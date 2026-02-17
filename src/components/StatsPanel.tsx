@@ -10,7 +10,6 @@ import {
   ChevronsUpDown,
   Cpu,
 } from "lucide-react"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -29,7 +28,8 @@ import { getUserMessageText, getToolColor } from "@/lib/parser"
 interface StatsPanelProps {
   session: ParsedSession
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
-  onOpenTerminal?: (outputPath: string, title: string) => void
+  onToggleServer?: (id: string, outputPath: string, title: string) => void
+  onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
   /** When true, renders full-width mobile layout */
   isMobile?: boolean
   /** Search + expand controls (desktop only — passed when sidebar hosts search) */
@@ -365,11 +365,13 @@ function detectPorts(text: string): number[] {
 function BackgroundServers({
   cwd,
   turns,
-  onOpenTerminal,
+  onToggleServer,
+  onServersChanged,
 }: {
   cwd: string
   turns: Turn[]
-  onOpenTerminal?: (outputPath: string, title: string) => void
+  onToggleServer?: (id: string, outputPath: string, title: string) => void
+  onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
 }) {
   const [tasks, setTasks] = useState<BgTask[]>([])
 
@@ -480,6 +482,21 @@ function BackgroundServers({
     []
   )
 
+  // Report discovered servers to parent for the ServerPanel badges
+  useEffect(() => {
+    if (!onServersChanged) return
+    const discovered = tasks
+      .filter((t) => t.outputPath)
+      .map((t) => ({
+        id: t.id,
+        outputPath: t.outputPath!,
+        title:
+          t.preview.split("\n").find((l) => l.trim())?.trim() ||
+          `Task ${t.id}`,
+      }))
+    onServersChanged(discovered)
+  }, [tasks, onServersChanged])
+
   if (tasks.length === 0) return null
 
   return (
@@ -504,7 +521,7 @@ function BackgroundServers({
                 className="w-full text-left"
                 onClick={() =>
                   task.outputPath
-                    ? onOpenTerminal?.(task.outputPath, title)
+                    ? onToggleServer?.(task.id, task.outputPath, title)
                     : undefined
                 }
               >
@@ -539,7 +556,7 @@ function BackgroundServers({
                 {task.outputPath && (
                   <button
                     className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-                    onClick={() => onOpenTerminal?.(task.outputPath!, title)}
+                    onClick={() => onToggleServer?.(task.id, task.outputPath!, title)}
                     title="View server output"
                   >
                     <TerminalSquare className="size-3" />
@@ -583,7 +600,7 @@ function TurnNavigator({
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Turns ({turns.length})
       </h3>
-      <ScrollArea className="max-h-[400px]">
+      <div className="max-h-[400px] overflow-y-auto">
         <div className="flex flex-col gap-0.5 pr-2">
           {turns.map((turn, i) => {
             const preview = getUserMessageText(turn.userMessage)
@@ -622,7 +639,7 @@ function TurnNavigator({
             )
           })}
         </div>
-      </ScrollArea>
+      </div>
     </section>
   )
 }
@@ -674,7 +691,7 @@ function ToolCallIndex({
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Tool Calls
       </h3>
-      <ScrollArea className="max-h-[320px]">
+      <div className="max-h-[320px] overflow-y-auto">
         <div className="flex flex-col gap-0.5 pr-2">
           {toolCallGroups.map(([name, group]) => {
             const colorClass = getToolColor(name)
@@ -725,7 +742,7 @@ function ToolCallIndex({
             )
           })}
         </div>
-      </ScrollArea>
+      </div>
     </section>
   )
 }
@@ -742,7 +759,8 @@ const MODEL_OPTIONS = [
 export function StatsPanel({
   session,
   onJumpToTurn,
-  onOpenTerminal,
+  onToggleServer,
+  onServersChanged,
   isMobile,
   searchQuery,
   onSearchChange,
@@ -764,7 +782,7 @@ export function StatsPanel({
 
   return (
     <aside className={cn(
-      "shrink-0 min-h-0 overflow-y-auto bg-zinc-950",
+      "shrink-0 min-h-0 h-full overflow-y-auto bg-zinc-950",
       isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-zinc-800"
     )}>
       {/* Search bar (desktop only) */}
@@ -834,7 +852,8 @@ export function StatsPanel({
         <BackgroundServers
           cwd={session.cwd}
           turns={turns}
-          onOpenTerminal={onOpenTerminal}
+          onToggleServer={onToggleServer}
+          onServersChanged={onServersChanged}
         />
 
         {/* Turn Navigator */}

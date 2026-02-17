@@ -213,9 +213,7 @@ function NonVirtualTimeline({
         const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
         const branchCount = turnBranches.length
 
-        // Key includes contentBlocks length so React detects mid-turn updates
-        // (e.g. sub-agent progress arriving before the turn is finalized)
-        const turnKey = `${turn.id}-${turn.contentBlocks.length}`
+        const turnKey = turn.id
 
         const turnContent = (
           <div key={turnKey} ref={setTurnRef(index)} data-turn-index={index}>
@@ -290,8 +288,14 @@ function VirtualizedTimeline({
     overscan: 5,
   })
 
+  const lastScrolledTurnRef = useRef<number | null>(null)
   useEffect(() => {
-    if (activeTurnIndex === null) return
+    if (activeTurnIndex === null) {
+      lastScrolledTurnRef.current = null
+      return
+    }
+    if (activeTurnIndex === lastScrolledTurnRef.current) return
+    lastScrolledTurnRef.current = activeTurnIndex
     // Find the virtual index for this turn
     const virtualIdx = filteredTurns.findIndex(({ index }) => index === activeTurnIndex)
     if (virtualIdx >= 0) {
@@ -313,7 +317,7 @@ function VirtualizedTimeline({
         const branchCount = turnBranches.length
         const isLast = virtualRow.index === filteredTurns.length - 1
 
-        const turnKey = `${turn.id}-${turn.contentBlocks.length}`
+        const turnKey = turn.id
 
         const turnContent = (
           <div
@@ -628,9 +632,15 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const isOpen = expandAll || manualOpen
 
   // Auto-expand when a specific tool call in this group is targeted
+  const lastScrolledToolCallRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!activeToolCallId) return
+    if (!activeToolCallId) {
+      lastScrolledToolCallRef.current = null
+      return
+    }
+    if (activeToolCallId === lastScrolledToolCallRef.current) return
     if (!toolCalls.some((tc) => tc.id === activeToolCallId)) return
+    lastScrolledToolCallRef.current = activeToolCallId
     setManualOpen(true)
     // Scroll to the target after DOM update (double rAF for layout)
     requestAnimationFrame(() => {

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Skull,
   Plus,
+  Settings,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -41,12 +42,14 @@ import { useSessionActions } from "@/hooks/useSessionActions"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { ChatInput } from "@/components/ChatInput"
-import { TerminalPanel } from "@/components/TerminalPanel"
+import { ServerPanel } from "@/components/ServerPanel"
 import { PermissionsPanel } from "@/components/PermissionsPanel"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { BranchModal } from "@/components/BranchModal"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
+import { SetupScreen } from "@/components/SetupScreen"
+import { ConfigDialog } from "@/components/ConfigDialog"
 import { usePermissions } from "@/hooks/usePermissions"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
@@ -59,6 +62,19 @@ import {
 } from "@/components/ui/resizable"
 
 export default function App() {
+  // Config state — gates the entire app
+  const [configLoading, setConfigLoading] = useState(true)
+  const [claudeDir, setClaudeDir] = useState<string | null>(null)
+  const [showConfigDialog, setShowConfigDialog] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/config")
+      .then((res) => res.json())
+      .then((data) => setClaudeDir(data?.claudeDir ?? null))
+      .catch(() => setClaudeDir(null))
+      .finally(() => setConfigLoading(false))
+  }, [])
+
   const isMobile = useIsMobile()
   const [state, dispatch] = useSessionState()
 
@@ -66,9 +82,37 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(true)
   const [copied, setCopied] = useState(false)
-  const [terminalOpen, setTerminalOpen] = useState<{ outputPath: string; title: string } | null>(null)
+  const [serverMap, setServerMap] = useState<Map<string, { outputPath: string; title: string }>>(new Map())
+  const [visibleServerIds, setVisibleServerIds] = useState<Set<string>>(new Set())
+  const [serverPanelCollapsed, setServerPanelCollapsed] = useState(false)
+  const serverStateCacheRef = useRef<Map<string, { visibleIds: string[]; collapsed: boolean }>>(new Map())
+  const prevSessionIdRef = useRef<string | null>(null)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Save/restore server panel state when switching sessions
+  useEffect(() => {
+    const currentId = state.session?.sessionId ?? null
+    const prevId = prevSessionIdRef.current
+    if (prevId && prevId !== currentId) {
+      serverStateCacheRef.current.set(prevId, {
+        visibleIds: [...visibleServerIds],
+        collapsed: serverPanelCollapsed,
+      })
+    }
+    if (currentId !== prevId) {
+      const cached = currentId ? serverStateCacheRef.current.get(currentId) : null
+      if (cached) {
+        setVisibleServerIds(new Set(cached.visibleIds))
+        setServerPanelCollapsed(cached.collapsed)
+      } else {
+        setVisibleServerIds(new Set())
+        setServerPanelCollapsed(false)
+      }
+    }
+    prevSessionIdRef.current = currentId
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only run on session switch, reads current state via closure
+  }, [state.session?.sessionId])
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -238,6 +282,59 @@ export default function App() {
     setTimeout(() => setKilling(false), 1500)
   }, [])
 
+  // Server panel handlers
+  const handleServersChanged = useCallback((servers: { id: string; outputPath: string; title: string }[]) => {
+    setServerMap((prev) => {
+      const next = new Map<string, { outputPath: string; title: string }>()
+      for (const s of servers) {
+        next.set(s.id, { outputPath: s.outputPath, title: s.title })
+      }
+      if (next.size === prev.size) {
+        let same = true
+        for (const [k, v] of next) {
+          const p = prev.get(k)
+          if (!p || p.outputPath !== v.outputPath || p.title !== v.title) {
+            same = false
+            break
+          }
+        }
+        if (same) return prev
+      }
+      return next
+    })
+    // Clean up visibleIds for servers that no longer exist.
+    // Skip when empty — discovery may not have completed yet (e.g. after session switch).
+    if (servers.length > 0) {
+      const currentIds = new Set(servers.map((s) => s.id))
+      setVisibleServerIds((prev) => {
+        const next = new Set([...prev].filter((id) => currentIds.has(id)))
+        if (next.size === prev.size) return prev
+        return next
+      })
+    }
+  }, [])
+
+  const handleToggleServer = useCallback((id: string, outputPath?: string, title?: string) => {
+    if (outputPath && title) {
+      setServerMap((prev) => {
+        if (prev.has(id)) return prev
+        const next = new Map(prev)
+        next.set(id, { outputPath, title })
+        return next
+      })
+    }
+    setVisibleServerIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+        setServerPanelCollapsed(false)
+      }
+      return next
+    })
+  }, [])
+
   const [branchModalTurn, setBranchModalTurn] = useState<number | null>(null)
   const branchModalBranches = branchModalTurn !== null ? undoRedo.branchesAtTurn(branchModalTurn) : []
 
@@ -253,6 +350,19 @@ export default function App() {
     />
   ), [perms.config, perms.hasPendingChanges, perms.setMode, perms.toggleAllowedTool, perms.toggleDisallowedTool, perms.resetToDefault])
 
+
+  // ─── CONFIG GATE ────────────────────────────────────────────────────────────
+  if (configLoading) {
+    return (
+      <div className="dark flex h-dvh items-center justify-center bg-zinc-950">
+        <Loader2 className="size-6 animate-spin text-zinc-500" />
+      </div>
+    )
+  }
+
+  if (!claudeDir) {
+    return <SetupScreen onConfigured={(dir) => setClaudeDir(dir)} />
+  }
 
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
@@ -312,6 +422,14 @@ export default function App() {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-0.5 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-zinc-500 shrink-0"
+              onClick={() => setShowConfigDialog(true)}
+            >
+              <Settings className="size-3.5" />
+            </Button>
             {state.session && (
               <Button
                 variant="ghost"
@@ -542,7 +660,8 @@ export default function App() {
                 actions.handleJumpToTurn(index, toolCallId)
                 dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
               }}
-              onOpenTerminal={(outputPath, title) => setTerminalOpen({ outputPath, title })}
+              onToggleServer={handleToggleServer}
+              onServersChanged={handleServersChanged}
               isMobile
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
@@ -576,12 +695,14 @@ export default function App() {
 
         </div>
 
-        {/* Terminal panel */}
-        {terminalOpen && (
-          <TerminalPanel
-            outputPath={terminalOpen.outputPath}
-            title={terminalOpen.title}
-            onClose={() => setTerminalOpen(null)}
+        {/* Server panel - multi-server split view */}
+        {serverMap.size > 0 && (
+          <ServerPanel
+            servers={serverMap}
+            visibleIds={visibleServerIds}
+            collapsed={serverPanelCollapsed}
+            onToggleServer={(id) => handleToggleServer(id)}
+            onToggleCollapse={() => setServerPanelCollapsed((p) => !p)}
           />
         )}
 
@@ -725,6 +846,19 @@ export default function App() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-1 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-200"
+                onClick={() => setShowConfigDialog(true)}
+              >
+                <Settings className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -989,7 +1123,8 @@ export default function App() {
           <StatsPanel
             session={state.session}
             onJumpToTurn={actions.handleJumpToTurn}
-            onOpenTerminal={(outputPath, title) => setTerminalOpen({ outputPath, title })}
+            onToggleServer={handleToggleServer}
+            onServersChanged={handleServersChanged}
             searchQuery={state.searchQuery}
             onSearchChange={(q) => dispatch({ type: "SET_SEARCH_QUERY", value: q })}
             expandAll={state.expandAll}
@@ -1002,12 +1137,14 @@ export default function App() {
         )}
       </div>
 
-      {/* Terminal panel - streams background task output */}
-      {terminalOpen && (
-        <TerminalPanel
-          outputPath={terminalOpen.outputPath}
-          title={terminalOpen.title}
-          onClose={() => setTerminalOpen(null)}
+      {/* Server panel - multi-server split view */}
+      {serverMap.size > 0 && (
+        <ServerPanel
+          servers={serverMap}
+          visibleIds={visibleServerIds}
+          collapsed={serverPanelCollapsed}
+          onToggleServer={(id) => handleToggleServer(id)}
+          onToggleCollapse={() => setServerPanelCollapsed((p) => !p)}
         />
       )}
 
@@ -1035,6 +1172,17 @@ export default function App() {
           }}
         />
       )}
+
+      <ConfigDialog
+        open={showConfigDialog}
+        currentPath={claudeDir!}
+        onClose={() => setShowConfigDialog(false)}
+        onSaved={(newPath) => {
+          setClaudeDir(newPath)
+          setShowConfigDialog(false)
+          window.location.reload()
+        }}
+      />
 
     </div>
   )

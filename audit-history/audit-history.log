@@ -1,3 +1,4 @@
+20260217-308a2b6 | feat: configurable .claude directory path with setup screen and validation
 20260217-4ce53be | init: Agent Window dashboard project with session browser, undo/redo branching, teams, PTY chat
 2026-02-16-197b5a5 | refactor: undo/redo rearchitecture, UI polish, HTTP chat
 2026-02-16-14393a1 | perf: memoize timeline components, error boundary, session/team resolution fixes

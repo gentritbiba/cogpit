@@ -9,10 +9,22 @@ import { homedir } from "node:os"
 import { randomUUID } from "node:crypto"
 import { createInterface } from "node:readline"
 
-const PROJECTS_DIR = join(homedir(), ".claude", "projects")
-const TEAMS_DIR = join(homedir(), ".claude", "teams")
-const TASKS_DIR = join(homedir(), ".claude", "tasks")
-const UNDO_DIR = join(homedir(), ".claude", "agent-window", "undo-history")
+import { getConfig, loadConfig, saveConfig, validateClaudeDir, getDirs } from "./config"
+
+// Mutable directory references, updated when config changes
+let dirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  UNDO_DIR: "",
+}
+
+function refreshDirs(): boolean {
+  const config = getConfig()
+  if (!config) return false
+  dirs = getDirs(config.claudeDir)
+  return true
+}
 
 function isWithinDir(parent: string, child: string): boolean {
   const resolved = resolve(child)
@@ -28,12 +40,12 @@ async function matchSubagentToMember(
   subagentFileName: string,
   members: Array<{ name: string; agentType: string; prompt?: string }>
 ): Promise<string | null> {
-  const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+  const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
 
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === "memory") continue
     const filePath = join(
-      PROJECTS_DIR,
+      dirs.PROJECTS_DIR,
       entry.name,
       leadSessionId,
       "subagents",
@@ -233,10 +245,10 @@ const persistentSessions = new Map<string, PersistentSession>()
 async function findJsonlPath(sessionId: string): Promise<string | null> {
   const targetFile = `${sessionId}.jsonl`
   try {
-    const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+    const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === "memory") continue
-      const projectDir = join(PROJECTS_DIR, entry.name)
+      const projectDir = join(dirs.PROJECTS_DIR, entry.name)
       try {
         const files = await readdir(projectDir)
         if (files.includes(targetFile)) {
@@ -244,7 +256,7 @@ async function findJsonlPath(sessionId: string): Promise<string | null> {
         }
       } catch { continue }
     }
-  } catch { /* PROJECTS_DIR might not exist */ }
+  } catch { /* dirs.PROJECTS_DIR might not exist */ }
   return null
 }
 
@@ -264,6 +276,97 @@ export function sessionApiPlugin(): Plugin {
         }
       })
 
+      // Load config on startup
+      loadConfig().then(() => refreshDirs())
+
+      // Guard middleware: block data APIs when not configured
+      server.middlewares.use((req, res, next) => {
+        const url = req.url || ""
+        // Allow config endpoints through without guard
+        if (url.startsWith("/api/config")) return next()
+        // Allow non-API requests through (HTML, JS, CSS)
+        if (!url.startsWith("/api/")) return next()
+        // Block data APIs when not configured
+        if (!getConfig()) {
+          res.statusCode = 503
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Not configured", code: "NOT_CONFIGURED" }))
+          return
+        }
+        // Refresh dirs from current config
+        refreshDirs()
+        next()
+      })
+
+      // GET /api/config/validate?path=... - validate a path without saving
+      server.middlewares.use("/api/config/validate", async (req, res, next) => {
+        if (req.method !== "GET") return next()
+
+        const url = new URL(req.url || "/", "http://localhost")
+        const dirPath = url.searchParams.get("path")
+
+        if (!dirPath) {
+          res.statusCode = 400
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ valid: false, error: "path query param required" }))
+          return
+        }
+
+        const result = await validateClaudeDir(dirPath)
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify(result))
+      })
+
+      // GET /api/config - return current config (or null)
+      // POST /api/config - validate and save config
+      server.middlewares.use("/api/config", async (req, res, next) => {
+        if (req.method === "GET") {
+          // Only handle exact path
+          if (req.url && req.url !== "/" && req.url !== "" && !req.url.startsWith("?")) return next()
+          const config = getConfig()
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify(config))
+          return
+        }
+
+        if (req.method === "POST") {
+          let body = ""
+          req.on("data", (chunk: Buffer) => { body += chunk.toString() })
+          req.on("end", async () => {
+            try {
+              const { claudeDir } = JSON.parse(body)
+              if (!claudeDir || typeof claudeDir !== "string") {
+                res.statusCode = 400
+                res.setHeader("Content-Type", "application/json")
+                res.end(JSON.stringify({ error: "claudeDir string required" }))
+                return
+              }
+
+              const validation = await validateClaudeDir(claudeDir)
+              if (!validation.valid) {
+                res.statusCode = 400
+                res.setHeader("Content-Type", "application/json")
+                res.end(JSON.stringify({ error: validation.error }))
+                return
+              }
+
+              await saveConfig({ claudeDir: validation.resolved || claudeDir })
+              refreshDirs()
+
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ success: true, claudeDir: validation.resolved || claudeDir }))
+            } catch {
+              res.statusCode = 400
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ error: "Invalid JSON body" }))
+            }
+          })
+          return
+        }
+
+        next()
+      })
+
       // GET /api/projects - list all projects
       server.middlewares.use("/api/projects", async (_req, res, next) => {
         if (_req.method !== "GET") return next()
@@ -271,14 +374,14 @@ export function sessionApiPlugin(): Plugin {
         if (_req.url && _req.url !== "/" && _req.url !== "") return next()
 
         try {
-          const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+          const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
           const projects = []
 
           for (const entry of entries) {
             if (!entry.isDirectory()) continue
             if (entry.name === "memory") continue
 
-            const projectDir = join(PROJECTS_DIR, entry.name)
+            const projectDir = join(dirs.PROJECTS_DIR, entry.name)
             const files = await readdir(projectDir)
             const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"))
 
@@ -331,9 +434,9 @@ export function sessionApiPlugin(): Plugin {
         if (parts.length === 1) {
           // List sessions for this project
           const dirName = decodeURIComponent(parts[0])
-          const projectDir = join(PROJECTS_DIR, dirName)
+          const projectDir = join(dirs.PROJECTS_DIR, dirName)
 
-          if (!isWithinDir(PROJECTS_DIR, projectDir)) {
+          if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
             res.statusCode = 403
             res.end(JSON.stringify({ error: "Access denied" }))
             return
@@ -406,8 +509,8 @@ export function sessionApiPlugin(): Plugin {
             return
           }
 
-          const filePath = join(PROJECTS_DIR, dirName, fileName)
-          if (!isWithinDir(PROJECTS_DIR, filePath)) {
+          const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+          if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
             res.statusCode = 403
             res.end(JSON.stringify({ error: "Access denied" }))
             return
@@ -434,7 +537,7 @@ export function sessionApiPlugin(): Plugin {
         const limit = Math.min(parseInt(url.searchParams.get("limit") || "30", 10), 100)
 
         try {
-          const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+          const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
 
           // First pass: collect all session files with their mtime (cheap stat only)
           const candidates: Array<{
@@ -447,7 +550,7 @@ export function sessionApiPlugin(): Plugin {
 
           for (const entry of entries) {
             if (!entry.isDirectory() || entry.name === "memory") continue
-            const projectDir = join(PROJECTS_DIR, entry.name)
+            const projectDir = join(dirs.PROJECTS_DIR, entry.name)
 
             let files: string[]
             try {
@@ -804,10 +907,10 @@ export function sessionApiPlugin(): Plugin {
         const targetFile = `${sessionId}.jsonl`
 
         try {
-          const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+          const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
           for (const entry of entries) {
             if (!entry.isDirectory() || entry.name === "memory") continue
-            const projectDir = join(PROJECTS_DIR, entry.name)
+            const projectDir = join(dirs.PROJECTS_DIR, entry.name)
             try {
               const files = await readdir(projectDir)
               if (files.includes(targetFile)) {
@@ -845,7 +948,7 @@ export function sessionApiPlugin(): Plugin {
 
         try {
           // Read team config to get leadSessionId and member prompt
-          const configPath = join(TEAMS_DIR, teamName, "config.json")
+          const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
           const configRaw = await readFile(configPath, "utf-8")
           const config = JSON.parse(configRaw)
 
@@ -863,10 +966,10 @@ export function sessionApiPlugin(): Plugin {
           // If clicking the lead, return their session directly
           if (member?.agentType === "team-lead") {
             // Find lead's session file
-            const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+            const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
             for (const entry of entries) {
               if (!entry.isDirectory() || entry.name === "memory") continue
-              const projectDir = join(PROJECTS_DIR, entry.name)
+              const projectDir = join(dirs.PROJECTS_DIR, entry.name)
               try {
                 const files = await readdir(projectDir)
                 const targetFile = `${leadSessionId}.jsonl`
@@ -884,10 +987,10 @@ export function sessionApiPlugin(): Plugin {
 
           // For non-lead members, find their subagent session
           // Search for the lead session's subagent directory
-          const entries = await readdir(PROJECTS_DIR, { withFileTypes: true })
+          const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
           for (const entry of entries) {
             if (!entry.isDirectory() || entry.name === "memory") continue
-            const projectDir = join(PROJECTS_DIR, entry.name)
+            const projectDir = join(dirs.PROJECTS_DIR, entry.name)
             const subagentDir = join(projectDir, leadSessionId, "subagents")
 
             let subagentFiles: string[]
@@ -1191,8 +1294,8 @@ export function sessionApiPlugin(): Plugin {
               return
             }
 
-            const projectDir = join(PROJECTS_DIR, dirName)
-            if (!isWithinDir(PROJECTS_DIR, projectDir)) {
+            const projectDir = join(dirs.PROJECTS_DIR, dirName)
+            if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
               res.statusCode = 403
               res.end(JSON.stringify({ error: "Access denied" }))
               return
@@ -1579,7 +1682,7 @@ export function sessionApiPlugin(): Plugin {
         try {
           let teamDirs: string[]
           try {
-            const entries = await readdir(TEAMS_DIR, { withFileTypes: true })
+            const entries = await readdir(dirs.TEAMS_DIR, { withFileTypes: true })
             teamDirs = entries
               .filter((e) => e.isDirectory())
               .map((e) => e.name)
@@ -1594,7 +1697,7 @@ export function sessionApiPlugin(): Plugin {
 
           for (const teamName of teamDirs) {
             try {
-              const configPath = join(TEAMS_DIR, teamName, "config.json")
+              const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
               const configRaw = await readFile(configPath, "utf-8")
               const config = JSON.parse(configRaw)
 
@@ -1656,7 +1759,7 @@ export function sessionApiPlugin(): Plugin {
         try {
           let teamDirs: string[]
           try {
-            const entries = await readdir(TEAMS_DIR, { withFileTypes: true })
+            const entries = await readdir(dirs.TEAMS_DIR, { withFileTypes: true })
             teamDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name)
           } catch {
             res.setHeader("Content-Type", "application/json")
@@ -1667,14 +1770,14 @@ export function sessionApiPlugin(): Plugin {
           const teams = []
           for (const teamName of teamDirs) {
             try {
-              const configPath = join(TEAMS_DIR, teamName, "config.json")
+              const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
               const configRaw = await readFile(configPath, "utf-8")
               const config = JSON.parse(configRaw)
 
               // Count tasks
               const taskSummary = { total: 0, completed: 0, inProgress: 0, pending: 0 }
               try {
-                const taskDir = join(TASKS_DIR, teamName)
+                const taskDir = join(dirs.TASKS_DIR, teamName)
                 const taskFiles = await readdir(taskDir)
                 for (const tf of taskFiles.filter((f) => f.endsWith(".json"))) {
                   try {
@@ -1726,9 +1829,9 @@ export function sessionApiPlugin(): Plugin {
         if (parts.length !== 1) return next()
 
         const teamName = decodeURIComponent(parts[0])
-        const teamDir = join(TEAMS_DIR, teamName)
+        const teamDir = join(dirs.TEAMS_DIR, teamName)
 
-        if (!isWithinDir(TEAMS_DIR, teamDir)) {
+        if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -1742,7 +1845,7 @@ export function sessionApiPlugin(): Plugin {
           // Read tasks
           const tasks: unknown[] = []
           try {
-            const taskDir = join(TASKS_DIR, teamName)
+            const taskDir = join(dirs.TASKS_DIR, teamName)
             const taskFiles = await readdir(taskDir)
             for (const tf of taskFiles.filter((f) => f.endsWith(".json"))) {
               try {
@@ -1786,10 +1889,10 @@ export function sessionApiPlugin(): Plugin {
         if (parts.length !== 1) return next()
 
         const teamName = decodeURIComponent(parts[0])
-        const teamDir = join(TEAMS_DIR, teamName)
-        const taskDir = join(TASKS_DIR, teamName)
+        const teamDir = join(dirs.TEAMS_DIR, teamName)
+        const taskDir = join(dirs.TASKS_DIR, teamName)
 
-        if (!isWithinDir(TEAMS_DIR, teamDir)) {
+        if (!isWithinDir(dirs.TEAMS_DIR, teamDir)) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -1814,10 +1917,14 @@ export function sessionApiPlugin(): Plugin {
         // Watch team config dir (config + inboxes)
         const watchers: ReturnType<typeof watch>[] = []
         try {
-          watchers.push(watch(teamDir, { recursive: true }, sendUpdate))
+          const w = watch(teamDir, { recursive: true }, sendUpdate)
+          w.on("error", () => {}) // prevent uncaught crash when dir is removed
+          watchers.push(w)
         } catch { /* dir may not exist */ }
         try {
-          watchers.push(watch(taskDir, { recursive: true }, sendUpdate))
+          const w = watch(taskDir, { recursive: true }, sendUpdate)
+          w.on("error", () => {}) // prevent uncaught crash when dir is removed
+          watchers.push(w)
         } catch { /* dir may not exist */ }
 
         res.write(`data: ${JSON.stringify({ type: "init" })}\n\n`)
@@ -1846,9 +1953,9 @@ export function sessionApiPlugin(): Plugin {
 
         const teamName = decodeURIComponent(parts[0])
         const memberName = decodeURIComponent(parts[1])
-        const inboxPath = join(TEAMS_DIR, teamName, "inboxes", `${memberName}.json`)
+        const inboxPath = join(dirs.TEAMS_DIR, teamName, "inboxes", `${memberName}.json`)
 
-        if (!isWithinDir(TEAMS_DIR, inboxPath)) {
+        if (!isWithinDir(dirs.TEAMS_DIR, inboxPath)) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -1963,12 +2070,18 @@ export function sessionApiPlugin(): Plugin {
           watcherReady = true
         })
 
-        // Watch for new content
-        const watcher = watch(resolved, () => {
-          if (!watcherReady) return
-          if (debounceTimer) clearTimeout(debounceTimer)
-          debounceTimer = setTimeout(readAndSend, 100)
-        })
+        // Watch for new content (file may not exist yet)
+        let watcher: ReturnType<typeof watch> | null = null
+        try {
+          watcher = watch(resolved, () => {
+            if (!watcherReady) return
+            if (debounceTimer) clearTimeout(debounceTimer)
+            debounceTimer = setTimeout(readAndSend, 100)
+          })
+          watcher.on("error", () => {}) // prevent uncaught crash when file is removed
+        } catch {
+          // file doesn't exist yet — poller below will pick up changes
+        }
 
         // Also poll every 2s in case fs.watch misses events
         const poller = setInterval(readAndSend, 2000)
@@ -1978,7 +2091,7 @@ export function sessionApiPlugin(): Plugin {
         }, 15000)
 
         req.on("close", () => {
-          watcher.close()
+          watcher?.close()
           if (debounceTimer) clearTimeout(debounceTimer)
           clearInterval(poller)
           clearInterval(heartbeat)
@@ -1996,7 +2109,7 @@ export function sessionApiPlugin(): Plugin {
         if (parts.length !== 1) return next()
 
         const sessionId = decodeURIComponent(parts[0])
-        const filePath = join(UNDO_DIR, `${sessionId}.json`)
+        const filePath = join(dirs.UNDO_DIR, `${sessionId}.json`)
 
         if (req.method === "GET") {
           try {
@@ -2016,7 +2129,7 @@ export function sessionApiPlugin(): Plugin {
         req.on("data", (chunk: string) => { body += chunk })
         req.on("end", async () => {
           try {
-            await mkdir(UNDO_DIR, { recursive: true })
+            await mkdir(dirs.UNDO_DIR, { recursive: true })
             await writeFile(filePath, body, "utf-8")
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({ success: true }))
@@ -2183,8 +2296,8 @@ export function sessionApiPlugin(): Plugin {
               keepLines: number
             }
 
-            const filePath = join(PROJECTS_DIR, dirName, fileName)
-            if (!isWithinDir(PROJECTS_DIR, filePath)) {
+            const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+            if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
               res.statusCode = 403
               res.end(JSON.stringify({ error: "Access denied" }))
               return
@@ -2226,8 +2339,8 @@ export function sessionApiPlugin(): Plugin {
               lines: string[]
             }
 
-            const filePath = join(PROJECTS_DIR, dirName, fileName)
-            if (!isWithinDir(PROJECTS_DIR, filePath)) {
+            const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+            if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
               res.statusCode = 403
               res.end(JSON.stringify({ error: "Access denied" }))
               return
@@ -2251,6 +2364,171 @@ export function sessionApiPlugin(): Plugin {
         })
       })
 
+      // POST /api/check-files-exist - check which files have been deleted + get line counts via git
+      server.middlewares.use("/api/check-files-exist", (req, res, next) => {
+        if (req.method !== "POST") return next()
+        let body = ""
+        req.on("data", (chunk: Buffer) => (body += chunk.toString()))
+        req.on("end", async () => {
+          try {
+            const { files, dirs } = JSON.parse(body) as { files?: string[]; dirs?: string[] }
+            const fileList = Array.isArray(files) ? files : []
+            const dirList = Array.isArray(dirs) ? dirs : []
+            if (fileList.length === 0 && dirList.length === 0) {
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ deleted: [] }))
+              return
+            }
+            const deleted: { path: string; lines: number }[] = []
+            // Cache git root lookups per directory
+            const gitRootCache = new Map<string, string | null>()
+
+            async function findGitRoot(dir: string): Promise<string | null> {
+              if (gitRootCache.has(dir)) return gitRootCache.get(dir)!
+              // Walk up to find an existing directory (handles deleted dirs)
+              let cwd = dir
+              while (cwd && cwd !== "/") {
+                try {
+                  const s = await stat(cwd)
+                  if (s.isDirectory()) break
+                } catch {
+                  cwd = cwd.substring(0, cwd.lastIndexOf("/")) || "/"
+                }
+              }
+              return new Promise((resolve) => {
+                const proc = spawn("git", ["rev-parse", "--show-toplevel"], { cwd })
+                let out = ""
+                proc.stdout.on("data", (d: Buffer) => (out += d.toString()))
+                proc.on("close", (code) => {
+                  const root = code === 0 ? out.trim() : null
+                  gitRootCache.set(dir, root)
+                  resolve(root)
+                })
+                proc.on("error", () => {
+                  gitRootCache.set(dir, null)
+                  resolve(null)
+                })
+              })
+            }
+
+            function spawnLines(args: string[], cwd: string): Promise<number> {
+              return new Promise((resolve) => {
+                const proc = spawn("git", args, { cwd })
+                let out = ""
+                proc.stdout.on("data", (d: Buffer) => (out += d.toString()))
+                proc.on("close", (code) => {
+                  if (code !== 0 || !out) return resolve(0)
+                  resolve(out.split("\n").length)
+                })
+                proc.on("error", () => resolve(0))
+              })
+            }
+
+            function spawnOutput(args: string[], cwd: string): Promise<string> {
+              return new Promise((resolve) => {
+                const proc = spawn("git", args, { cwd })
+                let out = ""
+                proc.stdout.on("data", (d: Buffer) => (out += d.toString()))
+                proc.on("close", () => resolve(out.trim()))
+                proc.on("error", () => resolve(""))
+              })
+            }
+
+            async function getGitLineCount(filePath: string): Promise<number> {
+              const dir = filePath.substring(0, filePath.lastIndexOf("/")) || "/"
+              const gitRoot = await findGitRoot(dir)
+              if (!gitRoot) return 0
+              const relPath = filePath.startsWith(gitRoot + "/")
+                ? filePath.slice(gitRoot.length + 1)
+                : filePath
+
+              // 1. Try HEAD (file still in current commit)
+              const headLines = await spawnLines(["show", `HEAD:${relPath}`], gitRoot)
+              if (headLines > 0) return headLines
+
+              // 2. Find the commit that deleted the file, show from its parent
+              const deleteCommit = await spawnOutput(
+                ["log", "--diff-filter=D", "-1", "--format=%H", "--", relPath],
+                gitRoot
+              )
+              if (deleteCommit) {
+                const lines = await spawnLines(["show", `${deleteCommit}^:${relPath}`], gitRoot)
+                if (lines > 0) return lines
+              }
+
+              // 3. Find any commit that last touched the file
+              const lastCommit = await spawnOutput(
+                ["log", "--all", "-1", "--format=%H", "--", relPath],
+                gitRoot
+              )
+              if (lastCommit) {
+                return await spawnLines(["show", `${lastCommit}:${relPath}`], gitRoot)
+              }
+
+              return 0
+            }
+
+            // Check individual files
+            for (const f of fileList) {
+              if (typeof f !== "string" || f.length === 0) continue
+              try {
+                await stat(f)
+              } catch {
+                const lines = await getGitLineCount(f)
+                deleted.push({ path: f, lines })
+              }
+            }
+
+            // Expand rm -rf directories: list files that were in the dir via git
+            const seenPaths = new Set(deleted.map((d) => d.path))
+            for (const d of dirList) {
+              if (typeof d !== "string" || d.length === 0) continue
+              // Skip dirs that still exist (not actually deleted)
+              try {
+                const s = await lstat(d)
+                if (s.isDirectory()) continue
+              } catch {
+                // dir doesn't exist — expand via git
+              }
+              const parentDir = d.substring(0, d.lastIndexOf("/")) || "/"
+              const gitRoot = await findGitRoot(parentDir)
+              if (!gitRoot) continue
+              const relDir = d.startsWith(gitRoot + "/")
+                ? d.slice(gitRoot.length + 1)
+                : d
+              // List files that were in this directory across all commits
+              const filesInDir = await spawnOutput(
+                ["log", "--all", "--pretty=format:", "--name-only", "--diff-filter=ACMR", "--", `${relDir}/`],
+                gitRoot
+              )
+              if (!filesInDir) continue
+              const uniqueFiles = [...new Set(filesInDir.split("\n").map((l) => l.trim()).filter(Boolean))]
+              for (const relFile of uniqueFiles) {
+                const absFile = join(gitRoot, relFile)
+                if (seenPaths.has(absFile)) continue
+                // Verify it's actually deleted
+                try {
+                  await stat(absFile)
+                  continue // still exists
+                } catch {
+                  // deleted
+                }
+                seenPaths.add(absFile)
+                const lines = await getGitLineCount(absFile)
+                deleted.push({ path: absFile, lines })
+              }
+            }
+
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ deleted }))
+          } catch {
+            res.statusCode = 400
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Invalid JSON body" }))
+          }
+        })
+      })
+
       // GET /api/watch/:dirName/:fileName - SSE stream of new JSONL lines
       server.middlewares.use("/api/watch/", (req, res, next) => {
         if (req.method !== "GET") return next()
@@ -2269,8 +2547,8 @@ export function sessionApiPlugin(): Plugin {
           return
         }
 
-        const filePath = join(PROJECTS_DIR, dirName, fileName)
-        if (!isWithinDir(PROJECTS_DIR, filePath)) {
+        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -2349,6 +2627,21 @@ export function sessionApiPlugin(): Plugin {
           }
         }
 
+        let watcher: ReturnType<typeof watch> | null = null
+        let pollTimer: ReturnType<typeof setInterval> | null = null
+        let heartbeat: ReturnType<typeof setInterval> | null = null
+        let closed = false
+
+        function cleanup() {
+          closed = true
+          watcher?.close()
+          watcher = null
+          if (throttleTimer) clearTimeout(throttleTimer)
+          if (trailingTimer) clearTimeout(trailingTimer)
+          if (pollTimer) clearInterval(pollTimer)
+          if (heartbeat) clearInterval(heartbeat)
+        }
+
         // Get initial file size, then start watching
         stat(filePath)
           .then((s) => {
@@ -2359,46 +2652,49 @@ export function sessionApiPlugin(): Plugin {
             res.write(
               `data: ${JSON.stringify({ type: "error", message: "File not found" })}\n\n`
             )
+            cleanup()
             res.end()
           })
 
         // Throttle: fire immediately on first change, then at most once per
         // THROTTLE_MS while writes continue. A trailing flush catches the
         // final write after activity stops.
-        const watcher = watch(filePath, () => {
-          // Schedule a trailing flush so the last write is never missed
-          if (trailingTimer) clearTimeout(trailingTimer)
-          trailingTimer = setTimeout(() => flushNewLines(), THROTTLE_MS)
+        try {
+          watcher = watch(filePath, () => {
+            if (closed) return
+            // Schedule a trailing flush so the last write is never missed
+            if (trailingTimer) clearTimeout(trailingTimer)
+            trailingTimer = setTimeout(() => flushNewLines(), THROTTLE_MS)
 
-          // Throttle: skip if a flush was recently scheduled
-          if (throttleTimer) return
-          // Fire immediately, then block further immediate fires for THROTTLE_MS
-          flushNewLines()
-          throttleTimer = setTimeout(() => {
-            throttleTimer = null
-          }, THROTTLE_MS)
-        })
+            // Throttle: skip if a flush was recently scheduled
+            if (throttleTimer) return
+            // Fire immediately, then block further immediate fires for THROTTLE_MS
+            flushNewLines()
+            throttleTimer = setTimeout(() => {
+              throttleTimer = null
+            }, THROTTLE_MS)
+          })
+          watcher.on("error", () => {}) // prevent uncaught crash when file is removed
+        } catch {
+          // file may not exist yet — poller below will pick up changes
+        }
 
         // Poll as a fallback for fs.watch — macOS FSEvents can coalesce
         // rapid writes (e.g. sub-agent progress events) into a single event
         // that was already handled, causing new data to be missed until the
         // next distinct file change.  A short poll interval catches these.
         const POLL_MS = 500
-        const pollTimer = setInterval(() => flushNewLines(), POLL_MS)
+        pollTimer = setInterval(() => {
+          if (!closed) flushNewLines()
+        }, POLL_MS)
 
         // Heartbeat to keep connection alive
-        const heartbeat = setInterval(() => {
-          res.write(": heartbeat\n\n")
+        heartbeat = setInterval(() => {
+          if (!closed) res.write(": heartbeat\n\n")
         }, 15000)
 
         // Cleanup on disconnect
-        req.on("close", () => {
-          watcher.close()
-          if (throttleTimer) clearTimeout(throttleTimer)
-          if (trailingTimer) clearTimeout(trailingTimer)
-          clearInterval(pollTimer)
-          clearInterval(heartbeat)
-        })
+        req.on("close", cleanup)
       })
     },
   }
