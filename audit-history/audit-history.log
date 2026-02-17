@@ -1,0 +1,5 @@
+20260217-4ce53be | init: Agent Window dashboard project with session browser, undo/redo branching, teams, PTY chat
+2026-02-16-197b5a5 | refactor: undo/redo rearchitecture, UI polish, HTTP chat
+2026-02-16-14393a1 | perf: memoize timeline components, error boundary, session/team resolution fixes
+20260216-225630-f8b0c56 | feat: incremental parsing, virtual scrolling, plan mode detection, paginated sessions
+20260216-plan-interaction-c55ec4b | fix: refine pending interaction detection to handle error tool_results

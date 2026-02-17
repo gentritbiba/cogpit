@@ -1,0 +1,139 @@
+import { useState, useCallback, useRef, useEffect } from "react"
+import type { SessionSource } from "@/hooks/useLiveSession"
+import { type PermissionsConfig, DEFAULT_PERMISSIONS } from "@/lib/permissions"
+
+export type PtyChatStatus = "idle" | "connected" | "error"
+
+interface UsePtyChatOpts {
+  sessionSource: SessionSource | null
+  /** The parsed session's UUID — used for `claude --resume`. Falls back to fileName-based derivation. */
+  parsedSessionId?: string | null
+  cwd?: string
+  permissions?: PermissionsConfig
+  onPermissionsApplied?: () => void
+  model?: string
+}
+
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model }: UsePtyChatOpts) {
+  const [status, setStatus] = useState<PtyChatStatus>("idle")
+  const [error, setError] = useState<string | undefined>()
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+
+  // Track active requests per session so concurrent sessions work
+  const activeAbortRef = useRef<AbortController | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
+
+  // Use parsed session ID (actual UUID from JSONL) if available, else derive from fileName
+  const fileBasedId = sessionSource?.fileName?.replace(".jsonl", "") ?? null
+  const sessionId = parsedSessionId || fileBasedId
+
+  // When session changes, reset state (but don't abort — other sessions keep running)
+  useEffect(() => {
+    if (sessionIdRef.current !== sessionId) {
+      sessionIdRef.current = sessionId
+      setStatus("idle")
+      setError(undefined)
+      setPendingMessage(null)
+      activeAbortRef.current = null
+    }
+  }, [sessionId])
+
+  const sendMessage = useCallback(
+    async (text: string, images?: Array<{ data: string; mediaType: string }>) => {
+      if (!sessionId) return
+
+      setPendingMessage(text)
+      setStatus("connected")
+      setError(undefined)
+
+      const permsConfig = permissions ?? DEFAULT_PERMISSIONS
+      onPermissionsApplied?.()
+
+      const abortController = new AbortController()
+      activeAbortRef.current = abortController
+
+      try {
+        const res = await fetch("/api/send-message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            message: text,
+            images: images || undefined,
+            cwd: cwd || undefined,
+            permissions: permsConfig,
+            model: model || undefined,
+          }),
+          signal: abortController.signal,
+        })
+
+        const data = await res.json()
+
+        // Only update state if this is still the active request for this session
+        if (activeAbortRef.current === abortController) {
+          if (!res.ok) {
+            setError(data.error || `Request failed (${res.status})`)
+            setStatus("error")
+          } else {
+            setStatus("idle")
+          }
+          setPendingMessage(null)
+        }
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") {
+          // Intentionally stopped — don't set error
+          return
+        }
+        if (activeAbortRef.current === abortController) {
+          setError(err instanceof Error ? err.message : "Unknown error")
+          setStatus("error")
+          setPendingMessage(null)
+        }
+      }
+    },
+    [sessionId, cwd, permissions, onPermissionsApplied, model]
+  )
+
+  const interrupt = useCallback(() => {
+    // For HTTP-based approach, we stop the server-side process
+    if (!sessionId) return
+    fetch("/api/stop-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {})
+  }, [sessionId])
+
+  const stopAgent = useCallback(() => {
+    if (!sessionId) return
+
+    // Abort the fetch request
+    activeAbortRef.current?.abort()
+    activeAbortRef.current = null
+
+    // Kill the server-side process
+    fetch("/api/stop-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {})
+
+    setStatus("idle")
+    setPendingMessage(null)
+  }, [sessionId])
+
+  const clearPending = useCallback(() => {
+    setPendingMessage(null)
+  }, [])
+
+  return {
+    status,
+    error,
+    pendingMessage,
+    sendMessage,
+    interrupt,
+    stopAgent,
+    clearPending,
+    isConnected: status === "connected",
+  }
+}
