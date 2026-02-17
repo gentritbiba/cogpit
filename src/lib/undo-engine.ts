@@ -64,6 +64,7 @@ export function buildUndoOperations(
     // Reverse within the turn too (last call first)
     for (let j = calls.length - 1; j >= 0; j--) {
       const call = calls[j]
+      if (!call) continue
       if (call.type === "Edit") {
         ops.push({
           type: "reverse-edit",
@@ -131,6 +132,7 @@ export function buildRedoFromArchived(
   const limit = upToIndex !== undefined ? upToIndex + 1 : archivedTurns.length
   for (let i = 0; i < limit; i++) {
     const at = archivedTurns[i]
+    if (!at) continue
     for (const call of at.toolCalls) {
       if (call.type === "Edit") {
         ops.push({
@@ -163,7 +165,9 @@ export function createBranch(
 ): Branch {
   const archivedTurns: ArchivedTurn[] = []
   for (let i = branchPointTurnIndex + 1; i < turns.length; i++) {
-    archivedTurns.push(archiveTurn(turns[i], i))
+    const turn = turns[i]
+    if (!turn) continue
+    archivedTurns.push(archiveTurn(turn, i))
   }
 
   const firstPrompt = archivedTurns[0]?.userMessage || "Untitled branch"

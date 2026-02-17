@@ -152,7 +152,8 @@ export function useUrlSync({
       window.history.pushState(null, "", newPath)
       lastPushedRef.current = newPath
     }
-  }, [state.sessionSource, state.mainView, state.selectedTeam, state.dashboardProject, state])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync URL-relevant state fields
+  }, [state.sessionSource, state.mainView, state.selectedTeam, state.dashboardProject])
 
   // Handle browser back/forward
   useEffect(() => {

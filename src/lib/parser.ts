@@ -117,7 +117,7 @@ function buildCompactionSummary(turns: Turn[], title: string): string {
       ? turn.userMessage
       : (turn.userMessage as { type: string; text?: string }[])
           .filter((b) => b.type === "text" && b.text)
-          .map((b) => b.text!)
+          .map((b) => b.text ?? "")
           .join(" ")
     if (text) {
       const firstLine = text.split("\n")[0].trim()
@@ -289,9 +289,12 @@ function buildTurns(messages: RawMessage[]): Turn[] {
       // Collect consecutive tool_use blocks, then flush as one content block
       const msgToolCalls: ToolCall[] = []
 
+      // current is guaranteed non-null here (assigned above or created as synthetic turn)
+      const activeTurn = current
+
       function flushToolCalls() {
         if (msgToolCalls.length > 0) {
-          current!.contentBlocks.push({ kind: "tool_calls", toolCalls: [...msgToolCalls], timestamp: msgTs })
+          activeTurn.contentBlocks.push({ kind: "tool_calls", toolCalls: [...msgToolCalls], timestamp: msgTs })
           msgToolCalls.length = 0
         }
       }
@@ -299,11 +302,11 @@ function buildTurns(messages: RawMessage[]): Turn[] {
       function flushThinking() {
         if (msgThinking.length > 0) {
           // Merge with last thinking block if consecutive
-          const last = current!.contentBlocks[current!.contentBlocks.length - 1]
+          const last = activeTurn.contentBlocks[activeTurn.contentBlocks.length - 1]
           if (last && last.kind === "thinking") {
             last.blocks.push(...msgThinking)
           } else {
-            current!.contentBlocks.push({ kind: "thinking", blocks: [...msgThinking], timestamp: msgTs })
+            activeTurn.contentBlocks.push({ kind: "thinking", blocks: [...msgThinking], timestamp: msgTs })
           }
           msgThinking.length = 0
         }
@@ -422,10 +425,12 @@ function buildTurns(messages: RawMessage[]): Turn[] {
         }
       }
 
-      if (!subAgentMap.has(parentId)) {
-        subAgentMap.set(parentId, [])
+      let agentMsgs = subAgentMap.get(parentId)
+      if (!agentMsgs) {
+        agentMsgs = []
+        subAgentMap.set(parentId, agentMsgs)
       }
-      subAgentMap.get(parentId)!.push(agentMsg)
+      agentMsgs.push(agentMsg)
 
       // Flush immediately so sub-agent activity appears chronologically
       // in contentBlocks (near the tool call that spawned it)
@@ -577,8 +582,9 @@ export function parseSessionAppend(
     // the sub-agent content block lands in the correct turn.
     const progressParentIds = new Set<string>()
     for (const msg of newMessages) {
-      if (msg.type === "progress" && (msg as ProgressMessage).parentToolUseID) {
-        progressParentIds.add((msg as ProgressMessage).parentToolUseID!)
+      if (msg.type === "progress") {
+        const parentId = (msg as ProgressMessage).parentToolUseID
+        if (parentId) progressParentIds.add(parentId)
       }
     }
 
@@ -696,9 +702,10 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   if (turns.length === 0) return null
 
   const lastTurn = turns[turns.length - 1]
-  if (lastTurn.toolCalls.length === 0) return null
+  if (!lastTurn || lastTurn.toolCalls.length === 0) return null
 
   const lastToolCall = lastTurn.toolCalls[lastTurn.toolCalls.length - 1]
+  if (!lastToolCall) return null
 
   // For interactive tools (AskUserQuestion, ExitPlanMode), Claude Code writes
   // an immediate error tool_result containing the permission prompt text

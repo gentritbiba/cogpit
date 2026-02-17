@@ -8,11 +8,14 @@ export interface SessionSource {
   rawText: string
 }
 
+export type SseConnectionState = "connecting" | "connected" | "disconnected"
+
 export function useLiveSession(
   source: SessionSource | null,
   onUpdate: (session: ParsedSession) => void
 ) {
   const [isLive, setIsLive] = useState(false)
+  const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
   const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
   const onUpdateRef = useRef(onUpdate)
@@ -36,8 +39,11 @@ export function useLiveSession(
   useEffect(() => {
     if (!dirName || !fileName) {
       setIsLive(false)
+      setSseState("disconnected")
       return
     }
+
+    setSseState("connecting")
 
     const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
     const es = new EventSource(url)
@@ -61,8 +67,13 @@ export function useLiveSession(
       }
     }
 
+    es.onopen = () => {
+      setSseState("connected")
+    }
+
     es.onmessage = (event) => {
       try {
+        setSseState("connected")
         const data = JSON.parse(event.data)
         if (data.type === "init") {
           resetStaleTimer()
@@ -91,15 +102,17 @@ export function useLiveSession(
 
     es.onerror = () => {
       setIsLive(false)
+      setSseState("disconnected")
     }
 
     return () => {
       es.close()
       setIsLive(false)
+      setSseState("disconnected")
       if (staleTimer) clearTimeout(staleTimer)
       if (rafId !== null) cancelAnimationFrame(rafId)
     }
   }, [dirName, fileName, rawText])
 
-  return { isLive }
+  return { isLive, sseState }
 }

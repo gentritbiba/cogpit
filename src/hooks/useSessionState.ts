@@ -145,20 +145,21 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       }
 
     case "SET_SEARCH_QUERY":
+      if (state.searchQuery === action.value) return state
       return { ...state, searchQuery: action.value }
 
     case "SET_EXPAND_ALL":
+      if (state.expandAll === action.value) return state
       return { ...state, expandAll: action.value }
 
     case "TOGGLE_EXPAND_ALL":
       return { ...state, expandAll: !state.expandAll }
 
-    case "SET_MOBILE_TAB":
-      return {
-        ...state,
-        mobileTab: action.tab,
-        sidebarTab: action.tab === "teams" && !state.selectedTeam ? "teams" : state.sidebarTab,
-      }
+    case "SET_MOBILE_TAB": {
+      const newSidebarTab = action.tab === "teams" && !state.selectedTeam ? "teams" : state.sidebarTab
+      if (state.mobileTab === action.tab && state.sidebarTab === newSidebarTab) return state
+      return { ...state, mobileTab: action.tab, sidebarTab: newSidebarTab }
+    }
 
     case "UPDATE_SESSION":
       return { ...state, session: action.session }
@@ -172,6 +173,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       }
 
     case "SET_CURRENT_MEMBER_NAME":
+      if (state.currentMemberName === action.name) return state
       return { ...state, currentMemberName: action.name }
 
     case "GUARD_MOBILE_TAB": {
@@ -186,12 +188,15 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     }
 
     case "SET_LOADING_MEMBER":
+      if (state.loadingMember === action.name) return state
       return { ...state, loadingMember: action.name }
 
     case "SET_SIDEBAR_TAB":
+      if (state.sidebarTab === action.tab) return state
       return { ...state, sidebarTab: action.tab }
 
     case "SET_DASHBOARD_PROJECT":
+      if (state.dashboardProject === action.dirName) return state
       return { ...state, dashboardProject: action.dirName }
 
     default:

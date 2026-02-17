@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef, useCallback, useEffect } from "react"
+import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react"
 import { FileCode2, CheckCircle, XCircle, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { EditDiffView } from "./timeline/EditDiffView"
@@ -159,7 +159,7 @@ function DeletedFileCard({ filePath, lineCount, turnIndex }: { filePath: string;
   )
 }
 
-export function FileChangesPanel({ session, sessionChangeKey }: FileChangesPanelProps) {
+export const FileChangesPanel = memo(function FileChangesPanel({ session, sessionChangeKey }: FileChangesPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -304,7 +304,6 @@ export function FileChangesPanel({ session, sessionChangeKey }: FileChangesPanel
       .catch(() => {})
 
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathsHash, session.sessionId])
 
   // Build unified ordered list: file changes + deleted file entries, sorted by turn index
@@ -496,4 +495,4 @@ export function FileChangesPanel({ session, sessionChangeKey }: FileChangesPanel
       </div>
     </div>
   )
-}
+})

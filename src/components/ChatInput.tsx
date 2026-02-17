@@ -86,7 +86,9 @@ export const ChatInput = memo(function ChatInput({
             const canvas = document.createElement("canvas")
             canvas.width = img.width
             canvas.height = img.height
-            canvas.getContext("2d")!.drawImage(img, 0, 0)
+            const ctx = canvas.getContext("2d")
+            if (!ctx) return
+            ctx.drawImage(img, 0, 0)
             const pngDataUrl = canvas.toDataURL("image/png")
             const pngBase64 = pngDataUrl.split(",")[1]
             setImages((prev) => [
@@ -299,6 +301,7 @@ export const ChatInput = memo(function ChatInput({
               <button
                 onClick={() => removeImage(i)}
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity hover:bg-red-900 hover:border-red-600"
+                aria-label={`Remove image ${i + 1}`}
               >
                 <X className="w-3 h-3 text-zinc-300" />
               </button>
@@ -420,6 +423,7 @@ export const ChatInput = memo(function ChatInput({
           )}
           disabled={!text.trim() && images.length === 0}
           onClick={handleSubmit}
+          aria-label="Send message"
         >
           <Send className="size-4" />
         </Button>

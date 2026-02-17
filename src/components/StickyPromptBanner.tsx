@@ -103,6 +103,9 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Scroll to turn ${stickyTurn.index + 1} prompt`}
       className={cn(
         "absolute inset-x-0 top-0 z-20",
         "border-b border-blue-500/10 bg-zinc-950/85 backdrop-blur-md",
@@ -110,6 +113,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
         "transition-all duration-200 hover:bg-zinc-900/90"
       )}
       onClick={scrollToPrompt}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") scrollToPrompt() }}
     >
       <div className="flex-shrink-0">
         <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">

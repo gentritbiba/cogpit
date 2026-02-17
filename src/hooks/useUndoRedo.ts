@@ -14,6 +14,8 @@ import {
   type OperationSummary,
 } from "@/lib/undo-engine"
 
+const EMPTY_BRANCHES: Branch[] = []
+
 export interface UndoConfirmState {
   type: "undo" | "redo" | "branch-switch"
   summary: OperationSummary
@@ -95,12 +97,28 @@ export function useUndoRedo(
     if (session.sessionId === sessionIdRef.current) return
     sessionIdRef.current = session.sessionId
 
-    fetch(`/api/undo-state/${encodeURIComponent(session.sessionId)}`)
+    // Capture the id so we can check for staleness when the fetch resolves
+    const fetchedSessionId = session.sessionId
+    const controller = new AbortController()
+
+    fetch(`/api/undo-state/${encodeURIComponent(fetchedSessionId)}`, {
+      signal: controller.signal,
+    })
       .then((res) => res.ok ? res.json() : null)
       .then((data: UndoState | null) => {
-        setUndoState(data ?? null)
+        // Only apply if this session is still current
+        if (sessionIdRef.current === fetchedSessionId) {
+          setUndoState(data ?? null)
+        }
       })
-      .catch(() => setUndoState(null))
+      .catch((err) => {
+        if (err instanceof Error && err.name === "AbortError") return
+        if (sessionIdRef.current === fetchedSessionId) {
+          setUndoState(null)
+        }
+      })
+
+    return () => controller.abort()
   }, [session?.sessionId])
 
   // Save undo state to server
@@ -137,13 +155,13 @@ export function useUndoRedo(
     }
   }, [])
 
-  const branches = undoState?.branches ?? []
+  const branches = undoState?.branches ?? EMPTY_BRANCHES
 
   // canRedo: true if most recent branch's branchPoint + 1 === current session length
   // (no new turns added since the undo)
-  const { canRedo, redoTurnCount, redoBranch } = useMemo(() => {
+  const { canRedo, redoTurnCount, redoBranch } = useMemo((): { canRedo: boolean; redoTurnCount: number; redoBranch: Branch | null } => {
     if (!session || branches.length === 0) {
-      return { canRedo: false, redoTurnCount: 0, redoBranch: null as Branch | null }
+      return { canRedo: false, redoTurnCount: 0, redoBranch: null }
     }
     // Check most recent branch first (most likely candidate)
     for (let i = branches.length - 1; i >= 0; i--) {
@@ -152,7 +170,7 @@ export function useUndoRedo(
         return { canRedo: true, redoTurnCount: b.turns.length, redoBranch: b }
       }
     }
-    return { canRedo: false, redoTurnCount: 0, redoBranch: null as Branch | null }
+    return { canRedo: false, redoTurnCount: 0, redoBranch: null }
   }, [session, branches])
 
   // Parse the redo branch's JSONL lines into full Turn objects for ghost rendering

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import {
   Eye,
   RefreshCw,
@@ -15,6 +15,7 @@ import {
   Loader2,
   Search,
   X,
+  AlertTriangle,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -74,7 +75,7 @@ interface DashboardProps {
   onSelectProject?: (dirName: string | null) => void
 }
 
-export function Dashboard({
+export const Dashboard = memo(function Dashboard({
   onSelectSession,
   onNewSession,
   creatingSession,
@@ -92,6 +93,7 @@ export function Dashboard({
   const [sessionsPage, setSessionsPage] = useState(1)
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [searchFilter, setSearchFilter] = useState("")
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Track which dirName we last loaded sessions for, to avoid re-fetching
   const loadedForDirName = useRef<string | null>(null)
@@ -103,12 +105,16 @@ export function Dashboard({
         fetch("/api/projects"),
         fetch("/api/active-sessions"),
       ])
+      if (!projectsRes.ok || !sessionsRes.ok) {
+        throw new Error("Failed to fetch dashboard data")
+      }
       const projectsData = await projectsRes.json()
       const sessionsData = await sessionsRes.json()
       setProjects(Array.isArray(projectsData) ? projectsData : [])
       setActiveSessions(Array.isArray(sessionsData) ? sessionsData : [])
+      setFetchError(null)
     } catch (err) {
-      console.error("Failed to fetch dashboard data:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -143,14 +149,18 @@ export function Dashboard({
     setSearchFilter("")
     setSessionsLoading(true)
     setSessions([])
+    setFetchError(null)
     fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
+        return res.json()
+      })
       .then((data) => {
         setSessions(data.sessions)
         setSessionsTotal(data.total)
         setSessionsPage(1)
       })
-      .catch((err) => console.error("Failed to load sessions:", err))
+      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
       .finally(() => setSessionsLoading(false))
   }, [selectedProjectDirName])
 
@@ -183,12 +193,13 @@ export function Dashboard({
     setSessionsLoading(true)
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
+      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
       const data = await res.json()
       setSessions((prev) => [...prev, ...data.sessions])
       setSessionsTotal(data.total)
       setSessionsPage(nextPage)
     } catch (err) {
-      console.error("Failed to load more sessions:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load more sessions")
     } finally {
       setSessionsLoading(false)
     }
@@ -290,11 +301,50 @@ export function Dashboard({
               <button
                 onClick={() => setSearchFilter("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                aria-label="Clear search"
               >
                 <X className="size-3" />
               </button>
             )}
           </div>
+
+          {/* Error banner */}
+          {fetchError && (
+            <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
+              <AlertTriangle className="size-4 text-red-400 shrink-0" />
+              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={() => {
+                  setFetchError(null)
+                  loadedForDirName.current = null
+                  if (selectedProjectDirName) {
+                    // Re-trigger session load by resetting the ref
+                    setSessionsLoading(true)
+                    setSessions([])
+                    fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
+                      .then((res) => {
+                        if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
+                        return res.json()
+                      })
+                      .then((data) => {
+                        loadedForDirName.current = selectedProjectDirName
+                        setSessions(data.sessions)
+                        setSessionsTotal(data.total)
+                        setSessionsPage(1)
+                      })
+                      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
+                      .finally(() => setSessionsLoading(false))
+                  }
+                }}
+              >
+                <RefreshCw className="size-3 mr-1" />
+                Retry
+              </Button>
+            </div>
+          )}
 
           {/* Sessions grid */}
           {sessionsLoading && sessions.length === 0 ? (
@@ -444,6 +494,7 @@ export function Dashboard({
               className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-300"
               onClick={() => fetchData(true)}
               disabled={refreshing}
+              aria-label="Refresh projects"
             >
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
             </Button>
@@ -462,11 +513,29 @@ export function Dashboard({
               <button
                 onClick={() => setSearchFilter("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                aria-label="Clear search"
               >
                 <X className="size-3" />
               </button>
             )}
           </div>
+
+          {/* Error banner */}
+          {fetchError && !selectedProjectDirName && (
+            <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
+              <AlertTriangle className="size-4 text-red-400 shrink-0" />
+              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={() => { setFetchError(null); fetchData(true) }}
+              >
+                <RefreshCw className="size-3 mr-1" />
+                Retry
+              </Button>
+            </div>
+          )}
 
           {loading ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -594,4 +663,4 @@ export function Dashboard({
       </div>
     </ScrollArea>
   )
-}
+})

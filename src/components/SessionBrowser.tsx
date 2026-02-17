@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, memo } from "react"
 import {
   FileText,
   Wrench,
@@ -102,7 +102,7 @@ interface SessionBrowserProps {
 
 type View = "projects" | "sessions" | "detail"
 
-export function SessionBrowser({
+export const SessionBrowser = memo(function SessionBrowser({
   session,
   activeSessionKey,
   onLoadSession,
@@ -122,6 +122,7 @@ export function SessionBrowser({
   const [selectedProject, setSelectedProject] = useState<ProjectInfo | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [searchFilter, setSearchFilter] = useState("")
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Load projects on mount
   useEffect(() => {
@@ -129,18 +130,21 @@ export function SessionBrowser({
   }, [])
 
   // When session changes externally, switch to detail view
+  const sessionId = session?.sessionId ?? null
   useEffect(() => {
-    if (session) setView("detail")
-  }, [session])
+    if (sessionId) setView("detail")
+  }, [sessionId])
 
   const loadProjects = useCallback(async () => {
     setIsLoading(true)
+    setFetchError(null)
     try {
       const res = await fetch("/api/projects")
+      if (!res.ok) throw new Error(`Failed to load projects (${res.status})`)
       const data = await res.json()
       setProjects(data)
     } catch (err) {
-      console.error("Failed to load projects:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load projects")
     } finally {
       setIsLoading(false)
     }
@@ -148,11 +152,13 @@ export function SessionBrowser({
 
   const loadSessions = useCallback(async (project: ProjectInfo, page = 1, append = false) => {
     setIsLoading(true)
+    setFetchError(null)
     if (!append) {
       setSelectedProject(project)
     }
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
+      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
       const data = await res.json()
       if (append) {
         setSessions((prev) => [...prev, ...data.sessions])
@@ -163,7 +169,7 @@ export function SessionBrowser({
       setSessionsPage(page)
       if (!append) setView("sessions")
     } catch (err) {
-      console.error("Failed to load sessions:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load sessions")
     } finally {
       setIsLoading(false)
     }
@@ -172,10 +178,12 @@ export function SessionBrowser({
   const loadSessionFile = useCallback(
     async (project: ProjectInfo, session: SessionInfo) => {
       setIsLoading(true)
+      setFetchError(null)
       try {
         const res = await fetch(
           `/api/sessions/${encodeURIComponent(project.dirName)}/${encodeURIComponent(session.fileName)}`
         )
+        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
         const text = await res.text()
         const parsed = parseSession(text)
         onLoadSession(parsed, {
@@ -185,7 +193,7 @@ export function SessionBrowser({
         })
         setView("detail")
       } catch (err) {
-        console.error("Failed to load session file:", err)
+        setFetchError(err instanceof Error ? err.message : "Failed to load session")
       } finally {
         setIsLoading(false)
       }
@@ -196,16 +204,18 @@ export function SessionBrowser({
   const loadLiveSession = useCallback(
     async (dirName: string, fileName: string) => {
       setIsLoading(true)
+      setFetchError(null)
       try {
         const res = await fetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
+        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
         const text = await res.text()
         const parsed = parseSession(text)
         onLoadSession(parsed, { dirName, fileName, rawText: text })
         setView("detail")
       } catch (err) {
-        console.error("Failed to load live session:", err)
+        setFetchError(err instanceof Error ? err.message : "Failed to load session")
       } finally {
         setIsLoading(false)
       }
@@ -240,10 +250,10 @@ export function SessionBrowser({
   }
 
   return (
-    <div className={cn(
+    <aside className={cn(
       "flex h-full shrink-0 flex-col bg-zinc-950",
-      isMobile ? "w-full" : "w-80 border-r border-zinc-800"
-    )}>
+      isMobile ? "w-full" : "w-80 border-r border-zinc-800 panel-enter"
+    )} aria-label="Session browser">
       {/* ── Top: Live Sessions ── */}
       <div className="flex min-h-0 flex-[55_1_0%] flex-col overflow-hidden">
         <LiveSessions
@@ -257,8 +267,10 @@ export function SessionBrowser({
       {/* ── Bottom: Browse / Teams ── */}
       <div className="flex min-h-0 flex-[45_1_0%] flex-col overflow-hidden border-t border-zinc-800">
         {/* Tab bar */}
-        <div className="flex shrink-0 border-b border-zinc-800">
+        <div className="flex shrink-0 border-b border-zinc-800" role="tablist">
           <button
+            role="tab"
+            aria-selected={sidebarTab === "browse"}
             onClick={() => onSidebarTabChange("browse")}
             className={cn(
               "flex-1 text-xs font-medium transition-colors border-b-2",
@@ -271,6 +283,8 @@ export function SessionBrowser({
             Browse
           </button>
           <button
+            role="tab"
+            aria-selected={sidebarTab === "teams"}
             onClick={() => onSidebarTabChange("teams")}
             className={cn(
               "flex-1 text-xs font-medium transition-colors border-b-2 flex items-center justify-center gap-1.5",
@@ -299,6 +313,7 @@ export function SessionBrowser({
                   size="sm"
                   className={cn(isMobile ? "h-8 w-8 p-0" : "h-6 w-6 p-0")}
                   onClick={handleBack}
+                  aria-label="Go back"
                 >
                   <ChevronLeft className={cn(isMobile ? "size-5" : "size-4")} />
                 </Button>
@@ -317,6 +332,7 @@ export function SessionBrowser({
                   size="sm"
                   className={cn(isMobile ? "h-8 w-8 p-0" : "h-6 w-6 p-0")}
                   onClick={loadProjects}
+                  aria-label="Refresh projects"
                 >
                   <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
                 </Button>
@@ -359,12 +375,34 @@ export function SessionBrowser({
                   <button
                     onClick={() => setSearchFilter("")}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    aria-label="Clear search"
                   >
                     <X className="size-3" />
                   </button>
                 )}
               </div>
             </div>}
+
+            {/* Error banner */}
+            {fetchError && (
+              <div className="shrink-0 mx-3 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2.5 py-1.5">
+                <AlertTriangle className="size-3 text-red-400 shrink-0" />
+                <span className="text-[11px] text-red-400 flex-1 truncate">{fetchError}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-1.5 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  onClick={() => {
+                    setFetchError(null)
+                    if (view === "projects") loadProjects()
+                    else if (view === "sessions" && selectedProject) loadSessions(selectedProject)
+                  }}
+                >
+                  <RefreshCw className="size-2.5 mr-1" />
+                  Retry
+                </Button>
+              </div>
+            )}
 
             {/* Scrollable content area */}
             <div className="flex-1 min-h-0">
@@ -414,9 +452,24 @@ export function SessionBrowser({
           </div>
         )}
       </div>
-    </div>
+    </aside>
   )
-}
+}, (prev, next) => {
+  // Custom comparator: compare session by ID instead of reference
+  // so SSE updates to the session object don't trigger re-renders
+  // of the projects/sessions list
+  if ((prev.session?.sessionId ?? null) !== (next.session?.sessionId ?? null)) return false
+  if (prev.activeSessionKey !== next.activeSessionKey) return false
+  if (prev.onLoadSession !== next.onLoadSession) return false
+  if (prev.sidebarTab !== next.sidebarTab) return false
+  if (prev.onSidebarTabChange !== next.onSidebarTabChange) return false
+  if (prev.onSelectTeam !== next.onSelectTeam) return false
+  if (prev.onNewSession !== next.onNewSession) return false
+  if (prev.creatingSession !== next.creatingSession) return false
+  if (prev.isMobile !== next.isMobile) return false
+  if (prev.teamsOnly !== next.teamsOnly) return false
+  return true
+})
 
 // ── Projects List ──────────────────────────────────────────────────────────
 

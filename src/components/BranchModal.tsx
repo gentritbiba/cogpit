@@ -149,6 +149,7 @@ export function BranchModal({
               className="h-7 w-7 p-0"
               onClick={goPrev}
               disabled={branches.length <= 1}
+              aria-label="Previous branch"
             >
               <ChevronLeft className="size-4" />
             </Button>
@@ -167,6 +168,7 @@ export function BranchModal({
               className="h-7 w-7 p-0"
               onClick={goNext}
               disabled={branches.length <= 1}
+              aria-label="Next branch"
             >
               <ChevronRight className="size-4" />
             </Button>

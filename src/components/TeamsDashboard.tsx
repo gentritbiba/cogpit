@@ -5,6 +5,8 @@ import {
   ListTodo,
   MessageSquare,
   ChevronLeft,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,17 +28,22 @@ interface TeamsDashboardProps {
 export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboardProps) {
   const [data, setData] = useState<TeamDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   const fetchTeam = useCallback(async () => {
     try {
       const res = await fetch(
         `/api/team-detail/${encodeURIComponent(teamName)}`
       )
-      if (!res.ok) return
+      if (!res.ok) {
+        setFetchError(`Failed to load team (${res.status})`)
+        return
+      }
       const detail: TeamDetail = await res.json()
       setData(detail)
+      setFetchError(null)
     } catch (err) {
-      console.error("Failed to fetch team detail:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load team")
     } finally {
       setLoading(false)
     }
@@ -80,11 +87,36 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
 
   if (!data) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-zinc-500">
-        <p className="text-sm">Team not found</p>
-        <Button variant="outline" size="sm" onClick={onBack}>
-          Back
-        </Button>
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-zinc-500">
+        {fetchError ? (
+          <>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
+              <AlertTriangle className="size-5 text-red-400" />
+            </div>
+            <p className="text-sm text-red-400">{fetchError}</p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => { setFetchError(null); setLoading(true); fetchTeam() }}
+              >
+                <RefreshCw className="size-3" />
+                Retry
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onBack}>
+                Back
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm">Team not found</p>
+            <Button variant="outline" size="sm" onClick={onBack}>
+              Back
+            </Button>
+          </>
+        )}
       </div>
     )
   }

@@ -288,6 +288,15 @@ function VirtualizedTimeline({
     overscan: 5,
   })
 
+  // Build a turnIndex → virtualIndex lookup map to avoid O(n) findIndex on scroll
+  const turnIndexToVirtualIdx = useMemo(() => {
+    const map = new Map<number, number>()
+    for (let i = 0; i < filteredTurns.length; i++) {
+      map.set(filteredTurns[i].index, i)
+    }
+    return map
+  }, [filteredTurns])
+
   const lastScrolledTurnRef = useRef<number | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {
@@ -296,12 +305,11 @@ function VirtualizedTimeline({
     }
     if (activeTurnIndex === lastScrolledTurnRef.current) return
     lastScrolledTurnRef.current = activeTurnIndex
-    // Find the virtual index for this turn
-    const virtualIdx = filteredTurns.findIndex(({ index }) => index === activeTurnIndex)
-    if (virtualIdx >= 0) {
+    const virtualIdx = turnIndexToVirtualIdx.get(activeTurnIndex)
+    if (virtualIdx !== undefined) {
       virtualizer.scrollToIndex(virtualIdx, { align: "start", behavior: "smooth" })
     }
-  }, [activeTurnIndex, filteredTurns, virtualizer])
+  }, [activeTurnIndex, turnIndexToVirtualIdx, virtualizer])
 
   return (
     <div
@@ -633,6 +641,7 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   // Auto-expand when a specific tool call in this group is targeted
   const lastScrolledToolCallRef = useRef<string | null>(null)
+  const scrollRafRef = useRef<number | null>(null)
   useEffect(() => {
     if (!activeToolCallId) {
       lastScrolledToolCallRef.current = null
@@ -642,9 +651,11 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     if (!toolCalls.some((tc) => tc.id === activeToolCallId)) return
     lastScrolledToolCallRef.current = activeToolCallId
     setManualOpen(true)
-    // Scroll to the target after DOM update (double rAF for layout)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    // Scroll to the target after DOM update (double rAF for layout).
+    // Track the frame IDs so we can cancel if the component unmounts mid-scroll.
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null
         targetRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "nearest",
@@ -652,6 +663,13 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
       })
     })
   }, [activeToolCallId, toolCalls])
+
+  // Cancel pending scroll animation frames on unmount
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
+    }
+  }, [])
 
   const toolCounts = useMemo(() => {
     const counts: Record<string, number> = {}

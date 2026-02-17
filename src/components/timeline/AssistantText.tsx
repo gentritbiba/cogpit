@@ -59,12 +59,12 @@ export const AssistantText = memo(function AssistantText({
                   <div className="pl-2 text-zinc-400">New: {formatTokenCount(tokenUsage.input_tokens)}</div>
                   {(tokenUsage.cache_read_input_tokens ?? 0) > 0 && (
                     <div className="pl-2 text-zinc-400">
-                      Cache read: {formatTokenCount(tokenUsage.cache_read_input_tokens!)}
+                      Cache read: {formatTokenCount(tokenUsage.cache_read_input_tokens ?? 0)}
                     </div>
                   )}
                   {(tokenUsage.cache_creation_input_tokens ?? 0) > 0 && (
                     <div className="pl-2 text-zinc-400">
-                      Cache write: {formatTokenCount(tokenUsage.cache_creation_input_tokens!)}
+                      Cache write: {formatTokenCount(tokenUsage.cache_creation_input_tokens ?? 0)}
                     </div>
                   )}
                   <div>Output: {formatTokenCount(tokenUsage.output_tokens)}</div>

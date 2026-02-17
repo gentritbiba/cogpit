@@ -2,6 +2,7 @@ node_modules
 dist
 *.local
 config.local.json
-.DS_Store
+**/.DS_Store
 undo-history/
+audit-history/
 test-results/

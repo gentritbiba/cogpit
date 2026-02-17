@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch } from "react"
+import { useState, useCallback, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
 import type { ParsedSession } from "@/lib/types"
@@ -22,8 +22,11 @@ export function useSessionActions({
   scrollToBottomInstant,
   resetTurnCount,
 }: UseSessionActionsOpts) {
+  const [loadError, setLoadError] = useState<string | null>(null)
+
   const handleLoadSession = useCallback(
     (parsed: ParsedSession, source: SessionSource) => {
+      setLoadError(null)
       dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
       resetTurnCount(parsed.turns.length)
       scrollToBottomInstant()
@@ -33,15 +36,20 @@ export function useSessionActions({
 
   const handleDashboardSelect = useCallback(
     async (dirName: string, fileName: string) => {
+      setLoadError(null)
       try {
         const res = await fetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
+        if (!res.ok) {
+          setLoadError(`Failed to load session (${res.status})`)
+          return
+        }
         const text = await res.text()
         const parsed = parseSession(text)
         handleLoadSession(parsed, { dirName, fileName, rawText: text })
       } catch (err) {
-        console.error("Failed to load session from dashboard:", err)
+        setLoadError(err instanceof Error ? err.message : "Failed to load session")
       }
     },
     [handleLoadSession]
@@ -49,10 +57,15 @@ export function useSessionActions({
 
   const handleOpenSessionFromTeam = useCallback(
     async (dirName: string, fileName: string, memberName?: string) => {
+      setLoadError(null)
       try {
         const res = await fetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
+        if (!res.ok) {
+          setLoadError(`Failed to load team session (${res.status})`)
+          return
+        }
         const text = await res.text()
         const parsed = parseSession(text)
         dispatch({
@@ -65,7 +78,7 @@ export function useSessionActions({
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()
       } catch (err) {
-        console.error("Failed to open session from team:", err)
+        setLoadError(err instanceof Error ? err.message : "Failed to load team session")
       }
     },
     [dispatch, isMobile, resetTurnCount, scrollToBottomInstant]
@@ -74,17 +87,25 @@ export function useSessionActions({
   const handleTeamMemberSwitch = useCallback(
     async (member: TeamMember) => {
       if (!teamContext) return
+      setLoadError(null)
       dispatch({ type: "SET_LOADING_MEMBER", name: member.name })
       try {
         const res = await fetch(
           `/api/team-member-session/${encodeURIComponent(teamContext.teamName)}/${encodeURIComponent(member.name)}`
         )
-        if (!res.ok) return
+        if (!res.ok) {
+          setLoadError(`Failed to find session for ${member.name}`)
+          return
+        }
         const { dirName, fileName } = await res.json()
 
         const contentRes = await fetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
+        if (!contentRes.ok) {
+          setLoadError(`Failed to load session for ${member.name}`)
+          return
+        }
         const text = await contentRes.text()
         const parsed = parseSession(text)
         dispatch({
@@ -96,13 +117,15 @@ export function useSessionActions({
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()
       } catch (err) {
-        console.error("Failed to switch team member:", err)
+        setLoadError(err instanceof Error ? err.message : "Failed to switch team member")
       } finally {
         dispatch({ type: "SET_LOADING_MEMBER", name: null })
       }
     },
     [dispatch, teamContext, resetTurnCount, scrollToBottomInstant]
   )
+
+  const clearLoadError = useCallback(() => setLoadError(null), [])
 
   const handleSelectTeam = useCallback(
     (teamName: string) => {
@@ -139,6 +162,8 @@ export function useSessionActions({
   )
 
   return {
+    loadError,
+    clearLoadError,
     handleLoadSession,
     handleDashboardSelect,
     handleOpenSessionFromTeam,

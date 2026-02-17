@@ -1,3 +1,5 @@
+import type { RawMessage } from "./types"
+
 export function shortenModel(model: string): string {
   if (!model) return "unknown"
   if (model.includes("opus-4-6")) return "opus 4.6"
@@ -142,13 +144,12 @@ export interface ContextUsage {
  * context size. We need the LAST raw API response's usage, not the merged turn total.
  */
 export function getContextUsage(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  rawMessages: readonly any[]
+  rawMessages: readonly RawMessage[]
 ): ContextUsage | null {
   // Walk backwards through raw messages to find the last assistant message with usage
   for (let i = rawMessages.length - 1; i >= 0; i--) {
     const msg = rawMessages[i]
-    if (msg.type === "assistant" && msg.message?.usage) {
+    if (msg.type === "assistant") {
       const u = msg.message.usage
       const input = typeof u.input_tokens === "number" ? u.input_tokens : 0
       const cacheCreate = typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : 0

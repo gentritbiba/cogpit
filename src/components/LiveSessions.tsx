@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive } from "lucide-react"
+import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -45,6 +45,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -53,14 +54,18 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
         fetch("/api/active-sessions"),
         fetch("/api/running-processes"),
       ])
+      if (!sessRes.ok || !procRes.ok) {
+        throw new Error("Failed to fetch live data")
+      }
       const [sessData, procData] = await Promise.all([
         sessRes.json(),
         procRes.json(),
       ])
       setSessions(sessData)
       setProcesses(procData)
+      setFetchError(null)
     } catch (err) {
-      console.error("Failed to fetch sessions/processes:", err)
+      setFetchError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
       setLoading(false)
     }
@@ -122,7 +127,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
     if (p.args.includes("stream-json")) return "persistent (Agent Window)"
     if (p.args.includes("-p ")) {
       const msgMatch = p.args.match(/-p\s+(.{1,60})/)
-      return msgMatch ? `one-shot: "${truncate(msgMatch[1], 40)}"` : "one-shot (-p)"
+      return msgMatch?.[1] ? `one-shot: "${truncate(msgMatch[1], 40)}"` : "one-shot (-p)"
     }
     return "interactive"
   }
@@ -145,6 +150,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
             size="sm"
             className="h-6 w-6 p-0"
             onClick={fetchData}
+            aria-label="Refresh live sessions"
           >
             <RefreshCw
               className={cn("size-3", loading && "animate-spin")}
@@ -155,7 +161,20 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-0.5 px-2 pb-3">
-          {sessions.length === 0 && unmatchedProcs.length === 0 && !loading && (
+          {fetchError && (
+            <div className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1.5">
+              <AlertTriangle className="size-3 text-red-400 shrink-0" />
+              <span className="text-[10px] text-red-400 flex-1 truncate">{fetchError}</span>
+              <button
+                onClick={() => { setFetchError(null); fetchData() }}
+                className="text-[10px] text-red-400 hover:text-red-300 shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {sessions.length === 0 && unmatchedProcs.length === 0 && !loading && !fetchError && (
             <div className="px-3 py-8 text-center">
               <Activity className="size-5 mx-auto mb-2 text-zinc-700" />
               <p className="text-xs text-zinc-600">No active sessions</p>
@@ -209,6 +228,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
                       disabled={killingPids.has(proc.pid)}
                       className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 disabled:opacity-50"
                       title={`Kill PID ${proc.pid} (${proc.memMB} MB)`}
+                      aria-label={`Kill process ${proc.pid}`}
                     >
                       <X className="size-3" />
                     </button>
@@ -286,6 +306,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
                     disabled={killingPids.has(p.pid)}
                     className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 disabled:opacity-50"
                     title={`Kill PID ${p.pid}`}
+                    aria-label={`Kill process ${p.pid}`}
                   >
                     <X className="size-3.5" />
                   </button>

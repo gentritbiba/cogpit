@@ -558,6 +558,7 @@ function BackgroundServers({
                     className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
                     onClick={() => onToggleServer?.(task.id, task.outputPath!, title)}
                     title="View server output"
+                    aria-label="View server output"
                   >
                     <TerminalSquare className="size-3" />
                   </button>
@@ -567,6 +568,7 @@ function BackgroundServers({
                     className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-950/50 hover:text-red-300"
                     onClick={() => activePorts.forEach((p) => handleKillPort(p))}
                     title="Stop server"
+                    aria-label="Stop server"
                   >
                     <Square className="size-2.5 fill-current" />
                     <span>Stop</span>
@@ -783,7 +785,7 @@ export function StatsPanel({
   return (
     <aside className={cn(
       "shrink-0 min-h-0 h-full overflow-y-auto bg-zinc-950",
-      isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-zinc-800"
+      isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-zinc-800 panel-enter-right"
     )}>
       {/* Search bar (desktop only) */}
       {onSearchChange && (
@@ -804,6 +806,7 @@ export function StatsPanel({
               size="sm"
               className="h-7 w-7 p-0 shrink-0"
               onClick={onToggleExpandAll}
+              aria-label={expandAll ? "Collapse all" : "Expand all"}
             >
               {expandAll ? (
                 <ChevronsDownUp className="size-3.5" />

@@ -27,9 +27,11 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   const fileBasedId = sessionSource?.fileName?.replace(".jsonl", "") ?? null
   const sessionId = parsedSessionId || fileBasedId
 
-  // When session changes, reset state (but don't abort — other sessions keep running)
+  // When session changes, abort any in-flight request and reset state
   useEffect(() => {
     if (sessionIdRef.current !== sessionId) {
+      // Abort the previous request so it doesn't keep running in the background
+      activeAbortRef.current?.abort()
       sessionIdRef.current = sessionId
       setStatus("idle")
       setError(undefined)
@@ -37,6 +39,13 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       activeAbortRef.current = null
     }
   }, [sessionId])
+
+  // Abort any in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      activeAbortRef.current?.abort()
+    }
+  }, [])
 
   const sendMessage = useCallback(
     async (text: string, images?: Array<{ data: string; mediaType: string }>) => {

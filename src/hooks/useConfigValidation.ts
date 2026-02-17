@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 
 export type ValidationStatus = "idle" | "validating" | "valid" | "invalid"
 
@@ -60,6 +60,11 @@ export function useConfigValidation() {
       setError("Failed to save configuration")
       return { success: false, error: "Network error" }
     }
+  }, [])
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current)
   }, [])
 
   return { status, error, debouncedValidate, validate, reset, save }

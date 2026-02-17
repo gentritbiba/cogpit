@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from "react"
+import { useState, useEffect, useRef, Fragment, memo } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import {
   ResizablePanelGroup,
@@ -115,7 +115,7 @@ interface ServerPanelProps {
   onToggleCollapse: () => void
 }
 
-export function ServerPanel({
+export const ServerPanel = memo(function ServerPanel({
   servers,
   visibleIds,
   collapsed,
@@ -135,6 +135,8 @@ export function ServerPanel({
         <button
           className="flex items-center gap-1.5 hover:text-zinc-300 transition-colors"
           onClick={onToggleCollapse}
+          aria-label={collapsed ? "Expand server panel" : "Collapse server panel"}
+          aria-expanded={!collapsed}
         >
           {collapsed ? (
             <ChevronRight className="size-3 text-zinc-500" />
@@ -154,6 +156,8 @@ export function ServerPanel({
               <button
                 key={id}
                 onClick={() => onToggleServer(id)}
+                aria-label={`${isVisible ? "Hide" : "Show"} ${info.title}`}
+                aria-pressed={isVisible}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all",
                   isVisible
@@ -201,4 +205,4 @@ export function ServerPanel({
       )}
     </div>
   )
-}
+})
