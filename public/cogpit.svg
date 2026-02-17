@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="gear-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="brain-glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+    <linearGradient id="core-glow" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#93c5fd"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="0.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Gear body with 8 teeth -->
+  <path d="M11.48,5.10 L13.43,4.48 L13.86,0.95 L18.14,0.95 L18.57,4.48 L20.52,5.10 L22.32,6.04 L25.13,3.84 L28.16,6.87 L25.96,9.68 L26.90,11.48 L27.52,13.43 L31.05,13.86 L31.05,18.14 L27.52,18.57 L26.90,20.52 L25.96,22.32 L28.16,25.13 L25.13,28.16 L22.32,25.96 L20.52,26.90 L18.57,27.52 L18.14,31.05 L13.86,31.05 L13.43,27.52 L11.48,26.90 L9.68,25.96 L6.87,28.16 L3.84,25.13 L6.04,22.32 L5.10,20.52 L4.48,18.57 L0.95,18.14 L0.95,13.86 L4.48,13.43 L5.10,11.48 L6.04,9.68 L3.84,6.87 L6.87,3.84 L9.68,6.04 L11.48,5.10 Z" fill="url(#gear-fill)"/>
+
+  <!-- Center hole -->
+  <circle cx="16" cy="16" r="7.8" fill="#09090b"/>
+
+  <!-- Neural circuit pattern - nodes and connections -->
+  <g filter="url(#glow)" opacity="0.9">
+    <!-- Central brain node -->
+    <circle cx="16" cy="16" r="2.2" fill="url(#core-glow)"/>
+
+    <!-- Neural connection lines -->
+    <line x1="16" y1="16" x2="12.2" y2="12.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="16" y1="16" x2="19.8" y2="12.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="16" y1="16" x2="12.2" y2="19.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="16" y1="16" x2="19.8" y2="19.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="16" y1="16" x2="16" y2="10.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+    <line x1="16" y1="16" x2="16" y2="21.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
+
+    <!-- Outer neural nodes -->
+    <circle cx="12.2" cy="12.5" r="1.1" fill="url(#brain-glow)"/>
+    <circle cx="19.8" cy="12.5" r="1.1" fill="url(#brain-glow)"/>
+    <circle cx="12.2" cy="19.5" r="1.1" fill="url(#brain-glow)"/>
+    <circle cx="19.8" cy="19.5" r="1.1" fill="url(#brain-glow)"/>
+    <circle cx="16" cy="10.5" r="0.9" fill="url(#brain-glow)"/>
+    <circle cx="16" cy="21.5" r="0.9" fill="url(#brain-glow)"/>
+
+    <!-- Secondary connections between outer nodes -->
+    <line x1="12.2" y1="12.5" x2="16" y2="10.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
+    <line x1="19.8" y1="12.5" x2="16" y2="10.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
+    <line x1="12.2" y1="19.5" x2="16" y2="21.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
+    <line x1="19.8" y1="19.5" x2="16" y2="21.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
+    <line x1="12.2" y1="12.5" x2="12.2" y2="19.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.5"/>
+    <line x1="19.8" y1="12.5" x2="19.8" y2="19.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.5"/>
+  </g>
+
+  <!-- Center dot highlight -->
+  <circle cx="15.4" cy="15.2" r="0.7" fill="#ffffff" opacity="0.6"/>
+</svg>

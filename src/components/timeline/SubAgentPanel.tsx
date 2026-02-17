@@ -1,5 +1,5 @@
 import { useState, memo } from "react"
-import { Users, ChevronRight, ChevronDown, Brain, Bot } from "lucide-react"
+import { Users, ChevronRight, ChevronDown, Brain, Cog } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ToolCallCard } from "./ToolCallCard"
 import type { SubAgentMessage } from "@/lib/types"
@@ -87,7 +87,7 @@ function SubAgentMessageItem({
 
       {message.text.length > 0 && (
         <div className="flex gap-2 items-start">
-          <Bot className="w-3.5 h-3.5 text-green-400 mt-0.5 shrink-0" />
+          <Cog className="w-3.5 h-3.5 text-green-400 mt-0.5 shrink-0" />
           <div className="prose prose-invert prose-xs max-w-none text-zinc-300 text-xs break-words">
             <ReactMarkdown>{message.text.join("\n\n")}</ReactMarkdown>
           </div>

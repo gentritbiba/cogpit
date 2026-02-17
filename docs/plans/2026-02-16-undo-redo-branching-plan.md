@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add time-travel undo/redo to Agent Window that reverts/re-applies file changes per turn, with git-like branching when the user writes a new prompt after undoing.
+**Goal:** Add time-travel undo/redo to Cogpit that reverts/re-applies file changes per turn, with git-like branching when the user writes a new prompt after undoing.
 
 **Architecture:** Reversible operations engine (swap Edit old/new strings, delete/recreate Write files) backed by a sidecar JSON state file per session. Server-side API handles all file mutations. UI adds hover restore buttons, right-click context menu, dimmed undone turns, floating redo bar, branch indicators, and a full-screen branch viewer modal.
 
@@ -62,7 +62,7 @@ export interface UndoState {
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 Expected: No errors.
 
 **Step 3: Commit**
@@ -307,7 +307,7 @@ export function createEmptyUndoState(sessionId: string, totalTurns: number): Und
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -336,7 +336,7 @@ import { mkdir, unlink, access } from "node:fs/promises"
 After line 11 (`const TASKS_DIR = ...`), add:
 
 ```typescript
-const UNDO_DIR = join(homedir(), ".claude", "agent-window", "undo-history")
+const UNDO_DIR = join(homedir(), ".claude", "cogpit", "undo-history")
 ```
 
 **Step 2: Add the undo API routes**
@@ -555,7 +555,7 @@ Insert before the `// GET /api/watch/` SSE route (line 1420). These endpoints:
 
 **Step 3: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -875,7 +875,7 @@ export function useUndoRedo(
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -924,7 +924,7 @@ In the `GO_HOME` case, reset undo: add `undoCurrentTurnIndex: null,` after the `
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1069,7 +1069,7 @@ Run: `ls src/components/ui/dialog.tsx` — if it doesn't exist, create it using 
 
 **Step 3: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -1087,7 +1087,7 @@ git commit -m "feat(undo): add confirmation dialog component"
 
 **Step 1: Install Radix context menu if needed**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun add @radix-ui/react-context-menu`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun add @radix-ui/react-context-menu`
 
 **Step 2: Create `src/components/TurnContextMenu.tsx`**
 
@@ -1163,7 +1163,7 @@ export function TurnContextMenu({
 
 **Step 3: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 4: Commit**
 
@@ -1229,7 +1229,7 @@ export function UndoRedoBar({ undoneCount, onRedoNext, onRedoAll }: UndoRedoBarP
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1281,7 +1281,7 @@ export function BranchIndicator({ branchCount, onClick }: BranchIndicatorProps) 
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1516,7 +1516,7 @@ export function BranchModal({
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 3: Commit**
 
@@ -1611,7 +1611,7 @@ This task is complex — the agent implementing it should read the current `Conv
 
 **Step 5: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 6: Commit**
 
@@ -1707,7 +1707,7 @@ Before the closing `</div>` of the root element (both desktop and mobile), add:
 
 **Step 4: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 5: Commit**
 
@@ -1833,7 +1833,7 @@ Make sure the raw text is stored when loading sessions. In `useSessionActions.ts
 
 **Step 4: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bunx tsc --noEmit`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bunx tsc --noEmit`
 
 **Step 5: Commit**
 
@@ -1861,7 +1861,7 @@ If missing, create it with the standard shadcn/ui dialog implementation.
 
 **Step 2: Verify the full build passes**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build`
 
 **Step 3: Commit if changes were made**
 
@@ -1878,12 +1878,12 @@ git commit -m "feat(ui): add dialog component for undo modals"
 
 **Step 1: Run full build**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build`
 Expected: Build succeeds with no errors.
 
 **Step 2: Run dev server and visually verify**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run dev`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run dev`
 
 Verify:
 - Open a session with Edit/Write tool calls

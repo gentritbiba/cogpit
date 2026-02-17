@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react"
-import { Eye, FolderOpen, CheckCircle, XCircle, Loader2 } from "lucide-react"
+import { Cog, FolderOpen, CheckCircle, XCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -36,8 +36,8 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
     <div className="flex h-dvh items-center justify-center bg-zinc-950 text-zinc-100">
       <Card className="w-full max-w-md mx-4 p-6 bg-zinc-900 border-zinc-800">
         <div className="flex flex-col items-center gap-4">
-          <Eye className="size-8 text-blue-400" />
-          <h1 className="text-xl font-semibold tracking-tight">Agent Window Setup</h1>
+          <Cog className="size-8 text-blue-400" />
+          <h1 className="text-xl font-semibold tracking-tight">Cogpit Setup</h1>
           <p className="text-sm text-zinc-400 text-center leading-relaxed">
             Enter the path to your <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">.claude</code> directory
             to get started. This is typically located at{" "}

@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import {
-  Eye,
+  Cog,
   RefreshCw,
   MessageSquare,
   GitBranch,
-  Keyboard,
   Activity,
   FolderOpen,
   Clock,
@@ -470,9 +469,9 @@ export const Dashboard = memo(function Dashboard({
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <Eye className="size-7 text-blue-400" />
+            <Cog className="size-7 text-blue-400" />
             <h1 className="text-2xl font-bold tracking-tight text-zinc-100">
-              Agent Window
+              Cogpit
             </h1>
           </div>
           <p className="text-sm text-zinc-500">Session Viewer & Monitor</p>
@@ -625,41 +624,6 @@ export const Dashboard = memo(function Dashboard({
           )}
         </div>
 
-        {/* Keyboard Shortcuts (desktop only) */}
-        <div className="hidden md:block">
-          <div className="flex items-center gap-2 mb-3">
-            <Keyboard className="size-3.5 text-zinc-600" />
-            <span className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium">
-              Keyboard Shortcuts
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-[11px] text-zinc-600">
-            <span>
-              <kbd className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
-                Ctrl+B
-              </kbd>{" "}
-              Sidebar
-            </span>
-            <span>
-              <kbd className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
-                Ctrl+F
-              </kbd>{" "}
-              Search
-            </span>
-            <span>
-              <kbd className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
-                Ctrl+E
-              </kbd>{" "}
-              Expand all
-            </span>
-            <span>
-              <kbd className="rounded bg-zinc-800/80 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">
-                Esc
-              </kbd>{" "}
-              Clear search
-            </span>
-          </div>
-        </div>
       </div>
     </ScrollArea>
   )

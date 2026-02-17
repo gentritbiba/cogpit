@@ -38,7 +38,7 @@ export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResult
 
 **Step 2: Verify the build still compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds (ImageBlock is additive, no breakage)
 
 **Step 3: Commit**
@@ -91,7 +91,7 @@ import type {
 
 **Step 2: Verify the build still compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds
 
 **Step 3: Commit**
@@ -248,7 +248,7 @@ Key changes from original:
 
 **Step 2: Verify the build compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds
 
 **Step 3: Manually verify with the known session**
@@ -452,7 +452,7 @@ text.trim() || images.length > 0
 
 **Step 2: Verify build compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds (the `onSend` signature change will cause type errors downstream — fix in next task)
 
 **Step 3: Commit**
@@ -551,7 +551,7 @@ Also check `src/components/TeamChatInput.tsx` or any other ChatInput consumers �
 
 **Step 3: Verify the build compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds
 
 **Step 4: Commit**
@@ -659,7 +659,7 @@ The rest of the handler (tracking, stderr, close events) stays the same — just
 
 **Step 2: Verify the build compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | tail -5`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | tail -5`
 Expected: Build succeeds
 
 **Step 3: Commit**
@@ -677,7 +677,7 @@ git commit -m "feat: use stream-json to send images via Claude CLI"
 
 **Step 1: Start the dev server**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run dev`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run dev`
 
 **Step 2: Test viewing existing images in timeline**
 

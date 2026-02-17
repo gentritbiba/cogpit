@@ -1,5 +1,5 @@
 import { memo } from "react"
-import { Bot } from "lucide-react"
+import { Cog } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -29,12 +29,12 @@ export const AssistantText = memo(function AssistantText({
     <div className="flex gap-3 group">
       <div className="flex-shrink-0 mt-1">
         <div className="w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center">
-          <Bot className="w-4 h-4 text-green-400" />
+          <Cog className="w-4 h-4 text-green-400" />
         </div>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-medium text-green-400">Assistant</span>
+          <span className="text-xs font-medium text-green-400">Agent</span>
           {model && (
             <Badge
               variant="outline"

@@ -1,5 +1,5 @@
 {
-  "name": "agent-window",
+  "name": "cogpit",
   "private": true,
   "version": "0.0.0",
   "description": "Dashboard for browsing and inspecting Claude Code agent sessions",

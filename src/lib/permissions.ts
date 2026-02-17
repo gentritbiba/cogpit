@@ -31,7 +31,7 @@ export const KNOWN_TOOLS = [
   "Task",
 ] as const
 
-export const PERMISSIONS_STORAGE_KEY = "agent-window:permissions"
+export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"
 
 export function buildPermissionArgs(config: PermissionsConfig): string[] {
   if (config.mode === "bypassPermissions") {

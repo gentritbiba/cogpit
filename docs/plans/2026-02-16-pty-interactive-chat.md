@@ -160,7 +160,7 @@ export function usePtyChat({ terminalManager, sessionSource, cwd }: UsePtyChatOp
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | head -30`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | head -30`
 Expected: No errors from `usePtyChat.ts` (it won't be imported yet, but should have no syntax errors)
 
 **Step 3: Commit**
@@ -344,7 +344,7 @@ Key changes from original:
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | head -30`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | head -30`
 Expected: May have type warnings since App.tsx still uses old props — that's fine, we fix it in Task 3.
 
 **Step 3: Commit**
@@ -466,7 +466,7 @@ Check if `Loader2` is still used elsewhere in App.tsx. It is — it's used in th
 
 **Step 6: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | head -30`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | head -30`
 Expected: Clean build, no errors.
 
 **Step 7: Commit**
@@ -506,7 +506,7 @@ This already clears the pending message when a new turn is detected via JSONL. S
 
 **Step 2: Run the app and test manually**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run dev`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run dev`
 
 Test scenario:
 1. Open a session in the browser
@@ -582,12 +582,12 @@ In `usePtyChat.ts`, update the `sendMessage` callback. Instead of a blind 500ms 
 
 **Step 2: Verify it compiles**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | head -30`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | head -30`
 Expected: Clean build.
 
 **Step 3: Test manually**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run dev`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run dev`
 
 Test: Send a first message to a session. Verify the message gets delivered (check JSONL watcher picks up the new turn). Try with both fast and slow network conditions.
 
@@ -625,7 +625,7 @@ The `/api/send-message` and `/api/stop-session` endpoints in `api-plugin.ts` can
 
 **Step 4: Verify build**
 
-Run: `cd /Users/gentritbiba/.claude/agent-window && bun run build 2>&1 | head -30`
+Run: `cd /Users/gentritbiba/.claude/cogpit && bun run build 2>&1 | head -30`
 Expected: Clean build, no missing import errors.
 
 **Step 5: Commit**
@@ -641,5 +641,5 @@ git commit -m "chore: remove unused useClaudeChat hook (replaced by usePtyChat)"
 
 - **JSONL watcher is untouched** — `useLiveSession` + SSE `/api/watch` continue providing structured conversation updates. The PTY is only for input, not for parsing output.
 - **The PTY plugin already exists** — `server/pty-plugin.ts` and `useTerminalManager.ts` are production-ready with WebSocket reconnection, scrollback buffering, and multi-client support. We just wire into them.
-- **`--dangerously-skip-permissions`** is carried over from the original implementation. The user already opted into this for the agent-window use case.
+- **`--dangerously-skip-permissions`** is carried over from the original implementation. The user already opted into this for the cogpit use case.
 - **The `Unplug` icon** from lucide-react is already available in the project's lucide dependency. No new packages needed.

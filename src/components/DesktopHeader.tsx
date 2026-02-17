@@ -62,12 +62,12 @@ export function DesktopHeader({
             <button
               onClick={onGoHome}
               className="shrink-0 transition-opacity hover:opacity-70"
-              aria-label={session ? "Back to Dashboard" : "Agent Window"}
+              aria-label={session ? "Back to Dashboard" : "Cogpit"}
             >
               <Eye className="size-4 text-blue-400" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{session ? "Back to Dashboard" : "Agent Window"}</TooltipContent>
+          <TooltipContent>{session ? "Back to Dashboard" : "Cogpit"}</TooltipContent>
         </Tooltip>
 
         {session ? (
@@ -122,7 +122,7 @@ export function DesktopHeader({
             </Tooltip>
           </>
         ) : (
-          <h1 className="text-sm font-semibold tracking-tight">Agent Window</h1>
+          <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
         )}
       </div>
 

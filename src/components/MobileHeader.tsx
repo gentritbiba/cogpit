@@ -52,7 +52,7 @@ export function MobileHeader({
     <header className="flex h-12 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3">
       {/* Left: Identity */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <button onClick={onGoHome} className="shrink-0 transition-opacity hover:opacity-70" aria-label={session ? "Back to Dashboard" : "Agent Window"}>
+        <button onClick={onGoHome} className="shrink-0 transition-opacity hover:opacity-70" aria-label={session ? "Back to Dashboard" : "Cogpit"}>
           <Eye className="size-4 text-blue-400" />
         </button>
         {session ? (
@@ -91,7 +91,7 @@ export function MobileHeader({
             })()}
           </>
         ) : (
-          <h1 className="text-sm font-semibold tracking-tight">Agent Window</h1>
+          <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
         )}
       </div>
 

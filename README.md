@@ -1,8 +1,8 @@
-# Agent Window
+# Cogpit
 
 A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions.
 
-Agent Window reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and presents them as a rich, interactive UI — with live streaming, conversation timelines, token analytics, undo/redo with branching, team dashboards, and the ability to chat with running sessions.
+Cogpit reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and presents them as a rich, interactive UI — with live streaming, conversation timelines, token analytics, undo/redo with branching, team dashboards, and the ability to chat with running sessions.
 
 ## Features
 
@@ -90,11 +90,6 @@ Full desktop and mobile support with distinct layouts:
 +----------------------------------------+
 ```
 
-### Keyboard Shortcuts
-- `Cmd+Shift+T` — Toggle sidebar
-- `Cmd+F` — Focus search
-- Full-text search across turns, tool calls, and thinking blocks
-
 ## Tech Stack
 
 | Layer | Technology |
@@ -123,7 +118,7 @@ Full desktop and mobile support with distinct layouts:
 
 ```bash
 git clone <repo-url>
-cd agent-window
+cd cogpit
 bun install
 ```
 
@@ -151,7 +146,7 @@ bun run typecheck
 
 ## Configuration
 
-On first launch, Agent Window shows a setup screen to configure the path to your `.claude` directory (defaults to `~/.claude`). The configuration is saved to `config.local.json` at the project root and can be changed later via the settings dialog.
+On first launch, Cogpit shows a setup screen to configure the path to your `.claude` directory (defaults to `~/.claude`). The configuration is saved to `config.local.json` at the project root and can be changed later via the settings dialog.
 
 The configured directory must contain a `projects/` subdirectory where Claude Code stores session files.
 
@@ -159,7 +154,7 @@ The configured directory must contain a `projects/` subdirectory where Claude Co
 
 ### Session Parsing
 
-Claude Code writes conversation data as JSONL (JSON Lines) files in `~/.claude/projects/<project>/`. Agent Window parses these files into structured sessions:
+Claude Code writes conversation data as JSONL (JSON Lines) files in `~/.claude/projects/<project>/`. Cogpit parses these files into structured sessions:
 
 1. **Load** — Reads the JSONL file line by line
 2. **Parse** — Converts raw JSON messages into typed `Turn` objects
@@ -170,7 +165,7 @@ For live sessions, an incremental `parseSessionAppend` function efficiently rebu
 
 ### API Layer
 
-Agent Window runs a custom Vite plugin that exposes REST + SSE endpoints:
+Cogpit runs a custom Vite plugin that exposes REST + SSE endpoints:
 
 | Endpoint | Description |
 |----------|-------------|
@@ -196,7 +191,7 @@ Agent Window runs a custom Vite plugin that exposes REST + SSE endpoints:
 ## Project Structure
 
 ```
-agent-window/
+cogpit/
 ├── src/
 │   ├── App.tsx                          # Root component & layout orchestration
 │   ├── main.tsx                         # React entry point

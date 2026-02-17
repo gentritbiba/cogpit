@@ -2,7 +2,7 @@
 
 ## Overview
 
-A time-travel system for Agent Window that lets users undo and redo agent turns, reverting or re-applying file changes on disk. When a user writes a new prompt after undoing, the old future turns are archived as a "branch" that can be revisited and restored later through a modal viewer.
+A time-travel system for Cogpit that lets users undo and redo agent turns, reverting or re-applying file changes on disk. When a user writes a new prompt after undoing, the old future turns are archived as a "branch" that can be revisited and restored later through a modal viewer.
 
 ## Core Concepts
 
@@ -16,7 +16,7 @@ A time-travel system for Agent Window that lets users undo and redo agent turns,
 Stored in a dedicated directory, one JSON file per session:
 
 ```
-~/.claude/agent-window/undo-history/{session-id}.json
+~/.claude/cogpit/undo-history/{session-id}.json
 ```
 
 ### Branching

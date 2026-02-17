@@ -124,7 +124,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
   function describeProcess(p: RunningProcess): string {
     if (p.args.includes("--continue")) return "interactive (--continue)"
     if (p.args.includes("--resume")) return "resumed session"
-    if (p.args.includes("stream-json")) return "persistent (Agent Window)"
+    if (p.args.includes("stream-json")) return "persistent (Cogpit)"
     if (p.args.includes("-p ")) {
       const msgMatch = p.args.match(/-p\s+(.{1,60})/)
       return msgMatch?.[1] ? `one-shot: "${truncate(msgMatch[1], 40)}"` : "one-shot (-p)"

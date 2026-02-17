@@ -796,7 +796,7 @@ export function StatsPanel({
               ref={searchInputRef}
               value={searchQuery ?? ""}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search... (Ctrl+F)"
+              placeholder="Search..."
               className="h-7 bg-zinc-900/50 pl-7 text-xs border-zinc-700/50 placeholder:text-zinc-600 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/30 transition-all"
             />
           </div>
