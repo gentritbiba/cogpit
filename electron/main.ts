@@ -26,12 +26,9 @@ async function createWindow(port: number) {
     return { action: "deny" }
   })
 
-  // In dev, use the Vite dev server URL; in production, use local server
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
-  } else {
-    mainWindow.loadURL(`http://localhost:${port}`)
-  }
+  // Always load from the Express server — it serves the built renderer
+  // and handles all API routes on the same origin (no proxy needed).
+  mainWindow.loadURL(`http://127.0.0.1:${port}`)
 
   mainWindow.on("closed", () => {
     mainWindow = null
@@ -46,13 +43,9 @@ app.whenReady().then(async () => {
   // Start embedded server
   const { httpServer } = await createAppServer(staticDir, userDataDir)
 
-  // In dev mode, use a fixed port so the Vite renderer proxy can forward
-  // API requests. In production, use random port (renderer loads directly).
-  const DEV_API_PORT = 19384
-  const listenPort = process.env.ELECTRON_RENDERER_URL ? DEV_API_PORT : 0
-
+  // Random port — renderer loads directly from this server
   await new Promise<void>((resolve) => {
-    httpServer.listen(listenPort, "127.0.0.1", () => resolve())
+    httpServer.listen(0, "127.0.0.1", () => resolve())
   })
 
   const address = httpServer.address()

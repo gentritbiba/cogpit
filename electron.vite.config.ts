@@ -33,12 +33,6 @@ export default defineConfig({
         input: "index.html",
       },
     },
-    server: {
-      proxy: {
-        "/api": "http://127.0.0.1:19384",
-        "/__pty": { target: "ws://127.0.0.1:19384", ws: true },
-      },
-    },
     plugins: [
       react({
         babel: {
