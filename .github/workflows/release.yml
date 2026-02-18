@@ -15,14 +15,21 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            arch: universal
             name: macOS
+            cmd: bun run electron:package -- --mac --arm64 --x64 --publish never
+            pattern: "release/*.dmg"
           - os: windows-latest
-            arch: x64
             name: Windows
+            cmd: bun run electron:package -- --win --x64 --publish never
+            pattern: "release/*.exe"
           - os: ubuntu-latest
-            arch: x64
-            name: Linux
+            name: Linux (AppImage)
+            cmd: bun run electron:package -- --linux AppImage --x64 --publish never
+            pattern: "release/*.AppImage"
+          - os: ubuntu-latest
+            name: Linux (pacman)
+            cmd: bun run electron:package -- --linux pacman --x64 --publish never
+            pattern: "release/*.pacman"
 
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -41,34 +48,20 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build and package (macOS)
-        if: matrix.os == 'macos-latest'
-        run: bun run electron:package -- --mac --arm64 --x64 --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Build and package (Windows)
-        if: matrix.os == 'windows-latest'
-        run: bun run electron:package -- --win --x64 --publish never
-
       - name: Install Linux build deps
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
-      - name: Build and package (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: bun run electron:package -- --linux --x64 --publish never
+      - name: Build and package (${{ matrix.name }})
+        run: ${{ matrix.cmd }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.os }}
-          path: |
-            release/*.dmg
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-            release/*.pacman
+          name: release-${{ matrix.name }}
+          path: ${{ matrix.pattern }}
           if-no-files-found: ignore
 
   publish:
