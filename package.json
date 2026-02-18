@@ -4,7 +4,10 @@
   "version": "0.0.1",
   "description": "Dashboard for browsing and inspecting Claude Code agent sessions",
   "license": "MIT",
-  "author": "Gentrit Biba",
+  "author": {
+    "name": "Gentrit Biba",
+    "email": "gentritbiba@gmail.com"
+  },
   "type": "module",
   "main": "out/main/main.js",
   "scripts": {
