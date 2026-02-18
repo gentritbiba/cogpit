@@ -1,5 +1,5 @@
 import express from "express"
-import { createServer } from "node:http"
+import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
 import { WebSocketServer, WebSocket } from "ws"
 import { spawn as ptySpawn, type IPty } from "node-pty"
@@ -90,11 +90,31 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerFileRoutes(use)
   registerFileWatchRoutes(use)
 
-  // ── Static files + SPA fallback ────────────────────────────────
-  app.use(express.static(staticDir))
-  app.get("{*path}", (_req, res) => {
-    res.sendFile(join(staticDir, "index.html"))
-  })
+  // ── Static files / dev proxy ────────────────────────────────────
+  const viteDevUrl = process.env.ELECTRON_RENDERER_URL
+  if (viteDevUrl) {
+    // Dev mode: proxy non-API requests to Vite dev server (HMR + live CSS)
+    const vite = new URL(viteDevUrl)
+    app.use((req, res) => {
+      const proxyReq = httpRequest(
+        { hostname: vite.hostname, port: vite.port, path: req.url, method: req.method, headers: req.headers },
+        (proxyRes) => {
+          res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers)
+          proxyRes.pipe(res)
+        },
+      )
+      proxyReq.on("error", () => {
+        res.status(502).end("Vite dev server not ready")
+      })
+      req.pipe(proxyReq)
+    })
+  } else {
+    // Production: serve static files + SPA fallback
+    app.use(express.static(staticDir))
+    app.get("{*path}", (_req, res) => {
+      res.sendFile(join(staticDir, "index.html"))
+    })
+  }
 
   // ── PTY WebSocket ──────────────────────────────────────────────
   const ptySessions = new Map<string, PtySession>()
@@ -102,8 +122,30 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url || "/", "http://localhost")
-    if (url.pathname !== "/__pty") return
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+    if (url.pathname === "/__pty") {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+      return
+    }
+    // Dev mode: forward HMR WebSocket to Vite dev server
+    if (viteDevUrl) {
+      const vite = new URL(viteDevUrl)
+      const proxyReq = httpRequest(
+        { hostname: vite.hostname, port: vite.port, path: req.url, method: req.method, headers: req.headers },
+        (proxyRes) => {
+          if (!proxyRes.headers.upgrade) { socket.destroy(); return }
+        },
+      )
+      proxyReq.on("upgrade", (_proxyRes, proxySocket, proxyHead) => {
+        socket.write("HTTP/1.1 101 Switching Protocols\r\n" +
+          Object.entries(_proxyRes.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n\r\n")
+        if (proxyHead.length) socket.write(proxyHead)
+        proxySocket.pipe(socket)
+        socket.pipe(proxySocket)
+      })
+      proxyReq.on("error", () => socket.destroy())
+      proxyReq.end()
+      return
+    }
   })
 
   wss.on("connection", (ws: WebSocket) => {

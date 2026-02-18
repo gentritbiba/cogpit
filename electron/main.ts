@@ -12,6 +12,7 @@ async function createWindow(port: number) {
     minHeight: 600,
     title: "Cogpit",
     titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 14 },
     backgroundColor: "#09090b",
     webPreferences: {
       preload: join(__dirname, "../preload/preload.js"),
@@ -43,9 +44,12 @@ app.whenReady().then(async () => {
   // Start embedded server
   const { httpServer } = await createAppServer(staticDir, userDataDir)
 
-  // Random port — renderer loads directly from this server
+  // Fixed port in dev (for predictable proxy), random in production
+  const isDev = !!process.env.ELECTRON_RENDERER_URL
+  const listenPort = isDev ? 19384 : 0
+
   await new Promise<void>((resolve) => {
-    httpServer.listen(0, "127.0.0.1", () => resolve())
+    httpServer.listen(listenPort, "127.0.0.1", () => resolve())
   })
 
   const address = httpServer.address()
