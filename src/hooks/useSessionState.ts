@@ -6,6 +6,8 @@ import type { MobileTab } from "@/components/MobileNav"
 export interface SessionState {
   session: ParsedSession | null
   sessionSource: SessionSource | null
+  /** dirName of a pending (not-yet-created) session, set before first message */
+  pendingDirName: string | null
   activeTurnIndex: number | null
   activeToolCallId: string | null
   searchQuery: string
@@ -39,10 +41,13 @@ export type SessionAction =
   | { type: "SET_LOADING_MEMBER"; name: string | null }
   | { type: "SET_SIDEBAR_TAB"; tab: "browse" | "teams" }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
+  | { type: "INIT_PENDING_SESSION"; dirName: string; isMobile: boolean }
+  | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource }
 
 const initialState: SessionState = {
   session: null,
   sessionSource: null,
+  pendingDirName: null,
   activeTurnIndex: null,
   activeToolCallId: null,
   searchQuery: "",
@@ -64,6 +69,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         ...state,
         session: action.session,
         sessionSource: action.source,
+        pendingDirName: null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -82,6 +88,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         ...state,
         session: null,
         sessionSource: null,
+        pendingDirName: null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -198,6 +205,33 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "SET_DASHBOARD_PROJECT":
       if (state.dashboardProject === action.dirName) return state
       return { ...state, dashboardProject: action.dirName }
+
+    case "INIT_PENDING_SESSION":
+      return {
+        ...state,
+        session: null,
+        sessionSource: null,
+        pendingDirName: action.dirName,
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        mainView: "sessions",
+        selectedTeam: null,
+        currentMemberName: null,
+        dashboardProject: null,
+        sessionChangeKey: state.sessionChangeKey + 1,
+        mobileTab: action.isMobile ? "chat" : state.mobileTab,
+      }
+
+    case "FINALIZE_SESSION":
+      return {
+        ...state,
+        session: action.session,
+        sessionSource: action.source,
+        pendingDirName: null,
+        sessionChangeKey: state.sessionChangeKey + 1,
+      }
 
     default:
       return state

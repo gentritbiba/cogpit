@@ -7,6 +7,7 @@ export function useAppConfig() {
   const [claudeDir, setClaudeDir] = useState<string | null>(null)
   const [showConfigDialog, setShowConfigDialog] = useState(false)
   const [networkUrl, setNetworkUrl] = useState<string | null>(null)
+  const [networkAccessDisabled, setNetworkAccessDisabled] = useState(false)
   // Bump to re-fetch config (e.g. after authentication)
   const [fetchKey, setFetchKey] = useState(0)
 
@@ -50,8 +51,12 @@ export function useAppConfig() {
       .then((res) => res.json())
       .then((data: { enabled: boolean; url?: string }) => {
         setNetworkUrl(data.enabled && data.url ? data.url : null)
+        setNetworkAccessDisabled(!data.enabled)
       })
-      .catch(() => setNetworkUrl(null))
+      .catch(() => {
+        setNetworkUrl(null)
+        setNetworkAccessDisabled(false)
+      })
   }, [claudeDir])
 
   const handleCloseConfigDialog = useCallback(() => setShowConfigDialog(false), [])
@@ -94,5 +99,6 @@ export function useAppConfig() {
     handleConfigSaved,
     retryConfig,
     networkUrl,
+    networkAccessDisabled,
   }
 }

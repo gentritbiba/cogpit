@@ -1,77 +1,123 @@
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
-import type { ParsedSession } from "@/lib/types"
+import type { SessionAction } from "@/hooks/useSessionState"
 import type { SessionSource } from "@/hooks/useLiveSession"
+import type { ParsedSession } from "@/lib/types"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
-  onSessionCreated: (parsed: ParsedSession, source: SessionSource) => void
+  dispatch: Dispatch<SessionAction>
+  isMobile: boolean
+  onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
+  model: string
 }
 
-export function useNewSession({ permissionsConfig, onSessionCreated }: UseNewSessionOpts) {
+export function useNewSession({
+  permissionsConfig,
+  dispatch,
+  isMobile,
+  onSessionFinalized,
+  model,
+}: UseNewSessionOpts) {
   const [creatingSession, setCreatingSession] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  /** The dirName of the pending session (set before first message) */
+  const pendingDirNameRef = useRef<string | null>(null)
 
-  const handleNewSession = useCallback(async (dirName: string) => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    setCreatingSession(true)
-    setCreateError(null)
-
-    // Safety timeout — abort the request after 10 seconds
-    const timeout = setTimeout(() => {
-      controller.abort()
+  /** Instantly show the empty chat view for a new session (no backend call). */
+  const handleNewSession = useCallback(
+    (dirName: string) => {
+      pendingDirNameRef.current = dirName
+      setCreateError(null)
       setCreatingSession(false)
-      setCreateError("Session creation timed out. Please try again.")
-    }, 10_000)
+      dispatch({ type: "INIT_PENDING_SESSION", dirName, isMobile })
+    },
+    [dispatch, isMobile]
+  )
 
-    try {
-      const res = await authFetch("/api/new-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dirName,
-          message: "Ready when you are. Just say hi, no need to explore anything yet.",
-          permissions: permissionsConfig,
-        }),
-        signal: controller.signal,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }))
-        setCreateError(err.error || `Failed to create session (${res.status})`)
-        return
-      }
-      const { dirName: resDirName, fileName } = await res.json()
+  /**
+   * Create the session on the backend and send the first message.
+   * Called from usePtyChat when the user submits their first message.
+   * Returns the new sessionId on success.
+   */
+  const createAndSend = useCallback(
+    async (
+      message: string,
+      images?: Array<{ data: string; mediaType: string }>
+    ): Promise<string | null> => {
+      const dirName = pendingDirNameRef.current
+      if (!dirName) return null
 
-      // Fetch the JSONL content and load the session
-      const contentRes = await authFetch(
-        `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
-        { signal: controller.signal }
-      )
-      if (!contentRes.ok) {
-        setCreateError(`Failed to load new session (${contentRes.status})`)
-        return
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      setCreatingSession(true)
+      setCreateError(null)
+
+      try {
+        const res = await authFetch("/api/create-and-send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dirName,
+            message,
+            images,
+            permissions: permissionsConfig,
+            model: model || undefined,
+          }),
+          signal: controller.signal,
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Unknown error" }))
+          setCreateError(err.error || `Failed to create session (${res.status})`)
+          return null
+        }
+
+        const { dirName: resDirName, fileName, sessionId } = await res.json()
+        pendingDirNameRef.current = null
+
+        // Fetch the JSONL to populate the session view
+        const contentRes = await authFetch(
+          `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
+          { signal: controller.signal }
+        )
+        if (!contentRes.ok) {
+          setCreateError(`Failed to load new session (${contentRes.status})`)
+          return null
+        }
+        const rawText = await contentRes.text()
+        const parsed = parseSession(rawText)
+        const source: SessionSource = { dirName: resDirName, fileName, rawText }
+        dispatch({ type: "FINALIZE_SESSION", session: parsed, source })
+        onSessionFinalized(parsed, source)
+
+        return sessionId
+      } catch (err) {
+        if (controller.signal.aborted) return null
+        setCreateError(err instanceof Error ? err.message : "Failed to create session")
+        return null
+      } finally {
+        if (!controller.signal.aborted) {
+          setCreatingSession(false)
+        }
       }
-      const rawText = await contentRes.text()
-      const parsed = parseSession(rawText)
-      onSessionCreated(parsed, { dirName: resDirName, fileName, rawText })
-    } catch (err) {
-      if (controller.signal.aborted) return
-      setCreateError(err instanceof Error ? err.message : "Failed to create session")
-    } finally {
-      clearTimeout(timeout)
-      if (!controller.signal.aborted) {
-        setCreatingSession(false)
-      }
-    }
-  }, [permissionsConfig, onSessionCreated])
+    },
+    [permissionsConfig, model, dispatch, onSessionFinalized]
+  )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])
 
-  return { creatingSession, createError, clearCreateError, handleNewSession }
+  return {
+    creatingSession,
+    createError,
+    clearCreateError,
+    handleNewSession,
+    createAndSend,
+    pendingDirNameRef,
+  }
 }

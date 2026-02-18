@@ -13,10 +13,30 @@ function getLiveSessionButtons(): HTMLButtonElement[] {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("[data-live-session]"))
 }
 
-/** Focus a session button and scroll it into view */
+/** Find the nearest scrollable ancestor */
+function getScrollParent(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node) {
+    const { overflowY } = getComputedStyle(node)
+    if (overflowY === "auto" || overflowY === "scroll") return node
+    node = node.parentElement
+  }
+  return null
+}
+
+/** Focus a session button and scroll it into view within the sidebar only */
 function focusSession(btn: HTMLButtonElement) {
-  btn.focus()
-  btn.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  btn.focus({ preventScroll: true })
+  const scroller = getScrollParent(btn)
+  if (scroller) {
+    const scrollerRect = scroller.getBoundingClientRect()
+    const btnRect = btn.getBoundingClientRect()
+    if (btnRect.top < scrollerRect.top) {
+      scroller.scrollTop -= scrollerRect.top - btnRect.top + 8
+    } else if (btnRect.bottom > scrollerRect.bottom) {
+      scroller.scrollTop += btnRect.bottom - scrollerRect.bottom + 8
+    }
+  }
 }
 
 export function useKeyboardShortcuts({
@@ -61,7 +81,7 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Ctrl+Shift+ArrowDown/Up — navigate between live sessions
+      // Ctrl+Shift+ArrowDown/Up — navigate between live sessions (Enter to open)
       if (mod && e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
         e.preventDefault()
         const buttons = getLiveSessionButtons()
@@ -70,14 +90,12 @@ export function useKeyboardShortcuts({
         const currentIdx = buttons.findIndex((btn) => btn === document.activeElement)
         let nextIdx: number
         if (currentIdx === -1) {
-          // Nothing focused — start from top or bottom
           nextIdx = e.key === "ArrowDown" ? 0 : buttons.length - 1
         } else {
           const delta = e.key === "ArrowDown" ? 1 : -1
           nextIdx = Math.max(0, Math.min(buttons.length - 1, currentIdx + delta))
         }
         focusSession(buttons[nextIdx])
-        buttons[nextIdx].click()
       }
     }
     window.addEventListener("keydown", handleKeyDown)

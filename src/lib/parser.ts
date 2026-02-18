@@ -371,6 +371,27 @@ function buildTurns(messages: RawMessage[]): Turn[] {
       const data = msg.data
       const parentId = msg.parentToolUseID ?? ""
 
+      // Extract token usage from sub-agent assistant messages (deduplicated by message ID)
+      let subAgentUsage: TokenUsage | null = null
+      if (data.message.type === "assistant") {
+        const innerMsg = data.message.message as Record<string, unknown>
+        const msgId = innerMsg.id as string | undefined
+        const usage = innerMsg.usage as TokenUsage | undefined
+        if (usage && msgId && !seenMessageIds.has(msgId)) {
+          seenMessageIds.add(msgId)
+          subAgentUsage = {
+            input_tokens: usage.input_tokens ?? 0,
+            output_tokens: usage.output_tokens ?? 0,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+            cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+          }
+        }
+      }
+
+      const innerModel = data.message.type === "assistant"
+        ? ((data.message.message as Record<string, unknown>).model as string | undefined) ?? null
+        : null
+
       const agentMsg: SubAgentMessage = {
         agentId: data.agentId,
         type: data.message.type,
@@ -379,6 +400,8 @@ function buildTurns(messages: RawMessage[]): Turn[] {
         thinking: [],
         text: [],
         timestamp: data.message.timestamp ?? msg.timestamp ?? "",
+        tokenUsage: subAgentUsage,
+        model: innerModel,
       }
 
       // Extract details from assistant sub-agent messages
@@ -512,6 +535,21 @@ function computeStats(turns: Turn[]): SessionStats {
         stats.toolCallCounts[tc.name] =
           (stats.toolCallCounts[tc.name] ?? 0) + 1
         if (tc.isError) stats.errorCount++
+      }
+      if (sa.tokenUsage) {
+        const cacheCreate = sa.tokenUsage.cache_creation_input_tokens ?? 0
+        const cacheRead = sa.tokenUsage.cache_read_input_tokens ?? 0
+        stats.totalInputTokens += sa.tokenUsage.input_tokens
+        stats.totalOutputTokens += sa.tokenUsage.output_tokens
+        stats.totalCacheCreationTokens += cacheCreate
+        stats.totalCacheReadTokens += cacheRead
+        stats.totalCostUSD += calculateTurnCost(
+          sa.model,
+          sa.tokenUsage.input_tokens,
+          sa.tokenUsage.output_tokens,
+          cacheCreate,
+          cacheRead,
+        )
       }
     }
   }

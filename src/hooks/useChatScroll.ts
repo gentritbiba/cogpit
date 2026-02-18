@@ -6,9 +6,10 @@ interface UseChatScrollOpts {
   isLive: boolean
   pendingMessage: string | null
   clearPending: () => void
+  sessionChangeKey: number
 }
 
-export function useChatScroll({ session, isLive, pendingMessage, clearPending }: UseChatScrollOpts) {
+export function useChatScroll({ session, isLive, pendingMessage, clearPending, sessionChangeKey }: UseChatScrollOpts) {
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const scrollEndRef = useRef<HTMLDivElement>(null)
   const chatIsAtBottomRef = useRef(true)
@@ -19,11 +20,19 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending }:
   const [canScrollDown, setCanScrollDown] = useState(false)
 
   const scrollToBottomInstant = useCallback(() => {
-    requestAnimationFrame(() => {
+    const doScroll = () => {
       const el = chatScrollRef.current
       if (el) el.scrollTop = el.scrollHeight
       chatIsAtBottomRef.current = true
       chatScrollOnNextRef.current = false
+    }
+    // Scroll immediately for instant feedback
+    doScroll()
+    // Then again after next frame (React may not have rendered yet)
+    requestAnimationFrame(() => {
+      doScroll()
+      // And once more after layout settles (virtualized lists, images, etc.)
+      requestAnimationFrame(doScroll)
     })
   }, [])
 
@@ -57,6 +66,31 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending }:
   const resetTurnCount = useCallback((count: number) => {
     prevTurnCountRef.current = count
   }, [])
+
+  // Session changed → force scroll to bottom after React renders new content
+  const prevSessionChangeKeyRef = useRef(sessionChangeKey)
+  useEffect(() => {
+    if (sessionChangeKey === prevSessionChangeKeyRef.current) return
+    prevSessionChangeKeyRef.current = sessionChangeKey
+
+    // The DOM now has the new session content. Scroll aggressively:
+    // 1) Immediate (layout is committed)
+    // 2) Next frame (virtualizer may still be measuring)
+    // 3) After a short delay (covers lazy rendering, image loads, etc.)
+    const doScroll = () => {
+      const el = chatScrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+      chatIsAtBottomRef.current = true
+      chatScrollOnNextRef.current = false
+    }
+    doScroll()
+    requestAnimationFrame(() => {
+      doScroll()
+      requestAnimationFrame(doScroll)
+    })
+    const timer = setTimeout(doScroll, 150)
+    return () => clearTimeout(timer)
+  }, [sessionChangeKey])
 
   // Pending message → scroll to bottom
   useEffect(() => {

@@ -162,6 +162,8 @@ export interface SubAgentMessage {
   thinking: string[]
   text: string[]
   timestamp: string
+  tokenUsage: TokenUsage | null
+  model: string | null
 }
 
 /** Ordered content block within a turn – preserves chronological order */

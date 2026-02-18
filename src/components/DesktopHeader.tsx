@@ -10,6 +10,7 @@ import {
   Skull,
   Settings,
   Globe,
+  WifiOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +28,7 @@ interface DesktopHeaderProps {
   showStats: boolean
   killing: boolean
   networkUrl: string | null
+  networkAccessDisabled: boolean
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
@@ -41,6 +43,7 @@ export function DesktopHeader({
   showStats,
   killing,
   networkUrl,
+  networkAccessDisabled,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
@@ -139,7 +142,7 @@ export function DesktopHeader({
 
       <div className="flex-1" />
 
-      {networkUrl && (
+      {networkUrl ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -156,7 +159,17 @@ export function DesktopHeader({
           </TooltipTrigger>
           <TooltipContent>Click to copy connection URL</TooltipContent>
         </Tooltip>
-      )}
+      ) : networkAccessDisabled ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-600 mr-1">
+              <WifiOff className="size-3" />
+              <span>Network off</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>Network access is disabled</TooltipContent>
+        </Tooltip>
+      ) : null}
 
       <div className="flex items-center gap-1 shrink-0">
         <Tooltip>

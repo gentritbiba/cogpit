@@ -3,14 +3,18 @@ import {
   isWithinDir,
   friendlySpawnError,
   activeProcesses,
+  persistentSessions,
+  findJsonlPath,
   spawn,
+  createInterface,
+  appendFile,
   readdir,
   open,
   join,
   randomUUID,
   stat,
 } from "../helpers"
-import type { UseFn } from "../helpers"
+import type { PersistentSession, UseFn } from "../helpers"
 
 export function registerClaudeNewRoutes(use: UseFn) {
   // POST /api/new-session - create a new Claude session in a project
@@ -169,6 +173,224 @@ export function registerClaudeNewRoutes(use: UseFn) {
             )
           }
         })
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+      }
+    })
+  })
+
+  // POST /api/create-and-send - create a new session AND send the first message
+  // Combines session creation with the first user message in one step (lazy creation).
+  use("/api/create-and-send", (req, res, next) => {
+    if (req.method !== "POST") return next()
+
+    let body = ""
+    req.on("data", (chunk: string) => {
+      body += chunk
+    })
+    req.on("end", async () => {
+      try {
+        const { dirName, message, images, permissions, model } = JSON.parse(body)
+
+        if (!dirName || (!message && (!images || !images.length))) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "dirName and message (or images) are required" }))
+          return
+        }
+
+        const projectDir = join(dirs.PROJECTS_DIR, dirName)
+        if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
+          res.statusCode = 403
+          res.end(JSON.stringify({ error: "Access denied" }))
+          return
+        }
+
+        // Resolve project cwd from existing sessions
+        let projectPath: string | null = null
+        try {
+          const files = await readdir(projectDir)
+          for (const f of files.filter((f) => f.endsWith(".jsonl"))) {
+            try {
+              const fh = await open(join(projectDir, f), "r")
+              try {
+                const buf = Buffer.alloc(4096)
+                const { bytesRead } = await fh.read(buf, 0, 4096, 0)
+                const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0]
+                if (firstLine) {
+                  const parsed = JSON.parse(firstLine)
+                  if (parsed.cwd) {
+                    projectPath = parsed.cwd
+                    break
+                  }
+                }
+              } finally {
+                await fh.close()
+              }
+            } catch {
+              continue
+            }
+          }
+        } catch {
+          // projectDir might not exist yet
+        }
+        if (!projectPath) {
+          projectPath = "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
+        }
+
+        // Build permission args
+        let permArgs: string[]
+        if (permissions && typeof permissions.mode === "string" && permissions.mode !== "bypassPermissions") {
+          permArgs = ["--permission-mode", permissions.mode]
+          if (Array.isArray(permissions.allowedTools)) {
+            for (const tool of permissions.allowedTools) {
+              permArgs.push("--allowedTools", tool)
+            }
+          }
+          if (Array.isArray(permissions.disallowedTools)) {
+            for (const tool of permissions.disallowedTools) {
+              permArgs.push("--disallowedTools", tool)
+            }
+          }
+        } else {
+          permArgs = ["--dangerously-skip-permissions"]
+        }
+
+        const modelArgs = model ? ["--model", model] : []
+        const sessionId = randomUUID()
+        const fileName = `${sessionId}.jsonl`
+
+        // Build stream-json user message
+        const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+        const contentBlocks: unknown[] = []
+        if (Array.isArray(images)) {
+          for (const img of images as Array<{ data: string; mediaType: string }>) {
+            const mediaType = ALLOWED_IMAGE_TYPES.has(img.mediaType) ? img.mediaType : "image/png"
+            contentBlocks.push({
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: img.data },
+            })
+          }
+        }
+        if (message) {
+          contentBlocks.push({ type: "text", text: message })
+        }
+        const streamMsg = JSON.stringify({
+          type: "user",
+          message: { role: "user", content: contentBlocks },
+        })
+
+        const cleanEnv = { ...process.env }
+        delete cleanEnv.CLAUDECODE
+
+        const child = spawn(
+          "claude",
+          [
+            "-p",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--session-id", sessionId,
+            ...permArgs,
+            ...modelArgs,
+          ],
+          {
+            cwd: projectPath,
+            env: cleanEnv,
+            stdio: ["pipe", "pipe", "pipe"],
+          }
+        )
+
+        const ps: PersistentSession = {
+          proc: child,
+          onResult: null,
+          dead: false,
+          cwd: projectPath,
+          permArgs,
+          modelArgs,
+          jsonlPath: null,
+        }
+        persistentSessions.set(sessionId, ps)
+        activeProcesses.set(sessionId, child)
+
+        // Resolve JSONL path after a brief delay for the file to be created
+        const resolveJsonl = () => {
+          findJsonlPath(sessionId).then((p) => {
+            if (p) {
+              ps.jsonlPath = p
+            } else {
+              // Retry once more after a short delay
+              setTimeout(() => findJsonlPath(sessionId).then((p2) => { ps.jsonlPath = p2 }), 1000)
+            }
+          })
+        }
+        setTimeout(resolveJsonl, 500)
+
+        // Read stdout line-by-line for result messages and progress forwarding
+        const rl = createInterface({ input: child.stdout! })
+        rl.on("line", (line) => {
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.type === "result" && ps.onResult) {
+              ps.onResult(parsed)
+            }
+            if (ps.jsonlPath && parsed.type === "progress") {
+              appendFile(ps.jsonlPath, line + "\n").catch(() => {})
+            }
+          } catch {
+            // ignore non-JSON lines
+          }
+        })
+
+        let persistentStderr = ""
+        child.stderr!.on("data", (data: Buffer) => {
+          persistentStderr += data.toString()
+        })
+
+        child.on("close", (code) => {
+          ps.dead = true
+          activeProcesses.delete(sessionId)
+          persistentSessions.delete(sessionId)
+          if (ps.onResult) {
+            const wasKilled = code === null || code === 143 || code === 137
+            ps.onResult({
+              type: "result",
+              subtype: wasKilled ? "success" : "error",
+              is_error: !wasKilled,
+              result: wasKilled
+                ? undefined
+                : persistentStderr.trim() || `claude exited with code ${code}`,
+            })
+          }
+        })
+
+        child.on("error", (err: NodeJS.ErrnoException) => {
+          ps.dead = true
+          activeProcesses.delete(sessionId)
+          persistentSessions.delete(sessionId)
+          if (ps.onResult) {
+            ps.onResult({ type: "result", is_error: true, result: friendlySpawnError(err) })
+          }
+        })
+
+        // Wire up result handler for the first message
+        let responded = false
+        ps.onResult = (result) => {
+          if (responded) return
+          responded = true
+          activeProcesses.delete(sessionId)
+          ps.onResult = null
+          res.setHeader("Content-Type", "application/json")
+          if (result.is_error) {
+            res.statusCode = 500
+            res.end(JSON.stringify({ error: result.result || "Claude returned an error" }))
+          } else {
+            res.end(JSON.stringify({ success: true, dirName, fileName, sessionId }))
+          }
+        }
+
+        // Send the first user message
+        child.stdin!.write(streamMsg + "\n")
       } catch {
         res.statusCode = 400
         res.end(JSON.stringify({ error: "Invalid JSON body" }))

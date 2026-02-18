@@ -13,9 +13,14 @@ interface UsePtyChatOpts {
   permissions?: PermissionsConfig
   onPermissionsApplied?: () => void
   model?: string
+  /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
+  onCreateSession?: (
+    message: string,
+    images?: Array<{ data: string; mediaType: string }>
+  ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
@@ -50,6 +55,32 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
 
   const sendMessage = useCallback(
     async (text: string, images?: Array<{ data: string; mediaType: string }>) => {
+      // If there's no sessionId yet, this is a pending session — create it first
+      if (!sessionId && onCreateSession) {
+        setPendingMessage(text)
+        setStatus("connected")
+        setError(undefined)
+        onPermissionsApplied?.()
+
+        try {
+          const newSessionId = await onCreateSession(text, images)
+          if (!newSessionId) {
+            // createAndSend handles its own error state; just reset ours
+            setStatus("idle")
+            setPendingMessage(null)
+            return
+          }
+          // Session was created and first message was sent — done.
+          setStatus("idle")
+          setPendingMessage(null)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to create session")
+          setStatus("error")
+          setPendingMessage(null)
+        }
+        return
+      }
+
       if (!sessionId) return
 
       setPendingMessage(text)
@@ -101,7 +132,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, cwd, permissions, onPermissionsApplied, model]
+    [sessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession]
   )
 
   const interrupt = useCallback(() => {

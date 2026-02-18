@@ -7,6 +7,7 @@ import {
   Skull,
   Plus,
   Settings,
+  WifiOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +23,7 @@ interface MobileHeaderProps {
   killing: boolean
   creatingSession: boolean
   networkUrl: string | null
+  networkAccessDisabled: boolean
   onGoHome: () => void
   onKillAll: () => void
   onOpenSettings: () => void
@@ -35,6 +37,7 @@ export function MobileHeader({
   killing,
   creatingSession,
   networkUrl,
+  networkAccessDisabled,
   onGoHome,
   onKillAll,
   onOpenSettings,
@@ -95,9 +98,14 @@ export function MobileHeader({
         ) : (
           <div className="flex flex-col min-w-0">
             <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
-            {networkUrl && (
+            {networkUrl ? (
               <span className="text-[10px] font-mono text-zinc-600 truncate">{networkUrl}</span>
-            )}
+            ) : networkAccessDisabled ? (
+              <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+                <WifiOff className="size-2.5" />
+                Network off
+              </span>
+            ) : null}
           </div>
         )}
       </div>

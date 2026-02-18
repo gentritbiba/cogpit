@@ -35,6 +35,7 @@ import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useKillAll } from "@/hooks/useKillAll"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
+import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
@@ -98,6 +99,19 @@ export default function App() {
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
 
+  // New session creation (lazy — no backend call until first message)
+  // Declared before usePtyChat because it provides the onCreateSession callback.
+  const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
+  const { creatingSession, createError, clearCreateError, handleNewSession, createAndSend } = useNewSession({
+    permissionsConfig: perms.config,
+    dispatch,
+    isMobile,
+    onSessionFinalized: (parsed) => {
+      sessionFinalizedRef.current?.(parsed)
+    },
+    model: selectedModel,
+  })
+
   // Claude chat
   const claudeChat = usePtyChat({
     sessionSource: state.sessionSource,
@@ -106,6 +120,7 @@ export default function App() {
     permissions: perms.config,
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
+    onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
   // Detect if session belongs to a team
@@ -125,10 +140,10 @@ export default function App() {
     if (!isMobile) return
     dispatch({
       type: "GUARD_MOBILE_TAB",
-      hasSession: !!state.session,
+      hasSession: !!state.session || !!state.pendingDirName,
       hasTeam: !!teamContext,
     })
-  }, [state.session, teamContext, state.mobileTab, isMobile, dispatch])
+  }, [state.session, state.pendingDirName, teamContext, state.mobileTab, isMobile, dispatch])
 
   // Scroll management
   const scroll = useChatScroll({
@@ -136,7 +151,14 @@ export default function App() {
     isLive,
     pendingMessage: claudeChat.pendingMessage,
     clearPending: claudeChat.clearPending,
+    sessionChangeKey: state.sessionChangeKey,
   })
+
+  // Wire up the session finalized ref now that scroll is available
+  sessionFinalizedRef.current = (parsed) => {
+    scroll.resetTurnCount(parsed.turns.length)
+    scroll.scrollToBottomInstant()
+  }
 
   // Session action handlers
   const actions = useSessionActions({
@@ -154,12 +176,6 @@ export default function App() {
     isMobile,
     resetTurnCount: scroll.resetTurnCount,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
-  })
-
-  // New session creation
-  const { creatingSession, createError, clearCreateError, handleNewSession } = useNewSession({
-    permissionsConfig: perms.config,
-    onSessionCreated: actions.handleLoadSession,
   })
 
   // Keyboard shortcuts
@@ -378,6 +394,7 @@ export default function App() {
           killing={killing}
           creatingSession={creatingSession}
           networkUrl={config.networkUrl}
+          networkAccessDisabled={config.networkAccessDisabled}
           onGoHome={actions.handleGoHome}
           onKillAll={handleKillAll}
           onOpenSettings={config.openConfigDialog}
@@ -439,6 +456,28 @@ export default function App() {
                     onToggleExpandAll={handleToggleExpandAll}
                   />
                 </div>
+              ) : state.pendingDirName ? (
+                <div className="flex flex-1 min-h-0 flex-col">
+                  {claudeChat.pendingMessage ? (
+                    <div className="flex-1 overflow-y-auto px-3 py-4">
+                      <div className="space-y-3">
+                        <div className="flex justify-end">
+                          <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[85%]">
+                            {claudeChat.pendingMessage}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-zinc-500">
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span className="text-xs">Creating session...</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center">
+                      <p className="text-sm text-zinc-500">New session — type your first message below</p>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <Dashboard
                   onSelectSession={actions.handleDashboardSelect}
@@ -489,12 +528,12 @@ export default function App() {
         </main>
 
         {serverPanelNode}
-        {state.mobileTab === "chat" && state.session && state.mainView !== "teams" && chatInputNode}
+        {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && chatInputNode}
 
         <MobileNav
           activeTab={state.mobileTab}
           onTabChange={actions.handleMobileTabChange}
-          hasSession={!!state.session}
+          hasSession={!!state.session || !!state.pendingDirName}
           hasTeam={!!teamContext}
           isLive={isLive}
         />
@@ -502,19 +541,6 @@ export default function App() {
         {undoConfirmDialog}
         {branchModal}
         {errorToast || sseIndicator}
-
-        {/* Global loading overlay when creating a new session */}
-        {creatingSession && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/95 px-8 py-6 shadow-2xl">
-              <Loader2 className="size-8 animate-spin text-blue-400" />
-              <div className="text-center">
-                <p className="text-sm font-medium text-zinc-200">Creating session...</p>
-                <p className="mt-1 text-xs text-zinc-500">Starting a new Claude session</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     )
   }
@@ -529,6 +555,7 @@ export default function App() {
         showStats={showStats}
         killing={killing}
         networkUrl={config.networkUrl}
+        networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
         onToggleStats={() => setShowStats(!showStats)}
@@ -605,6 +632,29 @@ export default function App() {
 
               {chatInputNode}
             </div>
+          ) : state.pendingDirName ? (
+            <div className="flex flex-1 min-h-0 flex-col">
+              {claudeChat.pendingMessage ? (
+                <div className="flex-1 overflow-y-auto px-4 py-6">
+                  <div className="mx-auto max-w-3xl space-y-4">
+                    <div className="flex justify-end">
+                      <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[80%]">
+                        {claudeChat.pendingMessage}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-zinc-500">
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span className="text-xs">Creating session...</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-sm text-zinc-500">New session — type your first message below</p>
+                </div>
+              )}
+              {chatInputNode}
+            </div>
           ) : (
             <Dashboard
               onSelectSession={actions.handleDashboardSelect}
@@ -646,19 +696,6 @@ export default function App() {
       />
 
       {errorToast || sseIndicator}
-
-      {/* Global loading overlay when creating a new session */}
-      {creatingSession && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/95 px-8 py-6 shadow-2xl">
-            <Loader2 className="size-8 animate-spin text-blue-400" />
-            <div className="text-center">
-              <p className="text-sm font-medium text-zinc-200">Creating session...</p>
-              <p className="mt-1 text-xs text-zinc-500">Starting a new Claude session</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

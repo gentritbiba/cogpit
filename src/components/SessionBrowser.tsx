@@ -239,6 +239,17 @@ export const SessionBrowser = memo(function SessionBrowser({
     setSearchFilter("")
   }, [view, selectedProject])
 
+  const handleSelectSession = useCallback(
+    (s: SessionInfo) => {
+      if (selectedProject) loadSessionFile(selectedProject, s)
+    },
+    [selectedProject, loadSessionFile]
+  )
+
+  const handleLoadMoreSessions = useCallback(() => {
+    if (selectedProject) loadSessions(selectedProject, sessionsPage + 1, true)
+  }, [selectedProject, sessionsPage, loadSessions])
+
   // Mobile teams-only mode: just show the teams list
   if (teamsOnly) {
     return (
@@ -259,9 +270,7 @@ export const SessionBrowser = memo(function SessionBrowser({
       <div className="flex min-h-0 flex-[55_1_0%] flex-col overflow-hidden">
         <LiveSessions
           activeSessionKey={activeSessionKey}
-          onSelectSession={(dirName, fileName) => {
-            loadLiveSession(dirName, fileName)
-          }}
+          onSelectSession={loadLiveSession}
         />
       </div>
 
@@ -419,11 +428,11 @@ export const SessionBrowser = memo(function SessionBrowser({
                 <SessionsList
                   sessions={sessions}
                   filter={searchFilter}
-                  onSelectSession={(s) => loadSessionFile(selectedProject, s)}
+                  onSelectSession={handleSelectSession}
                   isMobile={isMobile}
                   hasMore={sessions.length < sessionsTotal}
                   isLoading={isLoading}
-                  onLoadMore={() => loadSessions(selectedProject, sessionsPage + 1, true)}
+                  onLoadMore={handleLoadMoreSessions}
                 />
               )}
               {view === "detail" && session && !isMobile && (
@@ -455,26 +464,11 @@ export const SessionBrowser = memo(function SessionBrowser({
       </div>
     </aside>
   )
-}, (prev, next) => {
-  // Custom comparator: compare session by ID instead of reference
-  // so SSE updates to the session object don't trigger re-renders
-  // of the projects/sessions list
-  if ((prev.session?.sessionId ?? null) !== (next.session?.sessionId ?? null)) return false
-  if (prev.activeSessionKey !== next.activeSessionKey) return false
-  if (prev.onLoadSession !== next.onLoadSession) return false
-  if (prev.sidebarTab !== next.sidebarTab) return false
-  if (prev.onSidebarTabChange !== next.onSidebarTabChange) return false
-  if (prev.onSelectTeam !== next.onSelectTeam) return false
-  if (prev.onNewSession !== next.onNewSession) return false
-  if (prev.creatingSession !== next.creatingSession) return false
-  if (prev.isMobile !== next.isMobile) return false
-  if (prev.teamsOnly !== next.teamsOnly) return false
-  return true
 })
 
 // ── Projects List ──────────────────────────────────────────────────────────
 
-function ProjectsList({
+const ProjectsList = memo(function ProjectsList({
   projects,
   filter,
   onSelectProject,
@@ -538,11 +532,11 @@ function ProjectsList({
       </div>
     </ScrollArea>
   )
-}
+})
 
 // ── Sessions List ──────────────────────────────────────────────────────────
 
-function SessionsList({
+const SessionsList = memo(function SessionsList({
   sessions,
   filter,
   onSelectSession,
@@ -658,7 +652,7 @@ function SessionsList({
       </div>
     </ScrollArea>
   )
-}
+})
 
 // ── Session Detail (info + stats, no tool calls) ──────────────────────────
 
