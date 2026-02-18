@@ -1,5 +1,14 @@
 import type { UseFn } from "../helpers"
-import { refreshDirs, isLocalRequest, safeCompare } from "../helpers"
+import {
+  refreshDirs,
+  isLocalRequest,
+  isRateLimited,
+  createSessionToken,
+  verifyPassword,
+  hashPassword,
+  validatePasswordStrength,
+  revokeAllSessions,
+} from "../helpers"
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
 import { networkInterfaces } from "node:os"
 
@@ -36,7 +45,7 @@ export function registerConfigRoutes(use: UseFn) {
     }))
   })
 
-  // POST /api/auth/verify — public endpoint, validates password directly
+  // POST /api/auth/verify — public endpoint, validates password and issues session token
   use("/api/auth/verify", (req, res, next) => {
     if (req.method !== "POST") return next()
     res.setHeader("Content-Type", "application/json")
@@ -44,6 +53,13 @@ export function registerConfigRoutes(use: UseFn) {
     // Local requests always pass
     if (isLocalRequest(req)) {
       res.end(JSON.stringify({ valid: true }))
+      return
+    }
+
+    // Rate limit remote auth attempts
+    if (isRateLimited(req)) {
+      res.statusCode = 429
+      res.end(JSON.stringify({ valid: false, error: "Too many attempts. Try again in 1 minute." }))
       return
     }
 
@@ -55,21 +71,23 @@ export function registerConfigRoutes(use: UseFn) {
     }
 
     const authHeader = req.headers.authorization
-    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null
+    const password = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null
 
-    if (!token) {
+    if (!password) {
       res.statusCode = 401
       res.end(JSON.stringify({ valid: false, error: "Password required" }))
       return
     }
 
-    if (!safeCompare(token, config.networkPassword)) {
+    if (!verifyPassword(password, config.networkPassword)) {
       res.statusCode = 401
       res.end(JSON.stringify({ valid: false, error: "Invalid password" }))
       return
     }
 
-    res.end(JSON.stringify({ valid: true }))
+    // Issue a session token instead of letting client reuse the password
+    const sessionToken = createSessionToken(req.socket.remoteAddress || "unknown")
+    res.end(JSON.stringify({ valid: true, token: sessionToken }))
   })
 
   // GET /api/config/validate?path=... - validate a path without saving
@@ -102,7 +120,7 @@ export function registerConfigRoutes(use: UseFn) {
       res.end(JSON.stringify(config ? {
         claudeDir: config.claudeDir,
         networkAccess: config.networkAccess || false,
-        networkPassword: config.networkPassword ? "••••••••" : null,
+        networkPassword: config.networkPassword ? "set" : null,
       } : null))
       return
     }
@@ -130,13 +148,36 @@ export function registerConfigRoutes(use: UseFn) {
           }
 
           const currentConfig = getConfig()
-          const finalPassword = parsed.networkPassword || currentConfig?.networkPassword || undefined
+
+          // Handle password: new password provided, or keep existing
+          let finalPassword = currentConfig?.networkPassword || undefined
+          if (parsed.networkPassword && typeof parsed.networkPassword === "string") {
+            // Validate password strength
+            const strengthError = validatePasswordStrength(parsed.networkPassword)
+            if (strengthError) {
+              res.statusCode = 400
+              res.setHeader("Content-Type", "application/json")
+              res.end(JSON.stringify({ error: strengthError }))
+              return
+            }
+            // Hash the new password before storing
+            finalPassword = hashPassword(parsed.networkPassword)
+            // Revoke all existing sessions when password changes
+            revokeAllSessions()
+          }
+
           if (parsed.networkAccess && !finalPassword) {
             res.statusCode = 400
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({ error: "Password required when enabling network access" }))
             return
           }
+
+          // If disabling network access, revoke all sessions
+          if (!parsed.networkAccess && currentConfig?.networkAccess) {
+            revokeAllSessions()
+          }
+
           await saveConfig({
             claudeDir: validation.resolved || claudeDir,
             networkAccess: !!parsed.networkAccess,

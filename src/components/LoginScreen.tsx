@@ -30,11 +30,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
         },
       })
 
-      if (res.ok) {
-        setToken(password)
+      const data = await res.json()
+      if (res.ok && data.valid) {
+        // Store the session token returned by the server (not the raw password)
+        setToken(data.token || password)
         onAuthenticated()
       } else {
-        setError("Invalid password")
+        setError(data.error || "Invalid password")
       }
     } catch {
       setError("Failed to connect to server")

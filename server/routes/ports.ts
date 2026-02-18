@@ -206,7 +206,7 @@ export function registerPortRoutes(use: UseFn) {
     }
   })
 
-  // POST /api/kill-port - kill process listening on a given port
+  // POST /api/kill-port - kill process listening on a given port (unprivileged ports only)
   use("/api/kill-port", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -220,6 +220,15 @@ export function registerPortRoutes(use: UseFn) {
         if (!port || port < 1 || port > 65535) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "Valid port required" }))
+          return
+        }
+
+        // Only allow killing processes on unprivileged ports (>1024)
+        // This prevents killing system services (SSH=22, HTTP=80, HTTPS=443, etc.)
+        if (port <= 1024) {
+          res.statusCode = 403
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Cannot kill processes on privileged ports (<=1024)" }))
           return
         }
 

@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 import { getConfig } from "./config"
-import { isLocalRequest, safeCompare } from "./helpers"
+import { isLocalRequest, validateSessionToken } from "./helpers"
 
 interface PtySession {
   id: string
@@ -77,7 +77,7 @@ export function ptyPlugin(): Plugin {
           if (!isLocalRequest(req)) {
             const cfg = getConfig()
             const token = url.searchParams.get("token")
-            if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !safeCompare(token, cfg.networkPassword)) {
+            if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !validateSessionToken(token)) {
               socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
               socket.destroy()
               return

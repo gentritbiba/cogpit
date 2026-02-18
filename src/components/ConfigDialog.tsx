@@ -75,9 +75,12 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     setSaving(false)
   }, [path, networkAccess, networkPassword, save, onSaved])
 
+  const MIN_PASSWORD_LENGTH = 12
   const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
   const pathChanged = status === "valid"
-  const canSave = (pathChanged || networkChanged) && status !== "validating" && status !== "invalid"
+  const passwordTooShort = networkAccess && networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
+  const needsPassword = networkAccess && !hasExistingPassword && networkPassword.length === 0
+  const canSave = (pathChanged || networkChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -174,6 +177,11 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                     {showNetworkPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                   </button>
                 </div>
+                {networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH && (
+                  <p className="text-[11px] text-amber-500">
+                    Password must be at least {MIN_PASSWORD_LENGTH} characters ({networkPassword.length}/{MIN_PASSWORD_LENGTH})
+                  </p>
+                )}
                 <p className="text-[11px] text-zinc-600">
                   Requires app restart to take effect. Port: 19384
                 </p>

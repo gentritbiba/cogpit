@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { appendFile } from "node:fs/promises"
-import { timingSafeEqual } from "node:crypto"
+import { timingSafeEqual, randomBytes, createHash } from "node:crypto"
 
 import { getConfig, getDirs } from "./config"
 
@@ -72,6 +72,157 @@ export function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
+// ── Rate limiting ────────────────────────────────────────────────────────
+
+interface RateLimitEntry {
+  count: number
+  resetAt: number
+}
+
+const rateLimitMap = new Map<string, RateLimitEntry>()
+const RATE_LIMIT_WINDOW_MS = 60_000  // 1 minute
+const RATE_LIMIT_MAX_ATTEMPTS = 5    // 5 attempts per window
+
+function getRateLimitKey(req: IncomingMessage): string {
+  return req.socket.remoteAddress || "unknown"
+}
+
+export function isRateLimited(req: IncomingMessage): boolean {
+  const key = getRateLimitKey(req)
+  const now = Date.now()
+  const entry = rateLimitMap.get(key)
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
+    return false
+  }
+
+  entry.count++
+  if (entry.count > RATE_LIMIT_MAX_ATTEMPTS) return true
+  return false
+}
+
+// Periodically clean up expired entries
+setInterval(() => {
+  const now = Date.now()
+  for (const [key, entry] of rateLimitMap) {
+    if (now > entry.resetAt) rateLimitMap.delete(key)
+  }
+}, 60_000)
+
+// ── Session token system ────────────────────────────────────────────────
+
+const activeSessions = new Map<string, { createdAt: number; ip: string }>()
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+export function createSessionToken(ip: string): string {
+  const token = randomBytes(32).toString("hex")
+  activeSessions.set(token, { createdAt: Date.now(), ip })
+  return token
+}
+
+export function validateSessionToken(token: string): boolean {
+  const session = activeSessions.get(token)
+  if (!session) return false
+  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
+    activeSessions.delete(token)
+    return false
+  }
+  return true
+}
+
+export function revokeAllSessions(): void {
+  activeSessions.clear()
+}
+
+// Clean up expired sessions periodically
+setInterval(() => {
+  const now = Date.now()
+  for (const [token, session] of activeSessions) {
+    if (now - session.createdAt > SESSION_TTL_MS) activeSessions.delete(token)
+  }
+}, 60_000)
+
+// ── Password hashing ────────────────────────────────────────────────────
+
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex")
+  const hash = createHash("sha256").update(salt + password).digest("hex")
+  return `${salt}:${hash}`
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  // Support legacy unhashed passwords (no colon = plaintext)
+  if (!stored.includes(":")) {
+    return safeCompare(password, stored)
+  }
+  const [salt, hash] = stored.split(":")
+  const candidate = createHash("sha256").update(salt + password).digest("hex")
+  return safeCompare(candidate, hash)
+}
+
+// ── Password validation ─────────────────────────────────────────────────
+
+export const MIN_PASSWORD_LENGTH = 12
+
+export function validatePasswordStrength(password: string): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+  }
+  return null
+}
+
+// ── Security headers middleware ──────────────────────────────────────────
+
+export function securityHeaders(_req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  res.setHeader("X-Content-Type-Options", "nosniff")
+  res.setHeader("X-Frame-Options", "DENY")
+  res.setHeader("Referrer-Policy", "no-referrer")
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+  res.setHeader("X-XSS-Protection", "1; mode=block")
+  next()
+}
+
+// ── Body size limit ─────────────────────────────────────────────────────
+
+const MAX_BODY_SIZE = 5 * 1024 * 1024 // 5MB
+
+export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  if (req.method !== "POST" && req.method !== "PUT" && req.method !== "PATCH") return next()
+
+  let size = 0
+  const contentLength = parseInt(req.headers["content-length"] || "", 10)
+  if (contentLength > MAX_BODY_SIZE) {
+    res.statusCode = 413
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ error: "Request body too large" }))
+    return
+  }
+
+  const origOn = req.on.bind(req)
+  req.on = function (event: string, listener: (...args: unknown[]) => void) {
+    if (event === "data") {
+      const wrapped = (chunk: Buffer | string) => {
+        size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length
+        if (size > MAX_BODY_SIZE) {
+          res.statusCode = 413
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Request body too large" }))
+          req.destroy()
+          return
+        }
+        ;(listener as (chunk: Buffer | string) => void)(chunk)
+      }
+      return origOn(event, wrapped)
+    }
+    return origOn(event, listener)
+  } as typeof req.on
+
+  next()
+}
+
+// ── Auth middleware ──────────────────────────────────────────────────────
+
 // Paths that remote clients can access without auth (login page assets + verify endpoint)
 const PUBLIC_PATHS = new Set(["/api/auth/verify"])
 
@@ -103,7 +254,7 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     token = url.searchParams.get("token")
   }
 
-  if (!token || !safeCompare(token, config.networkPassword)) {
+  if (!token || !validateSessionToken(token)) {
     res.statusCode = 401
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify({ error: "Authentication required" }))

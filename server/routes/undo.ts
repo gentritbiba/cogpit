@@ -7,9 +7,13 @@ import {
   unlink,
   join,
   resolve,
+  homedir,
 } from "../helpers"
 import { appendFile } from "node:fs/promises"
 import type { UseFn } from "../helpers"
+
+// Directories that undo/apply must NEVER write to
+const FORBIDDEN_PREFIXES = ["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/proc/", "/sys/", "/dev/", "/var/"]
 
 export function registerUndoRoutes(use: UseFn) {
   // GET /api/undo-state/:sessionId - read undo state
@@ -77,12 +81,26 @@ export function registerUndoRoutes(use: UseFn) {
           return
         }
 
-        // Validate all file paths are absolute and don't contain traversal
+        // Validate all file paths are absolute, don't contain traversal,
+        // and are within user's home directory (not system files)
+        const home = homedir()
         for (const op of operations) {
           const resolved = resolve(op.filePath)
           if (resolved !== op.filePath) {
             res.statusCode = 403
             res.end(JSON.stringify({ error: `Invalid file path: ${op.filePath}` }))
+            return
+          }
+          // Must be within user's home directory
+          if (!resolved.startsWith(home + "/") && resolved !== home) {
+            res.statusCode = 403
+            res.end(JSON.stringify({ error: `File operations restricted to home directory` }))
+            return
+          }
+          // Extra safety: block known system directories even if somehow under home
+          if (FORBIDDEN_PREFIXES.some(p => resolved.startsWith(p))) {
+            res.statusCode = 403
+            res.end(JSON.stringify({ error: `Cannot modify system files` }))
             return
           }
         }

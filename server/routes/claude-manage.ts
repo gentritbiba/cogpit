@@ -168,7 +168,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
     })
   })
 
-  // POST /api/kill-process - kill a specific process by PID
+  // POST /api/kill-process - kill a specific process by PID (only tracked claude processes)
   use("/api/kill-process", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -183,19 +183,32 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
-        // Also clean up from our tracked maps if this PID matches
+        // Only allow killing PIDs that we are tracking
+        let isTracked = false
+
         for (const [sid, ps] of persistentSessions) {
           if (ps.proc.pid === pid) {
+            isTracked = true
             ps.dead = true
             persistentSessions.delete(sid)
             break
           }
         }
-        for (const [sid, proc] of activeProcesses) {
-          if (proc.pid === pid) {
-            activeProcesses.delete(sid)
-            break
+        if (!isTracked) {
+          for (const [sid, proc] of activeProcesses) {
+            if (proc.pid === pid) {
+              isTracked = true
+              activeProcesses.delete(sid)
+              break
+            }
           }
+        }
+
+        if (!isTracked) {
+          res.statusCode = 403
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Can only kill tracked claude processes" }))
+          return
         }
 
         try {

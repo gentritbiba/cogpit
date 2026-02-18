@@ -9,7 +9,7 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { setConfigPath, loadConfig, getConfig } from "../server/config"
-import { dirs, refreshDirs, cleanupProcesses, authMiddleware, isLocalRequest, safeCompare } from "../server/helpers"
+import { dirs, refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit, isLocalRequest, validateSessionToken } from "../server/helpers"
 import { registerConfigRoutes } from "../server/routes/config"
 import { registerProjectRoutes } from "../server/routes/projects"
 import { registerClaudeRoutes } from "../server/routes/claude"
@@ -64,7 +64,9 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   const app = express()
   const httpServer = createServer(app)
 
-  // ── Auth middleware (before all routes) ────────────────────────────
+  // ── Security middleware (before all routes) ────────────────────────
+  app.use(securityHeaders)
+  app.use(bodySizeLimit)
   app.use(authMiddleware)
 
   // ── Guard middleware ────────────────────────────────────────────
@@ -130,7 +132,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
       if (!isLocalRequest(req)) {
         const cfg = getConfig()
         const token = url.searchParams.get("token")
-        if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !safeCompare(token, cfg.networkPassword)) {
+        if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !validateSessionToken(token)) {
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
           socket.destroy()
           return

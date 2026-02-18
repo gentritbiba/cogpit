@@ -1,6 +1,6 @@
 import type { Plugin } from "vite"
 import { loadConfig, getConfig } from "./config"
-import { refreshDirs, cleanupProcesses, authMiddleware } from "./helpers"
+import { refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { registerConfigRoutes } from "./routes/config"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerClaudeRoutes } from "./routes/claude"
@@ -23,7 +23,9 @@ export function sessionApiPlugin(): Plugin {
       // Load config on startup
       loadConfig().then(() => refreshDirs())
 
-      // Auth middleware (before all routes)
+      // Security middleware (before all routes)
+      server.middlewares.use(securityHeaders)
+      server.middlewares.use(bodySizeLimit)
       server.middlewares.use(authMiddleware)
 
       // Guard middleware: block data APIs when not configured
