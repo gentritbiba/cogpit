@@ -5,9 +5,9 @@ import {
   activeProcesses,
   persistentSessions,
   findJsonlPath,
+  watchSubagents,
   spawn,
   createInterface,
-  appendFile,
   readdir,
   open,
   join,
@@ -309,24 +309,32 @@ export function registerClaudeNewRoutes(use: UseFn) {
           permArgs,
           modelArgs,
           jsonlPath: null,
+          pendingTaskCalls: new Map(),
+          subagentWatcher: null,
         }
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)
 
-        // Resolve JSONL path after a brief delay for the file to be created
+        // Resolve JSONL path after a brief delay for the file to be created,
+        // then start the subagent watcher.
         const resolveJsonl = () => {
           findJsonlPath(sessionId).then((p) => {
             if (p) {
               ps.jsonlPath = p
+              ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
             } else {
-              // Retry once more after a short delay
-              setTimeout(() => findJsonlPath(sessionId).then((p2) => { ps.jsonlPath = p2 }), 1000)
+              setTimeout(() => findJsonlPath(sessionId).then((p2) => {
+                ps.jsonlPath = p2
+                if (p2) {
+                  ps.subagentWatcher = watchSubagents(p2, sessionId, ps.pendingTaskCalls)
+                }
+              }), 1000)
             }
           })
         }
         setTimeout(resolveJsonl, 500)
 
-        // Read stdout line-by-line for result messages and progress forwarding
+        // Read stdout for result messages and track Task tool calls
         const rl = createInterface({ input: child.stdout! })
         rl.on("line", (line) => {
           try {
@@ -334,8 +342,16 @@ export function registerClaudeNewRoutes(use: UseFn) {
             if (parsed.type === "result" && ps.onResult) {
               ps.onResult(parsed)
             }
-            if (ps.jsonlPath && parsed.type === "progress") {
-              appendFile(ps.jsonlPath, line + "\n").catch(() => {})
+            // Track Task tool calls so the subagent watcher can match files
+            if (parsed.type === "assistant") {
+              const content = parsed.message?.content
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === "tool_use" && block.name === "Task") {
+                    ps.pendingTaskCalls.set(block.id, block.input?.prompt ?? "")
+                  }
+                }
+              }
             }
           } catch {
             // ignore non-JSON lines
@@ -349,6 +365,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
 
         child.on("close", (code) => {
           ps.dead = true
+          ps.subagentWatcher?.close()
           activeProcesses.delete(sessionId)
           persistentSessions.delete(sessionId)
           if (ps.onResult) {
@@ -366,6 +383,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
 
         child.on("error", (err: NodeJS.ErrnoException) => {
           ps.dead = true
+          ps.subagentWatcher?.close()
           activeProcesses.delete(sessionId)
           persistentSessions.delete(sessionId)
           if (ps.onResult) {

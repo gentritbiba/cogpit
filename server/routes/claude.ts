@@ -3,9 +3,9 @@ import {
   activeProcesses,
   persistentSessions,
   findJsonlPath,
+  watchSubagents,
   spawn,
   createInterface,
-  appendFile,
   homedir,
 } from "../helpers"
 import type { PersistentSession, UseFn } from "../helpers"
@@ -140,14 +140,24 @@ export function registerClaudeRoutes(use: UseFn) {
           permArgs,
           modelArgs,
           jsonlPath: null,
+          pendingTaskCalls: new Map(),
+          subagentWatcher: null,
         }
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)
 
-        // Resolve JSONL path asynchronously so we can forward progress events
-        findJsonlPath(sessionId).then((p) => { ps.jsonlPath = p })
+        // Resolve JSONL path and start subagent watcher.
+        // Claude Code doesn't write agent_progress to the parent JSONL when
+        // using --output-format stream-json.  We watch the subagent JSONL
+        // files and synthesize progress entries into the parent JSONL.
+        findJsonlPath(sessionId).then((p) => {
+          ps.jsonlPath = p
+          if (p) {
+            ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
+          }
+        })
 
-        // Read stdout line-by-line for result messages and progress forwarding
+        // Read stdout for result messages and track Task tool calls
         const rl = createInterface({ input: child.stdout! })
         rl.on("line", (line) => {
           try {
@@ -155,8 +165,16 @@ export function registerClaudeRoutes(use: UseFn) {
             if (parsed.type === "result" && ps.onResult) {
               ps.onResult(parsed)
             }
-            if (ps.jsonlPath && parsed.type === "progress") {
-              appendFile(ps.jsonlPath, line + "\n").catch(() => {})
+            // Track Task tool calls so the subagent watcher can match files
+            if (parsed.type === "assistant") {
+              const content = parsed.message?.content
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === "tool_use" && block.name === "Task") {
+                    ps.pendingTaskCalls.set(block.id, block.input?.prompt ?? "")
+                  }
+                }
+              }
             }
           } catch {
             // ignore non-JSON lines
@@ -170,6 +188,7 @@ export function registerClaudeRoutes(use: UseFn) {
 
         child.on("close", (code) => {
           ps.dead = true
+          ps.subagentWatcher?.close()
           activeProcesses.delete(sessionId)
           persistentSessions.delete(sessionId)
           if (ps.onResult) {
@@ -187,6 +206,7 @@ export function registerClaudeRoutes(use: UseFn) {
 
         child.on("error", (err: NodeJS.ErrnoException) => {
           ps.dead = true
+          ps.subagentWatcher?.close()
           activeProcesses.delete(sessionId)
           persistentSessions.delete(sessionId)
           if (ps.onResult) {

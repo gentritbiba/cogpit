@@ -19,6 +19,7 @@ import { DesktopHeader } from "@/components/DesktopHeader"
 import { MobileHeader } from "@/components/MobileHeader"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { ChatArea } from "@/components/ChatArea"
+import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { usePtyChat } from "@/hooks/usePtyChat"
@@ -34,6 +35,7 @@ import { useAppConfig } from "@/hooks/useAppConfig"
 import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useKillAll } from "@/hooks/useKillAll"
+import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
@@ -69,6 +71,9 @@ export default function App() {
 
   // Server panel state
   const serverPanel = useServerPanel(state.session?.sessionId)
+
+  // TODO progress from session's TodoWrite tool calls
+  const todoProgress = useTodoProgress(state.session ?? null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -531,7 +536,12 @@ export default function App() {
         </main>
 
         {serverPanelNode}
-        {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && chatInputNode}
+        {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && (
+          <>
+            {todoProgress && <TodoProgressPanel progress={todoProgress} />}
+            {chatInputNode}
+          </>
+        )}
 
         <MobileNav
           activeTab={state.mobileTab}
@@ -633,6 +643,7 @@ export default function App() {
                 )}
               </ResizablePanelGroup>
 
+              {todoProgress && <TodoProgressPanel progress={todoProgress} />}
               {chatInputNode}
             </div>
           ) : state.pendingDirName ? (

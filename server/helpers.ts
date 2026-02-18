@@ -6,7 +6,9 @@ import { homedir } from "node:os"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { appendFile } from "node:fs/promises"
+import { watch } from "node:fs"
 import { timingSafeEqual, randomBytes, createHash } from "node:crypto"
+import { randomUUID } from "node:crypto"
 
 import { getConfig, getDirs } from "./config"
 
@@ -102,13 +104,13 @@ export function isRateLimited(req: IncomingMessage): boolean {
   return false
 }
 
-// Periodically clean up expired entries
+// Periodically clean up expired entries (unref so build process can exit)
 setInterval(() => {
   const now = Date.now()
   for (const [key, entry] of rateLimitMap) {
     if (now > entry.resetAt) rateLimitMap.delete(key)
   }
-}, 60_000)
+}, 60_000).unref()
 
 // ── Session token system ────────────────────────────────────────────────
 
@@ -135,13 +137,13 @@ export function revokeAllSessions(): void {
   activeSessions.clear()
 }
 
-// Clean up expired sessions periodically
+// Clean up expired sessions periodically (unref so build process can exit)
 setInterval(() => {
   const now = Date.now()
   for (const [token, session] of activeSessions) {
     if (now - session.createdAt > SESSION_TTL_MS) activeSessions.delete(token)
   }
-}, 60_000)
+}, 60_000).unref()
 
 // ── Password hashing ────────────────────────────────────────────────────
 
@@ -465,8 +467,12 @@ export interface PersistentSession {
   cwd: string
   permArgs: string[]
   modelArgs: string[]
-  /** Path to the session's JSONL file (for forwarding progress events) */
+  /** Path to the session's JSONL file */
   jsonlPath: string | null
+  /** Active Task tool_use IDs -> prompt text (for matching subagent files) */
+  pendingTaskCalls: Map<string, string>
+  /** Subagent directory watcher (cleaned up on process close) */
+  subagentWatcher: SubagentWatcher | null
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 
@@ -489,6 +495,168 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
   return null
 }
 
+// ── Subagent JSONL watcher ───────────────────────────────────────────────
+// Claude Code doesn't reliably write agent_progress to the parent JSONL
+// when using --output-format stream-json.  The subagent data IS written to
+// separate files under <sessionId>/subagents/agent-<id>.jsonl.  This watcher
+// monitors those files and synthesizes agent_progress entries into the parent
+// JSONL so the SSE file watcher can stream them to the UI.
+
+interface SubagentWatcher {
+  close(): void
+}
+
+/**
+ * Watch for subagent JSONL files and forward their content as agent_progress
+ * entries into the parent session JSONL.
+ *
+ * @param parentJsonlPath  Path to the parent session's JSONL file
+ * @param sessionId        The parent session UUID
+ * @param pendingTaskCalls Map of tool_use_id -> prompt for active Task tool calls.
+ *                         Updated externally by the stdout parser when it sees Task tool_use/result.
+ */
+export function watchSubagents(
+  parentJsonlPath: string,
+  sessionId: string,
+  pendingTaskCalls: Map<string, string>,
+): SubagentWatcher {
+  const subagentsDir = parentJsonlPath.replace(/\.jsonl$/, "") + "/subagents"
+
+  // Track offsets per subagent file and their parentToolUseID mapping
+  const fileOffsets = new Map<string, number>()
+  const agentToParentToolId = new Map<string, string>()
+  let closed = false
+  let dirWatcher: ReturnType<typeof watch> | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+
+  async function processAgentFile(filePath: string, agentFileName: string) {
+    if (closed) return
+    const agentId = agentFileName.replace("agent-", "").replace(".jsonl", "")
+    const offset = fileOffsets.get(filePath) ?? 0
+
+    try {
+      const s = await stat(filePath)
+      if (s.size <= offset) return
+
+      const fh = await open(filePath, "r")
+      try {
+        const buf = Buffer.alloc(s.size - offset)
+        const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+        fileOffsets.set(filePath, s.size)
+
+        const text = buf.subarray(0, bytesRead).toString("utf-8")
+        const lines = text.split("\n").filter(Boolean)
+
+        for (const line of lines) {
+          try {
+            const msg = JSON.parse(line)
+            if (msg.type !== "user" && msg.type !== "assistant") continue
+
+            // Resolve parentToolUseID for this agent
+            let parentToolId = agentToParentToolId.get(agentId)
+            if (!parentToolId) {
+              // Match by prompt: the subagent's first user message text
+              // should match a pending Task tool call's prompt
+              const msgContent = msg.message?.content
+              let promptText = ""
+              if (typeof msgContent === "string") {
+                promptText = msgContent
+              } else if (Array.isArray(msgContent)) {
+                for (const b of msgContent) {
+                  if (b.type === "text") { promptText = b.text; break }
+                }
+              }
+              if (promptText) {
+                for (const [toolId, taskPrompt] of pendingTaskCalls) {
+                  if (taskPrompt === promptText || promptText.startsWith(taskPrompt.slice(0, 100))) {
+                    parentToolId = toolId
+                    agentToParentToolId.set(agentId, toolId)
+                    break
+                  }
+                }
+              }
+            }
+            if (!parentToolId) continue
+
+            // Synthesize an agent_progress entry matching Claude Code's format
+            const progressEntry = {
+              type: "progress",
+              parentUuid: "",
+              isSidechain: false,
+              cwd: msg.cwd || "",
+              sessionId,
+              uuid: randomUUID(),
+              timestamp: msg.timestamp || new Date().toISOString(),
+              parentToolUseID: parentToolId,
+              toolUseID: `agent_msg_synth_${randomUUID().slice(0, 12)}`,
+              data: {
+                type: "agent_progress",
+                agentId,
+                prompt: "",
+                normalizedMessages: [],
+                message: {
+                  type: msg.type,
+                  message: msg.message,
+                  uuid: msg.uuid || randomUUID(),
+                  timestamp: msg.timestamp || new Date().toISOString(),
+                },
+              },
+            }
+
+            await appendFile(parentJsonlPath, JSON.stringify(progressEntry) + "\n").catch(() => {})
+          } catch {
+            // skip malformed lines
+          }
+        }
+      } finally {
+        await fh.close()
+      }
+    } catch {
+      // file may not exist yet
+    }
+  }
+
+  async function scanDir() {
+    if (closed) return
+    try {
+      const files = await readdir(subagentsDir)
+      for (const f of files) {
+        if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
+          await processAgentFile(join(subagentsDir, f), f)
+        }
+      }
+    } catch {
+      // directory may not exist yet
+    }
+  }
+
+  // Watch the subagents directory for changes
+  try {
+    dirWatcher = watch(subagentsDir, { recursive: true }, () => {
+      if (!closed) scanDir()
+    })
+    dirWatcher.on("error", () => {}) // dir may not exist yet
+  } catch {
+    // directory doesn't exist yet — poller will pick up changes
+  }
+
+  // Poll as fallback (subagents dir may be created after we start watching)
+  pollTimer = setInterval(scanDir, 500)
+
+  // Initial scan
+  scanDir()
+
+  return {
+    close() {
+      closed = true
+      dirWatcher?.close()
+      dirWatcher = null
+      if (pollTimer) clearInterval(pollTimer)
+      pollTimer = null
+    },
+  }
+}
+
 // ── Cleanup ─────────────────────────────────────────────────────────────
 
 export function cleanupProcesses(): void {
@@ -497,6 +665,7 @@ export function cleanupProcesses(): void {
     activeProcesses.delete(sid)
   }
   for (const [sid, ps] of persistentSessions) {
+    ps.subagentWatcher?.close()
     try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
     persistentSessions.delete(sid)
   }
@@ -507,6 +676,6 @@ export { spawn, createInterface, appendFile, homedir }
 export { readdir, readFile, stat, open } from "node:fs/promises"
 export { writeFile, mkdir, unlink, lstat } from "node:fs/promises"
 export { join, resolve } from "node:path"
-export { watch } from "node:fs"
+export { watch }
 export { createConnection } from "node:net"
-export { randomUUID } from "node:crypto"
+export { randomUUID }

@@ -261,6 +261,7 @@ Cogpit exposes REST + SSE endpoints (via Vite plugin in dev, Express in Electron
 ### Real-Time Updates
 
 - **Session streaming** — SSE connections watch JSONL files for changes via `fs.watch`, pushing new lines to connected clients
+- **Subagent synthesis** — When Claude spawns subagents via the Task tool, their JSONL output is monitored separately and synthesized as `agent_progress` entries into the parent session JSONL
 - **Team updates** — SSE watches team config, task, and inbox directories
 - **Throttling** — Client coalesces rapid updates using `requestAnimationFrame` with a 100ms max latency cap
 
