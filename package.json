@@ -11,7 +11,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "electron:dev": "electron-vite dev",
+    "electron:build": "electron-vite build",
+    "electron:package": "electron-vite build && electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.2",
@@ -24,32 +28,37 @@
     "@tanstack/react-virtual": "^3.13.18",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "express": "^5.2.1",
     "lucide-react": "^0.469.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.3",
     "react-resizable-panels": "^4.6.4",
+    "node-pty": "^1.1.0",
     "shiki": "^3.22.0",
-    "tailwind-merge": "^3.0.1"
+    "tailwind-merge": "^3.0.1",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.2.3",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "babel-plugin-react-compiler": "^1.0.0",
+    "electron": "^40.4.1",
+    "electron-builder": "^26.7.0",
+    "electron-vite": "^5.0.0",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.16",
     "globals": "^15.14.0",
-    "node-pty": "^1.1.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.6.2",
     "typescript-eslint": "^8.18.2",
-    "vite": "^6.0.5",
-    "ws": "^8.19.0"
+    "vite": "^6.0.5"
   }
 }
