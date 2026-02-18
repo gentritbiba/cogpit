@@ -16,11 +16,15 @@ jobs:
         include:
           - os: macos-latest
             arch: universal
+            name: macOS
           - os: windows-latest
             arch: x64
+            name: Windows
           - os: ubuntu-latest
             arch: x64
+            name: Linux
 
+    name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
 
     steps:
