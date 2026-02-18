@@ -4,6 +4,7 @@ import {
   XCircle,
   ChevronRight,
   ChevronDown,
+  Loader2,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
@@ -78,9 +79,10 @@ function getToolSummary(tc: ToolCall): string {
 interface ToolCallCardProps {
   toolCall: ToolCall
   expandAll: boolean
+  isAgentActive?: boolean
 }
 
-export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll }: ToolCallCardProps) {
+export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive }: ToolCallCardProps) {
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
   const [resultExpanded, setResultExpanded] = useState(false)
@@ -140,6 +142,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll }: 
             <XCircle className="w-4 h-4 text-red-400" />
           ) : toolCall.result !== null ? (
             <CheckCircle className="w-4 h-4 text-green-500/60" />
+          ) : isAgentActive ? (
+            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
           ) : null}
         </div>
       </div>

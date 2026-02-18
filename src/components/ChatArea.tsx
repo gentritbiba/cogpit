@@ -1,4 +1,4 @@
-import { type RefObject, type Dispatch } from "react"
+import { type RefObject, type Dispatch, useRef, useEffect, useState } from "react"
 import {
   Search,
   ChevronsDownUp,
@@ -40,6 +40,13 @@ interface ChatAreaProps {
   onToggleExpandAll: () => void
 }
 
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}m ${s}s`
+}
+
 export function ChatArea({
   session,
   activeTurnIndex,
@@ -60,6 +67,25 @@ export function ChatArea({
   isConnected,
   onToggleExpandAll,
 }: ChatAreaProps) {
+  const connectedAtRef = useRef<number | null>(null)
+  const [elapsedSec, setElapsedSec] = useState(0)
+
+  useEffect(() => {
+    if (!isConnected) {
+      connectedAtRef.current = null
+      setElapsedSec(0)
+      return
+    }
+    connectedAtRef.current = Date.now()
+    setElapsedSec(0)
+    const interval = setInterval(() => {
+      if (connectedAtRef.current !== null) {
+        setElapsedSec(Math.floor((Date.now() - connectedAtRef.current) / 1000))
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isConnected])
+
   return (
     <div className={cn("relative", isMobile ? "flex flex-col flex-1 min-h-0" : "h-full")}>
       {/* Search bar (mobile only - desktop has it in StatsPanel) */}
@@ -116,6 +142,7 @@ export function ChatArea({
                 activeToolCallId={activeToolCallId}
                 searchQuery={searchQuery}
                 expandAll={expandAll}
+                isAgentActive={isConnected}
                 scrollContainerRef={chatScrollRef}
                 branchesAtTurn={undoRedo.branchesAtTurn}
                 onRestoreToHere={undoRedo.requestUndo}
@@ -140,6 +167,11 @@ export function ChatArea({
                     <div className="flex items-center gap-2 text-zinc-500">
                       <Loader2 className="size-3.5 animate-spin text-blue-400" />
                       <span className="text-xs">Agent is working...</span>
+                      {elapsedSec > 0 && (
+                        <span className="text-[10px] font-mono tabular-nums text-zinc-600">
+                          {formatElapsed(elapsedSec)}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

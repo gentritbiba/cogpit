@@ -47,6 +47,13 @@ const MODE_LABELS: Record<string, string> = {
   delegate: "Delegate",
 }
 
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}m ${s}s`
+}
+
 export const ChatInput = memo(function ChatInput({
   status,
   error,
@@ -65,6 +72,24 @@ export const ChatInput = memo(function ChatInput({
 
   const [images, setImages] = useState<Array<{ file: File; preview: string; data: string; mediaType: string }>>([])
   const [isDragOver, setIsDragOver] = useState(false)
+
+  const connectedAtRef = useRef<number | null>(null)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  useEffect(() => {
+    if (!isConnected) {
+      connectedAtRef.current = null
+      setElapsedSec(0)
+      return
+    }
+    connectedAtRef.current = Date.now()
+    setElapsedSec(0)
+    const interval = setInterval(() => {
+      if (connectedAtRef.current !== null) {
+        setElapsedSec(Math.floor((Date.now() - connectedAtRef.current) / 1000))
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [isConnected])
 
   const addImageFiles = useCallback((files: FileList | File[]) => {
     const SUPPORTED_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -341,6 +366,11 @@ export const ChatInput = memo(function ChatInput({
           />
           {isConnected && !isPlanApproval && !isUserQuestion && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              {elapsedSec > 0 && (
+                <span className="text-[10px] font-mono tabular-nums text-zinc-500">
+                  {formatElapsed(elapsedSec)}
+                </span>
+              )}
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />

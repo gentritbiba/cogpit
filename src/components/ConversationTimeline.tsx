@@ -21,6 +21,7 @@ interface ConversationTimelineProps {
   activeToolCallId: string | null
   searchQuery: string
   expandAll: boolean
+  isAgentActive?: boolean
   scrollContainerRef?: React.RefObject<HTMLElement | null>
   // Undo/redo props
   branchesAtTurn?: (turnIndex: number) => Branch[]
@@ -75,6 +76,7 @@ export function ConversationTimeline({
   activeToolCallId,
   searchQuery,
   expandAll,
+  isAgentActive = false,
   scrollContainerRef,
   branchesAtTurn,
   onRestoreToHere,
@@ -118,6 +120,7 @@ export function ConversationTimeline({
         activeTurnIndex={activeTurnIndex}
         activeToolCallId={activeToolCallId}
         expandAll={expandAll}
+        isAgentActive={isAgentActive}
         hasUndoCallbacks={hasUndoCallbacks}
         branchesAtTurn={branchesAtTurn}
         onRestoreToHere={onRestoreToHere}
@@ -139,6 +142,7 @@ export function ConversationTimeline({
       activeTurnIndex={activeTurnIndex}
       activeToolCallId={activeToolCallId}
       expandAll={expandAll}
+      isAgentActive={isAgentActive}
       hasUndoCallbacks={hasUndoCallbacks}
       branchesAtTurn={branchesAtTurn}
       onRestoreToHere={onRestoreToHere}
@@ -158,6 +162,7 @@ interface TimelineInnerProps {
   activeTurnIndex: number | null
   activeToolCallId: string | null
   expandAll: boolean
+  isAgentActive: boolean
   hasUndoCallbacks: boolean
   branchesAtTurn?: (turnIndex: number) => Branch[]
   onRestoreToHere?: (turnIndex: number) => void
@@ -175,6 +180,7 @@ function NonVirtualTimeline({
   activeTurnIndex,
   activeToolCallId,
   expandAll,
+  isAgentActive,
   hasUndoCallbacks,
   branchesAtTurn,
   onRestoreToHere,
@@ -212,6 +218,7 @@ function NonVirtualTimeline({
       {filteredTurns.map(({ turn, index }, fi) => {
         const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
         const branchCount = turnBranches.length
+        const isLastTurn = index === sessionTurnCount - 1
 
         const turnKey = turn.id
 
@@ -226,6 +233,7 @@ function NonVirtualTimeline({
               isActive={activeTurnIndex === index}
               activeToolCallId={activeToolCallId}
               expandAll={expandAll}
+              isAgentActive={isAgentActive && isLastTurn}
               branchCount={branchCount}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
@@ -270,6 +278,7 @@ function VirtualizedTimeline({
   activeTurnIndex,
   activeToolCallId,
   expandAll,
+  isAgentActive,
   hasUndoCallbacks,
   branchesAtTurn,
   onRestoreToHere,
@@ -324,6 +333,7 @@ function VirtualizedTimeline({
         const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
         const branchCount = turnBranches.length
         const isLast = virtualRow.index === filteredTurns.length - 1
+        const isLastTurn = index === sessionTurnCount - 1
 
         const turnKey = turn.id
 
@@ -350,6 +360,7 @@ function VirtualizedTimeline({
               isActive={activeTurnIndex === index}
               activeToolCallId={activeToolCallId}
               expandAll={expandAll}
+              isAgentActive={isAgentActive && isLastTurn}
               branchCount={branchCount}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
@@ -448,6 +459,7 @@ const TurnSection = memo(function TurnSection({
   isActive,
   activeToolCallId,
   expandAll,
+  isAgentActive = false,
   branchCount = 0,
   onRestoreToHere,
   onOpenBranches,
@@ -457,6 +469,7 @@ const TurnSection = memo(function TurnSection({
   isActive: boolean
   activeToolCallId: string | null
   expandAll: boolean
+  isAgentActive?: boolean
   branchCount?: number
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
@@ -569,6 +582,7 @@ const TurnSection = memo(function TurnSection({
                           toolCalls={toolCalls}
                           expandAll={expandAll}
                           activeToolCallId={activeToolCallId}
+                          isAgentActive={isAgentActive}
                         />
                       </div>
                     )}
@@ -595,6 +609,7 @@ const TurnSection = memo(function TurnSection({
                     toolCalls={toolCalls}
                     expandAll={expandAll}
                     activeToolCallId={activeToolCallId}
+                    isAgentActive={isAgentActive}
                   />
                 </div>
               )
@@ -629,15 +644,18 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls,
   expandAll,
   activeToolCallId,
+  isAgentActive = false,
 }: {
   toolCalls: ToolCall[]
   expandAll: boolean
   activeToolCallId: string | null
+  isAgentActive?: boolean
 }) {
   const [manualOpen, setManualOpen] = useState(false)
   const targetRef = useRef<HTMLDivElement | null>(null)
 
-  const isOpen = expandAll || manualOpen
+  const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
+  const isOpen = expandAll || manualOpen || hasInProgressCall
 
   // Auto-expand when a specific tool call in this group is targeted
   const lastScrolledToolCallRef = useRef<string | null>(null)
@@ -691,18 +709,21 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
             <span>{toolCalls.length} tool call{toolCalls.length !== 1 ? "s" : ""}</span>
           </button>
         )}
-        {toolCalls.map((tc) => (
-          <div
-            key={tc.id}
-            ref={tc.id === activeToolCallId ? targetRef : undefined}
-            className={cn(
-              tc.id === activeToolCallId &&
-                "ring-1 ring-blue-500/50 rounded-md"
-            )}
-          >
-            <ToolCallCard toolCall={tc} expandAll={expandAll} />
-          </div>
-        ))}
+        {toolCalls.map((tc, i) => {
+          const isLastWithoutResult = isAgentActive && i === toolCalls.length - 1 && tc.result === null
+          return (
+            <div
+              key={tc.id}
+              ref={tc.id === activeToolCallId ? targetRef : undefined}
+              className={cn(
+                tc.id === activeToolCallId &&
+                  "ring-1 ring-blue-500/50 rounded-md"
+              )}
+            >
+              <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} />
+            </div>
+          )
+        })}
       </div>
     )
   }
