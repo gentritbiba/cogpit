@@ -6,6 +6,7 @@
   "license": "MIT",
   "author": "Gentrit Biba",
   "type": "module",
+  "main": "out/main/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
