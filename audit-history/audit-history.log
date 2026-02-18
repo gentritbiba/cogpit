@@ -1,0 +1,7 @@
+## Audit History Log
+
+| Date       | Commit      | Report File                            | Summary                                                        |
+|------------|-------------|----------------------------------------|----------------------------------------------------------------|
+| 2026-02-18 | 941220a     | audit-20260218-941220a.md          | App.tsx decomposition, hook extraction, dependency cleanup, deleted files, new UI features. No blocking doc updates needed. |
+| 2026-02-18 | 4d3758e     | audit-20260218-222832-4d3758e.md     | Undo system: in-memory batching, replaceAll support, simplified rollback. All changes backward-compatible. No blocking updates. |
+| 2026-02-18 | faee1e5     | audit-20260218-234818-faee1e5.md     | Comprehensive Vitest testing system: 870 tests across 34 files covering lib, server, and hooks. Test-only addition, no source changes. |
