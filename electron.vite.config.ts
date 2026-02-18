@@ -8,6 +8,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: "out/main",
+      lib: {
+        entry: "electron/main.ts",
+      },
       rollupOptions: {
         external: ["node-pty"],
       },
@@ -17,6 +20,9 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: "out/preload",
+      lib: {
+        entry: "electron/preload.ts",
+      },
     },
   },
   renderer: {
