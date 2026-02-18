@@ -46,9 +46,13 @@ app.whenReady().then(async () => {
   // Start embedded server
   const { httpServer } = await createAppServer(staticDir, userDataDir)
 
-  // Listen on random available port
+  // In dev mode, use a fixed port so the Vite renderer proxy can forward
+  // API requests. In production, use random port (renderer loads directly).
+  const DEV_API_PORT = 19384
+  const listenPort = process.env.ELECTRON_RENDERER_URL ? DEV_API_PORT : 0
+
   await new Promise<void>((resolve) => {
-    httpServer.listen(0, "127.0.0.1", () => resolve())
+    httpServer.listen(listenPort, "127.0.0.1", () => resolve())
   })
 
   const address = httpServer.address()
