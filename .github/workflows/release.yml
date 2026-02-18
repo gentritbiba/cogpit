@@ -51,6 +51,10 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: bun run electron:package -- --win --x64 --publish never
 
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
+
       - name: Build and package (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: bun run electron:package -- --linux --x64 --publish never
