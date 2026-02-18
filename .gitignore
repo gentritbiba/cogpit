@@ -6,3 +6,5 @@ config.local.json
 undo-history/
 audit-history/
 test-results/
+/out
+/release
