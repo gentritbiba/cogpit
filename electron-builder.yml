@@ -1,0 +1,42 @@
+appId: com.cogpit.app
+productName: Cogpit
+copyright: "Copyright © 2026 Gentrit Biba"
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - "!node_modules/**/*.{md,map,ts}"
+
+extraMetadata:
+  main: out/main/main.js
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  category: Development
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

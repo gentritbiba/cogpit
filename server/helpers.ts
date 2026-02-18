@@ -1,0 +1,298 @@
+import type { ChildProcess } from "node:child_process"
+import { readdir, readFile, stat, open } from "node:fs/promises"
+import { join } from "node:path"
+import { resolve } from "node:path"
+import { homedir } from "node:os"
+import { spawn } from "node:child_process"
+import { createInterface } from "node:readline"
+import { appendFile } from "node:fs/promises"
+
+import { getConfig, getDirs } from "./config"
+
+// ── Shared types ────────────────────────────────────────────────────────
+
+import type { IncomingMessage, ServerResponse } from "node:http"
+
+export type NextFn = (err?: unknown) => void
+export type Middleware = (req: IncomingMessage, res: ServerResponse, next: NextFn) => void
+export type UseFn = (path: string, handler: Middleware) => void
+
+// ── Friendly error formatter ────────────────────────────────────────────
+
+export function friendlySpawnError(err: NodeJS.ErrnoException): string {
+  if (err.code === "ENOENT") {
+    return "Claude CLI is not installed or not found in PATH. Install it with: npm install -g @anthropic-ai/claude-code"
+  }
+  return err.message
+}
+
+// ── Mutable directory references ────────────────────────────────────────
+
+export const dirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  UNDO_DIR: "",
+}
+
+export function refreshDirs(): boolean {
+  const config = getConfig()
+  if (!config) return false
+  const d = getDirs(config.claudeDir)
+  dirs.PROJECTS_DIR = d.PROJECTS_DIR
+  dirs.TEAMS_DIR = d.TEAMS_DIR
+  dirs.TASKS_DIR = d.TASKS_DIR
+  dirs.UNDO_DIR = d.UNDO_DIR
+  return true
+}
+
+// ── Path safety ─────────────────────────────────────────────────────────
+
+export function isWithinDir(parent: string, child: string): boolean {
+  const resolved = resolve(child)
+  return resolved.startsWith(resolve(parent) + "/") || resolved === resolve(parent)
+}
+
+// ── Subagent matching ───────────────────────────────────────────────────
+
+export async function matchSubagentToMember(
+  leadSessionId: string,
+  subagentFileName: string,
+  members: Array<{ name: string; agentType: string; prompt?: string }>
+): Promise<string | null> {
+  const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === "memory") continue
+    const filePath = join(
+      dirs.PROJECTS_DIR,
+      entry.name,
+      leadSessionId,
+      "subagents",
+      subagentFileName
+    )
+
+    try {
+      const fh = await open(filePath, "r")
+      try {
+        const buf = Buffer.alloc(16384)
+        const { bytesRead } = await fh.read(buf, 0, 16384, 0)
+        const firstLine =
+          buf
+            .subarray(0, bytesRead)
+            .toString("utf-8")
+            .split("\n")[0] || ""
+
+        for (const member of members) {
+          if (member.agentType === "team-lead") continue
+          const prompt = member.prompt || ""
+          const snippet = prompt.slice(0, 120)
+          const terms = [
+            member.name,
+            member.name.replace(/-/g, " "),
+            ...(snippet
+              ? [snippet, snippet.replace(/"/g, '\\"')]
+              : []),
+          ]
+          if (terms.some((t) => firstLine.includes(t))) {
+            return member.name
+          }
+        }
+      } finally {
+        await fh.close()
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return null
+}
+
+// ── Project name helpers ────────────────────────────────────────────────
+
+const HOME_PREFIX = homedir().replace(/\//g, "-").replace(/^-/, "").toLowerCase()
+
+export function projectDirToReadableName(dirName: string): { path: string; shortName: string } {
+  const raw = dirName.replace(/^-/, "")
+  const lowerRaw = raw.toLowerCase()
+
+  let shortPart = raw
+  const homePrefix = HOME_PREFIX + "-"
+  if (lowerRaw.startsWith(homePrefix)) {
+    const afterHome = raw.slice(homePrefix.length)
+    const lowerAfter = afterHome.toLowerCase()
+    const subdirs = ["desktop-", "documents-", "code-", "projects-", "repos-", "dev-"]
+    let stripped = false
+    for (const sub of subdirs) {
+      if (lowerAfter.startsWith(sub)) {
+        shortPart = afterHome.slice(sub.length)
+        stripped = true
+        break
+      }
+    }
+    if (!stripped) {
+      shortPart = afterHome
+    }
+  }
+
+  const shortName = shortPart || raw
+
+  return {
+    path: "/" + raw.replace(/-/g, "/"),
+    shortName,
+  }
+}
+
+// ── Session metadata extraction ─────────────────────────────────────────
+
+export async function getSessionMeta(filePath: string) {
+  let lines: string[]
+  let isPartialRead = false
+  const fileStat = await stat(filePath)
+
+  if (fileStat.size > 65536) {
+    const fh = await open(filePath, "r")
+    try {
+      const buf = Buffer.alloc(32768)
+      const { bytesRead } = await fh.read(buf, 0, 32768, 0)
+      const text = buf.subarray(0, bytesRead).toString("utf-8")
+      const lastNewline = text.lastIndexOf("\n")
+      lines = (lastNewline > 0 ? text.slice(0, lastNewline) : text).split("\n").filter(Boolean)
+      isPartialRead = true
+    } finally {
+      await fh.close()
+    }
+  } else {
+    const content = await readFile(filePath, "utf-8")
+    lines = content.split("\n").filter(Boolean)
+  }
+
+  let sessionId = ""
+  let version = ""
+  let gitBranch = ""
+  let model = ""
+  let slug = ""
+  let cwd = ""
+  let firstUserMessage = ""
+  let lastUserMessage = ""
+  let timestamp = ""
+  let turnCount = 0
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line)
+      if (obj.sessionId && !sessionId) sessionId = obj.sessionId
+      if (obj.version && !version) version = obj.version
+      if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
+      if (obj.slug && !slug) slug = obj.slug
+      if (obj.cwd && !cwd) cwd = obj.cwd
+      if (obj.type === "assistant" && obj.message?.model && !model) {
+        model = obj.message.model
+      }
+      if (obj.type === "user" && !obj.isMeta && !timestamp) {
+        timestamp = obj.timestamp || ""
+      }
+      if (obj.type === "user" && !obj.isMeta) {
+        const c = obj.message?.content
+        let extracted = ""
+        if (typeof c === "string") {
+          const cleaned = c.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
+          if (cleaned && cleaned.length > 5) extracted = cleaned.slice(0, 120)
+        } else if (Array.isArray(c)) {
+          for (const block of c) {
+            if (block.type === "text") {
+              const cleaned = block.text.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
+              if (cleaned && cleaned.length > 5) {
+                extracted = cleaned.slice(0, 120)
+                break
+              }
+            }
+          }
+        }
+        if (extracted) {
+          if (!firstUserMessage) firstUserMessage = extracted
+          lastUserMessage = extracted
+        }
+        turnCount++
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+
+  return {
+    sessionId,
+    version,
+    gitBranch,
+    model,
+    slug,
+    cwd,
+    firstUserMessage,
+    lastUserMessage,
+    timestamp,
+    turnCount: isPartialRead ? turnCount : turnCount, // partial reads give approximate count
+    lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
+  }
+}
+
+// ── Active process tracking ─────────────────────────────────────────────
+
+export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()
+
+// ── Persistent sessions ─────────────────────────────────────────────────
+
+export interface PersistentSession {
+  proc: ChildProcess
+  /** Resolves when the current turn's `result` message arrives */
+  onResult: ((msg: { type: string; subtype?: string; is_error?: boolean; result?: string }) => void) | null
+  /** Set to true once the process has exited */
+  dead: boolean
+  cwd: string
+  permArgs: string[]
+  modelArgs: string[]
+  /** Path to the session's JSONL file (for forwarding progress events) */
+  jsonlPath: string | null
+}
+export const persistentSessions = new Map<string, PersistentSession>()
+
+/** Find the JSONL file path for a session by searching all project directories. */
+export async function findJsonlPath(sessionId: string): Promise<string | null> {
+  const targetFile = `${sessionId}.jsonl`
+  try {
+    const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "memory") continue
+      const projectDir = join(dirs.PROJECTS_DIR, entry.name)
+      try {
+        const files = await readdir(projectDir)
+        if (files.includes(targetFile)) {
+          return join(projectDir, targetFile)
+        }
+      } catch { continue }
+    }
+  } catch { /* dirs.PROJECTS_DIR might not exist */ }
+  return null
+}
+
+// ── Cleanup ─────────────────────────────────────────────────────────────
+
+export function cleanupProcesses(): void {
+  for (const [sid, proc] of activeProcesses) {
+    try { proc.kill("SIGTERM") } catch { /* already dead */ }
+    activeProcesses.delete(sid)
+  }
+  for (const [sid, ps] of persistentSessions) {
+    try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
+    persistentSessions.delete(sid)
+  }
+}
+
+// Re-export utilities needed by route handlers that spawn processes
+export { spawn, createInterface, appendFile, homedir }
+export { readdir, readFile, stat, open } from "node:fs/promises"
+export { writeFile, mkdir, unlink, lstat } from "node:fs/promises"
+export { join, resolve } from "node:path"
+export { watch } from "node:fs"
+export { createConnection } from "node:net"
+export { randomUUID } from "node:crypto"

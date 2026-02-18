@@ -5,7 +5,15 @@ import { fileURLToPath } from "node:url"
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const PROJECT_ROOT = resolve(__dirname, "..")
 
-export const CONFIG_PATH = join(PROJECT_ROOT, "config.local.json")
+export let CONFIG_PATH = join(PROJECT_ROOT, "config.local.json")
+
+/**
+ * Override the config file path at runtime (used by Electron main process
+ * to store config in userData instead of the app bundle directory).
+ */
+export function setConfigPath(p: string): void {
+  CONFIG_PATH = p
+}
 
 export interface AppConfig {
   claudeDir: string

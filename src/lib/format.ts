@@ -4,6 +4,7 @@ export function shortenModel(model: string): string {
   if (!model) return "unknown"
   if (model.includes("opus-4-6")) return "opus 4.6"
   if (model.includes("opus-4-5")) return "opus 4.5"
+  if (model.includes("sonnet-4-6")) return "sonnet 4.6"
   if (model.includes("sonnet-4-5")) return "sonnet 4.5"
   if (model.includes("haiku-4-5")) return "haiku 4.5"
   if (model.includes("opus-4-0")) return "opus 4"
@@ -66,6 +67,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "opus-4-6":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
   "opus-4-5":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
   "opus-4-0":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
+  "sonnet-4-6": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
   "sonnet-4-5": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
   "sonnet-4-0": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
   "haiku-4-5":  { input: 0.8, output: 4,   cacheRead: 0.08,  cacheWrite: 1     },

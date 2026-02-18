@@ -55,7 +55,7 @@ export function DesktopHeader({
   }, [session])
 
   return (
-    <header className="flex h-11 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3">
+    <header className="flex h-11 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3 electron-drag">
       <div className="flex items-center gap-2 min-w-0">
         <Tooltip>
           <TooltipTrigger asChild>

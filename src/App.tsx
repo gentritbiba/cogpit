@@ -306,10 +306,15 @@ export default function App() {
     />
   )
 
+  const branchModalCurrentTurns = branchModalTurn !== null && state.session
+    ? state.session.turns.slice(branchModalTurn)
+    : []
+
   const branchModal = branchModalTurn !== null && branchModalBranches.length > 0 && (
     <BranchModal
       branches={branchModalBranches}
       branchPointTurnIndex={branchModalTurn}
+      currentTurns={branchModalCurrentTurns}
       onClose={handleCloseBranchModal}
       onRedoToTurn={handleRedoToTurn}
       onRedoEntireBranch={handleRedoEntireBranch}

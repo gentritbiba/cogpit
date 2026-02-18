@@ -192,6 +192,24 @@
   pointer-events: none;
 }
 
+/* Electron window drag region */
+.electron-drag {
+  -webkit-app-region: drag;
+}
+.electron-drag button,
+.electron-drag a,
+.electron-drag input,
+.electron-drag [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+/* macOS traffic light inset — only in Electron where the native
+   title bar is hidden. The "electron" class is set on <html> via
+   inline script in index.html based on user-agent detection. */
+html.electron .electron-drag {
+  padding-left: 96px;
+}
+
 /* Desktop scrollbar styling */
 @media (min-width: 768px) {
   ::-webkit-scrollbar {
