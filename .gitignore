@@ -6,3 +6,7 @@ config.local.json
 undo-history/
 audit-history/
 test-results/
+
+# Electron
+out/
+release/
