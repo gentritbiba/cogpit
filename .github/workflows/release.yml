@@ -135,7 +135,7 @@ jobs:
         run: |
           cd aur-repo
           docker run --rm -v "$PWD:/pkg" archlinux:base bash -c \
-            "pacman -Sy --noconfirm pacman-contrib && chown -R nobody:nobody /pkg && su nobody -s /bin/bash -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
+            "pacman -Sy --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
 
       - name: Push to AUR
         run: |
