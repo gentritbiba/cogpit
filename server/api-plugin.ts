@@ -11,6 +11,13 @@ import { createInterface } from "node:readline"
 
 import { getConfig, loadConfig, saveConfig, validateClaudeDir, getDirs } from "./config"
 
+function friendlySpawnError(err: NodeJS.ErrnoException): string {
+  if (err.code === "ENOENT") {
+    return "Claude CLI is not installed or not found in PATH. Install it with: npm install -g @anthropic-ai/claude-code"
+  }
+  return err.message
+}
+
 // Mutable directory references, updated when config changes
 let dirs = {
   PROJECTS_DIR: "",
@@ -1220,8 +1227,9 @@ export function sessionApiPlugin(): Plugin {
               }
             })
 
-            child.stderr.on("data", () => {
-              // discard stderr (logged to JSONL by claude itself)
+            let persistentStderr = ""
+            child.stderr.on("data", (data: Buffer) => {
+              persistentStderr += data.toString()
             })
 
             child.on("close", (code) => {
@@ -1235,17 +1243,19 @@ export function sessionApiPlugin(): Plugin {
                   type: "result",
                   subtype: wasKilled ? "success" : "error",
                   is_error: !wasKilled,
-                  result: wasKilled ? undefined : `claude exited with code ${code}`,
+                  result: wasKilled
+                    ? undefined
+                    : persistentStderr.trim() || `claude exited with code ${code}`,
                 })
               }
             })
 
-            child.on("error", (err) => {
+            child.on("error", (err: NodeJS.ErrnoException) => {
               ps.dead = true
               activeProcesses.delete(sessionId)
               persistentSessions.delete(sessionId)
               if (ps.onResult) {
-                ps.onResult({ type: "result", is_error: true, result: err.message })
+                ps.onResult({ type: "result", is_error: true, result: friendlySpawnError(err) })
               }
             })
 
@@ -1404,12 +1414,12 @@ export function sessionApiPlugin(): Plugin {
               }
             }, 60000) // 60s — the first turn may take a while
 
-            child.on("error", (err) => {
+            child.on("error", (err: NodeJS.ErrnoException) => {
               if (!responded) {
                 responded = true
                 clearTimeout(timeout)
                 res.statusCode = 500
-                res.end(JSON.stringify({ error: err.message }))
+                res.end(JSON.stringify({ error: friendlySpawnError(err) }))
               }
             })
 
