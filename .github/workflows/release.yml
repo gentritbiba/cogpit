@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -38,21 +39,17 @@ jobs:
 
       - name: Build and package (macOS)
         if: matrix.os == 'macos-latest'
-        run: bun run electron:package -- --mac --arm64 --x64
+        run: bun run electron:package -- --mac --arm64 --x64 --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build and package (Windows)
         if: matrix.os == 'windows-latest'
-        run: bun run electron:package -- --win --x64
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run electron:package -- --win --x64 --publish never
 
       - name: Build and package (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: bun run electron:package -- --linux --x64
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run electron:package -- --linux --x64 --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

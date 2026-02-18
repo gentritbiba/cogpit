@@ -1,8 +1,22 @@
 # Cogpit
 
-A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions.
+A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions. Available as a **desktop app** (macOS, Windows, Linux) or a **browser-based** dev server.
 
 Cogpit reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and presents them as a rich, interactive UI — with live streaming, conversation timelines, token analytics, undo/redo with branching, team dashboards, and the ability to chat with running sessions.
+
+## Download
+
+Grab the latest release for your platform from the [Releases page](https://github.com/gentritbiba/cogpit/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `Cogpit-x.x.x-arm64.dmg` |
+| macOS (Intel) | `Cogpit-x.x.x.dmg` |
+| Windows | `Cogpit-x.x.x-Setup.exe` |
+| Linux (AppImage) | `Cogpit-x.x.x.AppImage` |
+| Linux (Debian/Ubuntu) | `Cogpit-x.x.x.deb` |
+
+> **Requirement:** You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed on your machine. Cogpit uses your existing Claude CLI — no separate login or API key needed.
 
 ## Features
 
@@ -96,6 +110,7 @@ Full desktop and mobile support with distinct layouts:
 |-------|------------|
 | UI | React 19, TypeScript 5.6 |
 | Build | Vite 6 with React Compiler |
+| Desktop | Electron (electron-vite + electron-builder) |
 | Styling | Tailwind CSS 4 |
 | Components | Radix UI (headless primitives) |
 | Icons | Lucide React |
@@ -103,26 +118,32 @@ Full desktop and mobile support with distinct layouts:
 | Virtualization | @tanstack/react-virtual |
 | Markdown | react-markdown |
 | Layout | react-resizable-panels |
-| Backend | Vite dev server with custom plugins |
+| Backend | Express 5 (Electron) / Vite plugins (dev) |
 | Real-time | Server-Sent Events (SSE) + WebSocket |
 | Terminal | node-pty (pseudo-terminal) |
 
 ## Getting Started
 
-### Prerequisites
+### Desktop App (recommended)
+
+Download the installer for your platform from the [Releases page](https://github.com/gentritbiba/cogpit/releases) and open it. On first launch, Cogpit will ask you to confirm the path to your `.claude` directory.
+
+### From Source
+
+#### Prerequisites
 
 - [Bun](https://bun.sh/) (or Node.js 18+)
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and used at least once (so `~/.claude/projects/` exists)
 
-### Install
+#### Install
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/gentritbiba/cogpit.git
 cd cogpit
 bun install
 ```
 
-### Run
+#### Run (browser)
 
 ```bash
 bun run dev
@@ -130,14 +151,28 @@ bun run dev
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### Build
+#### Run (Electron)
+
+```bash
+bun run electron:dev
+```
+
+#### Build (web)
 
 ```bash
 bun run build
 bun run preview
 ```
 
-### Lint & Type Check
+#### Build (Electron)
+
+```bash
+bun run electron:package
+```
+
+Outputs to `release/` — produces a DMG on macOS, NSIS installer on Windows, AppImage + deb on Linux.
+
+#### Lint & Type Check
 
 ```bash
 bun run lint
@@ -146,11 +181,20 @@ bun run typecheck
 
 ## Configuration
 
-On first launch, Cogpit shows a setup screen to configure the path to your `.claude` directory (defaults to `~/.claude`). The configuration is saved to `config.local.json` at the project root and can be changed later via the settings dialog.
+On first launch, Cogpit shows a setup screen to configure the path to your `.claude` directory (defaults to `~/.claude`). In the desktop app, the configuration is stored in the system's app data directory. In the web version, it's saved to `config.local.json` at the project root. Both can be changed later via the settings dialog.
 
 The configured directory must contain a `projects/` subdirectory where Claude Code stores session files.
 
 ## How It Works
+
+### Architecture
+
+Cogpit ships as two targets from a single codebase:
+
+- **Web** — `bun run dev` starts a Vite dev server with custom plugins that serve the API and PTY WebSocket alongside the frontend.
+- **Desktop** — `bun run electron:dev` starts an Electron app with an embedded Express server that imports the same shared route modules. The frontend is loaded from the Express server, which proxies to Vite for HMR during development.
+
+The API routes live in `server/routes/` as small, independent modules. Both the Vite plugin and the Express server register them via the same `register*Routes(use)` interface — no code duplication.
 
 ### Session Parsing
 
@@ -165,7 +209,7 @@ For live sessions, an incremental `parseSessionAppend` function efficiently rebu
 
 ### API Layer
 
-Cogpit runs a custom Vite plugin that exposes REST + SSE endpoints:
+Cogpit exposes REST + SSE endpoints (via Vite plugin in dev, Express in Electron):
 
 | Endpoint | Description |
 |----------|-------------|
@@ -192,62 +236,55 @@ Cogpit runs a custom Vite plugin that exposes REST + SSE endpoints:
 
 ```
 cogpit/
+├── electron/
+│   ├── main.ts                            # Electron main process
+│   ├── server.ts                          # Embedded Express server + PTY
+│   └── preload.ts                         # Preload script (sandboxed)
 ├── src/
-│   ├── App.tsx                          # Root component & layout orchestration
-│   ├── main.tsx                         # React entry point
-│   ├── index.css                        # Tailwind config & global styles
+│   ├── App.tsx                            # Root component & layout orchestration
+│   ├── main.tsx                           # React entry point
+│   ├── index.css                          # Tailwind config & global styles
 │   ├── components/
-│   │   ├── ConversationTimeline.tsx     # Virtualized turn list
-│   │   ├── ChatArea.tsx                 # Chat display + controls
-│   │   ├── ChatInput.tsx                # Message composer
-│   │   ├── SessionBrowser.tsx           # Sidebar session navigator
-│   │   ├── StatsPanel.tsx               # Token chart & analytics
-│   │   ├── FileChangesPanel.tsx         # File modification tracker
-│   │   ├── TeamsDashboard.tsx           # Team overview
-│   │   ├── Dashboard.tsx                # Project/session grid
-│   │   ├── PermissionsPanel.tsx         # Permission configuration
-│   │   ├── BranchModal.tsx              # Branch switcher
-│   │   ├── UndoConfirmDialog.tsx        # Undo confirmation
-│   │   ├── ServerPanel.tsx              # Active server processes
-│   │   ├── SetupScreen.tsx              # First-run configuration
-│   │   ├── timeline/                    # Turn rendering components
-│   │   │   ├── UserMessage.tsx
-│   │   │   ├── AssistantText.tsx
-│   │   │   ├── ThinkingBlock.tsx
-│   │   │   ├── ToolCallCard.tsx
-│   │   │   ├── EditDiffView.tsx
-│   │   │   └── SubAgentPanel.tsx
-│   │   ├── teams/                       # Team dashboard components
-│   │   │   ├── MembersGrid.tsx
-│   │   │   ├── TaskBoard.tsx
-│   │   │   └── MessageTimeline.tsx
-│   │   └── ui/                          # Radix UI primitive wrappers
-│   ├── hooks/
-│   │   ├── useSessionState.ts           # Central state reducer
-│   │   ├── useLiveSession.ts            # SSE streaming & incremental parsing
-│   │   ├── usePtyChat.ts                # Chat message API
-│   │   ├── useUndoRedo.ts               # Undo/redo & branching logic
-│   │   ├── useSessionActions.ts         # Session load/navigate handlers
-│   │   ├── useUrlSync.ts                # Hash-based URL routing
-│   │   ├── useSessionTeam.ts            # Team detection for sessions
-│   │   ├── usePermissions.ts            # Permission state (localStorage)
-│   │   ├── useAppConfig.ts              # Directory configuration
-│   │   └── ...                          # Keyboard shortcuts, scroll, etc.
-│   └── lib/
-│       ├── types.ts                     # TypeScript interfaces
-│       ├── team-types.ts                # Team-specific types
-│       ├── parser.ts                    # JSONL → ParsedSession pipeline
-│       ├── format.ts                    # Token/cost/duration formatters
-│       ├── undo-engine.ts               # File operation reversal logic
-│       └── permissions.ts               # Permission mode utilities
+│   │   ├── ConversationTimeline.tsx       # Virtualized turn list
+│   │   ├── ChatArea.tsx                   # Chat display + controls
+│   │   ├── ChatInput.tsx                  # Message composer
+│   │   ├── SessionBrowser.tsx             # Sidebar session navigator
+│   │   ├── StatsPanel.tsx                 # Token chart & analytics
+│   │   ├── FileChangesPanel.tsx           # File modification tracker
+│   │   ├── TeamsDashboard.tsx             # Team overview
+│   │   ├── Dashboard.tsx                  # Project/session grid
+│   │   ├── PermissionsPanel.tsx           # Permission configuration
+│   │   ├── BranchModal.tsx                # Branch switcher
+│   │   ├── UndoConfirmDialog.tsx          # Undo confirmation
+│   │   ├── ServerPanel.tsx                # Active server processes
+│   │   ├── SetupScreen.tsx                # First-run configuration
+│   │   ├── DesktopHeader.tsx              # Title bar (draggable in Electron)
+│   │   ├── timeline/                      # Turn rendering components
+│   │   └── teams/                         # Team dashboard components
+│   ├── hooks/                             # React hooks (state, SSE, undo, etc.)
+│   └── lib/                               # Types, parser, formatters, utils
 ├── server/
-│   ├── api-plugin.ts                    # Vite plugin: REST + SSE API
-│   ├── pty-plugin.ts                    # Vite plugin: WebSocket PTY
-│   └── config.ts                        # Config file I/O
+│   ├── api-plugin.ts                      # Vite plugin wrapper
+│   ├── pty-plugin.ts                      # Vite plugin: WebSocket PTY
+│   ├── config.ts                          # Config file I/O
+│   ├── helpers.ts                         # Shared state & utilities
+│   └── routes/                            # API route modules (12 files)
+│       ├── config.ts
+│       ├── projects.ts
+│       ├── claude.ts
+│       ├── claude-new.ts
+│       ├── claude-manage.ts
+│       ├── ports.ts
+│       ├── teams.ts
+│       ├── team-session.ts
+│       ├── undo.ts
+│       ├── files.ts
+│       └── files-watch.ts
+├── .github/workflows/release.yml          # CI: build + publish releases
+├── electron.vite.config.ts                # Electron build config
+├── electron-builder.yml                   # Packaging config (all platforms)
 ├── vite.config.ts
-├── package.json
-├── tsconfig.app.json
-└── tsconfig.node.json
+└── package.json
 ```
 
 ## License
