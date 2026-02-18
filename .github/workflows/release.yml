@@ -140,6 +140,7 @@ jobs:
       - name: Push to AUR
         run: |
           cd aur-repo
+          sudo chown -R "$(id -u):$(id -g)" .
           git config user.name "Gentrit Biba"
           git config user.email "gentritbiba@gmail.com"
           git add PKGBUILD .SRCINFO
