@@ -502,6 +502,19 @@ export default function App() {
         {undoConfirmDialog}
         {branchModal}
         {errorToast || sseIndicator}
+
+        {/* Global loading overlay when creating a new session */}
+        {creatingSession && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/95 px-8 py-6 shadow-2xl">
+              <Loader2 className="size-8 animate-spin text-blue-400" />
+              <div className="text-center">
+                <p className="text-sm font-medium text-zinc-200">Creating session...</p>
+                <p className="mt-1 text-xs text-zinc-500">Starting a new Claude session</p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -633,6 +646,19 @@ export default function App() {
       />
 
       {errorToast || sseIndicator}
+
+      {/* Global loading overlay when creating a new session */}
+      {creatingSession && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/95 px-8 py-6 shadow-2xl">
+            <Loader2 className="size-8 animate-spin text-blue-400" />
+            <div className="text-center">
+              <p className="text-sm font-medium text-zinc-200">Creating session...</p>
+              <p className="mt-1 text-xs text-zinc-500">Starting a new Claude session</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

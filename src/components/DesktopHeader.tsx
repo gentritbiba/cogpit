@@ -198,16 +198,14 @@ export function DesktopHeader({
             <TooltipContent>{showStats ? "Hide Stats" : "Show Stats"}</TooltipContent>
           </Tooltip>
         )}
-        {(session || showSidebar) && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onToggleSidebar} aria-label={showSidebar ? "Hide Sidebar" : "Show Sidebar"}>
-                {showSidebar ? <PanelLeftClose className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}</TooltipContent>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onToggleSidebar} aria-label={showSidebar ? "Hide Sidebar" : "Show Sidebar"}>
+              {showSidebar ? <PanelLeftClose className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}</TooltipContent>
+        </Tooltip>
       </div>
     </header>
   )

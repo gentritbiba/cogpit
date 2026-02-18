@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
@@ -262,10 +263,15 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
                   <span>{formatFileSize(s.size)}</span>
                   <span>{formatRelativeTime(s.lastModified)}</span>
                   {hasProcess && proc && (
-                    <span className="flex items-center gap-0.5 text-green-500">
-                      <Cpu className="size-2.5" />
-                      {proc.memMB} MB
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="flex items-center gap-0.5 text-green-500">
+                          <Cpu className="size-2.5" />
+                          {proc.memMB} MB
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>RAM usage for this session</TooltipContent>
+                    </Tooltip>
                   )}
                 </div>
               </button>
@@ -293,10 +299,15 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
                       {describeProcess(p)}
                     </div>
                     <div className="flex items-center gap-2 text-[10px] text-zinc-600">
-                      <span className="flex items-center gap-0.5">
-                        <HardDrive className="size-2.5" />
-                        {p.memMB} MB
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="flex items-center gap-0.5">
+                            <HardDrive className="size-2.5" />
+                            {p.memMB} MB
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>RAM usage for this process</TooltipContent>
+                      </Tooltip>
                       <span>PID {p.pid}</span>
                       <span>{p.tty !== "??" ? p.tty : "bg"}</span>
                       <span>{p.startTime}</span>

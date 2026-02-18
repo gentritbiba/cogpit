@@ -79,6 +79,16 @@ Configure how the dashboard interacts with Claude Code:
 - Tool allowlist / blocklist
 - Visual permission configuration panel
 
+### Network Access
+Access Cogpit from other devices on your local network:
+- **Opt-in** — enable via the settings dialog with a password
+- **Password-protected** — remote clients see a login screen before accessing the dashboard
+- **Connection URL** — displayed in the header bar, click to copy
+- **Full access** — remote clients get the same capabilities as local (chat, undo/redo, teams, etc.)
+- **Requires restart** — changing network settings takes effect after restarting the app
+
+The server binds to `0.0.0.0:19384` when network access is enabled. Local clients (localhost) bypass authentication entirely.
+
 ### File Changes Panel
 Track all file modifications in a session — shows Edit and Write operations with a resizable split-pane view.
 
@@ -186,6 +196,8 @@ On first launch, Cogpit shows a setup screen to configure the path to your `.cla
 
 The configured directory must contain a `projects/` subdirectory where Claude Code stores session files.
 
+**Network access** can be enabled in the settings dialog by toggling "Network Access" on and setting a password. Remote devices on the same LAN can then connect to `http://<your-ip>:19384` and authenticate with the password. The connection URL is shown in the app header. Changing network settings requires an app restart.
+
 ## How It Works
 
 ### Architecture
@@ -226,6 +238,8 @@ Cogpit exposes REST + SSE endpoints (via Vite plugin in dev, Express in Electron
 | `GET /api/watch-team/:name` | SSE stream for team updates |
 | `GET /api/config` | Get current configuration |
 | `POST /api/config` | Save configuration |
+| `GET /api/network-info` | Get network access status and LAN URL |
+| `POST /api/auth/verify` | Verify password for remote clients |
 
 ### Real-Time Updates
 
@@ -259,11 +273,14 @@ cogpit/
 │   │   ├── UndoConfirmDialog.tsx          # Undo confirmation
 │   │   ├── ServerPanel.tsx                # Active server processes
 │   │   ├── SetupScreen.tsx                # First-run configuration
+│   │   ├── LoginScreen.tsx                # Remote client password entry
 │   │   ├── DesktopHeader.tsx              # Title bar (draggable in Electron)
 │   │   ├── timeline/                      # Turn rendering components
 │   │   └── teams/                         # Team dashboard components
 │   ├── hooks/                             # React hooks (state, SSE, undo, etc.)
-│   └── lib/                               # Types, parser, formatters, utils
+│   ├── lib/
+│   │   ├── auth.ts                        # Network auth (authFetch, authUrl, token mgmt)
+│   │   └── ...                            # Types, parser, formatters, utils
 ├── server/
 │   ├── api-plugin.ts                      # Vite plugin wrapper
 │   ├── pty-plugin.ts                      # Vite plugin: WebSocket PTY
