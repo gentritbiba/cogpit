@@ -23,6 +23,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { shortenModel, formatRelativeTime, formatFileSize, truncate } from "@/lib/format"
+import { authFetch } from "@/lib/auth"
 
 interface ProjectInfo {
   dirName: string
@@ -101,8 +102,8 @@ export const Dashboard = memo(function Dashboard({
     if (isRefresh) setRefreshing(true)
     try {
       const [projectsRes, sessionsRes] = await Promise.all([
-        fetch("/api/projects"),
-        fetch("/api/active-sessions"),
+        authFetch("/api/projects"),
+        authFetch("/api/active-sessions"),
       ])
       if (!projectsRes.ok || !sessionsRes.ok) {
         throw new Error("Failed to fetch dashboard data")
@@ -149,7 +150,7 @@ export const Dashboard = memo(function Dashboard({
     setSessionsLoading(true)
     setSessions([])
     setFetchError(null)
-    fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
+    authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
         return res.json()
@@ -191,7 +192,7 @@ export const Dashboard = memo(function Dashboard({
     const nextPage = sessionsPage + 1
     setSessionsLoading(true)
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
+      const res = await authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
       if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
       const data = await res.json()
       setSessions((prev) => [...prev, ...data.sessions])
@@ -323,7 +324,7 @@ export const Dashboard = memo(function Dashboard({
                     // Re-trigger session load by resetting the ref
                     setSessionsLoading(true)
                     setSessions([])
-                    fetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
+                    authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
                       .then((res) => {
                         if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
                         return res.json()

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useTeamLive } from "./useTeamLive"
+import { authFetch } from "@/lib/auth"
 import type { TeamConfig } from "@/lib/team-types"
 
 export interface SessionTeamContext {
@@ -44,7 +45,7 @@ export function useSessionTeam(
     if (!params) return
 
     try {
-      const res = await fetch(`/api/session-team?${params}`)
+      const res = await authFetch(`/api/session-team?${params}`)
       if (!res.ok) {
         setCtx(null)
         return

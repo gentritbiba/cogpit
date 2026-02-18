@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/format"
 import type { TeamListItem } from "@/lib/team-types"
 
@@ -18,7 +19,7 @@ export function TeamsList({ onSelectTeam }: TeamsListProps) {
   const fetchTeams = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/teams")
+      const res = await authFetch("/api/teams")
       const data = await res.json()
       setTeams(data)
     } catch (err) {

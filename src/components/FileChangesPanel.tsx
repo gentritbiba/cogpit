@@ -5,6 +5,7 @@ import { EditDiffView } from "./timeline/EditDiffView"
 import { getToolBadgeStyle } from "./timeline/ToolCallCard"
 import type { ParsedSession, ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 
 // Cache: sessionId -> { pathsHash, deletedFiles }
 const deletedFilesCache = new Map<string, { pathsHash: string; deleted: Map<string, number> }>()
@@ -289,7 +290,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     }
 
     let cancelled = false
-    fetch("/api/check-files-exist", {
+    authFetch("/api/check-files-exist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files: paths, dirs }),

@@ -1,8 +1,77 @@
 import type { UseFn } from "../helpers"
-import { refreshDirs } from "../helpers"
+import { refreshDirs, isLocalRequest, safeCompare } from "../helpers"
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
+import { networkInterfaces } from "node:os"
+
+function getLanIp(): string | null {
+  const ifaces = networkInterfaces()
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address
+      }
+    }
+  }
+  return null
+}
 
 export function registerConfigRoutes(use: UseFn) {
+  // GET /api/network-info
+  use("/api/network-info", (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const config = getConfig()
+    if (!config?.networkAccess || !config?.networkPassword) {
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({ enabled: false }))
+      return
+    }
+    const host = getLanIp()
+    const port = (req.socket.address() as { port?: number })?.port || 19384
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({
+      enabled: true,
+      host,
+      port,
+      url: host ? `http://${host}:${port}` : null,
+    }))
+  })
+
+  // POST /api/auth/verify — public endpoint, validates password directly
+  use("/api/auth/verify", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    res.setHeader("Content-Type", "application/json")
+
+    // Local requests always pass
+    if (isLocalRequest(req)) {
+      res.end(JSON.stringify({ valid: true }))
+      return
+    }
+
+    const config = getConfig()
+    if (!config?.networkAccess || !config?.networkPassword) {
+      res.statusCode = 403
+      res.end(JSON.stringify({ valid: false, error: "Network access is disabled" }))
+      return
+    }
+
+    const authHeader = req.headers.authorization
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null
+
+    if (!token) {
+      res.statusCode = 401
+      res.end(JSON.stringify({ valid: false, error: "Password required" }))
+      return
+    }
+
+    if (!safeCompare(token, config.networkPassword)) {
+      res.statusCode = 401
+      res.end(JSON.stringify({ valid: false, error: "Invalid password" }))
+      return
+    }
+
+    res.end(JSON.stringify({ valid: true }))
+  })
+
   // GET /api/config/validate?path=... - validate a path without saving
   use("/api/config/validate", async (req, res, next) => {
     if (req.method !== "GET") return next()
@@ -30,7 +99,11 @@ export function registerConfigRoutes(use: UseFn) {
       if (req.url && req.url !== "/" && req.url !== "" && !req.url.startsWith("?")) return next()
       const config = getConfig()
       res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify(config))
+      res.end(JSON.stringify(config ? {
+        claudeDir: config.claudeDir,
+        networkAccess: config.networkAccess || false,
+        networkPassword: config.networkPassword ? "••••••••" : null,
+      } : null))
       return
     }
 
@@ -39,7 +112,8 @@ export function registerConfigRoutes(use: UseFn) {
       req.on("data", (chunk: Buffer) => { body += chunk.toString() })
       req.on("end", async () => {
         try {
-          const { claudeDir } = JSON.parse(body)
+          const parsed = JSON.parse(body)
+          const { claudeDir } = parsed
           if (!claudeDir || typeof claudeDir !== "string") {
             res.statusCode = 400
             res.setHeader("Content-Type", "application/json")
@@ -55,7 +129,19 @@ export function registerConfigRoutes(use: UseFn) {
             return
           }
 
-          await saveConfig({ claudeDir: validation.resolved || claudeDir })
+          const currentConfig = getConfig()
+          const finalPassword = parsed.networkPassword || currentConfig?.networkPassword || undefined
+          if (parsed.networkAccess && !finalPassword) {
+            res.statusCode = 400
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Password required when enabling network access" }))
+            return
+          }
+          await saveConfig({
+            claudeDir: validation.resolved || claudeDir,
+            networkAccess: !!parsed.networkAccess,
+            networkPassword: finalPassword,
+          })
           refreshDirs()
 
           res.setHeader("Content-Type", "application/json")

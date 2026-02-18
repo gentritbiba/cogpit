@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react"
+import { authFetch } from "@/lib/auth"
 
 export type ValidationStatus = "idle" | "validating" | "valid" | "invalid"
 
@@ -16,7 +17,7 @@ export function useConfigValidation() {
     setStatus("validating")
     setError(null)
     try {
-      const res = await fetch(`/api/config/validate?path=${encodeURIComponent(value)}`)
+      const res = await authFetch(`/api/config/validate?path=${encodeURIComponent(value)}`)
       const data = await res.json()
       if (data.valid) {
         setStatus("valid")
@@ -42,12 +43,12 @@ export function useConfigValidation() {
     clearTimeout(timerRef.current)
   }, [])
 
-  const save = useCallback(async (path: string): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
+  const save = useCallback(async (path: string, networkOpts?: { networkAccess?: boolean; networkPassword?: string }): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
     try {
-      const res = await fetch("/api/config", {
+      const res = await authFetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeDir: path }),
+        body: JSON.stringify({ claudeDir: path, ...networkOpts }),
       })
       const data = await res.json()
       if (res.ok && data.success) {

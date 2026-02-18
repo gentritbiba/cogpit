@@ -9,7 +9,7 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { setConfigPath, loadConfig, getConfig } from "../server/config"
-import { dirs, refreshDirs, cleanupProcesses } from "../server/helpers"
+import { dirs, refreshDirs, cleanupProcesses, authMiddleware, isLocalRequest, safeCompare } from "../server/helpers"
 import { registerConfigRoutes } from "../server/routes/config"
 import { registerProjectRoutes } from "../server/routes/projects"
 import { registerClaudeRoutes } from "../server/routes/claude"
@@ -63,6 +63,9 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   const app = express()
   const httpServer = createServer(app)
+
+  // ── Auth middleware (before all routes) ────────────────────────────
+  app.use(authMiddleware)
 
   // ── Guard middleware ────────────────────────────────────────────
   app.use("/api", (req, res, next) => {
@@ -123,6 +126,16 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url || "/", "http://localhost")
     if (url.pathname === "/__pty") {
+      // Auth check for remote WebSocket connections
+      if (!isLocalRequest(req)) {
+        const cfg = getConfig()
+        const token = url.searchParams.get("token")
+        if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !safeCompare(token, cfg.networkPassword)) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
+          socket.destroy()
+          return
+        }
+      }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
       return
     }

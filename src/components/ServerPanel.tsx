@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, Fragment, memo } from "react"
+import { authUrl } from "@/lib/auth"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import {
   ResizablePanelGroup,
@@ -37,7 +38,7 @@ function ServerOutput({ outputPath, title }: { outputPath: string; title: string
     if (!outputPath) return
 
     const es = new EventSource(
-      `/api/task-output?path=${encodeURIComponent(outputPath)}`
+      authUrl(`/api/task-output?path=${encodeURIComponent(outputPath)}`)
     )
 
     es.onopen = () => setConnected(true)

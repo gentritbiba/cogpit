@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { authUrl } from "@/lib/auth"
 
 export function useTeamLive(
   teamName: string | null,
@@ -15,7 +16,7 @@ export function useTeamLive(
     }
 
     const url = `/api/team-watch/${encodeURIComponent(teamName)}`
-    const es = new EventSource(url)
+    const es = new EventSource(authUrl(url))
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
     const resetStaleTimer = () => {

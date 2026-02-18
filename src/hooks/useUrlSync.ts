@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
 import { parseSession } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -99,7 +100,7 @@ export function useUrlSync({
       try {
         if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
           const fileName = fileNameFromSessionId(parsed.sessionId)
-          const res = await fetch(
+          const res = await authFetch(
             `/api/sessions/${encodeURIComponent(parsed.dirName)}/${encodeURIComponent(fileName)}`
           )
           if (!res.ok) {

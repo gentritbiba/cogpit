@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react"
 import { Send, Loader2, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 import type { TeamMember } from "@/lib/team-types"
 import { getMemberColorClass } from "@/lib/team-types"
 
@@ -27,7 +28,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
     setError(null)
 
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/team-message/${encodeURIComponent(teamName)}/${encodeURIComponent(selectedMember)}`,
         {
           method: "POST",

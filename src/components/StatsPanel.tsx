@@ -19,6 +19,7 @@ import {
   CollapsibleContent,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 import type { ParsedSession, Turn, ToolCall } from "@/lib/types"
 import { formatTokenCount, truncate } from "@/lib/format"
 import { getUserMessageText, getToolColor } from "@/lib/parser"
@@ -412,7 +413,7 @@ function BackgroundServers({
     async function check() {
       try {
         // Primary: scan Claude's task output directory
-        const res = await fetch(
+        const res = await authFetch(
           `/api/background-tasks?cwd=${encodeURIComponent(cwd)}`
         )
         if (cancelled) return
@@ -430,7 +431,7 @@ function BackgroundServers({
           return
         }
         const portsToCheck = [...jsonlPorts.keys()]
-        const portRes = await fetch(
+        const portRes = await authFetch(
           `/api/check-ports?ports=${portsToCheck.join(",")}`
         )
         if (cancelled) return
@@ -466,7 +467,7 @@ function BackgroundServers({
   const handleKillPort = useCallback(
     async (port: number) => {
       try {
-        await fetch("/api/kill-port", {
+        await authFetch("/api/kill-port", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ port }),

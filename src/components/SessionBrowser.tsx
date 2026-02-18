@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { parseSession } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
 import type { ParsedSession } from "@/lib/types"
 import {
   shortenModel,
@@ -139,7 +140,7 @@ export const SessionBrowser = memo(function SessionBrowser({
     setIsLoading(true)
     setFetchError(null)
     try {
-      const res = await fetch("/api/projects")
+      const res = await authFetch("/api/projects")
       if (!res.ok) throw new Error(`Failed to load projects (${res.status})`)
       const data = await res.json()
       setProjects(data)
@@ -157,7 +158,7 @@ export const SessionBrowser = memo(function SessionBrowser({
       setSelectedProject(project)
     }
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
+      const res = await authFetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
       if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
       const data = await res.json()
       if (append) {
@@ -180,7 +181,7 @@ export const SessionBrowser = memo(function SessionBrowser({
       setIsLoading(true)
       setFetchError(null)
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/sessions/${encodeURIComponent(project.dirName)}/${encodeURIComponent(session.fileName)}`
         )
         if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
@@ -206,7 +207,7 @@ export const SessionBrowser = memo(function SessionBrowser({
       setIsLoading(true)
       setFetchError(null)
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
         if (!res.ok) throw new Error(`Failed to load session (${res.status})`)

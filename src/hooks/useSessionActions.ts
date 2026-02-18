@@ -6,6 +6,7 @@ import type { SessionSource } from "./useLiveSession"
 import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
 import { parseSession } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -38,7 +39,7 @@ export function useSessionActions({
     async (dirName: string, fileName: string) => {
       setLoadError(null)
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
         if (!res.ok) {
@@ -59,7 +60,7 @@ export function useSessionActions({
     async (dirName: string, fileName: string, memberName?: string) => {
       setLoadError(null)
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
         if (!res.ok) {
@@ -90,7 +91,7 @@ export function useSessionActions({
       setLoadError(null)
       dispatch({ type: "SET_LOADING_MEMBER", name: member.name })
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/team-member-session/${encodeURIComponent(teamContext.teamName)}/${encodeURIComponent(member.name)}`
         )
         if (!res.ok) {
@@ -99,7 +100,7 @@ export function useSessionActions({
         }
         const { dirName, fileName } = await res.json()
 
-        const contentRes = await fetch(
+        const contentRes = await authFetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
         if (!contentRes.ok) {

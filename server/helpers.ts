@@ -6,6 +6,7 @@ import { homedir } from "node:os"
 import { spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { appendFile } from "node:fs/promises"
+import { timingSafeEqual } from "node:crypto"
 
 import { getConfig, getDirs } from "./config"
 
@@ -51,6 +52,65 @@ export function refreshDirs(): boolean {
 export function isWithinDir(parent: string, child: string): boolean {
   const resolved = resolve(child)
   return resolved.startsWith(resolve(parent) + "/") || resolved === resolve(parent)
+}
+
+// ── Network auth ────────────────────────────────────────────────────────
+
+const LOCAL_ADDRS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+
+export function isLocalRequest(req: IncomingMessage): boolean {
+  return LOCAL_ADDRS.has(req.socket.remoteAddress || "")
+}
+
+export function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) {
+    timingSafeEqual(bufA, bufA)
+    return false
+  }
+  return timingSafeEqual(bufA, bufB)
+}
+
+// Paths that remote clients can access without auth (login page assets + verify endpoint)
+const PUBLIC_PATHS = new Set(["/api/auth/verify"])
+
+function isPublicPath(url: string): boolean {
+  if (PUBLIC_PATHS.has(url.split("?")[0])) return true
+  // Allow static assets so the login screen can load
+  if (!url.startsWith("/api/") && !url.startsWith("/__pty")) return true
+  return false
+}
+
+export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  if (isLocalRequest(req)) return next()
+  if (isPublicPath(req.url || "/")) return next()
+
+  const config = getConfig()
+  if (!config?.networkAccess || !config?.networkPassword) {
+    res.statusCode = 403
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ error: "Network access is disabled" }))
+    return
+  }
+
+  const authHeader = req.headers.authorization
+  let token: string | null = null
+  if (authHeader?.startsWith("Bearer ")) {
+    token = authHeader.slice(7)
+  } else {
+    const url = new URL(req.url || "/", "http://localhost")
+    token = url.searchParams.get("token")
+  }
+
+  if (!token || !safeCompare(token, config.networkPassword)) {
+    res.statusCode = 401
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ error: "Authentication required" }))
+    return
+  }
+
+  next()
 }
 
 // ── Subagent matching ───────────────────────────────────────────────────

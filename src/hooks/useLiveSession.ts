@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { parseSession, parseSessionAppend } from "@/lib/parser"
+import { authUrl } from "@/lib/auth"
 import type { ParsedSession } from "@/lib/types"
 
 export interface SessionSource {
@@ -46,7 +47,7 @@ export function useLiveSession(
     setSseState("connecting")
 
     const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
-    const es = new EventSource(url)
+    const es = new EventSource(authUrl(url))
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
     const resetStaleTimer = () => {

@@ -21,6 +21,7 @@ interface MobileHeaderProps {
   isLive: boolean
   killing: boolean
   creatingSession: boolean
+  networkUrl: string | null
   onGoHome: () => void
   onKillAll: () => void
   onOpenSettings: () => void
@@ -33,6 +34,7 @@ export function MobileHeader({
   isLive,
   killing,
   creatingSession,
+  networkUrl,
   onGoHome,
   onKillAll,
   onOpenSettings,
@@ -91,7 +93,12 @@ export function MobileHeader({
             })()}
           </>
         ) : (
-          <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
+          <div className="flex flex-col min-w-0">
+            <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
+            {networkUrl && (
+              <span className="text-[10px] font-mono text-zinc-600 truncate">{networkUrl}</span>
+            )}
+          </div>
         )}
       </div>
 

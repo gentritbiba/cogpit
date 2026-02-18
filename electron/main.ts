@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createAppServer } from "./server.ts"
+import { getConfig } from "../server/config"
 
 // macOS/Linux GUI apps don't inherit the user's shell PATH.
 // Spawn their shell to get the real PATH so `claude` CLI is found.
@@ -57,12 +58,16 @@ app.whenReady().then(async () => {
   // Start embedded server
   const { httpServer } = await createAppServer(staticDir, userDataDir)
 
-  // Fixed port in dev (for predictable proxy), random in production
+  // Bind to 0.0.0.0 when network access is enabled, otherwise localhost only
   const isDev = !!process.env.ELECTRON_RENDERER_URL
-  const listenPort = isDev ? 19384 : 0
+  const config = getConfig()
+  const networkEnabled = config?.networkAccess && config?.networkPassword
+
+  const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
+  const listenPort = isDev ? 19384 : (networkEnabled ? 19384 : 0)
 
   await new Promise<void>((resolve) => {
-    httpServer.listen(listenPort, "127.0.0.1", () => resolve())
+    httpServer.listen(listenPort, listenHost, () => resolve())
   })
 
   const address = httpServer.address()
@@ -74,7 +79,7 @@ app.whenReady().then(async () => {
     return
   }
 
-  console.log(`Cogpit server listening on http://127.0.0.1:${port}`)
+  console.log(`Cogpit server listening on http://${listenHost}:${port}`)
 
   await createWindow(port)
 

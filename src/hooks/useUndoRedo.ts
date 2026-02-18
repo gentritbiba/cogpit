@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import type { ParsedSession, UndoState, Branch, Turn } from "@/lib/types"
 import type { SessionSource } from "./useLiveSession"
 import { parseSession } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
 import {
   buildUndoOperations,
   buildRedoFromArchived,
@@ -101,7 +102,7 @@ export function useUndoRedo(
     const fetchedSessionId = session.sessionId
     const controller = new AbortController()
 
-    fetch(`/api/undo-state/${encodeURIComponent(fetchedSessionId)}`, {
+    authFetch(`/api/undo-state/${encodeURIComponent(fetchedSessionId)}`, {
       signal: controller.signal,
     })
       .then((res) => res.ok ? res.json() : null)
@@ -125,7 +126,7 @@ export function useUndoRedo(
   const saveUndoState = useCallback(async (state: UndoState) => {
     setUndoState(state)
     try {
-      await fetch(`/api/undo-state/${encodeURIComponent(state.sessionId)}`, {
+      await authFetch(`/api/undo-state/${encodeURIComponent(state.sessionId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(state),
@@ -138,7 +139,7 @@ export function useUndoRedo(
   // Apply file operations via server
   const applyOperations = useCallback(async (operations: FileOperation[]): Promise<boolean> => {
     try {
-      const res = await fetch("/api/undo/apply", {
+      const res = await authFetch("/api/undo/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operations }),
@@ -287,7 +288,7 @@ export function useUndoRedo(
 
       // Fetch the current JSONL content from disk. sessionSource.rawText may
       // be stale if SSE streaming added lines after the session was loaded.
-      const freshRes = await fetch(
+      const freshRes = await authFetch(
         `/api/sessions/${encodeURIComponent(sessionSource.dirName)}/${encodeURIComponent(sessionSource.fileName)}`
       )
       if (!freshRes.ok) {
@@ -320,7 +321,7 @@ export function useUndoRedo(
           const { retained, scooped } = collectChildBranches(state.branches, effectiveTarget)
           const branch = createBranch(session.turns, effectiveTarget, removedJsonlLines, scooped)
 
-          const truncRes = await fetch("/api/undo/truncate-jsonl", {
+          const truncRes = await authFetch("/api/undo/truncate-jsonl", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -375,7 +376,7 @@ export function useUndoRedo(
         }
 
         if (linesToAppend.length > 0) {
-          const appendRes = await fetch("/api/undo/append-jsonl", {
+          const appendRes = await authFetch("/api/undo/append-jsonl", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -467,7 +468,7 @@ export function useUndoRedo(
             )
             updatedBranches = [...updatedBranches, currentBranch]
 
-            const truncRes = await fetch("/api/undo/truncate-jsonl", {
+            const truncRes = await authFetch("/api/undo/truncate-jsonl", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -492,7 +493,7 @@ export function useUndoRedo(
 
         // Append target branch's JSONL lines
         if (branch.jsonlLines.length > 0) {
-          const appendRes = await fetch("/api/undo/append-jsonl", {
+          const appendRes = await authFetch("/api/undo/append-jsonl", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

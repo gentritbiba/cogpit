@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { type PermissionsConfig, DEFAULT_PERMISSIONS } from "@/lib/permissions"
+import { authFetch } from "@/lib/auth"
 
 export type PtyChatStatus = "idle" | "connected" | "error"
 
@@ -62,7 +63,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       activeAbortRef.current = abortController
 
       try {
-        const res = await fetch("/api/send-message", {
+        const res = await authFetch("/api/send-message", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -106,7 +107,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   const interrupt = useCallback(() => {
     // For HTTP-based approach, we stop the server-side process
     if (!sessionId) return
-    fetch("/api/stop-session", {
+    authFetch("/api/stop-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
@@ -121,7 +122,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     activeAbortRef.current = null
 
     // Kill the server-side process
-    fetch("/api/stop-session", {
+    authFetch("/api/stop-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),

@@ -17,6 +17,8 @@ export function setConfigPath(p: string): void {
 
 export interface AppConfig {
   claudeDir: string
+  networkAccess?: boolean
+  networkPassword?: string
 }
 
 let cachedConfig: AppConfig | null = null
@@ -30,7 +32,11 @@ export async function loadConfig(): Promise<AppConfig | null> {
     const raw = await readFile(CONFIG_PATH, "utf-8")
     const parsed = JSON.parse(raw)
     if (parsed.claudeDir && typeof parsed.claudeDir === "string") {
-      cachedConfig = { claudeDir: parsed.claudeDir }
+      cachedConfig = {
+        claudeDir: parsed.claudeDir,
+        networkAccess: !!parsed.networkAccess,
+        networkPassword: parsed.networkPassword || undefined,
+      }
       return cachedConfig
     }
   } catch {

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { useTeamLive } from "@/hooks/useTeamLive"
+import { authFetch } from "@/lib/auth"
 import { MembersGrid } from "@/components/teams/MembersGrid"
 import { TaskBoard } from "@/components/teams/TaskBoard"
 import { MessageTimeline } from "@/components/teams/MessageTimeline"
@@ -32,7 +33,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
 
   const fetchTeam = useCallback(async () => {
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/team-detail/${encodeURIComponent(teamName)}`
       )
       if (!res.ok) {
@@ -64,7 +65,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
       if (!onOpenSession) return
 
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/team-member-session/${encodeURIComponent(teamName)}/${encodeURIComponent(member.name)}`
         )
         if (!res.ok) return

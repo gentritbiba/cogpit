@@ -3,6 +3,7 @@ import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDri
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { authFetch } from "@/lib/auth"
 import {
   formatFileSize,
   formatRelativeTime,
@@ -51,8 +52,8 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
     setLoading(true)
     try {
       const [sessRes, procRes] = await Promise.all([
-        fetch("/api/active-sessions"),
-        fetch("/api/running-processes"),
+        authFetch("/api/active-sessions"),
+        authFetch("/api/running-processes"),
       ])
       if (!sessRes.ok || !procRes.ok) {
         throw new Error("Failed to fetch live data")
@@ -103,7 +104,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
     e.stopPropagation()
     setKillingPids(prev => new Set(prev).add(pid))
     try {
-      await fetch("/api/kill-process", {
+      await authFetch("/api/kill-process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),

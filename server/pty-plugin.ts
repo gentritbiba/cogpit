@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
+import { getConfig } from "./config"
+import { isLocalRequest, safeCompare } from "./helpers"
 
 interface PtySession {
   id: string
@@ -70,6 +72,17 @@ export function ptyPlugin(): Plugin {
         (req: IncomingMessage, socket: Duplex, head: Buffer) => {
           const url = new URL(req.url || "/", "http://localhost")
           if (url.pathname !== "/__pty") return
+
+          // Auth check for remote WebSocket connections
+          if (!isLocalRequest(req)) {
+            const cfg = getConfig()
+            const token = url.searchParams.get("token")
+            if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !safeCompare(token, cfg.networkPassword)) {
+              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
+              socket.destroy()
+              return
+            }
+          }
 
           wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit("connection", ws, req)

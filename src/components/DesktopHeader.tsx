@@ -9,6 +9,7 @@ import {
   Copy,
   Skull,
   Settings,
+  Globe,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,6 +26,7 @@ interface DesktopHeaderProps {
   showSidebar: boolean
   showStats: boolean
   killing: boolean
+  networkUrl: string | null
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
@@ -38,6 +40,7 @@ export function DesktopHeader({
   showSidebar,
   showStats,
   killing,
+  networkUrl,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
@@ -45,6 +48,14 @@ export function DesktopHeader({
   onOpenSettings,
 }: DesktopHeaderProps) {
   const [copied, setCopied] = useState(false)
+  const [urlCopied, setUrlCopied] = useState(false)
+
+  const copyNetworkUrl = useCallback(() => {
+    if (!networkUrl) return
+    navigator.clipboard.writeText(networkUrl)
+    setUrlCopied(true)
+    setTimeout(() => setUrlCopied(false), 1500)
+  }, [networkUrl])
 
   const copyResumeCmd = useCallback(() => {
     if (!session) return
@@ -127,6 +138,25 @@ export function DesktopHeader({
       </div>
 
       <div className="flex-1" />
+
+      {networkUrl && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={copyNetworkUrl}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors mr-1"
+            >
+              <Globe className="size-3 text-green-500" />
+              {urlCopied ? (
+                <span className="text-green-400">Copied!</span>
+              ) : (
+                networkUrl
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Click to copy connection URL</TooltipContent>
+        </Tooltip>
+      )}
 
       <div className="flex items-center gap-1 shrink-0">
         <Tooltip>

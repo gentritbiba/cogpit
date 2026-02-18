@@ -35,6 +35,9 @@ import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useKillAll } from "@/hooks/useKillAll"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
+import { LoginScreen } from "@/components/LoginScreen"
+import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -43,6 +46,7 @@ import {
 
 export default function App() {
   const config = useAppConfig()
+  const networkAuth = useNetworkAuth()
   const isMobile = useIsMobile()
   const [state, dispatch] = useSessionState()
 
@@ -170,7 +174,7 @@ export default function App() {
   const reloadSession = useCallback(async () => {
     if (!state.sessionSource) return
     const { dirName, fileName } = state.sessionSource
-    const res = await fetch(
+    const res = await authFetch(
       `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
     )
     if (!res.ok) return
@@ -236,6 +240,11 @@ export default function App() {
     const timer = setTimeout(clearActiveError, 8000)
     return () => clearTimeout(timer)
   }, [activeError, clearActiveError])
+
+  // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
+  if (!networkAuth.authenticated) {
+    return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
+  }
 
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
@@ -368,6 +377,7 @@ export default function App() {
           isLive={isLive}
           killing={killing}
           creatingSession={creatingSession}
+          networkUrl={config.networkUrl}
           onGoHome={actions.handleGoHome}
           onKillAll={handleKillAll}
           onOpenSettings={config.openConfigDialog}
@@ -505,6 +515,7 @@ export default function App() {
         showSidebar={showSidebar}
         showStats={showStats}
         killing={killing}
+        networkUrl={config.networkUrl}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
         onToggleStats={() => setShowStats(!showStats)}

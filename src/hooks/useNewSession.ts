@@ -3,6 +3,7 @@ import type { PermissionsConfig } from "@/lib/permissions"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { parseSession } from "@/lib/parser"
+import { authFetch } from "@/lib/auth"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
@@ -17,7 +18,7 @@ export function useNewSession({ permissionsConfig, onSessionCreated }: UseNewSes
     setCreatingSession(true)
     setCreateError(null)
     try {
-      const res = await fetch("/api/new-session", {
+      const res = await authFetch("/api/new-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -34,7 +35,7 @@ export function useNewSession({ permissionsConfig, onSessionCreated }: UseNewSes
       const { dirName: resDirName, fileName } = await res.json()
 
       // Fetch the JSONL content and load the session
-      const contentRes = await fetch(
+      const contentRes = await authFetch(
         `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`
       )
       if (!contentRes.ok) {
