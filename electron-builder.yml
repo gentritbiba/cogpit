@@ -40,6 +40,21 @@ linux:
         - x64
   category: Development
 
+pacman:
+  depends:
+    - c-ares
+    - gcc-libs
+    - glibc
+    - gtk3
+    - libcups
+    - libdrm
+    - libnotify
+    - libxcrypt-compat
+    - libxss
+    - mesa
+    - nss
+    - alsa-lib
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

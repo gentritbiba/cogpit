@@ -85,3 +85,62 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-aur:
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "pkgver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download .pacman from release
+        run: |
+          gh release download "$GITHUB_REF_NAME" \
+            --pattern "cogpit-*.pacman" \
+            --dir .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute checksum
+        id: checksum
+        run: echo "sha256=$(sha256sum cogpit-*.pacman | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<EOF
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
+      - name: Clone AUR repo
+        run: git clone ssh://aur@aur.archlinux.org/cogpit.git aur-repo
+
+      - name: Update PKGBUILD
+        run: |
+          sed -e 's/%%PKGVER%%/${{ steps.version.outputs.pkgver }}/' \
+              -e 's/%%SHA256%%/${{ steps.checksum.outputs.sha256 }}/' \
+              aur/PKGBUILD.template > aur-repo/PKGBUILD
+
+      - name: Generate .SRCINFO
+        run: |
+          cd aur-repo
+          docker run --rm -v "$PWD:/pkg" archlinux:base bash -c \
+            "pacman -Sy --noconfirm pacman-contrib && chown -R nobody:nobody /pkg && su nobody -s /bin/bash -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
+
+      - name: Push to AUR
+        run: |
+          cd aur-repo
+          git config user.name "Gentrit Biba"
+          git config user.email "gentritbiba@gmail.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to ${{ steps.version.outputs.pkgver }}"
+          git push
