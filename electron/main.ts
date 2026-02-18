@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron"
+import { app, BrowserWindow, session, shell } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createAppServer } from "./server.ts"
@@ -80,6 +80,11 @@ app.whenReady().then(async () => {
   }
 
   console.log(`Cogpit server listening on http://${listenHost}:${port}`)
+
+  // Grant microphone permission for voice input (Whisper WASM)
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media")
+  })
 
   await createWindow(port)
 

@@ -28,6 +28,8 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   // Track active requests per session so concurrent sessions work
   const activeAbortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  /** Set during session creation to prevent the sessionId-change effect from clearing pendingMessage */
+  const creatingRef = useRef(false)
 
   // Use parsed session ID (actual UUID from JSONL) if available, else derive from fileName
   const fileBasedId = sessionSource?.fileName?.replace(".jsonl", "") ?? null
@@ -38,10 +40,16 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     if (sessionIdRef.current !== sessionId) {
       // Abort the previous request so it doesn't keep running in the background
       activeAbortRef.current?.abort()
+      const wasCreating = creatingRef.current
+      creatingRef.current = false
       sessionIdRef.current = sessionId
       setStatus("idle")
       setError(undefined)
-      setPendingMessage(null)
+      // Preserve pendingMessage when transitioning from session creation —
+      // useChatScroll will clear it once the session's turns are rendered.
+      if (!wasCreating) {
+        setPendingMessage(null)
+      }
       activeAbortRef.current = null
     }
   }, [sessionId])
@@ -60,20 +68,24 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         setPendingMessage(text)
         setStatus("connected")
         setError(undefined)
+        creatingRef.current = true
         onPermissionsApplied?.()
 
         try {
           const newSessionId = await onCreateSession(text, images)
           if (!newSessionId) {
             // createAndSend handles its own error state; just reset ours
+            creatingRef.current = false
             setStatus("idle")
             setPendingMessage(null)
             return
           }
-          // Session was created and first message was sent — done.
+          // Session was created and first message was sent.
+          // Don't clear pendingMessage — useChatScroll will clear it
+          // once the session's turns are rendered, ensuring a smooth transition.
           setStatus("idle")
-          setPendingMessage(null)
         } catch (err) {
+          creatingRef.current = false
           setError(err instanceof Error ? err.message : "Failed to create session")
           setStatus("error")
           setPendingMessage(null)

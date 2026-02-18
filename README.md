@@ -42,8 +42,8 @@ Connect to active sessions via Server-Sent Events. New turns appear in real-time
 ### Chat Interface
 Send messages to running Claude Code sessions directly from the dashboard:
 - Model override per message (Opus, Sonnet, Haiku)
+- Voice input powered by Whisper WASM (Ctrl+Shift+M)
 - Interrupt running sessions
-- Kill all active sessions
 - Permission-aware message sending
 - Pending message status tracking
 
@@ -124,6 +124,7 @@ Navigate live sessions and control the dashboard from your keyboard:
 | **Ctrl+Shift+1–9** | Jump to the Nth live session |
 | **Ctrl+Shift+↑ / ↓** | Navigate between live sessions |
 | **Ctrl+B** | Toggle sidebar |
+| **Ctrl+Shift+M** | Toggle voice input |
 | **Ctrl+E** | Expand all turns |
 | **Ctrl+Shift+E** | Collapse all turns |
 | **Esc** | Clear search |
@@ -147,6 +148,7 @@ On macOS, use **⌘** instead of Ctrl. A shortcuts reference is also shown at th
 | Backend | Express 5 (Electron) / Vite plugins (dev) |
 | Real-time | Server-Sent Events (SSE) + WebSocket |
 | Terminal | node-pty (pseudo-terminal) |
+| Voice transcription | whisper-web-transcriber (WASM) |
 
 ## Getting Started
 

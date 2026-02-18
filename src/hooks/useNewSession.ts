@@ -93,7 +93,7 @@ export function useNewSession({
         const rawText = await contentRes.text()
         const parsed = parseSession(rawText)
         const source: SessionSource = { dirName: resDirName, fileName, rawText }
-        dispatch({ type: "FINALIZE_SESSION", session: parsed, source })
+        dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
         onSessionFinalized(parsed, source)
 
         return sessionId
@@ -107,7 +107,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, dispatch, onSessionFinalized]
+    [permissionsConfig, model, dispatch, isMobile, onSessionFinalized]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

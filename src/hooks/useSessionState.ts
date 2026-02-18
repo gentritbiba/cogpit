@@ -42,7 +42,7 @@ export type SessionAction =
   | { type: "SET_SIDEBAR_TAB"; tab: "browse" | "teams" }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; isMobile: boolean }
-  | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource }
+  | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
 
 const initialState: SessionState = {
   session: null,
@@ -230,7 +230,16 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         session: action.session,
         sessionSource: action.source,
         pendingDirName: null,
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        mainView: "sessions",
+        selectedTeam: null,
+        currentMemberName: null,
+        dashboardProject: null,
         sessionChangeKey: state.sessionChangeKey + 1,
+        mobileTab: action.isMobile ? "chat" : state.mobileTab,
       }
 
     default:

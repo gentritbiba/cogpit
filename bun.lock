@@ -23,6 +23,7 @@
         "react-resizable-panels": "^4.6.4",
         "shiki": "^3.22.0",
         "tailwind-merge": "^3.0.1",
+        "whisper-web-transcriber": "^0.2.5",
         "ws": "^8.19.0",
       },
       "devDependencies": {
@@ -1417,6 +1418,8 @@
     "wcwidth": ["wcwidth@1.0.1", "", { "dependencies": { "defaults": "^1.0.3" } }, "sha512-XHPEwS0q6TaxcvG85+8EYkbiCux2XtWG2mkc47Ng2A77BQu9+DqIOJldST4HgPkuea7dvKSj5VgX3P1d4rW8Tg=="],
 
     "which": ["which@5.0.0", "", { "dependencies": { "isexe": "^3.1.1" }, "bin": { "node-which": "bin/which.js" } }, "sha512-JEdGzHwwkrbWoGOlIHqQ5gtprKGOenpDHpxE9zVR1bWbOtYRyPPHMe9FaP6x61CmNaTThSkb0DAJte5jD+DmzQ=="],
+
+    "whisper-web-transcriber": ["whisper-web-transcriber@0.2.5", "", {}, "sha512-M8u+QpBBHrSHhF25W1Dd2yO93iUeDPJIV0fzVL84nRTO8p0CkFzHkcqgnU42eFeGqW/N8eBVcQiz0MTlbV1G6g=="],
 
     "word-wrap": ["word-wrap@1.2.5", "", {}, "sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA=="],
 

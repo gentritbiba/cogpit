@@ -1,9 +1,11 @@
 import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
+import type { ChatInputHandle } from "@/components/ChatInput"
 
 interface UseKeyboardShortcutsOpts {
   isMobile: boolean
   searchInputRef: RefObject<HTMLInputElement | null>
+  chatInputRef: RefObject<ChatInputHandle | null>
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
 }
@@ -42,6 +44,7 @@ function focusSession(btn: HTMLButtonElement) {
 export function useKeyboardShortcuts({
   isMobile,
   searchInputRef,
+  chatInputRef,
   dispatch,
   onToggleSidebar,
 }: UseKeyboardShortcutsOpts) {
@@ -61,6 +64,13 @@ export function useKeyboardShortcuts({
       if (mod && e.key === "b") {
         e.preventDefault()
         onToggleSidebar()
+      }
+
+      // Ctrl+Shift+M — toggle voice input and focus chat
+      if (mod && e.shiftKey && e.key === "M") {
+        e.preventDefault()
+        chatInputRef.current?.focus()
+        chatInputRef.current?.toggleVoice()
       }
       if (e.key === "Escape") {
         dispatch({ type: "SET_SEARCH_QUERY", value: "" })
@@ -100,5 +110,5 @@ export function useKeyboardShortcuts({
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isMobile, searchInputRef, dispatch, onToggleSidebar])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar])
 }

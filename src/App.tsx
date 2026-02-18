@@ -8,7 +8,7 @@ import { TeamsDashboard } from "@/components/TeamsDashboard"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
-import { ChatInput } from "@/components/ChatInput"
+import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { ServerPanel } from "@/components/ServerPanel"
 import { PermissionsPanel } from "@/components/PermissionsPanel"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
@@ -55,6 +55,7 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const chatInputRef = useRef<ChatInputHandle>(null)
 
   // Stable callbacks
   const handleSidebarTabChange = useCallback(
@@ -155,8 +156,9 @@ export default function App() {
   })
 
   // Wire up the session finalized ref now that scroll is available
-  sessionFinalizedRef.current = (parsed) => {
-    scroll.resetTurnCount(parsed.turns.length)
+  sessionFinalizedRef.current = () => {
+    // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
+    scroll.resetTurnCount(0)
     scroll.scrollToBottomInstant()
   }
 
@@ -182,6 +184,7 @@ export default function App() {
   useKeyboardShortcuts({
     isMobile,
     searchInputRef,
+    chatInputRef,
     dispatch,
     onToggleSidebar: handleToggleSidebar,
   })
@@ -370,12 +373,12 @@ export default function App() {
   const chatInputNode = (
     <div className="shrink-0">
       <ChatInput
+        ref={chatInputRef}
         status={claudeChat.status}
         error={claudeChat.error}
         isConnected={claudeChat.isConnected}
         onSend={claudeChat.sendMessage}
         onInterrupt={claudeChat.interrupt}
-        onDisconnect={claudeChat.stopAgent}
         permissionMode={perms.config.mode}
         permissionsPending={perms.hasPendingChanges}
         pendingInteraction={pendingInteraction}

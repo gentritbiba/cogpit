@@ -136,23 +136,28 @@ export function ChatArea({
         >
           <div className={isMobile ? "py-3 px-1" : "mx-auto max-w-4xl py-4"}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
-              <ConversationTimeline
-                session={session}
-                activeTurnIndex={activeTurnIndex}
-                activeToolCallId={activeToolCallId}
-                searchQuery={searchQuery}
-                expandAll={expandAll}
-                isAgentActive={isConnected}
-                scrollContainerRef={chatScrollRef}
-                branchesAtTurn={undoRedo.branchesAtTurn}
-                onRestoreToHere={undoRedo.requestUndo}
-                onOpenBranches={onOpenBranches}
-                canRedo={undoRedo.canRedo}
-                redoTurnCount={undoRedo.redoTurnCount}
-                redoGhostTurns={undoRedo.redoGhostTurns}
-                onRedoAll={undoRedo.requestRedoAll}
-                onRedoUpTo={undoRedo.requestRedoUpTo}
-              />
+              {/* Hide the empty-state placeholder when a pending message is
+                  waiting for the first turn to arrive (e.g. right after session
+                  creation). The timeline renders normally once turns exist. */}
+              {(session.turns.length > 0 || !pendingMessage) && (
+                <ConversationTimeline
+                  session={session}
+                  activeTurnIndex={activeTurnIndex}
+                  activeToolCallId={activeToolCallId}
+                  searchQuery={searchQuery}
+                  expandAll={expandAll}
+                  isAgentActive={isConnected}
+                  scrollContainerRef={chatScrollRef}
+                  branchesAtTurn={undoRedo.branchesAtTurn}
+                  onRestoreToHere={undoRedo.requestUndo}
+                  onOpenBranches={onOpenBranches}
+                  canRedo={undoRedo.canRedo}
+                  redoTurnCount={undoRedo.redoTurnCount}
+                  redoGhostTurns={undoRedo.redoGhostTurns}
+                  onRedoAll={undoRedo.requestRedoAll}
+                  onRedoUpTo={undoRedo.requestRedoUpTo}
+                />
+              )}
               {pendingMessage && (
                 <div className={cn("mt-3 space-y-3", isMobile ? "mx-3" : "mx-4 mt-4")}>
                   <div className="flex justify-end">

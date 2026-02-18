@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback, useEffect, memo } from "react"
-import { Send, Square, Unplug, Mic, MicOff, CheckCircle, MessageSquare, X } from "lucide-react"
+import { useState, useRef, useCallback, useEffect, memo, useImperativeHandle, forwardRef } from "react"
+import { Send, Square, Mic, MicOff, Loader2, CheckCircle, MessageSquare, X } from "lucide-react"
+import { WhisperTranscriber } from "whisper-web-transcriber"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -7,15 +8,12 @@ import type { PendingInteraction } from "@/lib/parser"
 
 export type ChatStatus = "ready" | "sending" | "error" | "idle" | "connected"
 
-type SpeechRecognitionEvent = Event & {
-  results: { [index: number]: { [index: number]: { transcript: string } }; length: number }
-  resultIndex: number
+export interface ChatInputHandle {
+  toggleVoice: () => void
+  focus: () => void
 }
 
-const SpeechRecognition =
-  (globalThis as unknown as { SpeechRecognition?: typeof EventTarget; webkitSpeechRecognition?: typeof EventTarget })
-    .SpeechRecognition ??
-  (globalThis as unknown as { webkitSpeechRecognition?: typeof EventTarget }).webkitSpeechRecognition
+type VoiceStatus = "idle" | "loading" | "listening"
 
 interface ChatInputProps {
   status: ChatStatus
@@ -23,7 +21,6 @@ interface ChatInputProps {
   isConnected?: boolean
   onSend: (message: string, images?: Array<{ data: string; mediaType: string }>) => void
   onInterrupt?: () => void
-  onDisconnect?: () => void
   permissionMode?: string
   permissionsPending?: boolean
   pendingInteraction?: PendingInteraction
@@ -54,21 +51,21 @@ function formatElapsed(sec: number): string {
   return `${m}m ${s}s`
 }
 
-export const ChatInput = memo(function ChatInput({
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
   status,
   error,
   isConnected,
   onSend,
   onInterrupt,
-  onDisconnect,
   permissionMode,
   permissionsPending,
   pendingInteraction,
-}: ChatInputProps) {
+}, ref) {
   const [text, setText] = useState("")
-  const [isListening, setIsListening] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle")
+  const [voiceProgress, setVoiceProgress] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const recognitionRef = useRef<InstanceType<typeof EventTarget> | null>(null)
+  const transcriberRef = useRef<WhisperTranscriber | null>(null)
 
   const [images, setImages] = useState<Array<{ file: File; preview: string; data: string; mediaType: string }>>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -210,67 +207,79 @@ export const ChatInput = memo(function ChatInput({
     [addImageFiles]
   )
 
-  const toggleVoice = useCallback(() => {
-    if (!SpeechRecognition) return
-
-    if (isListening && recognitionRef.current) {
-      ;(recognitionRef.current as unknown as { stop(): void }).stop()
-      setIsListening(false)
+  const toggleVoice = useCallback(async () => {
+    // Stop listening
+    if (voiceStatus === "listening" && transcriberRef.current) {
+      transcriberRef.current.stopRecording()
+      setVoiceStatus("idle")
       return
     }
 
-    const recognition = new (SpeechRecognition as unknown as new () => EventTarget & {
-      continuous: boolean
-      interimResults: boolean
-      lang: string
-      start(): void
-      stop(): void
-    })()
-    recognition.continuous = true
-    recognition.interimResults = false
-    recognition.lang = "en-US"
+    // Don't start if already loading
+    if (voiceStatus === "loading") return
 
-    recognition.addEventListener("result", ((e: SpeechRecognitionEvent) => {
-      let transcript = ""
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        transcript += e.results[i][0].transcript
+    // Lazily create transcriber on first use
+    if (!transcriberRef.current) {
+      setVoiceStatus("loading")
+      setVoiceProgress(0)
+      const transcriber = new WhisperTranscriber({
+        modelSize: "base-en-q5_1",
+        onTranscription: (transcript: string) => {
+          if (transcript) {
+            setText((prev) => {
+              const joined = prev ? prev + " " + transcript : transcript
+              requestAnimationFrame(() => {
+                const el = textareaRef.current
+                if (el) {
+                  el.style.height = "auto"
+                  el.style.height = Math.min(el.scrollHeight, 200) + "px"
+                }
+              })
+              return joined
+            })
+          }
+        },
+        onProgress: (progress: number) => setVoiceProgress(progress),
+        onStatus: (s: string) => {
+          if (s === "recording") setVoiceStatus("listening")
+        },
+      })
+      // Fix: override base path so the library finds its WASM files served from /whisper/
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(transcriber as unknown as { getScriptBasePath: () => string }).getScriptBasePath = () => "/whisper/"
+      // Suppress confirm() dialog the library shows before first model download
+      const origConfirm = window.confirm
+      try {
+        window.confirm = () => true
+        await transcriber.loadModel()
+        transcriberRef.current = transcriber
+      } catch {
+        setVoiceStatus("idle")
+        return
+      } finally {
+        window.confirm = origConfirm
       }
-      if (transcript) {
-        setText((prev) => {
-          const joined = prev ? prev + " " + transcript : transcript
-          // Auto-resize textarea
-          requestAnimationFrame(() => {
-            const el = textareaRef.current
-            if (el) {
-              el.style.height = "auto"
-              el.style.height = Math.min(el.scrollHeight, 200) + "px"
-            }
-          })
-          return joined
-        })
-      }
-    }) as EventListener)
+    }
 
-    recognition.addEventListener("error", () => {
-      setIsListening(false)
-      recognitionRef.current = null
-    })
+    // Start recording
+    try {
+      setVoiceStatus("listening")
+      await transcriberRef.current.startRecording()
+    } catch {
+      setVoiceStatus("idle")
+    }
+  }, [voiceStatus])
 
-    recognition.addEventListener("end", () => {
-      setIsListening(false)
-      recognitionRef.current = null
-    })
-
-    recognitionRef.current = recognition
-    recognition.start()
-    setIsListening(true)
-  }, [isListening])
+  useImperativeHandle(ref, () => ({
+    toggleVoice,
+    focus: () => textareaRef.current?.focus(),
+  }), [toggleVoice])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (recognitionRef.current) {
-        ;(recognitionRef.current as unknown as { stop(): void }).stop()
+      if (transcriberRef.current) {
+        transcriberRef.current.destroy()
       }
     }
   }, [])
@@ -335,7 +344,7 @@ export const ChatInput = memo(function ChatInput({
         </div>
       )}
 
-      <div className="flex items-end gap-2">
+      <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <textarea
             ref={textareaRef}
@@ -396,50 +405,41 @@ export const ChatInput = memo(function ChatInput({
           </Tooltip>
         )}
 
-        {/* Disconnect button — kills the PTY process entirely */}
-        {isConnected && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-9 w-9 shrink-0 p-0 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                onClick={onDisconnect}
-              >
-                <Unplug className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Disconnect session</TooltipContent>
-          </Tooltip>
-        )}
 
         {/* Voice input button */}
-        {SpeechRecognition && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-8 w-8 shrink-0 p-0",
-                  isListening
-                    ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "h-9 w-9 shrink-0 p-0 rounded-lg",
+                voiceStatus === "listening"
+                  ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                  : voiceStatus === "loading"
+                    ? "text-blue-400"
                     : "text-zinc-400 hover:text-zinc-200"
-                )}
-                onClick={toggleVoice}
-              >
-                {isListening ? (
-                  <MicOff className="size-4" />
-                ) : (
-                  <Mic className="size-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isListening ? "Stop listening" : "Voice input"}
-            </TooltipContent>
-          </Tooltip>
-        )}
+              )}
+              onClick={toggleVoice}
+              disabled={voiceStatus === "loading"}
+            >
+              {voiceStatus === "loading" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : voiceStatus === "listening" ? (
+                <MicOff className="size-4" />
+              ) : (
+                <Mic className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {voiceStatus === "loading"
+              ? `Loading voice model... ${Math.round(voiceProgress)}%`
+              : voiceStatus === "listening"
+                ? "Stop listening (Ctrl+Shift+M)"
+                : "Voice input (Ctrl+Shift+M)"}
+          </TooltipContent>
+        </Tooltip>
 
         {/* Send button */}
         <Button
@@ -493,7 +493,7 @@ export const ChatInput = memo(function ChatInput({
       </div>
     </div>
   )
-})
+}))
 
 // ── Plan Approval Bar ──────────────────────────────────────────────────────
 
