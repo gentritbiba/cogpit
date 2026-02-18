@@ -15,6 +15,7 @@ Grab the latest release for your platform from the [Releases page](https://githu
 | Windows | `Cogpit-x.x.x-Setup.exe` |
 | Linux (AppImage) | `Cogpit-x.x.x.AppImage` |
 | Linux (Debian/Ubuntu) | `Cogpit-x.x.x.deb` |
+| Linux (Arch) | `Cogpit-x.x.x.pacman` |
 
 > **Requirement:** You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed on your machine. Cogpit uses your existing Claude CLI — no separate login or API key needed.
 

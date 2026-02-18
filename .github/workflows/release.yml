@@ -60,6 +60,7 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.deb
+            release/*.pacman
           if-no-files-found: ignore
 
   publish:
