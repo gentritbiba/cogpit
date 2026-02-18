@@ -92,7 +92,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // ── Static files + SPA fallback ────────────────────────────────
   app.use(express.static(staticDir))
-  app.get("*", (_req, res) => {
+  app.get("{*path}", (_req, res) => {
     res.sendFile(join(staticDir, "index.html"))
   })
 
