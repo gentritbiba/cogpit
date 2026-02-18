@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, memo } from "react"
 import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -42,7 +42,7 @@ interface LiveSessionsProps {
   onSelectSession: (dirName: string, fileName: string) => void
 }
 
-export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessionsProps) {
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
@@ -199,6 +199,7 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
             return (
               <button
                 key={`${s.dirName}/${s.fileName}`}
+                data-live-session
                 onClick={() => onSelectSession(s.dirName, s.fileName)}
                 className={cn(
                   "group flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 border border-transparent hover:border-zinc-800",
@@ -330,4 +331,4 @@ export function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessions
       </ScrollArea>
     </div>
   )
-}
+})

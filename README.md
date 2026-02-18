@@ -115,6 +115,21 @@ Full desktop and mobile support with distinct layouts:
 +----------------------------------------+
 ```
 
+### Keyboard Shortcuts
+
+Navigate live sessions and control the dashboard from your keyboard:
+
+| Shortcut | Action |
+|----------|--------|
+| **Ctrl+Shift+1–9** | Jump to the Nth live session |
+| **Ctrl+Shift+↑ / ↓** | Navigate between live sessions |
+| **Ctrl+B** | Toggle sidebar |
+| **Ctrl+E** | Expand all turns |
+| **Ctrl+Shift+E** | Collapse all turns |
+| **Esc** | Clear search |
+
+On macOS, use **⌘** instead of Ctrl. A shortcuts reference is also shown at the bottom of the dashboard.
+
 ## Tech Stack
 
 | Layer | Technology |

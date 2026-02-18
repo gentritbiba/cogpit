@@ -15,6 +15,7 @@ import {
   Search,
   X,
   AlertTriangle,
+  Keyboard,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,6 +25,26 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { shortenModel, formatRelativeTime, formatFileSize, truncate } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
+
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
+
+function Shortcut({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-0.5">
+      <span className="text-zinc-500">{label}</span>
+      <span className="flex items-center gap-0.5 shrink-0">
+        {keys.map((k, i) => (
+          <kbd
+            key={i}
+            className="inline-flex items-center justify-center rounded border border-zinc-700/80 bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 min-w-[20px]"
+          >
+            {k === "Ctrl" ? (isMac ? "⌘" : "Ctrl") : k}
+          </kbd>
+        ))}
+      </span>
+    </div>
+  )
+}
 
 interface ProjectInfo {
   dirName: string
@@ -623,6 +644,22 @@ export const Dashboard = memo(function Dashboard({
               })}
             </div>
           )}
+        </div>
+
+        {/* Keyboard shortcuts */}
+        <div className="mt-6 rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-5 py-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Keyboard className="size-3.5 text-zinc-500" />
+            <span className="text-xs font-medium text-zinc-400">Keyboard Shortcuts</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11px]">
+            <Shortcut keys={["Ctrl", "Shift", "1–9"]} label="Jump to Nth live session" />
+            <Shortcut keys={["Ctrl", "Shift", "↑ / ↓"]} label="Navigate live sessions" />
+            <Shortcut keys={["Ctrl", "B"]} label="Toggle sidebar" />
+            <Shortcut keys={["Ctrl", "E"]} label="Expand all turns" />
+            <Shortcut keys={["Ctrl", "Shift", "E"]} label="Collapse all turns" />
+            <Shortcut keys={["Esc"]} label="Clear search" />
+          </div>
         </div>
 
       </div>
