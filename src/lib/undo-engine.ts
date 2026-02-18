@@ -11,8 +11,9 @@ export function extractReversibleCalls(turn: Turn): ArchivedToolCall[] {
       const oldStr = tc.input.old_string as string | undefined
       const newStr = tc.input.new_string as string | undefined
       const filePath = (tc.input.file_path ?? tc.input.path ?? "") as string
+      const replaceAll = tc.input.replace_all as boolean | undefined
       if (oldStr !== undefined && newStr !== undefined && filePath) {
-        calls.push({ type: "Edit", filePath, oldString: oldStr, newString: newStr })
+        calls.push({ type: "Edit", filePath, oldString: oldStr, newString: newStr, replaceAll: replaceAll ?? false })
       }
     } else if (tc.name === "Write") {
       const filePath = (tc.input.file_path ?? tc.input.path ?? "") as string
@@ -46,6 +47,7 @@ export interface FileOperation {
   filePath: string
   oldString?: string
   newString?: string
+  replaceAll?: boolean
   content?: string
   turnIndex: number
 }
@@ -72,6 +74,7 @@ export function buildUndoOperations(
           // Swap: to undo, the "old" becomes what we write, "new" becomes what we find
           oldString: call.newString,
           newString: call.oldString,
+          replaceAll: call.replaceAll,
           turnIndex: i,
         })
       } else if (call.type === "Write") {
@@ -107,6 +110,7 @@ export function buildRedoOperations(
           filePath: call.filePath,
           oldString: call.oldString,
           newString: call.newString,
+          replaceAll: call.replaceAll,
           turnIndex: i,
         })
       } else if (call.type === "Write") {
@@ -140,6 +144,7 @@ export function buildRedoFromArchived(
           filePath: call.filePath,
           oldString: call.oldString,
           newString: call.newString,
+          replaceAll: call.replaceAll,
           turnIndex: at.index,
         })
       } else if (call.type === "Write") {

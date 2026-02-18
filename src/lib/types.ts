@@ -222,6 +222,7 @@ export interface ArchivedToolCall {
   filePath: string
   oldString?: string   // Edit only
   newString?: string   // Edit only
+  replaceAll?: boolean // Edit only
   content?: string     // Write only
 }
 

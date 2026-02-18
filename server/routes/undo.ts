@@ -71,6 +71,7 @@ export function registerUndoRoutes(use: UseFn) {
             filePath: string
             oldString?: string
             newString?: string
+            replaceAll?: boolean
             content?: string
           }>
         }
@@ -105,91 +106,104 @@ export function registerUndoRoutes(use: UseFn) {
           }
         }
 
-        // Track applied operations for rollback
-        const applied: Array<{
-          type: string
-          filePath: string
-          previousContent?: string
-          fileExisted: boolean
-        }> = []
+        // Track original file contents for rollback (filePath → original content)
+        const originalContents = new Map<string, { content: string; existed: boolean }>()
+        // In-memory file buffers: apply all edits per file before writing
+        const fileBuffers = new Map<string, string>()
+        // Files marked for deletion
+        const filesToDelete = new Set<string>()
 
         try {
+          // First pass: apply all edits in memory
           for (const op of operations) {
             if (op.type === "reverse-edit" || op.type === "apply-edit") {
-              // Read current file content
-              const content = await readFile(op.filePath, "utf-8")
+              // Read from buffer if we already have this file, otherwise read from disk
+              let content: string
+              if (fileBuffers.has(op.filePath)) {
+                content = fileBuffers.get(op.filePath)!
+              } else {
+                content = await readFile(op.filePath, "utf-8")
+                originalContents.set(op.filePath, { content, existed: true })
+              }
 
-              // Verify exactly one occurrence of the expected string
               if (op.oldString) {
-                const occurrences = content.split(op.oldString).length - 1
-                if (occurrences === 0) {
-                  throw new Error(
-                    `Conflict: expected string not found in ${op.filePath}. File may have been modified externally.`
-                  )
-                }
-                if (occurrences > 1) {
-                  throw new Error(
-                    `Conflict: expected exactly 1 occurrence in ${op.filePath}, found ${occurrences}. Cannot safely apply edit.`
-                  )
+                if (op.replaceAll) {
+                  // replaceAll: verify at least one occurrence exists
+                  if (!content.includes(op.oldString)) {
+                    throw new Error(
+                      `Conflict: expected string not found in ${op.filePath}. File may have been modified externally.`
+                    )
+                  }
+                  content = content.split(op.oldString).join(op.newString!)
+                } else {
+                  // Single replace: verify exactly one occurrence
+                  const occurrences = content.split(op.oldString).length - 1
+                  if (occurrences === 0) {
+                    throw new Error(
+                      `Conflict: expected string not found in ${op.filePath}. File may have been modified externally.`
+                    )
+                  }
+                  if (occurrences > 1) {
+                    throw new Error(
+                      `Conflict: expected exactly 1 occurrence in ${op.filePath}, found ${occurrences}. Cannot safely apply edit.`
+                    )
+                  }
+                  content = content.replace(op.oldString, op.newString!)
                 }
               }
 
-              // Apply the edit (safe since we verified exactly one occurrence)
-              const updated = content.replace(op.oldString!, op.newString!)
-              applied.push({ type: op.type, filePath: op.filePath, previousContent: content, fileExisted: true })
-              await writeFile(op.filePath, updated, "utf-8")
+              fileBuffers.set(op.filePath, content)
+              filesToDelete.delete(op.filePath)
 
             } else if (op.type === "delete-write") {
-              // Verify file content matches before deleting
-              let fileExisted = true
-              try {
-                const content = await readFile(op.filePath, "utf-8")
-                applied.push({ type: op.type, filePath: op.filePath, previousContent: content, fileExisted: true })
-              } catch {
-                fileExisted = false
-                applied.push({ type: op.type, filePath: op.filePath, fileExisted: false })
+              if (!originalContents.has(op.filePath)) {
+                try {
+                  const content = await readFile(op.filePath, "utf-8")
+                  originalContents.set(op.filePath, { content, existed: true })
+                } catch {
+                  originalContents.set(op.filePath, { content: "", existed: false })
+                }
               }
-              if (fileExisted) {
-                await unlink(op.filePath)
-              }
+              fileBuffers.delete(op.filePath)
+              filesToDelete.add(op.filePath)
 
             } else if (op.type === "create-write") {
-              // Check if file already exists
-              let fileExisted = false
-              let previousContent: string | undefined
-              try {
-                previousContent = await readFile(op.filePath, "utf-8")
-                fileExisted = true
-              } catch {
-                fileExisted = false
+              if (!originalContents.has(op.filePath)) {
+                try {
+                  const existing = await readFile(op.filePath, "utf-8")
+                  originalContents.set(op.filePath, { content: existing, existed: true })
+                } catch {
+                  originalContents.set(op.filePath, { content: "", existed: false })
+                }
               }
-              applied.push({ type: op.type, filePath: op.filePath, previousContent, fileExisted })
-              await writeFile(op.filePath, op.content!, "utf-8")
+              fileBuffers.set(op.filePath, op.content!)
+              filesToDelete.delete(op.filePath)
             }
           }
 
+          // Second pass: write all changes to disk
+          for (const filePath of filesToDelete) {
+            const orig = originalContents.get(filePath)
+            if (orig?.existed) {
+              await unlink(filePath)
+            }
+          }
+          for (const [filePath, content] of fileBuffers) {
+            await writeFile(filePath, content, "utf-8")
+          }
+
           res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ success: true, applied: applied.length }))
+          res.end(JSON.stringify({ success: true, applied: operations.length }))
 
         } catch (err) {
-          // Rollback all applied operations
-          for (let i = applied.length - 1; i >= 0; i--) {
-            const a = applied[i]
+          // Rollback: restore all files to their original state
+          for (const [filePath, orig] of originalContents) {
             try {
-              if (a.type === "reverse-edit" || a.type === "apply-edit") {
-                if (a.previousContent !== undefined) {
-                  await writeFile(a.filePath, a.previousContent, "utf-8")
-                }
-              } else if (a.type === "delete-write") {
-                if (a.previousContent !== undefined) {
-                  await writeFile(a.filePath, a.previousContent, "utf-8")
-                }
-              } else if (a.type === "create-write") {
-                if (a.fileExisted && a.previousContent !== undefined) {
-                  await writeFile(a.filePath, a.previousContent, "utf-8")
-                } else if (!a.fileExisted) {
-                  try { await unlink(a.filePath) } catch { /* file may not exist */ }
-                }
+              if (orig.existed) {
+                await writeFile(filePath, orig.content, "utf-8")
+              } else {
+                // File didn't exist before — remove if it was created
+                try { await unlink(filePath) } catch { /* may not exist */ }
               }
             } catch {
               // Best-effort rollback
@@ -199,7 +213,7 @@ export function registerUndoRoutes(use: UseFn) {
           res.statusCode = 409
           res.end(JSON.stringify({
             error: String(err instanceof Error ? err.message : err),
-            rolledBack: applied.length,
+            rolledBack: originalContents.size,
           }))
         }
       } catch {
