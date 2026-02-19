@@ -9,16 +9,25 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Cpu,
+  RotateCcw,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible"
-import { cn } from "@/lib/utils"
+import { cn, MODEL_OPTIONS } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { ParsedSession, Turn, ToolCall } from "@/lib/types"
 import { formatTokenCount, truncate } from "@/lib/format"
@@ -44,6 +53,10 @@ interface StatsPanelProps {
   /** Model selector */
   selectedModel?: string
   onModelChange?: (model: string) => void
+  /** Whether model or permissions have pending changes requiring restart */
+  hasSettingsChanges?: boolean
+  /** Called when user confirms restarting the session to apply settings */
+  onApplySettings?: () => Promise<void>
 }
 
 // ── Token Usage Per Turn Chart ─────────────────────────────────────────────
@@ -752,13 +765,6 @@ function ToolCallIndex({
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-const MODEL_OPTIONS = [
-  { value: "", label: "Default" },
-  { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "haiku", label: "Haiku" },
-]
-
 export function StatsPanel({
   session,
   onJumpToTurn,
@@ -773,15 +779,24 @@ export function StatsPanel({
   permissionsPanel,
   selectedModel,
   onModelChange,
+  hasSettingsChanges,
+  onApplySettings,
 }: StatsPanelProps) {
   const { turns } = session
 
-  const handleJumpToTurn = useCallback(
-    (turnIndex: number) => {
-      onJumpToTurn?.(turnIndex)
-    },
-    [onJumpToTurn]
-  )
+  const [showRestartDialog, setShowRestartDialog] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
+
+  const handleConfirmRestart = useCallback(async () => {
+    if (!onApplySettings) return
+    setIsRestarting(true)
+    try {
+      await onApplySettings()
+      setShowRestartDialog(false)
+    } finally {
+      setIsRestarting(false)
+    }
+  }, [onApplySettings])
 
   return (
     <aside className={cn(
@@ -820,36 +835,53 @@ export function StatsPanel({
       )}
       <div className={cn("flex flex-col gap-6", isMobile ? "p-4" : "p-3")}>
         {/* Permissions */}
-        {permissionsPanel}
+        {permissionsPanel && (
+          <div className="rounded-lg border border-zinc-800 p-3">
+            {permissionsPanel}
+          </div>
+        )}
 
         {/* Model Selector */}
         {onModelChange && (
-          <section>
-            <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
-              <Cpu className="size-3" />
-              Model
-            </h3>
-            <div className="grid grid-cols-2 gap-1">
-              {MODEL_OPTIONS.map((opt) => {
-                const isSelected = (selectedModel || "") === opt.value
-                return (
-                  <button
-                    key={opt.value}
-                    onClick={() => onModelChange(opt.value)}
-                    className={cn(
-                      "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
-                      isSelected
-                        ? "border-blue-500 text-blue-400 bg-blue-500/10"
-                        : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 bg-zinc-900/50"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                )
-              })}
-            </div>
-          </section>
+          <div className="rounded-lg border border-zinc-800 p-3">
+            <section>
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
+                <Cpu className="size-3" />
+                Model
+              </h3>
+              <div className="grid grid-cols-2 gap-1">
+                {MODEL_OPTIONS.map((opt) => {
+                  const isSelected = (selectedModel || "") === opt.value
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => onModelChange(opt.value)}
+                      className={cn(
+                        "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
+                        isSelected
+                          ? "border-blue-500 text-blue-400 bg-blue-500/10"
+                          : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 bg-zinc-900/50"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* Apply Settings Button */}
+        {hasSettingsChanges && onApplySettings && (
+          <button
+            onClick={() => setShowRestartDialog(true)}
+            className="flex items-center justify-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 transition-all hover:bg-amber-500/20 hover:border-amber-500/70"
+          >
+            <RotateCcw className="size-3" />
+            Apply Changes
+          </button>
         )}
 
         {/* Background Servers */}
@@ -882,8 +914,43 @@ export function StatsPanel({
         <ModelDistribution turns={turns} />
 
         {/* Error Log */}
-        <ErrorLog turns={turns} onJumpToTurn={handleJumpToTurn} />
+        <ErrorLog turns={turns} onJumpToTurn={onJumpToTurn} />
       </div>
+
+      {/* Restart Confirmation Dialog */}
+      <Dialog open={showRestartDialog} onOpenChange={(open) => { if (!open && !isRestarting) setShowRestartDialog(false) }}>
+        <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-100">
+              <RotateCcw className="size-4 text-amber-400" />
+              Restart session?
+            </DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              Applying new model or permission settings requires restarting the
+              underlying Claude process. Your conversation history will be
+              preserved, but the context cache will be cleared.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setShowRestartDialog(false)}
+              disabled={isRestarting}
+              className="text-zinc-400 hover:text-zinc-200"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmRestart}
+              disabled={isRestarting}
+              className="bg-amber-600 hover:bg-amber-500 text-white"
+            >
+              {isRestarting ? "Restarting..." : "Apply & Restart"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

@@ -315,25 +315,6 @@ export function registerClaudeNewRoutes(use: UseFn) {
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)
 
-        // Resolve JSONL path after a brief delay for the file to be created,
-        // then start the subagent watcher.
-        const resolveJsonl = () => {
-          findJsonlPath(sessionId).then((p) => {
-            if (p) {
-              ps.jsonlPath = p
-              ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
-            } else {
-              setTimeout(() => findJsonlPath(sessionId).then((p2) => {
-                ps.jsonlPath = p2
-                if (p2) {
-                  ps.subagentWatcher = watchSubagents(p2, sessionId, ps.pendingTaskCalls)
-                }
-              }), 1000)
-            }
-          })
-        }
-        setTimeout(resolveJsonl, 500)
-
         // Read stdout for result messages and track Task tool calls
         const rl = createInterface({ input: child.stdout! })
         rl.on("line", (line) => {
@@ -391,24 +372,75 @@ export function registerClaudeNewRoutes(use: UseFn) {
           }
         })
 
-        // Wire up result handler for the first message
-        let responded = false
-        ps.onResult = (result) => {
-          if (responded) return
-          responded = true
-          activeProcesses.delete(sessionId)
-          ps.onResult = null
-          res.setHeader("Content-Type", "application/json")
-          if (result.is_error) {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: result.result || "Claude returned an error" }))
-          } else {
-            res.end(JSON.stringify({ success: true, dirName, fileName, sessionId }))
-          }
-        }
-
         // Send the first user message
         child.stdin!.write(streamMsg + "\n")
+
+        // Respond as soon as the JSONL file exists on disk with content,
+        // so the client can redirect immediately and stream via SSE.
+        // Don't wait for the entire first turn to complete.
+        let responded = false
+        const expectedPath = join(projectDir, fileName)
+
+        const respondSuccess = () => {
+          if (responded) return
+          responded = true
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ success: true, dirName, fileName, sessionId }))
+        }
+
+        const respondError = (error: string) => {
+          if (responded) return
+          responded = true
+          res.statusCode = 500
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error }))
+        }
+
+        // Poll for the JSONL file to appear on disk with content
+        const pollForFile = async () => {
+          const maxAttempts = 150 // 15 seconds max (100ms intervals)
+          for (let i = 0; i < maxAttempts; i++) {
+            if (responded) return // error/close handler already responded
+            try {
+              const s = await stat(expectedPath)
+              if (s.size > 0) {
+                respondSuccess()
+
+                // Now resolve JSONL path for subagent watcher
+                ps.jsonlPath = expectedPath
+                ps.subagentWatcher = watchSubagents(expectedPath, sessionId, ps.pendingTaskCalls)
+                return
+              }
+            } catch {
+              // File doesn't exist yet, keep polling
+            }
+            await new Promise(r => setTimeout(r, 100))
+          }
+          // Timed out — file never appeared. Fall through to let onResult handle it.
+        }
+
+        pollForFile()
+
+        // If the process finishes or errors before we've responded, handle it
+        ps.onResult = (result) => {
+          ps.onResult = null
+          if (result.is_error) {
+            respondError(result.result || "Claude returned an error")
+          } else {
+            // Process completed its first turn — respond if we haven't already
+            respondSuccess()
+          }
+
+          // Resolve JSONL path for subagent watcher if not already done
+          if (!ps.jsonlPath) {
+            findJsonlPath(sessionId).then((p) => {
+              if (p) {
+                ps.jsonlPath = p
+                ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
+              }
+            })
+          }
+        }
       } catch {
         res.statusCode = 400
         res.end(JSON.stringify({ error: "Invalid JSON body" }))

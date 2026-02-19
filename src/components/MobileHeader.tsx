@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { getContextUsage } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { cn, copyToClipboard } from "@/lib/utils"
 
 interface MobileHeaderProps {
   session: ParsedSession | null
@@ -45,10 +45,11 @@ export function MobileHeader({
 }: MobileHeaderProps) {
   const [copied, setCopied] = useState(false)
 
-  const copyResumeCmd = useCallback(() => {
+  const copyResumeCmd = useCallback(async () => {
     if (!session) return
     const cmd = `claude --resume ${session.sessionId}`
-    navigator.clipboard.writeText(cmd)
+    const ok = await copyToClipboard(cmd)
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [session])

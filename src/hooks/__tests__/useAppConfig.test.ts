@@ -180,9 +180,13 @@ describe("useAppConfig", () => {
   })
 
   describe("handleConfigSaved", () => {
-    it("sets claudeDir, closes dialog, and reloads", async () => {
+    it("reloads when path changes", async () => {
       mockConfigResponse()
       const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => {
+        expect(result.current.configLoading).toBe(false)
+      })
 
       act(() => result.current.openConfigDialog())
       act(() => result.current.handleConfigSaved("/new/path/.claude"))
@@ -190,6 +194,52 @@ describe("useAppConfig", () => {
       expect(result.current.claudeDir).toBe("/new/path/.claude")
       expect(result.current.showConfigDialog).toBe(false)
       expect(reloadMock).toHaveBeenCalled()
+    })
+
+    it("does not reload for network-only changes (same path)", async () => {
+      mockConfigResponse("/home/user/.claude")
+      const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => {
+        expect(result.current.configLoading).toBe(false)
+      })
+      expect(result.current.claudeDir).toBe("/home/user/.claude")
+
+      act(() => result.current.openConfigDialog())
+      act(() => result.current.handleConfigSaved("/home/user/.claude"))
+
+      expect(result.current.showConfigDialog).toBe(false)
+      expect(reloadMock).not.toHaveBeenCalled()
+    })
+
+    it("re-fetches network info for network-only changes", async () => {
+      // Start with network disabled
+      mockConfigResponse("/home/user/.claude")
+      const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => {
+        expect(result.current.configLoading).toBe(false)
+      })
+
+      // Now mock network-info to return enabled
+      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString()
+        if (url.includes("/api/network-info")) {
+          return new Response(
+            JSON.stringify({ enabled: true, url: "http://192.168.1.5:19384" }),
+            { status: 200 }
+          )
+        }
+        return new Response("not found", { status: 404 })
+      })
+
+      act(() => result.current.handleConfigSaved("/home/user/.claude"))
+
+      await waitFor(() => {
+        expect(result.current.networkUrl).toBe("http://192.168.1.5:19384")
+      })
+      expect(result.current.networkAccessDisabled).toBe(false)
+      expect(reloadMock).not.toHaveBeenCalled()
     })
   })
 

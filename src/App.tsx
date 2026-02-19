@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
+import { SessionSetupPanel } from "@/components/SessionSetupPanel"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamsDashboard } from "@/components/TeamsDashboard"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
@@ -104,6 +105,12 @@ export default function App() {
 
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
+
+  // In-memory map: sessionId → model the persistent process was spawned with.
+  // No localStorage — processes don't survive page reload, so stale data would be wrong.
+  const [appliedModels, setAppliedModels] = useState<Record<string, string>>({})
+  const selectedModelRef = useRef(selectedModel)
+  selectedModelRef.current = selectedModel
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -236,6 +243,39 @@ export default function App() {
 
   // Kill-all handler
   const { killing, handleKillAll } = useKillAll()
+
+  // When session changes: record baseline for new sessions, restore model for revisits
+  const currentSessionId = state.session?.sessionId ?? null
+  const prevSessionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (currentSessionId === prevSessionIdRef.current) return
+    prevSessionIdRef.current = currentSessionId
+    if (!currentSessionId) return
+    setAppliedModels(prev => {
+      if (currentSessionId in prev) {
+        setSelectedModel(prev[currentSessionId])
+        return prev
+      }
+      return { ...prev, [currentSessionId]: selectedModelRef.current }
+    })
+  }, [currentSessionId])
+
+  // Detect if model or permissions have changed from what the persistent process uses
+  const hasSettingsChanges = currentSessionId != null &&
+    currentSessionId in appliedModels &&
+    (selectedModel !== appliedModels[currentSessionId] || perms.hasPendingChanges)
+
+  // Restart the persistent process to apply new model/permissions
+  const handleApplySettings = useCallback(async () => {
+    if (!currentSessionId) return
+    await authFetch("/api/stop-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: currentSessionId }),
+    })
+    setAppliedModels(prev => ({ ...prev, [currentSessionId]: selectedModel }))
+    perms.markApplied()
+  }, [currentSessionId, selectedModel, perms])
 
   // Permissions panel element (shared between desktop/mobile StatsPanel)
   const permissionsPanelNode = useMemo(() => (
@@ -508,6 +548,16 @@ export default function App() {
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              hasSettingsChanges={hasSettingsChanges}
+              onApplySettings={handleApplySettings}
+            />
+          )}
+
+          {state.mobileTab === "stats" && state.pendingDirName && !state.session && (
+            <SessionSetupPanel
+              permissionsPanel={permissionsPanelNode}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
             />
           )}
 
@@ -647,27 +697,34 @@ export default function App() {
               {chatInputNode}
             </div>
           ) : state.pendingDirName ? (
-            <div className="flex flex-1 min-h-0 flex-col">
-              {claudeChat.pendingMessage ? (
-                <div className="flex-1 overflow-y-auto px-4 py-6">
-                  <div className="mx-auto max-w-3xl space-y-4">
-                    <div className="flex justify-end">
-                      <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[80%]">
-                        {claudeChat.pendingMessage}
+            <div className="flex flex-1 min-h-0">
+              <div className="flex flex-1 min-h-0 flex-col min-w-0">
+                {claudeChat.pendingMessage ? (
+                  <div className="flex-1 overflow-y-auto px-4 py-6">
+                    <div className="mx-auto max-w-3xl space-y-4">
+                      <div className="flex justify-end">
+                        <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[80%]">
+                          {claudeChat.pendingMessage}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-zinc-500">
+                        <Loader2 className="size-3.5 animate-spin" />
+                        <span className="text-xs">Creating session...</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 text-zinc-500">
-                      <Loader2 className="size-3.5 animate-spin" />
-                      <span className="text-xs">Creating session...</span>
-                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-sm text-zinc-500">New session — type your first message below</p>
-                </div>
-              )}
-              {chatInputNode}
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <p className="text-sm text-zinc-500">New session — type your first message below</p>
+                  </div>
+                )}
+                {chatInputNode}
+              </div>
+              <SessionSetupPanel
+                permissionsPanel={permissionsPanelNode}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+              />
             </div>
           ) : (
             <Dashboard
@@ -694,6 +751,8 @@ export default function App() {
             permissionsPanel={permissionsPanelNode}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
+            hasSettingsChanges={hasSettingsChanges}
+            onApplySettings={handleApplySettings}
           />
         )}
       </div>

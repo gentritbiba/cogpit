@@ -62,10 +62,25 @@ export function useAppConfig() {
   const handleCloseConfigDialog = useCallback(() => setShowConfigDialog(false), [])
 
   const handleConfigSaved = useCallback((newPath: string) => {
-    setClaudeDir(newPath)
     setShowConfigDialog(false)
-    window.location.reload()
-  }, [])
+    if (newPath !== claudeDir) {
+      // Path changed — full reload to re-fetch sessions, etc.
+      setClaudeDir(newPath)
+      window.location.reload()
+    } else {
+      // Network-only change — re-fetch network info without full reload
+      authFetch("/api/network-info")
+        .then((res) => res.json())
+        .then((data: { enabled: boolean; url?: string }) => {
+          setNetworkUrl(data.enabled && data.url ? data.url : null)
+          setNetworkAccessDisabled(!data.enabled)
+        })
+        .catch(() => {
+          setNetworkUrl(null)
+          setNetworkAccessDisabled(false)
+        })
+    }
+  }, [claudeDir])
 
   const openConfigDialog = useCallback(() => setShowConfigDialog(true), [])
 

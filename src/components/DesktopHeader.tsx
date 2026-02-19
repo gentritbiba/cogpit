@@ -19,7 +19,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, copyToClipboard } from "@/lib/utils"
 
 interface DesktopHeaderProps {
   session: ParsedSession | null
@@ -53,17 +53,19 @@ export function DesktopHeader({
   const [copied, setCopied] = useState(false)
   const [urlCopied, setUrlCopied] = useState(false)
 
-  const copyNetworkUrl = useCallback(() => {
+  const copyNetworkUrl = useCallback(async () => {
     if (!networkUrl) return
-    navigator.clipboard.writeText(networkUrl)
+    const ok = await copyToClipboard(networkUrl)
+    if (!ok) return
     setUrlCopied(true)
     setTimeout(() => setUrlCopied(false), 1500)
   }, [networkUrl])
 
-  const copyResumeCmd = useCallback(() => {
+  const copyResumeCmd = useCallback(async () => {
     if (!session) return
     const cmd = `claude --resume ${session.sessionId}`
-    navigator.clipboard.writeText(cmd)
+    const ok = await copyToClipboard(cmd)
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
   }, [session])

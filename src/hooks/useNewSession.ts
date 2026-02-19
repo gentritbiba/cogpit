@@ -81,17 +81,34 @@ export function useNewSession({
         const { dirName: resDirName, fileName, sessionId } = await res.json()
         pendingDirNameRef.current = null
 
-        // Fetch the JSONL to populate the session view
-        const contentRes = await authFetch(
-          `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
-          { signal: controller.signal }
-        )
-        if (!contentRes.ok) {
-          setCreateError(`Failed to load new session (${contentRes.status})`)
+        // Poll for the JSONL to have parseable content.
+        // The server responds as soon as the file exists, but it may still be
+        // very early in the write — poll until we get a parseable session.
+        const maxAttempts = 30
+        let rawText = ""
+        let parsed: ParsedSession | null = null
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          if (controller.signal.aborted) return null
+          const contentRes = await authFetch(
+            `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
+            { signal: controller.signal }
+          )
+          if (contentRes.ok) {
+            rawText = await contentRes.text()
+            if (rawText.trim()) {
+              parsed = parseSession(rawText)
+              // We have content — good enough to render. SSE will stream the rest.
+              break
+            }
+          }
+          await new Promise(r => setTimeout(r, 200))
+        }
+
+        if (!parsed) {
+          setCreateError("Failed to load new session — no content available")
           return null
         }
-        const rawText = await contentRes.text()
-        const parsed = parseSession(rawText)
+
         const source: SessionSource = { dirName: resDirName, fileName, rawText }
         dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
         onSessionFinalized(parsed, source)

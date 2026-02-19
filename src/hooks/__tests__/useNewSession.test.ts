@@ -192,32 +192,52 @@ describe("useNewSession", () => {
     expect(result.current.createError).toBe("Unknown error")
   })
 
-  it("createAndSend sets error when content fetch fails", async () => {
-    const { result } = renderHook(() => useNewSession(defaultOpts))
+  it("createAndSend sets error when content fetch never returns content", async () => {
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() => useNewSession(defaultOpts))
 
-    act(() => {
-      result.current.handleNewSession("dir1")
-    })
+      act(() => {
+        result.current.handleNewSession("dir1")
+      })
 
-    mockedAuthFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          dirName: "dir1",
-          fileName: "s.jsonl",
-          sessionId: "sid",
-        }),
-      } as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-      } as Response)
+      let callCount = 0
+      mockedAuthFetch.mockImplementation(async () => {
+        callCount++
+        if (callCount === 1) {
+          // First call: create-and-send succeeds
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              dirName: "dir1",
+              fileName: "s.jsonl",
+              sessionId: "sid",
+            }),
+          } as Response
+        }
+        // All subsequent calls (polling for JSONL content): return empty text
+        return {
+          ok: true,
+          text: () => Promise.resolve(""),
+        } as unknown as Response
+      })
 
-    await act(async () => {
-      await result.current.createAndSend("hello")
-    })
+      let done = false
+      const promise = act(async () => {
+        await result.current.createAndSend("hello")
+        done = true
+      })
 
-    expect(result.current.createError).toBe("Failed to load new session (404)")
+      // Fast-forward through all polling delays until the promise resolves
+      while (!done) {
+        await vi.advanceTimersByTimeAsync(200)
+      }
+      await promise
+
+      expect(result.current.createError).toBe("Failed to load new session — no content available")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("createAndSend handles network errors", async () => {
