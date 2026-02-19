@@ -147,7 +147,7 @@ function TokenChart({ turns }: { turns: Turn[] }) {
           const outputY = padTop + chartH - outputH
 
           return (
-            <g key={i}>
+            <g key={`bar-${d.turn}`}>
               {/* Cache read (bottom of stack, lightest) */}
               {cacheReadH > 0 && (
                 <rect
@@ -240,7 +240,7 @@ function ActivityHeatmap({ turns }: { turns: Turn[] }) {
             const alpha = 0.1 + intensity * 0.9
             return (
               <rect
-                key={i}
+                key={t.id}
                 x={i * segW}
                 y={0}
                 width={segW - 1}
@@ -270,11 +270,11 @@ function ActivityHeatmap({ turns }: { turns: Turn[] }) {
 function ModelDistribution({ turns }: { turns: Turn[] }) {
   const models = useMemo(() => {
     const counts: Record<string, number> = {}
-    for (const t of turns) {
+    turns.forEach(t => {
       if (t.model) {
         counts[t.model] = (counts[t.model] ?? 0) + 1
       }
-    }
+    })
     return Object.entries(counts).sort(([, a], [, b]) => b - a)
   }, [turns])
 
@@ -311,11 +311,14 @@ function ErrorLog({
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
 }) {
   const errors = useMemo(() => {
-    const result: { turnIndex: number; toolName: string; message: string }[] = []
+    const result: { id: string; turnIndex: number; toolName: string; message: string }[] = []
     for (let i = 0; i < turns.length; i++) {
-      for (const tc of turns[i].toolCalls) {
+      const tcs = turns[i].toolCalls
+      for (let j = 0; j < tcs.length; j++) {
+        const tc = tcs[j]
         if (tc.isError && tc.result) {
           result.push({
+            id: tc.id,
             turnIndex: i,
             toolName: tc.name,
             message: tc.result.slice(0, 200),
@@ -335,9 +338,9 @@ function ErrorLog({
         Errors ({errors.length})
       </h3>
       <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1">
-        {errors.map((err, i) => (
+        {errors.map((err) => (
           <button
-            key={i}
+            key={err.id}
             onClick={() => onJumpToTurn?.(err.turnIndex)}
             className="w-full rounded-lg border border-red-900/40 bg-red-950/20 px-3 py-2.5 text-left transition-all hover:bg-red-950/40 hover:border-red-800/40"
           >
@@ -369,10 +372,10 @@ const PORT_RE = /(?::(\d{4,5}))|(?:port\s+(\d{4,5}))|(?:localhost:(\d{4,5}))/gi
 
 function detectPorts(text: string): number[] {
   const ports = new Set<number>()
-  for (const m of text.matchAll(PORT_RE)) {
+  Array.from(text.matchAll(PORT_RE)).forEach(m => {
     const p = parseInt(m[1] || m[2] || m[3], 10)
     if (p > 0 && p < 65536) ports.add(p)
-  }
+  })
   return [...ports]
 }
 
@@ -393,7 +396,9 @@ function BackgroundServers({
   const jsonlPorts = useMemo(() => {
     const portMap = new Map<number, { description: string; outputPath: string | null }>()
     for (let i = 0; i < turns.length; i++) {
-      for (const tc of turns[i].toolCalls) {
+      const tcs = turns[i].toolCalls
+      for (let j = 0; j < tcs.length; j++) {
+        const tc = tcs[j]
         if (tc.name !== "Bash" || !tc.input.run_in_background) continue
         const command = (tc.input.command as string) || ""
         const description = (tc.input.description as string) || ""
@@ -410,8 +415,8 @@ function BackgroundServers({
         const outputMatch = (tc.result || "").match(/Output is being written to:\s*(\S+)/)
         const outputPath = outputMatch ? outputMatch[1] : null
         // Latest command per port wins
-        for (const port of ports) {
-          portMap.set(port, { description: description || command.replace(/^cd\s+"[^"]*"\s*&&\s*/, "").slice(0, 60), outputPath })
+        for (let k = 0; k < ports.length; k++) {
+          portMap.set(ports[k], { description: description || command.replace(/^cd\s+"[^"]*"\s*&&\s*/, "").slice(0, 60), outputPath })
         }
       }
     }
@@ -424,50 +429,51 @@ function BackgroundServers({
 
     let cancelled = false
     async function check() {
+      let nextTasks: BgTask[] = []
+
+      // Primary: scan Claude's task output directory
       try {
-        // Primary: scan Claude's task output directory
         const res = await authFetch(
           `/api/background-tasks?cwd=${encodeURIComponent(cwd)}`
         )
         if (cancelled) return
         if (res.ok) {
           const apiTasks: BgTask[] = await res.json()
-          if (apiTasks.length > 0) {
-            setTasks(apiTasks)
-            return
-          }
-        }
-
-        // Fallback: check ports from JSONL tool calls
-        if (jsonlPorts.size === 0) {
-          setTasks([])
-          return
-        }
-        const portsToCheck = [...jsonlPorts.keys()]
-        const portRes = await authFetch(
-          `/api/check-ports?ports=${portsToCheck.join(",")}`
-        )
-        if (cancelled) return
-        if (portRes.ok) {
-          const portStatus: Record<number, boolean> = await portRes.json()
-          const fallbackTasks: BgTask[] = []
-          const seen = new Set<number>()
-          for (const [port, info] of jsonlPorts) {
-            if (!portStatus[port] || seen.has(port)) continue
-            seen.add(port)
-            fallbackTasks.push({
-              id: `port-${port}`,
-              outputPath: info.outputPath,
-              ports: [port],
-              portStatus: { [port]: true },
-              preview: info.description,
-            })
-          }
-          setTasks(fallbackTasks)
+          if (apiTasks.length > 0) nextTasks = apiTasks
         }
       } catch {
-        // ignore
+        return
       }
+
+      // Fallback: check ports from JSONL tool calls
+      if (nextTasks.length === 0 && jsonlPorts.size > 0) {
+        try {
+          const portsToCheck = [...jsonlPorts.keys()]
+          const portRes = await authFetch(
+            `/api/check-ports?ports=${portsToCheck.join(",")}`
+          )
+          if (cancelled) return
+          if (portRes.ok) {
+            const portStatus: Record<number, boolean> = await portRes.json()
+            const seen = new Set<number>()
+            jsonlPorts.forEach((info, port) => {
+              if (!portStatus[port] || seen.has(port)) return
+              seen.add(port)
+              nextTasks.push({
+                id: `port-${port}`,
+                outputPath: info.outputPath,
+                ports: [port],
+                portStatus: { [port]: true },
+                preview: info.description,
+              })
+            })
+          }
+        } catch {
+          return
+        }
+      }
+
+      setTasks(nextTasks)
     }
     check()
     const interval = setInterval(check, 10_000)
@@ -485,13 +491,13 @@ function BackgroundServers({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ port }),
         })
-        // Refresh after kill
-        setTimeout(() => {
-          setTasks((prev) => prev.filter((t) => !t.ports.includes(port)))
-        }, 1500)
       } catch {
-        /* ignore */
+        return
       }
+      // Refresh after kill
+      setTimeout(() => {
+        setTasks((prev) => prev.filter((t) => !t.ports.includes(port)))
+      }, 1500)
     },
     []
   )
@@ -687,7 +693,9 @@ function ToolCallIndex({
   const toolCallGroups = useMemo(() => {
     const groups = new Map<string, { calls: { tc: ToolCall; turnIndex: number }[]; count: number }>()
     for (let i = 0; i < turns.length; i++) {
-      for (const tc of turns[i].toolCalls) {
+      const tcs = turns[i].toolCalls
+      for (let j = 0; j < tcs.length; j++) {
+        const tc = tcs[j]
         if (!groups.has(tc.name)) {
           groups.set(tc.name, { calls: [], count: 0 })
         }
@@ -725,11 +733,11 @@ function ToolCallIndex({
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-800 pl-2 pt-0.5">
-                    {group.calls.slice(0, 50).map(({ tc, turnIndex }, i) => {
+                    {group.calls.slice(0, 50).map(({ tc, turnIndex }) => {
                       const preview = getToolCallPreview(tc)
                       return (
                         <button
-                          key={`${tc.id}-${i}`}
+                          key={tc.id}
                           onClick={() => onJumpToTurn?.(turnIndex, tc.id)}
                           className={cn(
                             "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors",
@@ -793,7 +801,8 @@ export function StatsPanel({
     try {
       await onApplySettings()
       setShowRestartDialog(false)
-    } finally {
+      setIsRestarting(false)
+    } catch {
       setIsRestarting(false)
     }
   }, [onApplySettings])

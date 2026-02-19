@@ -265,29 +265,31 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   }, [session, rmPaths])
 
   // deleted files: Map<path, lineCount> (line count from git via server)
-  const [deletedFilesMap, setDeletedFilesMap] = useState<Map<string, number>>(new Map())
+  const [fetchedDeletedMap, setFetchedDeletedMap] = useState<Map<string, number>>(new Map())
+
+  // Derive from cache or empty state during render (no sync setState in effect)
+  const isEmpty = uniquePaths.length === 0 && rmDirs.length === 0
+  const cachedDeletedMap = useMemo(() => {
+    if (isEmpty) return new Map<string, number>()
+    const cached = deletedFilesCache.get(session.sessionId)
+    if (cached && cached.pathsHash === pathsHash) return cached.deleted
+    return null
+  }, [isEmpty, session.sessionId, pathsHash])
+  const deletedFilesMap = cachedDeletedMap ?? fetchedDeletedMap
 
   // Keep refs so the effect can read the latest without re-firing
   const uniquePathsRef = useRef(uniquePaths)
-  uniquePathsRef.current = uniquePaths
   const rmDirsRef = useRef(rmDirs)
-  rmDirsRef.current = rmDirs
-
-  // Check which files have been deleted, with caching
   useEffect(() => {
+    uniquePathsRef.current = uniquePaths
+    rmDirsRef.current = rmDirs
+  }, [uniquePaths, rmDirs])
+
+  // Only fetch when not derivable from cache
+  useEffect(() => {
+    if (cachedDeletedMap !== null) return
     const paths = uniquePathsRef.current
     const dirs = rmDirsRef.current
-    if (paths.length === 0 && dirs.length === 0) {
-      setDeletedFilesMap(new Map())
-      return
-    }
-
-    const sessionId = session.sessionId
-    const cached = deletedFilesCache.get(sessionId)
-    if (cached && cached.pathsHash === pathsHash) {
-      setDeletedFilesMap(cached.deleted)
-      return
-    }
 
     let cancelled = false
     authFetch("/api/check-files-exist", {
@@ -299,13 +301,13 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
       .then((data: { deleted: { path: string; lines: number }[] }) => {
         if (cancelled) return
         const map = new Map(data.deleted.map((d) => [d.path, d.lines]))
-        deletedFilesCache.set(sessionId, { pathsHash, deleted: map })
-        setDeletedFilesMap(map)
+        deletedFilesCache.set(session.sessionId, { pathsHash, deleted: map })
+        setFetchedDeletedMap(map)
       })
       .catch(() => {})
 
     return () => { cancelled = true }
-  }, [pathsHash, session.sessionId])
+  }, [cachedDeletedMap, pathsHash, session.sessionId])
 
   // Build unified ordered list: file changes + deleted file entries, sorted by turn index
   const renderItems = useMemo(() => {

@@ -72,11 +72,11 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
 
       {isOpen && (
         <div className="mt-3 space-y-2">
-          {messages.map((msg, i) => {
+          {messages.map((msg) => {
             const color = agentColorMap.get(msg.agentId) ?? AGENT_COLORS[0]
             return (
               <SubAgentMessageItem
-                key={i}
+                key={`${msg.agentId}-${msg.timestamp}`}
                 message={msg}
                 expandAll={expandAll}
                 barColor={color.bar}
@@ -107,9 +107,9 @@ function SubAgentMessageItem({
           <div className="flex gap-2 items-start">
             <Brain className="w-3.5 h-3.5 text-violet-400 mt-0.5 shrink-0" />
             <div className="space-y-1">
-              {message.thinking.map((t, i) => (
+              {message.thinking.map((t) => (
                 <pre
-                  key={i}
+                  key={t.slice(0, 120)}
                   className="text-[11px] text-zinc-500 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto"
                 >
                   {t}

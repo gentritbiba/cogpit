@@ -192,11 +192,11 @@ function FullTurnCard({
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-zinc-500/60 mt-1.5 shrink-0" />
             <div className="flex flex-wrap gap-1">
-              {turn.toolCalls.map((tc, i) => {
+              {turn.toolCalls.map((tc) => {
                 const summary = toolSummary(tc)
                 return (
                   <Badge
-                    key={i}
+                    key={tc.id || `tc-${tc.name}`}
                     variant="outline"
                     className={cn(
                       "text-[10px] px-1.5 py-0 h-4 font-mono",
@@ -271,9 +271,9 @@ function ArchivedTurnCard({
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-zinc-500/60 mt-1.5 shrink-0" />
             <div className="flex flex-wrap gap-1">
-              {turn.toolCalls.map((tc, i) => (
+              {turn.toolCalls.map((tc) => (
                 <Badge
-                  key={i}
+                  key={`${tc.type}-${tc.filePath}`}
                   variant="outline"
                   className={cn(
                     "text-[10px] px-1.5 py-0 h-4 font-mono",
@@ -476,7 +476,7 @@ export function BranchModal({
           {current.fullTurns
             ? current.fullTurns.map((turn, i) => (
                 <FullTurnCard
-                  key={i}
+                  key={turn.id || `turn-${i}`}
                   turn={turn}
                   archiveIndex={i}
                   branchId={current.id}
@@ -485,7 +485,7 @@ export function BranchModal({
               ))
             : current.archivedTurns?.map((turn, i) => (
                 <ArchivedTurnCard
-                  key={i}
+                  key={`archived-${turn.index}`}
                   turn={turn}
                   archiveIndex={i}
                   branchId={current.id}

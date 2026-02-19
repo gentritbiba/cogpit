@@ -21,6 +21,7 @@ import { registerTeamSessionRoutes } from "../server/routes/team-session"
 import { registerUndoRoutes } from "../server/routes/undo"
 import { registerFileRoutes } from "../server/routes/files"
 import { registerFileWatchRoutes } from "../server/routes/files-watch"
+import { registerUsageRoutes } from "../server/routes/usage"
 
 // ── PTY types ───────────────────────────────────────────────────────
 interface PtySession {
@@ -94,6 +95,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerUndoRoutes(use)
   registerFileRoutes(use)
   registerFileWatchRoutes(use)
+  registerUsageRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Eye, EyeOff, Lock, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -21,28 +23,29 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     setLoading(true)
     setError(null)
 
+    let res: Response
+    let data: { valid?: boolean; token?: string; error?: string }
     try {
-      const res = await fetch("/api/auth/verify", {
+      res = await fetch("/api/auth/verify", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${password}`,
           "Content-Type": "application/json",
         },
       })
-
-      const data = await res.json()
-      if (res.ok && data.valid) {
-        // Store the session token returned by the server (not the raw password)
-        setToken(data.token || password)
-        onAuthenticated()
-      } else {
-        setError(data.error || "Invalid password")
-      }
+      data = await res.json()
     } catch {
       setError("Failed to connect to server")
-    } finally {
       setLoading(false)
+      return
     }
+    if (res.ok && data.valid) {
+      setToken(data.token || password)
+      onAuthenticated()
+    } else {
+      setError(data.error || "Invalid password")
+    }
+    setLoading(false)
   }, [password, onAuthenticated])
 
   return (
@@ -64,8 +67,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
+            ref={inputRef}
             className="pr-10 bg-zinc-900 border-zinc-700 focus:border-zinc-600"
-            autoFocus
           />
           <button
             type="button"

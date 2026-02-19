@@ -36,31 +36,23 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
 
       for (const el of turnEls) {
         const rect = el.getBoundingClientRect()
-        // Find the turn that spans across our probe point
         if (rect.top <= probe && rect.bottom > probe && rect.top > bestTop) {
           bestIndex = parseInt(el.dataset.turnIndex!, 10)
           bestTop = rect.top
         }
       }
 
-      if (bestIndex === null) {
-        setStickyTurn(null)
-        return
+      let next: { index: number; userMsgVisible: boolean } | null = null
+      if (bestIndex !== null) {
+        const turnEl = container.querySelector<HTMLElement>(
+          `[data-turn-index="${bestIndex}"]`
+        )
+        if (turnEl) {
+          const turnTop = turnEl.getBoundingClientRect().top
+          next = { index: bestIndex, userMsgVisible: turnTop + 120 > containerTop }
+        }
       }
-
-      // Check if the user message area (first ~120px of the turn) is still visible
-      const turnEl = container.querySelector<HTMLElement>(
-        `[data-turn-index="${bestIndex}"]`
-      )
-      if (!turnEl) {
-        setStickyTurn(null)
-        return
-      }
-
-      const turnTop = turnEl.getBoundingClientRect().top
-      const userMsgVisible = turnTop + 120 > containerTop
-
-      setStickyTurn({ index: bestIndex, userMsgVisible })
+      setStickyTurn(next)
     }
 
     const handleScroll = () => {
@@ -69,9 +61,11 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     }
 
     container.addEventListener("scroll", handleScroll, { passive: true })
-    update()
+    // Defer initial computation to next frame (subscription pattern, not sync setState)
+    const initFrame = requestAnimationFrame(update)
 
     return () => {
+      cancelAnimationFrame(initFrame)
       container.removeEventListener("scroll", handleScroll)
       cancelAnimationFrame(rafRef.current)
     }
@@ -86,7 +80,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     if (!clean) return null
     const firstLine = clean.split("\n")[0]
     return firstLine.length > 150 ? firstLine.slice(0, 150) + "..." : firstLine
-  }, [stickyTurn?.index, session.turns])
+  }, [stickyTurn, session.turns])
 
   const scrollToPrompt = () => {
     const container = scrollContainerRef.current

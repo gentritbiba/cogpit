@@ -73,7 +73,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
           <div className="flex flex-wrap gap-2 mb-2">
             {imageUrls.map((url, i) => (
               <button
-                key={i}
+                key={url}
                 onClick={() => setModalImage(url)}
                 className="rounded-lg overflow-hidden border border-zinc-700/50 hover:border-blue-500/50 transition-colors cursor-pointer"
               >

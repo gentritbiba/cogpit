@@ -70,16 +70,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const [images, setImages] = useState<Array<{ file: File; preview: string; data: string; mediaType: string }>>([])
   const [isDragOver, setIsDragOver] = useState(false)
 
+  // Track connection elapsed time — ref for start time, subscription via interval
   const connectedAtRef = useRef<number | null>(null)
   const [elapsedSec, setElapsedSec] = useState(0)
   useEffect(() => {
     if (!isConnected) {
       connectedAtRef.current = null
-      setElapsedSec(0)
       return
     }
     connectedAtRef.current = Date.now()
-    setElapsedSec(0)
     const interval = setInterval(() => {
       if (connectedAtRef.current !== null) {
         setElapsedSec(Math.floor((Date.now() - connectedAtRef.current) / 1000))
@@ -253,11 +252,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         window.confirm = () => true
         await transcriber.loadModel()
         transcriberRef.current = transcriber
+        window.confirm = origConfirm
       } catch {
+        window.confirm = origConfirm
         setVoiceStatus("idle")
         return
-      } finally {
-        window.confirm = origConfirm
       }
     }
 
@@ -325,17 +324,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       {/* Image preview strip */}
       {images.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2">
-          {images.map((img, i) => (
-            <div key={i} className="relative group/thumb">
+          {images.map((img, imgIdx) => (
+            <div key={img.preview} className="relative group/thumb">
               <img
                 src={img.preview}
-                alt={`Upload ${i + 1}`}
+                alt={`Upload ${imgIdx + 1}`}
                 className="h-16 w-auto rounded-lg border border-zinc-700/50 object-contain bg-zinc-800"
               />
               <button
-                onClick={() => removeImage(i)}
+                onClick={() => removeImage(imgIdx)}
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity hover:bg-red-900 hover:border-red-600"
-                aria-label={`Remove image ${i + 1}`}
+                aria-label={`Remove image ${imgIdx + 1}`}
               >
                 <X className="w-3 h-3 text-zinc-300" />
               </button>
@@ -538,9 +537,9 @@ function PlanApprovalBar({
       {allowedPrompts && allowedPrompts.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           <span className="text-[10px] text-zinc-500 self-center mr-1">Permissions requested:</span>
-          {allowedPrompts.map((p, i) => (
+          {allowedPrompts.map((p) => (
             <span
-              key={i}
+              key={`${p.tool}-${p.prompt}`}
               className="inline-flex items-center rounded border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400"
             >
               {p.prompt}
@@ -583,8 +582,8 @@ function UserQuestionBar({
         </span>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {q.options.map((opt, i) => (
-          <Tooltip key={i}>
+        {q.options.map((opt) => (
+          <Tooltip key={opt.label}>
             <TooltipTrigger asChild>
               <Button
                 variant="outline"

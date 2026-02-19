@@ -61,9 +61,9 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
       {!collapsed && (
         <div className="px-3 pb-2 pt-0.5">
           <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {todos.map((todo, i) => (
+            {todos.map((todo) => (
               <div
-                key={i}
+                key={todo.content}
                 className="flex items-center gap-1.5 min-w-0"
               >
                 {todo.status === "completed" ? (

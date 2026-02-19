@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Cog, FolderOpen, CheckCircle, XCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,8 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
   const [path, setPath] = useState("")
   const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, save } = useConfigValidation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -51,11 +53,11 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
                 value={path}
                 onChange={handleChange}
                 placeholder="/Users/you/.claude"
+                ref={inputRef}
                 className="pl-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && status === "valid" && !saving) handleSave()
                 }}
-                autoFocus
               />
             </div>
 

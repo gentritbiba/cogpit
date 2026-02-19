@@ -125,158 +125,180 @@ export const SessionBrowser = memo(function SessionBrowser({
   onDeleteSession,
 }: SessionBrowserProps) {
   const [view, setView] = useState<View>(session ? "detail" : "projects")
-  const [projects, setProjects] = useState<ProjectInfo[]>([])
-  const [sessions, setSessions] = useState<SessionInfo[]>([])
-  const [sessionsTotal, setSessionsTotal] = useState(0)
-  const [sessionsPage, setSessionsPage] = useState(1)
-  const [selectedProject, setSelectedProject] = useState<ProjectInfo | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [searchFilter, setSearchFilter] = useState("")
-  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [browse, setBrowse] = useState({
+    projects: [] as ProjectInfo[],
+    sessions: [] as SessionInfo[],
+    sessionsTotal: 0,
+    sessionsPage: 1,
+    selectedProject: null as ProjectInfo | null,
+    isLoading: true,
+    searchFilter: "",
+    fetchError: null as string | null,
+  })
 
-  // Load projects on mount
-  useEffect(() => {
-    loadProjects()
-  }, [])
-
-  // When session changes externally, switch to detail view
+  // When session changes externally, switch to detail view (adjust state during render)
   const sessionId = session?.sessionId ?? null
-  useEffect(() => {
+  const [prevSessionId, setPrevSessionId] = useState(sessionId)
+  if (sessionId !== prevSessionId) {
+    setPrevSessionId(sessionId)
     if (sessionId) setView("detail")
-  }, [sessionId])
+  }
 
+  // UI wrapper — sets loading/error state, safe for event handlers
   const loadProjects = useCallback(async () => {
-    setIsLoading(true)
-    setFetchError(null)
+    setBrowse(prev => ({ ...prev, isLoading: true, fetchError: null }))
+    let res: Response
     try {
-      const res = await authFetch("/api/projects")
-      if (!res.ok) throw new Error(`Failed to load projects (${res.status})`)
-      const data = await res.json()
-      setProjects(data)
+      res = await authFetch("/api/projects")
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load projects")
-    } finally {
-      setIsLoading(false)
+      setBrowse(prev => ({ ...prev, fetchError: err instanceof Error ? err.message : "Failed to load projects", isLoading: false }))
+      return
     }
+    if (!res.ok) {
+      setBrowse(prev => ({ ...prev, fetchError: `Failed to load projects (${res.status})`, isLoading: false }))
+      return
+    }
+    const data = await res.json()
+    setBrowse(prev => ({ ...prev, projects: data, isLoading: false }))
   }, [])
 
   const loadSessions = useCallback(async (project: ProjectInfo, page = 1, append = false) => {
-    setIsLoading(true)
-    setFetchError(null)
-    if (!append) {
-      setSelectedProject(project)
-    }
+    setBrowse(prev => ({ ...prev, isLoading: true, fetchError: null, ...(append ? {} : { selectedProject: project }) }))
+    let res: Response
     try {
-      const res = await authFetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
-      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
-      const data = await res.json()
-      if (append) {
-        setSessions((prev) => [...prev, ...data.sessions])
-      } else {
-        setSessions(data.sessions)
-      }
-      setSessionsTotal(data.total)
-      setSessionsPage(page)
-      if (!append) setView("sessions")
+      res = await authFetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load sessions")
-    } finally {
-      setIsLoading(false)
+      setBrowse(prev => ({ ...prev, fetchError: err instanceof Error ? err.message : "Failed to load sessions", isLoading: false }))
+      return
     }
+    if (!res.ok) {
+      setBrowse(prev => ({ ...prev, fetchError: `Failed to load sessions (${res.status})`, isLoading: false }))
+      return
+    }
+    const data = await res.json()
+    setBrowse(prev => ({
+      ...prev,
+      sessions: append ? [...prev.sessions, ...data.sessions] : data.sessions,
+      sessionsTotal: data.total,
+      sessionsPage: page,
+      isLoading: false,
+    }))
+    if (!append) setView("sessions")
   }, [])
 
   const loadSessionFile = useCallback(
     async (project: ProjectInfo, session: SessionInfo) => {
-      setIsLoading(true)
-      setFetchError(null)
+      setBrowse(prev => ({ ...prev, isLoading: true, fetchError: null }))
+      let res: Response
       try {
-        const res = await authFetch(
+        res = await authFetch(
           `/api/sessions/${encodeURIComponent(project.dirName)}/${encodeURIComponent(session.fileName)}`
         )
-        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
-        const text = await res.text()
-        const parsed = parseSession(text)
-        onLoadSession(parsed, {
-          dirName: project.dirName,
-          fileName: session.fileName,
-          rawText: text,
-        })
-        setView("detail")
       } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load session")
-      } finally {
-        setIsLoading(false)
+        setBrowse(prev => ({ ...prev, fetchError: err instanceof Error ? err.message : "Failed to load session", isLoading: false }))
+        return
       }
+      if (!res.ok) {
+        setBrowse(prev => ({ ...prev, fetchError: `Failed to load session (${res.status})`, isLoading: false }))
+        return
+      }
+      const text = await res.text()
+      const parsed = parseSession(text)
+      onLoadSession(parsed, {
+        dirName: project.dirName,
+        fileName: session.fileName,
+        rawText: text,
+      })
+      setView("detail")
+      setBrowse(prev => ({ ...prev, isLoading: false }))
     },
     [onLoadSession]
   )
 
   const loadLiveSession = useCallback(
     async (dirName: string, fileName: string) => {
-      setIsLoading(true)
-      setFetchError(null)
+      setBrowse(prev => ({ ...prev, isLoading: true, fetchError: null }))
+      let res: Response
       try {
-        const res = await authFetch(
+        res = await authFetch(
           `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
         )
-        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
-        const text = await res.text()
-        const parsed = parseSession(text)
-        onLoadSession(parsed, { dirName, fileName, rawText: text })
-        setView("detail")
       } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load session")
-      } finally {
-        setIsLoading(false)
+        setBrowse(prev => ({ ...prev, fetchError: err instanceof Error ? err.message : "Failed to load session", isLoading: false }))
+        return
       }
+      if (!res.ok) {
+        setBrowse(prev => ({ ...prev, fetchError: `Failed to load session (${res.status})`, isLoading: false }))
+        return
+      }
+      const text = await res.text()
+      const parsed = parseSession(text)
+      onLoadSession(parsed, { dirName, fileName, rawText: text })
+      setView("detail")
+      setBrowse(prev => ({ ...prev, isLoading: false }))
     },
     [onLoadSession]
   )
 
+  // Load projects on mount — inlined to keep single setState per branch
+  useEffect(() => {
+    authFetch("/api/projects")
+      .then(res => {
+        if (!res.ok) return Promise.reject(new Error(`Failed to load projects (${res.status})`))
+        return res.json()
+      })
+      .then(data => {
+        setBrowse(prev => ({ ...prev, projects: data, isLoading: false }))
+      })
+      .catch(err => {
+        setBrowse(prev => ({ ...prev, fetchError: err instanceof Error ? err.message : "Failed to load projects", isLoading: false }))
+      })
+  }, [])
+
   const handleBack = useCallback(() => {
-    if (view === "detail" && selectedProject) {
+    if (view === "detail" && browse.selectedProject) {
       setView("sessions")
     } else if (view === "detail") {
       setView("projects")
     } else if (view === "sessions") {
       setView("projects")
-      setSelectedProject(null)
-      setSessions([])
-      setSessionsTotal(0)
-      setSessionsPage(1)
+      setBrowse(prev => ({ ...prev, selectedProject: null, sessions: [], sessionsTotal: 0, sessionsPage: 1 }))
     }
-    setSearchFilter("")
-  }, [view, selectedProject])
+    setBrowse(prev => ({ ...prev, searchFilter: "" }))
+  }, [view, browse.selectedProject])
 
   const handleSelectSession = useCallback(
     (s: SessionInfo) => {
-      if (selectedProject) loadSessionFile(selectedProject, s)
+      if (browse.selectedProject) loadSessionFile(browse.selectedProject, s)
     },
-    [selectedProject, loadSessionFile]
+    [browse.selectedProject, loadSessionFile]
   )
 
   const handleDeleteSessionLocal = useCallback(
     (s: SessionInfo) => {
-      if (!selectedProject || !onDeleteSession) return
-      onDeleteSession(selectedProject.dirName, s.fileName)
+      if (!browse.selectedProject || !onDeleteSession) return
+      onDeleteSession(browse.selectedProject.dirName, s.fileName)
       // Remove from local state immediately
-      setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
-      setSessionsTotal((prev) => prev - 1)
+      setBrowse(prev => ({
+        ...prev,
+        sessions: prev.sessions.filter((x) => x.fileName !== s.fileName),
+        sessionsTotal: prev.sessionsTotal - 1,
+      }))
     },
-    [selectedProject, onDeleteSession]
+    [browse.selectedProject, onDeleteSession]
   )
 
   const handleDuplicateSessionLocal = useCallback(
     (s: SessionInfo) => {
-      if (!selectedProject || !onDuplicateSession) return
-      onDuplicateSession(selectedProject.dirName, s.fileName)
+      if (!browse.selectedProject || !onDuplicateSession) return
+      onDuplicateSession(browse.selectedProject.dirName, s.fileName)
     },
-    [selectedProject, onDuplicateSession]
+    [browse.selectedProject, onDuplicateSession]
   )
 
   const handleLoadMoreSessions = useCallback(() => {
-    if (selectedProject) loadSessions(selectedProject, sessionsPage + 1, true)
-  }, [selectedProject, sessionsPage, loadSessions])
+    if (browse.selectedProject) loadSessions(browse.selectedProject, browse.sessionsPage + 1, true)
+  }, [browse.selectedProject, browse.sessionsPage, loadSessions])
 
   // Mobile teams-only mode: just show the teams list
   if (teamsOnly) {
@@ -363,7 +385,7 @@ export const SessionBrowser = memo(function SessionBrowser({
                 isMobile ? "text-sm" : "text-xs"
               )}>
                 {view === "projects" && "Projects"}
-                {view === "sessions" && selectedProject?.shortName}
+                {view === "sessions" && browse.selectedProject?.shortName}
                 {view === "detail" && "Session"}
               </span>
               {view === "projects" && (
@@ -374,10 +396,10 @@ export const SessionBrowser = memo(function SessionBrowser({
                   onClick={loadProjects}
                   aria-label="Refresh projects"
                 >
-                  <RefreshCw className={cn("size-3", isLoading && "animate-spin")} />
+                  <RefreshCw className={cn("size-3", browse.isLoading && "animate-spin")} />
                 </Button>
               )}
-              {view === "sessions" && selectedProject && onNewSession && (
+              {view === "sessions" && browse.selectedProject && onNewSession && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -385,14 +407,14 @@ export const SessionBrowser = memo(function SessionBrowser({
                       size="sm"
                       className={cn(isMobile ? "h-8 w-8 p-0" : "h-6 w-6 p-0")}
                       disabled={creatingSession}
-                      onClick={() => onNewSession(selectedProject.dirName)}
+                      onClick={() => onNewSession(browse.selectedProject!.dirName)}
                     >
                       {creatingSession
                         ? <Loader2 className={cn(isMobile ? "size-4" : "size-3.5", "animate-spin")} />
                         : <Plus className={cn(isMobile ? "size-4" : "size-3.5")} />}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{creatingSession ? "Creating session..." : `New session in ${selectedProject.shortName}`}</TooltipContent>
+                  <TooltipContent>{creatingSession ? "Creating session..." : `New session in ${browse.selectedProject.shortName}`}</TooltipContent>
                 </Tooltip>
               )}
             </div>
@@ -402,18 +424,18 @@ export const SessionBrowser = memo(function SessionBrowser({
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-600" />
                 <Input
-                  value={searchFilter}
-                  onChange={(e) => setSearchFilter(e.target.value)}
+                  value={browse.searchFilter}
+                  onChange={(e) => setBrowse(prev => ({ ...prev, searchFilter: e.target.value }))}
                   placeholder={view === "projects" ? "Filter projects..." : "Filter sessions..."}
                   className={cn(
                     "bg-zinc-900 pl-8 border-zinc-800 placeholder:text-zinc-600",
                     isMobile ? "h-9 text-sm" : "h-7 text-xs",
-                    searchFilter && "pr-8"
+                    browse.searchFilter && "pr-8"
                   )}
                 />
-                {searchFilter && (
+                {browse.searchFilter && (
                   <button
-                    onClick={() => setSearchFilter("")}
+                    onClick={() => setBrowse(prev => ({ ...prev, searchFilter: "" }))}
                     className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                     aria-label="Clear search"
                   >
@@ -424,18 +446,18 @@ export const SessionBrowser = memo(function SessionBrowser({
             </div>}
 
             {/* Error banner */}
-            {fetchError && (
+            {browse.fetchError && (
               <div className="shrink-0 mx-3 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2.5 py-1.5">
                 <AlertTriangle className="size-3 text-red-400 shrink-0" />
-                <span className="text-[11px] text-red-400 flex-1 truncate">{fetchError}</span>
+                <span className="text-[11px] text-red-400 flex-1 truncate">{browse.fetchError}</span>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-5 px-1.5 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10"
                   onClick={() => {
-                    setFetchError(null)
+                    setBrowse(prev => ({ ...prev, fetchError: null }))
                     if (view === "projects") loadProjects()
-                    else if (view === "sessions" && selectedProject) loadSessions(selectedProject)
+                    else if (view === "sessions" && browse.selectedProject) loadSessions(browse.selectedProject)
                   }}
                 >
                   <RefreshCw className="size-2.5 mr-1" />
@@ -448,22 +470,22 @@ export const SessionBrowser = memo(function SessionBrowser({
             <div className="flex-1 min-h-0">
               {view === "projects" && (
                 <ProjectsList
-                  projects={projects}
-                  filter={searchFilter}
+                  projects={browse.projects}
+                  filter={browse.searchFilter}
                   onSelectProject={loadSessions}
                   isMobile={isMobile}
                 />
               )}
-              {view === "sessions" && selectedProject && (
+              {view === "sessions" && browse.selectedProject && (
                 <SessionsList
-                  sessions={sessions}
-                  filter={searchFilter}
+                  sessions={browse.sessions}
+                  filter={browse.searchFilter}
                   onSelectSession={handleSelectSession}
                   onDuplicateSession={onDuplicateSession ? handleDuplicateSessionLocal : undefined}
                   onDeleteSession={onDeleteSession ? handleDeleteSessionLocal : undefined}
                   isMobile={isMobile}
-                  hasMore={sessions.length < sessionsTotal}
-                  isLoading={isLoading}
+                  hasMore={browse.sessions.length < browse.sessionsTotal}
+                  isLoading={browse.isLoading}
                   onLoadMore={handleLoadMoreSessions}
                 />
               )}
@@ -589,6 +611,13 @@ const SessionsList = memo(function SessionsList({
   isLoading?: boolean
   onLoadMore?: () => void
 }) {
+  // Stable timestamp for "recently active" checks — avoids Date.now() during render
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(interval)
+  }, [])
+
   const filtered = useMemo(() => {
     if (!filter) return sessions
     const q = filter.toLowerCase()
@@ -619,7 +648,7 @@ const SessionsList = memo(function SessionsList({
               onClick={() => onSelectSession(s)}
               className={cn(
                 "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border border-transparent hover:border-zinc-800",
-                s.lastModified && Date.now() - new Date(s.lastModified).getTime() < 120000
+                s.lastModified && now - new Date(s.lastModified).getTime() < 120000
                   ? "border-l-2 border-l-green-500/50"
                   : "border-l-2 border-l-transparent",
                 isMobile ? "py-3.5" : "py-2.5"
@@ -628,7 +657,7 @@ const SessionsList = memo(function SessionsList({
               {/* Top row: slug or session id + model */}
               <div className="flex items-center gap-2">
                 {s.lastModified &&
-                Date.now() - new Date(s.lastModified).getTime() < 120000 ? (
+                now - new Date(s.lastModified).getTime() < 120000 ? (
                   <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />

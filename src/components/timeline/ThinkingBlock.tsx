@@ -31,9 +31,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks, expandAll }: 
       </button>
       {isOpen && (
         <div className="mt-2 space-y-2">
-          {blocks.map((block, i) => (
+          {blocks.map((block) => (
             <pre
-              key={i}
+              key={block.signature}
               className="text-xs text-zinc-400 font-mono whitespace-pre-wrap break-words bg-zinc-900/50 rounded-md p-3 border border-zinc-800 max-h-96 overflow-y-auto"
             >
               {block.thinking}
