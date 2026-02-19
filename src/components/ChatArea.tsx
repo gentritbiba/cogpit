@@ -33,6 +33,7 @@ interface ChatAreaProps {
   // Undo/redo
   undoRedo: ReturnType<typeof useUndoRedo>
   onOpenBranches: (turnIndex: number) => void
+  onBranchFromHere?: (turnIndex: number) => void
   // Pending message
   pendingMessage: string | null
   isConnected: boolean
@@ -63,6 +64,7 @@ export function ChatArea({
   handleScroll,
   undoRedo,
   onOpenBranches,
+  onBranchFromHere,
   pendingMessage,
   isConnected,
   onToggleExpandAll,
@@ -151,6 +153,7 @@ export function ChatArea({
                   branchesAtTurn={undoRedo.branchesAtTurn}
                   onRestoreToHere={undoRedo.requestUndo}
                   onOpenBranches={onOpenBranches}
+                  onBranchFromHere={onBranchFromHere}
                   canRedo={undoRedo.canRedo}
                   redoTurnCount={undoRedo.redoTurnCount}
                   redoGhostTurns={undoRedo.redoGhostTurns}

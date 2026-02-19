@@ -235,6 +235,81 @@ export default function App() {
     setBranchModalTurn(null)
   }, [undoRedo.requestBranchSwitch])
 
+  // Duplicate any session by dirName/fileName and load it
+  const handleDuplicateSessionByPath = useCallback(async (dirName: string, fileName: string) => {
+    try {
+      const res = await authFetch("/api/branch-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName }),
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const contentRes = await authFetch(
+        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      )
+      if (!contentRes.ok) return
+      const rawText = await contentRes.text()
+      const newSession = parseSession(rawText)
+      dispatch({
+        type: "LOAD_SESSION",
+        session: newSession,
+        source: { dirName: data.dirName, fileName: data.fileName, rawText },
+        isMobile,
+      })
+    } catch {
+      // silently fail
+    }
+  }, [dispatch, isMobile])
+
+  // Duplicate the current session (full copy) — used by SessionInfoBar
+  const handleDuplicateSession = useCallback(() => {
+    if (!state.sessionSource) return
+    handleDuplicateSessionByPath(state.sessionSource.dirName, state.sessionSource.fileName)
+  }, [state.sessionSource, handleDuplicateSessionByPath])
+
+  // Delete any session by dirName/fileName
+  const handleDeleteSession = useCallback(async (dirName: string, fileName: string) => {
+    try {
+      await authFetch("/api/delete-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName }),
+      })
+    } catch {
+      // silently fail
+    }
+  }, [])
+
+  // Duplicate from a specific turn (creates a new session truncated at that turn)
+  const handleBranchFromHere = useCallback(async (turnIndex: number) => {
+    if (!state.sessionSource) return
+    const { dirName, fileName } = state.sessionSource
+    try {
+      const res = await authFetch("/api/branch-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName, turnIndex }),
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const contentRes = await authFetch(
+        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      )
+      if (!contentRes.ok) return
+      const rawText = await contentRes.text()
+      const newSession = parseSession(rawText)
+      dispatch({
+        type: "LOAD_SESSION",
+        session: newSession,
+        source: { dirName: data.dirName, fileName: data.fileName, rawText },
+        isMobile,
+      })
+    } catch {
+      // silently fail
+    }
+  }, [state.sessionSource, dispatch, isMobile])
+
   // Mobile StatsPanel jump callback
   const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
     actions.handleJumpToTurn(index, toolCallId)
@@ -460,6 +535,8 @@ export default function App() {
               onSelectTeam={actions.handleSelectTeam}
               onNewSession={handleNewSession}
               creatingSession={creatingSession}
+              onDuplicateSession={handleDuplicateSessionByPath}
+              onDeleteSession={handleDeleteSession}
               isMobile
             />
           )}
@@ -482,6 +559,7 @@ export default function App() {
                     isMobile
                     dispatch={dispatch}
                     onNewSession={handleNewSession}
+                    onDuplicateSession={handleDuplicateSession}
                   />
                   <ChatArea
                     session={state.session}
@@ -499,6 +577,7 @@ export default function App() {
                     handleScroll={scroll.handleScroll}
                     undoRedo={undoRedo}
                     onOpenBranches={handleOpenBranches}
+                    onBranchFromHere={handleBranchFromHere}
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
@@ -533,6 +612,8 @@ export default function App() {
                   creatingSession={creatingSession}
                   selectedProjectDirName={state.dashboardProject}
                   onSelectProject={handleSelectProject}
+                  onDuplicateSession={handleDuplicateSessionByPath}
+                  onDeleteSession={handleDeleteSession}
                 />
               )}
             </div>
@@ -637,6 +718,8 @@ export default function App() {
             onSelectTeam={actions.handleSelectTeam}
             onNewSession={handleNewSession}
             creatingSession={creatingSession}
+            onDuplicateSession={handleDuplicateSessionByPath}
+            onDeleteSession={handleDeleteSession}
           />
         )}
 
@@ -657,6 +740,7 @@ export default function App() {
                 isMobile={false}
                 dispatch={dispatch}
                 onNewSession={handleNewSession}
+                onDuplicateSession={handleDuplicateSession}
               />
 
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
@@ -677,6 +761,7 @@ export default function App() {
                     handleScroll={scroll.handleScroll}
                     undoRedo={undoRedo}
                     onOpenBranches={handleOpenBranches}
+                    onBranchFromHere={handleBranchFromHere}
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
@@ -733,6 +818,8 @@ export default function App() {
               creatingSession={creatingSession}
               selectedProjectDirName={state.dashboardProject}
               onSelectProject={handleSelectProject}
+              onDuplicateSession={handleDuplicateSessionByPath}
+              onDeleteSession={handleDeleteSession}
             />
           )}
         </main>

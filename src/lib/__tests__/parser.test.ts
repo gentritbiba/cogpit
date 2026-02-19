@@ -1389,3 +1389,46 @@ describe("edge cases", () => {
     expect(session.turns[0].timestamp).toBe("2025-06-15T14:00:00Z")
   })
 })
+
+// ── branchedFrom metadata ────────────────────────────────────────────────
+
+describe("branchedFrom metadata", () => {
+  it("extracts branchedFrom from first-line metadata", () => {
+    const branchedFrom = { sessionId: "original-123", turnIndex: 2 }
+    const jsonl = toJsonl([
+      userMsg("Hello", {
+        sessionId: "branched-456",
+        branchedFrom,
+      } as Record<string, unknown>),
+      textAssistant("Hi"),
+    ])
+    const session = parseSession(jsonl)
+    expect(session.branchedFrom).toEqual(branchedFrom)
+    expect(session.sessionId).toBe("branched-456")
+  })
+
+  it("returns undefined branchedFrom when not present", () => {
+    const session = parseSession(simpleSession())
+    expect(session.branchedFrom).toBeUndefined()
+  })
+
+  it("preserves branchedFrom in parseSessionAppend", () => {
+    const branchedFrom = { sessionId: "parent-abc", turnIndex: null }
+    const jsonl = toJsonl([
+      userMsg("Hello", {
+        sessionId: "branch-def",
+        branchedFrom,
+      } as Record<string, unknown>),
+      textAssistant("Hi"),
+    ])
+    const existing = parseSession(jsonl)
+    expect(existing.branchedFrom).toEqual(branchedFrom)
+
+    const newJsonl = toJsonl([
+      userMsg("Follow up"),
+      textAssistant("Sure"),
+    ])
+    const updated = parseSessionAppend(existing, newJsonl)
+    expect(updated.branchedFrom).toEqual(branchedFrom)
+  })
+})

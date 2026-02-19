@@ -3,6 +3,7 @@ import {
   Loader2,
   FolderOpen,
   Plus,
+  Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +24,7 @@ interface SessionInfoBarProps {
   isMobile: boolean
   dispatch: Dispatch<SessionAction>
   onNewSession: (dirName: string) => void
+  onDuplicateSession?: () => void
 }
 
 export function SessionInfoBar({
@@ -32,6 +34,7 @@ export function SessionInfoBar({
   isMobile,
   dispatch,
   onNewSession,
+  onDuplicateSession,
 }: SessionInfoBarProps) {
   return (
     <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/50 bg-zinc-950/80 ${isMobile ? "px-2" : "px-3"}`}>
@@ -41,6 +44,20 @@ export function SessionInfoBar({
       <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-zinc-500 border-zinc-700">
         {session.turns.length} turns
       </Badge>
+      {session.branchedFrom && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-purple-400 border-purple-700/50 bg-purple-500/5 gap-1">
+              <Copy className="size-2.5" />
+              Duplicated
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            Duplicated from {session.branchedFrom.sessionId.slice(0, 8)}
+            {session.branchedFrom.turnIndex != null ? ` at turn ${session.branchedFrom.turnIndex + 1}` : ""}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {(() => {
         const ctx = getContextUsage(session.rawMessages)
         if (!ctx) return null
@@ -105,6 +122,22 @@ export function SessionInfoBar({
             </TooltipTrigger>
             <TooltipContent>New session in this project</TooltipContent>
           </Tooltip>
+          {onDuplicateSession && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-purple-400 hover:bg-purple-500/10"
+                  onClick={onDuplicateSession}
+                >
+                  <Copy className="size-3" />
+                  Duplicate
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Duplicate this session</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -127,16 +160,29 @@ export function SessionInfoBar({
       )}
 
       {sessionSource && isMobile && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 gap-1 text-[11px] text-zinc-500 hover:text-green-400"
-          disabled={creatingSession}
-          onClick={() => onNewSession(sessionSource.dirName)}
-        >
-          {creatingSession ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
-          New
-        </Button>
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 gap-1 text-[11px] text-zinc-500 hover:text-green-400"
+            disabled={creatingSession}
+            onClick={() => onNewSession(sessionSource.dirName)}
+          >
+            {creatingSession ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+            New
+          </Button>
+          {onDuplicateSession && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 gap-1 text-[11px] text-zinc-500 hover:text-purple-400"
+              onClick={onDuplicateSession}
+            >
+              <Copy className="size-3" />
+              Duplicate
+            </Button>
+          )}
+        </>
       )}
     </div>
   )

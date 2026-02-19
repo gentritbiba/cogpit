@@ -82,6 +82,7 @@ function extractSessionMetadata(messages: RawMessage[]) {
   let cwd = ""
   let slug = ""
   let model = ""
+  let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
 
   for (const msg of messages) {
     if (msg.sessionId && !sessionId) sessionId = msg.sessionId
@@ -89,6 +90,9 @@ function extractSessionMetadata(messages: RawMessage[]) {
     if (msg.gitBranch && !gitBranch) gitBranch = msg.gitBranch
     if (msg.cwd && !cwd) cwd = msg.cwd
     if (msg.slug && !slug) slug = msg.slug
+    if ((msg as Record<string, unknown>).branchedFrom && !branchedFrom) {
+      branchedFrom = (msg as Record<string, unknown>).branchedFrom as { sessionId: string; turnIndex?: number | null }
+    }
     if (isAssistantMessage(msg) && msg.message.model && !model) {
       model = msg.message.model
     }
@@ -96,7 +100,7 @@ function extractSessionMetadata(messages: RawMessage[]) {
     if (sessionId && version && gitBranch && cwd && model) break
   }
 
-  return { sessionId, version, gitBranch, cwd, slug, model }
+  return { sessionId, version, gitBranch, cwd, slug, model, branchedFrom }
 }
 
 function buildCompactionSummary(turns: Turn[], title: string): string {
@@ -676,6 +680,7 @@ export function parseSessionAppend(
     turns: allTurns,
     stats,
     rawMessages: allRawMessages,
+    branchedFrom: existing.branchedFrom,
   }
 }
 

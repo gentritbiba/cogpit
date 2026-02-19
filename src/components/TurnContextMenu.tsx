@@ -1,5 +1,5 @@
 import * as ContextMenu from "@radix-ui/react-context-menu"
-import { RotateCcw, GitFork } from "lucide-react"
+import { RotateCcw, GitFork, Copy } from "lucide-react"
 import type { Branch } from "@/lib/types"
 
 interface TurnContextMenuProps {
@@ -8,6 +8,7 @@ interface TurnContextMenuProps {
   branches: Branch[]
   onRestoreToHere: (turnIndex: number) => void
   onOpenBranches: (turnIndex: number) => void
+  onBranchFromHere?: (turnIndex: number) => void
 }
 
 export function TurnContextMenu({
@@ -16,6 +17,7 @@ export function TurnContextMenu({
   branches,
   onRestoreToHere,
   onOpenBranches,
+  onBranchFromHere,
 }: TurnContextMenuProps) {
   return (
     <ContextMenu.Root>
@@ -38,6 +40,18 @@ export function TurnContextMenu({
               >
                 <GitFork className="size-3.5" />
                 View branches ({branches.length})
+              </ContextMenu.Item>
+            </>
+          )}
+          {onBranchFromHere && (
+            <>
+              <ContextMenu.Separator className="my-1 h-px bg-zinc-800" />
+              <ContextMenu.Item
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-zinc-800 hover:text-zinc-100"
+                onSelect={() => onBranchFromHere(turnIndex)}
+              >
+                <Copy className="size-3.5" />
+                Duplicate from here
               </ContextMenu.Item>
             </>
           )}

@@ -27,6 +27,7 @@ interface ConversationTimelineProps {
   branchesAtTurn?: (turnIndex: number) => Branch[]
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
+  onBranchFromHere?: (turnIndex: number) => void
   canRedo?: boolean
   redoTurnCount?: number
   redoGhostTurns?: Turn[]
@@ -81,6 +82,7 @@ export function ConversationTimeline({
   branchesAtTurn,
   onRestoreToHere,
   onOpenBranches,
+  onBranchFromHere,
   canRedo = false,
   redoTurnCount = 0,
   redoGhostTurns = [],
@@ -125,6 +127,7 @@ export function ConversationTimeline({
         branchesAtTurn={branchesAtTurn}
         onRestoreToHere={onRestoreToHere}
         onOpenBranches={onOpenBranches}
+        onBranchFromHere={onBranchFromHere}
         canRedo={canRedo}
         redoTurnCount={redoTurnCount}
         redoGhostTurns={redoGhostTurns}
@@ -147,6 +150,7 @@ export function ConversationTimeline({
       branchesAtTurn={branchesAtTurn}
       onRestoreToHere={onRestoreToHere}
       onOpenBranches={onOpenBranches}
+      onBranchFromHere={onBranchFromHere}
       canRedo={canRedo}
       redoTurnCount={redoTurnCount}
       redoGhostTurns={redoGhostTurns}
@@ -167,6 +171,7 @@ interface TimelineInnerProps {
   branchesAtTurn?: (turnIndex: number) => Branch[]
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
+  onBranchFromHere?: (turnIndex: number) => void
   canRedo: boolean
   redoTurnCount: number
   redoGhostTurns: Turn[]
@@ -185,6 +190,7 @@ function NonVirtualTimeline({
   branchesAtTurn,
   onRestoreToHere,
   onOpenBranches,
+  onBranchFromHere,
   canRedo,
   redoTurnCount,
   redoGhostTurns,
@@ -252,6 +258,7 @@ function NonVirtualTimeline({
               branches={turnBranches}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
+              onBranchFromHere={onBranchFromHere}
             >
               {turnContent}
             </TurnContextMenu>
@@ -283,6 +290,7 @@ function VirtualizedTimeline({
   branchesAtTurn,
   onRestoreToHere,
   onOpenBranches,
+  onBranchFromHere,
   canRedo,
   redoTurnCount,
   redoGhostTurns,
@@ -377,6 +385,7 @@ function VirtualizedTimeline({
               branches={turnBranches}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
+              onBranchFromHere={onBranchFromHere}
             >
               {turnContent}
             </TurnContextMenu>

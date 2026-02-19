@@ -22,6 +22,7 @@ import {
   Plus,
   Loader2,
   DollarSign,
+  Copy,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +34,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
+import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
@@ -71,6 +73,7 @@ interface SessionInfo {
   timestamp?: string
   turnCount?: number
   lineCount?: number
+  branchedFrom?: { sessionId: string; turnIndex?: number | null }
 }
 
 import { LiveSessions } from "@/components/LiveSessions"
@@ -97,6 +100,10 @@ interface SessionBrowserProps {
   isMobile?: boolean
   /** When true, only show the Teams tab (used for mobile teams tab) */
   teamsOnly?: boolean
+  /** Duplicate a session (full copy) */
+  onDuplicateSession?: (dirName: string, fileName: string) => void
+  /** Delete a session file */
+  onDeleteSession?: (dirName: string, fileName: string) => void
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -114,6 +121,8 @@ export const SessionBrowser = memo(function SessionBrowser({
   creatingSession,
   isMobile,
   teamsOnly,
+  onDuplicateSession,
+  onDeleteSession,
 }: SessionBrowserProps) {
   const [view, setView] = useState<View>(session ? "detail" : "projects")
   const [projects, setProjects] = useState<ProjectInfo[]>([])
@@ -246,6 +255,25 @@ export const SessionBrowser = memo(function SessionBrowser({
     [selectedProject, loadSessionFile]
   )
 
+  const handleDeleteSessionLocal = useCallback(
+    (s: SessionInfo) => {
+      if (!selectedProject || !onDeleteSession) return
+      onDeleteSession(selectedProject.dirName, s.fileName)
+      // Remove from local state immediately
+      setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
+      setSessionsTotal((prev) => prev - 1)
+    },
+    [selectedProject, onDeleteSession]
+  )
+
+  const handleDuplicateSessionLocal = useCallback(
+    (s: SessionInfo) => {
+      if (!selectedProject || !onDuplicateSession) return
+      onDuplicateSession(selectedProject.dirName, s.fileName)
+    },
+    [selectedProject, onDuplicateSession]
+  )
+
   const handleLoadMoreSessions = useCallback(() => {
     if (selectedProject) loadSessions(selectedProject, sessionsPage + 1, true)
   }, [selectedProject, sessionsPage, loadSessions])
@@ -271,6 +299,8 @@ export const SessionBrowser = memo(function SessionBrowser({
         <LiveSessions
           activeSessionKey={activeSessionKey}
           onSelectSession={loadLiveSession}
+          onDuplicateSession={onDuplicateSession}
+          onDeleteSession={onDeleteSession}
         />
       </div>
 
@@ -429,6 +459,8 @@ export const SessionBrowser = memo(function SessionBrowser({
                   sessions={sessions}
                   filter={searchFilter}
                   onSelectSession={handleSelectSession}
+                  onDuplicateSession={onDuplicateSession ? handleDuplicateSessionLocal : undefined}
+                  onDeleteSession={onDeleteSession ? handleDeleteSessionLocal : undefined}
                   isMobile={isMobile}
                   hasMore={sessions.length < sessionsTotal}
                   isLoading={isLoading}
@@ -540,6 +572,8 @@ const SessionsList = memo(function SessionsList({
   sessions,
   filter,
   onSelectSession,
+  onDuplicateSession,
+  onDeleteSession,
   isMobile,
   hasMore,
   isLoading,
@@ -548,6 +582,8 @@ const SessionsList = memo(function SessionsList({
   sessions: SessionInfo[]
   filter: string
   onSelectSession: (s: SessionInfo) => void
+  onDuplicateSession?: (s: SessionInfo) => void
+  onDeleteSession?: (s: SessionInfo) => void
   isMobile?: boolean
   hasMore?: boolean
   isLoading?: boolean
@@ -576,70 +612,88 @@ const SessionsList = memo(function SessionsList({
   return (
     <ScrollArea className="h-full">
       <div className="flex flex-col gap-0.5 px-2 pb-3">
-        {filtered.map((s) => (
-          <button
-            key={s.fileName}
-            onClick={() => onSelectSession(s)}
-            className={cn(
-              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border border-transparent hover:border-zinc-800",
-              s.lastModified && Date.now() - new Date(s.lastModified).getTime() < 120000
-                ? "border-l-2 border-l-green-500/50"
-                : "border-l-2 border-l-transparent",
-              isMobile ? "py-3.5" : "py-2.5"
-            )}
-          >
-            {/* Top row: slug or session id + model */}
-            <div className="flex items-center gap-2">
-              {s.lastModified &&
-              Date.now() - new Date(s.lastModified).getTime() < 120000 ? (
-                <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                  <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+        {filtered.map((s) => {
+          const row = (
+            <button
+              key={s.fileName}
+              onClick={() => onSelectSession(s)}
+              className={cn(
+                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border border-transparent hover:border-zinc-800",
+                s.lastModified && Date.now() - new Date(s.lastModified).getTime() < 120000
+                  ? "border-l-2 border-l-green-500/50"
+                  : "border-l-2 border-l-transparent",
+                isMobile ? "py-3.5" : "py-2.5"
+              )}
+            >
+              {/* Top row: slug or session id + model */}
+              <div className="flex items-center gap-2">
+                {s.lastModified &&
+                Date.now() - new Date(s.lastModified).getTime() < 120000 ? (
+                  <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                  </span>
+                ) : (
+                  <FileText className="size-3.5 shrink-0 text-zinc-600 group-hover:text-blue-400" />
+                )}
+                <span className="text-xs font-medium text-zinc-300 truncate flex-1">
+                  {s.slug || truncate(s.sessionId, 16)}
                 </span>
-              ) : (
-                <FileText className="size-3.5 shrink-0 text-zinc-600 group-hover:text-blue-400" />
-              )}
-              <span className="text-xs font-medium text-zinc-300 truncate flex-1">
-                {s.slug || truncate(s.sessionId, 16)}
-              </span>
-              {s.model && (
-                <Badge
-                  variant="outline"
-                  className="h-4 px-1 text-[9px] font-normal border-zinc-700 text-zinc-500 shrink-0"
-                >
-                  {shortenModel(s.model)}
-                </Badge>
-              )}
-            </div>
+                {s.branchedFrom && <Copy className="size-2.5 text-purple-400 shrink-0" title="Duplicated session" />}
+                {s.model && (
+                  <Badge
+                    variant="outline"
+                    className="h-4 px-1 text-[9px] font-normal border-zinc-700 text-zinc-500 shrink-0"
+                  >
+                    {shortenModel(s.model)}
+                  </Badge>
+                )}
+              </div>
 
-            {/* Preview message */}
-            {s.firstUserMessage && (
-              <p className="ml-5.5 text-[11px] text-zinc-500 line-clamp-2 leading-snug">
-                {s.firstUserMessage}
-              </p>
-            )}
+              {/* Preview message */}
+              {s.firstUserMessage && (
+                <p className="ml-5.5 text-[11px] text-zinc-500 line-clamp-2 leading-snug">
+                  {s.firstUserMessage}
+                </p>
+              )}
 
-            {/* Meta row */}
-            <div className="ml-5.5 flex items-center gap-2 text-[10px] text-zinc-600 flex-wrap">
-              {(s.turnCount ?? 0) > 0 && (
-                <span className="flex items-center gap-0.5">
-                  <MessageSquare className="size-2.5" />
-                  {s.turnCount}
-                </span>
-              )}
-              {s.gitBranch && (
-                <span className="flex items-center gap-0.5">
-                  <GitBranch className="size-2.5" />
-                  {s.gitBranch}
-                </span>
-              )}
-              <span>{formatFileSize(s.size)}</span>
-              {s.lastModified && (
-                <span>{formatRelativeTime(s.lastModified)}</span>
-              )}
-            </div>
-          </button>
-        ))}
+              {/* Meta row */}
+              <div className="ml-5.5 flex items-center gap-2 text-[10px] text-zinc-600 flex-wrap">
+                {(s.turnCount ?? 0) > 0 && (
+                  <span className="flex items-center gap-0.5">
+                    <MessageSquare className="size-2.5" />
+                    {s.turnCount}
+                  </span>
+                )}
+                {s.gitBranch && (
+                  <span className="flex items-center gap-0.5">
+                    <GitBranch className="size-2.5" />
+                    {s.gitBranch}
+                  </span>
+                )}
+                <span>{formatFileSize(s.size)}</span>
+                {s.lastModified && (
+                  <span>{formatRelativeTime(s.lastModified)}</span>
+                )}
+              </div>
+            </button>
+          )
+
+          if (onDuplicateSession || onDeleteSession) {
+            return (
+              <SessionContextMenu
+                key={s.fileName}
+                sessionLabel={s.slug || s.sessionId.slice(0, 12)}
+                onDuplicate={onDuplicateSession ? () => onDuplicateSession(s) : undefined}
+                onDelete={onDeleteSession ? () => onDeleteSession(s) : undefined}
+              >
+                {row}
+              </SessionContextMenu>
+            )
+          }
+
+          return row
+        })}
         {hasMore && !filter && (
           <button
             onClick={onLoadMore}

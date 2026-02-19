@@ -213,6 +213,7 @@ export interface ParsedSession {
   turns: Turn[]
   stats: SessionStats
   rawMessages: RawMessage[]
+  branchedFrom?: { sessionId: string; turnIndex?: number | null }
 }
 
 // ── Undo/Redo & Branching ────────────────────────────────────────────────

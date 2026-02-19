@@ -394,6 +394,7 @@ export async function getSessionMeta(filePath: string) {
   let lastUserMessage = ""
   let timestamp = ""
   let turnCount = 0
+  let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
 
   for (const line of lines) {
     try {
@@ -403,6 +404,7 @@ export async function getSessionMeta(filePath: string) {
       if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
       if (obj.slug && !slug) slug = obj.slug
       if (obj.cwd && !cwd) cwd = obj.cwd
+      if (obj.branchedFrom && !branchedFrom) branchedFrom = obj.branchedFrom
       if (obj.type === "assistant" && obj.message?.model && !model) {
         model = obj.message.model
       }
@@ -449,6 +451,7 @@ export async function getSessionMeta(filePath: string) {
     timestamp,
     turnCount: isPartialRead ? turnCount : turnCount, // partial reads give approximate count
     lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
+    branchedFrom,
   }
 }
 

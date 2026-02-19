@@ -3,6 +3,7 @@ import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDri
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import {
@@ -40,9 +41,11 @@ interface RunningProcess {
 interface LiveSessionsProps {
   activeSessionKey: string | null
   onSelectSession: (dirName: string, fileName: string) => void
+  onDuplicateSession?: (dirName: string, fileName: string) => void
+  onDeleteSession?: (dirName: string, fileName: string) => void
 }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession }: LiveSessionsProps) {
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
@@ -196,13 +199,15 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             const proc = procBySession.get(s.sessionId)
             const hasProcess = matchedSessionIds.has(s.sessionId)
 
-            return (
-              <button
-                key={`${s.dirName}/${s.fileName}`}
+            const sessionRow = (
+              <div
+                role="button"
+                tabIndex={0}
                 data-live-session
                 onClick={() => onSelectSession(s.dirName, s.fileName)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
                 className={cn(
-                  "group flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 border border-transparent hover:border-zinc-800",
+                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 border border-transparent hover:border-zinc-800 cursor-pointer",
                   isActiveSession
                     ? "border-l-2 border-l-blue-500 bg-blue-500/5"
                     : hasProcess
@@ -275,8 +280,26 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                     </Tooltip>
                   )}
                 </div>
-              </button>
+              </div>
             )
+
+            if (onDuplicateSession || onDeleteSession) {
+              return (
+                <SessionContextMenu
+                  key={`${s.dirName}/${s.fileName}`}
+                  sessionLabel={s.slug || s.firstUserMessage?.slice(0, 30) || s.sessionId.slice(0, 12)}
+                  onDuplicate={onDuplicateSession ? () => onDuplicateSession(s.dirName, s.fileName) : undefined}
+                  onDelete={onDeleteSession ? () => {
+                    onDeleteSession(s.dirName, s.fileName)
+                    setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
+                  } : undefined}
+                >
+                  {sessionRow}
+                </SessionContextMenu>
+              )
+            }
+
+            return <div key={`${s.dirName}/${s.fileName}`}>{sessionRow}</div>
           })}
 
           {/* Unmatched processes — running claude instances without a known session */}

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { shortenModel, formatRelativeTime, formatFileSize, truncate } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
@@ -68,6 +69,7 @@ interface SessionInfo {
   timestamp?: string
   turnCount?: number
   lineCount?: number
+  branchedFrom?: { sessionId: string; turnIndex?: number | null }
 }
 
 interface ActiveSessionInfo {
@@ -94,6 +96,10 @@ interface DashboardProps {
   selectedProjectDirName?: string | null
   /** Callback to change the selected project (pushes URL) */
   onSelectProject?: (dirName: string | null) => void
+  /** Duplicate a session (full copy) */
+  onDuplicateSession?: (dirName: string, fileName: string) => void
+  /** Delete a session file */
+  onDeleteSession?: (dirName: string, fileName: string) => void
 }
 
 export const Dashboard = memo(function Dashboard({
@@ -102,6 +108,8 @@ export const Dashboard = memo(function Dashboard({
   creatingSession,
   selectedProjectDirName,
   onSelectProject,
+  onDuplicateSession,
+  onDeleteSession,
 }: DashboardProps) {
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [activeSessions, setActiveSessions] = useState<ActiveSessionInfo[]>([])
@@ -397,12 +405,11 @@ export const Dashboard = memo(function Dashboard({
                     ? Date.now() - new Date(s.lastModified).getTime() < 2 * 60 * 1000
                     : false
 
-                  return (
+                  const card = (
                     <button
-                      key={s.fileName}
                       onClick={() => onSelectSession(selectedProject.dirName, s.fileName)}
                       className={cn(
-                        "card-glow group relative rounded-lg border bg-zinc-900/50 p-4 text-left transition-smooth",
+                        "card-glow group relative w-full rounded-lg border bg-zinc-900/50 p-4 text-left transition-smooth",
                         "hover:bg-zinc-900/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
                         isLive
                           ? "border-l-[3px] border-l-green-500 border-t-zinc-800 border-r-zinc-800 border-b-zinc-800 live-pulse"
@@ -460,6 +467,25 @@ export const Dashboard = memo(function Dashboard({
                       )}
                     </button>
                   )
+
+                  if (onDuplicateSession || onDeleteSession) {
+                    return (
+                      <SessionContextMenu
+                        key={s.fileName}
+                        sessionLabel={s.slug || s.sessionId.slice(0, 12)}
+                        onDuplicate={onDuplicateSession ? () => onDuplicateSession(selectedProject.dirName, s.fileName) : undefined}
+                        onDelete={onDeleteSession ? () => {
+                          onDeleteSession(selectedProject.dirName, s.fileName)
+                          setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
+                          setSessionsTotal((prev) => prev - 1)
+                        } : undefined}
+                      >
+                        {card}
+                      </SessionContextMenu>
+                    )
+                  }
+
+                  return <div key={s.fileName}>{card}</div>
                 })}
               </div>
 
