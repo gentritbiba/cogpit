@@ -1,4 +1,7 @@
 # Cogpit
+<img width="2056" height="1292" alt="image" src="https://github.com/user-attachments/assets/9c47d9db-772c-46f4-8cbf-97d68dd76e38" />
+
+
 
 A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions. Available as a **desktop app** (macOS, Windows, Linux) or a **browser-based** dev server.
 
