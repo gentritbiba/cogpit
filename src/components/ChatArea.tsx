@@ -3,12 +3,12 @@ import {
   Search,
   ChevronsDownUp,
   ChevronsUpDown,
-  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
+import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionAction } from "@/hooks/useSessionState"
@@ -39,13 +39,6 @@ interface ChatAreaProps {
   isConnected: boolean
   // Callbacks
   onToggleExpandAll: () => void
-}
-
-function formatElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m ${s}s`
 }
 
 export function ChatArea({
@@ -162,27 +155,11 @@ export function ChatArea({
                 />
               )}
               {pendingMessage && (
-                <div className={cn("mt-3 space-y-3", isMobile ? "mx-3" : "mx-4 mt-4")}>
-                  <div className="flex justify-end">
-                    <div className={cn(
-                      "rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200",
-                      isMobile ? "max-w-[85%]" : "max-w-[80%]"
-                    )}>
-                      {pendingMessage}
-                    </div>
-                  </div>
-                  {isConnected && (
-                    <div className="flex items-center gap-2 text-zinc-500">
-                      <Loader2 className="size-3.5 animate-spin text-blue-400" />
-                      <span className="text-xs">Agent is working...</span>
-                      {elapsedSec > 0 && (
-                        <span className="text-[10px] font-mono tabular-nums text-zinc-600">
-                          {formatElapsed(elapsedSec)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                <PendingTurnPreview
+                  message={pendingMessage}
+                  turnNumber={session.turns.length + 1}
+                  elapsedSec={isConnected ? elapsedSec : undefined}
+                />
               )}
               <div ref={scrollEndRef} />
             </ErrorBoundary>

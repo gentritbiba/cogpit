@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,23 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { authFetch } from "@/lib/auth"
+
+function DeviceIcon({ name }: { name: string }) {
+  const n = name.toLowerCase()
+  if (n.includes("iphone") || n.includes("android")) return <Smartphone className="size-4 text-zinc-500" />
+  if (n.includes("ipad") || n.includes("tablet")) return <Tablet className="size-4 text-zinc-500" />
+  return <Monitor className="size-4 text-zinc-500" />
+}
+
+function formatTimeAgo(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000)
+  if (diff < 60) return "just now"
+  const mins = Math.floor(diff / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
 
 interface ConfigDialogProps {
   open: boolean
@@ -34,6 +51,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
 
+  // Connected devices
+  const [connectedDevices, setConnectedDevices] = useState<Array<{ ip: string; deviceName: string; lastActivity: number }>>([])
+
   // Reset when dialog opens
   useEffect(() => {
     if (open) {
@@ -48,6 +68,15 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           setInitialNetworkAccess(access)
           setHasExistingPassword(!!data?.networkPassword)
           setNetworkPassword("")
+          // Fetch connected devices if network is active
+          if (access && data?.networkPassword) {
+            authFetch("/api/connected-devices")
+              .then((r) => r.json())
+              .then((d) => setConnectedDevices(d?.devices || []))
+              .catch(() => {})
+          } else {
+            setConnectedDevices([])
+          }
         })
         .catch(() => {})
     }
@@ -185,6 +214,30 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                 <p className="text-[11px] text-zinc-600">
                   Requires app restart to take effect. Port: 19384
                 </p>
+              </div>
+            )}
+
+            {/* Connected devices */}
+            {networkAccess && initialNetworkAccess && connectedDevices.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <p className="text-xs text-zinc-500">Connected devices</p>
+                <div className="space-y-1.5">
+                  {connectedDevices.map((device, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                      <div className="flex items-center gap-2.5">
+                        <DeviceIcon name={device.deviceName} />
+                        <div>
+                          <p className="text-sm text-zinc-200">{device.deviceName}</p>
+                          <p className="text-[11px] text-zinc-600">{device.ip}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="size-1.5 rounded-full bg-green-500" />
+                        <span className="text-[11px] text-zinc-500">{formatTimeAgo(device.lastActivity)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

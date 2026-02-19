@@ -11,7 +11,6 @@ import {
   readdir,
   readFile,
   writeFile,
-  unlink,
   open,
   join,
   randomUUID,
@@ -529,45 +528,6 @@ export function registerClaudeNewRoutes(use: UseFn) {
     })
   })
 
-  // POST /api/delete-session - permanently delete a session JSONL file
-  use("/api/delete-session", (req, res, next) => {
-    if (req.method !== "POST") return next()
-
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", async () => {
-      try {
-        const { dirName, fileName } = JSON.parse(body)
-
-        if (!dirName || !fileName) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "dirName and fileName are required" }))
-          return
-        }
-
-        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
-          return
-        }
-
-        await unlink(filePath)
-
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ success: true }))
-      } catch (err) {
-        res.statusCode = 400
-        res.end(
-          JSON.stringify({
-            error: err instanceof Error ? err.message : "Failed to delete session",
-          })
-        )
-      }
-    })
-  })
 }
 
 /**

@@ -1,6 +1,10 @@
 import {
   activeProcesses,
   persistentSessions,
+  dirs,
+  isWithinDir,
+  unlink,
+  join,
   spawn,
 } from "../helpers"
 import type { UseFn } from "../helpers"
@@ -228,6 +232,68 @@ export function registerClaudeManageRoutes(use: UseFn) {
       } catch {
         res.statusCode = 400
         res.end(JSON.stringify({ error: "Invalid JSON body" }))
+      }
+    })
+  })
+
+  // POST /api/delete-session - kill process and permanently delete a session JSONL file
+  use("/api/delete-session", (req, res, next) => {
+    if (req.method !== "POST") return next()
+
+    let body = ""
+    req.on("data", (chunk: string) => {
+      body += chunk
+    })
+    req.on("end", async () => {
+      try {
+        const { dirName, fileName } = JSON.parse(body)
+
+        if (!dirName || !fileName) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "dirName and fileName are required" }))
+          return
+        }
+
+        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+          res.statusCode = 403
+          res.end(JSON.stringify({ error: "Access denied" }))
+          return
+        }
+
+        // Kill any running process for this session before deleting
+        const sessionId = fileName.replace(".jsonl", "")
+        const ps = persistentSessions.get(sessionId)
+        if (ps && !ps.dead) {
+          ps.dead = true
+          ps.proc.kill("SIGTERM")
+          persistentSessions.delete(sessionId)
+          const forceKillPs = setTimeout(() => {
+            try { ps.proc.kill("SIGKILL") } catch { /* already dead */ }
+          }, 3000)
+          forceKillPs.unref()
+        }
+        const child = activeProcesses.get(sessionId)
+        if (child) {
+          child.kill("SIGTERM")
+          activeProcesses.delete(sessionId)
+          const forceKill = setTimeout(() => {
+            try { child.kill("SIGKILL") } catch { /* already dead */ }
+          }, 3000)
+          forceKill.unref()
+        }
+
+        await unlink(filePath)
+
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ success: true }))
+      } catch (err) {
+        res.statusCode = 400
+        res.end(
+          JSON.stringify({
+            error: err instanceof Error ? err.message : "Failed to delete session",
+          })
+        )
       }
     })
   })

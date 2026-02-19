@@ -114,12 +114,20 @@ setInterval(() => {
 
 // ── Session token system ────────────────────────────────────────────────
 
-const activeSessions = new Map<string, { createdAt: number; ip: string }>()
+interface SessionInfo {
+  createdAt: number
+  ip: string
+  userAgent: string
+  lastActivity: number
+}
+
+const activeSessions = new Map<string, SessionInfo>()
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
-export function createSessionToken(ip: string): string {
+export function createSessionToken(ip: string, userAgent?: string): string {
   const token = randomBytes(32).toString("hex")
-  activeSessions.set(token, { createdAt: Date.now(), ip })
+  const now = Date.now()
+  activeSessions.set(token, { createdAt: now, ip, userAgent: userAgent || "", lastActivity: now })
   return token
 }
 
@@ -130,11 +138,48 @@ export function validateSessionToken(token: string): boolean {
     activeSessions.delete(token)
     return false
   }
+  session.lastActivity = Date.now()
   return true
 }
 
 export function revokeAllSessions(): void {
   activeSessions.clear()
+}
+
+export function getConnectedDevices(): Array<{ ip: string; userAgent: string; deviceName: string; connectedAt: number; lastActivity: number }> {
+  const now = Date.now()
+  const devices: Array<{ ip: string; userAgent: string; deviceName: string; connectedAt: number; lastActivity: number }> = []
+  for (const [, session] of activeSessions) {
+    if (now - session.createdAt > SESSION_TTL_MS) continue
+    devices.push({
+      ip: session.ip.replace(/^::ffff:/, ""),
+      userAgent: session.userAgent,
+      deviceName: parseDeviceName(session.userAgent),
+      connectedAt: session.createdAt,
+      lastActivity: session.lastActivity,
+    })
+  }
+  return devices
+}
+
+function parseDeviceName(ua: string): string {
+  if (!ua) return "Unknown device"
+  // iOS devices
+  if (/iPhone/.test(ua)) return "iPhone"
+  if (/iPad/.test(ua)) return "iPad"
+  // macOS
+  if (/Macintosh|Mac OS/.test(ua)) return "Mac"
+  // Windows
+  if (/Windows/.test(ua)) return "Windows PC"
+  // Android
+  if (/Android/.test(ua)) {
+    const match = ua.match(/;\s*([^;)]+)\s*Build\//)
+    if (match) return match[1].trim()
+    return "Android device"
+  }
+  // Linux
+  if (/Linux/.test(ua)) return "Linux"
+  return "Unknown device"
 }
 
 // Clean up expired sessions periodically (unref so build process can exit)

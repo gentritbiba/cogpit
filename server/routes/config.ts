@@ -8,6 +8,7 @@ import {
   hashPassword,
   validatePasswordStrength,
   revokeAllSessions,
+  getConnectedDevices,
 } from "../helpers"
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
 import { networkInterfaces } from "node:os"
@@ -86,8 +87,15 @@ export function registerConfigRoutes(use: UseFn) {
     }
 
     // Issue a session token instead of letting client reuse the password
-    const sessionToken = createSessionToken(req.socket.remoteAddress || "unknown")
+    const sessionToken = createSessionToken(req.socket.remoteAddress || "unknown", req.headers["user-agent"])
     res.end(JSON.stringify({ valid: true, token: sessionToken }))
+  })
+
+  // GET /api/connected-devices — list active remote sessions
+  use("/api/connected-devices", (req, res, next) => {
+    if (req.method !== "GET") return next()
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ devices: getConnectedDevices() }))
   })
 
   // GET /api/config/validate?path=... - validate a path without saving

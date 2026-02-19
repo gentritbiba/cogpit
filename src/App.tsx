@@ -20,6 +20,7 @@ import { DesktopHeader } from "@/components/DesktopHeader"
 import { MobileHeader } from "@/components/MobileHeader"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { ChatArea } from "@/components/ChatArea"
+import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
@@ -586,18 +587,12 @@ export default function App() {
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
                   {claudeChat.pendingMessage ? (
-                    <div className="flex-1 overflow-y-auto px-3 py-4">
-                      <div className="space-y-3">
-                        <div className="flex justify-end">
-                          <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[85%]">
-                            {claudeChat.pendingMessage}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 text-zinc-500">
-                          <Loader2 className="size-3.5 animate-spin" />
-                          <span className="text-xs">Creating session...</span>
-                        </div>
-                      </div>
+                    <div className="flex-1 overflow-y-auto px-1 py-3">
+                      <PendingTurnPreview
+                        message={claudeChat.pendingMessage}
+                        turnNumber={1}
+                        statusText="Creating session..."
+                      />
                     </div>
                   ) : (
                     <div className="flex-1 flex items-center justify-center">
@@ -786,16 +781,12 @@ export default function App() {
               <div className="flex flex-1 min-h-0 flex-col min-w-0">
                 {claudeChat.pendingMessage ? (
                   <div className="flex-1 overflow-y-auto px-4 py-6">
-                    <div className="mx-auto max-w-3xl space-y-4">
-                      <div className="flex justify-end">
-                        <div className="rounded-lg bg-blue-600/20 border border-blue-500/20 px-3 py-2 text-sm text-zinc-200 max-w-[80%]">
-                          {claudeChat.pendingMessage}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 text-zinc-500">
-                        <Loader2 className="size-3.5 animate-spin" />
-                        <span className="text-xs">Creating session...</span>
-                      </div>
+                    <div className="mx-auto max-w-4xl">
+                      <PendingTurnPreview
+                        message={claudeChat.pendingMessage}
+                        turnNumber={1}
+                        statusText="Creating session..."
+                      />
                     </div>
                   </div>
                 ) : (

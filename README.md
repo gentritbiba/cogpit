@@ -1,5 +1,7 @@
 # Cogpit
 
+**[cogpit.gentrit.dev](https://cogpit.gentrit.dev/)**
+
 A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions. Available as a **desktop app** (macOS, Windows, Linux) or a **browser-based** dev server.
 
 Cogpit reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and presents them as a rich, interactive UI — with live streaming, conversation timelines, token analytics, undo/redo with branching, team dashboards, and the ability to chat with running sessions.
@@ -257,6 +259,8 @@ Cogpit exposes REST + SSE endpoints (via Vite plugin in dev, Express in Electron
 | `POST /api/config` | Save configuration |
 | `GET /api/network-info` | Get network access status and LAN URL |
 | `POST /api/auth/verify` | Verify password for remote clients |
+| `GET /api/connected-devices` | List active remote device sessions |
+| `POST /api/delete-session` | Kill process and delete session JSONL |
 
 ### Real-Time Updates
 
