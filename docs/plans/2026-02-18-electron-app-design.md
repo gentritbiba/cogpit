@@ -2,14 +2,14 @@
 
 ## Goal
 
-Package Cogpit as a standalone desktop app (macOS, Windows, Linux) so users can download and run it without cloning a repo. The existing web version (`bun dev`) remains fully functional and unchanged.
+Package Cogpit as a standalone desktop app (macOS, Linux) so users can download and run it without cloning a repo. The existing web version (`bun dev`) remains fully functional and unchanged.
 
 ## Key Decisions
 
 - **Bridge layer**: Embedded HTTP/WS server inside Electron's main process. The React frontend makes the same `fetch()`/`EventSource`/`WebSocket` calls — zero changes to `src/`.
 - **Build tooling**: `electron-vite` for dev + build, `electron-builder` for packaging.
 - **Auth**: Uses the user's existing `claude` CLI installation. No API keys or login flow in the app.
-- **Platforms**: macOS (.dmg), Windows (.exe/NSIS), Linux (.AppImage/.deb).
+- **Platforms**: macOS (.dmg), Linux (.AppImage/.deb).
 
 ## Project Structure
 
@@ -36,7 +36,7 @@ cogpit/
 
 1. Starts the embedded HTTP/WS server on a random available port.
 2. Creates a `BrowserWindow` that loads the Vite-built frontend pointed at that local server.
-3. Handles app lifecycle (quit on all windows closed for Windows/Linux, dock behavior for macOS).
+3. Handles app lifecycle (quit on all windows closed for Linux, dock behavior for macOS).
 
 `electron/server.ts` is a standalone Express server that:
 
@@ -65,7 +65,6 @@ cogpit/
 
 - **`claude` CLI not found**: Check `PATH` on startup. Show friendly message if missing. Session browsing still works, but can't start new sessions or chat.
 - **Port conflicts**: Server picks a random available port (port 0). No hardcoded ports.
-- **Cross-platform paths**: `server/config.ts` already uses `homedir()` + `path.join()`. Works on all platforms.
 - **`node-pty` rebuild**: `electron-rebuild` runs as postinstall. Same approach VS Code uses.
 
 ## What Stays Unchanged

@@ -21,12 +21,6 @@ mac:
         - arm64
   category: public.app-category.developer-tools
 
-win:
-  target:
-    - target: nsis
-      arch:
-        - x64
-
 linux:
   target:
     - target: AppImage
@@ -51,7 +45,3 @@ pacman:
     - mesa
     - nss
     - alsa-lib
-
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true

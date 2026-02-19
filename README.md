@@ -2,7 +2,7 @@
 
 **[cogpit.gentrit.dev](https://cogpit.gentrit.dev/)**
 
-A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions. Available as a **desktop app** (macOS, Windows, Linux) or a **browser-based** dev server.
+A real-time dashboard for browsing, inspecting, and interacting with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) agent sessions. Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
 
 Cogpit reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and presents them as a rich, interactive UI — with live streaming, conversation timelines, token analytics, undo/redo with branching, team dashboards, and the ability to chat with running sessions.
 
@@ -14,7 +14,6 @@ Grab the latest release for your platform from the [Releases page](https://githu
 |----------|------|
 | macOS (Apple Silicon) | `Cogpit-x.x.x-arm64.dmg` |
 | macOS (Intel) | `Cogpit-x.x.x.dmg` |
-| Windows | `Cogpit-x.x.x-Setup.exe` |
 | Linux (AppImage) | `Cogpit-x.x.x.AppImage` |
 | Linux (Debian/Ubuntu) | `Cogpit-x.x.x.deb` |
 | Linux (Arch) | `Cogpit-x.x.x.pacman` |
@@ -200,7 +199,7 @@ bun run preview
 bun run electron:package
 ```
 
-Outputs to `release/` — produces a DMG on macOS, NSIS installer on Windows, AppImage + deb on Linux.
+Outputs to `release/` — produces a DMG on macOS, AppImage + deb on Linux.
 
 #### Lint & Type Check
 

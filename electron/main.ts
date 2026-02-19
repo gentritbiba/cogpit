@@ -4,16 +4,14 @@ import { join } from "node:path"
 import { createAppServer } from "./server.ts"
 import { getConfig } from "../server/config"
 
-// macOS/Linux GUI apps don't inherit the user's shell PATH.
+// GUI apps don't inherit the user's shell PATH.
 // Spawn their shell to get the real PATH so `claude` CLI is found.
-if (process.platform !== "win32") {
-  try {
-    const userShell = process.env.SHELL || "/bin/zsh"
-    const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
-    if (realPath) process.env.PATH = realPath
-  } catch {
-    // Fall back to system PATH
-  }
+try {
+  const userShell = process.env.SHELL || "/bin/zsh"
+  const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
+  if (realPath) process.env.PATH = realPath
+} catch {
+  // Fall back to system PATH
 }
 
 let mainWindow: BrowserWindow | null = null

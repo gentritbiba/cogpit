@@ -18,10 +18,6 @@ jobs:
             name: macOS
             cmd: bun run electron:package -- --mac --arm64 --x64 --publish never
             pattern: "release/*.dmg"
-          - os: windows-latest
-            name: Windows
-            cmd: bun run electron:package -- --win --x64 --publish never
-            pattern: "release/*.exe"
           - os: ubuntu-latest
             name: Linux (AppImage)
             cmd: bun run electron:package -- --linux AppImage --x64 --publish never

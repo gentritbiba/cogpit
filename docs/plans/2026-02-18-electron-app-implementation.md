@@ -515,13 +515,6 @@ mac:
   category: public.app-category.developer-tools
   icon: public/cogpit.svg
 
-win:
-  target:
-    - target: nsis
-      arch:
-        - x64
-  icon: public/cogpit.svg
-
 linux:
   target:
     - target: AppImage
@@ -533,16 +526,13 @@ linux:
   category: Development
   icon: public/cogpit.svg
 
-nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
 ```
 
 **Step 2: Commit**
 
 ```bash
 git add electron-builder.yml
-git commit -m "feat(electron): add electron-builder config for macOS, Windows, Linux"
+git commit -m "feat(electron): add electron-builder config for macOS, Linux"
 ```
 
 ---
