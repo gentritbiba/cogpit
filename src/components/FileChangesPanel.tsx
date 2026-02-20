@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef, useCallback, useEffect, memo } from "react"
-import { FileCode2, CheckCircle, XCircle, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
+import { FileCode2, CheckCircle, XCircle, ChevronDown, ChevronRight, Trash2, Code2, GitCompareArrows, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { EditDiffView } from "./timeline/EditDiffView"
 import { getToolBadgeStyle } from "./timeline/ToolCallCard"
 import type { ParsedSession, ToolCall } from "@/lib/types"
@@ -75,8 +76,23 @@ function diffLineCount(oldStr: string, newStr: string): { add: number; del: numb
   return { add, del }
 }
 
-function FileChangeCard({ turnIndex, toolCall }: FileChange) {
-  const [open, setOpen] = useState(true)
+function openInEditor(filePath: string, mode: "file" | "diff") {
+  authFetch("/api/open-in-editor", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: filePath, mode }),
+  })
+}
+
+function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const prevDefaultRef = useRef(defaultOpen)
+  useEffect(() => {
+    if (prevDefaultRef.current !== defaultOpen) {
+      prevDefaultRef.current = defaultOpen
+      setOpen(defaultOpen)
+    }
+  }, [defaultOpen])
 
   const filePath = String(toolCall.input.file_path ?? toolCall.input.path ?? "")
   const shortPath = filePath.split("/").slice(-3).join("/")
@@ -87,45 +103,80 @@ function FileChangeCard({ turnIndex, toolCall }: FileChange) {
     : String(toolCall.input.content ?? "")
 
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/30 overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full px-2.5 py-1.5 hover:bg-zinc-800/50 transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="size-3 text-zinc-500 shrink-0" />
-        ) : (
-          <ChevronRight className="size-3 text-zinc-500 shrink-0" />
-        )}
-        <Badge
-          variant="outline"
-          className={cn(
-            "text-[10px] px-1.5 py-0 h-4 font-mono shrink-0",
-            getToolBadgeStyle(toolCall.name)
-          )}
+    <div className="rounded-md border border-zinc-800 bg-zinc-900/30">
+      <div className="sticky top-0 z-10 flex items-center w-full bg-zinc-900 rounded-t-md hover:bg-zinc-800/80 transition-colors group">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-2 flex-1 min-w-0 px-2.5 py-1.5"
         >
-          {toolCall.name}
-        </Badge>
-        <span className="text-[10px] text-zinc-400 font-mono truncate">
-          {shortPath}
-        </span>
-        <span className="text-[10px] text-zinc-600 shrink-0">
-          T{turnIndex + 1}
-        </span>
-        <div className="flex-1" />
-        {toolCall.isError ? (
-          <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-        ) : toolCall.result !== null ? (
-          <CheckCircle className="w-3.5 h-3.5 text-green-500/60 shrink-0" />
-        ) : null}
-      </button>
+          {open ? (
+            <ChevronDown className="size-3 text-zinc-500 shrink-0" />
+          ) : (
+            <ChevronRight className="size-3 text-zinc-500 shrink-0" />
+          )}
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-[10px] px-1.5 py-0 h-4 font-mono shrink-0",
+              getToolBadgeStyle(toolCall.name)
+            )}
+          >
+            {toolCall.name}
+          </Badge>
+          <span className="text-[10px] text-zinc-400 font-mono truncate">
+            {shortPath}
+          </span>
+          <span className="text-[10px] text-zinc-600 shrink-0">
+            T{turnIndex + 1}
+          </span>
+        </button>
+        <div className="flex items-center gap-0.5 pr-1.5 shrink-0">
+          {filePath && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => openInEditor(filePath, "file")}
+                    className="p-1 text-zinc-600 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                    aria-label="Open file in editor"
+                  >
+                    <Code2 className="size-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Open file in editor</TooltipContent>
+              </Tooltip>
+              {isEdit && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => openInEditor(filePath, "diff")}
+                      className="p-1 text-zinc-600 hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
+                      aria-label="View git changes in editor"
+                    >
+                      <GitCompareArrows className="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>View git changes in editor</TooltipContent>
+                </Tooltip>
+              )}
+            </>
+          )}
+          {toolCall.isError ? (
+            <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          ) : toolCall.result !== null ? (
+            <CheckCircle className="w-3.5 h-3.5 text-green-500/60 shrink-0" />
+          ) : null}
+        </div>
+      </div>
       {open && (
-        <EditDiffView
-          oldString={oldString}
-          newString={newString}
-          filePath={filePath}
-          compact={false}
-        />
+        <div className="overflow-hidden rounded-b-md">
+          <EditDiffView
+            oldString={oldString}
+            newString={newString}
+            filePath={filePath}
+            compact={false}
+          />
+        </div>
       )}
     </div>
   )
@@ -169,6 +220,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const prevTurnCountRef = useRef(session.turns.length)
   const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
+  const [allExpanded, setAllExpanded] = useState(true)
 
   const { fileChanges, additions, deletions } = useMemo(() => {
     const changes: FileChange[] = []
@@ -452,6 +504,18 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         <span className="text-[10px] font-mono tabular-nums text-red-400/70">
           -{totalDeletions}
         </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => setAllExpanded(!allExpanded)}
+              className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              aria-label={allExpanded ? "Collapse all" : "Expand all"}
+            >
+              {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{allExpanded ? "Collapse all" : "Expand all"}</TooltipContent>
+        </Tooltip>
       </div>
       <div className="relative flex-1 min-h-0">
         {/* Top fade */}
@@ -473,6 +537,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   key={item.key}
                   turnIndex={item.turnIndex}
                   toolCall={item.toolCall}
+                  defaultOpen={allExpanded}
                 />
               ) : (
                 <DeletedFileCard

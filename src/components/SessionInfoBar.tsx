@@ -4,6 +4,7 @@ import {
   FolderOpen,
   Plus,
   Copy,
+  Code2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,6 +17,7 @@ import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { SessionAction } from "@/hooks/useSessionState"
 import { shortenModel, formatTokenCount, getContextUsage } from "@/lib/format"
+import { authFetch } from "@/lib/auth"
 
 interface SessionInfoBarProps {
   session: ParsedSession
@@ -136,6 +138,26 @@ export function SessionInfoBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Duplicate this session</TooltipContent>
+            </Tooltip>
+          )}
+          {session.cwd && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10"
+                  onClick={() => authFetch("/api/open-in-editor", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ path: session.cwd }),
+                  })}
+                >
+                  <Code2 className="size-3" />
+                  Open
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Open project in editor</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
