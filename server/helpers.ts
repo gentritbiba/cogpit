@@ -500,6 +500,60 @@ export async function getSessionMeta(filePath: string) {
   }
 }
 
+/**
+ * Search all user messages in a session file for a query string.
+ * Returns the first matching message snippet, or null if no match.
+ */
+export async function searchSessionMessages(
+  filePath: string,
+  query: string
+): Promise<string | null> {
+  const q = query.toLowerCase()
+
+  let content: string
+  try {
+    content = await readFile(filePath, "utf-8")
+  } catch {
+    return null
+  }
+
+  const lines = content.split("\n")
+  for (const line of lines) {
+    // Fast pre-check: skip lines that can't be user messages
+    if (!line || !line.includes('"user"')) continue
+    try {
+      const obj = JSON.parse(line)
+      if (obj.type !== "user" || obj.isMeta) continue
+
+      const c = obj.message?.content
+      let text = ""
+      if (typeof c === "string") {
+        text = c.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
+      } else if (Array.isArray(c)) {
+        for (const block of c) {
+          if (block.type === "text") {
+            text += block.text.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim() + " "
+          }
+        }
+        text = text.trim()
+      }
+
+      const lower = text.toLowerCase()
+      if (lower.includes(q)) {
+        const idx = lower.indexOf(q)
+        const start = Math.max(0, idx - 30)
+        const end = Math.min(text.length, idx + query.length + 70)
+        const snippet = (start > 0 ? "…" : "") + text.slice(start, end).trim() + (end < text.length ? "…" : "")
+        return snippet.slice(0, 150)
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+
+  return null
+}
+
 // ── Active process tracking ─────────────────────────────────────────────
 
 export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()

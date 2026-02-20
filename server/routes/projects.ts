@@ -1,5 +1,5 @@
 import type { UseFn } from "../helpers"
-import { dirs, isWithinDir, projectDirToReadableName, getSessionMeta, readdir, readFile, stat, join } from "../helpers"
+import { dirs, isWithinDir, projectDirToReadableName, getSessionMeta, searchSessionMessages, readdir, readFile, stat, join } from "../helpers"
 
 export function registerProjectRoutes(use: UseFn) {
   // GET /api/projects - list all projects
@@ -178,10 +178,12 @@ export function registerProjectRoutes(use: UseFn) {
   // GET /api/active-sessions - list most recent sessions across all projects
   use("/api/active-sessions", async (_req, res, next) => {
     if (_req.method !== "GET") return next()
-    if (_req.url && !_req.url.startsWith("?") && _req.url !== "/" && _req.url !== "") return next()
+    if (_req.url && !_req.url.startsWith("?") && !_req.url.startsWith("/?") && _req.url !== "/" && _req.url !== "") return next()
 
-    const url = new URL(_req.url || "/", "http://localhost")
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "30", 10), 100)
+    const url = new URL((_req.url || "/").replace(/^\/?/, "/"), "http://localhost")
+    const search = url.searchParams.get("search")?.trim() || ""
+    const defaultLimit = search ? 50 : 30
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || String(defaultLimit), 10), 100)
 
     try {
       const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
@@ -224,40 +226,63 @@ export function registerProjectRoutes(use: UseFn) {
         }
       }
 
-      // Sort by mtime descending and take top N
+      // Sort by mtime descending; when searching, scan top 50 then filter
       candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
-      const top = candidates.slice(0, limit)
+      const scanPool = search ? candidates.slice(0, 50) : candidates.slice(0, limit)
 
-      // Second pass: read metadata only for top N sessions
-      const activeSessions = []
+      // Second pass: read metadata (+ search) in parallel for speed
       const now = Date.now()
+      const q = search ? search.toLowerCase() : ""
 
-      for (const c of top) {
-        try {
-          const meta = await getSessionMeta(c.filePath)
-          const { shortName } = projectDirToReadableName(c.dirName)
-          const lastModified = new Date(c.mtimeMs).toISOString()
+      const results = await Promise.all(
+        scanPool.map(async (c) => {
+          try {
+            const meta = await getSessionMeta(c.filePath)
+            const { shortName } = projectDirToReadableName(c.dirName)
+            const lastModified = new Date(c.mtimeMs).toISOString()
 
-          activeSessions.push({
-            dirName: c.dirName,
-            projectShortName: shortName,
-            fileName: c.fileName,
-            sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
-            slug: meta.slug,
-            model: meta.model,
-            firstUserMessage: meta.firstUserMessage,
-            lastUserMessage: meta.lastUserMessage,
-            gitBranch: meta.gitBranch,
-            cwd: meta.cwd,
-            lastModified,
-            turnCount: meta.turnCount,
-            size: c.size,
-            isActive: now - c.mtimeMs < 5 * 60 * 1000,
-          })
-        } catch {
-          // skip inaccessible files
-        }
-      }
+            let matchedMessage: string | undefined
+            if (search) {
+              const metaMatch =
+                meta.firstUserMessage?.toLowerCase().includes(q) ||
+                meta.lastUserMessage?.toLowerCase().includes(q) ||
+                meta.slug?.toLowerCase().includes(q) ||
+                meta.gitBranch?.toLowerCase().includes(q) ||
+                meta.cwd?.toLowerCase().includes(q)
+
+              if (metaMatch) {
+                matchedMessage = meta.lastUserMessage || meta.firstUserMessage || meta.slug || ""
+              } else {
+                const found = await searchSessionMessages(c.filePath, search)
+                if (!found) return null
+                matchedMessage = found
+              }
+            }
+
+            return {
+              dirName: c.dirName,
+              projectShortName: shortName,
+              fileName: c.fileName,
+              sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
+              slug: meta.slug,
+              model: meta.model,
+              firstUserMessage: meta.firstUserMessage,
+              lastUserMessage: meta.lastUserMessage,
+              gitBranch: meta.gitBranch,
+              cwd: meta.cwd,
+              lastModified,
+              turnCount: meta.turnCount,
+              size: c.size,
+              isActive: now - c.mtimeMs < 5 * 60 * 1000,
+              ...(matchedMessage !== undefined && { matchedMessage }),
+            }
+          } catch {
+            return null
+          }
+        })
+      )
+
+      const activeSessions = results.filter(Boolean)
 
       res.setHeader("Content-Type", "application/json")
       res.end(JSON.stringify(activeSessions))

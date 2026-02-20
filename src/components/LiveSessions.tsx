@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, memo } from "react"
-import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle } from "lucide-react"
+import { useState, useEffect, useCallback, useRef, memo } from "react"
+import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -28,6 +28,7 @@ interface ActiveSessionInfo {
   turnCount?: number
   size: number
   isActive?: boolean
+  matchedMessage?: string
 }
 
 interface RunningProcess {
@@ -53,14 +54,35 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const [loading, setLoading] = useState(false)
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [searching, setSearching] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const debouncedSearchRef = useRef(debouncedSearch)
+  debouncedSearchRef.current = debouncedSearch
 
-  const fetchData = useCallback(async () => {
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const fetchData = useCallback(async (search?: string) => {
+    // Cancel any in-flight request
+    abortRef.current?.abort()
+    const ac = new AbortController()
+    abortRef.current = ac
+
     setLoading(true)
+    if (search) setSearching(true)
     try {
+      const searchParam = search ? `?search=${encodeURIComponent(search)}&limit=50` : ""
       const [sessRes, procRes] = await Promise.all([
-        authFetch("/api/active-sessions"),
-        authFetch("/api/running-processes"),
+        authFetch(`/api/active-sessions${searchParam}`, { signal: ac.signal }),
+        authFetch("/api/running-processes", { signal: ac.signal }),
       ])
+      if (ac.signal.aborted) return
       if (!sessRes.ok || !procRes.ok) {
         throw new Error("Failed to fetch live data")
       }
@@ -68,22 +90,31 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         sessRes.json(),
         procRes.json(),
       ])
+      if (ac.signal.aborted) return
       setSessions(sessData)
       setProcesses(procData)
       setFetchError(null)
     } catch (err) {
+      if (ac.signal.aborted) return
       setFetchError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
-      setLoading(false)
+      if (!ac.signal.aborted) {
+        setLoading(false)
+        setSearching(false)
+      }
     }
   }, [])
 
-  // Initial fetch + poll every 10s
+  // Re-fetch when debounced search changes
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 10000)
+    fetchData(debouncedSearch || undefined)
+  }, [debouncedSearch, fetchData])
+
+  // Poll every 10s
+  useEffect(() => {
+    const interval = setInterval(() => fetchData(debouncedSearch || undefined), 10000)
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [fetchData, debouncedSearch])
 
   // Build a map: sessionId -> process info
   const procBySession = new Map<string, RunningProcess>()
@@ -116,7 +147,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         body: JSON.stringify({ pid }),
       })
       // Refresh after a short delay to let process die
-      setTimeout(fetchData, 1500)
+      setTimeout(() => fetchData(debouncedSearchRef.current || undefined), 1500)
     } catch { /* ignore */ }
     setTimeout(() => {
       setKillingPids(prev => {
@@ -156,13 +187,39 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             variant="ghost"
             size="sm"
             className="h-6 w-6 p-0"
-            onClick={fetchData}
+            onClick={() => fetchData(debouncedSearch || undefined)}
             aria-label="Refresh live sessions"
           >
             <RefreshCw
               className={cn("size-3", loading && "animate-spin")}
             />
           </Button>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="shrink-0 px-2 pb-1.5">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-zinc-500" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search sessions & prompts…"
+            className="w-full rounded-md border border-zinc-800 bg-zinc-900/50 py-1.5 pl-7 pr-7 text-xs text-zinc-300 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600"
+          />
+          {searchQuery && !searching && (
+            <button
+              onClick={() => { setSearchQuery(""); searchInputRef.current?.focus() }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+          {searching && (
+            <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-zinc-500" />
+          )}
         </div>
       </div>
 
@@ -173,7 +230,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               <AlertTriangle className="size-3 text-red-400 shrink-0" />
               <span className="text-[10px] text-red-400 flex-1 truncate">{fetchError}</span>
               <button
-                onClick={() => { setFetchError(null); fetchData() }}
+                onClick={() => { setFetchError(null); fetchData(debouncedSearchRef.current || undefined) }}
                 className="text-[10px] text-red-400 hover:text-red-300 shrink-0"
               >
                 Retry
@@ -183,9 +240,19 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
           {sessions.length === 0 && unmatchedProcs.length === 0 && !loading && !fetchError && (
             <div className="px-3 py-8 text-center">
-              <Activity className="size-5 mx-auto mb-2 text-zinc-700" />
-              <p className="text-xs text-zinc-600">No active sessions</p>
-              <p className="text-[10px] text-zinc-700 mt-1">Start Claude Code to see sessions here</p>
+              {debouncedSearch ? (
+                <>
+                  <Search className="size-5 mx-auto mb-2 text-zinc-700" />
+                  <p className="text-xs text-zinc-600">No sessions match "{debouncedSearch}"</p>
+                  <p className="text-[10px] text-zinc-700 mt-1">Try a different search term</p>
+                </>
+              ) : (
+                <>
+                  <Activity className="size-5 mx-auto mb-2 text-zinc-700" />
+                  <p className="text-xs text-zinc-600">No active sessions</p>
+                  <p className="text-[10px] text-zinc-700 mt-1">Start Claude Code to see sessions here</p>
+                </>
+              )}
             </div>
           )}
 
@@ -257,6 +324,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 )}>
                   {shortPath(s.cwd ?? dirNameToPath(s.dirName), 2)}
                 </div>
+
+                {/* Matched message snippet (search results) */}
+                {s.matchedMessage && (
+                  <div className="ml-5.5 text-[10px] text-amber-500/70 truncate italic">
+                    {s.matchedMessage}
+                  </div>
+                )}
 
                 {/* Meta row */}
                 <div className={cn(
