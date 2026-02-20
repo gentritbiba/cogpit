@@ -12,7 +12,7 @@ import { registerTeamSessionRoutes } from "./routes/team-session"
 import { registerUndoRoutes } from "./routes/undo"
 import { registerFileRoutes } from "./routes/files"
 import { registerFileWatchRoutes } from "./routes/files-watch"
-import { registerUsageRoutes } from "./routes/usage"
+import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -60,7 +60,7 @@ export function sessionApiPlugin(): Plugin {
       registerUndoRoutes(use)
       registerFileRoutes(use)
       registerFileWatchRoutes(use)
-      registerUsageRoutes(use)
+      registerSessionFileChangesRoutes(use)
     },
   }
 }

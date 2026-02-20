@@ -139,6 +139,56 @@ describe("useKeyboardShortcuts", () => {
     })
   })
 
+  describe("Space - focus chat input", () => {
+    it("focuses chat input when no input is focused", () => {
+      const focusMock = vi.fn()
+      const chatInputRef = {
+        current: { focus: focusMock, toggleVoice: vi.fn() },
+      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+      const opts = createOpts({ chatInputRef })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey(" ")
+      expect(focusMock).toHaveBeenCalled()
+    })
+
+    it("does not focus chat input when an input is focused", () => {
+      const focusMock = vi.fn()
+      const chatInputRef = {
+        current: { focus: focusMock, toggleVoice: vi.fn() },
+      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+      const opts = createOpts({ chatInputRef })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const input = document.createElement("input")
+      document.body.appendChild(input)
+      input.focus()
+
+      fireKey(" ")
+      expect(focusMock).not.toHaveBeenCalled()
+
+      document.body.removeChild(input)
+    })
+
+    it("does not focus chat input when a textarea is focused", () => {
+      const focusMock = vi.fn()
+      const chatInputRef = {
+        current: { focus: focusMock, toggleVoice: vi.fn() },
+      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+      const opts = createOpts({ chatInputRef })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const textarea = document.createElement("textarea")
+      document.body.appendChild(textarea)
+      textarea.focus()
+
+      fireKey(" ")
+      expect(focusMock).not.toHaveBeenCalled()
+
+      document.body.removeChild(textarea)
+    })
+  })
+
   describe("cleanup", () => {
     it("removes event listener on unmount", () => {
       const opts = createOpts()

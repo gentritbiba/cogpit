@@ -20,8 +20,6 @@ import {
 } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
 import { cn, copyToClipboard } from "@/lib/utils"
-import type { UsageStats } from "@/hooks/useUsageStats"
-import { getSessionLimit, getWeeklyLimit } from "@/hooks/useUsageStats"
 
 interface DesktopHeaderProps {
   session: ParsedSession | null
@@ -31,40 +29,11 @@ interface DesktopHeaderProps {
   killing: boolean
   networkUrl: string | null
   networkAccessDisabled: boolean
-  usage: UsageStats | null
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
   onKillAll: () => void
   onOpenSettings: () => void
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
-  return String(n)
-}
-
-function usageColor(pct: number): string {
-  if (pct >= 80) return "text-red-400"
-  if (pct >= 50) return "text-amber-400"
-  return "text-emerald-400"
-}
-
-function barColor(pct: number): string {
-  if (pct >= 80) return "bg-red-400"
-  if (pct >= 50) return "bg-amber-400"
-  return "bg-emerald-400"
-}
-
-function formatResetTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-}
-
-function formatResetDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
 }
 
 export function DesktopHeader({
@@ -75,7 +44,6 @@ export function DesktopHeader({
   killing,
   networkUrl,
   networkAccessDisabled,
-  usage,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
@@ -204,65 +172,6 @@ export function DesktopHeader({
           <TooltipContent>Network access is disabled</TooltipContent>
         </Tooltip>
       ) : null}
-
-      {usage && (
-        <div className="flex items-center gap-2 mr-2 shrink-0">
-          {/* Session window usage */}
-          {(() => {
-            const sessionLimit = getSessionLimit(usage.subscriptionType)
-            const sessionPct = Math.min(100, Math.round((usage.sessionWindow.outputTokens / sessionLimit) * 100))
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1.5 cursor-default">
-                    <span className={cn("text-[11px] font-medium tabular-nums", usageColor(sessionPct))}>
-                      S {sessionPct}%
-                    </span>
-                    <div className="w-8 h-1 rounded-full bg-zinc-700 overflow-hidden">
-                      <div
-                        className={cn("h-full rounded-full transition-all", barColor(sessionPct))}
-                        style={{ width: `${sessionPct}%` }}
-                      />
-                    </div>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs space-y-1">
-                  <div className="font-medium">Session window</div>
-                  <div>{formatTokens(usage.sessionWindow.outputTokens)} / ~{formatTokens(sessionLimit)} output tokens</div>
-                  <div className="text-zinc-400">Resets {formatResetTime(usage.sessionWindow.resetAt)}</div>
-                </TooltipContent>
-              </Tooltip>
-            )
-          })()}
-          {/* Weekly usage */}
-          {(() => {
-            const weeklyLimit = getWeeklyLimit(usage.subscriptionType)
-            const weeklyPct = Math.min(100, Math.round((usage.weekly.outputTokens / weeklyLimit) * 100))
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1.5 cursor-default">
-                    <span className={cn("text-[11px] font-medium tabular-nums", usageColor(weeklyPct))}>
-                      W {weeklyPct}%
-                    </span>
-                    <div className="w-8 h-1 rounded-full bg-zinc-700 overflow-hidden">
-                      <div
-                        className={cn("h-full rounded-full transition-all", barColor(weeklyPct))}
-                        style={{ width: `${weeklyPct}%` }}
-                      />
-                    </div>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="text-xs space-y-1">
-                  <div className="font-medium">Weekly usage</div>
-                  <div>{formatTokens(usage.weekly.outputTokens)} / ~{formatTokens(weeklyLimit)} output tokens</div>
-                  <div className="text-zinc-400">Resets {formatResetDate(usage.weekly.resetAt)}</div>
-                </TooltipContent>
-              </Tooltip>
-            )
-          })()}
-        </div>
-      )}
 
       <div className="flex items-center gap-1 shrink-0">
         <Tooltip>

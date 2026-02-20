@@ -166,11 +166,16 @@ function useHighlightedTokens(
   newStr: string,
   filePath: string
 ): { oldTokens: TokenizedLines | null; newTokens: TokenizedLines | null } {
-  const lang = getLang(filePath)
-  const [tokens, setTokens] = useState<{ old: TokenizedLines | null; new: TokenizedLines | null }>({ old: null, new: null })
+  const [oldTokens, setOldTokens] = useState<TokenizedLines | null>(null)
+  const [newTokens, setNewTokens] = useState<TokenizedLines | null>(null)
 
   useEffect(() => {
-    if (!lang) return
+    const lang = getLang(filePath)
+    if (!lang) {
+      setOldTokens(null)
+      setNewTokens(null)
+      return
+    }
 
     let cancelled = false
     getHighlighter()
@@ -186,38 +191,37 @@ function useHighlightedTokens(
           lang,
           theme: "github-dark",
         })
-        setTokens({ old: oldResult.tokens, new: newResult.tokens })
+        setOldTokens(oldResult.tokens)
+        setNewTokens(newResult.tokens)
       })
       .catch((err) => {
         console.warn("[EditDiffView] highlight failed:", err)
-        if (!cancelled) setTokens({ old: null, new: null })
+        if (!cancelled) {
+          setOldTokens(null)
+          setNewTokens(null)
+        }
       })
 
     return () => {
       cancelled = true
     }
-  }, [oldStr, newStr, filePath, lang])
+  }, [oldStr, newStr, filePath])
 
-  return { oldTokens: lang ? tokens.old : null, newTokens: lang ? tokens.new : null }
+  return { oldTokens, newTokens }
 }
 
 // ── Token rendering ─────────────────────────────────────────────────────────
 
 function renderTokens(tokens: ThemedToken[], dimmed?: boolean) {
-  let offset = 0
-  return tokens.map((token) => {
-    const tokenKey = offset
-    offset += token.content.length
-    return (
-      <span
-        key={tokenKey}
-        style={{ color: token.color }}
-        className={cn(dimmed && "opacity-50")}
-      >
-        {token.content}
-      </span>
-    )
-  })
+  return tokens.map((token, i) => (
+    <span
+      key={i}
+      style={{ color: token.color }}
+      className={cn(dimmed && "opacity-50")}
+    >
+      {token.content}
+    </span>
+  ))
 }
 
 // ── Diff rendering ──────────────────────────────────────────────────────────
@@ -240,7 +244,7 @@ function DiffLines({
         compact && "max-h-64 overflow-y-auto"
       )}
     >
-      {lines.map((line) => {
+      {lines.map((line, idx) => {
         // Pick highlighted tokens for this line if available
         const tokens =
           line.type === "removed"
@@ -253,7 +257,7 @@ function DiffLines({
 
         return (
           <div
-            key={`${line.type}-${line.oldIdx ?? ""}-${line.newIdx ?? ""}`}
+            key={idx}
             className={cn(
               "flex",
               line.type === "removed" && "bg-red-950/40",

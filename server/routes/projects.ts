@@ -24,18 +24,32 @@ export function registerProjectRoutes(use: UseFn) {
 
         // Get file stats for latest session
         let latestTime = 0
+        let latestFile: string | null = null
         for (const f of jsonlFiles) {
           try {
             const s = await stat(join(projectDir, f))
-            if (s.mtimeMs > latestTime) latestTime = s.mtimeMs
+            if (s.mtimeMs > latestTime) {
+              latestTime = s.mtimeMs
+              latestFile = f
+            }
           } catch { /* ignore stat errors */ }
         }
 
         const { path: realPath, shortName } = projectDirToReadableName(entry.name)
 
+        // Read cwd from the latest session to get the real filesystem path
+        // (the path field derived from dirName is unreliable for dirs with hyphens)
+        let cwd: string | null = null
+        if (latestFile) {
+          try {
+            const meta = await getSessionMeta(join(projectDir, latestFile))
+            cwd = meta.cwd ?? null
+          } catch { /* ignore, fall back to derived path */ }
+        }
+
         projects.push({
           dirName: entry.name,
-          path: realPath,
+          path: cwd ?? realPath,
           shortName,
           sessionCount: jsonlFiles.length,
           lastModified: latestTime ? new Date(latestTime).toISOString() : null,

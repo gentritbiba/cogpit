@@ -49,24 +49,27 @@ function matchesSearch(turn: Turn, query: string): boolean {
   }
 
   // Check assistant text
-  if (turn.assistantText.some(t => t.toLowerCase().includes(q))) return true
+  for (const t of turn.assistantText) {
+    if (t.toLowerCase().includes(q)) return true
+  }
 
   // Check thinking
-  if (turn.thinking.some(tb => tb.thinking.toLowerCase().includes(q))) return true
+  for (const tb of turn.thinking) {
+    if (tb.thinking.toLowerCase().includes(q)) return true
+  }
 
   // Check tool calls
-  if (turn.toolCalls.some(tc =>
-    tc.name.toLowerCase().includes(q) ||
-    JSON.stringify(tc.input).toLowerCase().includes(q) ||
-    tc.result?.toLowerCase().includes(q)
-  )) return true
+  for (const tc of turn.toolCalls) {
+    if (tc.name.toLowerCase().includes(q)) return true
+    if (JSON.stringify(tc.input).toLowerCase().includes(q)) return true
+    if (tc.result?.toLowerCase().includes(q)) return true
+  }
 
   return false
 }
 
 // Threshold: only virtualize when we have enough turns to benefit
 const VIRTUALIZE_THRESHOLD = 30
-const EMPTY_GHOST_TURNS: Turn[] = []
 
 export function ConversationTimeline({
   session,
@@ -82,7 +85,7 @@ export function ConversationTimeline({
   onBranchFromHere,
   canRedo = false,
   redoTurnCount = 0,
-  redoGhostTurns = EMPTY_GHOST_TURNS,
+  redoGhostTurns = [],
   onRedoAll,
   onRedoUpTo,
 }: ConversationTimelineProps) {
@@ -100,13 +103,8 @@ export function ConversationTimeline({
     [allTurns, searchQuery]
   )
 
-  // Track scroll container availability without reading ref during render
-  const [hasScrollContainer, setHasScrollContainer] = useState(false)
-  useEffect(() => {
-    setHasScrollContainer(scrollContainerRef?.current != null)
-  }, [scrollContainerRef])
-
-  const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && hasScrollContainer
+  // Decide whether to virtualize
+  const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && scrollContainerRef?.current != null
 
   if (filteredTurns.length === 0) {
     return (
@@ -485,101 +483,6 @@ const TurnSection = memo(function TurnSection({
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
 }) {
-  const contentElements = useMemo(() => {
-    const elements: React.ReactNode[] = []
-    const blocks = turn.contentBlocks
-    let blockPos = 0
-    while (blockPos < blocks.length) {
-      const block = blocks[blockPos]
-
-      if (block.kind === "thinking") {
-        elements.push(
-          <div key={`thinking-${blockPos}`} className="relative rounded-lg bg-violet-500/[0.06] border border-violet-500/10 p-3">
-            <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-violet-500/60 ring-2 ring-zinc-900" />
-            <ThinkingBlock blocks={block.blocks} expandAll={expandAll} />
-          </div>
-        )
-        blockPos++
-        continue
-      }
-
-      if (block.kind === "text") {
-        const toolCalls: ToolCall[] = []
-        let j = blockPos + 1
-        while (j < blocks.length && blocks[j].kind === "tool_calls") {
-          toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
-          j++
-        }
-        for (let ti = 0; ti < block.text.length; ti++) {
-          const text = block.text[ti]
-          const isLastTextInBlock = ti === block.text.length - 1
-          elements.push(
-            <div key={`text-${blockPos}-${ti}`} className="relative rounded-lg bg-green-500/[0.06] border border-green-500/10 p-3">
-              <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-green-500/60 ring-2 ring-zinc-900" />
-              <AssistantText
-                text={text}
-                model={turn.model}
-                tokenUsage={null}
-                timestamp={block.timestamp}
-              />
-              {isLastTextInBlock && toolCalls.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-green-500/10">
-                  <CollapsibleToolCalls
-                    toolCalls={toolCalls}
-                    expandAll={expandAll}
-                    activeToolCallId={activeToolCallId}
-                    isAgentActive={isAgentActive}
-                  />
-                </div>
-              )}
-            </div>
-          )
-        }
-        blockPos = j
-        continue
-      }
-
-      if (block.kind === "tool_calls") {
-        const toolCalls: ToolCall[] = [...block.toolCalls]
-        let j = blockPos + 1
-        while (j < blocks.length && blocks[j].kind === "tool_calls") {
-          toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
-          j++
-        }
-        elements.push(
-          <div key={`tools-${blockPos}`} className="relative rounded-lg bg-zinc-500/[0.06] border border-zinc-700/30 p-3">
-            <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-zinc-500/60 ring-2 ring-zinc-900" />
-            <CollapsibleToolCalls
-              toolCalls={toolCalls}
-              expandAll={expandAll}
-              activeToolCallId={activeToolCallId}
-              isAgentActive={isAgentActive}
-            />
-          </div>
-        )
-        blockPos = j
-        continue
-      }
-
-      if (block.kind === "sub_agent") {
-        elements.push(
-          <div key={`agent-${blockPos}`} className="relative rounded-lg bg-indigo-500/[0.06] border border-indigo-500/10 p-3">
-            <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-indigo-500/60 ring-2 ring-zinc-900" />
-            <SubAgentPanel
-              messages={block.messages}
-              expandAll={expandAll}
-            />
-          </div>
-        )
-        blockPos++
-        continue
-      }
-
-      blockPos++
-    }
-    return elements
-  }, [turn.contentBlocks, turn.model, expandAll, activeToolCallId, isAgentActive])
-
   return (
     <div
       className={cn(
@@ -642,7 +545,105 @@ const TurnSection = memo(function TurnSection({
         )}
 
         {/* Content blocks: each text message card contains its following tool calls */}
-        {contentElements}
+        {(() => {
+          const elements: React.ReactNode[] = []
+          const blocks = turn.contentBlocks
+          let i = 0
+          while (i < blocks.length) {
+            const block = blocks[i]
+
+            if (block.kind === "thinking") {
+              elements.push(
+                <div key={`thinking-${i}`} className="relative rounded-lg bg-violet-500/[0.06] border border-violet-500/10 p-3">
+                  <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-violet-500/60 ring-2 ring-zinc-900" />
+                  <ThinkingBlock blocks={block.blocks} expandAll={expandAll} />
+                </div>
+              )
+              i++
+              continue
+            }
+
+            if (block.kind === "text") {
+              // Collect all tool_calls blocks that follow this text block
+              const toolCalls: ToolCall[] = []
+              let j = i + 1
+              while (j < blocks.length && blocks[j].kind === "tool_calls") {
+                toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
+                j++
+              }
+
+              // Render each text string as its own card with the grouped tool calls underneath
+              block.text.forEach((text, ti) => {
+                const isLastTextInBlock = ti === block.text.length - 1
+                elements.push(
+                  <div key={`text-${i}-${ti}`} className="relative rounded-lg bg-green-500/[0.06] border border-green-500/10 p-3">
+                    <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-green-500/60 ring-2 ring-zinc-900" />
+                    <AssistantText
+                      text={text}
+                      model={turn.model}
+                      tokenUsage={null}
+                      timestamp={block.timestamp}
+                    />
+                    {/* Tool calls go inside the last text card of this group */}
+                    {isLastTextInBlock && toolCalls.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-green-500/10">
+                        <CollapsibleToolCalls
+                          toolCalls={toolCalls}
+                          expandAll={expandAll}
+                          activeToolCallId={activeToolCallId}
+                          isAgentActive={isAgentActive}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+
+              i = j // skip past the consumed tool_calls blocks
+              continue
+            }
+
+            if (block.kind === "tool_calls") {
+              // Orphan tool calls (no preceding text) — merge consecutive ones
+              const toolCalls: ToolCall[] = [...block.toolCalls]
+              let j = i + 1
+              while (j < blocks.length && blocks[j].kind === "tool_calls") {
+                toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
+                j++
+              }
+              elements.push(
+                <div key={`tools-${i}`} className="relative rounded-lg bg-zinc-500/[0.06] border border-zinc-700/30 p-3">
+                  <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-zinc-500/60 ring-2 ring-zinc-900" />
+                  <CollapsibleToolCalls
+                    toolCalls={toolCalls}
+                    expandAll={expandAll}
+                    activeToolCallId={activeToolCallId}
+                    isAgentActive={isAgentActive}
+                  />
+                </div>
+              )
+              i = j
+              continue
+            }
+
+            if (block.kind === "sub_agent") {
+              elements.push(
+                <div key={`agent-${i}`} className="relative rounded-lg bg-indigo-500/[0.06] border border-indigo-500/10 p-3">
+                  <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-indigo-500/60 ring-2 ring-zinc-900" />
+                  <SubAgentPanel
+                    messages={block.messages}
+                    expandAll={expandAll}
+                  />
+                </div>
+              )
+              i++
+              continue
+            }
+
+            i++
+          }
+          return elements
+        })()}
       </div>
     </div>
   )
@@ -665,10 +666,9 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
   const isOpen = expandAll || manualOpen || hasInProgressCall
 
-  // Auto-expand and scroll to targeted tool call (rAF avoids synchronous setState in effect)
+  // Auto-expand when a specific tool call in this group is targeted
   const lastScrolledToolCallRef = useRef<string | null>(null)
   const scrollRafRef = useRef<number | null>(null)
-  const openFrameRef = useRef<number | null>(null)
   useEffect(() => {
     if (!activeToolCallId) {
       lastScrolledToolCallRef.current = null
@@ -677,12 +677,9 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     if (activeToolCallId === lastScrolledToolCallRef.current) return
     if (!toolCalls.some((tc) => tc.id === activeToolCallId)) return
     lastScrolledToolCallRef.current = activeToolCallId
-    // Defer setState to rAF (subscription pattern, not synchronous)
-    openFrameRef.current = requestAnimationFrame(() => {
-      openFrameRef.current = null
-      setManualOpen(true)
-    })
+    setManualOpen(true)
     // Scroll to the target after DOM update (double rAF for layout).
+    // Track the frame IDs so we can cancel if the component unmounts mid-scroll.
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = requestAnimationFrame(() => {
         scrollRafRef.current = null
@@ -692,9 +689,6 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         })
       })
     })
-    return () => {
-      if (openFrameRef.current !== null) cancelAnimationFrame(openFrameRef.current)
-    }
   }, [activeToolCallId, toolCalls])
 
   // Cancel pending scroll animation frames on unmount
@@ -706,9 +700,9 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   const toolCounts = useMemo(() => {
     const counts: Record<string, number> = {}
-    toolCalls.forEach(tc => {
+    for (const tc of toolCalls) {
       counts[tc.name] = (counts[tc.name] || 0) + 1
-    })
+    }
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   }, [toolCalls])
 
@@ -799,8 +793,8 @@ const CompactionMarker = memo(function CompactionMarker({ summary }: { summary: 
 
       {open && details.length > 0 && (
         <div className="mt-2 mx-8 rounded-md border border-amber-500/10 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 space-y-0.5">
-          {details.map((line) => (
-            <div key={line} className={cn(
+          {details.map((line, i) => (
+            <div key={i} className={cn(
               line.startsWith("- ") && "pl-2 text-zinc-500",
               line.startsWith("Tools:") && "text-zinc-300 font-medium",
               line.startsWith("Prompts:") && "text-zinc-300 font-medium mt-1",

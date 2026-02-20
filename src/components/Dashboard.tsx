@@ -24,7 +24,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
-import { shortenModel, formatRelativeTime, formatFileSize, truncate } from "@/lib/format"
+import { shortenModel, formatRelativeTime, formatFileSize, truncate, shortPath, projectName, dirNameToPath } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
@@ -34,9 +34,9 @@ function Shortcut({ keys, label }: { keys: string[]; label: string }) {
     <div className="flex items-center justify-between gap-3 py-0.5">
       <span className="text-zinc-500">{label}</span>
       <span className="flex items-center gap-0.5 shrink-0">
-        {keys.map((k) => (
+        {keys.map((k, i) => (
           <kbd
-            key={k}
+            key={i}
             className="inline-flex items-center justify-center rounded border border-zinc-700/80 bg-zinc-800/80 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 min-w-[20px]"
           >
             {k === "Ctrl" ? (isMac ? "⌘" : "Ctrl") : k}
@@ -116,99 +116,81 @@ export const Dashboard = memo(function Dashboard({
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Combined session-browse state (single setter for the project-switch effect)
-  const [browse, setBrowse] = useState({
-    sessions: [] as SessionInfo[],
-    total: 0,
-    page: 1,
-    loading: false,
-    filter: "",
-    error: null as string | null,
-    prevDir: null as string | null,
-  })
+  // Session list state (for when viewing a project)
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [sessionsTotal, setSessionsTotal] = useState(0)
+  const [sessionsPage, setSessionsPage] = useState(1)
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [searchFilter, setSearchFilter] = useState("")
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Track which dirName we last loaded sessions for, to avoid re-fetching
   const loadedForDirName = useRef<string | null>(null)
 
-  // "Adjust state during render" — sync reset/load-start when project selection changes
-  const currentDir = selectedProjectDirName ?? null
-  if (currentDir !== browse.prevDir) {
-    if (!currentDir) {
-      if (browse.prevDir) {
-        setBrowse({ sessions: [], total: 0, page: 1, loading: false, filter: "", error: null, prevDir: null })
-        loadedForDirName.current = null
-      } else {
-        setBrowse(prev => ({ ...prev, prevDir: null }))
-      }
-    } else if (loadedForDirName.current !== currentDir) {
-      setBrowse(prev => ({ ...prev, filter: "", loading: true, sessions: [], error: null, prevDir: currentDir }))
-    } else {
-      setBrowse(prev => ({ ...prev, prevDir: currentDir }))
-    }
-  }
-
-  // Stable timestamp for render-time calculations
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Core fetch — no synchronous setState before first await (safe for effects)
-  const fetchDashboardData = useCallback(async () => {
-    let projectsRes: Response
-    let sessionsRes: Response
+  const fetchData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
     try {
-      ;[projectsRes, sessionsRes] = await Promise.all([
+      const [projectsRes, sessionsRes] = await Promise.all([
         authFetch("/api/projects"),
         authFetch("/api/active-sessions"),
       ])
+      if (!projectsRes.ok || !sessionsRes.ok) {
+        throw new Error("Failed to fetch dashboard data")
+      }
+      const projectsData = await projectsRes.json()
+      const sessionsData = await sessionsRes.json()
+      setProjects(Array.isArray(projectsData) ? projectsData : [])
+      setActiveSessions(Array.isArray(sessionsData) ? sessionsData : [])
+      setFetchError(null)
     } catch (err) {
-      setBrowse(prev => ({ ...prev, error: err instanceof Error ? err.message : "Failed to load data" }))
+      setFetchError(err instanceof Error ? err.message : "Failed to load data")
+    } finally {
       setLoading(false)
       setRefreshing(false)
-      return
     }
-    if (!projectsRes.ok || !sessionsRes.ok) {
-      setBrowse(prev => ({ ...prev, error: "Failed to fetch dashboard data" }))
-      setLoading(false)
-      setRefreshing(false)
-      return
-    }
-    const projectsData = await projectsRes.json()
-    const sessionsData = await sessionsRes.json()
-    setProjects(Array.isArray(projectsData) ? projectsData : [])
-    setActiveSessions(Array.isArray(sessionsData) ? sessionsData : [])
-    setBrowse(prev => ({ ...prev, error: null }))
-    setLoading(false)
-    setRefreshing(false)
   }, [])
 
-  // UI wrapper for manual refresh — safe for event handlers
-  const fetchData = useCallback(async () => {
-    setRefreshing(true)
-    await fetchDashboardData()
-  }, [fetchDashboardData])
-
   useEffect(() => {
-    fetchDashboardData()
-    const interval = setInterval(() => fetchDashboardData(), 10000)
+    fetchData()
+    const interval = setInterval(() => fetchData(), 10000)
     return () => clearInterval(interval)
-  }, [fetchDashboardData])
+  }, [fetchData])
 
-  // Load sessions when selectedProjectDirName changes — only async fetch here
+  // Load sessions when selectedProjectDirName changes (from URL or click)
   useEffect(() => {
-    if (!selectedProjectDirName || loadedForDirName.current === selectedProjectDirName) return
+    if (!selectedProjectDirName) {
+      // Going back to projects list — clear session data
+      if (loadedForDirName.current) {
+        setSessions([])
+        setSessionsTotal(0)
+        setSessionsPage(1)
+        setSearchFilter("")
+        loadedForDirName.current = null
+      }
+      return
+    }
+
+    // Already loaded for this project
+    if (loadedForDirName.current === selectedProjectDirName) return
+
+    // Fetch sessions for this project
     loadedForDirName.current = selectedProjectDirName
+    setSearchFilter("")
+    setSessionsLoading(true)
+    setSessions([])
+    setFetchError(null)
     authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
       .then((res) => {
-        if (!res.ok) return Promise.reject(new Error(`Failed to load sessions (${res.status})`))
+        if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
         return res.json()
       })
       .then((data) => {
-        setBrowse(prev => ({ ...prev, sessions: data.sessions, total: data.total, page: 1, loading: false }))
+        setSessions(data.sessions)
+        setSessionsTotal(data.total)
+        setSessionsPage(1)
       })
-      .catch((err) => setBrowse(prev => ({ ...prev, error: err instanceof Error ? err.message : "Failed to load sessions", loading: false })))
+      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
+      .finally(() => setSessionsLoading(false))
   }, [selectedProjectDirName])
 
   // Resolve the selected project info from the projects list
@@ -217,14 +199,15 @@ export const Dashboard = memo(function Dashboard({
     const found = projects.find((p) => p.dirName === selectedProjectDirName)
     if (found) return found
     // Fallback: minimal info from dirName
+    const fallbackPath = dirNameToPath(selectedProjectDirName)
     return {
       dirName: selectedProjectDirName,
-      path: "/" + selectedProjectDirName.replace(/^-/, "").replace(/-/g, "/"),
-      shortName: selectedProjectDirName.split("-").filter(Boolean).slice(-2).join("-"),
-      sessionCount: browse.total,
+      path: fallbackPath,
+      shortName: projectName(fallbackPath),
+      sessionCount: sessionsTotal,
       lastModified: null,
     }
-  }, [selectedProjectDirName, projects, browse.total])
+  }, [selectedProjectDirName, projects, sessionsTotal])
 
   const handleSelectProject = useCallback((project: ProjectInfo) => {
     onSelectProject?.(project.dirName)
@@ -236,56 +219,56 @@ export const Dashboard = memo(function Dashboard({
 
   const loadMoreSessions = useCallback(async () => {
     if (!selectedProjectDirName) return
-    const nextPage = browse.page + 1
-    setBrowse(prev => ({ ...prev, loading: true }))
-    let res: Response
+    const nextPage = sessionsPage + 1
+    setSessionsLoading(true)
     try {
-      res = await authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
+      const res = await authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
+      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
+      const data = await res.json()
+      setSessions((prev) => [...prev, ...data.sessions])
+      setSessionsTotal(data.total)
+      setSessionsPage(nextPage)
     } catch (err) {
-      setBrowse(prev => ({ ...prev, error: err instanceof Error ? err.message : "Failed to load more sessions", loading: false }))
-      return
+      setFetchError(err instanceof Error ? err.message : "Failed to load more sessions")
+    } finally {
+      setSessionsLoading(false)
     }
-    if (!res.ok) {
-      setBrowse(prev => ({ ...prev, error: `Failed to load sessions (${res.status})`, loading: false }))
-      return
-    }
-    const data = await res.json()
-    setBrowse(prev => ({ ...prev, sessions: [...prev.sessions, ...data.sessions], total: data.total, page: nextPage, loading: false }))
-  }, [selectedProjectDirName, browse.page])
+  }, [selectedProjectDirName, sessionsPage])
 
   // Build a map of active session counts per project for the folder cards
   const activeCountByProject = useMemo(() => {
+    const now = Date.now()
     const map: Record<string, number> = {}
-    activeSessions.forEach(s => {
+    for (const s of activeSessions) {
       const age = now - new Date(s.lastModified).getTime()
       if (age < 2 * 60 * 1000) {
         map[s.dirName] = (map[s.dirName] || 0) + 1
       }
-    })
+    }
     return map
-  }, [activeSessions, now])
+  }, [activeSessions])
 
   // Filter projects
   const filteredProjects = useMemo(() => {
-    if (!browse.filter) return projects
-    const q = browse.filter.toLowerCase()
+    if (!searchFilter) return projects
+    const q = searchFilter.toLowerCase()
     return projects.filter(
       (p) => p.path.toLowerCase().includes(q) || p.shortName.toLowerCase().includes(q)
     )
-  }, [projects, browse.filter])
+  }, [projects, searchFilter])
 
   // Filter sessions
   const filteredSessions = useMemo(() => {
-    if (!browse.filter) return browse.sessions
-    const q = browse.filter.toLowerCase()
-    return browse.sessions.filter(
+    if (!searchFilter) return sessions
+    const q = searchFilter.toLowerCase()
+    return sessions.filter(
       (s) =>
         s.firstUserMessage?.toLowerCase().includes(q) ||
         s.slug?.toLowerCase().includes(q) ||
         s.model?.toLowerCase().includes(q) ||
         s.sessionId.toLowerCase().includes(q)
     )
-  }, [browse.sessions, browse.filter])
+  }, [sessions, searchFilter])
 
   // ── Sessions view (drilled into a project) ──
   if (selectedProject) {
@@ -305,9 +288,9 @@ export const Dashboard = memo(function Dashboard({
               <FolderOpen className="size-6 text-blue-400" />
               <div className="flex-1 min-w-0">
                 <h1 className="text-xl font-bold tracking-tight text-zinc-100 truncate">
-                  {selectedProject.shortName}
+                  {projectName(selectedProject.path)}
                 </h1>
-                <p className="text-xs text-zinc-500 truncate mt-0.5">{selectedProject.path}</p>
+                <p className="text-xs text-zinc-500 truncate mt-0.5">{shortPath(selectedProject.path)}</p>
               </div>
               {onNewSession && (
                 <Tooltip>
@@ -328,7 +311,7 @@ export const Dashboard = memo(function Dashboard({
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {creatingSession ? "Creating session..." : `Start a new session in ${selectedProject.shortName}`}
+                    {creatingSession ? "Creating session..." : `Start a new session in ${projectName(selectedProject.path)}`}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -339,14 +322,14 @@ export const Dashboard = memo(function Dashboard({
           <div className="mb-4 relative max-w-sm">
             <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-600" />
             <Input
-              value={browse.filter}
-              onChange={(e) => setBrowse(prev => ({ ...prev, filter: e.target.value }))}
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Filter sessions..."
               className="bg-zinc-900 pl-9 h-8 text-sm border-zinc-800 placeholder:text-zinc-600"
             />
-            {browse.filter && (
+            {searchFilter && (
               <button
-                onClick={() => setBrowse(prev => ({ ...prev, filter: "" }))}
+                onClick={() => setSearchFilter("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                 aria-label="Clear search"
               >
@@ -356,18 +339,21 @@ export const Dashboard = memo(function Dashboard({
           </div>
 
           {/* Error banner */}
-          {browse.error && (
+          {fetchError && (
             <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
               <AlertTriangle className="size-4 text-red-400 shrink-0" />
-              <span className="text-sm text-red-400 flex-1">{browse.error}</span>
+              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
                 onClick={() => {
+                  setFetchError(null)
                   loadedForDirName.current = null
                   if (selectedProjectDirName) {
-                    setBrowse(prev => ({ ...prev, error: null, loading: true, sessions: [] }))
+                    // Re-trigger session load by resetting the ref
+                    setSessionsLoading(true)
+                    setSessions([])
                     authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
                       .then((res) => {
                         if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
@@ -375,10 +361,12 @@ export const Dashboard = memo(function Dashboard({
                       })
                       .then((data) => {
                         loadedForDirName.current = selectedProjectDirName
-                        setBrowse(prev => ({ ...prev, sessions: data.sessions, total: data.total, page: 1 }))
+                        setSessions(data.sessions)
+                        setSessionsTotal(data.total)
+                        setSessionsPage(1)
                       })
-                      .catch((err) => setBrowse(prev => ({ ...prev, error: err instanceof Error ? err.message : "Failed to load sessions" })))
-                      .finally(() => setBrowse(prev => ({ ...prev, loading: false })))
+                      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
+                      .finally(() => setSessionsLoading(false))
                   }
                 }}
               >
@@ -389,10 +377,10 @@ export const Dashboard = memo(function Dashboard({
           )}
 
           {/* Sessions grid */}
-          {browse.loading && browse.sessions.length === 0 ? (
+          {sessionsLoading && sessions.length === 0 ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[1, 2, 3].map((n) => (
-                <div key={`skel-${n}`} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
                   <div className="skeleton h-4 w-3/4 rounded mb-3" />
                   <div className="skeleton h-3 w-1/2 rounded mb-4" />
                   <div className="skeleton h-8 w-full rounded mb-3" />
@@ -407,7 +395,7 @@ export const Dashboard = memo(function Dashboard({
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 py-12 px-6 text-center">
               <FileText className="size-8 text-zinc-700 mb-3" />
               <p className="text-sm text-zinc-500">
-                {browse.filter ? "No matching sessions" : "No sessions in this project"}
+                {searchFilter ? "No matching sessions" : "No sessions in this project"}
               </p>
             </div>
           ) : (
@@ -415,7 +403,7 @@ export const Dashboard = memo(function Dashboard({
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredSessions.map((s) => {
                   const isLive = s.lastModified
-                    ? now - new Date(s.lastModified).getTime() < 2 * 60 * 1000
+                    ? Date.now() - new Date(s.lastModified).getTime() < 2 * 60 * 1000
                     : false
 
                   const card = (
@@ -489,7 +477,8 @@ export const Dashboard = memo(function Dashboard({
                         onDuplicate={onDuplicateSession ? () => onDuplicateSession(selectedProject.dirName, s.fileName) : undefined}
                         onDelete={onDeleteSession ? () => {
                           onDeleteSession(selectedProject.dirName, s.fileName)
-                          setBrowse(prev => ({ ...prev, sessions: prev.sessions.filter((x) => x.fileName !== s.fileName), total: prev.total - 1 }))
+                          setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
+                          setSessionsTotal((prev) => prev - 1)
                         } : undefined}
                       >
                         {card}
@@ -502,16 +491,16 @@ export const Dashboard = memo(function Dashboard({
               </div>
 
               {/* Load more */}
-              {browse.sessions.length < browse.total && !browse.filter && (
+              {sessions.length < sessionsTotal && !searchFilter && (
                 <div className="mt-4 text-center">
                   <Button
                     variant="outline"
                     size="sm"
                     className="text-xs border-zinc-800 hover:border-zinc-700"
-                    disabled={browse.loading}
+                    disabled={sessionsLoading}
                     onClick={loadMoreSessions}
                   >
-                    {browse.loading ? "Loading..." : "Load more sessions"}
+                    {sessionsLoading ? "Loading..." : "Load more sessions"}
                   </Button>
                 </div>
               )}
@@ -563,14 +552,14 @@ export const Dashboard = memo(function Dashboard({
           <div className="mb-4 relative max-w-sm">
             <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-zinc-600" />
             <Input
-              value={browse.filter}
-              onChange={(e) => setBrowse(prev => ({ ...prev, filter: e.target.value }))}
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Filter projects..."
               className="bg-zinc-900 pl-9 h-8 text-sm border-zinc-800 placeholder:text-zinc-600"
             />
-            {browse.filter && (
+            {searchFilter && (
               <button
-                onClick={() => setBrowse(prev => ({ ...prev, filter: "" }))}
+                onClick={() => setSearchFilter("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                 aria-label="Clear search"
               >
@@ -580,15 +569,15 @@ export const Dashboard = memo(function Dashboard({
           </div>
 
           {/* Error banner */}
-          {browse.error && !selectedProjectDirName && (
+          {fetchError && !selectedProjectDirName && (
             <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
               <AlertTriangle className="size-4 text-red-400 shrink-0" />
-              <span className="text-sm text-red-400 flex-1">{browse.error}</span>
+              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                onClick={() => { setBrowse(prev => ({ ...prev, error: null })); fetchData(true) }}
+                onClick={() => { setFetchError(null); fetchData(true) }}
               >
                 <RefreshCw className="size-3 mr-1" />
                 Retry
@@ -598,8 +587,8 @@ export const Dashboard = memo(function Dashboard({
 
           {loading ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[1, 2, 3].map((n) => (
-                <div key={`skel-${n}`} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
                   <div className="skeleton h-4 w-3/4 rounded mb-3" />
                   <div className="skeleton h-3 w-1/2 rounded mb-4" />
                   <div className="flex gap-3">
@@ -613,7 +602,7 @@ export const Dashboard = memo(function Dashboard({
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 py-12 px-6 text-center">
               <Activity className="size-8 text-zinc-700 mb-3" />
               <p className="text-sm text-zinc-500">
-                {browse.filter ? "No matching projects" : "No projects found. Start Claude Code to see projects here."}
+                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code to see projects here."}
               </p>
             </div>
           ) : (
@@ -637,14 +626,14 @@ export const Dashboard = memo(function Dashboard({
                     <div className="flex items-center gap-2.5 mb-2">
                       <FolderOpen className="size-4 shrink-0 text-zinc-500 group-hover:text-blue-400 transition-colors" />
                       <span className="text-sm font-medium text-zinc-200 truncate flex-1">
-                        {project.shortName}
+                        {projectName(project.path)}
                       </span>
                       <ChevronRight className="size-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors shrink-0" />
                     </div>
 
                     {/* Path */}
                     <p className="text-[11px] text-zinc-600 mb-3 truncate font-mono">
-                      {project.path}
+                      {shortPath(project.path)}
                     </p>
 
                     {/* Bottom stats */}
@@ -691,6 +680,7 @@ export const Dashboard = memo(function Dashboard({
             <span className="text-xs font-medium text-zinc-400">Keyboard Shortcuts</span>
           </div>
           <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11px]">
+            <Shortcut keys={isMac ? ["⌃", "⌘", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
             <Shortcut keys={["Ctrl", "Shift", "1–9"]} label="Jump to Nth live session" />
             <Shortcut keys={["Ctrl", "Shift", "↑ / ↓"]} label="Navigate live sessions" />
             <Shortcut keys={["Ctrl", "B"]} label="Toggle sidebar" />

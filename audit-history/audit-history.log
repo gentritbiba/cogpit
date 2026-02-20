@@ -8,3 +8,5 @@
 | 2026-02-19 | 6c32000     | audit-20260219-012700-6c32000.md     | Early session response, model restart flow, SessionSetupPanel, color-coded sub-agents, clipboard fallback, config save optimization. |
 | 2026-02-19 | ddc0172     | audit-PLACEHOLDER.md                   | Session duplication/deletion feature: branch-session and delete-session routes, branchedFrom metadata, SessionContextMenu UI, comprehensive tests. No blocking doc updates needed. |
 | 2026-02-19 | cee442e     | audit-20260219-033024-cee442e.md       | Connected devices tracking, PendingTurnPreview component extraction, enhanced session deletion with process cleanup, README API table updates. |
+| 2026-02-19 | 8a3be0f     | audit-20260219-220200-8a3be0f.md       | React Compiler optimizations (96/100), state consolidation, hook extraction, UserMessage/BranchModal bug fixes, usage stats route. |
+| 2026-02-20 | 1272be9     | audit-20260220-1272be9.md                | New session-file-changes route, ProjectSwitcherModal, useSessionHistory hook, deleted usage route + 3 hooks, cwd bug fix. PASS — no blocking doc issues. |

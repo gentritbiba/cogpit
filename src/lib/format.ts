@@ -53,6 +53,22 @@ export function truncate(s: string, max: number): string {
   return s.slice(0, max) + "..."
 }
 
+export function dirNameToPath(dirName: string): string {
+  return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
+}
+
+/** Show the last N segments of a filesystem path. */
+export function shortPath(fullPath: string, segments = 2): string {
+  const parts = fullPath.replace(/\/+$/, "").split("/").filter(Boolean)
+  if (parts.length <= segments) return fullPath
+  return parts.slice(-segments).join("/")
+}
+
+/** Return just the final folder name from a filesystem path. */
+export function projectName(path: string): string {
+  return path.replace(/\/+$/, "").split("/").at(-1) ?? path
+}
+
 // ── Cost Calculation ──────────────────────────────────────────────────────
 
 // Pricing per million tokens (USD)

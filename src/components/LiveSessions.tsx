@@ -10,6 +10,8 @@ import {
   formatFileSize,
   formatRelativeTime,
   truncate,
+  shortPath,
+  dirNameToPath,
 } from "@/lib/format"
 
 interface ActiveSessionInfo {
@@ -165,7 +167,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-0.5 px-2 pb-3">
+        <div className="flex flex-col gap-0.5 px-2 pt-1 pb-3">
           {fetchError && (
             <div className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1.5">
               <AlertTriangle className="size-3 text-red-400 shrink-0" />
@@ -207,12 +209,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 onClick={() => onSelectSession(s.dirName, s.fileName)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
                 className={cn(
-                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 border border-transparent hover:border-zinc-800 cursor-pointer",
+                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 cursor-pointer",
                   isActiveSession
-                    ? "border-l-2 border-l-blue-500 bg-blue-500/5"
-                    : hasProcess
-                      ? "border-l-2 border-l-green-500 hover:bg-zinc-900"
-                      : "border-l-2 border-l-zinc-700/50 hover:bg-zinc-900"
+                    ? "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
+                    : "border border-transparent hover:border-zinc-800 hover:bg-zinc-900"
                 )}
               >
                 {/* Top row: status dot + last prompt + kill button */}
@@ -227,7 +227,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-zinc-600" />
                     )}
                   </span>
-                  <span className="text-xs font-medium text-zinc-300 truncate flex-1">
+                  <span className={cn(
+                    "text-xs font-medium truncate flex-1",
+                    isActiveSession ? "text-zinc-100" : "text-zinc-300"
+                  )}>
                     {s.lastUserMessage || s.firstUserMessage || s.slug || truncate(s.sessionId, 16)}
                   </span>
                   {hasProcess && proc ? (
@@ -248,12 +251,18 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 </div>
 
                 {/* Project name */}
-                <div className="ml-5.5 text-[10px] text-zinc-600">
-                  {s.projectShortName}
+                <div className={cn(
+                  "ml-5.5 text-[10px]",
+                  isActiveSession ? "text-blue-400/70" : "text-zinc-600"
+                )}>
+                  {shortPath(s.cwd ?? dirNameToPath(s.dirName), 2)}
                 </div>
 
                 {/* Meta row */}
-                <div className="ml-5.5 flex items-center gap-2 text-[10px] text-zinc-600 flex-wrap">
+                <div className={cn(
+                  "ml-5.5 flex items-center gap-2 text-[10px] flex-wrap",
+                  isActiveSession ? "text-zinc-400" : "text-zinc-600"
+                )}>
                   {(s.turnCount ?? 0) > 0 && (
                     <span className="flex items-center gap-0.5">
                       <MessageSquare className="size-2.5" />

@@ -16,6 +16,7 @@ import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { BranchModal } from "@/components/BranchModal"
 import { SetupScreen } from "@/components/SetupScreen"
 import { ConfigDialog } from "@/components/ConfigDialog"
+import { ProjectSwitcherModal } from "@/components/ProjectSwitcherModal"
 import { DesktopHeader } from "@/components/DesktopHeader"
 import { MobileHeader } from "@/components/MobileHeader"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
@@ -31,17 +32,18 @@ import { useChatScroll } from "@/hooks/useChatScroll"
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
+import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { usePermissions } from "@/hooks/usePermissions"
-import { useSessionOperations } from "@/hooks/useSessionOperations"
-import { useModelManagement } from "@/hooks/useModelManagement"
+import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
 import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useKillAll } from "@/hooks/useKillAll"
-import { useUsageStats } from "@/hooks/useUsageStats"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
-import { detectPendingInteraction } from "@/lib/parser"
+import { parseSession, detectPendingInteraction } from "@/lib/parser"
+import { dirNameToPath, shortPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
+import { authFetch } from "@/lib/auth"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
@@ -57,7 +59,9 @@ export default function App() {
   const [state, dispatch] = useSessionState()
 
   // Local UI state
-  const [panels, setPanels] = useState({ sidebar: true, stats: true })
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [showStats, setShowStats] = useState(true)
+  const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -66,7 +70,9 @@ export default function App() {
     (tab: "browse" | "teams") => dispatch({ type: "SET_SIDEBAR_TAB", tab }),
     [dispatch]
   )
-  const handleToggleSidebar = useCallback(() => setPanels((p) => ({ ...p, sidebar: !p.sidebar })), [])
+  const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
+  const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
+  const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
   const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
   const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
@@ -86,8 +92,14 @@ export default function App() {
   }, [state.session])
 
   // Detect pending interactive prompts (plan approval, user questions)
+  const pendingInteractionRef = useRef<ReturnType<typeof detectPendingInteraction>>(null)
   const pendingInteraction = useMemo(() => {
-    return state.session ? detectPendingInteraction(state.session) : null
+    const next = state.session ? detectPendingInteraction(state.session) : null
+    if (JSON.stringify(next) === JSON.stringify(pendingInteractionRef.current)) {
+      return pendingInteractionRef.current
+    }
+    pendingInteractionRef.current = next
+    return next
   }, [state.session])
 
   // Live session streaming
@@ -98,13 +110,14 @@ export default function App() {
   // Permissions management
   const perms = usePermissions()
 
-  // Model override & per-session tracking
-  const { selectedModel, setSelectedModel, hasSettingsChanges, handleApplySettings } =
-    useModelManagement({
-      currentSessionId: state.session?.sessionId ?? null,
-      hasPendingPermChanges: perms.hasPendingChanges,
-      markPermApplied: perms.markApplied,
-    })
+  // Model override (empty = use session default)
+  const [selectedModel, setSelectedModel] = useState("")
+
+  // In-memory map: sessionId → model the persistent process was spawned with.
+  // No localStorage — processes don't survive page reload, so stale data would be wrong.
+  const [appliedModels, setAppliedModels] = useState<Record<string, string>>({})
+  const selectedModelRef = useRef(selectedModel)
+  selectedModelRef.current = selectedModel
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -162,13 +175,11 @@ export default function App() {
   })
 
   // Wire up the session finalized ref now that scroll is available
-  useEffect(() => {
-    sessionFinalizedRef.current = () => {
-      // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
-      scroll.resetTurnCount(0)
-      scroll.scrollToBottomInstant()
-    }
-  }, [scroll.resetTurnCount, scroll.scrollToBottomInstant])
+  sessionFinalizedRef.current = () => {
+    // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
+    scroll.resetTurnCount(0)
+    scroll.scrollToBottomInstant()
+  }
 
   // Session action handlers
   const actions = useSessionActions({
@@ -188,6 +199,16 @@ export default function App() {
     scrollToBottomInstant: scroll.scrollToBottomInstant,
   })
 
+  // MRU session history for Ctrl+Tab switching
+  const sessionHistory = useSessionHistory()
+
+  // Track session visits for history
+  useEffect(() => {
+    if (state.sessionSource) {
+      sessionHistory.push(state.sessionSource.dirName, state.sessionSource.fileName)
+    }
+  }, [state.sessionSource, sessionHistory.push])
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     isMobile,
@@ -195,27 +216,162 @@ export default function App() {
     chatInputRef,
     dispatch,
     onToggleSidebar: handleToggleSidebar,
+    onOpenProjectSwitcher: handleOpenProjectSwitcher,
+    onHistoryBack: sessionHistory.goBack,
+    onHistoryForward: sessionHistory.goForward,
+    onNavigateToSession: actions.handleDashboardSelect,
   })
 
-  // Session CRUD, branch modal, undo/redo — extracted to reduce component size
-  const {
-    undoRedo, branchModalTurn, branchModalBranches, handleOpenBranches,
-    handleCloseBranchModal, handleRedoToTurn, handleRedoEntireBranch,
-    handleDuplicateSessionByPath, handleDuplicateSession, handleDeleteSession,
-    handleBranchFromHere, handleMobileJumpToTurn,
-  } = useSessionOperations({
-    session: state.session,
-    sessionSource: state.sessionSource,
-    dispatch,
-    isMobile,
-    jumpToTurn: actions.handleJumpToTurn,
-  })
+  // Reload session from server (used after undo/redo JSONL mutations)
+  const reloadSession = useCallback(async () => {
+    if (!state.sessionSource) return
+    const { dirName, fileName } = state.sessionSource
+    const res = await authFetch(
+      `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
+    )
+    if (!res.ok) return
+    const rawText = await res.text()
+    const newSession = parseSession(rawText)
+    dispatch({
+      type: "RELOAD_SESSION_CONTENT",
+      session: newSession,
+      source: { dirName, fileName, rawText },
+    })
+  }, [state.sessionSource, dispatch])
+
+  // Undo/redo system
+  const undoRedo = useUndoRedo(state.session, state.sessionSource, reloadSession)
+
+  // Branch modal state
+  const [branchModalTurn, setBranchModalTurn] = useState<number | null>(null)
+  const branchModalBranches = branchModalTurn !== null ? undoRedo.branchesAtTurn(branchModalTurn) : []
+  const handleOpenBranches = useCallback((turnIndex: number) => setBranchModalTurn(turnIndex), [])
+  const handleCloseBranchModal = useCallback(() => setBranchModalTurn(null), [])
+  const handleRedoToTurn = useCallback((branchId: string, archiveTurnIdx: number) => {
+    undoRedo.requestBranchSwitch(branchId, archiveTurnIdx)
+    setBranchModalTurn(null)
+  }, [undoRedo.requestBranchSwitch])
+  const handleRedoEntireBranch = useCallback((branchId: string) => {
+    undoRedo.requestBranchSwitch(branchId)
+    setBranchModalTurn(null)
+  }, [undoRedo.requestBranchSwitch])
+
+  // Duplicate any session by dirName/fileName and load it
+  const handleDuplicateSessionByPath = useCallback(async (dirName: string, fileName: string) => {
+    try {
+      const res = await authFetch("/api/branch-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName }),
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const contentRes = await authFetch(
+        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      )
+      if (!contentRes.ok) return
+      const rawText = await contentRes.text()
+      const newSession = parseSession(rawText)
+      dispatch({
+        type: "LOAD_SESSION",
+        session: newSession,
+        source: { dirName: data.dirName, fileName: data.fileName, rawText },
+        isMobile,
+      })
+    } catch {
+      // silently fail
+    }
+  }, [dispatch, isMobile])
+
+  // Duplicate the current session (full copy) — used by SessionInfoBar
+  const handleDuplicateSession = useCallback(() => {
+    if (!state.sessionSource) return
+    handleDuplicateSessionByPath(state.sessionSource.dirName, state.sessionSource.fileName)
+  }, [state.sessionSource, handleDuplicateSessionByPath])
+
+  // Delete any session by dirName/fileName
+  const handleDeleteSession = useCallback(async (dirName: string, fileName: string) => {
+    try {
+      await authFetch("/api/delete-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName }),
+      })
+    } catch {
+      // silently fail
+    }
+  }, [])
+
+  // Duplicate from a specific turn (creates a new session truncated at that turn)
+  const handleBranchFromHere = useCallback(async (turnIndex: number) => {
+    if (!state.sessionSource) return
+    const { dirName, fileName } = state.sessionSource
+    try {
+      const res = await authFetch("/api/branch-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dirName, fileName, turnIndex }),
+      })
+      if (!res.ok) return
+      const data = await res.json()
+      const contentRes = await authFetch(
+        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      )
+      if (!contentRes.ok) return
+      const rawText = await contentRes.text()
+      const newSession = parseSession(rawText)
+      dispatch({
+        type: "LOAD_SESSION",
+        session: newSession,
+        source: { dirName: data.dirName, fileName: data.fileName, rawText },
+        isMobile,
+      })
+    } catch {
+      // silently fail
+    }
+  }, [state.sessionSource, dispatch, isMobile])
+
+  // Mobile StatsPanel jump callback
+  const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
+    actions.handleJumpToTurn(index, toolCallId)
+    dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
+  }, [actions.handleJumpToTurn, dispatch])
 
   // Kill-all handler
   const { killing, handleKillAll } = useKillAll()
 
-  // Account usage stats
-  const usage = useUsageStats()
+  // When session changes: record baseline for new sessions, restore model for revisits
+  const currentSessionId = state.session?.sessionId ?? null
+  const prevSessionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (currentSessionId === prevSessionIdRef.current) return
+    prevSessionIdRef.current = currentSessionId
+    if (!currentSessionId) return
+    setAppliedModels(prev => {
+      if (currentSessionId in prev) {
+        setSelectedModel(prev[currentSessionId])
+        return prev
+      }
+      return { ...prev, [currentSessionId]: selectedModelRef.current }
+    })
+  }, [currentSessionId])
+
+  // Detect if model or permissions have changed from what the persistent process uses
+  const hasSettingsChanges = currentSessionId != null &&
+    currentSessionId in appliedModels &&
+    (selectedModel !== appliedModels[currentSessionId] || perms.hasPendingChanges)
+
+  // Restart the persistent process to apply new model/permissions
+  const handleApplySettings = useCallback(async () => {
+    if (!currentSessionId) return
+    await authFetch("/api/stop-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: currentSessionId }),
+    })
+    setAppliedModels(prev => ({ ...prev, [currentSessionId]: selectedModel }))
+    perms.markApplied()
+  }, [currentSessionId, selectedModel, perms])
 
   // Permissions panel element (shared between desktop/mobile StatsPanel)
   const permissionsPanelNode = useMemo(() => (
@@ -459,8 +615,9 @@ export default function App() {
                       />
                     </div>
                   ) : (
-                    <div className="flex-1 flex items-center justify-center">
+                    <div className="flex-1 flex flex-col items-center justify-center gap-1">
                       <p className="text-sm text-zinc-500">New session — type your first message below</p>
+                      <p className="text-xs text-zinc-600 font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
                     </div>
                   )}
                 </div>
@@ -554,21 +711,20 @@ export default function App() {
       <DesktopHeader
         session={state.session}
         isLive={isLive}
-        showSidebar={panels.sidebar}
-        showStats={panels.stats}
+        showSidebar={showSidebar}
+        showStats={showStats}
         killing={killing}
         networkUrl={config.networkUrl}
         networkAccessDisabled={config.networkAccessDisabled}
-        usage={usage}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
-        onToggleStats={() => setPanels((p) => ({ ...p, stats: !p.stats }))}
+        onToggleStats={() => setShowStats(!showStats)}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {panels.sidebar && (
+        {showSidebar && (
           <SessionBrowser
             session={state.session}
             activeSessionKey={activeSessionKey}
@@ -655,8 +811,9 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex items-center justify-center">
+                  <div className="flex-1 flex flex-col items-center justify-center gap-1">
                     <p className="text-sm text-zinc-500">New session — type your first message below</p>
+                    <p className="text-xs text-zinc-600 font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
                   </div>
                 )}
                 {chatInputNode}
@@ -680,7 +837,7 @@ export default function App() {
           )}
         </main>
 
-        {panels.stats && state.session && state.mainView !== "teams" && (
+        {showStats && state.session && state.mainView !== "teams" && (
           <StatsPanel
             session={state.session}
             onJumpToTurn={actions.handleJumpToTurn}
@@ -709,6 +866,13 @@ export default function App() {
         currentPath={config.claudeDir ?? ""}
         onClose={config.handleCloseConfigDialog}
         onSaved={config.handleConfigSaved}
+      />
+
+      <ProjectSwitcherModal
+        open={showProjectSwitcher}
+        onClose={handleCloseProjectSwitcher}
+        onNewSession={handleNewSession}
+        currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
       />
 
       {errorToast || sseIndicator}

@@ -1,4 +1,4 @@
-import { useReducer, useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor } from "lucide-react"
 import {
   Dialog,
@@ -30,69 +30,6 @@ function formatTimeAgo(ts: number): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-type Device = { ip: string; deviceName: string; lastActivity: number }
-
-interface ConfigState {
-  path: string
-  saving: boolean
-  networkAccess: boolean
-  networkPassword: string
-  showNetworkPassword: boolean
-  initialNetworkAccess: boolean
-  hasExistingPassword: boolean
-  connectedDevices: Device[]
-}
-
-const initialState: ConfigState = {
-  path: "",
-  saving: false,
-  networkAccess: false,
-  networkPassword: "",
-  showNetworkPassword: false,
-  initialNetworkAccess: false,
-  hasExistingPassword: false,
-  connectedDevices: [],
-}
-
-type ConfigAction =
-  | { type: "RESET"; path: string }
-  | { type: "SET_PATH"; path: string }
-  | { type: "SET_SAVING"; saving: boolean }
-  | { type: "TOGGLE_NETWORK" }
-  | { type: "SET_PASSWORD"; password: string }
-  | { type: "TOGGLE_SHOW_PASSWORD" }
-  | { type: "CONFIG_LOADED"; networkAccess: boolean; hasExistingPassword: boolean }
-  | { type: "SET_DEVICES"; devices: Device[] }
-
-function configReducer(state: ConfigState, action: ConfigAction): ConfigState {
-  switch (action.type) {
-    case "RESET":
-      return { ...initialState, path: action.path }
-    case "SET_PATH":
-      return { ...state, path: action.path }
-    case "SET_SAVING":
-      return { ...state, saving: action.saving }
-    case "TOGGLE_NETWORK":
-      return { ...state, networkAccess: !state.networkAccess }
-    case "SET_PASSWORD":
-      return { ...state, networkPassword: action.password }
-    case "TOGGLE_SHOW_PASSWORD":
-      return { ...state, showNetworkPassword: !state.showNetworkPassword }
-    case "CONFIG_LOADED":
-      return {
-        ...state,
-        networkAccess: action.networkAccess,
-        initialNetworkAccess: action.networkAccess,
-        hasExistingPassword: action.hasExistingPassword,
-        networkPassword: "",
-      }
-    case "SET_DEVICES":
-      return { ...state, connectedDevices: action.devices }
-    default:
-      return state
-  }
-}
-
 interface ConfigDialogProps {
   open: boolean
   currentPath: string
@@ -101,67 +38,77 @@ interface ConfigDialogProps {
 }
 
 export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDialogProps) {
-  const [state, dispatch] = useReducer(configReducer, initialState)
+  const [path, setPath] = useState(currentPath)
+  const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, reset, save } = useConfigValidation()
 
-  // "Adjust state during render" — sync reset when dialog opens
-  const [prevOpen, setPrevOpen] = useState(false)
-  if (open && !prevOpen) {
-    setPrevOpen(true)
-    dispatch({ type: "RESET", path: currentPath })
-    reset()
-  }
-  if (!open && prevOpen) {
-    setPrevOpen(false)
-  }
+  // Network access state
+  const [networkAccess, setNetworkAccess] = useState(false)
+  const [networkPassword, setNetworkPassword] = useState("")
+  const [showNetworkPassword, setShowNetworkPassword] = useState(false)
 
-  // Async fetch when dialog opens (no sync setState here)
+  // Track whether network settings changed (to enable save without path change)
+  const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
+  const [hasExistingPassword, setHasExistingPassword] = useState(false)
+
+  // Connected devices
+  const [connectedDevices, setConnectedDevices] = useState<Array<{ ip: string; deviceName: string; lastActivity: number }>>([])
+
+  // Reset when dialog opens
   useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    authFetch("/api/config")
-      .then((res) => res.json())
-      .then((data) => {
-        if (cancelled) return
-        const access = data?.networkAccess || false
-        dispatch({ type: "CONFIG_LOADED", networkAccess: access, hasExistingPassword: !!data?.networkPassword })
-        if (access && data?.networkPassword) {
-          authFetch("/api/connected-devices")
-            .then((r) => r.json())
-            .then((d) => { if (!cancelled) dispatch({ type: "SET_DEVICES", devices: d?.devices || [] }) })
-            .catch(() => {})
-        }
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [open, currentPath])
+    if (open) {
+      setPath(currentPath)
+      reset()
+      // Fetch current network settings
+      authFetch("/api/config")
+        .then((res) => res.json())
+        .then((data) => {
+          const access = data?.networkAccess || false
+          setNetworkAccess(access)
+          setInitialNetworkAccess(access)
+          setHasExistingPassword(!!data?.networkPassword)
+          setNetworkPassword("")
+          // Fetch connected devices if network is active
+          if (access && data?.networkPassword) {
+            authFetch("/api/connected-devices")
+              .then((r) => r.json())
+              .then((d) => setConnectedDevices(d?.devices || []))
+              .catch(() => {})
+          } else {
+            setConnectedDevices([])
+          }
+        })
+        .catch(() => {})
+    }
+  }, [open, currentPath, reset])
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value
-      dispatch({ type: "SET_PATH", path: value })
+      setPath(value)
       debouncedValidate(value)
     },
     [debouncedValidate]
   )
 
   const handleSave = useCallback(async () => {
-    dispatch({ type: "SET_SAVING", saving: true })
-    const result = await save(state.path, {
-      networkAccess: state.networkAccess,
-      networkPassword: state.networkAccess && state.networkPassword.length > 0 ? state.networkPassword : undefined,
+    setSaving(true)
+    const result = await save(path, {
+      networkAccess,
+      // Only send password if user typed one (blank = keep existing)
+      networkPassword: networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
     })
     if (result.success && result.claudeDir) {
       onSaved(result.claudeDir)
     }
-    dispatch({ type: "SET_SAVING", saving: false })
-  }, [state.path, state.networkAccess, state.networkPassword, save, onSaved])
+    setSaving(false)
+  }, [path, networkAccess, networkPassword, save, onSaved])
 
   const MIN_PASSWORD_LENGTH = 12
-  const networkChanged = state.networkAccess !== state.initialNetworkAccess || (state.networkAccess && state.networkPassword.length > 0)
+  const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
   const pathChanged = status === "valid"
-  const passwordTooShort = state.networkAccess && state.networkPassword.length > 0 && state.networkPassword.length < MIN_PASSWORD_LENGTH
-  const needsPassword = state.networkAccess && !state.hasExistingPassword && state.networkPassword.length === 0
+  const passwordTooShort = networkAccess && networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
+  const needsPassword = networkAccess && !hasExistingPassword && networkPassword.length === 0
   const canSave = (pathChanged || networkChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
 
   return (
@@ -178,12 +125,12 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           <div className="relative">
             <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
             <Input
-              value={state.path}
+              value={path}
               onChange={handleChange}
               placeholder="/Users/you/.claude"
               className="pl-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && canSave && !state.saving) handleSave()
+                if (e.key === "Enter" && canSave && !saving) handleSave()
               }}
             />
           </div>
@@ -211,7 +158,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           <div className="space-y-3 pt-3 border-t border-zinc-800">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {state.networkAccess ? (
+                {networkAccess ? (
                   <Wifi className="size-4 text-green-400" />
                 ) : (
                   <WifiOff className="size-4 text-zinc-500" />
@@ -224,44 +171,44 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               <button
                 type="button"
                 role="switch"
-                aria-checked={state.networkAccess}
-                onClick={() => dispatch({ type: "TOGGLE_NETWORK" })}
+                aria-checked={networkAccess}
+                onClick={() => setNetworkAccess(!networkAccess)}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                  state.networkAccess ? "bg-green-600" : "bg-zinc-700"
+                  networkAccess ? "bg-green-600" : "bg-zinc-700"
                 }`}
               >
                 <span
                   className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                    state.networkAccess ? "translate-x-4" : "translate-x-0"
+                    networkAccess ? "translate-x-4" : "translate-x-0"
                   }`}
                 />
               </button>
             </div>
 
-            {state.networkAccess && (
+            {networkAccess && (
               <div className="space-y-2">
                 <label className="text-xs text-zinc-400">
-                  Password {state.hasExistingPassword && state.networkPassword.length === 0 && <span className="text-zinc-600">(already set — leave blank to keep)</span>}
+                  Password {hasExistingPassword && networkPassword.length === 0 && <span className="text-zinc-600">(already set — leave blank to keep)</span>}
                 </label>
                 <div className="relative">
                   <Input
-                    type={state.showNetworkPassword ? "text" : "password"}
-                    value={state.networkPassword}
-                    onChange={(e) => dispatch({ type: "SET_PASSWORD", password: e.target.value })}
-                    placeholder={state.hasExistingPassword ? "Enter new password to change" : "Set a password for remote access"}
+                    type={showNetworkPassword ? "text" : "password"}
+                    value={networkPassword}
+                    onChange={(e) => setNetworkPassword(e.target.value)}
+                    placeholder={hasExistingPassword ? "Enter new password to change" : "Set a password for remote access"}
                     className="pr-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
                   />
                   <button
                     type="button"
-                    onClick={() => dispatch({ type: "TOGGLE_SHOW_PASSWORD" })}
+                    onClick={() => setShowNetworkPassword(!showNetworkPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
                   >
-                    {state.showNetworkPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    {showNetworkPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                   </button>
                 </div>
-                {state.networkPassword.length > 0 && state.networkPassword.length < MIN_PASSWORD_LENGTH && (
+                {networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH && (
                   <p className="text-[11px] text-amber-500">
-                    Password must be at least {MIN_PASSWORD_LENGTH} characters ({state.networkPassword.length}/{MIN_PASSWORD_LENGTH})
+                    Password must be at least {MIN_PASSWORD_LENGTH} characters ({networkPassword.length}/{MIN_PASSWORD_LENGTH})
                   </p>
                 )}
                 <p className="text-[11px] text-zinc-600">
@@ -271,12 +218,12 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             )}
 
             {/* Connected devices */}
-            {state.networkAccess && state.initialNetworkAccess && state.connectedDevices.length > 0 && (
+            {networkAccess && initialNetworkAccess && connectedDevices.length > 0 && (
               <div className="space-y-2 pt-2">
                 <p className="text-xs text-zinc-500">Connected devices</p>
                 <div className="space-y-1.5">
-                  {state.connectedDevices.map((device) => (
-                    <div key={device.ip} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                  {connectedDevices.map((device, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
                       <div className="flex items-center gap-2.5">
                         <DeviceIcon name={device.deviceName} />
                         <div>
@@ -300,8 +247,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           <Button variant="ghost" onClick={onClose} className="text-zinc-400 hover:text-zinc-200">
             Cancel
           </Button>
-          <Button disabled={!canSave || state.saving} onClick={handleSave}>
-            {state.saving ? (
+          <Button disabled={!canSave || saving} onClick={handleSave}>
+            {saving ? (
               <>
                 <Loader2 className="size-4 animate-spin mr-2" />
                 Saving...

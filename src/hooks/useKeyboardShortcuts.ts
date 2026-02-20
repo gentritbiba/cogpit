@@ -2,12 +2,21 @@ import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { ChatInputHandle } from "@/components/ChatInput"
 
+interface HistoryEntry {
+  dirName: string
+  fileName: string
+}
+
 interface UseKeyboardShortcutsOpts {
   isMobile: boolean
   searchInputRef: RefObject<HTMLInputElement | null>
   chatInputRef: RefObject<ChatInputHandle | null>
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
+  onOpenProjectSwitcher: () => void
+  onHistoryBack: () => HistoryEntry | null
+  onHistoryForward: () => HistoryEntry | null
+  onNavigateToSession: (dirName: string, fileName: string) => void
 }
 
 /** Query all live-session buttons in DOM order */
@@ -47,6 +56,10 @@ export function useKeyboardShortcuts({
   chatInputRef,
   dispatch,
   onToggleSidebar,
+  onOpenProjectSwitcher,
+  onHistoryBack,
+  onHistoryForward,
+  onNavigateToSession,
 }: UseKeyboardShortcutsOpts) {
   useEffect(() => {
     if (isMobile) return
@@ -72,6 +85,12 @@ export function useKeyboardShortcuts({
         chatInputRef.current?.focus()
         chatInputRef.current?.toggleVoice()
       }
+      // Ctrl+Cmd+N (Mac) or Ctrl+Alt+N (Windows/Linux) — open project switcher
+      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "n") {
+        e.preventDefault()
+        onOpenProjectSwitcher()
+      }
+
       if (e.key === "Escape") {
         dispatch({ type: "SET_SEARCH_QUERY", value: "" })
         searchInputRef.current?.blur()
@@ -88,6 +107,35 @@ export function useKeyboardShortcuts({
             focusSession(target)
             target.click()
           }
+        }
+      }
+
+      // Ctrl+Tab / Ctrl+Shift+Tab — MRU session switching (like Firefox tabs)
+      // Only Ctrl (not Cmd) since Cmd+Tab is macOS app switcher.
+      // In browsers, Ctrl+Tab switches browser tabs so this naturally only works in Electron.
+      if (e.ctrlKey && !e.metaKey && e.key === "Tab") {
+        e.preventDefault()
+        const entry = e.shiftKey ? onHistoryForward() : onHistoryBack()
+        if (entry) {
+          onNavigateToSession(entry.dirName, entry.fileName)
+        }
+      }
+
+      // Space (no modifier, no focused input) — focus chat input
+      if (
+        e.key === " " &&
+        !mod &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        const tag = (document.activeElement as HTMLElement)?.tagName
+        const isEditable =
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          (document.activeElement as HTMLElement)?.isContentEditable
+        if (!isEditable) {
+          e.preventDefault()
+          chatInputRef.current?.focus()
         }
       }
 
@@ -110,5 +158,5 @@ export function useKeyboardShortcuts({
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onHistoryBack, onHistoryForward, onNavigateToSession])
 }
