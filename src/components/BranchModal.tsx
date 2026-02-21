@@ -71,7 +71,7 @@ function MiniBranchGraph({
   const height = firstY + (numBranches - 1) * branchGap + 15
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2">
+    <div className="rounded-lg border border-border bg-elevation-1 px-3 py-2">
       <svg width="100%" height={height} viewBox={`0 0 340 ${height}`}>
         {/* Shared trunk */}
         <line x1={20} y1={firstY} x2={bpX} y2={firstY} stroke="#3b82f6" strokeWidth={2} />
@@ -156,7 +156,7 @@ function FullTurnCard({
       : null
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-lg border border-border elevation-1 overflow-hidden">
       <div className="p-3 space-y-2">
         {/* User message */}
         {userText && (
@@ -215,7 +215,7 @@ function FullTurnCard({
 
       {/* Redo button (hidden for current branch) */}
       {onRedoToHere && (
-        <div className="border-t border-zinc-800 px-3 py-1.5 flex justify-end">
+        <div className="border-t border-border px-3 py-1.5 flex justify-end">
           <Button
             variant="ghost"
             size="sm"
@@ -245,7 +245,7 @@ function ArchivedTurnCard({
   onRedoToHere: (branchId: string, archiveTurnIndex: number) => void
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-lg border border-border elevation-1 overflow-hidden">
       <div className="p-3 space-y-2">
         {turn.userMessage && (
           <div className="flex items-start gap-2">
@@ -287,7 +287,7 @@ function ArchivedTurnCard({
           </div>
         )}
       </div>
-      <div className="border-t border-zinc-800 px-3 py-1.5 flex justify-end">
+      <div className="border-t border-border px-3 py-1.5 flex justify-end">
         <Button
           variant="ghost"
           size="sm"
@@ -408,7 +408,7 @@ export function BranchModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-2xl max-h-[80vh] bg-zinc-900 border-zinc-700 flex flex-col !top-[10%] !translate-y-0">
+      <DialogContent className="max-w-2xl max-h-[80vh] elevation-4 border-border/30 flex flex-col !top-[10%] !translate-y-0">
         <DialogHeader className="shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-zinc-100">
@@ -458,7 +458,7 @@ export function BranchModal({
           </div>
         </DialogHeader>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-border" />
 
         {/* Branch graph — at the top */}
         <div className="shrink-0">
@@ -469,7 +469,7 @@ export function BranchModal({
           />
         </div>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-border" />
 
         {/* Branch turns — full content, scrollable */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-3 py-3 px-1">
@@ -495,7 +495,7 @@ export function BranchModal({
           }
         </div>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-border" />
 
         {/* Footer */}
         <div className="shrink-0 flex items-center justify-between py-2">

@@ -127,7 +127,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
   const totalCount = tasks.length
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col elevation-1">
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-5xl py-4 px-4">
           {/* Header */}
@@ -168,20 +168,20 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
             <div className="flex items-center gap-2 shrink-0">
               <Badge
                 variant="outline"
-                className="h-5 px-1.5 text-[10px] font-normal border-zinc-700 text-zinc-400"
+                className="h-5 px-1.5 text-[10px] font-normal border-border/50 text-zinc-400"
               >
                 {config.members.length} members
               </Badge>
               <Badge
                 variant="outline"
-                className="h-5 px-1.5 text-[10px] font-normal border-zinc-700 text-zinc-400"
+                className="h-5 px-1.5 text-[10px] font-normal border-border/50 text-zinc-400"
               >
                 {completedCount}/{totalCount} tasks
               </Badge>
             </div>
           </div>
 
-          <Separator className="bg-zinc-800 mb-4" />
+          <Separator className="bg-border/40 mb-4" />
 
           {/* Members Grid */}
           <section className="mb-5">
@@ -194,7 +194,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
             <MembersGrid members={config.members} tasks={tasks} onMemberClick={handleMemberClick} />
           </section>
 
-          <Separator className="bg-zinc-800 mb-5" />
+          <Separator className="bg-border/40 mb-5" />
 
           {/* Task Board */}
           <section className="mb-5">
@@ -207,7 +207,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
             <TaskBoard tasks={tasks} members={config.members} />
           </section>
 
-          <Separator className="bg-zinc-800 mb-5" />
+          <Separator className="bg-border/40 mb-5" />
 
           {/* Message Timeline */}
           <section className="mb-8">

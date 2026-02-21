@@ -325,7 +325,7 @@ export const Dashboard = memo(function Dashboard({
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Filter sessions..."
-              className="bg-zinc-900 pl-9 h-8 text-sm border-zinc-800 placeholder:text-zinc-600"
+              className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-zinc-600"
             />
             {searchFilter && (
               <button
@@ -380,7 +380,7 @@ export const Dashboard = memo(function Dashboard({
           {sessionsLoading && sessions.length === 0 ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                <div key={i} className="rounded-lg border border-border/40 elevation-1 p-4">
                   <div className="skeleton h-4 w-3/4 rounded mb-3" />
                   <div className="skeleton h-3 w-1/2 rounded mb-4" />
                   <div className="skeleton h-8 w-full rounded mb-3" />
@@ -392,7 +392,7 @@ export const Dashboard = memo(function Dashboard({
               ))}
             </div>
           ) : filteredSessions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 py-12 px-6 text-center">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <FileText className="size-8 text-zinc-700 mb-3" />
               <p className="text-sm text-zinc-500">
                 {searchFilter ? "No matching sessions" : "No sessions in this project"}
@@ -410,11 +410,11 @@ export const Dashboard = memo(function Dashboard({
                     <button
                       onClick={() => onSelectSession(selectedProject.dirName, s.fileName)}
                       className={cn(
-                        "card-glow group relative w-full rounded-lg border bg-zinc-900/50 p-4 text-left transition-smooth",
-                        "hover:bg-zinc-900/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
+                        "card-glow group relative w-full rounded-lg border elevation-1 p-4 text-left transition-smooth",
+                        "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
                         isLive
-                          ? "border-l-[3px] border-l-green-500 border-t-zinc-800 border-r-zinc-800 border-b-zinc-800 live-pulse"
-                          : "border-zinc-800"
+                          ? "border-l-[3px] border-l-green-500 border-t-border/40 border-r-border/40 border-b-border/40 live-pulse"
+                          : "border-border/40"
                       )}
                     >
                       {/* Slug + model */}
@@ -496,7 +496,7 @@ export const Dashboard = memo(function Dashboard({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-xs border-zinc-800 hover:border-zinc-700"
+                    className="text-xs border-border/40 hover:border-border"
                     disabled={sessionsLoading}
                     onClick={loadMoreSessions}
                   >
@@ -555,7 +555,7 @@ export const Dashboard = memo(function Dashboard({
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Filter projects..."
-              className="bg-zinc-900 pl-9 h-8 text-sm border-zinc-800 placeholder:text-zinc-600"
+              className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-zinc-600"
             />
             {searchFilter && (
               <button
@@ -588,7 +588,7 @@ export const Dashboard = memo(function Dashboard({
           {loading ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+                <div key={i} className="rounded-lg border border-border/40 elevation-1 p-4">
                   <div className="skeleton h-4 w-3/4 rounded mb-3" />
                   <div className="skeleton h-3 w-1/2 rounded mb-4" />
                   <div className="flex gap-3">
@@ -599,7 +599,7 @@ export const Dashboard = memo(function Dashboard({
               ))}
             </div>
           ) : filteredProjects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 py-12 px-6 text-center">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <Activity className="size-8 text-zinc-700 mb-3" />
               <p className="text-sm text-zinc-500">
                 {searchFilter ? "No matching projects" : "No projects found. Start Claude Code to see projects here."}
@@ -615,11 +615,11 @@ export const Dashboard = memo(function Dashboard({
                     key={project.dirName}
                     onClick={() => handleSelectProject(project)}
                     className={cn(
-                      "card-glow group relative rounded-lg border bg-zinc-900/50 p-4 text-left transition-smooth",
-                      "hover:bg-zinc-900/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
+                      "card-glow group relative rounded-lg border elevation-1 p-4 text-left transition-smooth",
+                      "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
                       activeCount > 0
-                        ? "border-l-[3px] border-l-green-500 border-t-zinc-800 border-r-zinc-800 border-b-zinc-800"
-                        : "border-zinc-800"
+                        ? "border-l-[3px] border-l-green-500 border-t-border/40 border-r-border/40 border-b-border/40"
+                        : "border-border/40"
                     )}
                   >
                     {/* Folder name */}
@@ -674,7 +674,7 @@ export const Dashboard = memo(function Dashboard({
         </div>
 
         {/* Keyboard shortcuts */}
-        <div className="mt-6 rounded-lg border border-zinc-800/60 bg-zinc-900/30 px-5 py-4">
+        <div className="mt-6 rounded-lg border border-border/40 bg-elevation-1 px-5 py-4">
           <div className="flex items-center gap-2 mb-3">
             <Keyboard className="size-3.5 text-zinc-500" />
             <span className="text-xs font-medium text-zinc-400">Keyboard Shortcuts</span>

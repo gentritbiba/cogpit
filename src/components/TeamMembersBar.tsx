@@ -21,7 +21,7 @@ export function TeamMembersBar({
   onTeamClick,
 }: TeamMembersBarProps) {
   return (
-    <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900/60 px-3 py-1.5 shrink-0 overflow-x-auto">
+    <div className="flex items-center gap-2 border-b border-border/40 bg-elevation-1 px-3 py-1.5 shrink-0 overflow-x-auto">
       <button
         onClick={onTeamClick}
         className="flex items-center gap-1.5 shrink-0 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -29,7 +29,7 @@ export function TeamMembersBar({
         <Users className="size-3" />
         <span className="max-w-[120px] truncate">{teamName}</span>
       </button>
-      <div className="h-3.5 w-px bg-zinc-700/50 shrink-0" />
+      <div className="h-3.5 w-px bg-border/50 shrink-0" />
       <div className="flex items-center gap-1">
         {members.map((member) => {
           const isLead = member.agentType === "team-lead"
@@ -46,7 +46,7 @@ export function TeamMembersBar({
                 "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] transition-all whitespace-nowrap",
                 isCurrent
                   ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30"
-                  : "text-zinc-500 hover:bg-zinc-800/80 hover:text-zinc-300",
+                  : "text-zinc-500 hover:bg-elevation-2 hover:text-zinc-300",
                 isLoading && "opacity-60"
               )}
             >

@@ -29,7 +29,7 @@ export const MobileNav = memo(function MobileNav({
   const visibleTabs = tabs.filter((t) => t.show)
 
   return (
-    <nav className="flex shrink-0 items-stretch border-t border-zinc-800/80 bg-zinc-900/95 glass pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Navigation">
+    <nav className="flex shrink-0 items-stretch border-t border-border/50 bg-elevation-1 depth-mid pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Navigation">
       {visibleTabs.map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
@@ -42,7 +42,7 @@ export const MobileNav = memo(function MobileNav({
             onClick={() => onTabChange(tab.id)}
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-all duration-150 min-h-[56px]",
-              "active:scale-95 active:bg-zinc-800/50",
+              "active:scale-95 active:bg-elevation-2",
               isActive
                 ? "text-blue-400"
                 : "text-zinc-500"

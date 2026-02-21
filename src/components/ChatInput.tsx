@@ -21,27 +21,7 @@ interface ChatInputProps {
   isConnected?: boolean
   onSend: (message: string, images?: Array<{ data: string; mediaType: string }>) => void
   onInterrupt?: () => void
-  permissionMode?: string
-  permissionsPending?: boolean
   pendingInteraction?: PendingInteraction
-}
-
-const MODE_COLORS: Record<string, string> = {
-  bypassPermissions: "border-red-800 text-red-400 bg-red-500/10",
-  default: "border-blue-800 text-blue-400 bg-blue-500/10",
-  plan: "border-purple-800 text-purple-400 bg-purple-500/10",
-  acceptEdits: "border-green-800 text-green-400 bg-green-500/10",
-  dontAsk: "border-amber-800 text-amber-400 bg-amber-500/10",
-  delegate: "border-cyan-800 text-cyan-400 bg-cyan-500/10",
-}
-
-const MODE_LABELS: Record<string, string> = {
-  bypassPermissions: "YOLO",
-  default: "Default",
-  plan: "Plan",
-  acceptEdits: "Accept Edits",
-  dontAsk: "Don't Ask",
-  delegate: "Delegate",
 }
 
 function formatElapsed(sec: number): string {
@@ -57,8 +37,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   isConnected,
   onSend,
   onInterrupt,
-  permissionMode,
-  permissionsPending,
   pendingInteraction,
 }, ref) {
   const [text, setText] = useState("")
@@ -290,7 +268,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   return (
     <div
       className={cn(
-        "border-t border-zinc-800/80 bg-zinc-900/60 px-3 py-2.5 glass relative",
+        "border-t border-border/50 bg-elevation-1 px-3 py-2.5 relative",
         isDragOver && "ring-2 ring-blue-500/50 ring-inset"
       )}
       onDragOver={handleDragOver}
@@ -363,7 +341,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             }
             rows={1}
             className={cn(
-              "w-full resize-none rounded-xl border bg-zinc-900/50 px-3.5 py-2.5 text-sm text-zinc-100",
+              "w-full resize-none rounded-xl border elevation-1 px-3.5 py-2.5 text-sm text-zinc-100",
               "placeholder:text-zinc-600 focus:outline-none focus:ring-2",
               isPlanApproval
                 ? "border-purple-700/50 focus:border-purple-500/30 focus:ring-purple-500/20"
@@ -458,35 +436,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           <Send className="size-4" />
         </Button>
       </div>
-      {/* Permission mode badge */}
-      {permissionMode && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <span
-            className={cn(
-              "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium",
-              MODE_COLORS[permissionMode] || "border-zinc-700 text-zinc-400"
-            )}
-          >
-            {MODE_LABELS[permissionMode] || permissionMode}
-          </span>
-          {permissionsPending && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="flex items-center gap-1 text-[10px] text-amber-400 cursor-help">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
-                  </span>
-                  pending
-                </span>
-              </TooltipTrigger>
-              <TooltipContent className="max-w-[200px] text-xs">
-                Applies on next message send. The current session won't be interrupted.
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      )}
       {status === "error" && error && (
         <p className="mt-1 text-[10px] text-red-400">{error}</p>
       )}

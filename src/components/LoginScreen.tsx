@@ -46,7 +46,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   }, [password, onAuthenticated])
 
   return (
-    <div className="dark flex h-dvh items-center justify-center bg-zinc-950">
+    <div className="dark flex h-dvh items-center justify-center bg-elevation-0">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 px-6">
         <div className="flex flex-col items-center gap-3 mb-6">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20">
@@ -64,7 +64,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            className="pr-10 bg-zinc-900 border-zinc-700 focus:border-zinc-600"
+            className="pr-10 bg-elevation-1 border-border/70 focus:border-zinc-600"
             autoFocus
           />
           <button

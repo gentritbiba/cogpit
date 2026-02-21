@@ -71,7 +71,7 @@ export function DesktopHeader({
   }, [session])
 
   return (
-    <header className="flex h-11 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3 electron-drag">
+    <header className="flex h-11 shrink-0 items-center border-b border-border/50 bg-elevation-2 depth-mid px-3 electron-drag">
       <div className="flex items-center gap-2 min-w-0">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -149,7 +149,7 @@ export function DesktopHeader({
           <TooltipTrigger asChild>
             <button
               onClick={copyNetworkUrl}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors mr-1"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 hover:bg-elevation-2 transition-colors mr-1"
             >
               <Globe className="size-3 text-green-500" />
               {urlCopied ? (

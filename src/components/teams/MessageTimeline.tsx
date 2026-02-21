@@ -119,7 +119,7 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
             key={`${msg.from}-${msg.timestamp}-${i}`}
             className={cn(
               "flex gap-2 rounded-md px-2 py-1.5 transition-colors",
-              isSystemish ? "opacity-40" : "hover:bg-zinc-900/50"
+              isSystemish ? "opacity-40" : "hover:elevation-2"
             )}
           >
             {/* Color dot */}
@@ -140,12 +140,12 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
                   {formatRelativeTime(msg.timestamp)}
                 </span>
                 {msg.type === "task_assignment" && (
-                  <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1">
+                  <span className="text-[9px] text-zinc-600 bg-elevation-2 rounded px-1">
                     task
                   </span>
                 )}
                 {msg.type === "idle" && (
-                  <span className="text-[9px] text-zinc-700 bg-zinc-800/50 rounded px-1">
+                  <span className="text-[9px] text-zinc-700 bg-elevation-2 rounded px-1">
                     idle
                   </span>
                 )}

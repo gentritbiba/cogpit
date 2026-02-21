@@ -15,11 +15,11 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
   const pct = total > 0 ? (completed / total) * 100 : 0
 
   return (
-    <div className="shrink-0 border-t border-zinc-800/80 bg-zinc-900/40">
+    <div className="shrink-0 border-t border-border/80 bg-elevation-1">
       {/* Header — always visible */}
       <button
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/30"
+        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-elevation-2"
       >
         {collapsed ? (
           <ChevronUp className="size-3 text-zinc-500" />
@@ -35,7 +35,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
 
         {/* Progress bar */}
         <div className="flex-1 max-w-[200px]">
-          <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
+          <div className="h-1 rounded-full bg-elevation-2 overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-500",

@@ -55,7 +55,7 @@ export function MobileHeader({
   }, [session])
 
   return (
-    <header className="flex h-12 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3">
+    <header className="flex h-12 shrink-0 items-center border-b border-border/50 bg-elevation-2 depth-mid px-3">
       {/* Left: Identity */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <button onClick={onGoHome} className="shrink-0 transition-opacity hover:opacity-70" aria-label={session ? "Back to Dashboard" : "Cogpit"}>

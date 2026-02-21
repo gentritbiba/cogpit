@@ -103,8 +103,8 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
     : String(toolCall.input.content ?? "")
 
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/30">
-      <div className="sticky top-0 z-10 flex items-center w-full bg-zinc-900 rounded-t-md hover:bg-zinc-800/80 transition-colors group">
+    <div className="rounded-md border border-border elevation-2 depth-low">
+      <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t-md hover:bg-elevation-3 transition-colors group">
         <button
           onClick={() => setOpen(!open)}
           className="flex items-center gap-2 flex-1 min-w-0 px-2.5 py-1.5"
@@ -185,7 +185,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
 function DeletedFileCard({ filePath, lineCount, turnIndex }: { filePath: string; lineCount: number; turnIndex: number }) {
   const shortPath = filePath.split("/").slice(-3).join("/")
   return (
-    <div className="rounded-md border border-red-900/40 bg-red-950/20 overflow-hidden">
+    <div className="rounded-md border border-red-900/40 bg-red-950/20 overflow-hidden depth-low">
       <div className="flex items-center gap-2 w-full px-2.5 py-1.5">
         <Trash2 className="size-3 text-red-400/70 shrink-0" />
         <Badge
@@ -485,15 +485,15 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   if (fileChanges.length === 0) return null
 
   return (
-    <div className="flex flex-col h-full overflow-hidden border-zinc-800 min-w-0">
-      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+    <div className="flex flex-col h-full overflow-hidden border-border min-w-0 elevation-1">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
         <FileCode2 className="size-3.5 text-amber-400" />
         <span className="text-xs font-medium text-zinc-300">
           File Changes
         </span>
         <Badge
           variant="outline"
-          className="h-4 px-1.5 text-[10px] border-zinc-700 text-zinc-500"
+          className="h-4 px-1.5 text-[10px] border-border/70 text-zinc-500"
         >
           {fileChanges.length}
         </Badge>
@@ -521,7 +521,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         {/* Top fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-zinc-950 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-elevation-0 to-transparent transition-opacity duration-200",
             canScrollUp ? "opacity-100" : "opacity-0"
           )}
         />
@@ -554,7 +554,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         {/* Bottom fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-zinc-950 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-elevation-0 to-transparent transition-opacity duration-200",
             canScrollDown ? "opacity-100" : "opacity-0"
           )}
         />

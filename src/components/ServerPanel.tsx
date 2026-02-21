@@ -77,7 +77,7 @@ function ServerOutput({ outputPath, title }: { outputPath: string; title: string
   return (
     <div className="flex h-full flex-col min-w-0">
       {/* Mini header: server title + connection status */}
-      <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/50 px-2 text-[10px]">
+      <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-border elevation-1 px-2 text-[10px]">
         <span
           className={cn(
             "inline-block size-1.5 rounded-full shrink-0",
@@ -89,7 +89,7 @@ function ServerOutput({ outputPath, title }: { outputPath: string; title: string
       {/* Scrollable output */}
       <pre
         ref={outputRef}
-        className="flex-1 overflow-auto bg-zinc-950 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words"
+        className="flex-1 overflow-auto bg-elevation-0 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words"
       >
         {output || (
           <span className="text-zinc-600">
@@ -130,9 +130,9 @@ export const ServerPanel = memo(function ServerPanel({
   const panelKey = visibleServers.map(([id]) => id).join(",")
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-zinc-700 bg-zinc-950">
+    <div className="flex shrink-0 flex-col border-t border-border/70 bg-elevation-0">
       {/* Header — always visible */}
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-3">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-elevation-1 px-3">
         <button
           className="flex items-center gap-1.5 hover:text-zinc-300 transition-colors"
           onClick={onToggleCollapse}
@@ -163,7 +163,7 @@ export const ServerPanel = memo(function ServerPanel({
                   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all",
                   isVisible
                     ? "bg-green-500/15 text-green-400 border border-green-500/30"
-                    : "bg-zinc-800 text-zinc-500 border border-zinc-700 hover:border-zinc-600 hover:text-zinc-400"
+                    : "bg-elevation-2 text-zinc-500 border border-border/70 hover:border-zinc-600 hover:text-zinc-400"
                 )}
               >
                 <span

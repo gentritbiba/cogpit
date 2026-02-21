@@ -82,7 +82,7 @@ function ToolAccessGrid({
                   ? "border-green-800 text-green-400 bg-green-500/10"
                   : state === "blocked"
                     ? "border-red-800 text-red-400 bg-red-500/10"
-                    : "border-zinc-800 text-zinc-500 bg-zinc-900/50 hover:border-zinc-600 hover:text-zinc-300"
+                    : "border-border text-zinc-500 elevation-1 hover:border-zinc-600 hover:text-zinc-300"
               )}
             >
               <span
@@ -150,7 +150,7 @@ export function PermissionsPanel({
                 "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
                 isSelected
                   ? opt.color
-                  : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 bg-zinc-900/50"
+                  : "border-border text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 elevation-1"
               )}
             >
               {opt.label}

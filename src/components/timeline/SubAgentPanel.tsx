@@ -32,7 +32,7 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
   const multipleAgents = agentIds.length > 1
 
   return (
-    <div className="rounded-md border border-dashed border-indigo-500/30 bg-indigo-950/10 p-3">
+    <div className="rounded-md border border-dashed border-indigo-500/30 bg-elevation-1 depth-low p-3">
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 w-full text-left"

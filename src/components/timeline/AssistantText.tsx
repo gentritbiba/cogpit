@@ -38,7 +38,7 @@ export const AssistantText = memo(function AssistantText({
           {model && (
             <Badge
               variant="outline"
-              className="text-[10px] px-1.5 py-0 h-4 border-zinc-700 text-zinc-400"
+              className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-zinc-400"
             >
               {shortenModel(model)}
             </Badge>
@@ -78,7 +78,7 @@ export const AssistantText = memo(function AssistantText({
             </span>
           )}
         </div>
-        <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden [&_pre]:bg-zinc-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-zinc-300 [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+        <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-zinc-300 [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
           <ReactMarkdown>{text}</ReactMarkdown>
         </div>
       </div>

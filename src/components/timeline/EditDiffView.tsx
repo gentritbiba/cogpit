@@ -271,7 +271,7 @@ function DiffLines({
                   ? "text-red-500/50 border-red-500/20"
                   : line.type === "added"
                     ? "text-green-500/50 border-green-500/20"
-                    : "text-zinc-600 border-zinc-800"
+                    : "text-zinc-600 border-border/40"
               )}
             >
               {line.type === "removed" ? (
@@ -350,10 +350,10 @@ export function EditDiffView({
     <>
       {/* Inline diff */}
       <div className={cn(
-        "rounded border border-zinc-800 bg-zinc-950/50 overflow-hidden",
+        "rounded border border-border/40 bg-elevation-1 overflow-hidden",
         isCompact && "mt-1.5"
       )}>
-        <div className="flex items-center justify-between px-2 py-1 border-b border-zinc-800 bg-zinc-900/50">
+        <div className="flex items-center justify-between px-2 py-1 border-b border-border/40 bg-elevation-1">
           <span className="text-[10px] text-zinc-400 font-mono truncate">
             {shortPath}
           </span>
@@ -362,7 +362,7 @@ export function EditDiffView({
             {isCompact && (
               <button
                 onClick={() => setModalOpen(true)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5 rounded hover:bg-zinc-800"
+                className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5 rounded hover:bg-elevation-2"
                 title="Expand diff"
               >
                 <Maximize2 className="w-3 h-3" />
@@ -381,7 +381,7 @@ export function EditDiffView({
       {/* Full-screen modal - only in compact mode */}
       {isCompact && (
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col bg-zinc-950 border-zinc-800">
+          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col bg-elevation-0 border-border/40">
             <DialogHeader>
               <DialogTitle className="font-mono text-sm text-zinc-200 flex items-center gap-3">
                 {filePath}
@@ -391,7 +391,7 @@ export function EditDiffView({
                 Diff view for edit operation
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-auto rounded border border-zinc-800 bg-zinc-950">
+            <div className="flex-1 overflow-auto rounded border border-border/40 bg-elevation-0">
               <DiffLines
                 lines={lines}
                 oldTokens={oldTokens}

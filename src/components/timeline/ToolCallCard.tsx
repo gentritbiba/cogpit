@@ -109,10 +109,10 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   return (
     <div
       className={cn(
-        "rounded-md border bg-zinc-900/50 p-2.5",
+        "rounded-md border p-2.5 elevation-1 card-hover",
         toolCall.isError
           ? "border-red-500/30 bg-red-950/20"
-          : "border-zinc-800"
+          : "border-border/40"
       )}
     >
       <div className="flex items-start gap-2">
@@ -202,7 +202,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       )}
 
       {showInput && (
-        <pre className="mt-1.5 text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-all bg-zinc-950/50 rounded p-2 max-h-64 overflow-y-auto border border-zinc-800/50">
+        <pre className="mt-1.5 text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-all bg-elevation-0 rounded p-2 max-h-64 overflow-y-auto border border-border/30">
           {JSON.stringify(toolCall.input, null, 2)}
         </pre>
       )}
@@ -214,7 +214,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
               toolCall.isError
                 ? "text-red-300 bg-red-950/30 border-red-500/20"
-                : "text-zinc-400 bg-zinc-950/50 border-zinc-800/50"
+                : "text-zinc-400 bg-elevation-0 border-border/30"
             )}
           >
             {visibleResult}

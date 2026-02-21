@@ -39,7 +39,7 @@ export function SessionInfoBar({
   onDuplicateSession,
 }: SessionInfoBarProps) {
   return (
-    <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/50 bg-zinc-950/80 ${isMobile ? "px-2" : "px-3"}`}>
+    <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-border/50 bg-elevation-1 ${isMobile ? "px-2" : "px-3"}`}>
       <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
         {shortenModel(session.model)}
       </Badge>

@@ -113,7 +113,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700">
+      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
         <DialogHeader>
           <DialogTitle className="text-zinc-100">Configuration</DialogTitle>
           <DialogDescription className="text-zinc-400">
@@ -128,7 +128,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               value={path}
               onChange={handleChange}
               placeholder="/Users/you/.claude"
-              className="pl-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
+              className="pl-10 bg-elevation-0 border-border/70 focus:border-zinc-600"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canSave && !saving) handleSave()
               }}
@@ -155,7 +155,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           )}
 
           {/* Network Access */}
-          <div className="space-y-3 pt-3 border-t border-zinc-800">
+          <div className="space-y-3 pt-3 border-t border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {networkAccess ? (
@@ -196,7 +196,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                     value={networkPassword}
                     onChange={(e) => setNetworkPassword(e.target.value)}
                     placeholder={hasExistingPassword ? "Enter new password to change" : "Set a password for remote access"}
-                    className="pr-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
+                    className="pr-10 bg-elevation-0 border-border/70 focus:border-zinc-600"
                   />
                   <button
                     type="button"
@@ -223,7 +223,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                 <p className="text-xs text-zinc-500">Connected devices</p>
                 <div className="space-y-1.5">
                   {connectedDevices.map((device, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                    <div key={i} className="flex items-center justify-between rounded-md border border-border bg-elevation-0 px-3 py-2">
                       <div className="flex items-center gap-2.5">
                         <DeviceIcon name={device.deviceName} />
                         <div>

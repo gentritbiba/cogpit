@@ -23,9 +23,9 @@ export function TurnContextMenu({
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content className="min-w-[180px] rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl">
+        <ContextMenu.Content className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1">
           <ContextMenu.Item
-            className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-zinc-800 hover:text-zinc-100"
+            className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
             onSelect={() => onRestoreToHere(turnIndex)}
           >
             <RotateCcw className="size-3.5" />
@@ -33,9 +33,9 @@ export function TurnContextMenu({
           </ContextMenu.Item>
           {branches.length > 0 && (
             <>
-              <ContextMenu.Separator className="my-1 h-px bg-zinc-800" />
+              <ContextMenu.Separator className="my-1 h-px bg-border" />
               <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-zinc-800 hover:text-zinc-100"
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
                 onSelect={() => onOpenBranches(turnIndex)}
               >
                 <GitFork className="size-3.5" />
@@ -45,9 +45,9 @@ export function TurnContextMenu({
           )}
           {onBranchFromHere && (
             <>
-              <ContextMenu.Separator className="my-1 h-px bg-zinc-800" />
+              <ContextMenu.Separator className="my-1 h-px bg-border" />
               <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-zinc-800 hover:text-zinc-100"
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
                 onSelect={() => onBranchFromHere(turnIndex)}
               >
                 <Copy className="size-3.5" />

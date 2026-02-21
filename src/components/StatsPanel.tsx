@@ -12,7 +12,6 @@ import {
   RotateCcw,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -256,7 +255,7 @@ function ActivityHeatmap({ turns }: { turns: Turn[] }) {
           })}
         </svg>
         {hoveredTurn !== null && (
-          <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-300 shadow">
+          <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-elevation-2 px-2 py-1 text-[10px] text-zinc-300 depth-low">
             Turn {hoveredTurn + 1}: {turns[hoveredTurn].toolCalls.length} tool calls
           </div>
         )}
@@ -290,7 +289,7 @@ function ModelDistribution({ turns }: { turns: Turn[] }) {
         {models.map(([model, count]) => (
           <div
             key={model}
-            className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-[11px]"
+            className="flex items-center justify-between rounded border border-border elevation-2 depth-low px-2.5 py-1.5 text-[11px]"
           >
             <span className="truncate text-zinc-300">{model}</span>
             <span className="ml-2 shrink-0 text-zinc-500">{count}</span>
@@ -339,7 +338,7 @@ function ErrorLog({
           <button
             key={i}
             onClick={() => onJumpToTurn?.(err.turnIndex)}
-            className="w-full rounded-lg border border-red-900/40 bg-red-950/20 px-3 py-2.5 text-left transition-all hover:bg-red-950/40 hover:border-red-800/40"
+            className="w-full rounded-lg border border-red-900/40 bg-red-950/20 depth-low px-3 py-2.5 text-left transition-all hover:bg-red-950/40 hover:border-red-800/40"
           >
             <div className="flex items-center gap-1.5 text-[11px]">
               <span className="font-medium text-red-400">{err.toolName}</span>
@@ -529,7 +528,7 @@ function BackgroundServers({
           return (
             <div
               key={task.id}
-              className="rounded border border-zinc-800 bg-zinc-900 px-2.5 py-2 transition-colors hover:bg-zinc-800"
+              className="rounded border border-border elevation-2 depth-low px-2.5 py-2 transition-colors hover:bg-elevation-3"
             >
               <button
                 className="w-full text-left"
@@ -551,7 +550,7 @@ function BackgroundServers({
                 {task.ports.map((port) => (
                   <span
                     key={port}
-                    className="inline-flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono"
+                    className="inline-flex items-center gap-1 rounded bg-elevation-2 px-1.5 py-0.5 text-[10px] font-mono"
                   >
                     <span
                       className={cn(
@@ -569,7 +568,7 @@ function BackgroundServers({
 
                 {task.outputPath && (
                   <button
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-elevation-2 hover:text-zinc-300"
                     onClick={() => onToggleServer?.(task.id, task.outputPath!, title)}
                     title="View server output"
                     aria-label="View server output"
@@ -631,8 +630,8 @@ function TurnNavigator({
                 className={cn(
                   "group flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
                   isActive
-                    ? "bg-zinc-800 text-zinc-200"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-300"
+                    ? "bg-elevation-2 text-zinc-200"
+                    : "text-zinc-400 hover:bg-elevation-1 hover:text-zinc-300"
                 )}
               >
                 <span className="mt-0.5 shrink-0 text-[10px] font-mono text-zinc-600">
@@ -713,7 +712,7 @@ function ToolCallIndex({
             const colorClass = getToolColor(name)
             return (
               <Collapsible key={name}>
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-zinc-900">
+                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">
                   <ChevronRight className="size-3 shrink-0 text-zinc-600 transition-transform [[data-state=open]>&]:rotate-90" />
                   <span className={cn("font-medium", colorClass)}>{name}</span>
                   <Badge
@@ -724,7 +723,7 @@ function ToolCallIndex({
                   </Badge>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="ml-4 flex flex-col gap-0.5 border-l border-zinc-800 pl-2 pt-0.5">
+                  <div className="ml-4 flex flex-col gap-0.5 border-l border-border pl-2 pt-0.5">
                     {group.calls.slice(0, 50).map(({ tc, turnIndex }, i) => {
                       const preview = getToolCallPreview(tc)
                       return (
@@ -735,7 +734,7 @@ function ToolCallIndex({
                             "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors",
                             tc.isError
                               ? "text-red-400 hover:bg-red-950/30"
-                              : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                              : "text-zinc-500 hover:bg-elevation-2 hover:text-zinc-300"
                           )}
                         >
                           {tc.isError && (
@@ -800,50 +799,59 @@ export function StatsPanel({
 
   return (
     <aside className={cn(
-      "shrink-0 min-h-0 h-full overflow-y-auto bg-zinc-950",
-      isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-zinc-800 panel-enter-right"
+      "shrink-0 min-h-0 h-full overflow-y-auto elevation-1",
+      isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-border panel-enter-right"
     )}>
-      {/* Search bar (desktop only) */}
+      {/* Header + Search bar (desktop only) */}
       {onSearchChange && (
-        <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-zinc-800/50 bg-zinc-950/95 backdrop-blur-sm px-3 py-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-2 top-1/2 size-3 -translate-y-1/2 text-zinc-500" />
-            <Input
-              ref={searchInputRef}
-              value={searchQuery ?? ""}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search..."
-              className="h-7 bg-zinc-900/50 pl-7 text-xs border-zinc-700/50 placeholder:text-zinc-600 focus-visible:ring-blue-500/20 focus-visible:border-blue-500/30 transition-all"
-            />
+        <div className="sticky top-0 z-10 border-b border-border/50 backdrop-blur-sm">
+          <div className="flex items-center justify-between px-3 py-2">
+            <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+              <Search className="size-3" />
+              Session
+            </span>
+            {onToggleExpandAll && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 shrink-0"
+                onClick={onToggleExpandAll}
+                aria-label={expandAll ? "Collapse all" : "Expand all"}
+              >
+                {expandAll ? (
+                  <ChevronsDownUp className="size-3" />
+                ) : (
+                  <ChevronsUpDown className="size-3" />
+                )}
+              </Button>
+            )}
           </div>
-          {onToggleExpandAll && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 shrink-0"
-              onClick={onToggleExpandAll}
-              aria-label={expandAll ? "Collapse all" : "Expand all"}
-            >
-              {expandAll ? (
-                <ChevronsDownUp className="size-3.5" />
-              ) : (
-                <ChevronsUpDown className="size-3.5" />
-              )}
-            </Button>
-          )}
+          <div className="px-2 pb-2 pt-1">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery ?? ""}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Search..."
+                className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-zinc-300 placeholder:text-zinc-500 focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+              />
+            </div>
+          </div>
         </div>
       )}
       <div className={cn("flex flex-col gap-6", isMobile ? "p-4" : "p-3")}>
         {/* Permissions */}
         {permissionsPanel && (
-          <div className="rounded-lg border border-zinc-800 p-3">
+          <div className="rounded-lg border border-border elevation-2 depth-low p-3">
             {permissionsPanel}
           </div>
         )}
 
         {/* Model Selector */}
         {onModelChange && (
-          <div className="rounded-lg border border-zinc-800 p-3">
+          <div className="rounded-lg border border-border elevation-2 depth-low p-3">
             <section>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
                 <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
@@ -861,7 +869,7 @@ export function StatsPanel({
                         "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
                         isSelected
                           ? "border-blue-500 text-blue-400 bg-blue-500/10"
-                          : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 bg-zinc-900/50"
+                          : "border-border text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 elevation-1"
                       )}
                     >
                       {opt.label}
@@ -919,7 +927,7 @@ export function StatsPanel({
 
       {/* Restart Confirmation Dialog */}
       <Dialog open={showRestartDialog} onOpenChange={(open) => { if (!open && !isRestarting) setShowRestartDialog(false) }}>
-        <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700">
+        <DialogContent className="sm:max-w-md elevation-4 border-border/30">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-zinc-100">
               <RotateCcw className="size-4 text-amber-400" />

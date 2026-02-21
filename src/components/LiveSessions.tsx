@@ -198,16 +198,16 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       </div>
 
       {/* Search bar */}
-      <div className="shrink-0 px-2 pb-1.5">
+      <div className="shrink-0 px-2 pb-2 pt-1">
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-zinc-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-zinc-500" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search sessions & prompts…"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900/50 py-1.5 pl-7 pr-7 text-xs text-zinc-300 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600"
+            className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-zinc-300 placeholder:text-zinc-500 focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
           />
           {searchQuery && !searching && (
             <button
@@ -224,7 +224,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-0.5 px-2 pt-1 pb-3">
+        <div className="flex flex-col gap-1.5 px-2 pt-1 pb-3">
           {fetchError && (
             <div className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1.5">
               <AlertTriangle className="size-3 text-red-400 shrink-0" />
@@ -276,10 +276,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 onClick={() => onSelectSession(s.dirName, s.fileName)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
                 className={cn(
-                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 cursor-pointer",
+                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 cursor-pointer card-hover",
                   isActiveSession
                     ? "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
-                    : "border border-transparent hover:border-zinc-800 hover:bg-zinc-900"
+                    : "elevation-1 border border-border/40 hover:bg-elevation-2"
                 )}
               >
                 {/* Top row: status dot + last prompt + kill button */}
@@ -396,7 +396,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               {unmatchedProcs.map((p) => (
                 <div
                   key={p.pid}
-                  className="group flex items-center gap-2 rounded-lg px-2.5 py-2 border border-transparent hover:border-zinc-800 hover:bg-zinc-900"
+                  className="group flex items-center gap-2 rounded-lg px-2.5 py-2 elevation-1 border border-border/40 hover:bg-elevation-2 card-hover"
                 >
                   <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />

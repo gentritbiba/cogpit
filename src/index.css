@@ -39,27 +39,34 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* ── Malewicz Elevation Surface Colors ── */
+  --color-elevation-0: var(--elevation-0);
+  --color-elevation-1: var(--elevation-1);
+  --color-elevation-2: var(--elevation-2);
+  --color-elevation-3: var(--elevation-3);
+  --color-elevation-4: var(--elevation-4);
 }
 
 :root {
-  --background: oklch(1 0 0);
+  --background: oklch(0.965 0 0);
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --card: oklch(0.995 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.955 0.002 260);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.955 0.002 260);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(0.955 0.002 260);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.912 0.003 260);
+  --input: oklch(0.912 0.003 260);
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -67,49 +74,109 @@
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.975 0.001 260);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.955 0.002 260);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: oklch(0.912 0.003 260);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Malewicz Elevation: "Lightness for Proximity" (light mode) */
+  --elevation-0: oklch(0.965 0 0);
+  --elevation-1: oklch(0.990 0 0);
+  --elevation-2: oklch(1.000 0 0);
+  --elevation-3: oklch(1.000 0 0);
+  --elevation-4: oklch(1.000 0 0);
+
+  /* Shadow Physics: hue-matched shadows (blue-tinted, never pure black) */
+  --shadow-hue: 225deg 40% 20%;
+  --shadow-elevation-low:
+    0 1px 2px hsla(225, 40%, 20%, 0.06),
+    0 1px 3px hsla(225, 40%, 20%, 0.04);
+  --shadow-elevation-mid:
+    0 1px 2px hsla(225, 40%, 20%, 0.06),
+    0 4px 10px hsla(225, 40%, 20%, 0.06),
+    0 10px 20px hsla(225, 40%, 20%, 0.04);
+  --shadow-elevation-high:
+    0 2px 4px hsla(225, 40%, 20%, 0.06),
+    0 8px 20px hsla(225, 40%, 20%, 0.08),
+    0 24px 48px hsla(225, 40%, 20%, 0.06);
+  --shadow-elevation-ultra:
+    0 2px 4px hsla(225, 40%, 20%, 0.08),
+    0 16px 32px hsla(225, 40%, 20%, 0.10),
+    0 40px 80px hsla(225, 40%, 20%, 0.08);
+
+  /* Inner edge highlights */
+  --edge-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.5);
+  --edge-highlight-subtle: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.12 0.005 265);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
+  --card: oklch(0.18 0.008 265);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
+  --popover: oklch(0.24 0.010 265);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.985 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.22 0.008 265);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  --muted: oklch(0.22 0.008 265);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --accent: oklch(0.22 0.008 265);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.396 0.141 25.723);
   --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
+  --border: oklch(0.28 0.010 265);
+  --input: oklch(0.22 0.008 265);
   --ring: oklch(0.439 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.11 0.006 265);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.22 0.008 265);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-border: oklch(0.28 0.010 265);
   --sidebar-ring: oklch(0.439 0 0);
+
+  /* Malewicz Elevation: "Lightness for Proximity" (dark mode)
+     DRAMATIC jumps — like YouTube dark mode where cards
+     visibly float above the background */
+  --elevation-0: oklch(0.12 0.005 265);     /* Ground — dark gray, blue-tinted */
+  --elevation-1: oklch(0.18 0.008 265);     /* Surface — cards, panels (+0.09 jump) */
+  --elevation-2: oklch(0.24 0.010 265);     /* Raised — interactive, inputs (+0.06) */
+  --elevation-3: oklch(0.30 0.012 265);     /* Floating — dropdowns, popovers (+0.06) */
+  --elevation-4: oklch(0.34 0.014 265);     /* Overlay — modals, dialogs (+0.04) */
+
+  /* Shadow Physics: dark mode needs VERY visible shadows
+     Using near-black with blue tint at high opacity */
+  --shadow-elevation-low:
+    0 1px 3px hsla(230, 60%, 4%, 0.7),
+    0 2px 6px hsla(230, 60%, 4%, 0.5);
+  --shadow-elevation-mid:
+    0 1px 3px hsla(230, 60%, 4%, 0.7),
+    0 4px 12px hsla(230, 60%, 4%, 0.6),
+    0 12px 24px hsla(230, 60%, 4%, 0.4);
+  --shadow-elevation-high:
+    0 2px 4px hsla(230, 60%, 4%, 0.7),
+    0 8px 20px hsla(230, 60%, 4%, 0.6),
+    0 24px 48px hsla(230, 60%, 4%, 0.5);
+  --shadow-elevation-ultra:
+    0 2px 8px hsla(230, 60%, 4%, 0.8),
+    0 16px 32px hsla(230, 60%, 4%, 0.7),
+    0 40px 80px hsla(230, 60%, 4%, 0.5);
+
+  /* Edge highlights: clearly visible in dark mode */
+  --edge-highlight: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  --edge-highlight-subtle: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 @layer base {
@@ -152,27 +219,94 @@
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Card hover glow effect */
-.card-glow {
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+/* ── Malewicz Elevation Surfaces ───────────────────────────
+   "Lightness for Proximity" — higher elevation = lighter bg
+   Each level pairs its surface color with matching depth shadow */
+.elevation-0 {
+  background-color: var(--elevation-0);
 }
-.card-glow:hover {
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.1), 0 0 20px -5px rgba(59, 130, 246, 0.08);
+.elevation-1 {
+  background-color: var(--elevation-1);
+  box-shadow: var(--shadow-elevation-low), var(--edge-highlight);
+}
+.elevation-2 {
+  background-color: var(--elevation-2);
+  box-shadow: var(--shadow-elevation-mid), var(--edge-highlight);
+}
+.elevation-3 {
+  background-color: var(--elevation-3);
+  box-shadow: var(--shadow-elevation-high), var(--edge-highlight);
+}
+.elevation-4 {
+  background-color: var(--elevation-4);
+  box-shadow: var(--shadow-elevation-ultra), var(--edge-highlight);
 }
 
-/* Live session pulse */
+/* Standalone depth shadows (when you need shadow without bg change) */
+.depth-low { box-shadow: var(--shadow-elevation-low); }
+.depth-mid { box-shadow: var(--shadow-elevation-mid); }
+.depth-high { box-shadow: var(--shadow-elevation-high); }
+.depth-ultra { box-shadow: var(--shadow-elevation-ultra); }
+
+/* Edge highlights for defining boundaries on elevated elements */
+.edge-top { box-shadow: var(--edge-highlight); }
+.edge-all { box-shadow: var(--edge-highlight-subtle); }
+
+/* ── Card hover: elevation shift on hover ─── */
+.card-hover {
+  transition: box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-hover:hover {
+  box-shadow: var(--shadow-elevation-mid), var(--edge-highlight);
+  transform: translateY(-1px);
+}
+
+/* Card hover with glow (blue accent) */
+.card-glow {
+  transition: box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-glow:hover {
+  box-shadow:
+    var(--shadow-elevation-mid),
+    0 0 0 1px rgba(59, 130, 246, 0.12),
+    0 0 24px -6px rgba(59, 130, 246, 0.10);
+  transform: translateY(-1px);
+}
+
+/* Live session pulse — enhanced with elevation-aware shadow */
 .live-pulse {
   animation: live-pulse 2s ease-in-out infinite;
 }
 @keyframes live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.25); }
-  50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+  0%, 100% {
+    box-shadow:
+      var(--shadow-elevation-low),
+      0 0 0 0 rgba(34, 197, 94, 0.3);
+  }
+  50% {
+    box-shadow:
+      var(--shadow-elevation-low),
+      0 0 0 5px rgba(34, 197, 94, 0);
+  }
 }
 
-/* Glass effect */
+/* ── Glass / Glassmorphism (Rule 5: backdrop-filter + blur) ── */
 .glass {
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: var(--edge-highlight-subtle);
+}
+
+.glass-heavy {
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  box-shadow: var(--edge-highlight-subtle);
 }
 
 /* Gradient border */

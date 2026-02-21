@@ -122,11 +122,11 @@ export function ProjectSwitcherModal({
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent
-        className="max-w-md p-0 bg-zinc-900 border-zinc-700 gap-0 overflow-hidden [&>button:last-child]:hidden"
+        className="max-w-md p-0 elevation-4 border-border/30 gap-0 overflow-hidden [&>button:last-child]:hidden"
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
-        <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Search className="size-4 text-zinc-500 shrink-0" />
           <input
             ref={inputRef}
@@ -136,7 +136,7 @@ export function ProjectSwitcherModal({
             onChange={(e) => setFilter(e.target.value)}
             className="flex-1 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
           />
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 font-mono">
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-zinc-400 font-mono">
             ESC
           </kbd>
         </div>
@@ -154,8 +154,8 @@ export function ProjectSwitcherModal({
                 data-project-item
                 className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
                   i === selectedIndex
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+                    ? "bg-elevation-2 text-zinc-100"
+                    : "text-zinc-400 hover:bg-elevation-2 hover:text-zinc-200"
                 }`}
                 onClick={() => handleSelect(project)}
                 onMouseEnter={() => setSelectedIndex(i)}
@@ -173,7 +173,7 @@ export function ProjectSwitcherModal({
                   </div>
                 </div>
                 {i === selectedIndex && (
-                  <kbd className="hidden sm:inline-flex items-center rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500 font-mono">
+                  <kbd className="hidden sm:inline-flex items-center rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-zinc-500 font-mono">
                     ↵
                   </kbd>
                 )}

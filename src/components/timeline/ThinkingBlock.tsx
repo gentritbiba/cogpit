@@ -34,7 +34,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks, expandAll }: 
           {blocks.map((block, i) => (
             <pre
               key={i}
-              className="text-xs text-zinc-400 font-mono whitespace-pre-wrap break-words bg-zinc-900/50 rounded-md p-3 border border-zinc-800 max-h-96 overflow-y-auto"
+              className="text-xs text-zinc-400 font-mono whitespace-pre-wrap break-words bg-elevation-1 rounded-md p-3 border border-border/30 max-h-96 overflow-y-auto"
             >
               {block.thinking}
             </pre>

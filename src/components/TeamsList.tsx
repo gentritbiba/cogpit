@@ -78,7 +78,7 @@ export function TeamsList({ onSelectTeam }: TeamsListProps) {
               <button
                 key={team.name}
                 onClick={() => onSelectTeam(team.name)}
-                className="group flex flex-col gap-1.5 rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-zinc-900 border border-transparent hover:border-zinc-800"
+                className="group flex flex-col gap-1.5 rounded-lg px-2.5 py-2.5 text-left transition-colors elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover"
               >
                 {/* Top row: icon + name */}
                 <div className="flex items-center gap-2">
@@ -88,7 +88,7 @@ export function TeamsList({ onSelectTeam }: TeamsListProps) {
                   </span>
                   <Badge
                     variant="outline"
-                    className="h-4 px-1 text-[9px] font-normal border-zinc-700 text-zinc-500 shrink-0"
+                    className="h-4 px-1 text-[9px] font-normal border-border/50 text-zinc-500 shrink-0"
                   >
                     {team.memberCount}
                   </Badge>
@@ -104,7 +104,7 @@ export function TeamsList({ onSelectTeam }: TeamsListProps) {
                 {/* Progress bar */}
                 {ts.total > 0 && (
                   <div className="ml-5.5 flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="flex-1 h-1.5 bg-elevation-2 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-green-500 rounded-full transition-all"
                         style={{ width: `${progressPct}%` }}

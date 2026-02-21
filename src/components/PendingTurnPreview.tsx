@@ -24,16 +24,16 @@ export function PendingTurnPreview({
     <div className="group relative py-6 px-4">
       {/* Turn header */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-zinc-400 shrink-0">
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/70 text-[10px] font-mono text-zinc-400 shrink-0">
           {turnNumber}
         </div>
       </div>
 
       {/* Timeline content */}
-      <div className="ml-3 pl-4 border-l-2 space-y-4 border-zinc-700/40">
+      <div className="ml-3 pl-4 border-l-2 space-y-4 border-border/40">
         {/* User message card */}
         <div className="relative rounded-lg bg-blue-500/[0.06] border border-blue-500/10 p-3">
-          <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-blue-500/60 ring-2 ring-zinc-900" />
+          <div className="absolute -left-[13px] top-4 w-2.5 h-2.5 rounded-full bg-blue-500/60 ring-2 ring-elevation-1" />
           <div className="flex gap-3">
             <div className="flex-shrink-0 mt-1">
               <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center">

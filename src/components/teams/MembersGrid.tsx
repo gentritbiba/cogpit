@@ -27,8 +27,8 @@ export function MembersGrid({ members, tasks, onMemberClick }: MembersGridProps)
             key={member.agentId}
             onClick={() => onMemberClick?.(member)}
             className={cn(
-              "flex flex-col gap-1.5 rounded-lg border p-3 bg-zinc-900/50 text-left transition-colors group",
-              "hover:bg-zinc-800/60 cursor-pointer",
+              "flex flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors group elevation-2 depth-low card-hover",
+              "cursor-pointer",
               borderClass
             )}
           >
@@ -57,7 +57,7 @@ export function MembersGrid({ members, tasks, onMemberClick }: MembersGridProps)
               {member.model && (
                 <Badge
                   variant="outline"
-                  className="h-4 px-1.5 text-[9px] font-normal border-zinc-700 text-zinc-500"
+                  className="h-4 px-1.5 text-[9px] font-normal border-border/50 text-zinc-500"
                 >
                   {shortenModel(member.model)}
                 </Badge>

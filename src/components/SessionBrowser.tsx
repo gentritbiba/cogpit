@@ -26,7 +26,6 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -283,7 +282,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   // Mobile teams-only mode: just show the teams list
   if (teamsOnly) {
     return (
-      <div className="flex h-full w-full flex-col bg-zinc-950">
+      <div className="flex h-full w-full flex-col elevation-1">
         <TeamsList
           onSelectTeam={(teamName) => onSelectTeam?.(teamName)}
         />
@@ -293,8 +292,8 @@ export const SessionBrowser = memo(function SessionBrowser({
 
   return (
     <aside className={cn(
-      "flex h-full shrink-0 flex-col bg-zinc-950",
-      isMobile ? "w-full" : "w-80 border-r border-zinc-800 panel-enter"
+      "flex h-full shrink-0 flex-col elevation-1",
+      isMobile ? "w-full" : "w-80 border-r border-border/50 panel-enter"
     )} aria-label="Session browser">
       {/* ── Top: Live Sessions ── */}
       <div className="flex min-h-0 flex-[55_1_0%] flex-col overflow-hidden">
@@ -307,9 +306,9 @@ export const SessionBrowser = memo(function SessionBrowser({
       </div>
 
       {/* ── Bottom: Browse / Teams ── */}
-      <div className="flex min-h-0 flex-[45_1_0%] flex-col overflow-hidden border-t border-zinc-800">
+      <div className="flex min-h-0 flex-[45_1_0%] flex-col overflow-hidden border-t border-border/50">
         {/* Tab bar */}
-        <div className="flex shrink-0 border-b border-zinc-800" role="tablist">
+        <div className="flex shrink-0 border-b border-border/50" role="tablist">
           <button
             role="tab"
             aria-selected={sidebarTab === "browse"}
@@ -346,7 +345,7 @@ export const SessionBrowser = memo(function SessionBrowser({
           <div className="flex flex-1 min-h-0 flex-col">
             {/* Fixed header */}
             <div className={cn(
-              "flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3",
+              "flex shrink-0 items-center gap-2 border-b border-border/50 px-3",
               isMobile ? "py-2.5" : "py-2"
             )}>
               {view !== "projects" && (
@@ -400,16 +399,17 @@ export const SessionBrowser = memo(function SessionBrowser({
             </div>
 
             {/* Fixed search (hidden in detail view) */}
-            {view !== "detail" && <div className="shrink-0 px-3 py-2">
+            {view !== "detail" && <div className="shrink-0 px-2 pb-2 pt-1">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-600" />
-                <Input
+                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="text"
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={view === "projects" ? "Filter projects..." : "Filter sessions..."}
                   className={cn(
-                    "bg-zinc-900 pl-8 border-zinc-800 placeholder:text-zinc-600",
-                    isMobile ? "h-9 text-sm" : "h-7 text-xs",
+                    "w-full rounded-lg border border-border/60 elevation-2 depth-low pl-8 text-zinc-300 placeholder:text-zinc-500 focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all",
+                    isMobile ? "py-2.5 text-sm" : "py-2 text-xs",
                     searchFilter && "pr-8"
                   )}
                 />
@@ -533,13 +533,13 @@ const ProjectsList = memo(function ProjectsList({
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-0.5 px-2 pb-3">
+      <div className="flex flex-col gap-1.5 px-2 pb-3">
         {filtered.map((project) => (
           <button
             key={project.dirName}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border-l-2 border-transparent hover:border-l-blue-500/50",
+              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
               isMobile ? "py-3 min-h-[44px]" : "py-2"
             )}
           >
@@ -613,14 +613,14 @@ const SessionsList = memo(function SessionsList({
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-0.5 px-2 pb-3">
+      <div className="flex flex-col gap-1.5 px-2 pb-3">
         {filtered.map((s) => {
           const row = (
             <button
               key={s.fileName}
               onClick={() => onSelectSession(s)}
               className={cn(
-                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border border-transparent hover:border-zinc-800 border-l-2 border-l-transparent",
+                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
                 isMobile ? "py-3.5" : "py-2.5"
               )}
             >
@@ -697,7 +697,7 @@ const SessionsList = memo(function SessionsList({
           <button
             onClick={onLoadMore}
             disabled={isLoading}
-            className="mx-2 mt-1 mb-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300 transition-colors disabled:opacity-50"
+            className="mx-2 mt-1 mb-1 rounded-md border border-border/40 elevation-2 depth-low px-3 py-2 text-xs text-zinc-400 hover:bg-elevation-3 hover:text-zinc-300 transition-colors disabled:opacity-50"
           >
             {isLoading ? "Loading..." : "Load more sessions"}
           </button>
@@ -796,7 +796,7 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           )}
         </div>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-border/50" />
 
         {/* Quick Stats */}
         <div className="flex flex-col gap-1.5 py-3">
@@ -881,8 +881,8 @@ function SidebarStatCard({
       className={cn(
         "flex flex-col gap-0.5 rounded-md border px-2 py-1.5",
         variant === "error" && Number(value) > 0
-          ? "border-red-900/50 bg-red-950/30"
-          : "border-zinc-800 bg-zinc-900/50"
+          ? "border-red-900/50 bg-red-950/30 depth-low"
+          : "border-border/40 elevation-2 depth-low"
       )}
     >
       <div className="flex items-center gap-1 text-zinc-500">

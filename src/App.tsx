@@ -409,7 +409,7 @@ export default function App() {
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-zinc-950" role="status" aria-label="Loading">
+      <div className="dark flex h-dvh items-center justify-center bg-elevation-0" role="status" aria-label="Loading">
         <Loader2 className="size-6 animate-spin text-zinc-500" />
       </div>
     )
@@ -417,7 +417,7 @@ export default function App() {
 
   if (config.configError) {
     return (
-      <div className="dark flex h-dvh flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-100">
+      <div className="dark flex h-dvh flex-col items-center justify-center gap-4 bg-elevation-0 text-zinc-100">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
           <AlertTriangle className="size-7 text-red-400" />
         </div>
@@ -446,7 +446,7 @@ export default function App() {
 
   // SSE connection indicator (shows when session loaded but SSE disconnected)
   const sseIndicator = state.session && state.sessionSource && sseState === "disconnected" && (
-    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-zinc-900/95 backdrop-blur-sm px-3 py-2 shadow-lg toast-enter">
+    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high toast-enter">
       <WifiOff className="size-3.5 text-amber-400" />
       <span className="text-xs text-amber-400">Live connection lost</span>
       <span className="text-[10px] text-zinc-500">Reconnecting automatically...</span>
@@ -455,7 +455,7 @@ export default function App() {
 
   // Error toast
   const errorToast = activeError && (
-    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-zinc-900/95 backdrop-blur-sm px-3 py-2 shadow-lg max-w-md toast-enter">
+    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high max-w-md toast-enter">
       <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
       <span className="text-xs text-red-400 flex-1">{activeError}</span>
       {clearActiveError && (
@@ -520,8 +520,6 @@ export default function App() {
         isConnected={claudeChat.isConnected}
         onSend={claudeChat.sendMessage}
         onInterrupt={claudeChat.interrupt}
-        permissionMode={perms.config.mode}
-        permissionsPending={perms.hasPendingChanges}
         pendingInteraction={pendingInteraction}
       />
     </div>
@@ -530,7 +528,7 @@ export default function App() {
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div className="dark flex h-dvh flex-col bg-zinc-950 text-zinc-100">
+      <div className="dark flex h-dvh flex-col bg-elevation-0 text-zinc-100">
         <MobileHeader
           session={state.session}
           sessionSource={state.sessionSource}
@@ -707,7 +705,7 @@ export default function App() {
 
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
-    <div className="dark flex h-dvh flex-col bg-zinc-950 text-zinc-100">
+    <div className="dark flex h-dvh flex-col bg-elevation-0 text-zinc-100">
       <DesktopHeader
         session={state.session}
         isLive={isLive}
