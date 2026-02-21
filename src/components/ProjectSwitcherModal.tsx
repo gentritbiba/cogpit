@@ -127,16 +127,16 @@ export function ProjectSwitcherModal({
       >
         {/* Search input */}
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Search className="size-4 text-zinc-500 shrink-0" />
+          <Search className="size-4 text-muted-foreground shrink-0" />
           <input
             ref={inputRef}
             type="text"
             placeholder="Switch project..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
           />
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-zinc-400 font-mono">
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
             ESC
           </kbd>
         </div>
@@ -144,7 +144,7 @@ export function ProjectSwitcherModal({
         {/* Project list */}
         <div ref={listRef} className="max-h-[320px] overflow-y-auto py-1">
           {filtered.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-zinc-500">
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
               No projects found
             </div>
           ) : (
@@ -154,18 +154,18 @@ export function ProjectSwitcherModal({
                 data-project-item
                 className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
                   i === selectedIndex
-                    ? "bg-elevation-2 text-zinc-100"
-                    : "text-zinc-400 hover:bg-elevation-2 hover:text-zinc-200"
+                    ? "bg-elevation-2 text-foreground"
+                    : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
                 }`}
                 onClick={() => handleSelect(project)}
                 onMouseEnter={() => setSelectedIndex(i)}
               >
-                <FolderOpen className="size-4 shrink-0 text-zinc-500" />
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">
                     {shortPath(project.path)}
                   </div>
-                  <div className="text-[11px] text-zinc-500">
+                  <div className="text-[11px] text-muted-foreground">
                     {project.sessionCount} session{project.sessionCount !== 1 ? "s" : ""}
                     {project.lastModified && (
                       <> &middot; {new Date(project.lastModified).toLocaleDateString()}</>
@@ -173,7 +173,7 @@ export function ProjectSwitcherModal({
                   </div>
                 </div>
                 {i === selectedIndex && (
-                  <kbd className="hidden sm:inline-flex items-center rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-zinc-500 font-mono">
+                  <kbd className="hidden sm:inline-flex items-center rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
                     ↵
                   </kbd>
                 )}

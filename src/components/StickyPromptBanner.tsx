@@ -123,10 +123,10 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       <span className="text-xs font-medium text-blue-400/70 shrink-0">
         Turn {stickyTurn.index + 1}
       </span>
-      <span className="text-sm text-zinc-400 truncate min-w-0">
+      <span className="text-sm text-muted-foreground truncate min-w-0">
         {promptText}
       </span>
-      <ChevronUp className="size-3.5 text-zinc-600 shrink-0 ml-auto" />
+      <ChevronUp className="size-3.5 text-muted-foreground shrink-0 ml-auto" />
     </div>
   )
 })

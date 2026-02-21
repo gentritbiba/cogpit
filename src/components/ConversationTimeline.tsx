@@ -108,7 +108,7 @@ export function ConversationTimeline({
 
   if (filteredTurns.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-zinc-500 text-sm">
+      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
         {searchQuery ? "No turns match your search." : "No turns in this session."}
       </div>
     )
@@ -370,7 +370,7 @@ function VirtualizedTimeline({
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
             />
-            {!isLast && <Separator className="bg-zinc-700/60" />}
+            {!isLast && <Separator className="bg-border/60" />}
           </div>
         )
 
@@ -449,7 +449,7 @@ function RedoSection({
                 </button>
               )}
               {i < redoGhostTurns.length - 1 && (
-                <Separator className="bg-zinc-700/60" />
+                <Separator className="bg-border/60" />
               )}
             </div>
           ))}
@@ -489,20 +489,20 @@ const TurnSection = memo(function TurnSection({
     >
       {/* Turn header */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-zinc-400 shrink-0">
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
           {index + 1}
         </div>
         {turn.durationMs !== null && (
           <Badge
             variant="outline"
-            className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-zinc-500 gap-1"
+            className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-muted-foreground gap-1"
           >
             <Clock className="w-2.5 h-2.5" />
             {formatDuration(turn.durationMs)}
           </Badge>
         )}
         {turn.timestamp && (
-          <span className="text-[10px] text-zinc-600">
+          <span className="text-[10px] text-muted-foreground">
             {new Date(turn.timestamp).toLocaleTimeString()}
           </span>
         )}
@@ -510,7 +510,7 @@ const TurnSection = memo(function TurnSection({
         {onRestoreToHere && (
           <button
             onClick={() => onRestoreToHere(index)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-zinc-500 hover:text-amber-400 ml-auto"
+            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-muted-foreground hover:text-amber-400 ml-auto"
             title="Undo this turn and all after it"
           >
             <RotateCcw className="size-3" />
@@ -606,7 +606,7 @@ const TurnSection = memo(function TurnSection({
                 j++
               }
               elements.push(
-                <div key={`tools-${i}`} className="rounded-lg bg-zinc-500/[0.06] border border-border/30 p-3">
+                <div key={`tools-${i}`} className="rounded-lg bg-muted-foreground/[0.06] border border-border/30 p-3">
                   <CollapsibleToolCalls
                     toolCalls={toolCalls}
                     expandAll={expandAll}
@@ -704,7 +704,7 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         {!expandAll && (
           <button
             onClick={() => setManualOpen(false)}
-            className="flex items-center gap-1.5 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronDown className="size-3" />
             <span>{toolCalls.length} tool call{toolCalls.length !== 1 ? "s" : ""}</span>
@@ -735,8 +735,8 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
       onClick={() => setManualOpen(true)}
       className="flex items-center gap-2 w-full rounded-md border border-border/40 bg-elevation-1 px-2.5 py-2 text-left transition-colors hover:bg-elevation-2 hover:border-border/60"
     >
-      <ChevronRight className="size-3.5 text-zinc-500 shrink-0" />
-      <span className="text-xs text-zinc-400 shrink-0">
+      <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
+      <span className="text-xs text-muted-foreground shrink-0">
         {toolCalls.length} tool call{toolCalls.length !== 1 ? "s" : ""}
       </span>
       <div className="flex items-center gap-1 flex-wrap">
@@ -784,13 +784,13 @@ const CompactionMarker = memo(function CompactionMarker({ summary }: { summary: 
       </button>
 
       {open && details.length > 0 && (
-        <div className="mt-2 mx-8 rounded-md border border-amber-500/10 bg-amber-500/5 px-3 py-2 text-[11px] text-zinc-400 space-y-0.5">
+        <div className="mt-2 mx-8 rounded-md border border-amber-500/10 bg-amber-500/5 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
           {details.map((line, i) => (
             <div key={i} className={cn(
-              line.startsWith("- ") && "pl-2 text-zinc-500",
-              line.startsWith("Tools:") && "text-zinc-300 font-medium",
-              line.startsWith("Prompts:") && "text-zinc-300 font-medium mt-1",
-              line.match(/^\d+ turns/) && "text-zinc-300",
+              line.startsWith("- ") && "pl-2 text-muted-foreground",
+              line.startsWith("Tools:") && "text-foreground font-medium",
+              line.startsWith("Prompts:") && "text-foreground font-medium mt-1",
+              line.match(/^\d+ turns/) && "text-foreground",
             )}>
               {line}
             </div>

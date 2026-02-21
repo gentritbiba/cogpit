@@ -60,10 +60,10 @@ function ToolAccessGrid({
   return (
     <div>
       <div className="flex items-center gap-3 mb-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Tool Access
         </span>
-        <span className="flex items-center gap-1.5 text-[9px] text-zinc-600">
+        <span className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
           <span className="inline-block size-1.5 rounded-sm bg-green-500" /> L-click allow
           <span className="inline-block size-1.5 rounded-sm bg-red-500" /> R-click block
         </span>
@@ -82,7 +82,7 @@ function ToolAccessGrid({
                   ? "border-green-800 text-green-400 bg-green-500/10"
                   : state === "blocked"
                     ? "border-red-800 text-red-400 bg-red-500/10"
-                    : "border-border text-zinc-500 elevation-1 hover:border-zinc-600 hover:text-zinc-300"
+                    : "border-border text-muted-foreground elevation-1 hover:border-border hover:text-foreground"
               )}
             >
               <span
@@ -92,7 +92,7 @@ function ToolAccessGrid({
                     ? "border-green-500 bg-green-500"
                     : state === "blocked"
                       ? "border-red-500 bg-red-500"
-                      : "border-zinc-600 bg-transparent"
+                      : "border-border bg-transparent"
                 )}
               >
                 {state !== "none" && <Check className="size-2 text-white" strokeWidth={3} />}
@@ -116,7 +116,7 @@ export function PermissionsPanel({
 }: PermissionsPanelProps) {
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         <Shield className="size-3" />
         Permissions
@@ -150,7 +150,7 @@ export function PermissionsPanel({
                 "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
                 isSelected
                   ? opt.color
-                  : "border-border text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 elevation-1"
+                  : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"
               )}
             >
               {opt.label}
@@ -175,7 +175,7 @@ export function PermissionsPanel({
       {config.mode !== "bypassPermissions" && (
         <button
           onClick={onReset}
-          className="mt-2 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+          className="mt-2 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         >
           Reset to default (YOLO)
         </button>

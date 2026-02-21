@@ -25,7 +25,7 @@ export function TurnContextMenu({
       <ContextMenu.Portal>
         <ContextMenu.Content className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1">
           <ContextMenu.Item
-            className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
+            className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
             onSelect={() => onRestoreToHere(turnIndex)}
           >
             <RotateCcw className="size-3.5" />
@@ -35,7 +35,7 @@ export function TurnContextMenu({
             <>
               <ContextMenu.Separator className="my-1 h-px bg-border" />
               <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
                 onSelect={() => onOpenBranches(turnIndex)}
               >
                 <GitFork className="size-3.5" />
@@ -47,7 +47,7 @@ export function TurnContextMenu({
             <>
               <ContextMenu.Separator className="my-1 h-px bg-border" />
               <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
                 onSelect={() => onBranchFromHere(turnIndex)}
               >
                 <Copy className="size-3.5" />

@@ -110,9 +110,9 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
           className="flex items-center gap-2 flex-1 min-w-0 px-2.5 py-1.5"
         >
           {open ? (
-            <ChevronDown className="size-3 text-zinc-500 shrink-0" />
+            <ChevronDown className="size-3 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronRight className="size-3 text-zinc-500 shrink-0" />
+            <ChevronRight className="size-3 text-muted-foreground shrink-0" />
           )}
           <Badge
             variant="outline"
@@ -123,10 +123,10 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
           >
             {toolCall.name}
           </Badge>
-          <span className="text-[10px] text-zinc-400 font-mono truncate">
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
             {shortPath}
           </span>
-          <span className="text-[10px] text-zinc-600 shrink-0">
+          <span className="text-[10px] text-muted-foreground shrink-0">
             T{turnIndex + 1}
           </span>
         </button>
@@ -137,7 +137,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => openInEditor(filePath, "file")}
-                    className="p-1 text-zinc-600 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                    className="p-1 text-muted-foreground hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
                     aria-label="Open file in editor"
                   >
                     <Code2 className="size-3" />
@@ -150,7 +150,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => openInEditor(filePath, "diff")}
-                      className="p-1 text-zinc-600 hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-1 text-muted-foreground hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
                       aria-label="View git changes in editor"
                     >
                       <GitCompareArrows className="size-3" />
@@ -194,10 +194,10 @@ function DeletedFileCard({ filePath, lineCount, turnIndex }: { filePath: string;
         >
           Deleted
         </Badge>
-        <span className="text-[10px] text-zinc-500 font-mono truncate">
+        <span className="text-[10px] text-muted-foreground font-mono truncate">
           {shortPath}
         </span>
-        <span className="text-[10px] text-zinc-600 shrink-0">
+        <span className="text-[10px] text-muted-foreground shrink-0">
           T{turnIndex + 1}
         </span>
         <div className="flex-1" />
@@ -488,12 +488,12 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     <div className="flex flex-col h-full overflow-hidden border-border min-w-0 elevation-1">
       <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
         <FileCode2 className="size-3.5 text-amber-400" />
-        <span className="text-xs font-medium text-zinc-300">
+        <span className="text-xs font-medium text-foreground">
           File Changes
         </span>
         <Badge
           variant="outline"
-          className="h-4 px-1.5 text-[10px] border-border/70 text-zinc-500"
+          className="h-4 px-1.5 text-[10px] border-border/70 text-muted-foreground"
         >
           {fileChanges.length}
         </Badge>
@@ -508,7 +508,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           <TooltipTrigger asChild>
             <button
               onClick={() => setAllExpanded(!allExpanded)}
-              className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={allExpanded ? "Collapse all" : "Expand all"}
             >
               {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}

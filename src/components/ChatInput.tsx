@@ -308,14 +308,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               <img
                 src={img.preview}
                 alt={`Upload ${i + 1}`}
-                className="h-16 w-auto rounded-lg border border-zinc-700/50 object-contain bg-zinc-800"
+                className="h-16 w-auto rounded-lg border border-border/50 object-contain bg-muted"
               />
               <button
                 onClick={() => removeImage(i)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-600 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity hover:bg-red-900 hover:border-red-600"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-muted border border-border flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity hover:bg-red-900 hover:border-red-600"
                 aria-label={`Remove image ${i + 1}`}
               >
-                <X className="w-3 h-3 text-zinc-300" />
+                <X className="w-3 h-3 text-foreground" />
               </button>
             </div>
           ))}
@@ -341,20 +341,20 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             }
             rows={1}
             className={cn(
-              "w-full resize-none rounded-xl border elevation-1 px-3.5 py-2.5 text-sm text-zinc-100",
-              "placeholder:text-zinc-600 focus:outline-none focus:ring-2",
+              "w-full resize-none rounded-xl border elevation-1 px-3.5 py-2.5 text-sm text-foreground",
+              "placeholder:text-muted-foreground focus:outline-none focus:ring-2",
               isPlanApproval
                 ? "border-purple-700/50 focus:border-purple-500/30 focus:ring-purple-500/20"
                 : isUserQuestion
                   ? "border-pink-700/50 focus:border-pink-500/30 focus:ring-pink-500/20"
-                  : "border-zinc-700/50 focus:border-blue-500/30 focus:ring-blue-500/20",
+                  : "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20",
               "transition-all duration-200"
             )}
           />
           {isConnected && !isPlanApproval && !isUserQuestion && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
               {elapsedSec > 0 && (
-                <span className="text-[10px] font-mono tabular-nums text-zinc-500">
+                <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
                   {formatElapsed(elapsedSec)}
                 </span>
               )}
@@ -396,7 +396,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
                   ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
                   : voiceStatus === "loading"
                     ? "text-blue-400"
-                    : "text-zinc-400 hover:text-zinc-200"
+                    : "text-muted-foreground hover:text-foreground"
               )}
               onClick={toggleVoice}
               disabled={voiceStatus === "loading"}
@@ -427,7 +427,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             "h-9 w-9 shrink-0 p-0 rounded-lg transition-all duration-200",
             text.trim() || images.length > 0
               ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
-              : "text-zinc-600"
+              : "text-muted-foreground"
           )}
           disabled={!text.trim() && images.length === 0}
           onClick={handleSubmit}
@@ -486,7 +486,7 @@ function PlanApprovalBar({
       </div>
       {allowedPrompts && allowedPrompts.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          <span className="text-[10px] text-zinc-500 self-center mr-1">Permissions requested:</span>
+          <span className="text-[10px] text-muted-foreground self-center mr-1">Permissions requested:</span>
           {allowedPrompts.map((p, i) => (
             <span
               key={i}

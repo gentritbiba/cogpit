@@ -64,7 +64,7 @@ export function MobileHeader({
         {session ? (
           <>
             <button
-              className="truncate text-sm font-medium text-zinc-300 min-w-0"
+              className="truncate text-sm font-medium text-foreground min-w-0"
               onClick={copyResumeCmd}
             >
               {copied ? (
@@ -100,9 +100,9 @@ export function MobileHeader({
           <div className="flex flex-col min-w-0">
             <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
             {networkUrl ? (
-              <span className="text-[10px] font-mono text-zinc-600 truncate">{networkUrl}</span>
+              <span className="text-[10px] font-mono text-muted-foreground truncate">{networkUrl}</span>
             ) : networkAccessDisabled ? (
-              <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+              <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                 <WifiOff className="size-2.5" />
                 Network off
               </span>
@@ -116,7 +116,7 @@ export function MobileHeader({
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 text-zinc-500 shrink-0"
+          className="h-8 w-8 p-0 text-muted-foreground shrink-0"
           onClick={onOpenSettings}
           aria-label="Settings"
         >
@@ -126,7 +126,7 @@ export function MobileHeader({
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 w-8 p-0 text-zinc-500 shrink-0"
+            className="h-8 w-8 p-0 text-muted-foreground shrink-0"
             onClick={copyResumeCmd}
             aria-label={copied ? "Copied!" : "Copy resume command"}
           >
@@ -141,7 +141,7 @@ export function MobileHeader({
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 w-8 p-0 text-zinc-500 hover:text-green-400"
+            className="h-8 w-8 p-0 text-muted-foreground hover:text-green-400"
             disabled={creatingSession}
             onClick={() => onNewSession(sessionSource.dirName)}
             aria-label={creatingSession ? "Creating session..." : "New session"}
@@ -156,7 +156,7 @@ export function MobileHeader({
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 text-zinc-500 hover:text-red-400"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-red-400"
           onClick={onKillAll}
           disabled={killing}
           aria-label="Kill all Claude processes"

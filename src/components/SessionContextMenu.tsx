@@ -34,7 +34,7 @@ export function SessionContextMenu({
           <ContextMenu.Content className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1 z-50">
             {onDuplicate && (
               <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-zinc-300 outline-none cursor-pointer hover:bg-elevation-2 hover:text-zinc-100"
+                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
                 onSelect={onDuplicate}
               >
                 <Copy className="size-3.5" />
@@ -62,10 +62,10 @@ export function SessionContextMenu({
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent className="elevation-4 border-border/30 sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-zinc-100">Delete session?</DialogTitle>
-            <DialogDescription className="text-zinc-400">
+            <DialogTitle className="text-foreground">Delete session?</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
               This will permanently delete{" "}
-              <span className="font-medium text-zinc-300">{sessionLabel}</span>.
+              <span className="font-medium text-foreground">{sessionLabel}</span>.
               This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -73,7 +73,7 @@ export function SessionContextMenu({
             <Button
               variant="ghost"
               size="sm"
-              className="text-zinc-400 hover:text-zinc-200"
+              className="text-muted-foreground hover:text-foreground"
               onClick={() => setShowDeleteConfirm(false)}
             >
               Cancel

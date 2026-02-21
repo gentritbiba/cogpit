@@ -85,8 +85,8 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
             className={cn(
               "flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs transition-colors",
               selectedMember
-                ? "border-border/50 text-zinc-300 hover:border-border/70"
-                : "border-border/50 text-zinc-500 hover:border-border/70"
+                ? "border-border/50 text-foreground hover:border-border/70"
+                : "border-border/50 text-muted-foreground hover:border-border/70"
             )}
           >
             {selected && (
@@ -100,7 +100,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
             <span className="max-w-[100px] truncate">
               {selectedMember || "Select member"}
             </span>
-            <ChevronDown className="size-3 text-zinc-500" />
+            <ChevronDown className="size-3 text-muted-foreground" />
           </button>
 
           {showDropdown && (
@@ -117,8 +117,8 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
                     className={cn(
                       "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-elevation-2",
                       selectedMember === m.name
-                        ? "text-zinc-200"
-                        : "text-zinc-400"
+                        ? "text-foreground"
+                        : "text-muted-foreground"
                     )}
                   >
                     <span
@@ -128,7 +128,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
                       )}
                     />
                     <span className="truncate">{m.name}</span>
-                    <span className="ml-auto text-[10px] text-zinc-600">
+                    <span className="ml-auto text-[10px] text-muted-foreground">
                       {m.agentType}
                     </span>
                   </button>
@@ -155,8 +155,8 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
             disabled={!selectedMember || sending}
             rows={1}
             className={cn(
-              "w-full resize-none rounded-lg border bg-elevation-0 px-3 py-2 text-sm text-zinc-100",
-              "placeholder:text-zinc-600 focus:outline-none focus:ring-1",
+              "w-full resize-none rounded-lg border bg-elevation-0 px-3 py-2 text-sm text-foreground",
+              "placeholder:text-muted-foreground focus:outline-none focus:ring-1",
               !selectedMember || sending
                 ? "border-border/50 opacity-60 cursor-not-allowed"
                 : "border-border/50 focus:ring-blue-500/40"

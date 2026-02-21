@@ -77,20 +77,20 @@ function MiniBranchGraph({
         <line x1={20} y1={firstY} x2={bpX} y2={firstY} stroke="#3b82f6" strokeWidth={2} />
         {Array.from({ length: sharedCount }).map((_, i) => (
           <g key={`s-${i}`}>
-            <circle cx={20 + i * ss} cy={firstY} r={3.5} fill="#09090b" stroke="#3b82f6" strokeWidth={1.5} />
+            <circle cx={20 + i * ss} cy={firstY} r={3.5} fill="var(--background)" stroke="#3b82f6" strokeWidth={1.5} />
             <circle cx={20 + i * ss} cy={firstY} r={1.5} fill="#60a5fa" />
           </g>
         ))}
         {/* Branch point */}
-        <circle cx={bpX} cy={firstY} r={5} fill="#09090b" stroke="#a855f7" strokeWidth={2} />
+        <circle cx={bpX} cy={firstY} r={5} fill="var(--background)" stroke="#a855f7" strokeWidth={2} />
         <circle cx={bpX} cy={firstY} r={2} fill="#c084fc" />
 
         {/* Branches */}
         {branches.map((branch, bi) => {
           const isActive = bi === activeBranchIdx
           const ci = bi % BRANCH_COLORS.length
-          const color = isActive ? BRANCH_COLORS[ci] : "#27272a"
-          const inner = isActive ? BRANCH_INNER[ci] : "#3f3f46"
+          const color = isActive ? BRANCH_COLORS[ci] : "var(--muted)"
+          const inner = isActive ? BRANCH_INNER[ci] : "var(--border)"
           const y = firstY + bi * branchGap
           const count = Math.min(branch.graphTurnCount, cappedMax)
 
@@ -115,14 +115,14 @@ function MiniBranchGraph({
               )}
               {Array.from({ length: count }).map((_, ni) => (
                 <g key={ni}>
-                  <circle cx={bpX + (ni + 1) * ns} cy={y} r={3.5} fill="#09090b" stroke={color} strokeWidth={1.5} />
+                  <circle cx={bpX + (ni + 1) * ns} cy={y} r={3.5} fill="var(--background)" stroke={color} strokeWidth={1.5} />
                   <circle cx={bpX + (ni + 1) * ns} cy={y} r={1.5} fill={inner} />
                 </g>
               ))}
               {branch.graphTurnCount > cappedMax && (
                 <text
                   x={bpX + (count + 0.4) * ns} y={y + 3}
-                  fill={isActive ? BRANCH_COLORS[ci] : "#3f3f46"}
+                  fill={isActive ? BRANCH_COLORS[ci] : "var(--border)"}
                   fontSize="8" fontFamily="monospace"
                 >
                   +{branch.graphTurnCount - cappedMax}
@@ -162,7 +162,7 @@ function FullTurnCard({
         {userText && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 mt-1.5 shrink-0" />
-            <div className="text-sm text-zinc-300">{userText}</div>
+            <div className="text-sm text-foreground">{userText}</div>
           </div>
         )}
 
@@ -170,7 +170,7 @@ function FullTurnCard({
         {turn.thinking.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-violet-500/60 mt-1.5 shrink-0" />
-            <div className="text-xs text-zinc-500 italic">
+            <div className="text-xs text-muted-foreground italic">
               {turn.thinking[0].thinking.slice(0, 300)}
               {turn.thinking[0].thinking.length > 300 ? "..." : ""}
             </div>
@@ -181,7 +181,7 @@ function FullTurnCard({
         {turn.assistantText.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500/60 mt-1.5 shrink-0" />
-            <div className="text-sm text-zinc-400">
+            <div className="text-sm text-muted-foreground">
               {turn.assistantText.join("\n")}
             </div>
           </div>
@@ -190,7 +190,7 @@ function FullTurnCard({
         {/* ALL tool calls */}
         {turn.toolCalls.length > 0 && (
           <div className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-zinc-500/60 mt-1.5 shrink-0" />
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 mt-1.5 shrink-0" />
             <div className="flex flex-wrap gap-1">
               {turn.toolCalls.map((tc, i) => {
                 const summary = toolSummary(tc)
@@ -200,7 +200,7 @@ function FullTurnCard({
                     variant="outline"
                     className={cn(
                       "text-[10px] px-1.5 py-0 h-4 font-mono",
-                      TOOL_BADGE_STYLES[tc.name] ?? "border-zinc-700/50 text-zinc-400",
+                      TOOL_BADGE_STYLES[tc.name] ?? "border-border/50 text-muted-foreground",
                       tc.isError && "border-red-700/50 text-red-400"
                     )}
                   >
@@ -250,13 +250,13 @@ function ArchivedTurnCard({
         {turn.userMessage && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 mt-1.5 shrink-0" />
-            <div className="text-sm text-zinc-300">{turn.userMessage}</div>
+            <div className="text-sm text-foreground">{turn.userMessage}</div>
           </div>
         )}
         {turn.thinkingBlocks.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-violet-500/60 mt-1.5 shrink-0" />
-            <div className="text-xs text-zinc-500 italic">
+            <div className="text-xs text-muted-foreground italic">
               {turn.thinkingBlocks[0].slice(0, 300)}...
             </div>
           </div>
@@ -264,12 +264,12 @@ function ArchivedTurnCard({
         {turn.assistantText.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500/60 mt-1.5 shrink-0" />
-            <div className="text-sm text-zinc-400">{turn.assistantText.join("\n")}</div>
+            <div className="text-sm text-muted-foreground">{turn.assistantText.join("\n")}</div>
           </div>
         )}
         {turn.toolCalls.length > 0 && (
           <div className="flex items-start gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-zinc-500/60 mt-1.5 shrink-0" />
+            <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 mt-1.5 shrink-0" />
             <div className="flex flex-wrap gap-1">
               {turn.toolCalls.map((tc, i) => (
                 <Badge
@@ -411,7 +411,7 @@ export function BranchModal({
       <DialogContent className="max-w-2xl max-h-[80vh] elevation-4 border-border/30 flex flex-col !top-[10%] !translate-y-0">
         <DialogHeader className="shrink-0">
           <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2 text-zinc-100">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <GitFork className="size-4 text-purple-400" />
               Branches from Turn {branchPointTurnIndex + 1}
             </DialogTitle>
@@ -430,7 +430,7 @@ export function BranchModal({
               <ChevronLeft className="size-4" />
             </Button>
             <div className="flex-1 text-center">
-              <div className="text-sm font-medium text-zinc-200 truncate">
+              <div className="text-sm font-medium text-foreground truncate">
                 {current.label}
                 {isCurrent && (
                   <Badge variant="outline" className="ml-2 text-[10px] px-1.5 py-0 h-4 border-green-700/50 text-green-400">
@@ -438,7 +438,7 @@ export function BranchModal({
                   </Badge>
                 )}
               </div>
-              <div className="text-[10px] text-zinc-500">
+              <div className="text-[10px] text-muted-foreground">
                 Branch {currentIndex + 1} of {totalCount}
                 {!isCurrent && (
                   <> &middot; {new Date(current.createdAt).toLocaleString()}</>
@@ -499,7 +499,7 @@ export function BranchModal({
 
         {/* Footer */}
         <div className="shrink-0 flex items-center justify-between py-2">
-          <span className="text-xs text-zinc-500">
+          <span className="text-xs text-muted-foreground">
             {turnCount} turn{turnCount !== 1 ? "s" : ""} in this branch
           </span>
           {!isCurrent && (

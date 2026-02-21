@@ -15,6 +15,22 @@ import {
   type ThemedToken,
 } from "shiki"
 
+// ── Dark mode detection (reactive via MutationObserver) ─────────────────────
+
+function useIsDarkMode() {
+  const [isDark, setIsDark] = useState(
+    () => document.documentElement.classList.contains("dark")
+  )
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setIsDark(el.classList.contains("dark"))
+    const obs = new MutationObserver(update)
+    obs.observe(el, { attributes: true, attributeFilter: ["class"] })
+    return () => obs.disconnect()
+  }, [])
+  return isDark
+}
+
 // ── Shiki singleton ─────────────────────────────────────────────────────────
 
 let highlighterPromise: Promise<Highlighter> | null = null
@@ -23,7 +39,7 @@ const loadedLangs = new Set<string>()
 function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
-      themes: ["github-dark"],
+      themes: ["github-dark", "github-light"],
       langs: [
         "typescript",
         "tsx",
@@ -164,7 +180,8 @@ type TokenizedLines = ThemedToken[][]
 function useHighlightedTokens(
   oldStr: string,
   newStr: string,
-  filePath: string
+  filePath: string,
+  isDark: boolean
 ): { oldTokens: TokenizedLines | null; newTokens: TokenizedLines | null } {
   const [oldTokens, setOldTokens] = useState<TokenizedLines | null>(null)
   const [newTokens, setNewTokens] = useState<TokenizedLines | null>(null)
@@ -177,20 +194,15 @@ function useHighlightedTokens(
       return
     }
 
+    const theme = isDark ? "github-dark" : "github-light"
     let cancelled = false
     getHighlighter()
       .then(async (hl) => {
         if (cancelled) return
         await ensureLang(hl, lang)
         if (cancelled) return
-        const oldResult = hl.codeToTokens(oldStr, {
-          lang,
-          theme: "github-dark",
-        })
-        const newResult = hl.codeToTokens(newStr, {
-          lang,
-          theme: "github-dark",
-        })
+        const oldResult = hl.codeToTokens(oldStr, { lang, theme })
+        const newResult = hl.codeToTokens(newStr, { lang, theme })
         setOldTokens(oldResult.tokens)
         setNewTokens(newResult.tokens)
       })
@@ -205,7 +217,7 @@ function useHighlightedTokens(
     return () => {
       cancelled = true
     }
-  }, [oldStr, newStr, filePath])
+  }, [oldStr, newStr, filePath, isDark])
 
   return { oldTokens, newTokens }
 }
@@ -260,8 +272,8 @@ function DiffLines({
             key={idx}
             className={cn(
               "flex",
-              line.type === "removed" && "bg-red-950/40",
-              line.type === "added" && "bg-green-950/40"
+              line.type === "removed" && "bg-red-50 dark:bg-red-950/40",
+              line.type === "added" && "bg-green-50 dark:bg-green-950/40"
             )}
           >
             <span
@@ -271,7 +283,7 @@ function DiffLines({
                   ? "text-red-500/50 border-red-500/20"
                   : line.type === "added"
                     ? "text-green-500/50 border-green-500/20"
-                    : "text-zinc-600 border-border/40"
+                    : "text-muted-foreground border-border/40"
               )}
             >
               {line.type === "removed" ? (
@@ -288,9 +300,9 @@ function DiffLines({
               ) : (
                 <span
                   className={cn(
-                    line.type === "removed" && "text-red-300",
-                    line.type === "added" && "text-green-300",
-                    line.type === "unchanged" && "text-zinc-500"
+                    line.type === "removed" && "text-red-700 dark:text-red-300",
+                    line.type === "added" && "text-green-700 dark:text-green-300",
+                    line.type === "unchanged" && "text-muted-foreground"
                   )}
                 >
                   {line.text || "\u00A0"}
@@ -312,7 +324,7 @@ function DiffStats({ lines }: { lines: DiffLine[] }) {
   const added = lines.filter((l) => l.type === "added").length
   const removed = lines.filter((l) => l.type === "removed").length
   return (
-    <span className="text-[10px] text-zinc-500 font-mono">
+    <span className="text-[10px] text-muted-foreground font-mono">
       {removed > 0 && <span className="text-red-400">-{removed}</span>}
       {removed > 0 && added > 0 && " "}
       {added > 0 && <span className="text-green-400">+{added}</span>}
@@ -337,11 +349,13 @@ export function EditDiffView({
   compact: isCompact = true,
 }: EditDiffViewProps) {
   const [modalOpen, setModalOpen] = useState(false)
+  const isDark = useIsDarkMode()
   const lines = computeDiff(oldString, newString)
   const { oldTokens, newTokens } = useHighlightedTokens(
     oldString,
     newString,
-    filePath
+    filePath,
+    isDark
   )
 
   const shortPath = filePath.split("/").slice(-3).join("/")
@@ -354,7 +368,7 @@ export function EditDiffView({
         isCompact && "mt-1.5"
       )}>
         <div className="flex items-center justify-between px-2 py-1 border-b border-border/40 bg-elevation-1">
-          <span className="text-[10px] text-zinc-400 font-mono truncate">
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
             {shortPath}
           </span>
           <div className="flex items-center gap-2">
@@ -362,7 +376,7 @@ export function EditDiffView({
             {isCompact && (
               <button
                 onClick={() => setModalOpen(true)}
-                className="text-zinc-500 hover:text-zinc-300 transition-colors p-0.5 rounded hover:bg-elevation-2"
+                className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded hover:bg-elevation-2"
                 title="Expand diff"
               >
                 <Maximize2 className="w-3 h-3" />
@@ -383,7 +397,7 @@ export function EditDiffView({
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
           <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col bg-elevation-0 border-border/40">
             <DialogHeader>
-              <DialogTitle className="font-mono text-sm text-zinc-200 flex items-center gap-3">
+              <DialogTitle className="font-mono text-sm text-foreground flex items-center gap-3">
                 {filePath}
                 <DiffStats lines={lines} />
               </DialogTitle>

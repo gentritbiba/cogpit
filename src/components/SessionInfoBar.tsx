@@ -43,7 +43,7 @@ export function SessionInfoBar({
       <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
         {shortenModel(session.model)}
       </Badge>
-      <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-zinc-500 border-zinc-700">
+      <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-muted-foreground border-border">
         {session.turns.length} turns
       </Badge>
       {session.branchedFrom && (
@@ -93,7 +93,7 @@ export function SessionInfoBar({
             <TooltipContent className="text-xs space-y-1">
               <div className="font-medium">Context Left Until Auto-Compact</div>
               <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>
-              <div className="text-zinc-400">
+              <div className="text-muted-foreground">
                 {formatTokenCount(ctx.used)} / {formatTokenCount(ctx.limit)} tokens used ({ctx.percentAbsolute.toFixed(1)}%)
               </div>
             </TooltipContent>
@@ -110,7 +110,7 @@ export function SessionInfoBar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-green-400 hover:bg-green-500/10"
+                className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
                 disabled={creatingSession}
                 onClick={() => onNewSession(sessionSource.dirName)}
               >
@@ -130,7 +130,7 @@ export function SessionInfoBar({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-purple-400 hover:bg-purple-500/10"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
                   onClick={onDuplicateSession}
                 >
                   <Copy className="size-3" />
@@ -146,7 +146,7 @@ export function SessionInfoBar({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-blue-400 hover:bg-blue-500/10"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
                   onClick={() => authFetch("/api/open-in-editor", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -165,7 +165,7 @@ export function SessionInfoBar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-200"
+                className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
                 onClick={() => {
                   const dirName = sessionSource.dirName
                   dispatch({ type: "GO_HOME", isMobile: false })
@@ -186,7 +186,7 @@ export function SessionInfoBar({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 gap-1 text-[11px] text-zinc-500 hover:text-green-400"
+            className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
             disabled={creatingSession}
             onClick={() => onNewSession(sessionSource.dirName)}
           >
@@ -197,7 +197,7 @@ export function SessionInfoBar({
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 gap-1 text-[11px] text-zinc-500 hover:text-purple-400"
+              className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
               onClick={onDuplicateSession}
             >
               <Copy className="size-3" />

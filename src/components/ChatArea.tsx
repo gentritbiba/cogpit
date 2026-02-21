@@ -87,13 +87,13 @@ export function ChatArea({
       {isMobile && (
         <div className="flex items-center gap-1.5 shrink-0 border-b border-border/50 bg-elevation-1 backdrop-blur-sm px-2 py-1.5">
           <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => dispatch({ type: "SET_SEARCH_QUERY", value: e.target.value })}
               placeholder="Search conversation..."
-              className="h-8 bg-elevation-1 pl-8 text-sm border-border/50 placeholder:text-zinc-600 focus-visible:ring-blue-500/30"
+              className="h-8 bg-elevation-1 pl-8 text-sm border-border/50 placeholder:text-muted-foreground focus-visible:ring-blue-500/30"
             />
           </div>
           <Button

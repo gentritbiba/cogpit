@@ -96,7 +96,7 @@ function TokenChart({ turns }: { turns: Turn[] }) {
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Tokens Per Turn
       </h3>
@@ -107,7 +107,7 @@ function TokenChart({ turns }: { turns: Turn[] }) {
           y={padTop}
           textAnchor="end"
           dominantBaseline="central"
-          className="fill-zinc-600 text-[8px]"
+          className="fill-muted-foreground text-[8px]"
         >
           {formatTokenCount(maxVal)}
         </text>
@@ -116,7 +116,7 @@ function TokenChart({ turns }: { turns: Turn[] }) {
           y={padTop + chartH}
           textAnchor="end"
           dominantBaseline="central"
-          className="fill-zinc-600 text-[8px]"
+          className="fill-muted-foreground text-[8px]"
         >
           0
         </text>
@@ -126,7 +126,7 @@ function TokenChart({ turns }: { turns: Turn[] }) {
           y1={padTop + chartH}
           x2={padLeft + chartW}
           y2={padTop + chartH}
-          stroke="#3f3f46"
+          stroke="var(--border)"
           strokeWidth={0.5}
         />
 
@@ -199,11 +199,11 @@ function TokenChart({ turns }: { turns: Turn[] }) {
 
         {/* Legend */}
         <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={2} fill="#60a5fa" opacity={0.85} />
-        <text x={padLeft + 9} y={svgHeight - 4} className="fill-zinc-500 text-[7px]">New</text>
+        <text x={padLeft + 9} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">New</text>
         <rect x={padLeft + 30} y={svgHeight - 10} width={6} height={6} rx={2} fill="#60a5fa" opacity={0.25} />
-        <text x={padLeft + 39} y={svgHeight - 4} className="fill-zinc-500 text-[7px]">Cache</text>
+        <text x={padLeft + 39} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Cache</text>
         <rect x={padLeft + 65} y={svgHeight - 10} width={6} height={6} rx={2} fill="#4ade80" opacity={0.75} />
-        <text x={padLeft + 74} y={svgHeight - 4} className="fill-zinc-500 text-[7px]">Output</text>
+        <text x={padLeft + 74} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Output</text>
       </svg>
     </section>
   )
@@ -228,7 +228,7 @@ function ActivityHeatmap({ turns }: { turns: Turn[] }) {
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Activity Heatmap
       </h3>
@@ -255,7 +255,7 @@ function ActivityHeatmap({ turns }: { turns: Turn[] }) {
           })}
         </svg>
         {hoveredTurn !== null && (
-          <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-elevation-2 px-2 py-1 text-[10px] text-zinc-300 depth-low">
+          <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-elevation-2 px-2 py-1 text-[10px] text-foreground depth-low">
             Turn {hoveredTurn + 1}: {turns[hoveredTurn].toolCalls.length} tool calls
           </div>
         )}
@@ -281,7 +281,7 @@ function ModelDistribution({ turns }: { turns: Turn[] }) {
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Models
       </h3>
@@ -291,8 +291,8 @@ function ModelDistribution({ turns }: { turns: Turn[] }) {
             key={model}
             className="flex items-center justify-between rounded border border-border elevation-2 depth-low px-2.5 py-1.5 text-[11px]"
           >
-            <span className="truncate text-zinc-300">{model}</span>
-            <span className="ml-2 shrink-0 text-zinc-500">{count}</span>
+            <span className="truncate text-foreground">{model}</span>
+            <span className="ml-2 shrink-0 text-muted-foreground">{count}</span>
           </div>
         ))}
       </div>
@@ -329,7 +329,7 @@ function ErrorLog({
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Errors ({errors.length})
       </h3>
@@ -342,9 +342,9 @@ function ErrorLog({
           >
             <div className="flex items-center gap-1.5 text-[11px]">
               <span className="font-medium text-red-400">{err.toolName}</span>
-              <span className="text-zinc-600">Turn {err.turnIndex + 1}</span>
+              <span className="text-muted-foreground">Turn {err.turnIndex + 1}</span>
             </div>
-            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">
+            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
               {err.message}
             </div>
           </button>
@@ -514,7 +514,7 @@ function BackgroundServers({
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Active Servers ({tasks.length})
       </h3>
@@ -540,7 +540,7 @@ function BackgroundServers({
               >
                 <div className="flex items-center gap-1.5">
                   <Server className="size-3 shrink-0 text-green-400" />
-                  <span className="truncate text-[11px] font-medium text-zinc-300">
+                  <span className="truncate text-[11px] font-medium text-foreground">
                     {title}
                   </span>
                 </div>
@@ -555,10 +555,10 @@ function BackgroundServers({
                     <span
                       className={cn(
                         "inline-block size-1.5 rounded-full",
-                        task.portStatus[port] ? "bg-green-400" : "bg-zinc-600"
+                        task.portStatus[port] ? "bg-green-400" : "bg-muted"
                       )}
                     />
-                    <span className={task.portStatus[port] ? "text-green-400" : "text-zinc-500"}>
+                    <span className={task.portStatus[port] ? "text-green-400" : "text-muted-foreground"}>
                       :{port}
                     </span>
                   </span>
@@ -568,7 +568,7 @@ function BackgroundServers({
 
                 {task.outputPath && (
                   <button
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-elevation-2 hover:text-zinc-300"
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
                     onClick={() => onToggleServer?.(task.id, task.outputPath!, title)}
                     title="View server output"
                     aria-label="View server output"
@@ -611,7 +611,7 @@ function TurnNavigator({
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Turns ({turns.length})
       </h3>
@@ -630,11 +630,11 @@ function TurnNavigator({
                 className={cn(
                   "group flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
                   isActive
-                    ? "bg-elevation-2 text-zinc-200"
-                    : "text-zinc-400 hover:bg-elevation-1 hover:text-zinc-300"
+                    ? "bg-elevation-2 text-foreground"
+                    : "text-muted-foreground hover:bg-elevation-1 hover:text-foreground"
                 )}
               >
-                <span className="mt-0.5 shrink-0 text-[10px] font-mono text-zinc-600">
+                <span className="mt-0.5 shrink-0 text-[10px] font-mono text-muted-foreground">
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs">
@@ -702,7 +702,7 @@ function ToolCallIndex({
 
   return (
     <section>
-      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
         Tool Calls
       </h3>
@@ -713,7 +713,7 @@ function ToolCallIndex({
             return (
               <Collapsible key={name}>
                 <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">
-                  <ChevronRight className="size-3 shrink-0 text-zinc-600 transition-transform [[data-state=open]>&]:rotate-90" />
+                  <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-state=open]>&]:rotate-90" />
                   <span className={cn("font-medium", colorClass)}>{name}</span>
                   <Badge
                     variant="secondary"
@@ -734,7 +734,7 @@ function ToolCallIndex({
                             "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors",
                             tc.isError
                               ? "text-red-400 hover:bg-red-950/30"
-                              : "text-zinc-500 hover:bg-elevation-2 hover:text-zinc-300"
+                              : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
                           )}
                         >
                           {tc.isError && (
@@ -747,7 +747,7 @@ function ToolCallIndex({
                       )
                     })}
                     {group.calls.length > 50 && (
-                      <div className="px-1.5 py-0.5 text-[10px] text-zinc-600">
+                      <div className="px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         +{group.calls.length - 50} more
                       </div>
                     )}
@@ -806,7 +806,7 @@ export function StatsPanel({
       {onSearchChange && (
         <div className="sticky top-0 z-10 border-b border-border/50 backdrop-blur-sm">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
               <Search className="size-3" />
               Session
             </span>
@@ -828,14 +828,14 @@ export function StatsPanel({
           </div>
           <div className="px-2 pb-2 pt-1">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 ref={searchInputRef}
                 type="text"
                 value={searchQuery ?? ""}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search..."
-                className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-zinc-300 placeholder:text-zinc-500 focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
               />
             </div>
           </div>
@@ -853,7 +853,7 @@ export function StatsPanel({
         {onModelChange && (
           <div className="rounded-lg border border-border elevation-2 depth-low p-3">
             <section>
-              <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
                 <Cpu className="size-3" />
                 Model
@@ -869,7 +869,7 @@ export function StatsPanel({
                         "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
                         isSelected
                           ? "border-blue-500 text-blue-400 bg-blue-500/10"
-                          : "border-border text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 elevation-1"
+                          : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"
                       )}
                     >
                       {opt.label}
@@ -929,11 +929,11 @@ export function StatsPanel({
       <Dialog open={showRestartDialog} onOpenChange={(open) => { if (!open && !isRestarting) setShowRestartDialog(false) }}>
         <DialogContent className="sm:max-w-md elevation-4 border-border/30">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-zinc-100">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <RotateCcw className="size-4 text-amber-400" />
               Restart session?
             </DialogTitle>
-            <DialogDescription className="text-zinc-400">
+            <DialogDescription className="text-muted-foreground">
               Applying new model or permission settings requires restarting the
               underlying Claude process. Your conversation history will be
               preserved, but the context cache will be cleared.
@@ -945,7 +945,7 @@ export function StatsPanel({
               variant="ghost"
               onClick={() => setShowRestartDialog(false)}
               disabled={isRestarting}
-              className="text-zinc-400 hover:text-zinc-200"
+              className="text-muted-foreground hover:text-foreground"
             >
               Cancel
             </Button>

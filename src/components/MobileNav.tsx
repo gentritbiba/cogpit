@@ -45,7 +45,7 @@ export const MobileNav = memo(function MobileNav({
               "active:scale-95 active:bg-elevation-2",
               isActive
                 ? "text-blue-400"
-                : "text-zinc-500"
+                : "text-muted-foreground"
             )}
           >
             <div className="relative">

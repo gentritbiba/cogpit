@@ -46,14 +46,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-blue-400">User</span>
           {timestamp && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-muted-foreground">
               {new Date(timestamp).toLocaleTimeString()}
             </span>
           )}
           {hasTags && (
             <button
               onClick={() => setShowRaw(!showRaw)}
-              className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
             >
               {showRaw ? (
                 <>
@@ -88,14 +88,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
         )}
 
         {visibleText && (
-          <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-zinc-300 [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400">
+          <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-foreground [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400">
             <ReactMarkdown>{visibleText}</ReactMarkdown>
           </div>
         )}
         {displayText.length > 500 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="mt-1 text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+            className="mt-1 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
           >
             {expanded ? (
               <>

@@ -22,14 +22,14 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
         className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-elevation-2"
       >
         {collapsed ? (
-          <ChevronUp className="size-3 text-zinc-500" />
+          <ChevronUp className="size-3 text-muted-foreground" />
         ) : (
-          <ChevronDown className="size-3 text-zinc-500" />
+          <ChevronDown className="size-3 text-muted-foreground" />
         )}
-        <span className="text-[11px] font-medium text-zinc-400">
+        <span className="text-[11px] font-medium text-muted-foreground">
           TODOs
         </span>
-        <span className="text-[10px] font-mono tabular-nums text-zinc-500">
+        <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
           {completed}/{total}
         </span>
 
@@ -71,16 +71,16 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                 ) : todo.status === "in_progress" ? (
                   <Loader2 className="size-3 shrink-0 text-blue-400 animate-spin" />
                 ) : (
-                  <Circle className="size-3 shrink-0 text-zinc-600" />
+                  <Circle className="size-3 shrink-0 text-muted-foreground" />
                 )}
                 <span
                   className={cn(
                     "text-[11px] truncate",
                     todo.status === "completed"
-                      ? "text-zinc-500 line-through"
+                      ? "text-muted-foreground line-through"
                       : todo.status === "in_progress"
                         ? "text-blue-300"
-                        : "text-zinc-400"
+                        : "text-muted-foreground"
                   )}
                 >
                   {todo.content}

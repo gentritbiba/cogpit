@@ -53,8 +53,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             <Lock className="size-5 text-blue-400" />
           </div>
           <div className="text-center">
-            <h1 className="text-lg font-semibold text-zinc-100">Cogpit</h1>
-            <p className="text-sm text-zinc-500">Enter the password to connect</p>
+            <h1 className="text-lg font-semibold text-foreground">Cogpit</h1>
+            <p className="text-sm text-muted-foreground">Enter the password to connect</p>
           </div>
         </div>
 
@@ -64,13 +64,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            className="pr-10 bg-elevation-1 border-border/70 focus:border-zinc-600"
+            className="pr-10 bg-elevation-1 border-border/70 focus:border-border"
             autoFocus
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </button>

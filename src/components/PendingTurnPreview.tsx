@@ -24,7 +24,7 @@ export function PendingTurnPreview({
     <div className="group relative py-6 px-4">
       {/* Turn header */}
       <div className="flex items-center gap-2 mb-4">
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/70 text-[10px] font-mono text-zinc-400 shrink-0">
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/70 text-[10px] font-mono text-muted-foreground shrink-0">
           {turnNumber}
         </div>
       </div>
@@ -43,11 +43,11 @@ export function PendingTurnPreview({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-xs font-medium text-blue-400">User</span>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-muted-foreground">
                   {new Date().toLocaleTimeString()}
                 </span>
               </div>
-              <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden">
+              <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden">
                 {message}
               </div>
             </div>
@@ -55,11 +55,11 @@ export function PendingTurnPreview({
         </div>
 
         {/* Agent working indicator */}
-        <div className="flex items-center gap-2 text-zinc-500">
+        <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="size-3.5 animate-spin text-blue-400" />
           <span className="text-xs">{statusText}</span>
           {elapsedSec !== undefined && elapsedSec > 0 && (
-            <span className="text-[10px] font-mono tabular-nums text-zinc-600">
+            <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
               {formatElapsed(elapsedSec)}
             </span>
           )}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/cogpit.svg" />
@@ -8,10 +8,21 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#09090b" />
     <title>Cogpit - Claude Code Session Dashboard</title>
-    <script>if(navigator.userAgent.includes('Electron'))document.documentElement.classList.add('electron')</script>
+    <script>
+      // FOUC prevention: apply theme class before first paint
+      (function(){
+        var t='dark';try{t=localStorage.getItem('cogpit-theme')||'dark'}catch(e){}
+        if(t==='dark'||t==='oled')document.documentElement.classList.add('dark');
+        if(t==='oled')document.documentElement.classList.add('theme-oled');
+        if(navigator.userAgent.includes('Electron'))document.documentElement.classList.add('electron');
+        var m=document.querySelector('meta[name="theme-color"]');
+        if(m)m.setAttribute('content',t==='light'?'#fafafa':'#09090b');
+      })();
+    </script>
     <style>
       html, body, #root { height: 100%; height: 100dvh; margin: 0; overflow: hidden; }
-      body { background: #09090b; color: #fafafa; }
+      .dark body { background: #09090b; color: #fafafa; }
+      body { background: #fafafa; color: #09090b; }
     </style>
   </head>
   <body>

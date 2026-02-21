@@ -91,7 +91,7 @@ export function DesktopHeader({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="truncate max-w-[220px] text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                  className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
                   onClick={copyResumeCmd}
                 >
                   {copied ? (
@@ -106,7 +106,7 @@ export function DesktopHeader({
               <TooltipContent className="text-xs space-y-1">
                 <div>Click to copy resume command</div>
                 {session.cwd && (
-                  <div className="font-mono text-zinc-400">{session.cwd}</div>
+                  <div className="font-mono text-muted-foreground">{session.cwd}</div>
                 )}
               </TooltipContent>
             </Tooltip>
@@ -121,7 +121,7 @@ export function DesktopHeader({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-5 w-5 p-0 text-zinc-500 hover:text-zinc-200"
+                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
                   onClick={copyResumeCmd}
                   aria-label={copied ? "Copied!" : "Copy resume command"}
                 >
@@ -149,7 +149,7 @@ export function DesktopHeader({
           <TooltipTrigger asChild>
             <button
               onClick={copyNetworkUrl}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 hover:bg-elevation-2 transition-colors mr-1"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
             >
               <Globe className="size-3 text-green-500" />
               {urlCopied ? (
@@ -164,7 +164,7 @@ export function DesktopHeader({
       ) : networkAccessDisabled ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-600 mr-1">
+            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1">
               <WifiOff className="size-3" />
               <span>Network off</span>
             </div>
@@ -179,7 +179,7 @@ export function DesktopHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-200"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
               onClick={onOpenSettings}
               aria-label="Settings"
             >
@@ -193,7 +193,7 @@ export function DesktopHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
               onClick={onKillAll}
               disabled={killing}
               aria-label="Kill all Claude processes"

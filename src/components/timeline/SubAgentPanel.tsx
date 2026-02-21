@@ -58,14 +58,14 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
             </span>
           )
         })}
-        <span className="text-[10px] text-zinc-500">
+        <span className="text-[10px] text-muted-foreground">
           ({messages.length} message{messages.length > 1 ? "s" : ""})
         </span>
         <span className="ml-auto">
           {isOpen ? (
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
           ) : (
-            <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           )}
         </span>
       </button>
@@ -110,7 +110,7 @@ function SubAgentMessageItem({
               {message.thinking.map((t, i) => (
                 <pre
                   key={i}
-                  className="text-[11px] text-zinc-500 font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto"
+                  className="text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto"
                 >
                   {t}
                 </pre>
@@ -122,7 +122,7 @@ function SubAgentMessageItem({
         {message.text.length > 0 && (
           <div className="flex gap-2 items-start">
             <Cog className="w-3.5 h-3.5 text-green-400 mt-0.5 shrink-0" />
-            <div className="prose prose-invert prose-xs max-w-none text-zinc-300 text-xs break-words">
+            <div className="prose dark:prose-invert prose-xs max-w-none text-foreground text-xs break-words">
               <ReactMarkdown>{message.text.join("\n\n")}</ReactMarkdown>
             </div>
           </div>

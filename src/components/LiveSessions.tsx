@@ -173,13 +173,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+        <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
           <Activity className="size-3" />
           Live & Recent
         </span>
         <div className="flex items-center gap-1">
           {processes.length > 0 && (
-            <span className="text-[10px] text-zinc-500 mr-1">
+            <span className="text-[10px] text-muted-foreground mr-1">
               {processes.length} proc{processes.length !== 1 ? "s" : ""}
             </span>
           )}
@@ -200,25 +200,25 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       {/* Search bar */}
       <div className="shrink-0 px-2 pb-2 pt-1">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-zinc-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search sessions & prompts…"
-            className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-zinc-300 placeholder:text-zinc-500 focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
           />
           {searchQuery && !searching && (
             <button
               onClick={() => { setSearchQuery(""); searchInputRef.current?.focus() }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <X className="size-3" />
             </button>
           )}
           {searching && (
-            <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-zinc-500" />
+            <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-muted-foreground" />
           )}
         </div>
       </div>
@@ -242,15 +242,15 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             <div className="px-3 py-8 text-center">
               {debouncedSearch ? (
                 <>
-                  <Search className="size-5 mx-auto mb-2 text-zinc-700" />
-                  <p className="text-xs text-zinc-600">No sessions match "{debouncedSearch}"</p>
-                  <p className="text-[10px] text-zinc-700 mt-1">Try a different search term</p>
+                  <Search className="size-5 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">No sessions match "{debouncedSearch}"</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Try a different search term</p>
                 </>
               ) : (
                 <>
-                  <Activity className="size-5 mx-auto mb-2 text-zinc-700" />
-                  <p className="text-xs text-zinc-600">No active sessions</p>
-                  <p className="text-[10px] text-zinc-700 mt-1">Start Claude Code to see sessions here</p>
+                  <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground">No active sessions</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Start Claude Code to see sessions here</p>
                 </>
               )}
             </div>
@@ -258,7 +258,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
           {loading && sessions.length === 0 && (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-5 animate-spin text-zinc-500" />
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           )}
 
@@ -291,27 +291,24 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                         <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                       </>
                     ) : (
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-zinc-600" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
                     )}
                   </span>
-                  <span className={cn(
-                    "text-xs font-medium truncate flex-1",
-                    isActiveSession ? "text-zinc-100" : "text-zinc-300"
-                  )}>
+                  <span className="text-xs font-medium truncate flex-1 text-foreground">
                     {s.lastUserMessage || s.firstUserMessage || s.slug || truncate(s.sessionId, 16)}
                   </span>
                   {hasProcess && proc ? (
                     <button
                       onClick={(e) => handleKill(proc.pid, e)}
                       disabled={killingPids.has(proc.pid)}
-                      className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 disabled:opacity-50"
+                      className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 disabled:opacity-50"
                       title={`Kill PID ${proc.pid} (${proc.memMB} MB)`}
                       aria-label={`Kill process ${proc.pid}`}
                     >
                       <X className="size-3" />
                     </button>
                   ) : (
-                    <span className="font-mono text-xs text-zinc-500 shrink-0">
+                    <span className="font-mono text-xs text-muted-foreground shrink-0">
                       #{s.sessionId.slice(0, 5)}
                     </span>
                   )}
@@ -320,7 +317,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 {/* Project name */}
                 <div className={cn(
                   "ml-5.5 text-[10px]",
-                  isActiveSession ? "text-blue-400/70" : "text-zinc-600"
+                  isActiveSession ? "text-blue-400/70" : "text-muted-foreground"
                 )}>
                   {shortPath(s.cwd ?? dirNameToPath(s.dirName), 2)}
                 </div>
@@ -333,10 +330,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 )}
 
                 {/* Meta row */}
-                <div className={cn(
-                  "ml-5.5 flex items-center gap-2 text-[10px] flex-wrap",
-                  isActiveSession ? "text-zinc-400" : "text-zinc-600"
-                )}>
+                <div className="ml-5.5 flex items-center gap-2 text-[10px] flex-wrap text-muted-foreground">
                   {(s.turnCount ?? 0) > 0 && (
                     <span className="flex items-center gap-0.5">
                       <MessageSquare className="size-2.5" />
@@ -389,7 +383,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
           {unmatchedProcs.length > 0 && (
             <>
               <div className="px-2.5 pt-3 pb-1">
-                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                   Running Processes ({unmatchedProcs.length})
                 </span>
               </div>
@@ -402,10 +396,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                   </span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs text-zinc-300 truncate">
+                    <div className="text-xs text-foreground truncate">
                       {describeProcess(p)}
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-zinc-600">
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="flex items-center gap-0.5">
@@ -423,7 +417,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                   <button
                     onClick={(e) => handleKill(p.pid, e)}
                     disabled={killingPids.has(p.pid)}
-                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-red-500/20 text-zinc-500 hover:text-red-400 disabled:opacity-50"
+                    className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 disabled:opacity-50"
                     title={`Kill PID ${p.pid}`}
                     aria-label={`Kill process ${p.pid}`}
                   >

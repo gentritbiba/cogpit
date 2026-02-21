@@ -12,7 +12,7 @@ export function UndoRedoBar({ redoTurnCount, onRedoAll }: UndoRedoBarProps) {
   return (
     <div className="sticky bottom-0 z-20 flex items-center justify-center px-4 py-2">
       <div className="flex items-center gap-3 rounded-full border border-border/70 elevation-3 glass px-4 py-2">
-        <div className="flex items-center gap-1.5 text-sm text-zinc-400">
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <RotateCcw className="size-3.5 text-amber-400" />
           <span className="font-mono">{redoTurnCount}</span>
           <span>turn{redoTurnCount !== 1 ? "s" : ""} archived</span>

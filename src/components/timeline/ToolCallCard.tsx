@@ -26,7 +26,7 @@ const TOOL_BADGE_STYLES: Record<string, string> = {
   AskUserQuestion: "bg-pink-500/20 text-pink-400 border-pink-500/30",
 }
 
-const DEFAULT_BADGE_STYLE = "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+const DEFAULT_BADGE_STYLE = "bg-muted/20 text-muted-foreground border-muted-foreground/30"
 
 export function getToolBadgeStyle(name: string): string {
   return TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
@@ -111,7 +111,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       className={cn(
         "rounded-md border p-2.5 elevation-1 card-hover",
         toolCall.isError
-          ? "border-red-500/30 bg-red-950/20"
+          ? "border-red-500/30 bg-red-50 dark:bg-red-950/20"
           : "border-border/40"
       )}
     >
@@ -127,14 +127,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             {toolCall.name}
           </Badge>
           {summary && (
-            <span className="text-xs text-zinc-400 truncate font-mono">
+            <span className="text-xs text-muted-foreground truncate font-mono">
               {summary}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {toolCall.timestamp && (
-            <span className="text-[10px] text-zinc-500 font-mono tabular-nums">
+            <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
               {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
@@ -156,7 +156,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               "text-[10px] flex items-center gap-0.5 transition-colors",
               showDiff
                 ? "text-amber-400"
-                : "text-zinc-500 hover:text-zinc-300"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
             {showDiff ? (
@@ -169,7 +169,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         )}
         <button
           onClick={() => setInputOpen(!inputOpen)}
-          className="text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-0.5 transition-colors"
+          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
         >
           {showInput ? (
             <ChevronDown className="w-3 h-3" />
@@ -181,7 +181,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         {toolCall.result !== null && (
           <button
             onClick={() => setResultOpen(!resultOpen)}
-            className="text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-0.5 transition-colors"
+            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
           >
             {showResult ? (
               <ChevronDown className="w-3 h-3" />
@@ -202,7 +202,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       )}
 
       {showInput && (
-        <pre className="mt-1.5 text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-all bg-elevation-0 rounded p-2 max-h-64 overflow-y-auto border border-border/30">
+        <pre className="mt-1.5 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all bg-elevation-0 rounded p-2 max-h-64 overflow-y-auto border border-border/30">
           {JSON.stringify(toolCall.input, null, 2)}
         </pre>
       )}
@@ -213,8 +213,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             className={cn(
               "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
               toolCall.isError
-                ? "text-red-300 bg-red-950/30 border-red-500/20"
-                : "text-zinc-400 bg-elevation-0 border-border/30"
+                ? "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border-red-500/20"
+                : "text-muted-foreground bg-elevation-0 border-border/30"
             )}
           >
             {visibleResult}
@@ -222,7 +222,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           {isLongResult && (
             <button
               onClick={() => setResultExpanded(!resultExpanded)}
-              className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >
               {resultExpanded ? "Show less" : "Show more"}
             </button>

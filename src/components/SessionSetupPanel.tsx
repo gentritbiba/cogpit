@@ -26,7 +26,7 @@ export function SessionSetupPanel({
         {onModelChange && (
           <div className="rounded-lg border border-border p-3">
             <section>
-              <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
                 <Cpu className="size-3" />
                 Model
@@ -42,7 +42,7 @@ export function SessionSetupPanel({
                         "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
                         isSelected
                           ? "border-blue-500 text-blue-400 bg-blue-500/10"
-                          : "border-border text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 elevation-1"
+                          : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"
                       )}
                     >
                       {opt.label}

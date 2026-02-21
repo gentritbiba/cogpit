@@ -87,10 +87,10 @@ describe("getMemberBorderClass", () => {
   })
 
   it("returns fallback for undefined color", () => {
-    expect(getMemberBorderClass(undefined)).toBe("border-zinc-700")
+    expect(getMemberBorderClass(undefined)).toBe("border-border")
   })
 
   it("returns fallback for unknown color", () => {
-    expect(getMemberBorderClass("cyan")).toBe("border-zinc-700")
+    expect(getMemberBorderClass("cyan")).toBe("border-border")
   })
 })
