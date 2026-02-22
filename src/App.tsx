@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
+import { WorktreePanel } from "@/components/WorktreePanel"
 import { SessionSetupPanel } from "@/components/SessionSetupPanel"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamsDashboard } from "@/components/TeamsDashboard"
@@ -39,6 +40,7 @@ import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
 import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
+import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
@@ -63,6 +65,7 @@ export default function App() {
   // Local UI state
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(true)
+  const [showWorktrees, setShowWorktrees] = useState(false)
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -87,6 +90,12 @@ export default function App() {
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
+
+  // Derive the current project dirName from session, pending session, or dashboard selection
+  const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
+
+  // Worktree data — only fetched when panel is open
+  const worktreeData = useWorktrees(showWorktrees ? currentDirName : null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -731,12 +740,14 @@ export default function App() {
         isLive={isLive}
         showSidebar={showSidebar}
         showStats={showStats}
+        showWorktrees={showWorktrees}
         killing={killing}
         networkUrl={config.networkUrl}
         networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
         onToggleStats={() => setShowStats(!showStats)}
+        onToggleWorktrees={() => setShowWorktrees((p) => !p)}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
@@ -875,6 +886,21 @@ export default function App() {
             onModelChange={setSelectedModel}
             hasSettingsChanges={hasSettingsChanges}
             onApplySettings={handleApplySettings}
+          />
+        )}
+
+        {showWorktrees && (
+          <WorktreePanel
+            worktrees={worktreeData.worktrees}
+            loading={worktreeData.loading}
+            dirName={currentDirName}
+            onRefetch={worktreeData.refetch}
+            onOpenSession={(sessionId) => {
+              // sessionId is a JSONL filename without extension; navigate to it
+              if (currentDirName) {
+                actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
+              }
+            }}
           />
         )}
       </div>

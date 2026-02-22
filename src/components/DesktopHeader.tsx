@@ -11,6 +11,7 @@ import {
   Settings,
   Globe,
   WifiOff,
+  GitBranch,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,12 +27,14 @@ interface DesktopHeaderProps {
   isLive: boolean
   showSidebar: boolean
   showStats: boolean
+  showWorktrees?: boolean
   killing: boolean
   networkUrl: string | null
   networkAccessDisabled: boolean
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
+  onToggleWorktrees?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
 }
@@ -41,12 +44,14 @@ export function DesktopHeader({
   isLive,
   showSidebar,
   showStats,
+  showWorktrees,
   killing,
   networkUrl,
   networkAccessDisabled,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
+  onToggleWorktrees,
   onKillAll,
   onOpenSettings,
 }: DesktopHeaderProps) {
@@ -203,6 +208,22 @@ export function DesktopHeader({
           </TooltipTrigger>
           <TooltipContent>Kill all Claude processes</TooltipContent>
         </Tooltip>
+        {onToggleWorktrees && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 w-7 p-0", showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+                onClick={onToggleWorktrees}
+                aria-label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
+              >
+                <GitBranch className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{showWorktrees ? "Hide Worktrees" : "Show Worktrees"}</TooltipContent>
+          </Tooltip>
+        )}
         {session && (
           <Tooltip>
             <TooltipTrigger asChild>
