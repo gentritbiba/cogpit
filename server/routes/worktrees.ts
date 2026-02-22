@@ -1,5 +1,6 @@
 import { execSync, execFileSync } from "node:child_process"
 import { statSync } from "node:fs"
+import { resolve, dirname } from "node:path"
 import {
   dirs,
   isWithinDir,
@@ -70,12 +71,16 @@ async function resolveProjectPath(projectDir: string, dirName: string): Promise<
   return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
-function getGitRoot(projectPath: string): string | null {
+function getMainWorktreeRoot(projectPath: string): string | null {
   try {
-    return execSync("git rev-parse --show-toplevel", {
+    const commonDir = execSync("git rev-parse --git-common-dir", {
       cwd: projectPath,
       encoding: "utf-8",
     }).trim()
+    // --git-common-dir returns the path to the shared .git directory.
+    // From main repo: ".git" (relative). From worktree: absolute or relative path to main .git.
+    // Resolving it and taking dirname gives the main repo root.
+    return dirname(resolve(projectPath, commonDir))
   } catch {
     return null
   }
@@ -110,7 +115,7 @@ export function registerWorktreeRoutes(use: UseFn) {
       }
 
       const projectPath = await resolveProjectPath(projectDir, dirName)
-      const gitRoot = getGitRoot(projectPath)
+      const gitRoot = getMainWorktreeRoot(projectPath)
 
       if (!gitRoot) {
         res.setHeader("Content-Type", "application/json")
@@ -225,7 +230,7 @@ export function registerWorktreeRoutes(use: UseFn) {
       }
 
       const projectPath = await resolveProjectPath(projectDir, dirName)
-      const gitRoot = getGitRoot(projectPath)
+      const gitRoot = getMainWorktreeRoot(projectPath)
 
       if (!gitRoot) {
         res.statusCode = 400
@@ -280,7 +285,7 @@ export function registerWorktreeRoutes(use: UseFn) {
       }
 
       const projectPath = await resolveProjectPath(projectDir, dirName)
-      const gitRoot = getGitRoot(projectPath)
+      const gitRoot = getMainWorktreeRoot(projectPath)
 
       if (!gitRoot) {
         res.statusCode = 400
@@ -350,7 +355,7 @@ export function registerWorktreeRoutes(use: UseFn) {
       }
 
       const projectPath = await resolveProjectPath(projectDir, dirName)
-      const gitRoot = getGitRoot(projectPath)
+      const gitRoot = getMainWorktreeRoot(projectPath)
 
       if (!gitRoot) {
         res.statusCode = 400

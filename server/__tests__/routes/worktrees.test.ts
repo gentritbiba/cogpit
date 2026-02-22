@@ -94,7 +94,7 @@ describe("GET /api/worktrees/:dirName", () => {
 
     // execSync is used for: git rev-parse, git symbolic-ref, git worktree list --porcelain
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
       if (cmd.includes("symbolic-ref")) throw new Error("no remote")
       if (cmd.includes("worktree list --porcelain")) {
         return (
@@ -133,7 +133,7 @@ describe("GET /api/worktrees/:dirName", () => {
     mockedIsWithinDir.mockReturnValue(true)
 
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) throw new Error("not a git repo")
+      if (cmd.includes("git-common-dir")) throw new Error("not a git repo")
       return ""
     })
 
@@ -167,6 +167,60 @@ describe("GET /api/worktrees/:dirName", () => {
 
     expect(next).toHaveBeenCalled()
   })
+
+  it("normalizes worktree cwd to main repo root via --git-common-dir", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+
+    // resolveProjectPath will read a session JSONL whose cwd is a worktree dir
+    const mockFh = { read: vi.fn().mockResolvedValue({ bytesRead: 100 }), close: vi.fn() }
+    const cwdJson = JSON.stringify({ cwd: "/repo/.claude/worktrees/fix-auth" })
+    mockFh.read.mockImplementation((_buf: Buffer) => {
+      const b = Buffer.from(cwdJson + "\n")
+      b.copy(_buf)
+      return Promise.resolve({ bytesRead: b.length })
+    })
+    const { open } = await import("../../helpers")
+    vi.mocked(open).mockResolvedValue(mockFh as any)
+    mockedReaddir.mockResolvedValue(["session1.jsonl"] as any)
+
+    mockedExecSync.mockImplementation((cmd: string) => {
+      // --git-common-dir from worktree returns path to main .git
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
+      if (cmd.includes("symbolic-ref")) throw new Error("no remote")
+      if (cmd.includes("worktree list --porcelain")) {
+        return (
+          "worktree /repo/.claude/worktrees/fix-auth\n" +
+          "HEAD abc1234\n" +
+          "branch refs/heads/worktree-fix-auth\n\n"
+        )
+      }
+      return ""
+    })
+
+    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+      const a = args as string[]
+      if (cmd === "git" && a.includes("status")) return ""
+      if (cmd === "git" && a.includes("rev-list")) return "1\n"
+      if (cmd === "git" && a.includes("log")) return "fix auth\n"
+      if (cmd === "git" && a.includes("diff")) return ""
+      return ""
+    })
+
+    const { req, res } = createMockReqRes("GET", "/test-project")
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(200)
+    const data = JSON.parse(res._getData())
+    expect(data).toHaveLength(1)
+    expect(data[0].name).toBe("fix-auth")
+
+    // Verify --git-common-dir was called (not --show-toplevel)
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      expect.stringContaining("git-common-dir"),
+      expect.any(Object)
+    )
+  })
 })
 
 describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
@@ -198,7 +252,7 @@ describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
     mockedReaddir.mockResolvedValue([] as any)
 
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
       return ""
     })
     mockedExecFileSync.mockReturnValue("" as any)
@@ -229,7 +283,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedReaddir.mockResolvedValue([] as any)
 
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
       return ""
     })
 
@@ -247,7 +301,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedReaddir.mockResolvedValue([] as any)
 
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
       return ""
     })
 
@@ -269,7 +323,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedReaddir.mockResolvedValue([] as any)
 
     mockedExecSync.mockImplementation((cmd: string) => {
-      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      if (cmd.includes("git-common-dir")) return "/repo/.git\n"
       return ""
     })
     mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
