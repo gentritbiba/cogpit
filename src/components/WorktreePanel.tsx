@@ -6,14 +6,29 @@ import {
   ExternalLink,
   RefreshCw,
   Sparkles,
+  ChevronRight,
+  FileCode2,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
 import type { WorktreeInfo } from "../../server/helpers"
 
 interface WorktreePanelProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   worktrees: WorktreeInfo[]
   loading: boolean
   dirName: string | null
@@ -21,7 +36,16 @@ interface WorktreePanelProps {
   onOpenSession: (sessionId: string) => void
 }
 
+const statusColors: Record<string, string> = {
+  M: "text-amber-400",
+  A: "text-emerald-400",
+  D: "text-red-400",
+  R: "text-blue-400",
+}
+
 export function WorktreePanel({
+  open,
+  onOpenChange,
   worktrees,
   loading,
   dirName,
@@ -109,111 +133,156 @@ export function WorktreePanel({
     setCleaningUp(false)
   }
 
-  if (!dirName) {
-    return (
-      <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Select a project to view worktrees
-      </div>
-    )
-  }
-
   return (
-    <div className="flex flex-col h-full w-72 shrink-0 border-l border-border bg-elevation-0">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h2 className="text-sm font-medium flex items-center gap-2">
-          <GitBranch className="size-4" />
-          Worktrees
-        </h2>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={handleCleanup}
-            disabled={cleaningUp}
-            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
-            title="Cleanup stale worktrees"
-          >
-            <Sparkles className="size-3.5" />
-          </button>
-          <button
-            onClick={onRefetch}
-            disabled={loading}
-            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-          </button>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent>
+        <SheetHeader>
+          <div className="flex items-center justify-between pr-8">
+            <SheetTitle className="flex items-center gap-2">
+              <GitBranch className="size-4" />
+              Worktrees
+            </SheetTitle>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleCleanup}
+                disabled={cleaningUp}
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
+                title="Cleanup stale worktrees"
+              >
+                <Sparkles className="size-3.5" />
+              </button>
+              <button
+                onClick={onRefetch}
+                disabled={loading}
+                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+              </button>
+            </div>
+          </div>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {!dirName && (
+            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+              Select a project to view worktrees
+            </div>
+          )}
+
+          {dirName && worktrees.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <GitBranch className="size-8 mb-2 opacity-40" />
+              <p className="text-sm">No worktrees</p>
+              <p className="text-xs mt-1 text-center px-4">
+                Create a new session with &ldquo;Isolate in worktree&rdquo; enabled
+              </p>
+            </div>
+          )}
+
+          {worktrees.map((wt) => {
+            const totalAdded = wt.changedFiles?.reduce((s, f) => s + f.additions, 0) ?? 0
+            const totalDeleted = wt.changedFiles?.reduce((s, f) => s + f.deletions, 0) ?? 0
+            const fileCount = wt.changedFiles?.length ?? 0
+
+            return (
+              <div
+                key={wt.name}
+                className="rounded-lg border border-border p-3 hover:bg-elevation-1/50 transition-colors"
+              >
+                {/* Header row */}
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium text-foreground truncate">{wt.name}</span>
+                    {wt.isDirty && (
+                      <span className="flex h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Uncommitted changes" />
+                    )}
+                    {wt.commitsAhead > 0 && (
+                      <Badge variant="outline" className="h-4 px-1 text-[9px] shrink-0">
+                        {wt.commitsAhead} ahead
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {wt.linkedSessions.length > 0 && (
+                      <button
+                        onClick={() => onOpenSession(wt.linkedSessions[0])}
+                        className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors"
+                        title="Open session"
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleCreatePr(wt)}
+                      disabled={creatingPr === wt.name || wt.commitsAhead === 0}
+                      className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors disabled:opacity-30"
+                      title="Create PR"
+                    >
+                      <GitPullRequest className="size-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(wt)}
+                      disabled={deleting === wt.name}
+                      className="rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Delete worktree"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Commit info */}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="font-mono shrink-0">{wt.head}</span>
+                  <span className="truncate">{wt.headMessage}</span>
+                </div>
+
+                {wt.createdAt && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    {formatRelativeTime(wt.createdAt)}
+                  </div>
+                )}
+
+                {/* File changes accordion */}
+                {fileCount > 0 && (
+                  <Collapsible className="mt-2">
+                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors group w-full">
+                      <ChevronRight className="size-3 transition-transform group-data-[state=open]:rotate-90" />
+                      <FileCode2 className="size-3" />
+                      <span>
+                        {fileCount} file{fileCount !== 1 ? "s" : ""} changed
+                      </span>
+                      <span className="ml-1">
+                        <span className="text-emerald-400">+{totalAdded}</span>
+                        {" "}
+                        <span className="text-red-400">-{totalDeleted}</span>
+                      </span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="mt-1.5 space-y-px rounded-md border border-border/50 bg-elevation-1/50 p-1.5">
+                        {wt.changedFiles.map((f) => (
+                          <div key={f.path} className="flex items-center gap-2 text-[10px] font-mono py-0.5 px-1">
+                            <span className={cn("shrink-0 w-3 text-center", statusColors[f.status] ?? "text-muted-foreground")}>
+                              {f.status}
+                            </span>
+                            <span className="truncate text-foreground/80">{f.path}</span>
+                            <span className="ml-auto shrink-0 text-muted-foreground">
+                              <span className="text-emerald-400/70">+{f.additions}</span>
+                              {" "}
+                              <span className="text-red-400/70">-{f.deletions}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+              </div>
+            )
+          })}
         </div>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {worktrees.length === 0 && !loading && (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <GitBranch className="size-8 mb-2 opacity-40" />
-            <p className="text-sm">No worktrees</p>
-            <p className="text-xs mt-1 text-center px-4">Create a new session with "Isolate in worktree" enabled</p>
-          </div>
-        )}
-
-        {worktrees.map((wt) => (
-          <div
-            key={wt.name}
-            className="rounded-lg border border-border p-3 hover:bg-elevation-1 transition-colors"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm font-medium text-foreground truncate">{wt.name}</span>
-                {wt.isDirty && (
-                  <span className="flex h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Has uncommitted changes" />
-                )}
-                {wt.commitsAhead > 0 && (
-                  <Badge variant="outline" className="h-4 px-1 text-[9px] shrink-0">
-                    {wt.commitsAhead} ahead
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {wt.linkedSessions.length > 0 && (
-                  <button
-                    onClick={() => onOpenSession(wt.linkedSessions[0])}
-                    className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors"
-                    title="Open session"
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </button>
-                )}
-                <button
-                  onClick={() => handleCreatePr(wt)}
-                  disabled={creatingPr === wt.name || wt.commitsAhead === 0}
-                  className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors disabled:opacity-30"
-                  title="Create PR"
-                >
-                  <GitPullRequest className="size-3.5" />
-                </button>
-                <button
-                  onClick={() => handleDelete(wt)}
-                  disabled={deleting === wt.name}
-                  className="rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  title="Delete worktree"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-              <span className="font-mono shrink-0">{wt.head}</span>
-              <span className="truncate">{wt.headMessage}</span>
-            </div>
-
-            {wt.createdAt && (
-              <div className="text-[10px] text-muted-foreground mt-0.5">
-                {formatRelativeTime(wt.createdAt)}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   )
 }
