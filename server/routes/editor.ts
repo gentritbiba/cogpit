@@ -49,6 +49,54 @@ function getGitHeadContent(filePath: string): Promise<string> {
 }
 
 export function registerEditorRoutes(use: UseFn) {
+  // POST /api/reveal-in-folder — reveal a path in the OS file manager (Finder / Explorer / etc.)
+  // Body: { path: string }
+  use("/api/reveal-in-folder", async (req, res, next) => {
+    if (req.method !== "POST") return next()
+
+    let body = ""
+    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
+    req.on("end", async () => {
+      res.setHeader("Content-Type", "application/json")
+
+      try {
+        const { path } = JSON.parse(body)
+        if (!path || typeof path !== "string") {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "path string required" }))
+          return
+        }
+
+        try {
+          await stat(path)
+        } catch {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Path does not exist" }))
+          return
+        }
+
+        const os = platform()
+        try {
+          if (os === "darwin") {
+            await openWithEditor("open", ["-R", path])
+          } else if (os === "win32") {
+            await openWithEditor("explorer", [`/select,${path}`])
+          } else {
+            // Linux: open the parent directory (no universal "select" flag)
+            await openWithEditor("xdg-open", [dirname(path)])
+          }
+          res.end(JSON.stringify({ success: true }))
+        } catch {
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: "Failed to reveal path in file manager" }))
+        }
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+      }
+    })
+  })
+
   // POST /api/open-in-editor — open a file or project in the user's default code editor
   // Body: { path: string, mode?: "file" | "diff" }
   //   mode "file" (default): open the file/folder directly

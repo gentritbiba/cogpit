@@ -5,6 +5,7 @@ import {
   Plus,
   Copy,
   Code2,
+  FolderSearch,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -158,6 +159,26 @@ export function SessionInfoBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Open project in editor</TooltipContent>
+            </Tooltip>
+          )}
+          {session.cwd && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+                  onClick={() => authFetch("/api/reveal-in-folder", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ path: session.cwd }),
+                  })}
+                >
+                  <FolderSearch className="size-3" />
+                  Reveal
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Reveal in file manager</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
