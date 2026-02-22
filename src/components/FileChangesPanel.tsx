@@ -14,6 +14,7 @@ const deletedFilesCache = new Map<string, { pathsHash: string; deleted: Map<stri
 interface FileChange {
   turnIndex: number
   toolCall: ToolCall
+  agentId?: string
 }
 
 interface FileChangesPanelProps {
@@ -84,7 +85,7 @@ function openInEditor(filePath: string, mode: "file" | "diff") {
   })
 }
 
-function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { defaultOpen: boolean }) {
+function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: FileChange & { defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   const prevDefaultRef = useRef(defaultOpen)
   useEffect(() => {
@@ -129,6 +130,14 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
           <span className="text-[10px] text-muted-foreground shrink-0">
             T{turnIndex + 1}
           </span>
+          {agentId && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1 py-0 h-3.5 font-mono shrink-0 border-indigo-800/60 text-indigo-400"
+            >
+              Sub-agent
+            </Badge>
+          )}
         </button>
         <div className="flex items-center gap-0.5 pr-1.5 shrink-0">
           {filePath && (
@@ -226,19 +235,22 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     const changes: FileChange[] = []
     let add = 0
     let del = 0
+    const collectToolCall = (tc: ToolCall, turnIndex: number, agentId?: string) => {
+      if (tc.name !== "Edit" && tc.name !== "Write") return
+      changes.push({ turnIndex, toolCall: tc, agentId })
+      const isEdit = tc.name === "Edit"
+      const oldStr = isEdit ? String(tc.input.old_string ?? "") : ""
+      const newStr = isEdit
+        ? String(tc.input.new_string ?? "")
+        : String(tc.input.content ?? "")
+      const d = diffLineCount(oldStr, newStr)
+      add += d.add
+      del += d.del
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        if (tc.name === "Edit" || tc.name === "Write") {
-          changes.push({ turnIndex, toolCall: tc })
-          const isEdit = tc.name === "Edit"
-          const oldStr = isEdit ? String(tc.input.old_string ?? "") : ""
-          const newStr = isEdit
-            ? String(tc.input.new_string ?? "")
-            : String(tc.input.content ?? "")
-          const d = diffLineCount(oldStr, newStr)
-          add += d.add
-          del += d.del
-        }
+      turn.toolCalls.forEach((tc) => collectToolCall(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => collectToolCall(tc, turnIndex, msg.agentId))
       })
     })
     return { fileChanges: changes, additions: add, deletions: del }
@@ -247,29 +259,33 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // Extract absolute paths from rm/git rm Bash commands
   const rmPaths = useMemo(() => {
     const paths: { path: string; isDir: boolean; turnIndex: number }[] = []
+    const collectBashRm = (tc: ToolCall, turnIndex: number) => {
+      if (tc.name !== "Bash") return
+      const cmd = String(tc.input.command ?? "")
+      if (!cmd) return
+      // Match rm or git rm commands (possibly with flags)
+      const rmMatch = cmd.match(/^(?:rm|git\s+rm)\s/)
+      if (!rmMatch) return
+      const isDir = /\s-[a-zA-Z]*r/.test(cmd) // -r, -rf, -Rf etc.
+      // Extract quoted absolute paths
+      const quoted = cmd.matchAll(/"(\/[^"]+)"/g)
+      for (const m of quoted) {
+        paths.push({ path: m[1], isDir, turnIndex })
+      }
+      // Extract unquoted absolute paths (space-separated, no special chars)
+      const parts = cmd.replace(/"[^"]*"/g, "").split(/\s+/)
+      for (const part of parts) {
+        if (part.startsWith("/") && !part.startsWith("//")) {
+          // Strip trailing redirects like 2>/dev/null
+          const clean = part.replace(/\s*[12]?>.*$/, "")
+          if (clean) paths.push({ path: clean, isDir, turnIndex })
+        }
+      }
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        if (tc.name !== "Bash") return
-        const cmd = String(tc.input.command ?? "")
-        if (!cmd) return
-        // Match rm or git rm commands (possibly with flags)
-        const rmMatch = cmd.match(/^(?:rm|git\s+rm)\s/)
-        if (!rmMatch) return
-        const isDir = /\s-[a-zA-Z]*r/.test(cmd) // -r, -rf, -Rf etc.
-        // Extract quoted absolute paths
-        const quoted = cmd.matchAll(/"(\/[^"]+)"/g)
-        for (const m of quoted) {
-          paths.push({ path: m[1], isDir, turnIndex })
-        }
-        // Extract unquoted absolute paths (space-separated, no special chars)
-        const parts = cmd.replace(/"[^"]*"/g, "").split(/\s+/)
-        for (const part of parts) {
-          if (part.startsWith("/") && !part.startsWith("//")) {
-            // Strip trailing redirects like 2>/dev/null
-            const clean = part.replace(/\s*[12]?>.*$/, "")
-            if (clean) paths.push({ path: clean, isDir, turnIndex })
-          }
-        }
+      turn.toolCalls.forEach((tc) => collectBashRm(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => collectBashRm(tc, turnIndex))
       })
     })
     return paths
@@ -279,11 +295,13 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const { uniquePaths, rmDirs, pathsHash } = useMemo(() => {
     const paths = new Set<string>()
     const dirs: string[] = []
+    const collectPath = (tc: ToolCall) => {
+      const p = String(tc.input.file_path ?? tc.input.path ?? "")
+      if (p && p.startsWith("/")) paths.add(p)
+    }
     session.turns.forEach((turn) => {
-      turn.toolCalls.forEach((tc) => {
-        const p = String(tc.input.file_path ?? tc.input.path ?? "")
-        if (p && p.startsWith("/")) paths.add(p)
-      })
+      turn.toolCalls.forEach(collectPath)
+      turn.subAgentActivity.forEach((msg) => msg.toolCalls.forEach(collectPath))
     })
     for (const rp of rmPaths) {
       if (rp.isDir) {
@@ -300,10 +318,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // For each file path, find the last turn index that references it
   const lastTurnForFile = useMemo(() => {
     const map = new Map<string, number>()
+    const trackPath = (tc: ToolCall, turnIndex: number) => {
+      const p = String(tc.input.file_path ?? tc.input.path ?? "")
+      if (p && p.startsWith("/")) map.set(p, turnIndex)
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        const p = String(tc.input.file_path ?? tc.input.path ?? "")
-        if (p && p.startsWith("/")) map.set(p, turnIndex)
+      turn.toolCalls.forEach((tc) => trackPath(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => trackPath(tc, turnIndex))
       })
     })
     // Also add rm command turn indices
@@ -362,14 +384,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // Build unified ordered list: file changes + deleted file entries, sorted by turn index
   const renderItems = useMemo(() => {
     type RenderItem =
-      | { type: "change"; turnIndex: number; toolCall: ToolCall; key: string }
+      | { type: "change"; turnIndex: number; toolCall: ToolCall; agentId?: string; key: string }
       | { type: "deleted"; turnIndex: number; filePath: string; lines: number; key: string }
 
     const items: RenderItem[] = []
 
     // Add all Edit/Write cards
     for (const fc of fileChanges) {
-      items.push({ type: "change", turnIndex: fc.turnIndex, toolCall: fc.toolCall, key: fc.toolCall.id })
+      items.push({ type: "change", turnIndex: fc.turnIndex, toolCall: fc.toolCall, agentId: fc.agentId, key: fc.toolCall.id })
     }
 
     // Add deleted file cards (skip files already in Edit/Write list — they'll show as regular cards)
@@ -537,6 +559,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   key={item.key}
                   turnIndex={item.turnIndex}
                   toolCall={item.toolCall}
+                  agentId={item.agentId}
                   defaultOpen={allExpanded}
                 />
               ) : (

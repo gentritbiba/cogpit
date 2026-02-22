@@ -48,7 +48,8 @@ function extractTextFromContent(content: string | ContentBlock[]): string {
     .join("\n")
 }
 
-function extractToolResultText(content: string | ContentBlock[]): string {
+function extractToolResultText(content: string | ContentBlock[] | undefined | null): string {
+  if (!content) return ""
   if (typeof content === "string") return content
   return content
     .map((b) => {

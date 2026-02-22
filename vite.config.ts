@@ -23,7 +23,7 @@ export default defineConfig({
   },
   server: {
     watch: {
-      ignored: ['**/undo-history/**'],
+      ignored: ['**/undo-history/**', '**/.claude/worktrees/**'],
     },
     headers: {
       'Cross-Origin-Embedder-Policy': 'credentialless',
