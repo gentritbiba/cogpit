@@ -46,7 +46,9 @@ export function WorktreePanel({
         body: JSON.stringify({ force }),
       })
       onRefetch()
-    } catch { /* ignore */ }
+    } catch (err) {
+      alert(`Failed to delete worktree: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
     setDeleting(null)
   }
 
@@ -63,10 +65,19 @@ export function WorktreePanel({
         }),
       })
       if (res.ok) {
-        const { url } = await res.json()
-        window.open(url, "_blank")
+        const data = await res.json()
+        if (data.url) {
+          window.open(data.url, "_blank")
+        } else {
+          alert("PR created but no URL was returned")
+        }
+      } else {
+        const error = await res.json().catch(() => ({ error: "Unknown error" }))
+        alert(`Failed to create PR: ${error.error || "Unknown error"}`)
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      alert(`Error creating PR: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
     setCreatingPr(null)
   }
 
@@ -92,7 +103,9 @@ export function WorktreePanel({
           onRefetch()
         }
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      alert(`Cleanup failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    }
     setCleaningUp(false)
   }
 
