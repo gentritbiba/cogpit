@@ -15,27 +15,27 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
   const pct = total > 0 ? (completed / total) * 100 : 0
 
   return (
-    <div className="shrink-0 border-t border-zinc-800/80 bg-zinc-900/40">
+    <div className="shrink-0 border-t border-border/80 bg-elevation-1">
       {/* Header — always visible */}
       <button
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/30"
+        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-elevation-2"
       >
         {collapsed ? (
-          <ChevronUp className="size-3 text-zinc-500" />
+          <ChevronUp className="size-3 text-muted-foreground" />
         ) : (
-          <ChevronDown className="size-3 text-zinc-500" />
+          <ChevronDown className="size-3 text-muted-foreground" />
         )}
-        <span className="text-[11px] font-medium text-zinc-400">
+        <span className="text-[11px] font-medium text-muted-foreground">
           TODOs
         </span>
-        <span className="text-[10px] font-mono tabular-nums text-zinc-500">
+        <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
           {completed}/{total}
         </span>
 
         {/* Progress bar */}
         <div className="flex-1 max-w-[200px]">
-          <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
+          <div className="h-1 rounded-full bg-elevation-2 overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-500",
@@ -71,16 +71,16 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                 ) : todo.status === "in_progress" ? (
                   <Loader2 className="size-3 shrink-0 text-blue-400 animate-spin" />
                 ) : (
-                  <Circle className="size-3 shrink-0 text-zinc-600" />
+                  <Circle className="size-3 shrink-0 text-muted-foreground" />
                 )}
                 <span
                   className={cn(
                     "text-[11px] truncate",
                     todo.status === "completed"
-                      ? "text-zinc-500 line-through"
+                      ? "text-muted-foreground line-through"
                       : todo.status === "in_progress"
                         ? "text-blue-300"
-                        : "text-zinc-400"
+                        : "text-muted-foreground"
                   )}
                 >
                   {todo.content}

@@ -38,7 +38,7 @@ export const AssistantText = memo(function AssistantText({
           {model && (
             <Badge
               variant="outline"
-              className="text-[10px] px-1.5 py-0 h-4 border-zinc-700 text-zinc-400"
+              className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-muted-foreground"
             >
               {shortenModel(model)}
             </Badge>
@@ -50,20 +50,20 @@ export const AssistantText = memo(function AssistantText({
             return (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-[10px] text-zinc-500 cursor-default">
+                  <span className="text-[10px] text-muted-foreground cursor-default">
                     {formatTokenCount(totalInput + tokenUsage.output_tokens)} tokens
                   </span>
                 </TooltipTrigger>
                 <TooltipContent className="text-xs space-y-1">
                   <div>Context: {formatTokenCount(totalInput)}</div>
-                  <div className="pl-2 text-zinc-400">New: {formatTokenCount(tokenUsage.input_tokens)}</div>
+                  <div className="pl-2 text-muted-foreground">New: {formatTokenCount(tokenUsage.input_tokens)}</div>
                   {(tokenUsage.cache_read_input_tokens ?? 0) > 0 && (
-                    <div className="pl-2 text-zinc-400">
+                    <div className="pl-2 text-muted-foreground">
                       Cache read: {formatTokenCount(tokenUsage.cache_read_input_tokens ?? 0)}
                     </div>
                   )}
                   {(tokenUsage.cache_creation_input_tokens ?? 0) > 0 && (
-                    <div className="pl-2 text-zinc-400">
+                    <div className="pl-2 text-muted-foreground">
                       Cache write: {formatTokenCount(tokenUsage.cache_creation_input_tokens ?? 0)}
                     </div>
                   )}
@@ -73,12 +73,12 @@ export const AssistantText = memo(function AssistantText({
             )
           })()}
           {timestamp && (
-            <span className="text-[10px] text-zinc-600 ml-auto">
+            <span className="text-[10px] text-muted-foreground ml-auto">
               {new Date(timestamp).toLocaleTimeString()}
             </span>
           )}
         </div>
-        <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden [&_pre]:bg-zinc-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-zinc-300 [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+        <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-foreground [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
           <ReactMarkdown>{text}</ReactMarkdown>
         </div>
       </div>

@@ -14,6 +14,7 @@ const deletedFilesCache = new Map<string, { pathsHash: string; deleted: Map<stri
 interface FileChange {
   turnIndex: number
   toolCall: ToolCall
+  agentId?: string
 }
 
 interface FileChangesPanelProps {
@@ -84,7 +85,7 @@ function openInEditor(filePath: string, mode: "file" | "diff") {
   })
 }
 
-function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { defaultOpen: boolean }) {
+function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: FileChange & { defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   const prevDefaultRef = useRef(defaultOpen)
   useEffect(() => {
@@ -103,16 +104,16 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
     : String(toolCall.input.content ?? "")
 
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900/30">
-      <div className="sticky top-0 z-10 flex items-center w-full bg-zinc-900 rounded-t-md hover:bg-zinc-800/80 transition-colors group">
+    <div className="rounded-md border border-border elevation-2 depth-low">
+      <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t-md hover:bg-elevation-3 transition-colors group">
         <button
           onClick={() => setOpen(!open)}
           className="flex items-center gap-2 flex-1 min-w-0 px-2.5 py-1.5"
         >
           {open ? (
-            <ChevronDown className="size-3 text-zinc-500 shrink-0" />
+            <ChevronDown className="size-3 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronRight className="size-3 text-zinc-500 shrink-0" />
+            <ChevronRight className="size-3 text-muted-foreground shrink-0" />
           )}
           <Badge
             variant="outline"
@@ -123,12 +124,20 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
           >
             {toolCall.name}
           </Badge>
-          <span className="text-[10px] text-zinc-400 font-mono truncate">
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
             {shortPath}
           </span>
-          <span className="text-[10px] text-zinc-600 shrink-0">
+          <span className="text-[10px] text-muted-foreground shrink-0">
             T{turnIndex + 1}
           </span>
+          {agentId && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1 py-0 h-3.5 font-mono shrink-0 border-indigo-800/60 text-indigo-400"
+            >
+              Sub-agent
+            </Badge>
+          )}
         </button>
         <div className="flex items-center gap-0.5 pr-1.5 shrink-0">
           {filePath && (
@@ -137,7 +146,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => openInEditor(filePath, "file")}
-                    className="p-1 text-zinc-600 hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
+                    className="p-1 text-muted-foreground hover:text-blue-400 transition-colors opacity-0 group-hover:opacity-100"
                     aria-label="Open file in editor"
                   >
                     <Code2 className="size-3" />
@@ -150,7 +159,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
                   <TooltipTrigger asChild>
                     <button
                       onClick={() => openInEditor(filePath, "diff")}
-                      className="p-1 text-zinc-600 hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-1 text-muted-foreground hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
                       aria-label="View git changes in editor"
                     >
                       <GitCompareArrows className="size-3" />
@@ -185,7 +194,7 @@ function FileChangeCard({ turnIndex, toolCall, defaultOpen }: FileChange & { def
 function DeletedFileCard({ filePath, lineCount, turnIndex }: { filePath: string; lineCount: number; turnIndex: number }) {
   const shortPath = filePath.split("/").slice(-3).join("/")
   return (
-    <div className="rounded-md border border-red-900/40 bg-red-950/20 overflow-hidden">
+    <div className="rounded-md border border-red-900/40 bg-red-950/20 overflow-hidden depth-low">
       <div className="flex items-center gap-2 w-full px-2.5 py-1.5">
         <Trash2 className="size-3 text-red-400/70 shrink-0" />
         <Badge
@@ -194,10 +203,10 @@ function DeletedFileCard({ filePath, lineCount, turnIndex }: { filePath: string;
         >
           Deleted
         </Badge>
-        <span className="text-[10px] text-zinc-500 font-mono truncate">
+        <span className="text-[10px] text-muted-foreground font-mono truncate">
           {shortPath}
         </span>
-        <span className="text-[10px] text-zinc-600 shrink-0">
+        <span className="text-[10px] text-muted-foreground shrink-0">
           T{turnIndex + 1}
         </span>
         <div className="flex-1" />
@@ -226,19 +235,22 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     const changes: FileChange[] = []
     let add = 0
     let del = 0
+    const collectToolCall = (tc: ToolCall, turnIndex: number, agentId?: string) => {
+      if (tc.name !== "Edit" && tc.name !== "Write") return
+      changes.push({ turnIndex, toolCall: tc, agentId })
+      const isEdit = tc.name === "Edit"
+      const oldStr = isEdit ? String(tc.input.old_string ?? "") : ""
+      const newStr = isEdit
+        ? String(tc.input.new_string ?? "")
+        : String(tc.input.content ?? "")
+      const d = diffLineCount(oldStr, newStr)
+      add += d.add
+      del += d.del
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        if (tc.name === "Edit" || tc.name === "Write") {
-          changes.push({ turnIndex, toolCall: tc })
-          const isEdit = tc.name === "Edit"
-          const oldStr = isEdit ? String(tc.input.old_string ?? "") : ""
-          const newStr = isEdit
-            ? String(tc.input.new_string ?? "")
-            : String(tc.input.content ?? "")
-          const d = diffLineCount(oldStr, newStr)
-          add += d.add
-          del += d.del
-        }
+      turn.toolCalls.forEach((tc) => collectToolCall(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => collectToolCall(tc, turnIndex, msg.agentId))
       })
     })
     return { fileChanges: changes, additions: add, deletions: del }
@@ -247,29 +259,33 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // Extract absolute paths from rm/git rm Bash commands
   const rmPaths = useMemo(() => {
     const paths: { path: string; isDir: boolean; turnIndex: number }[] = []
+    const collectBashRm = (tc: ToolCall, turnIndex: number) => {
+      if (tc.name !== "Bash") return
+      const cmd = String(tc.input.command ?? "")
+      if (!cmd) return
+      // Match rm or git rm commands (possibly with flags)
+      const rmMatch = cmd.match(/^(?:rm|git\s+rm)\s/)
+      if (!rmMatch) return
+      const isDir = /\s-[a-zA-Z]*r/.test(cmd) // -r, -rf, -Rf etc.
+      // Extract quoted absolute paths
+      const quoted = cmd.matchAll(/"(\/[^"]+)"/g)
+      for (const m of quoted) {
+        paths.push({ path: m[1], isDir, turnIndex })
+      }
+      // Extract unquoted absolute paths (space-separated, no special chars)
+      const parts = cmd.replace(/"[^"]*"/g, "").split(/\s+/)
+      for (const part of parts) {
+        if (part.startsWith("/") && !part.startsWith("//")) {
+          // Strip trailing redirects like 2>/dev/null
+          const clean = part.replace(/\s*[12]?>.*$/, "")
+          if (clean) paths.push({ path: clean, isDir, turnIndex })
+        }
+      }
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        if (tc.name !== "Bash") return
-        const cmd = String(tc.input.command ?? "")
-        if (!cmd) return
-        // Match rm or git rm commands (possibly with flags)
-        const rmMatch = cmd.match(/^(?:rm|git\s+rm)\s/)
-        if (!rmMatch) return
-        const isDir = /\s-[a-zA-Z]*r/.test(cmd) // -r, -rf, -Rf etc.
-        // Extract quoted absolute paths
-        const quoted = cmd.matchAll(/"(\/[^"]+)"/g)
-        for (const m of quoted) {
-          paths.push({ path: m[1], isDir, turnIndex })
-        }
-        // Extract unquoted absolute paths (space-separated, no special chars)
-        const parts = cmd.replace(/"[^"]*"/g, "").split(/\s+/)
-        for (const part of parts) {
-          if (part.startsWith("/") && !part.startsWith("//")) {
-            // Strip trailing redirects like 2>/dev/null
-            const clean = part.replace(/\s*[12]?>.*$/, "")
-            if (clean) paths.push({ path: clean, isDir, turnIndex })
-          }
-        }
+      turn.toolCalls.forEach((tc) => collectBashRm(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => collectBashRm(tc, turnIndex))
       })
     })
     return paths
@@ -279,11 +295,13 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const { uniquePaths, rmDirs, pathsHash } = useMemo(() => {
     const paths = new Set<string>()
     const dirs: string[] = []
+    const collectPath = (tc: ToolCall) => {
+      const p = String(tc.input.file_path ?? tc.input.path ?? "")
+      if (p && p.startsWith("/")) paths.add(p)
+    }
     session.turns.forEach((turn) => {
-      turn.toolCalls.forEach((tc) => {
-        const p = String(tc.input.file_path ?? tc.input.path ?? "")
-        if (p && p.startsWith("/")) paths.add(p)
-      })
+      turn.toolCalls.forEach(collectPath)
+      turn.subAgentActivity.forEach((msg) => msg.toolCalls.forEach(collectPath))
     })
     for (const rp of rmPaths) {
       if (rp.isDir) {
@@ -300,10 +318,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // For each file path, find the last turn index that references it
   const lastTurnForFile = useMemo(() => {
     const map = new Map<string, number>()
+    const trackPath = (tc: ToolCall, turnIndex: number) => {
+      const p = String(tc.input.file_path ?? tc.input.path ?? "")
+      if (p && p.startsWith("/")) map.set(p, turnIndex)
+    }
     session.turns.forEach((turn, turnIndex) => {
-      turn.toolCalls.forEach((tc) => {
-        const p = String(tc.input.file_path ?? tc.input.path ?? "")
-        if (p && p.startsWith("/")) map.set(p, turnIndex)
+      turn.toolCalls.forEach((tc) => trackPath(tc, turnIndex))
+      turn.subAgentActivity.forEach((msg) => {
+        msg.toolCalls.forEach((tc) => trackPath(tc, turnIndex))
       })
     })
     // Also add rm command turn indices
@@ -362,14 +384,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // Build unified ordered list: file changes + deleted file entries, sorted by turn index
   const renderItems = useMemo(() => {
     type RenderItem =
-      | { type: "change"; turnIndex: number; toolCall: ToolCall; key: string }
+      | { type: "change"; turnIndex: number; toolCall: ToolCall; agentId?: string; key: string }
       | { type: "deleted"; turnIndex: number; filePath: string; lines: number; key: string }
 
     const items: RenderItem[] = []
 
     // Add all Edit/Write cards
     for (const fc of fileChanges) {
-      items.push({ type: "change", turnIndex: fc.turnIndex, toolCall: fc.toolCall, key: fc.toolCall.id })
+      items.push({ type: "change", turnIndex: fc.turnIndex, toolCall: fc.toolCall, agentId: fc.agentId, key: fc.toolCall.id })
     }
 
     // Add deleted file cards (skip files already in Edit/Write list — they'll show as regular cards)
@@ -485,15 +507,15 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   if (fileChanges.length === 0) return null
 
   return (
-    <div className="flex flex-col h-full overflow-hidden border-zinc-800 min-w-0">
-      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/50">
+    <div className="flex flex-col h-full overflow-hidden border-border min-w-0 elevation-1">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
         <FileCode2 className="size-3.5 text-amber-400" />
-        <span className="text-xs font-medium text-zinc-300">
+        <span className="text-xs font-medium text-foreground">
           File Changes
         </span>
         <Badge
           variant="outline"
-          className="h-4 px-1.5 text-[10px] border-zinc-700 text-zinc-500"
+          className="h-4 px-1.5 text-[10px] border-border/70 text-muted-foreground"
         >
           {fileChanges.length}
         </Badge>
@@ -508,7 +530,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           <TooltipTrigger asChild>
             <button
               onClick={() => setAllExpanded(!allExpanded)}
-              className="p-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={allExpanded ? "Collapse all" : "Expand all"}
             >
               {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
@@ -521,7 +543,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         {/* Top fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-zinc-950 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-elevation-0 to-transparent transition-opacity duration-200",
             canScrollUp ? "opacity-100" : "opacity-0"
           )}
         />
@@ -537,6 +559,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   key={item.key}
                   turnIndex={item.turnIndex}
                   toolCall={item.toolCall}
+                  agentId={item.agentId}
                   defaultOpen={allExpanded}
                 />
               ) : (
@@ -554,7 +577,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         {/* Bottom fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-zinc-950 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-elevation-0 to-transparent transition-opacity duration-200",
             canScrollDown ? "opacity-100" : "opacity-0"
           )}
         />

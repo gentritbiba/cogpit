@@ -106,6 +106,6 @@ export function getMemberBorderClass(color?: string): string {
     purple: "border-purple-500/30",
     orange: "border-orange-500/30",
   }
-  if (!color) return "border-zinc-700"
-  return map[color] ?? "border-zinc-700"
+  if (!color) return "border-border"
+  return map[color] ?? "border-border"
 }

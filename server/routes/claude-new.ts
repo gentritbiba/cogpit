@@ -193,7 +193,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model } = JSON.parse(body)
+        const { dirName, message, images, permissions, model, worktreeName } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           res.statusCode = 400
@@ -259,6 +259,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
         }
 
         const modelArgs = model ? ["--model", model] : []
+        const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
 
@@ -295,6 +296,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
             "--session-id", sessionId,
             ...permArgs,
             ...modelArgs,
+            ...worktreeArgs,
           ],
           {
             cwd: projectPath,
@@ -313,6 +315,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
           jsonlPath: null,
           pendingTaskCalls: new Map(),
           subagentWatcher: null,
+          worktreeName: worktreeName || null,
         }
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)

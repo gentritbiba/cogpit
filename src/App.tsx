@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
+import { WorktreePanel } from "@/components/WorktreePanel"
 import { SessionSetupPanel } from "@/components/SessionSetupPanel"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamsDashboard } from "@/components/TeamsDashboard"
@@ -17,8 +18,8 @@ import { BranchModal } from "@/components/BranchModal"
 import { SetupScreen } from "@/components/SetupScreen"
 import { ConfigDialog } from "@/components/ConfigDialog"
 import { ProjectSwitcherModal } from "@/components/ProjectSwitcherModal"
+import { ThemeSelectorModal } from "@/components/ThemeSelectorModal"
 import { DesktopHeader } from "@/components/DesktopHeader"
-import { MobileHeader } from "@/components/MobileHeader"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
@@ -32,12 +33,14 @@ import { useChatScroll } from "@/hooks/useChatScroll"
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { useUrlSync } from "@/hooks/useUrlSync"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
+import { useTheme } from "@/hooks/useTheme"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { usePermissions } from "@/hooks/usePermissions"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
 import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
+import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
@@ -56,12 +59,15 @@ export default function App() {
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()
   const isMobile = useIsMobile()
+  const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
 
   // Local UI state
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(true)
+  const [showWorktrees, setShowWorktrees] = useState(false)
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
+  const [showThemeSelector, setShowThemeSelector] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -73,6 +79,8 @@ export default function App() {
   const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
   const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
+  const handleToggleThemeSelector = useCallback(() => setShowThemeSelector((p) => !p), [])
+  const handleCloseThemeSelector = useCallback(() => setShowThemeSelector(false), [])
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
   const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
   const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
@@ -82,6 +90,12 @@ export default function App() {
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
+
+  // Derive the current project dirName from session, pending session, or dashboard selection
+  const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
+
+  // Worktree data — only fetched when panel is open
+  const worktreeData = useWorktrees(showWorktrees ? currentDirName : null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -122,7 +136,17 @@ export default function App() {
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
   const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
-  const { creatingSession, createError, clearCreateError, handleNewSession, createAndSend } = useNewSession({
+  const {
+    creatingSession,
+    createError,
+    clearCreateError,
+    handleNewSession,
+    createAndSend,
+    worktreeEnabled,
+    setWorktreeEnabled,
+    worktreeName: newSessionWorktreeName,
+    setWorktreeName: setNewSessionWorktreeName,
+  } = useNewSession({
     permissionsConfig: perms.config,
     dispatch,
     isMobile,
@@ -217,9 +241,11 @@ export default function App() {
     dispatch,
     onToggleSidebar: handleToggleSidebar,
     onOpenProjectSwitcher: handleOpenProjectSwitcher,
+    onOpenThemeSelector: handleToggleThemeSelector,
     onHistoryBack: sessionHistory.goBack,
     onHistoryForward: sessionHistory.goForward,
     onNavigateToSession: actions.handleDashboardSelect,
+    onCommitNavigation: sessionHistory.commitNavigation,
   })
 
   // Reload session from server (used after undo/redo JSONL mutations)
@@ -373,6 +399,18 @@ export default function App() {
     perms.markApplied()
   }, [currentSessionId, selectedModel, perms])
 
+  // Stop/kill the running session process
+  const handleStopSession = useCallback(async () => {
+    if (!currentSessionId) return
+    try {
+      await authFetch("/api/stop-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: currentSessionId }),
+      })
+    } catch { /* ignore — session may already be dead */ }
+  }, [currentSessionId])
+
   // Permissions panel element (shared between desktop/mobile StatsPanel)
   const permissionsPanelNode = useMemo(() => (
     <PermissionsPanel
@@ -409,21 +447,21 @@ export default function App() {
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-zinc-950" role="status" aria-label="Loading">
-        <Loader2 className="size-6 animate-spin text-zinc-500" />
+      <div className="dark flex h-dvh items-center justify-center bg-elevation-0" role="status" aria-label="Loading">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   if (config.configError) {
     return (
-      <div className="dark flex h-dvh flex-col items-center justify-center gap-4 bg-zinc-950 text-zinc-100">
+      <div className="dark flex h-dvh flex-col items-center justify-center gap-4 bg-elevation-0 text-foreground">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
           <AlertTriangle className="size-7 text-red-400" />
         </div>
         <div className="text-center space-y-1">
-          <h2 className="text-sm font-medium text-zinc-200">Failed to connect</h2>
-          <p className="text-xs text-zinc-500 max-w-sm">{config.configError}</p>
+          <h2 className="text-sm font-medium text-foreground">Failed to connect</h2>
+          <p className="text-xs text-muted-foreground max-w-sm">{config.configError}</p>
         </div>
         <Button
           variant="outline"
@@ -446,20 +484,20 @@ export default function App() {
 
   // SSE connection indicator (shows when session loaded but SSE disconnected)
   const sseIndicator = state.session && state.sessionSource && sseState === "disconnected" && (
-    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-zinc-900/95 backdrop-blur-sm px-3 py-2 shadow-lg toast-enter">
+    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high toast-enter">
       <WifiOff className="size-3.5 text-amber-400" />
       <span className="text-xs text-amber-400">Live connection lost</span>
-      <span className="text-[10px] text-zinc-500">Reconnecting automatically...</span>
+      <span className="text-[10px] text-muted-foreground">Reconnecting automatically...</span>
     </div>
   )
 
   // Error toast
   const errorToast = activeError && (
-    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-zinc-900/95 backdrop-blur-sm px-3 py-2 shadow-lg max-w-md toast-enter">
+    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high max-w-md toast-enter">
       <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
       <span className="text-xs text-red-400 flex-1">{activeError}</span>
       {clearActiveError && (
-        <button onClick={clearActiveError} className="text-zinc-500 hover:text-zinc-300 shrink-0" aria-label="Dismiss error">
+        <button onClick={clearActiveError} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Dismiss error">
           <X className="size-3.5" />
         </button>
       )}
@@ -520,8 +558,7 @@ export default function App() {
         isConnected={claudeChat.isConnected}
         onSend={claudeChat.sendMessage}
         onInterrupt={claudeChat.interrupt}
-        permissionMode={perms.config.mode}
-        permissionsPending={perms.hasPendingChanges}
+        onStopSession={handleStopSession}
         pendingInteraction={pendingInteraction}
       />
     </div>
@@ -530,21 +567,7 @@ export default function App() {
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div className="dark flex h-dvh flex-col bg-zinc-950 text-zinc-100">
-        <MobileHeader
-          session={state.session}
-          sessionSource={state.sessionSource}
-          isLive={isLive}
-          killing={killing}
-          creatingSession={creatingSession}
-          networkUrl={config.networkUrl}
-          networkAccessDisabled={config.networkAccessDisabled}
-          onGoHome={actions.handleGoHome}
-          onKillAll={handleKillAll}
-          onOpenSettings={config.openConfigDialog}
-          onNewSession={handleNewSession}
-        />
-
+      <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         <main className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
             <SessionBrowser
@@ -616,8 +639,8 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                      <p className="text-sm text-zinc-500">New session — type your first message below</p>
-                      <p className="text-xs text-zinc-600 font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                      <p className="text-sm text-muted-foreground">New session — type your first message below</p>
+                      <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
                     </div>
                   )}
                 </div>
@@ -655,6 +678,10 @@ export default function App() {
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              worktreeEnabled={worktreeEnabled}
+              onWorktreeEnabledChange={setWorktreeEnabled}
+              worktreeName={newSessionWorktreeName}
+              onWorktreeNameChange={setNewSessionWorktreeName}
             />
           )}
 
@@ -707,18 +734,20 @@ export default function App() {
 
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
-    <div className="dark flex h-dvh flex-col bg-zinc-950 text-zinc-100">
+    <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       <DesktopHeader
         session={state.session}
         isLive={isLive}
         showSidebar={showSidebar}
         showStats={showStats}
+        showWorktrees={showWorktrees}
         killing={killing}
         networkUrl={config.networkUrl}
         networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
         onToggleStats={() => setShowStats(!showStats)}
+        onToggleWorktrees={() => setShowWorktrees((p) => !p)}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
@@ -812,8 +841,8 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                    <p className="text-sm text-zinc-500">New session — type your first message below</p>
-                    <p className="text-xs text-zinc-600 font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                    <p className="text-sm text-muted-foreground">New session — type your first message below</p>
+                    <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
                   </div>
                 )}
                 {chatInputNode}
@@ -822,6 +851,10 @@ export default function App() {
                 permissionsPanel={permissionsPanelNode}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
+                worktreeEnabled={worktreeEnabled}
+                onWorktreeEnabledChange={setWorktreeEnabled}
+                worktreeName={newSessionWorktreeName}
+                onWorktreeNameChange={setNewSessionWorktreeName}
               />
             </div>
           ) : (
@@ -855,7 +888,24 @@ export default function App() {
             onApplySettings={handleApplySettings}
           />
         )}
+
       </div>
+
+      <WorktreePanel
+        open={showWorktrees}
+        onOpenChange={setShowWorktrees}
+        worktrees={worktreeData.worktrees}
+        loading={worktreeData.loading}
+        dirName={currentDirName}
+        onRefetch={worktreeData.refetch}
+        onOpenSession={(sessionId) => {
+          // sessionId is a JSONL filename without extension; navigate to it
+          if (currentDirName) {
+            actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
+          }
+          setShowWorktrees(false)
+        }}
+      />
 
       {serverPanelNode}
       {undoConfirmDialog}
@@ -873,6 +923,14 @@ export default function App() {
         onClose={handleCloseProjectSwitcher}
         onNewSession={handleNewSession}
         currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
+      />
+
+      <ThemeSelectorModal
+        open={showThemeSelector}
+        onClose={handleCloseThemeSelector}
+        currentTheme={themeCtx.theme}
+        onSelectTheme={themeCtx.setTheme}
+        onPreviewTheme={themeCtx.setPreview}
       />
 
       {errorToast || sseIndicator}

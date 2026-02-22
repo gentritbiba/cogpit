@@ -15,9 +15,9 @@ import { authFetch } from "@/lib/auth"
 
 function DeviceIcon({ name }: { name: string }) {
   const n = name.toLowerCase()
-  if (n.includes("iphone") || n.includes("android")) return <Smartphone className="size-4 text-zinc-500" />
-  if (n.includes("ipad") || n.includes("tablet")) return <Tablet className="size-4 text-zinc-500" />
-  return <Monitor className="size-4 text-zinc-500" />
+  if (n.includes("iphone") || n.includes("android")) return <Smartphone className="size-4 text-muted-foreground" />
+  if (n.includes("ipad") || n.includes("tablet")) return <Tablet className="size-4 text-muted-foreground" />
+  return <Monitor className="size-4 text-muted-foreground" />
 }
 
 function formatTimeAgo(ts: number): string {
@@ -113,22 +113,22 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700">
+      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
         <DialogHeader>
-          <DialogTitle className="text-zinc-100">Configuration</DialogTitle>
-          <DialogDescription className="text-zinc-400">
+          <DialogTitle className="text-foreground">Configuration</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
             Change the path to your .claude directory.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className="relative">
-            <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+            <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={path}
               onChange={handleChange}
               placeholder="/Users/you/.claude"
-              className="pl-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
+              className="pl-10 bg-elevation-0 border-border/70 focus:border-border"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canSave && !saving) handleSave()
               }}
@@ -136,7 +136,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           </div>
 
           {status === "validating" && (
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               Checking path...
             </div>
@@ -155,17 +155,17 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           )}
 
           {/* Network Access */}
-          <div className="space-y-3 pt-3 border-t border-zinc-800">
+          <div className="space-y-3 pt-3 border-t border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {networkAccess ? (
                   <Wifi className="size-4 text-green-400" />
                 ) : (
-                  <WifiOff className="size-4 text-zinc-500" />
+                  <WifiOff className="size-4 text-muted-foreground" />
                 )}
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">Network Access</p>
-                  <p className="text-xs text-zinc-500">Allow other devices to connect</p>
+                  <p className="text-sm font-medium text-foreground">Network Access</p>
+                  <p className="text-xs text-muted-foreground">Allow other devices to connect</p>
                 </div>
               </div>
               <button
@@ -174,7 +174,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                 aria-checked={networkAccess}
                 onClick={() => setNetworkAccess(!networkAccess)}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                  networkAccess ? "bg-green-600" : "bg-zinc-700"
+                  networkAccess ? "bg-green-600" : "bg-accent"
                 }`}
               >
                 <span
@@ -187,8 +187,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
             {networkAccess && (
               <div className="space-y-2">
-                <label className="text-xs text-zinc-400">
-                  Password {hasExistingPassword && networkPassword.length === 0 && <span className="text-zinc-600">(already set — leave blank to keep)</span>}
+                <label className="text-xs text-muted-foreground">
+                  Password {hasExistingPassword && networkPassword.length === 0 && <span className="text-muted-foreground">(already set — leave blank to keep)</span>}
                 </label>
                 <div className="relative">
                   <Input
@@ -196,12 +196,12 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                     value={networkPassword}
                     onChange={(e) => setNetworkPassword(e.target.value)}
                     placeholder={hasExistingPassword ? "Enter new password to change" : "Set a password for remote access"}
-                    className="pr-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
+                    className="pr-10 bg-elevation-0 border-border/70 focus:border-border"
                   />
                   <button
                     type="button"
                     onClick={() => setShowNetworkPassword(!showNetworkPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
                     {showNetworkPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                   </button>
@@ -211,7 +211,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
                     Password must be at least {MIN_PASSWORD_LENGTH} characters ({networkPassword.length}/{MIN_PASSWORD_LENGTH})
                   </p>
                 )}
-                <p className="text-[11px] text-zinc-600">
+                <p className="text-[11px] text-muted-foreground">
                   Requires app restart to take effect. Port: 19384
                 </p>
               </div>
@@ -220,20 +220,20 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             {/* Connected devices */}
             {networkAccess && initialNetworkAccess && connectedDevices.length > 0 && (
               <div className="space-y-2 pt-2">
-                <p className="text-xs text-zinc-500">Connected devices</p>
+                <p className="text-xs text-muted-foreground">Connected devices</p>
                 <div className="space-y-1.5">
                   {connectedDevices.map((device, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+                    <div key={i} className="flex items-center justify-between rounded-md border border-border bg-elevation-0 px-3 py-2">
                       <div className="flex items-center gap-2.5">
                         <DeviceIcon name={device.deviceName} />
                         <div>
-                          <p className="text-sm text-zinc-200">{device.deviceName}</p>
-                          <p className="text-[11px] text-zinc-600">{device.ip}</p>
+                          <p className="text-sm text-foreground">{device.deviceName}</p>
+                          <p className="text-[11px] text-muted-foreground">{device.ip}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="size-1.5 rounded-full bg-green-500" />
-                        <span className="text-[11px] text-zinc-500">{formatTimeAgo(device.lastActivity)}</span>
+                        <span className="text-[11px] text-muted-foreground">{formatTimeAgo(device.lastActivity)}</span>
                       </div>
                     </div>
                   ))}
@@ -244,7 +244,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="text-zinc-400 hover:text-zinc-200">
+          <Button variant="ghost" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             Cancel
           </Button>
           <Button disabled={!canSave || saving} onClick={handleSave}>

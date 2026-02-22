@@ -41,34 +41,34 @@ export function UndoConfirmDialog({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
-      <DialogContent className="sm:max-w-md bg-zinc-900 border-zinc-700">
+      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-zinc-100">
+          <DialogTitle className="flex items-center gap-2 text-foreground">
             <AlertTriangle className="size-4 text-amber-400" />
             {TITLES[state.type]}
           </DialogTitle>
-          <DialogDescription className="text-zinc-400">
+          <DialogDescription className="text-muted-foreground">
             {DESCRIPTIONS[state.type]}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 py-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-500">Turns affected</span>
-            <span className="text-zinc-200 font-mono">{state.summary.turnCount}</span>
+            <span className="text-muted-foreground">Turns affected</span>
+            <span className="text-foreground font-mono">{state.summary.turnCount}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-500">Files affected</span>
-            <span className="text-zinc-200 font-mono">{state.summary.fileCount}</span>
+            <span className="text-muted-foreground">Files affected</span>
+            <span className="text-foreground font-mono">{state.summary.fileCount}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-zinc-500">Operations</span>
-            <span className="text-zinc-200 font-mono">{state.summary.operationCount}</span>
+            <span className="text-muted-foreground">Operations</span>
+            <span className="text-foreground font-mono">{state.summary.operationCount}</span>
           </div>
           {state.summary.filePaths.length > 0 && (
-            <div className="mt-2 max-h-32 overflow-y-auto rounded border border-zinc-800 bg-zinc-950 p-2">
+            <div className="mt-2 max-h-32 overflow-y-auto rounded border border-border bg-elevation-0 p-2">
               {state.summary.filePaths.map((fp) => (
-                <div key={fp} className="text-[11px] font-mono text-zinc-400 truncate">
+                <div key={fp} className="text-[11px] font-mono text-muted-foreground truncate">
                   {fp}
                 </div>
               ))}
@@ -77,7 +77,7 @@ export function UndoConfirmDialog({
         </div>
 
         {applyError && (
-          <div className="rounded border border-red-800 bg-red-900/20 px-3 py-2 text-sm text-red-400">
+          <div className="rounded border border-red-800/60 bg-red-900/20 px-3 py-2 text-sm text-red-400">
             {applyError}
           </div>
         )}
@@ -87,7 +87,7 @@ export function UndoConfirmDialog({
             variant="ghost"
             onClick={onCancel}
             disabled={isApplying}
-            className="text-zinc-400 hover:text-zinc-200"
+            className="text-muted-foreground hover:text-foreground"
           >
             Cancel
           </Button>

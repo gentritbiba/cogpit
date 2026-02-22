@@ -46,15 +46,15 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
   }, [password, onAuthenticated])
 
   return (
-    <div className="dark flex h-dvh items-center justify-center bg-zinc-950">
+    <div className="dark flex h-dvh items-center justify-center bg-elevation-0">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 px-6">
         <div className="flex flex-col items-center gap-3 mb-6">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20">
             <Lock className="size-5 text-blue-400" />
           </div>
           <div className="text-center">
-            <h1 className="text-lg font-semibold text-zinc-100">Cogpit</h1>
-            <p className="text-sm text-zinc-500">Enter the password to connect</p>
+            <h1 className="text-lg font-semibold text-foreground">Cogpit</h1>
+            <p className="text-sm text-muted-foreground">Enter the password to connect</p>
           </div>
         </div>
 
@@ -64,13 +64,13 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            className="pr-10 bg-zinc-900 border-zinc-700 focus:border-zinc-600"
+            className="pr-10 bg-elevation-1 border-border/70 focus:border-border"
             autoFocus
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </button>

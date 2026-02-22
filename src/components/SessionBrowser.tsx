@@ -26,7 +26,6 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -283,7 +282,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   // Mobile teams-only mode: just show the teams list
   if (teamsOnly) {
     return (
-      <div className="flex h-full w-full flex-col bg-zinc-950">
+      <div className="flex h-full w-full flex-col elevation-1">
         <TeamsList
           onSelectTeam={(teamName) => onSelectTeam?.(teamName)}
         />
@@ -293,8 +292,8 @@ export const SessionBrowser = memo(function SessionBrowser({
 
   return (
     <aside className={cn(
-      "flex h-full shrink-0 flex-col bg-zinc-950",
-      isMobile ? "w-full" : "w-80 border-r border-zinc-800 panel-enter"
+      "flex h-full shrink-0 flex-col elevation-1",
+      isMobile ? "w-full" : "w-80 border-r border-border/50 panel-enter"
     )} aria-label="Session browser">
       {/* ── Top: Live Sessions ── */}
       <div className="flex min-h-0 flex-[55_1_0%] flex-col overflow-hidden">
@@ -307,9 +306,9 @@ export const SessionBrowser = memo(function SessionBrowser({
       </div>
 
       {/* ── Bottom: Browse / Teams ── */}
-      <div className="flex min-h-0 flex-[45_1_0%] flex-col overflow-hidden border-t border-zinc-800">
+      <div className="flex min-h-0 flex-[45_1_0%] flex-col overflow-hidden border-t border-border/50">
         {/* Tab bar */}
-        <div className="flex shrink-0 border-b border-zinc-800" role="tablist">
+        <div className="flex shrink-0 border-b border-border/50" role="tablist">
           <button
             role="tab"
             aria-selected={sidebarTab === "browse"}
@@ -318,8 +317,8 @@ export const SessionBrowser = memo(function SessionBrowser({
               "flex-1 text-xs font-medium transition-colors border-b-2",
               isMobile ? "py-3" : "py-2",
               sidebarTab === "browse"
-                ? "border-blue-500 text-zinc-200"
-                : "border-transparent text-zinc-500 hover:text-zinc-400"
+                ? "border-blue-500 text-foreground"
+                : "border-transparent text-muted-foreground hover:text-muted-foreground"
             )}
           >
             Browse
@@ -332,8 +331,8 @@ export const SessionBrowser = memo(function SessionBrowser({
               "flex-1 text-xs font-medium transition-colors border-b-2 flex items-center justify-center gap-1.5",
               isMobile ? "py-3" : "py-2",
               sidebarTab === "teams"
-                ? "border-blue-500 text-zinc-200"
-                : "border-transparent text-zinc-500 hover:text-zinc-400"
+                ? "border-blue-500 text-foreground"
+                : "border-transparent text-muted-foreground hover:text-muted-foreground"
             )}
           >
             <Users className="size-3" />
@@ -346,7 +345,7 @@ export const SessionBrowser = memo(function SessionBrowser({
           <div className="flex flex-1 min-h-0 flex-col">
             {/* Fixed header */}
             <div className={cn(
-              "flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3",
+              "flex shrink-0 items-center gap-2 border-b border-border/50 px-3",
               isMobile ? "py-2.5" : "py-2"
             )}>
               {view !== "projects" && (
@@ -361,7 +360,7 @@ export const SessionBrowser = memo(function SessionBrowser({
                 </Button>
               )}
               <span className={cn(
-                "font-medium text-zinc-400 truncate flex-1",
+                "font-medium text-muted-foreground truncate flex-1",
                 isMobile ? "text-sm" : "text-xs"
               )}>
                 {view === "projects" && "Projects"}
@@ -400,23 +399,24 @@ export const SessionBrowser = memo(function SessionBrowser({
             </div>
 
             {/* Fixed search (hidden in detail view) */}
-            {view !== "detail" && <div className="shrink-0 px-3 py-2">
+            {view !== "detail" && <div className="shrink-0 px-2 pb-2 pt-1">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-600" />
-                <Input
+                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
                   value={searchFilter}
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={view === "projects" ? "Filter projects..." : "Filter sessions..."}
                   className={cn(
-                    "bg-zinc-900 pl-8 border-zinc-800 placeholder:text-zinc-600",
-                    isMobile ? "h-9 text-sm" : "h-7 text-xs",
+                    "w-full rounded-lg border border-border/60 elevation-2 depth-low pl-8 text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all",
+                    isMobile ? "py-2.5 text-sm" : "py-2 text-xs",
                     searchFilter && "pr-8"
                   )}
                 />
                 {searchFilter && (
                   <button
                     onClick={() => setSearchFilter("")}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     aria-label="Clear search"
                   >
                     <X className="size-3" />
@@ -474,11 +474,11 @@ export const SessionBrowser = memo(function SessionBrowser({
               )}
               {view === "detail" && session && isMobile && (
                 <div className="flex flex-col items-center justify-center gap-3 py-12 px-6 text-center">
-                  <MessageSquare className="size-8 text-zinc-600" />
-                  <p className="text-sm text-zinc-400">
-                    Session loaded: <span className="font-medium text-zinc-300">{session.slug || session.sessionId.slice(0, 12)}</span>
+                  <MessageSquare className="size-8 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">
+                    Session loaded: <span className="font-medium text-foreground">{session.slug || session.sessionId.slice(0, 12)}</span>
                   </p>
-                  <p className="text-xs text-zinc-600">
+                  <p className="text-xs text-muted-foreground">
                     Tap the Chat tab below to view the conversation
                   </p>
                 </div>
@@ -525,7 +525,7 @@ const ProjectsList = memo(function ProjectsList({
 
   if (filtered.length === 0) {
     return (
-      <div className="px-3 py-8 text-center text-xs text-zinc-600">
+      <div className="px-3 py-8 text-center text-xs text-muted-foreground">
         {filter ? "No matching projects" : "No projects found"}
       </div>
     )
@@ -533,24 +533,24 @@ const ProjectsList = memo(function ProjectsList({
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-0.5 px-2 pb-3">
+      <div className="flex flex-col gap-1.5 px-2 pb-3">
         {filtered.map((project) => (
           <button
             key={project.dirName}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border-l-2 border-transparent hover:border-l-blue-500/50",
+              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
               isMobile ? "py-3 min-h-[44px]" : "py-2"
             )}
           >
             <div className="flex items-center gap-2">
-              <FolderOpen className="size-3.5 shrink-0 text-zinc-500 group-hover:text-blue-400" />
-              <span className="text-xs font-medium text-zinc-300 truncate">
+              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground group-hover:text-blue-400" />
+              <span className="text-xs font-medium text-foreground truncate">
                 {shortPath(project.path, 2)}
               </span>
-              <ChevronRight className="size-3 ml-auto shrink-0 text-zinc-700 group-hover:text-zinc-500" />
+              <ChevronRight className="size-3 ml-auto shrink-0 text-muted-foreground group-hover:text-muted-foreground" />
             </div>
-            <div className="ml-5.5 flex items-center gap-2 text-[10px] text-zinc-600">
+            <div className="ml-5.5 flex items-center gap-2 text-[10px] text-muted-foreground">
               <Badge
                 variant="secondary"
                 className="h-4 px-1 text-[10px] font-normal"
@@ -605,7 +605,7 @@ const SessionsList = memo(function SessionsList({
 
   if (filtered.length === 0) {
     return (
-      <div className="px-3 py-8 text-center text-xs text-zinc-600">
+      <div className="px-3 py-8 text-center text-xs text-muted-foreground">
         {filter ? "No matching sessions" : "No sessions found"}
       </div>
     )
@@ -613,14 +613,14 @@ const SessionsList = memo(function SessionsList({
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-0.5 px-2 pb-3">
+      <div className="flex flex-col gap-1.5 px-2 pb-3">
         {filtered.map((s) => {
           const row = (
             <button
               key={s.fileName}
               onClick={() => onSelectSession(s)}
               className={cn(
-                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all hover:bg-zinc-900 border border-transparent hover:border-zinc-800 border-l-2 border-l-transparent",
+                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
                 isMobile ? "py-3.5" : "py-2.5"
               )}
             >
@@ -633,16 +633,16 @@ const SessionsList = memo(function SessionsList({
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                   </span>
                 ) : (
-                  <FileText className="size-3.5 shrink-0 text-zinc-600 group-hover:text-blue-400" />
+                  <FileText className="size-3.5 shrink-0 text-muted-foreground group-hover:text-blue-400" />
                 )}
-                <span className="text-xs font-medium text-zinc-300 truncate flex-1">
+                <span className="text-xs font-medium text-foreground truncate flex-1">
                   {s.slug || truncate(s.sessionId, 16)}
                 </span>
                 {s.branchedFrom && <Copy className="size-2.5 text-purple-400 shrink-0" title="Duplicated session" />}
                 {s.model && (
                   <Badge
                     variant="outline"
-                    className="h-4 px-1 text-[9px] font-normal border-zinc-700 text-zinc-500 shrink-0"
+                    className="h-4 px-1 text-[9px] font-normal border-border text-muted-foreground shrink-0"
                   >
                     {shortenModel(s.model)}
                   </Badge>
@@ -651,13 +651,13 @@ const SessionsList = memo(function SessionsList({
 
               {/* Preview message */}
               {s.firstUserMessage && (
-                <p className="ml-5.5 text-[11px] text-zinc-500 line-clamp-2 leading-snug">
+                <p className="ml-5.5 text-[11px] text-muted-foreground line-clamp-2 leading-snug">
                   {s.firstUserMessage}
                 </p>
               )}
 
               {/* Meta row */}
-              <div className="ml-5.5 flex items-center gap-2 text-[10px] text-zinc-600 flex-wrap">
+              <div className="ml-5.5 flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
                 {(s.turnCount ?? 0) > 0 && (
                   <span className="flex items-center gap-0.5">
                     <MessageSquare className="size-2.5" />
@@ -667,7 +667,15 @@ const SessionsList = memo(function SessionsList({
                 {s.gitBranch && (
                   <span className="flex items-center gap-0.5">
                     <GitBranch className="size-2.5" />
-                    {s.gitBranch}
+                    {s.gitBranch.startsWith("worktree-") ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="rounded bg-emerald-500/10 text-emerald-400 px-1 py-px text-[9px] font-medium">
+                          {s.gitBranch.replace("worktree-", "")}
+                        </span>
+                      </span>
+                    ) : (
+                      s.gitBranch
+                    )}
                   </span>
                 )}
                 <span>{formatFileSize(s.size)}</span>
@@ -697,7 +705,7 @@ const SessionsList = memo(function SessionsList({
           <button
             onClick={onLoadMore}
             disabled={isLoading}
-            className="mx-2 mt-1 mb-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300 transition-colors disabled:opacity-50"
+            className="mx-2 mt-1 mb-1 rounded-md border border-border/40 elevation-2 depth-low px-3 py-2 text-xs text-muted-foreground hover:bg-elevation-3 hover:text-foreground transition-colors disabled:opacity-50"
           >
             {isLoading ? "Loading..." : "Load more sessions"}
           </button>
@@ -724,14 +732,14 @@ function SessionDetail({ session }: { session: ParsedSession }) {
       <div className="flex flex-col gap-0 px-3 pb-3">
         {/* Session Info */}
         <div className="flex flex-col gap-1.5 py-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 border-l-2 border-blue-500/30 pl-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-l-2 border-blue-500/30 pl-2">
             Session
           </h3>
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                <Hash className="size-3 shrink-0 text-zinc-600" />
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Hash className="size-3 shrink-0 text-muted-foreground" />
                 <span className="truncate font-mono">
                   {truncate(session.sessionId, 20)}
                 </span>
@@ -741,14 +749,14 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           </Tooltip>
 
           {session.slug && (
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <FileText className="size-3 shrink-0 text-zinc-600" />
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <FileText className="size-3 shrink-0 text-muted-foreground" />
               <span className="truncate">{session.slug}</span>
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <Cpu className="size-3 shrink-0 text-zinc-600" />
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Cpu className="size-3 shrink-0 text-muted-foreground" />
             <Badge
               variant="secondary"
               className="h-4 px-1.5 text-[10px] font-normal"
@@ -758,8 +766,8 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           </div>
 
           {session.version && (
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <Zap className="size-3 shrink-0 text-zinc-600" />
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Zap className="size-3 shrink-0 text-muted-foreground" />
               <Badge
                 variant="outline"
                 className="h-4 px-1.5 text-[10px] font-normal"
@@ -770,22 +778,28 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           )}
 
           {session.gitBranch && (
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <GitBranch className="size-3 shrink-0 text-zinc-600" />
-              <Badge
-                variant="outline"
-                className="h-4 px-1.5 text-[10px] font-normal"
-              >
-                {session.gitBranch}
-              </Badge>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <GitBranch className="size-3 shrink-0 text-muted-foreground" />
+              {session.gitBranch.startsWith("worktree-") ? (
+                <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-px text-[10px] font-medium">
+                  {session.gitBranch.replace("worktree-", "")}
+                </span>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="h-4 px-1.5 text-[10px] font-normal"
+                >
+                  {session.gitBranch}
+                </Badge>
+              )}
             </div>
           )}
 
           {session.cwd && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                  <FolderOpen className="size-3 shrink-0 text-zinc-600" />
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <FolderOpen className="size-3 shrink-0 text-muted-foreground" />
                   <span className="truncate font-mono text-[10px]">
                     {truncate(session.cwd, 28)}
                   </span>
@@ -796,11 +810,11 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           )}
         </div>
 
-        <Separator className="bg-zinc-800" />
+        <Separator className="bg-border/50" />
 
         {/* Quick Stats */}
         <div className="flex flex-col gap-1.5 py-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 border-l-2 border-blue-500/30 pl-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-l-2 border-blue-500/30 pl-2">
             Stats
           </h3>
           <div className="grid grid-cols-2 gap-1.5">
@@ -881,11 +895,11 @@ function SidebarStatCard({
       className={cn(
         "flex flex-col gap-0.5 rounded-md border px-2 py-1.5",
         variant === "error" && Number(value) > 0
-          ? "border-red-900/50 bg-red-950/30"
-          : "border-zinc-800 bg-zinc-900/50"
+          ? "border-red-900/50 bg-red-950/30 depth-low"
+          : "border-border/40 elevation-2 depth-low"
       )}
     >
-      <div className="flex items-center gap-1 text-zinc-500">
+      <div className="flex items-center gap-1 text-muted-foreground">
         {icon}
         <span className="text-[10px]">{label}</span>
       </div>
@@ -894,7 +908,7 @@ function SidebarStatCard({
           "text-sm font-semibold",
           variant === "error" && Number(value) > 0
             ? "text-red-400"
-            : "text-zinc-200"
+            : "text-foreground"
         )}
       >
         {value}

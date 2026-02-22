@@ -46,14 +46,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-blue-400">User</span>
           {timestamp && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-muted-foreground">
               {new Date(timestamp).toLocaleTimeString()}
             </span>
           )}
           {hasTags && (
             <button
               onClick={() => setShowRaw(!showRaw)}
-              className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
             >
               {showRaw ? (
                 <>
@@ -75,12 +75,12 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
               <button
                 key={i}
                 onClick={() => setModalImage(url)}
-                className="rounded-lg overflow-hidden border border-zinc-700/50 hover:border-blue-500/50 transition-colors cursor-pointer"
+                className="rounded-lg overflow-hidden border border-border/50 hover:border-blue-500/50 transition-colors cursor-pointer"
               >
                 <img
                   src={url}
                   alt={`Attached image ${i + 1}`}
-                  className="max-h-40 max-w-60 object-contain bg-zinc-800"
+                  className="max-h-40 max-w-60 object-contain bg-elevation-2"
                 />
               </button>
             ))}
@@ -88,14 +88,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
         )}
 
         {visibleText && (
-          <div className="prose prose-invert prose-sm max-w-none text-zinc-200 break-words overflow-hidden [&_pre]:bg-zinc-800 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-zinc-300 [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400">
+          <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-foreground [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_a]:text-blue-400">
             <ReactMarkdown>{visibleText}</ReactMarkdown>
           </div>
         )}
         {displayText.length > 500 && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="mt-1 text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+            className="mt-1 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
           >
             {expanded ? (
               <>
@@ -112,7 +112,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
 
       {/* Full-size image modal */}
       <Dialog open={modalImage !== null} onOpenChange={(open) => !open && setModalImage(null)}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-zinc-900 border-zinc-700">
+        <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-elevation-1 border-border/50">
           <DialogTitle className="sr-only">Full size image</DialogTitle>
           {modalImage && (
             <img

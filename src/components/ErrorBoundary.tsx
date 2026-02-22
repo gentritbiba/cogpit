@@ -38,11 +38,11 @@ export class ErrorBoundary extends Component<Props, State> {
             <AlertTriangle className="size-6 text-red-400" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-sm font-medium text-zinc-200">
+            <h3 className="text-sm font-medium text-foreground">
               {this.props.fallbackMessage || "Something went wrong"}
             </h3>
             {this.state.error && (
-              <p className="text-xs text-zinc-500 max-w-md font-mono">
+              <p className="text-xs text-muted-foreground max-w-md font-mono">
                 {this.state.error.message}
               </p>
             )}

@@ -108,9 +108,9 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       aria-label={`Scroll to turn ${stickyTurn.index + 1} prompt`}
       className={cn(
         "absolute inset-x-0 top-0 z-20",
-        "border-b border-blue-500/10 bg-zinc-950/85 backdrop-blur-md",
+        "border-b border-blue-500/10 bg-elevation-1/90 backdrop-blur-md",
         "px-4 py-2.5 flex items-center gap-3 cursor-pointer",
-        "transition-all duration-200 hover:bg-zinc-900/90"
+        "transition-all duration-200 hover:bg-elevation-1"
       )}
       onClick={scrollToPrompt}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") scrollToPrompt() }}
@@ -123,10 +123,10 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       <span className="text-xs font-medium text-blue-400/70 shrink-0">
         Turn {stickyTurn.index + 1}
       </span>
-      <span className="text-sm text-zinc-400 truncate min-w-0">
+      <span className="text-sm text-muted-foreground truncate min-w-0">
         {promptText}
       </span>
-      <ChevronUp className="size-3.5 text-zinc-600 shrink-0 ml-auto" />
+      <ChevronUp className="size-3.5 text-muted-foreground shrink-0 ml-auto" />
     </div>
   )
 })

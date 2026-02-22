@@ -77,22 +77,22 @@ function ServerOutput({ outputPath, title }: { outputPath: string; title: string
   return (
     <div className="flex h-full flex-col min-w-0">
       {/* Mini header: server title + connection status */}
-      <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/50 px-2 text-[10px]">
+      <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-border elevation-1 px-2 text-[10px]">
         <span
           className={cn(
             "inline-block size-1.5 rounded-full shrink-0",
-            connected ? "bg-green-500" : "bg-zinc-600"
+            connected ? "bg-green-500" : "bg-muted"
           )}
         />
-        <span className="truncate font-medium text-zinc-400">{title}</span>
+        <span className="truncate font-medium text-muted-foreground">{title}</span>
       </div>
       {/* Scrollable output */}
       <pre
         ref={outputRef}
-        className="flex-1 overflow-auto bg-zinc-950 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-zinc-300 whitespace-pre-wrap break-words"
+        className="flex-1 overflow-auto bg-elevation-0 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words"
       >
         {output || (
-          <span className="text-zinc-600">
+          <span className="text-muted-foreground">
             {connected ? "Waiting for output..." : "Connecting..."}
           </span>
         )}
@@ -130,21 +130,21 @@ export const ServerPanel = memo(function ServerPanel({
   const panelKey = visibleServers.map(([id]) => id).join(",")
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-zinc-700 bg-zinc-950">
+    <div className="flex shrink-0 flex-col border-t border-border/70 bg-elevation-0">
       {/* Header — always visible */}
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-3">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-elevation-1 px-3">
         <button
-          className="flex items-center gap-1.5 hover:text-zinc-300 transition-colors"
+          className="flex items-center gap-1.5 hover:text-foreground transition-colors"
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand server panel" : "Collapse server panel"}
           aria-expanded={!collapsed}
         >
           {collapsed ? (
-            <ChevronRight className="size-3 text-zinc-500" />
+            <ChevronRight className="size-3 text-muted-foreground" />
           ) : (
-            <ChevronDown className="size-3 text-zinc-500" />
+            <ChevronDown className="size-3 text-muted-foreground" />
           )}
-          <span className="text-[11px] font-medium text-zinc-400">Servers</span>
+          <span className="text-[11px] font-medium text-muted-foreground">Servers</span>
         </button>
 
         <div className="flex-1" />
@@ -163,13 +163,13 @@ export const ServerPanel = memo(function ServerPanel({
                   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all",
                   isVisible
                     ? "bg-green-500/15 text-green-400 border border-green-500/30"
-                    : "bg-zinc-800 text-zinc-500 border border-zinc-700 hover:border-zinc-600 hover:text-zinc-400"
+                    : "bg-elevation-2 text-muted-foreground border border-border/70 hover:border-border hover:text-foreground"
                 )}
               >
                 <span
                   className={cn(
                     "inline-block size-1.5 rounded-full",
-                    isVisible ? "bg-green-400" : "bg-zinc-600"
+                    isVisible ? "bg-green-400" : "bg-muted"
                   )}
                 />
                 <span className="truncate max-w-[80px]">{info.title}</span>

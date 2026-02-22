@@ -81,14 +81,14 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
   if (loading && !data) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Loader2 className="size-6 animate-spin text-zinc-500" />
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   if (!data) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 text-zinc-500">
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
         {fetchError ? (
           <>
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
@@ -127,7 +127,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
   const totalCount = tasks.length
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col elevation-1">
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-5xl py-4 px-4">
           {/* Header */}
@@ -143,7 +143,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <Users className="size-4 text-blue-400 shrink-0" />
-                <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                <h2 className="text-sm font-semibold text-foreground truncate">
                   {config.name}
                 </h2>
                 {isLive && (
@@ -160,7 +160,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
                 )}
               </div>
               {config.description && (
-                <p className="text-xs text-zinc-500 mt-0.5 truncate">
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">
                   {config.description}
                 </p>
               )}
@@ -168,52 +168,52 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
             <div className="flex items-center gap-2 shrink-0">
               <Badge
                 variant="outline"
-                className="h-5 px-1.5 text-[10px] font-normal border-zinc-700 text-zinc-400"
+                className="h-5 px-1.5 text-[10px] font-normal border-border/50 text-muted-foreground"
               >
                 {config.members.length} members
               </Badge>
               <Badge
                 variant="outline"
-                className="h-5 px-1.5 text-[10px] font-normal border-zinc-700 text-zinc-400"
+                className="h-5 px-1.5 text-[10px] font-normal border-border/50 text-muted-foreground"
               >
                 {completedCount}/{totalCount} tasks
               </Badge>
             </div>
           </div>
 
-          <Separator className="bg-zinc-800 mb-4" />
+          <Separator className="bg-border/40 mb-4" />
 
           {/* Members Grid */}
           <section className="mb-5">
             <div className="flex items-center gap-1.5 mb-2.5">
-              <Users className="size-3.5 text-zinc-500" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <Users className="size-3.5 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Members
               </h3>
             </div>
             <MembersGrid members={config.members} tasks={tasks} onMemberClick={handleMemberClick} />
           </section>
 
-          <Separator className="bg-zinc-800 mb-5" />
+          <Separator className="bg-border/40 mb-5" />
 
           {/* Task Board */}
           <section className="mb-5">
             <div className="flex items-center gap-1.5 mb-2.5">
-              <ListTodo className="size-3.5 text-zinc-500" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <ListTodo className="size-3.5 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Tasks
               </h3>
             </div>
             <TaskBoard tasks={tasks} members={config.members} />
           </section>
 
-          <Separator className="bg-zinc-800 mb-5" />
+          <Separator className="bg-border/40 mb-5" />
 
           {/* Message Timeline */}
           <section className="mb-8">
             <div className="flex items-center gap-1.5 mb-2.5">
-              <MessageSquare className="size-3.5 text-zinc-500" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <MessageSquare className="size-3.5 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Activity
               </h3>
             </div>

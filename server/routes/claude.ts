@@ -142,6 +142,7 @@ export function registerClaudeRoutes(use: UseFn) {
           jsonlPath: null,
           pendingTaskCalls: new Map(),
           subagentWatcher: null,
+          worktreeName: null,
         }
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)

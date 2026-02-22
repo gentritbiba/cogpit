@@ -12,6 +12,17 @@ export const MODEL_OPTIONS = [
   { value: "haiku", label: "Haiku" },
 ]
 
+/** Convert a user message into a valid worktree/branch name. */
+export function slugifyWorktreeName(message: string): string {
+  return message
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 40)
+    .replace(/-$/, "")
+}
+
 /** Copy text to clipboard with fallback for Electron/sandboxed contexts. */
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {

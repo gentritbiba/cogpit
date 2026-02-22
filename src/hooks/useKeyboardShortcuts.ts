@@ -14,9 +14,11 @@ interface UseKeyboardShortcutsOpts {
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
   onOpenProjectSwitcher: () => void
+  onOpenThemeSelector: () => void
   onHistoryBack: () => HistoryEntry | null
   onHistoryForward: () => HistoryEntry | null
   onNavigateToSession: (dirName: string, fileName: string) => void
+  onCommitNavigation?: () => void
 }
 
 /** Query all live-session buttons in DOM order */
@@ -57,9 +59,11 @@ export function useKeyboardShortcuts({
   dispatch,
   onToggleSidebar,
   onOpenProjectSwitcher,
+  onOpenThemeSelector,
   onHistoryBack,
   onHistoryForward,
   onNavigateToSession,
+  onCommitNavigation,
 }: UseKeyboardShortcutsOpts) {
   useEffect(() => {
     if (isMobile) return
@@ -89,6 +93,12 @@ export function useKeyboardShortcuts({
       if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "n") {
         e.preventDefault()
         onOpenProjectSwitcher()
+      }
+
+      // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open theme selector
+      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "t") {
+        e.preventDefault()
+        onOpenThemeSelector()
       }
 
       if (e.key === "Escape") {
@@ -156,7 +166,17 @@ export function useKeyboardShortcuts({
         focusSession(buttons[nextIdx])
       }
     }
+    function handleKeyUp(e: KeyboardEvent) {
+      // When Ctrl is released after Ctrl+Tab navigation, commit the selection
+      if (e.key === "Control") {
+        onCommitNavigation?.()
+      }
+    }
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onHistoryBack, onHistoryForward, onNavigateToSession])
+    window.addEventListener("keyup", handleKeyUp)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+    }
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

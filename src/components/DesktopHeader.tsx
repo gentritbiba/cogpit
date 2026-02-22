@@ -11,6 +11,7 @@ import {
   Settings,
   Globe,
   WifiOff,
+  GitBranch,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,12 +27,14 @@ interface DesktopHeaderProps {
   isLive: boolean
   showSidebar: boolean
   showStats: boolean
+  showWorktrees?: boolean
   killing: boolean
   networkUrl: string | null
   networkAccessDisabled: boolean
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
+  onToggleWorktrees?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
 }
@@ -41,12 +44,14 @@ export function DesktopHeader({
   isLive,
   showSidebar,
   showStats,
+  showWorktrees,
   killing,
   networkUrl,
   networkAccessDisabled,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
+  onToggleWorktrees,
   onKillAll,
   onOpenSettings,
 }: DesktopHeaderProps) {
@@ -71,7 +76,7 @@ export function DesktopHeader({
   }, [session])
 
   return (
-    <header className="flex h-11 shrink-0 items-center border-b border-zinc-800/80 bg-zinc-900/60 glass px-3 electron-drag">
+    <header className="flex h-11 shrink-0 items-center border-b border-border/50 bg-elevation-2 depth-mid px-3 electron-drag">
       <div className="flex items-center gap-2 min-w-0">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -91,7 +96,7 @@ export function DesktopHeader({
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="truncate max-w-[220px] text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors"
+                  className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
                   onClick={copyResumeCmd}
                 >
                   {copied ? (
@@ -106,7 +111,7 @@ export function DesktopHeader({
               <TooltipContent className="text-xs space-y-1">
                 <div>Click to copy resume command</div>
                 {session.cwd && (
-                  <div className="font-mono text-zinc-400">{session.cwd}</div>
+                  <div className="font-mono text-muted-foreground">{session.cwd}</div>
                 )}
               </TooltipContent>
             </Tooltip>
@@ -121,7 +126,7 @@ export function DesktopHeader({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-5 w-5 p-0 text-zinc-500 hover:text-zinc-200"
+                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
                   onClick={copyResumeCmd}
                   aria-label={copied ? "Copied!" : "Copy resume command"}
                 >
@@ -149,7 +154,7 @@ export function DesktopHeader({
           <TooltipTrigger asChild>
             <button
               onClick={copyNetworkUrl}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors mr-1"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
             >
               <Globe className="size-3 text-green-500" />
               {urlCopied ? (
@@ -164,7 +169,7 @@ export function DesktopHeader({
       ) : networkAccessDisabled ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-zinc-600 mr-1">
+            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1">
               <WifiOff className="size-3" />
               <span>Network off</span>
             </div>
@@ -179,7 +184,7 @@ export function DesktopHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-200"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
               onClick={onOpenSettings}
               aria-label="Settings"
             >
@@ -193,7 +198,7 @@ export function DesktopHeader({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-7 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
               onClick={onKillAll}
               disabled={killing}
               aria-label="Kill all Claude processes"
@@ -203,6 +208,22 @@ export function DesktopHeader({
           </TooltipTrigger>
           <TooltipContent>Kill all Claude processes</TooltipContent>
         </Tooltip>
+        {onToggleWorktrees && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 w-7 p-0", showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
+                onClick={onToggleWorktrees}
+                aria-label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
+              >
+                <GitBranch className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{showWorktrees ? "Hide Worktrees" : "Show Worktrees"}</TooltipContent>
+          </Tooltip>
+        )}
         {session && (
           <Tooltip>
             <TooltipTrigger asChild>

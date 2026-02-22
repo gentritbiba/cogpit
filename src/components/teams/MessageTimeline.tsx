@@ -90,7 +90,7 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
 
   if (messages.length === 0) {
     return (
-      <div className="py-6 text-center text-xs text-zinc-600">
+      <div className="py-6 text-center text-xs text-muted-foreground">
         No messages yet
       </div>
     )
@@ -119,7 +119,7 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
             key={`${msg.from}-${msg.timestamp}-${i}`}
             className={cn(
               "flex gap-2 rounded-md px-2 py-1.5 transition-colors",
-              isSystemish ? "opacity-40" : "hover:bg-zinc-900/50"
+              isSystemish ? "opacity-40" : "hover:elevation-2"
             )}
           >
             {/* Color dot */}
@@ -136,16 +136,16 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
                 <span className={cn("text-[11px] font-medium", textColor)}>
                   {msg.from}
                 </span>
-                <span className="text-[10px] text-zinc-600">
+                <span className="text-[10px] text-muted-foreground">
                   {formatRelativeTime(msg.timestamp)}
                 </span>
                 {msg.type === "task_assignment" && (
-                  <span className="text-[9px] text-zinc-600 bg-zinc-800 rounded px-1">
+                  <span className="text-[9px] text-muted-foreground bg-elevation-2 rounded px-1">
                     task
                   </span>
                 )}
                 {msg.type === "idle" && (
-                  <span className="text-[9px] text-zinc-700 bg-zinc-800/50 rounded px-1">
+                  <span className="text-[9px] text-muted-foreground bg-elevation-2 rounded px-1">
                     idle
                   </span>
                 )}
@@ -158,11 +158,11 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
 
               {/* Message body */}
               {msg.type === "chat" ? (
-                <div className="mt-0.5 text-xs text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">
+                <div className="mt-0.5 text-xs text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
                   {msg.content.length > 500 ? (
                     <>
                       {msg.summary && (
-                        <p className="text-zinc-300 font-medium mb-1">
+                        <p className="text-foreground font-medium mb-1">
                           {msg.summary}
                         </p>
                       )}
@@ -173,7 +173,7 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
                   )}
                 </div>
               ) : (
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
                   {msg.content}
                 </p>
               )}

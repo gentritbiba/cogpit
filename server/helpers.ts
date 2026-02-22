@@ -575,8 +575,30 @@ export interface PersistentSession {
   pendingTaskCalls: Map<string, string>
   /** Subagent directory watcher (cleaned up on process close) */
   subagentWatcher: SubagentWatcher | null
+  /** Worktree name if session was created with --worktree */
+  worktreeName: string | null
 }
 export const persistentSessions = new Map<string, PersistentSession>()
+
+export interface FileChange {
+  path: string
+  status: "M" | "A" | "D" | "R"
+  additions: number
+  deletions: number
+}
+
+export interface WorktreeInfo {
+  name: string
+  path: string
+  branch: string
+  head: string
+  headMessage: string
+  isDirty: boolean
+  commitsAhead: number
+  linkedSessions: string[]
+  createdAt: string
+  changedFiles: FileChange[]
+}
 
 /** Find the JSONL file path for a session by searching all project directories. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {

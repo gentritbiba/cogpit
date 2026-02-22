@@ -348,4 +348,84 @@ describe("useNewSession", () => {
       expect.objectContaining({ isMobile: true })
     )
   })
+
+  it("passes worktreeName in createAndSend when worktree is enabled", async () => {
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+
+    act(() => {
+      result.current.handleNewSession("dir1")
+      result.current.setWorktreeEnabled(true)
+      result.current.setWorktreeName("my-feature")
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve("{}"),
+      } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("implement feature")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.worktreeName).toBe("my-feature")
+  })
+
+  it("auto-generates worktreeName from message when worktree enabled and name is empty", async () => {
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+
+    act(() => {
+      result.current.handleNewSession("dir1")
+      result.current.setWorktreeEnabled(true)
+      // Leave worktreeName empty — should auto-generate from message
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve("{}"),
+      } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("Fix the auth token refresh logic")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.worktreeName).toBe("fix-the-auth-token-refresh-logic")
+  })
+
+  it("does not pass worktreeName when worktree is disabled", async () => {
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+
+    act(() => {
+      result.current.handleNewSession("dir1")
+      // worktreeEnabled defaults to false
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ dirName: "dir1", fileName: "s.jsonl", sessionId: "sid" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve("{}"),
+      } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("hello")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.worktreeName).toBeUndefined()
+  })
 })

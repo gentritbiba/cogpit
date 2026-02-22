@@ -33,25 +33,25 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
   }, [path, save, onConfigured])
 
   return (
-    <div className="flex h-dvh items-center justify-center bg-zinc-950 text-zinc-100">
-      <Card className="w-full max-w-md mx-4 p-6 bg-zinc-900 border-zinc-800">
+    <div className="flex h-dvh items-center justify-center bg-elevation-0 text-foreground">
+      <Card className="w-full max-w-md mx-4 p-6 elevation-1 border-border">
         <div className="flex flex-col items-center gap-4">
           <Cog className="size-8 text-blue-400" />
           <h1 className="text-xl font-semibold tracking-tight">Cogpit Setup</h1>
-          <p className="text-sm text-zinc-400 text-center leading-relaxed">
-            Enter the path to your <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">.claude</code> directory
+          <p className="text-sm text-muted-foreground text-center leading-relaxed">
+            Enter the path to your <code className="rounded bg-elevation-2 px-1.5 py-0.5 text-xs text-foreground">.claude</code> directory
             to get started. This is typically located at{" "}
-            <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300">~/.claude</code>.
+            <code className="rounded bg-elevation-2 px-1.5 py-0.5 text-xs text-foreground">~/.claude</code>.
           </p>
 
           <div className="w-full space-y-3 mt-2">
             <div className="relative">
-              <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+              <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={path}
                 onChange={handleChange}
                 placeholder="/Users/you/.claude"
-                className="pl-10 bg-zinc-950 border-zinc-700 focus:border-zinc-600"
+                className="pl-10 bg-elevation-0 border-border/70 focus:border-border"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && status === "valid" && !saving) handleSave()
                 }}
@@ -60,7 +60,7 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
             </div>
 
             {status === "validating" && (
-              <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />
                 Checking path...
               </div>

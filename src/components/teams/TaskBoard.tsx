@@ -23,8 +23,8 @@ const COLUMNS: Column[] = [
     key: "pending",
     label: "Pending",
     icon: <Clock className="size-3.5" />,
-    headerColor: "text-zinc-400",
-    dotColor: "bg-zinc-500",
+    headerColor: "text-muted-foreground",
+    dotColor: "bg-muted-foreground",
   },
   {
     key: "in_progress",
@@ -84,16 +84,16 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
                     <div
                       key={task.id}
                       className={cn(
-                        "flex flex-col gap-1.5 rounded-lg border p-2.5 bg-zinc-900/50 transition-colors",
-                        isBlocked ? "border-yellow-800/40 opacity-70" : "border-zinc-800"
+                        "flex flex-col gap-1.5 rounded-lg border p-2.5 transition-colors elevation-2 depth-low card-glow",
+                        isBlocked ? "border-yellow-800/40 opacity-70" : "border-border/40"
                       )}
                     >
                       {/* Task ID + subject */}
                       <div className="flex items-start gap-1.5">
-                        <span className="shrink-0 text-[10px] font-mono text-zinc-600 mt-0.5">
+                        <span className="shrink-0 text-[10px] font-mono text-muted-foreground mt-0.5">
                           #{task.id}
                         </span>
-                        <span className="text-xs text-zinc-300 leading-snug">
+                        <span className="text-xs text-foreground leading-snug">
                           {task.subject}
                         </span>
                       </div>
@@ -107,7 +107,7 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
                               getMemberColorClass(ownerMember?.color)
                             )}
                           />
-                          <span className="text-[10px] text-zinc-500">
+                          <span className="text-[10px] text-muted-foreground">
                             {task.owner}
                           </span>
                         </div>
@@ -118,7 +118,7 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
                         {isBlocked && (
                           <Badge
                             variant="outline"
-                            className="h-4 px-1 text-[9px] font-normal border-yellow-700/50 text-yellow-500 gap-0.5"
+                            className="h-4 px-1 text-[9px] font-normal border-yellow-700/40 text-yellow-500 gap-0.5"
                           >
                             <Lock className="size-2" />
                             Blocked by {task.blockedBy.map((id) => `#${id}`).join(", ")}
@@ -127,7 +127,7 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
                         {task.blocks.length > 0 && (
                           <Badge
                             variant="outline"
-                            className="h-4 px-1 text-[9px] font-normal border-zinc-700 text-zinc-500 gap-0.5"
+                            className="h-4 px-1 text-[9px] font-normal border-border/50 text-muted-foreground gap-0.5"
                           >
                             <ArrowRight className="size-2" />
                             Blocks {task.blocks.map((id) => `#${id}`).join(", ")}
@@ -139,7 +139,7 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
                 })}
 
                 {colTasks.length === 0 && (
-                  <div className="py-6 text-center text-[10px] text-zinc-700">
+                  <div className="py-6 text-center text-[10px] text-muted-foreground">
                     No tasks
                   </div>
                 )}
