@@ -600,17 +600,6 @@ export interface WorktreeInfo {
   changedFiles: FileChange[]
 }
 
-/** Convert a user message into a valid worktree/branch name. */
-export function slugifyWorktreeName(message: string): string {
-  return message
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .slice(0, 40)
-    .replace(/-$/, "")
-}
-
 /** Find the JSONL file path for a session by searching all project directories. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {
   const targetFile = `${sessionId}.jsonl`

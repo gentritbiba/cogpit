@@ -1,4 +1,4 @@
-import { execSync, execFileSync } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { statSync } from "node:fs"
 import { resolve, dirname } from "node:path"
 import {
@@ -73,7 +73,7 @@ async function resolveProjectPath(projectDir: string, dirName: string): Promise<
 
 function getMainWorktreeRoot(projectPath: string): string | null {
   try {
-    const commonDir = execSync("git rev-parse --git-common-dir", {
+    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectPath,
       encoding: "utf-8",
     }).trim()
@@ -88,7 +88,7 @@ function getMainWorktreeRoot(projectPath: string): string | null {
 
 function getDefaultBranch(gitRoot: string): string {
   try {
-    const ref = execSync("git symbolic-ref refs/remotes/origin/HEAD", {
+    const ref = execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
       cwd: gitRoot,
       encoding: "utf-8",
     }).trim()
@@ -124,7 +124,7 @@ export function registerWorktreeRoutes(use: UseFn) {
       }
 
       try {
-        const rawOutput = execSync("git worktree list --porcelain", {
+        const rawOutput = execFileSync("git", ["worktree", "list", "--porcelain"], {
           cwd: gitRoot,
           encoding: "utf-8",
         })
@@ -255,7 +255,8 @@ export function registerWorktreeRoutes(use: UseFn) {
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify(worktrees))
-      } catch {
+      } catch (err) {
+        console.error("[worktrees] failed to list worktrees:", err instanceof Error ? err.message : err)
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify([]))
       }
@@ -295,7 +296,14 @@ export function registerWorktreeRoutes(use: UseFn) {
         req.on("end", () => resolve(data))
       })
 
-      const { force } = body ? JSON.parse(body) : { force: false }
+      let force = false
+      try {
+        if (body) ({ force = false } = JSON.parse(body))
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        return
+      }
       const worktreePath = join(gitRoot, ".claude", "worktrees", worktreeName)
       const branchName = `worktree-${worktreeName}`
 
@@ -350,7 +358,14 @@ export function registerWorktreeRoutes(use: UseFn) {
         req.on("end", () => resolve(data))
       })
 
-      const parsed: { worktreeName?: string; title?: string; body?: string } = body ? JSON.parse(body) : {}
+      let parsed: { worktreeName?: string; title?: string; body?: string } = {}
+      try {
+        if (body) parsed = JSON.parse(body)
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        return
+      }
       const { worktreeName, title, body: prBody } = parsed
       if (!worktreeName) {
         res.statusCode = 400
@@ -420,10 +435,19 @@ export function registerWorktreeRoutes(use: UseFn) {
         req.on("end", () => resolve(data))
       })
 
-      const { confirm, names, maxAgeDays = 7 } = body ? JSON.parse(body) : {}
+      let confirm: boolean | undefined
+      let names: string[] | undefined
+      let maxAgeDays = 7
+      try {
+        if (body) ({ confirm, names, maxAgeDays = 7 } = JSON.parse(body))
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        return
+      }
 
       try {
-        const rawOutput = execSync("git worktree list --porcelain", {
+        const rawOutput = execFileSync("git", ["worktree", "list", "--porcelain"], {
           cwd: gitRoot,
           encoding: "utf-8",
         })
@@ -477,7 +501,8 @@ export function registerWorktreeRoutes(use: UseFn) {
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ removed, errors }))
-      } catch {
+      } catch (err) {
+        console.error("[worktrees] cleanup failed:", err instanceof Error ? err.message : err)
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ stale: [] }))
       }
