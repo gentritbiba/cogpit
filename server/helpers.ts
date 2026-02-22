@@ -575,6 +575,8 @@ export interface PersistentSession {
   pendingTaskCalls: Map<string, string>
   /** Subagent directory watcher (cleaned up on process close) */
   subagentWatcher: SubagentWatcher | null
+  /** Worktree name if session was created with --worktree */
+  worktreeName: string | null
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 
