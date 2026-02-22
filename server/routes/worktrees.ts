@@ -9,7 +9,7 @@ import {
   open,
   join,
 } from "../helpers"
-import type { UseFn, WorktreeInfo } from "../helpers"
+import type { UseFn, WorktreeInfo, FileChange } from "../helpers"
 
 interface WorktreeRaw {
   path: string
@@ -189,6 +189,56 @@ export function registerWorktreeRoutes(use: UseFn) {
             createdAt = stat.birthtime.toISOString()
           } catch { /* */ }
 
+          const changedFiles: FileChange[] = []
+          try {
+            // Get diff stats against default branch
+            const diffOutput = execFileSync(
+              "git",
+              ["diff", "--numstat", `${defaultBranch}..HEAD`],
+              { cwd: wt.path, encoding: "utf-8" }
+            )
+            // Also get uncommitted changes
+            const uncommittedOutput = execFileSync(
+              "git",
+              ["diff", "--numstat"],
+              { cwd: wt.path, encoding: "utf-8" }
+            )
+
+            const seen = new Set<string>()
+            for (const output of [diffOutput, uncommittedOutput]) {
+              for (const line of output.trim().split("\n")) {
+                if (!line) continue
+                const [add, del, filePath] = line.split("\t")
+                if (!filePath || seen.has(filePath)) continue
+                seen.add(filePath)
+                changedFiles.push({
+                  path: filePath,
+                  status: "M",
+                  additions: parseInt(add, 10) || 0,
+                  deletions: parseInt(del, 10) || 0,
+                })
+              }
+            }
+
+            // Detect added/deleted files via --diff-filter
+            try {
+              const added = execFileSync(
+                "git",
+                ["diff", "--diff-filter=A", "--name-only", `${defaultBranch}..HEAD`],
+                { cwd: wt.path, encoding: "utf-8" }
+              ).trim().split("\n").filter(Boolean)
+              const deleted = execFileSync(
+                "git",
+                ["diff", "--diff-filter=D", "--name-only", `${defaultBranch}..HEAD`],
+                { cwd: wt.path, encoding: "utf-8" }
+              ).trim().split("\n").filter(Boolean)
+              for (const f of changedFiles) {
+                if (added.includes(f.path)) f.status = "A"
+                if (deleted.includes(f.path)) f.status = "D"
+              }
+            } catch { /* */ }
+          } catch { /* */ }
+
           return {
             name,
             path: wt.path,
@@ -199,6 +249,7 @@ export function registerWorktreeRoutes(use: UseFn) {
             commitsAhead,
             linkedSessions: sessionBranches.get(wt.branch) || [],
             createdAt,
+            changedFiles,
           }
         })
 

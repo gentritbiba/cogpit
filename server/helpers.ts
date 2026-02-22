@@ -580,6 +580,13 @@ export interface PersistentSession {
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 
+export interface FileChange {
+  path: string
+  status: "M" | "A" | "D" | "R"
+  additions: number
+  deletions: number
+}
+
 export interface WorktreeInfo {
   name: string
   path: string
@@ -590,6 +597,7 @@ export interface WorktreeInfo {
   commitsAhead: number
   linkedSessions: string[]
   createdAt: string
+  changedFiles: FileChange[]
 }
 
 /** Convert a user message into a valid worktree/branch name. */

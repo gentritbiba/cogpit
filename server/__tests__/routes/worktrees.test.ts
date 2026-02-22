@@ -106,12 +106,14 @@ describe("GET /api/worktrees/:dirName", () => {
       return ""
     })
 
-    // execFileSync is used for: git status --porcelain, git rev-list, git log
+    // execFileSync is used for: git status --porcelain, git rev-list, git log, git diff
     mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("status")) return "M file.ts\n"
       if (cmd === "git" && a.includes("rev-list")) return "2\n"
       if (cmd === "git" && a.includes("log")) return "fix auth bug\n"
+      if (cmd === "git" && a[0] === "diff" && a.includes("--numstat")) return "10\t2\tsrc/auth.ts\n3\t0\tsrc/types.ts\n"
+      if (cmd === "git" && a[0] === "diff" && a.includes("--name-only")) return ""
       return ""
     })
 
@@ -127,6 +129,10 @@ describe("GET /api/worktrees/:dirName", () => {
     expect(data[0].name).toBe("fix-auth")
     expect(data[0].isDirty).toBe(true)
     expect(data[0].branch).toBe("worktree-fix-auth")
+    expect(data[0].changedFiles).toEqual([
+      { path: "src/auth.ts", status: "M", additions: 10, deletions: 2 },
+      { path: "src/types.ts", status: "M", additions: 3, deletions: 0 },
+    ])
   })
 
   it("returns empty array when project is not a git repo", async () => {
