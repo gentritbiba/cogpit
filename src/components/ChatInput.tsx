@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, memo, useImperativeHandle, forwardRef } from "react"
-import { Send, Square, Mic, MicOff, Loader2, CheckCircle, MessageSquare, X } from "lucide-react"
+import { Send, Square, Mic, MicOff, Loader2, CheckCircle, MessageSquare, X, Power } from "lucide-react"
 import { WhisperTranscriber } from "whisper-web-transcriber"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -21,6 +21,7 @@ interface ChatInputProps {
   isConnected?: boolean
   onSend: (message: string, images?: Array<{ data: string; mediaType: string }>) => void
   onInterrupt?: () => void
+  onStopSession?: () => void
   pendingInteraction?: PendingInteraction
 }
 
@@ -37,6 +38,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   isConnected,
   onSend,
   onInterrupt,
+  onStopSession,
   pendingInteraction,
 }, ref) {
   const [text, setText] = useState("")
@@ -383,6 +385,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           </Tooltip>
         )}
 
+        {/* Stop session — kills the server process */}
+        {isConnected && onStopSession && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 shrink-0 p-0 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                onClick={onStopSession}
+              >
+                <Power className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Stop session</TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Voice input button */}
         <Tooltip>

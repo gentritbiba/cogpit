@@ -226,6 +226,7 @@ export default function App() {
     onHistoryBack: sessionHistory.goBack,
     onHistoryForward: sessionHistory.goForward,
     onNavigateToSession: actions.handleDashboardSelect,
+    onCommitNavigation: sessionHistory.commitNavigation,
   })
 
   // Reload session from server (used after undo/redo JSONL mutations)
@@ -379,6 +380,18 @@ export default function App() {
     perms.markApplied()
   }, [currentSessionId, selectedModel, perms])
 
+  // Stop/kill the running session process
+  const handleStopSession = useCallback(async () => {
+    if (!currentSessionId) return
+    try {
+      await authFetch("/api/stop-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: currentSessionId }),
+      })
+    } catch { /* ignore — session may already be dead */ }
+  }, [currentSessionId])
+
   // Permissions panel element (shared between desktop/mobile StatsPanel)
   const permissionsPanelNode = useMemo(() => (
     <PermissionsPanel
@@ -526,6 +539,7 @@ export default function App() {
         isConnected={claudeChat.isConnected}
         onSend={claudeChat.sendMessage}
         onInterrupt={claudeChat.interrupt}
+        onStopSession={handleStopSession}
         pendingInteraction={pendingInteraction}
       />
     </div>
