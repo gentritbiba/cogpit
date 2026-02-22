@@ -1,10 +1,11 @@
-import { execSync } from "node:child_process"
+import { execSync, execFileSync } from "node:child_process"
 import { statSync } from "node:fs"
 import {
   dirs,
   isWithinDir,
   readdir,
   readFile,
+  open,
   join,
 } from "../helpers"
 import type { UseFn, WorktreeInfo } from "../helpers"
@@ -13,6 +14,10 @@ interface WorktreeRaw {
   path: string
   head: string
   branch: string
+}
+
+function isValidWorktreeName(name: string): boolean {
+  return /^[a-zA-Z0-9._-]+$/.test(name) && name.length <= 40
 }
 
 function parseWorktreeList(output: string): WorktreeRaw[] {
@@ -36,7 +41,32 @@ function parseWorktreeList(output: string): WorktreeRaw[] {
   return worktrees
 }
 
-function resolveProjectPath(dirName: string): string {
+async function resolveProjectPath(projectDir: string, dirName: string): Promise<string> {
+  try {
+    const files = await readdir(projectDir)
+    for (const f of files.filter((f: string) => f.endsWith(".jsonl"))) {
+      try {
+        const fh = await open(join(projectDir, f), "r")
+        try {
+          const buf = Buffer.alloc(4096)
+          const { bytesRead } = await fh.read(buf, 0, 4096, 0)
+          const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0]
+          if (firstLine) {
+            const parsed = JSON.parse(firstLine)
+            if (parsed.cwd) {
+              return parsed.cwd
+            }
+          }
+        } finally {
+          await fh.close()
+        }
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    // projectDir might not exist yet
+  }
   return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
@@ -79,7 +109,7 @@ export function registerWorktreeRoutes(use: UseFn) {
         return
       }
 
-      const projectPath = resolveProjectPath(dirName)
+      const projectPath = await resolveProjectPath(projectDir, dirName)
       const gitRoot = getGitRoot(projectPath)
 
       if (!gitRoot) {
@@ -123,7 +153,7 @@ export function registerWorktreeRoutes(use: UseFn) {
 
           let isDirty = false
           try {
-            const status = execSync("git status --porcelain", {
+            const status = execFileSync("git", ["status", "--porcelain"], {
               cwd: wt.path,
               encoding: "utf-8",
             })
@@ -132,8 +162,9 @@ export function registerWorktreeRoutes(use: UseFn) {
 
           let commitsAhead = 0
           try {
-            const count = execSync(
-              `git rev-list --count ${defaultBranch}..HEAD`,
+            const count = execFileSync(
+              "git",
+              ["rev-list", "--count", `${defaultBranch}..HEAD`],
               { cwd: wt.path, encoding: "utf-8" }
             )
             commitsAhead = parseInt(count.trim(), 10) || 0
@@ -141,7 +172,7 @@ export function registerWorktreeRoutes(use: UseFn) {
 
           let headMessage = ""
           try {
-            headMessage = execSync("git log -1 --format=%s", {
+            headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
               cwd: wt.path,
               encoding: "utf-8",
             }).trim()
@@ -187,7 +218,13 @@ export function registerWorktreeRoutes(use: UseFn) {
         return
       }
 
-      const projectPath = resolveProjectPath(dirName)
+      if (!isValidWorktreeName(worktreeName)) {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid worktree name" }))
+        return
+      }
+
+      const projectPath = await resolveProjectPath(projectDir, dirName)
       const gitRoot = getGitRoot(projectPath)
 
       if (!gitRoot) {
@@ -207,15 +244,14 @@ export function registerWorktreeRoutes(use: UseFn) {
       const branchName = `worktree-${worktreeName}`
 
       try {
-        const removeArgs = force ? "--force" : ""
-        execSync(`git worktree remove ${removeArgs} "${worktreePath}"`, {
+        execFileSync("git", ["worktree", "remove", ...(force ? ["--force"] : []), worktreePath], {
           cwd: gitRoot,
           encoding: "utf-8",
         })
 
         try {
           const deleteFlag = force ? "-D" : "-d"
-          execSync(`git branch ${deleteFlag} "${branchName}"`, {
+          execFileSync("git", ["branch", deleteFlag, branchName], {
             cwd: gitRoot,
             encoding: "utf-8",
           })
@@ -243,7 +279,7 @@ export function registerWorktreeRoutes(use: UseFn) {
         return
       }
 
-      const projectPath = resolveProjectPath(dirName)
+      const projectPath = await resolveProjectPath(projectDir, dirName)
       const gitRoot = getGitRoot(projectPath)
 
       if (!gitRoot) {
@@ -258,24 +294,38 @@ export function registerWorktreeRoutes(use: UseFn) {
         req.on("end", () => resolve(data))
       })
 
-      const { worktreeName, title, body: prBody } = JSON.parse(body)
+      const parsed: { worktreeName?: string; title?: string; body?: string } = body ? JSON.parse(body) : {}
+      const { worktreeName, title, body: prBody } = parsed
+      if (!worktreeName) {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "worktreeName is required" }))
+        return
+      }
+
+      if (!isValidWorktreeName(worktreeName)) {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid worktree name" }))
+        return
+      }
+
       const worktreePath = join(gitRoot, ".claude", "worktrees", worktreeName)
       const branchName = `worktree-${worktreeName}`
 
       try {
         // Push branch
-        execSync(`git push -u origin "${branchName}"`, {
+        execFileSync("git", ["push", "-u", "origin", branchName], {
           cwd: worktreePath,
           encoding: "utf-8",
         })
 
         // Create PR
         const prTitle = title || worktreeName.replace(/-/g, " ")
-        const prBodyArg = prBody ? `--body "${prBody.replace(/"/g, '\\"')}"` : ""
-        const prUrl = execSync(
-          `gh pr create --title "${prTitle}" ${prBodyArg} --head "${branchName}"`,
-          { cwd: worktreePath, encoding: "utf-8" }
-        ).trim()
+        const ghArgs = ["pr", "create", "--title", prTitle, "--head", branchName]
+        if (prBody) ghArgs.push("--body", prBody)
+        const prUrl = execFileSync("gh", ghArgs, {
+          cwd: worktreePath,
+          encoding: "utf-8",
+        }).toString().trim()
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ url: prUrl }))
@@ -299,7 +349,7 @@ export function registerWorktreeRoutes(use: UseFn) {
         return
       }
 
-      const projectPath = resolveProjectPath(dirName)
+      const projectPath = await resolveProjectPath(projectDir, dirName)
       const gitRoot = getGitRoot(projectPath)
 
       if (!gitRoot) {
@@ -326,7 +376,7 @@ export function registerWorktreeRoutes(use: UseFn) {
 
         const stale = rawWorktrees.filter((wt) => {
           try {
-            const status = execSync("git status --porcelain", {
+            const status = execFileSync("git", ["status", "--porcelain"], {
               cwd: wt.path,
               encoding: "utf-8",
             })
@@ -359,9 +409,9 @@ export function registerWorktreeRoutes(use: UseFn) {
           const name = wt.branch.replace("worktree-", "")
           if (!namesToRemove.has(name)) continue
           try {
-            execSync(`git worktree remove "${wt.path}"`, { cwd: gitRoot, encoding: "utf-8" })
+            execFileSync("git", ["worktree", "remove", wt.path], { cwd: gitRoot, encoding: "utf-8" })
             try {
-              execSync(`git branch -d "${wt.branch}"`, { cwd: gitRoot, encoding: "utf-8" })
+              execFileSync("git", ["branch", "-d", wt.branch], { cwd: gitRoot, encoding: "utf-8" })
             } catch { /* */ }
             removed.push(name)
           } catch (err) {

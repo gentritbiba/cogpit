@@ -6,11 +6,13 @@ vi.mock("../../helpers", () => ({
   isWithinDir: vi.fn(),
   readdir: vi.fn(),
   readFile: vi.fn(),
+  open: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
 
 vi.mock("node:child_process", () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }))
 
 vi.mock("node:fs", () => ({
@@ -18,26 +20,48 @@ vi.mock("node:fs", () => ({
 }))
 
 import { isWithinDir, readdir } from "../../helpers"
-import { execSync } from "node:child_process"
+import { execSync, execFileSync } from "node:child_process"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerWorktreeRoutes } from "../../routes/worktrees"
 
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedReaddir = vi.mocked(readdir)
 const mockedExecSync = vi.mocked(execSync)
+const mockedExecFileSync = vi.mocked(execFileSync)
 
+/**
+ * Creates mock req/res objects. When body is provided, the req will emit
+ * "data" and "end" events as soon as the handler registers listeners for them
+ * (using a microtask). This handles the case where the handler awaits something
+ * before registering body listeners.
+ */
 function createMockReqRes(method: string, url: string, body?: string) {
-  const dataHandlers: ((chunk: string) => void)[] = []
-  const endHandlers: (() => void)[] = []
   let endData = ""
   let statusCode = 200
   const headers: Record<string, string> = {}
+
+  const dataHandlers: ((chunk: string) => void)[] = []
+  const endHandlers: (() => void)[] = []
+  let bodyFired = false
+
   const req = {
     method,
     url,
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-      if (event === "data") dataHandlers.push(handler as (chunk: string) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
+      if (event === "data") {
+        dataHandlers.push(handler as (chunk: string) => void)
+      }
+      if (event === "end") {
+        endHandlers.push(handler as () => void)
+        // As soon as "end" is registered, fire queued body on next microtask
+        if (body !== undefined && !bodyFired) {
+          bodyFired = true
+          Promise.resolve().then(() => {
+            if (body) dataHandlers.forEach(h => h(body))
+            endHandlers.forEach(h => h())
+          })
+        }
+      }
       return req
     }),
     socket: { remoteAddress: "127.0.0.1" },
@@ -51,11 +75,7 @@ function createMockReqRes(method: string, url: string, body?: string) {
     getHeader: vi.fn((k: string) => headers[k]),
     _getData: () => endData,
   }
-  const fire = () => {
-    if (body) dataHandlers.forEach(h => h(body))
-    endHandlers.forEach(h => h())
-  }
-  return { req, res, fire }
+  return { req, res }
 }
 
 describe("GET /api/worktrees/:dirName", () => {
@@ -72,6 +92,7 @@ describe("GET /api/worktrees/:dirName", () => {
   it("returns worktree list for a project", async () => {
     mockedIsWithinDir.mockReturnValue(true)
 
+    // execSync is used for: git rev-parse, git symbolic-ref, git worktree list --porcelain
     mockedExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
       if (cmd.includes("symbolic-ref")) throw new Error("no remote")
@@ -82,9 +103,15 @@ describe("GET /api/worktrees/:dirName", () => {
           "branch refs/heads/worktree-fix-auth\n\n"
         )
       }
-      if (cmd.includes("git status --porcelain")) return "M file.ts\n"
-      if (cmd.includes("rev-list --count")) return "2\n"
-      if (cmd.includes("git log")) return "fix auth bug\n"
+      return ""
+    })
+
+    // execFileSync is used for: git status --porcelain, git rev-list, git log
+    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+      const a = args as string[]
+      if (cmd === "git" && a.includes("status")) return "M file.ts\n"
+      if (cmd === "git" && a.includes("rev-list")) return "2\n"
+      if (cmd === "git" && a.includes("log")) return "fix auth bug\n"
       return ""
     })
 
@@ -109,6 +136,8 @@ describe("GET /api/worktrees/:dirName", () => {
       if (cmd.includes("rev-parse --show-toplevel")) throw new Error("not a git repo")
       return ""
     })
+
+    mockedReaddir.mockResolvedValue([] as any)
 
     const { req, res } = createMockReqRes("GET", "/not-a-repo")
     const next = vi.fn()
@@ -137,5 +166,129 @@ describe("GET /api/worktrees/:dirName", () => {
     await handler(req as any, res as any, next)
 
     expect(next).toHaveBeenCalled()
+  })
+})
+
+describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
+  let handler: Middleware
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const routes: Record<string, Middleware> = {}
+    const use: UseFn = (path: string, h: Middleware) => { routes[path] = h }
+    registerWorktreeRoutes(use)
+    handler = routes["/api/worktrees"]
+  })
+
+  it("rejects invalid worktree names", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+
+    // Use a name with semicolon (invalid char) — URL encodes it so pathParts.length === 2
+    const { req, res } = createMockReqRes("DELETE", "/my-project/evil%3Brm%20-rf")
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(400)
+    const data = JSON.parse(res._getData())
+    expect(data.error).toBe("Invalid worktree name")
+  })
+
+  it("removes a worktree successfully", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      return ""
+    })
+    mockedExecFileSync.mockReturnValue("" as any)
+
+    const { req, res } = createMockReqRes("DELETE", "/my-project/fix-auth", JSON.stringify({ force: false }))
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(200)
+    const data = JSON.parse(res._getData())
+    expect(data.ok).toBe(true)
+  })
+})
+
+describe("POST /api/worktrees/:dirName/create-pr", () => {
+  let handler: Middleware
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const routes: Record<string, Middleware> = {}
+    const use: UseFn = (path: string, h: Middleware) => { routes[path] = h }
+    registerWorktreeRoutes(use)
+    handler = routes["/api/worktrees"]
+  })
+
+  it("returns 400 when worktreeName is missing", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      return ""
+    })
+
+    const { req, res } = createMockReqRes("POST", "/my-project/create-pr", JSON.stringify({ title: "My PR" }))
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(400)
+    const data = JSON.parse(res._getData())
+    expect(data.error).toBe("worktreeName is required")
+  })
+
+  it("rejects invalid worktree names in create-pr", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      return ""
+    })
+
+    const { req, res } = createMockReqRes(
+      "POST",
+      "/my-project/create-pr",
+      JSON.stringify({ worktreeName: "evil; rm -rf /" })
+    )
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(400)
+    const data = JSON.parse(res._getData())
+    expect(data.error).toBe("Invalid worktree name")
+  })
+
+  it("creates a PR successfully", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return "/repo"
+      return ""
+    })
+    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+      const a = args as string[]
+      if (cmd === "git" && a.includes("push")) return ""
+      if (cmd === "gh" && a.includes("pr")) return "https://github.com/owner/repo/pull/1\n"
+      return ""
+    })
+
+    const { req, res } = createMockReqRes(
+      "POST",
+      "/my-project/create-pr",
+      JSON.stringify({ worktreeName: "fix-auth", title: "Fix auth" })
+    )
+    const next = vi.fn()
+    await handler(req as any, res as any, next)
+
+    expect(res.statusCode).toBe(200)
+    const data = JSON.parse(res._getData())
+    expect(data.url).toBe("https://github.com/owner/repo/pull/1")
   })
 })
