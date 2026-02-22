@@ -889,21 +889,23 @@ export default function App() {
           />
         )}
 
-        {showWorktrees && (
-          <WorktreePanel
-            worktrees={worktreeData.worktrees}
-            loading={worktreeData.loading}
-            dirName={currentDirName}
-            onRefetch={worktreeData.refetch}
-            onOpenSession={(sessionId) => {
-              // sessionId is a JSONL filename without extension; navigate to it
-              if (currentDirName) {
-                actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
-              }
-            }}
-          />
-        )}
       </div>
+
+      <WorktreePanel
+        open={showWorktrees}
+        onOpenChange={setShowWorktrees}
+        worktrees={worktreeData.worktrees}
+        loading={worktreeData.loading}
+        dirName={currentDirName}
+        onRefetch={worktreeData.refetch}
+        onOpenSession={(sessionId) => {
+          // sessionId is a JSONL filename without extension; navigate to it
+          if (currentDirName) {
+            actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
+          }
+          setShowWorktrees(false)
+        }}
+      />
 
       {serverPanelNode}
       {undoConfirmDialog}
