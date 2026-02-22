@@ -667,7 +667,15 @@ const SessionsList = memo(function SessionsList({
                 {s.gitBranch && (
                   <span className="flex items-center gap-0.5">
                     <GitBranch className="size-2.5" />
-                    {s.gitBranch}
+                    {s.gitBranch.startsWith("worktree-") ? (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="rounded bg-emerald-500/10 text-emerald-400 px-1 py-px text-[9px] font-medium">
+                          {s.gitBranch.replace("worktree-", "")}
+                        </span>
+                      </span>
+                    ) : (
+                      s.gitBranch
+                    )}
                   </span>
                 )}
                 <span>{formatFileSize(s.size)}</span>
@@ -772,12 +780,18 @@ function SessionDetail({ session }: { session: ParsedSession }) {
           {session.gitBranch && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <GitBranch className="size-3 shrink-0 text-muted-foreground" />
-              <Badge
-                variant="outline"
-                className="h-4 px-1.5 text-[10px] font-normal"
-              >
-                {session.gitBranch}
-              </Badge>
+              {session.gitBranch.startsWith("worktree-") ? (
+                <span className="rounded bg-emerald-500/10 text-emerald-400 px-1.5 py-px text-[10px] font-medium">
+                  {session.gitBranch.replace("worktree-", "")}
+                </span>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="h-4 px-1.5 text-[10px] font-normal"
+                >
+                  {session.gitBranch}
+                </Badge>
+              )}
             </div>
           )}
 
