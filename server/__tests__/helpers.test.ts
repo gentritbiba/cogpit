@@ -20,6 +20,7 @@ import {
   securityHeaders,
   bodySizeLimit,
   authMiddleware,
+  slugifyWorktreeName,
 } from "../helpers"
 
 // ── isWithinDir ─────────────────────────────────────────────────────────
@@ -563,5 +564,22 @@ describe("isRateLimited isolation between IPs", () => {
 
     // req2 should still be allowed
     expect(isRateLimited(req2)).toBe(false)
+  })
+})
+
+// ── slugifyWorktreeName ──────────────────────────────────────────────────
+
+describe("slugifyWorktreeName", () => {
+  it("converts message to slug", () => {
+    expect(slugifyWorktreeName("Fix the auth token refresh logic")).toBe("fix-the-auth-token-refresh-logic")
+  })
+  it("truncates to 40 chars without trailing dash", () => {
+    const long = "this is a very long message that exceeds the forty character limit easily"
+    const result = slugifyWorktreeName(long)
+    expect(result.length).toBeLessThanOrEqual(40)
+    expect(result).not.toMatch(/-$/)
+  })
+  it("strips special characters", () => {
+    expect(slugifyWorktreeName("Fix bug #123 (urgent!)")).toBe("fix-bug-123-urgent")
   })
 })

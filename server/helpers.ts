@@ -578,6 +578,29 @@ export interface PersistentSession {
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 
+export interface WorktreeInfo {
+  name: string
+  path: string
+  branch: string
+  head: string
+  headMessage: string
+  isDirty: boolean
+  commitsAhead: number
+  linkedSessions: string[]
+  createdAt: string
+}
+
+/** Convert a user message into a valid worktree/branch name. */
+export function slugifyWorktreeName(message: string): string {
+  return message
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 40)
+    .replace(/-$/, "")
+}
+
 /** Find the JSONL file path for a session by searching all project directories. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {
   const targetFile = `${sessionId}.jsonl`
