@@ -127,7 +127,17 @@ export default function App() {
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
   const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
-  const { creatingSession, createError, clearCreateError, handleNewSession, createAndSend } = useNewSession({
+  const {
+    creatingSession,
+    createError,
+    clearCreateError,
+    handleNewSession,
+    createAndSend,
+    worktreeEnabled,
+    setWorktreeEnabled,
+    worktreeName: newSessionWorktreeName,
+    setWorktreeName: setNewSessionWorktreeName,
+  } = useNewSession({
     permissionsConfig: perms.config,
     dispatch,
     isMobile,
@@ -659,6 +669,10 @@ export default function App() {
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              worktreeEnabled={worktreeEnabled}
+              onWorktreeEnabledChange={setWorktreeEnabled}
+              worktreeName={newSessionWorktreeName}
+              onWorktreeNameChange={setNewSessionWorktreeName}
             />
           )}
 
@@ -826,6 +840,10 @@ export default function App() {
                 permissionsPanel={permissionsPanelNode}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
+                worktreeEnabled={worktreeEnabled}
+                onWorktreeEnabledChange={setWorktreeEnabled}
+                worktreeName={newSessionWorktreeName}
+                onWorktreeNameChange={setNewSessionWorktreeName}
               />
             </div>
           ) : (

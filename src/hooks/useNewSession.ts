@@ -5,6 +5,7 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 import type { ParsedSession } from "@/lib/types"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
+import { slugifyWorktreeName } from "@/lib/utils"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
@@ -23,6 +24,8 @@ export function useNewSession({
 }: UseNewSessionOpts) {
   const [creatingSession, setCreatingSession] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [worktreeEnabled, setWorktreeEnabled] = useState(false)
+  const [worktreeName, setWorktreeName] = useState("")
   const abortRef = useRef<AbortController | null>(null)
   /** The dirName of the pending session (set before first message) */
   const pendingDirNameRef = useRef<string | null>(null)
@@ -68,6 +71,7 @@ export function useNewSession({
             images,
             permissions: permissionsConfig,
             model: model || undefined,
+            worktreeName: worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           }),
           signal: controller.signal,
         })
@@ -124,7 +128,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, dispatch, isMobile, onSessionFinalized]
+    [permissionsConfig, model, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])
@@ -136,5 +140,9 @@ export function useNewSession({
     handleNewSession,
     createAndSend,
     pendingDirNameRef,
+    worktreeEnabled,
+    setWorktreeEnabled,
+    worktreeName,
+    setWorktreeName,
   }
 }
