@@ -324,6 +324,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                         <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
                         <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                       </>
+                    ) : recentlyCompleted.has(s.sessionId) ? (
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
                     ) : (
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
                     )}

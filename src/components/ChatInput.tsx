@@ -1,10 +1,12 @@
-import { useState, useRef, useCallback, useEffect, memo, useImperativeHandle, forwardRef } from "react"
+import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef } from "react"
 import { Send, Square, Mic, MicOff, Loader2, CheckCircle, MessageSquare, X, Power } from "lucide-react"
 import { WhisperTranscriber } from "whisper-web-transcriber"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { PendingInteraction } from "@/lib/parser"
+import { SlashSuggestions } from "@/components/SlashSuggestions"
+import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 
 export type ChatStatus = "ready" | "sending" | "error" | "idle" | "connected"
 
@@ -23,6 +25,9 @@ interface ChatInputProps {
   onInterrupt?: () => void
   onStopSession?: () => void
   pendingInteraction?: PendingInteraction
+  slashSuggestions?: SlashSuggestion[]
+  slashSuggestionsLoading?: boolean
+  expandCommand?: (filePath: string, args: string) => Promise<string | null>
 }
 
 function formatElapsed(sec: number): string {
@@ -40,12 +45,39 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   onInterrupt,
   onStopSession,
   pendingInteraction,
+  slashSuggestions = [],
+  slashSuggestionsLoading = false,
+  expandCommand,
 }, ref) {
   const [text, setText] = useState("")
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle")
   const [voiceProgress, setVoiceProgress] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const transcriberRef = useRef<WhisperTranscriber | null>(null)
+
+  // Slash suggestions state
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const showSlash = text.startsWith("/") && !text.includes(" ")
+
+  // Compute filtered list for keyboard navigation count
+  const slashFilter = showSlash ? text.slice(1).split(" ")[0] : ""
+  const filteredSlashList = useMemo(() => {
+    if (!showSlash) return []
+    const query = slashFilter.toLowerCase()
+    const filtered = slashSuggestions.filter((s) => {
+      if (!query) return true
+      return s.name.toLowerCase().includes(query) || s.description.toLowerCase().includes(query)
+    })
+    // Group: commands first, then skills
+    const commands = filtered.filter((s) => s.type === "command")
+    const skills = filtered.filter((s) => s.type === "skill")
+    return [...commands, ...skills]
+  }, [showSlash, slashFilter, slashSuggestions])
+
+  // Reset selected index when filter changes
+  useEffect(() => {
+    setSlashSelectedIndex(0)
+  }, [slashFilter])
 
   const [images, setImages] = useState<Array<{ file: File; preview: string; data: string; mediaType: string }>>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -112,22 +144,101 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     setImages((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
-  const handleSubmit = useCallback(() => {
+  // Handle selecting a slash suggestion
+  const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
+    // If text already has args after the command name, preserve them
+    const parts = text.slice(1).split(" ")
+    const args = parts.slice(1).join(" ")
+    setText(`/${suggestion.name}${args ? " " + args : " "}`)
+    setSlashSelectedIndex(0)
+    // Focus and move cursor to end
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        el.selectionStart = el.selectionEnd = el.value.length
+        el.style.height = "auto"
+        el.style.height = Math.min(el.scrollHeight, 200) + "px"
+      }
+    })
+  }, [text])
+
+  const handleSubmit = useCallback(async () => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
     const imagePayload = images.length > 0
       ? images.map((img) => ({ data: img.data, mediaType: img.mediaType }))
       : undefined
+
+    // Check if this is a slash command that needs expanding
+    if (trimmed.startsWith("/") && expandCommand) {
+      const parts = trimmed.slice(1).split(/\s+/)
+      const cmdName = parts[0]
+      const args = parts.slice(1).join(" ")
+      const match = slashSuggestions.find(
+        (s) => s.name === cmdName && s.type === "command",
+      )
+      if (match) {
+        const expanded = await expandCommand(match.filePath, args)
+        if (expanded) {
+          onSend(expanded, imagePayload)
+          setText("")
+          setImages([])
+          if (textareaRef.current) textareaRef.current.style.height = "auto"
+          return
+        }
+      }
+    }
+
     onSend(trimmed, imagePayload)
     setText("")
     setImages([])
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-  }, [text, images, onSend])
+  }, [text, images, onSend, expandCommand, slashSuggestions])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Slash suggestions keyboard navigation
+      if (showSlash && filteredSlashList.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault()
+          setSlashSelectedIndex((i) =>
+            i < filteredSlashList.length - 1 ? i + 1 : 0,
+          )
+          return
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault()
+          setSlashSelectedIndex((i) =>
+            i > 0 ? i - 1 : filteredSlashList.length - 1,
+          )
+          return
+        }
+        if (e.key === "Tab") {
+          e.preventDefault()
+          const selected = filteredSlashList[slashSelectedIndex]
+          if (selected) handleSlashSelect(selected)
+          return
+        }
+        if (e.key === "Enter" && !e.shiftKey) {
+          // If the user hasn't typed a space yet (still filtering), select the suggestion
+          if (!text.includes(" ") || text.split(" ").length <= 1) {
+            e.preventDefault()
+            const selected = filteredSlashList[slashSelectedIndex]
+            if (selected) handleSlashSelect(selected)
+            return
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          // Clear the slash to dismiss
+          setText("")
+          return
+        }
+      }
+
       if (e.key === "Escape" && isConnected && onInterrupt) {
         e.preventDefault()
         onInterrupt()
@@ -138,7 +249,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         handleSubmit()
       }
     },
-    [handleSubmit, isConnected, onInterrupt]
+    [handleSubmit, isConnected, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, text]
   )
 
   const handleInput = useCallback(
@@ -282,6 +393,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         <div className="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-500/40 rounded-lg flex items-center justify-center z-10 pointer-events-none">
           <span className="text-sm text-blue-400 font-medium">Drop images here</span>
         </div>
+      )}
+
+      {/* Slash suggestions popup */}
+      {showSlash && (
+        <SlashSuggestions
+          suggestions={filteredSlashList}
+          filter={slashFilter}
+          loading={slashSuggestionsLoading}
+          selectedIndex={slashSelectedIndex}
+          onSelect={handleSlashSelect}
+          onHover={setSlashSelectedIndex}
+        />
       )}
 
       <div className="mx-auto max-w-3xl">

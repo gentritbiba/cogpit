@@ -45,6 +45,7 @@ import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useNotifications } from "@/hooks/useNotifications"
+import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
@@ -140,6 +141,9 @@ export default function App() {
 
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
+
+  // Slash command/skill suggestions
+  const slashSuggestions = useSlashSuggestions(state.session?.cwd)
 
   // Notification sound setting
   const [notificationSoundEnabled, setNotificationSoundEnabled] = useState(true)
@@ -628,6 +632,9 @@ export default function App() {
         onInterrupt={claudeChat.interrupt}
         onStopSession={handleStopSession}
         pendingInteraction={pendingInteraction}
+        slashSuggestions={slashSuggestions.suggestions}
+        slashSuggestionsLoading={slashSuggestions.loading}
+        expandCommand={slashSuggestions.expandCommand}
       />
     </div>
   )
