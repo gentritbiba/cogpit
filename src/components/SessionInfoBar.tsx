@@ -6,6 +6,7 @@ import {
   Copy,
   Code2,
   FolderSearch,
+  TerminalSquare,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +29,7 @@ interface SessionInfoBarProps {
   dispatch: Dispatch<SessionAction>
   onNewSession: (dirName: string) => void
   onDuplicateSession?: () => void
+  onOpenTerminal?: () => void
 }
 
 export function SessionInfoBar({
@@ -38,6 +40,7 @@ export function SessionInfoBar({
   dispatch,
   onNewSession,
   onDuplicateSession,
+  onOpenTerminal,
 }: SessionInfoBarProps) {
   return (
     <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-border/50 bg-elevation-1 ${isMobile ? "px-2" : "px-3"}`}>
@@ -179,6 +182,22 @@ export function SessionInfoBar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Reveal in file manager</TooltipContent>
+            </Tooltip>
+          )}
+          {onOpenTerminal && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                  onClick={onOpenTerminal}
+                >
+                  <TerminalSquare className="size-3" />
+                  Terminal
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Open terminal in project</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>

@@ -6,6 +6,45 @@ import { platform, tmpdir } from "node:os"
 import { join, basename, dirname } from "node:path"
 import { randomBytes } from "node:crypto"
 
+/** Terminals that need --working-directory instead of a positional dir arg */
+const WD_FLAG_TERMINALS = new Set(["ghostty", "alacritty", "wezterm", "wezterm-gui", "rio"])
+
+/**
+ * Build the right command + args to open a terminal at a directory.
+ * Some terminals (Terminal.app, iTerm, Warp) accept a positional dir arg via `open -a`,
+ * while modern cross-platform terminals (Ghostty, Alacritty, etc.) need --working-directory.
+ */
+export function terminalCommand(terminal: string, dirPath: string): { cmd: string; args: string[] } {
+  const os = platform()
+  const name = basename(terminal).toLowerCase()
+
+  // Binary path (contains /)
+  if (terminal.includes("/")) {
+    if (name === "kitty") {
+      return { cmd: terminal, args: ["--single-instance", "-d", dirPath] }
+    }
+    return { cmd: terminal, args: ["--working-directory", dirPath] }
+  }
+
+  // macOS app name via `open -a`
+  if (os === "darwin") {
+    if (WD_FLAG_TERMINALS.has(name)) {
+      return { cmd: "open", args: ["-a", terminal, "--args", "--working-directory", dirPath] }
+    }
+    if (name === "kitty") {
+      return { cmd: "open", args: ["-a", terminal, "--args", "--single-instance", "-d", dirPath] }
+    }
+    // Terminal.app, iTerm, Warp: positional arg works fine
+    return { cmd: "open", args: ["-a", terminal, dirPath] }
+  }
+
+  // Linux / Windows: direct execution
+  if (name === "kitty") {
+    return { cmd: terminal, args: ["--single-instance", "-d", dirPath] }
+  }
+  return { cmd: terminal, args: ["--working-directory", dirPath] }
+}
+
 const EDITORS = ["cursor", "code", "zed", "windsurf"] as const
 
 function findEditor(): Promise<string | null> {
@@ -128,11 +167,8 @@ export function registerEditorRoutes(use: UseFn) {
         try {
           const configuredTerminal = getConfig()?.terminalApp
           if (configuredTerminal) {
-            if (os === "darwin" && !configuredTerminal.startsWith("/")) {
-              await openWithEditor("open", ["-a", configuredTerminal, path])
-            } else {
-              await openWithEditor(configuredTerminal, [path])
-            }
+            const { cmd, args } = terminalCommand(configuredTerminal, path)
+            await openWithEditor(cmd, args)
           } else if (os === "darwin") {
             const tp = process.env.TERM_PROGRAM?.toLowerCase()
             const termApp = tp === "ghostty" ? "Ghostty"
@@ -141,7 +177,8 @@ export function registerEditorRoutes(use: UseFn) {
               : tp === "alacritty" ? "Alacritty"
               : tp === "kitty" ? "kitty"
               : "Terminal"
-            await openWithEditor("open", ["-a", termApp, path])
+            const { cmd, args } = terminalCommand(termApp, path)
+            await openWithEditor(cmd, args)
           } else if (os === "win32") {
             await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
           } else {

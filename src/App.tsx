@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
-import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from "lucide-react"
+import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, TerminalSquare, Code2, FolderSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
@@ -86,12 +86,14 @@ export default function App() {
       ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
       ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
       ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
-    if (!projectPath) return
+    if (!projectPath) { console.warn("[open-terminal] no project path available"); return }
     authFetch("/api/open-terminal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath }),
-    }).catch(() => {})
+    }).then((res) => {
+      if (!res.ok) res.json().then((d) => console.error("[open-terminal]", d.error)).catch(() => {})
+    }).catch((err) => console.error("[open-terminal] fetch failed:", err))
   }, [state.session?.cwd, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
   const handleCloseThemeSelector = useCallback(() => setShowThemeSelector(false), [])
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
@@ -618,6 +620,7 @@ export default function App() {
                     dispatch={dispatch}
                     onNewSession={handleNewSession}
                     onDuplicateSession={handleDuplicateSession}
+                    onOpenTerminal={handleOpenTerminal}
                   />
                   <ChatArea
                     session={state.session}
@@ -655,6 +658,17 @@ export default function App() {
                     <div className="flex-1 flex flex-col items-center justify-center gap-1">
                       <p className="text-sm text-muted-foreground">New session — type your first message below</p>
                       <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                      <div className="flex items-center gap-1 mt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                          onClick={handleOpenTerminal}
+                        >
+                          <TerminalSquare className="size-3" />
+                          Terminal
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -801,6 +815,7 @@ export default function App() {
                 dispatch={dispatch}
                 onNewSession={handleNewSession}
                 onDuplicateSession={handleDuplicateSession}
+                onOpenTerminal={handleOpenTerminal}
               />
 
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
@@ -858,6 +873,43 @@ export default function App() {
                   <div className="flex-1 flex flex-col items-center justify-center gap-1">
                     <p className="text-sm text-muted-foreground">New session — type your first message below</p>
                     <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                    <div className="flex items-center gap-1 mt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                        onClick={handleOpenTerminal}
+                      >
+                        <TerminalSquare className="size-3" />
+                        Terminal
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
+                        onClick={() => authFetch("/api/open-in-editor", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ path: dirNameToPath(state.pendingDirName ?? "") }),
+                        }).catch(() => {})}
+                      >
+                        <Code2 className="size-3" />
+                        Open
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+                        onClick={() => authFetch("/api/reveal-in-folder", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ path: dirNameToPath(state.pendingDirName ?? "") }),
+                        }).catch(() => {})}
+                      >
+                        <FolderSearch className="size-3" />
+                        Reveal
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {chatInputNode}

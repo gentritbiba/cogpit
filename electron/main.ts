@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from "electron"
+import { app, BrowserWindow, Menu, session, shell } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createAppServer } from "./server.ts"
@@ -92,6 +92,35 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media")
   })
+
+  // Custom menu: removes macOS "Show Tab Bar" (Ctrl+Cmd+T) which
+  // conflicts with the open-terminal shortcut in the renderer.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: "appMenu" },
+    { role: "editMenu" },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        { role: "close" },
+      ],
+    },
+  ]))
 
   await createWindow(port)
 

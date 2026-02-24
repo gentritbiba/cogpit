@@ -110,7 +110,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, save, onSaved])
+  }, [path, networkAccess, networkPassword, terminalApp, save, onSaved])
 
   const MIN_PASSWORD_LENGTH = 12
   const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
@@ -175,7 +175,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             <Input
               value={terminalApp}
               onChange={(e) => setTerminalApp(e.target.value)}
-              placeholder="/Applications/Ghostty.app/Contents/MacOS/ghostty"
+              placeholder="Ghostty, iTerm, or /path/to/binary"
               className="bg-elevation-0 border-border/70 focus:border-border text-sm"
             />
           </div>
