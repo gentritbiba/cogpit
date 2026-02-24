@@ -8,118 +8,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog"
-import {
-  createHighlighter,
-  type BundledLanguage,
-  type Highlighter,
-  type ThemedToken,
-} from "shiki"
-
-// ── Dark mode detection (reactive via MutationObserver) ─────────────────────
-
-function useIsDarkMode() {
-  const [isDark, setIsDark] = useState(
-    () => document.documentElement.classList.contains("dark")
-  )
-  useEffect(() => {
-    const el = document.documentElement
-    const update = () => setIsDark(el.classList.contains("dark"))
-    const obs = new MutationObserver(update)
-    obs.observe(el, { attributes: true, attributeFilter: ["class"] })
-    return () => obs.disconnect()
-  }, [])
-  return isDark
-}
-
-// ── Shiki singleton ─────────────────────────────────────────────────────────
-
-let highlighterPromise: Promise<Highlighter> | null = null
-const loadedLangs = new Set<string>()
-
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({
-      themes: ["github-dark", "github-light"],
-      langs: [
-        "typescript",
-        "tsx",
-        "javascript",
-        "jsx",
-        "json",
-        "css",
-        "html",
-        "python",
-        "bash",
-        "yaml",
-        "markdown",
-      ],
-    }).then((hl) => {
-      for (const l of [
-        "typescript", "tsx", "javascript", "jsx", "json",
-        "css", "html", "python", "bash", "yaml", "markdown",
-      ]) {
-        loadedLangs.add(l)
-      }
-      return hl
-    })
-  }
-  return highlighterPromise
-}
-
-async function ensureLang(
-  hl: Highlighter,
-  lang: BundledLanguage
-): Promise<void> {
-  if (loadedLangs.has(lang)) return
-  await hl.loadLanguage(lang)
-  loadedLangs.add(lang)
-}
-
-const EXT_TO_LANG: Record<string, string> = {
-  ts: "typescript",
-  tsx: "tsx",
-  js: "javascript",
-  jsx: "jsx",
-  mjs: "javascript",
-  cjs: "javascript",
-  mts: "typescript",
-  cts: "typescript",
-  py: "python",
-  rs: "rust",
-  go: "go",
-  json: "json",
-  css: "css",
-  scss: "css",
-  html: "html",
-  htm: "html",
-  md: "markdown",
-  mdx: "markdown",
-  yml: "yaml",
-  yaml: "yaml",
-  toml: "toml",
-  sh: "bash",
-  bash: "bash",
-  zsh: "bash",
-  sql: "sql",
-  c: "c",
-  h: "c",
-  cpp: "cpp",
-  cc: "cpp",
-  hpp: "cpp",
-  java: "java",
-  rb: "ruby",
-  swift: "swift",
-  kt: "kotlin",
-  kts: "kotlin",
-  php: "php",
-  vue: "vue",
-  svelte: "svelte",
-}
-
-function getLang(filePath: string): BundledLanguage | null {
-  const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
-  return (EXT_TO_LANG[ext] as BundledLanguage) ?? null
-}
+import type { ThemedToken } from "shiki"
+import { getHighlighter, ensureLang, getLangFromPath } from "@/lib/shiki"
+import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 
 // ── Simple line-level diff (LCS-based) ─────────────────────────────────────
 
@@ -187,7 +78,7 @@ function useHighlightedTokens(
   const [newTokens, setNewTokens] = useState<TokenizedLines | null>(null)
 
   useEffect(() => {
-    const lang = getLang(filePath)
+    const lang = getLangFromPath(filePath)
     if (!lang) {
       setOldTokens(null)
       setNewTokens(null)

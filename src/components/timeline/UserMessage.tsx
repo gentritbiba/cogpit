@@ -89,7 +89,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
         )}
 
         {visibleText && (
-          <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-foreground [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded">
+          <div className="max-w-none text-sm break-words overflow-hidden">
             <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{visibleText}</ReactMarkdown>
           </div>
         )}
