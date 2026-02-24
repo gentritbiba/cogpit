@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor, TerminalSquare } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor, TerminalSquare, Bell, BellOff } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -51,6 +51,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [terminalApp, setTerminalApp] = useState("")
   const [initialTerminalApp, setInitialTerminalApp] = useState("")
 
+  // Notification sound
+  const [notificationSound, setNotificationSound] = useState(true)
+  const [initialNotificationSound, setInitialNotificationSound] = useState(true)
+
   // Track whether network settings changed (to enable save without path change)
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
@@ -75,6 +79,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           const term = data?.terminalApp || ""
           setTerminalApp(term)
           setInitialTerminalApp(term)
+          const notifSound = data?.notificationSound !== false
+          setNotificationSound(notifSound)
+          setInitialNotificationSound(notifSound)
           // Fetch connected devices if network is active
           if (access && data?.networkPassword) {
             authFetch("/api/connected-devices")
@@ -105,6 +112,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       // Only send password if user typed one (blank = keep existing)
       networkPassword: networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
       terminalApp: terminalApp.trim() || undefined,
+      notificationSound,
     })
     if (result.success && result.claudeDir) {
       onSaved(result.claudeDir)
@@ -115,10 +123,11 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const MIN_PASSWORD_LENGTH = 12
   const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
   const terminalChanged = terminalApp !== initialTerminalApp
+  const notifChanged = notificationSound !== initialNotificationSound
   const pathChanged = status === "valid"
   const passwordTooShort = networkAccess && networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
   const needsPassword = networkAccess && !hasExistingPassword && networkPassword.length === 0
-  const canSave = (pathChanged || networkChanged || terminalChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
+  const canSave = (pathChanged || networkChanged || terminalChanged || notifChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -178,6 +187,38 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               placeholder="Ghostty, iTerm, or /path/to/binary"
               className="bg-elevation-0 border-border/70 focus:border-border text-sm"
             />
+          </div>
+
+          {/* Notification Sound */}
+          <div className="space-y-2 pt-3 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {notificationSound ? (
+                  <Bell className="size-4 text-blue-400" />
+                ) : (
+                  <BellOff className="size-4 text-muted-foreground" />
+                )}
+                <div>
+                  <p className="text-sm font-medium text-foreground">Notification Sound</p>
+                  <p className="text-xs text-muted-foreground">Play sound when agents finish</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notificationSound}
+                onClick={() => setNotificationSound(!notificationSound)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                  notificationSound ? "bg-blue-600" : "bg-accent"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    notificationSound ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           {/* Network Access */}

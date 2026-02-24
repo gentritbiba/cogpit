@@ -77,6 +77,9 @@ export function useLiveSession(
         setSseState("connected")
         const data = JSON.parse(event.data)
         if (data.type === "init") {
+          if (data.recentlyActive) {
+            setIsLive(true)
+          }
           resetStaleTimer()
         } else if (data.type === "lines" && data.lines.length > 0) {
           setIsLive(true)

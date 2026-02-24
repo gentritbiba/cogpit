@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from "react"
+import { useMemo, useState, useCallback, useEffect, useRef } from "react"
 import {
   AlertTriangle,
   Server,
@@ -61,6 +61,8 @@ interface StatsPanelProps {
   onLoadSession?: (dirName: string, fileName: string) => void
   /** Current session source for detecting sub-agent view */
   sessionSource?: { dirName: string; fileName: string } | null
+  /** Background agents from useBackgroundAgents (passed from App to avoid double-polling) */
+  backgroundAgents?: BgAgent[]
 }
 
 // ── Token Usage Per Turn Chart ─────────────────────────────────────────────
@@ -647,47 +649,14 @@ function extractInlineAgents(session: ParsedSession): Array<{
 function AgentsPanel({
   session,
   sessionSource,
+  bgAgents,
   onLoadSession,
 }: {
   session: ParsedSession
   sessionSource?: { dirName: string; fileName: string } | null
+  bgAgents: BgAgent[]
   onLoadSession?: (dirName: string, fileName: string) => void
 }) {
-  const [bgAgents, setBgAgents] = useState<BgAgent[]>([])
-  const cwd = session.cwd
-
-  // Fetch background agents from API
-  useEffect(() => {
-    if (!cwd) return
-
-    let cancelled = false
-
-    async function fetchAgents() {
-      try {
-        const res = await authFetch(
-          `/api/background-agents?cwd=${encodeURIComponent(cwd)}`
-        )
-        if (cancelled) return
-        if (res.ok) {
-          const data: BgAgent[] = await res.json()
-          setBgAgents(data)
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    fetchAgents()
-    const interval = setInterval(fetchAgents, 5_000)
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [cwd])
-
-  // Extract inline sub-agents from session content blocks
-  const inlineAgents = useMemo(() => extractInlineAgents(session), [session])
-
   // Detect if we're currently viewing a sub-agent
   const subAgentView = useMemo(() => {
     if (!sessionSource) return null
@@ -695,6 +664,22 @@ function AgentsPanel({
     if (!parsed) return null
     return { ...parsed, dirName: sessionSource.dirName }
   }, [sessionSource])
+
+  // Extract inline sub-agents from session content blocks
+  const currentInlineAgents = useMemo(() => extractInlineAgents(session), [session])
+
+  // Cache parent session's inline agents so they persist when navigating to sub-agents.
+  // When viewing the main session, update the cache. When viewing a sub-agent
+  // (whose session has no sub_agent content blocks), use the cached parent list.
+  const cachedInlineAgentsRef = useRef(currentInlineAgents)
+  useEffect(() => {
+    if (!subAgentView && currentInlineAgents.length > 0) {
+      cachedInlineAgentsRef.current = currentInlineAgents
+    }
+  }, [subAgentView, currentInlineAgents])
+  const inlineAgents = subAgentView && currentInlineAgents.length === 0
+    ? cachedInlineAgentsRef.current
+    : currentInlineAgents
 
   // Determine the parent session ID for constructing sub-agent paths
   const parentSessionId = useMemo(() => {
@@ -725,7 +710,7 @@ function AgentsPanel({
     <section>
       <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
-        Agents ({totalCount})
+        Sub-Agents ({totalCount})
       </h3>
 
       {/* Back to Main button when viewing a sub-agent */}
@@ -1033,6 +1018,7 @@ export function StatsPanel({
   onApplySettings,
   onLoadSession,
   sessionSource,
+  backgroundAgents,
 }: StatsPanelProps) {
   const { turns } = session
 
@@ -1157,6 +1143,7 @@ export function StatsPanel({
         <AgentsPanel
           session={session}
           sessionSource={sessionSource}
+          bgAgents={backgroundAgents ?? []}
           onLoadSession={onLoadSession}
         />
 

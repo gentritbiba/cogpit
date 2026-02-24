@@ -215,6 +215,44 @@ describe("useLiveSession", () => {
     vi.useRealTimers()
   })
 
+  it("sets isLive=true when init has recentlyActive", () => {
+    vi.useFakeTimers()
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "file.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
+    })
+
+    expect(result.current.isLive).toBe(true)
+    expect(result.current.sseState).toBe("connected")
+    vi.useRealTimers()
+  })
+
+  it("does not set isLive on init without recentlyActive", () => {
+    vi.useFakeTimers()
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "file.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "init" })
+    })
+
+    expect(result.current.isLive).toBe(false)
+    expect(result.current.sseState).toBe("connected")
+    vi.useRealTimers()
+  })
+
   it("sets isLive=true and calls onUpdate when lines arrive", () => {
     const source: SessionSource = {
       dirName: "dir",

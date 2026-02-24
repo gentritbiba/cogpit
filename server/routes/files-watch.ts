@@ -216,7 +216,8 @@ export function registerFileWatchRoutes(use: UseFn) {
     stat(filePath)
       .then((s) => {
         offset = s.size
-        res.write(`data: ${JSON.stringify({ type: "init", offset })}\n\n`)
+        const recentlyActive = Date.now() - s.mtimeMs < 30_000
+        res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
       })
       .catch(() => {
         res.write(
