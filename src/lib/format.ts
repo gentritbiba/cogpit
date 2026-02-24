@@ -69,6 +69,21 @@ export function projectName(path: string): string {
   return path.replace(/\/+$/, "").split("/").at(-1) ?? path
 }
 
+/** Parse a sub-agent session fileName, returning parent + agent info or null. */
+export function parseSubAgentPath(fileName: string): {
+  parentSessionId: string
+  agentId: string
+  parentFileName: string
+} | null {
+  const match = fileName.match(/^([^/]+)\/subagents\/agent-([^.]+)\.jsonl$/)
+  if (!match) return null
+  return {
+    parentSessionId: match[1],
+    agentId: match[2],
+    parentFileName: `${match[1]}.jsonl`,
+  }
+}
+
 // ── Cost Calculation ──────────────────────────────────────────────────────
 
 // Pricing per million tokens (USD)

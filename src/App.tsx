@@ -44,7 +44,7 @@ import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
-import { dirNameToPath, shortPath } from "@/lib/format"
+import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
 import { LoginScreen } from "@/components/LoginScreen"
@@ -444,6 +444,15 @@ export default function App() {
     ? `${state.sessionSource.dirName}/${state.sessionSource.fileName}`
     : null
 
+  // Navigate back to parent session when viewing a sub-agent
+  const subAgentInfo = state.sessionSource ? parseSubAgentPath(state.sessionSource.fileName) : null
+  const isSubAgentView = subAgentInfo !== null
+
+  const handleBackToMain = useCallback(() => {
+    if (!state.sessionSource || !subAgentInfo) return
+    actions.handleDashboardSelect(state.sessionSource.dirName, subAgentInfo.parentFileName)
+  }, [state.sessionSource, subAgentInfo, actions.handleDashboardSelect])
+
   // Collect all error messages for toast display
   const activeError = actions.loadError || createError || null
   const clearActiveError = actions.loadError ? actions.clearLoadError : createError ? clearCreateError : undefined
@@ -621,6 +630,7 @@ export default function App() {
                     onNewSession={handleNewSession}
                     onDuplicateSession={handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
+                    onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                   />
                   <ChatArea
                     session={state.session}
@@ -699,6 +709,7 @@ export default function App() {
               hasSettingsChanges={hasSettingsChanges}
               onApplySettings={handleApplySettings}
               onLoadSession={actions.handleDashboardSelect}
+              sessionSource={state.sessionSource}
             />
           )}
 
@@ -816,6 +827,7 @@ export default function App() {
                 onNewSession={handleNewSession}
                 onDuplicateSession={handleDuplicateSession}
                 onOpenTerminal={handleOpenTerminal}
+                onBackToMain={isSubAgentView ? handleBackToMain : undefined}
               />
 
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
@@ -954,6 +966,7 @@ export default function App() {
             hasSettingsChanges={hasSettingsChanges}
             onApplySettings={handleApplySettings}
             onLoadSession={actions.handleDashboardSelect}
+            sessionSource={state.sessionSource}
           />
         )}
 
