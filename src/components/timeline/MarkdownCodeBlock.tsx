@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, type HTMLAttributes } from "react"
+import { useState, useEffect, useCallback, useRef, type HTMLAttributes } from "react"
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { highlightCode } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { copyToClipboard } from "@/lib/utils"
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -41,17 +42,21 @@ function parseLang(className: string | undefined): string | null {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(
-      () => {
+    copyToClipboard(text).then((ok) => {
+      if (ok) {
         setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      },
-      () => {
-        // Clipboard access denied — silently ignore
+        timerRef.current = setTimeout(() => setCopied(false), 2000)
       }
-    )
+    })
   }, [text])
 
   return (
