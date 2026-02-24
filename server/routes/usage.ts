@@ -35,6 +35,13 @@ async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
   }
 
   return new Promise((resolve) => {
+    let resolved = false
+    const done = (value: OAuthCredentials | null) => {
+      if (resolved) return
+      resolved = true
+      resolve(value)
+    }
+
     const child = spawn("/usr/bin/security", [
       "find-generic-password",
       "-s",
@@ -50,8 +57,7 @@ async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
 
     child.on("close", (code) => {
       if (code !== 0) {
-        // Credentials not found or access denied
-        resolve(null)
+        done(null)
         return
       }
 
@@ -64,7 +70,7 @@ async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
 
         // Validate required fields
         if (!creds.accessToken || !creds.refreshToken) {
-          resolve(null)
+          done(null)
           return
         }
 
@@ -74,25 +80,25 @@ async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
           expiresAt = Math.floor(expiresAt / 1000)
         }
 
-        resolve({
+        done({
           accessToken: creds.accessToken,
           refreshToken: creds.refreshToken,
           expiresAt: expiresAt,
           subscriptionType: creds.subscriptionType,
         })
       } catch {
-        resolve(null)
+        done(null)
       }
     })
 
     child.on("error", () => {
-      resolve(null)
+      done(null)
     })
 
     // Timeout after 5 seconds
     setTimeout(() => {
       child.kill()
-      resolve(null)
+      done(null)
     }, 5000)
   })
 }
