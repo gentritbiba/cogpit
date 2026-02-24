@@ -172,6 +172,10 @@ function buildTurns(messages: RawMessage[]): Turn[] {
   // Track which parentToolUseIDs already have a sub_agent content block
   // so we can append to an existing block rather than creating duplicates
   const subAgentBlockMap = new Map<string, { kind: "sub_agent"; messages: SubAgentMessage[] }>()
+  const backgroundAgentBlockMap = new Map<string, { kind: "background_agent"; messages: SubAgentMessage[] }>()
+
+  // Track parentToolUseIDs from Task tool calls with run_in_background: true
+  const backgroundAgentParentIds = new Set<string>()
 
   function flushSubAgentMessages(parentId: string) {
     if (!current) return
@@ -180,14 +184,27 @@ function buildTurns(messages: RawMessage[]): Turn[] {
 
     current.subAgentActivity.push(...agentMsgs)
 
-    // Append to existing sub_agent block for this parentId, or create new one
-    const existingBlock = subAgentBlockMap.get(parentId)
-    if (existingBlock) {
-      existingBlock.messages.push(...agentMsgs)
+    const isBackground = backgroundAgentParentIds.has(parentId)
+
+    if (isBackground) {
+      const existingBlock = backgroundAgentBlockMap.get(parentId)
+      if (existingBlock) {
+        existingBlock.messages.push(...agentMsgs)
+      } else {
+        const block = { kind: "background_agent" as const, messages: [...agentMsgs] }
+        current.contentBlocks.push(block)
+        backgroundAgentBlockMap.set(parentId, block)
+      }
     } else {
-      const block = { kind: "sub_agent" as const, messages: [...agentMsgs] }
-      current.contentBlocks.push(block)
-      subAgentBlockMap.set(parentId, block)
+      // Append to existing sub_agent block for this parentId, or create new one
+      const existingBlock = subAgentBlockMap.get(parentId)
+      if (existingBlock) {
+        existingBlock.messages.push(...agentMsgs)
+      } else {
+        const block = { kind: "sub_agent" as const, messages: [...agentMsgs] }
+        current.contentBlocks.push(block)
+        subAgentBlockMap.set(parentId, block)
+      }
     }
     subAgentMap.delete(parentId)
   }
@@ -205,6 +222,7 @@ function buildTurns(messages: RawMessage[]): Turn[] {
     turns.push(current)
     current = null
     subAgentBlockMap.clear()
+    backgroundAgentBlockMap.clear()
   }
 
   for (const msg of messages) {
@@ -364,6 +382,14 @@ function buildTurns(messages: RawMessage[]): Turn[] {
           current.toolCalls.push(tc)
           msgToolCalls.push(tc)
           pendingToolUses.set(block.id, { turn: current, index: idx })
+
+          // Track Task tool calls with run_in_background for background agent detection
+          if (block.name === "Task") {
+            const input = block.input as Record<string, unknown>
+            if (input.run_in_background === true) {
+              backgroundAgentParentIds.add(block.id)
+            }
+          }
         }
       }
       // Flush any remaining batches
@@ -407,6 +433,7 @@ function buildTurns(messages: RawMessage[]): Turn[] {
         timestamp: data.message.timestamp ?? msg.timestamp ?? "",
         tokenUsage: subAgentUsage,
         model: innerModel,
+        isBackground: backgroundAgentParentIds.has(parentId),
       }
 
       // Extract details from assistant sub-agent messages

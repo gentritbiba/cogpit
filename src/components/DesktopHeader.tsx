@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
 import { cn, copyToClipboard } from "@/lib/utils"
+import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 
 interface DesktopHeaderProps {
   session: ParsedSession | null
@@ -148,6 +149,8 @@ export function DesktopHeader({
       </div>
 
       <div className="flex-1" />
+
+      <TokenUsageIndicator />
 
       {networkUrl ? (
         <Tooltip>

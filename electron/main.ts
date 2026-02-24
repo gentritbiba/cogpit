@@ -39,6 +39,15 @@ async function createWindow(port: number) {
     return { action: "deny" }
   })
 
+  // Intercept in-page link clicks that would navigate away from the app
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const appOrigin = `http://127.0.0.1:${port}`
+    if (!url.startsWith(appOrigin)) {
+      event.preventDefault()
+      shell.openExternal(url)
+    }
+  })
+
   // Always load from the Express server — it serves the built renderer
   // and handles all API routes on the same origin (no proxy needed).
   mainWindow.loadURL(`http://127.0.0.1:${port}`)

@@ -15,6 +15,7 @@ import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
 import { registerEditorRoutes } from "./routes/editor"
 import { registerWorktreeRoutes } from "./routes/worktrees"
+import { registerUsageRoutes } from "./routes/usage"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -65,6 +66,7 @@ export function sessionApiPlugin(): Plugin {
       registerSessionFileChangesRoutes(use)
       registerEditorRoutes(use)
       registerWorktreeRoutes(use)
+      registerUsageRoutes(use)
     },
   }
 }

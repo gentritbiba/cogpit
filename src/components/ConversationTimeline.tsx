@@ -8,6 +8,7 @@ import { ThinkingBlock } from "./timeline/ThinkingBlock"
 import { AssistantText } from "./timeline/AssistantText"
 import { ToolCallCard, getToolBadgeStyle } from "./timeline/ToolCallCard"
 import { SubAgentPanel } from "./timeline/SubAgentPanel"
+import { BackgroundAgentPanel } from "./timeline/BackgroundAgentPanel"
 import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
@@ -623,6 +624,19 @@ const TurnSection = memo(function TurnSection({
               elements.push(
                 <div key={`agent-${i}`} className="rounded-lg bg-indigo-500/[0.06] border border-indigo-500/10 p-3">
                   <SubAgentPanel
+                    messages={block.messages}
+                    expandAll={expandAll}
+                  />
+                </div>
+              )
+              i++
+              continue
+            }
+
+            if (block.kind === "background_agent") {
+              elements.push(
+                <div key={`bg-agent-${i}`} className="rounded-lg bg-violet-500/[0.06] border border-violet-500/10 p-3">
+                  <BackgroundAgentPanel
                     messages={block.messages}
                     expandAll={expandAll}
                   />

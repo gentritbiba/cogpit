@@ -164,6 +164,7 @@ export interface SubAgentMessage {
   timestamp: string
   tokenUsage: TokenUsage | null
   model: string | null
+  isBackground: boolean
 }
 
 /** Ordered content block within a turn – preserves chronological order */
@@ -172,6 +173,7 @@ export type TurnContentBlock =
   | { kind: "text"; text: string[]; timestamp?: string }
   | { kind: "tool_calls"; toolCalls: ToolCall[]; timestamp?: string }
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
+  | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
 
 export interface Turn {
   id: string

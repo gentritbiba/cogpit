@@ -24,6 +24,7 @@ import { registerFileWatchRoutes } from "../server/routes/files-watch"
 import { registerSessionFileChangesRoutes } from "../server/routes/session-file-changes"
 import { registerEditorRoutes } from "../server/routes/editor"
 import { registerWorktreeRoutes } from "../server/routes/worktrees"
+import { registerUsageRoutes } from "../server/routes/usage"
 
 // ── PTY types ───────────────────────────────────────────────────────
 interface PtySession {
@@ -100,6 +101,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerSessionFileChangesRoutes(use)
   registerEditorRoutes(use)
   registerWorktreeRoutes(use)
+  registerUsageRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

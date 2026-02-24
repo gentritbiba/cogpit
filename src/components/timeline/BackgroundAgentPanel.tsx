@@ -5,24 +5,24 @@ import type { SubAgentMessage } from "@/lib/types"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 
-interface SubAgentPanelProps {
+interface BackgroundAgentPanelProps {
   messages: SubAgentMessage[]
   expandAll: boolean
 }
 
 const AGENT_COLORS = [
-  { badge: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30", bar: "bg-indigo-400" },
-  { badge: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30", bar: "bg-cyan-400" },
-  { badge: "bg-amber-500/15 text-amber-300 border-amber-500/30", bar: "bg-amber-400" },
-  { badge: "bg-rose-500/15 text-rose-300 border-rose-500/30", bar: "bg-rose-400" },
-  { badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", bar: "bg-emerald-400" },
+  { badge: "bg-violet-500/15 text-violet-300 border-violet-500/30", bar: "bg-violet-400" },
+  { badge: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30", bar: "bg-fuchsia-400" },
+  { badge: "bg-purple-500/15 text-purple-300 border-purple-500/30", bar: "bg-purple-400" },
+  { badge: "bg-pink-500/15 text-pink-300 border-pink-500/30", bar: "bg-pink-400" },
+  { badge: "bg-sky-500/15 text-sky-300 border-sky-500/30", bar: "bg-sky-400" },
 ]
 
 function shortId(id: string) {
   return id.length > 8 ? id.slice(0, 8) : id
 }
 
-export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }: SubAgentPanelProps) {
+export const BackgroundAgentPanel = memo(function BackgroundAgentPanel({ messages, expandAll }: BackgroundAgentPanelProps) {
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
 
@@ -33,18 +33,18 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
   const multipleAgents = agentIds.length > 1
 
   return (
-    <div className="rounded-md border border-dashed border-indigo-500/30 bg-elevation-1 depth-low p-3">
+    <div className="rounded-md border border-dashed border-violet-500/30 bg-elevation-1 depth-low p-3">
       <button
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 w-full text-left"
       >
-        <Users className="w-4 h-4 text-indigo-400 shrink-0" />
-        <span className="text-xs font-medium text-indigo-400">
-          Sub-agent activity
+        <Users className="w-4 h-4 text-violet-400 shrink-0" />
+        <span className="text-xs font-medium text-violet-400">
+          Background agent activity
         </span>
         {multipleAgents && (
-          <span className="text-[10px] font-semibold text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded-full">
-            {agentIds.length} subagents active
+          <span className="text-[10px] font-semibold text-violet-300 bg-violet-500/20 px-1.5 py-0.5 rounded-full">
+            {agentIds.length} agents active
           </span>
         )}
         {agentIds.map((id) => {
@@ -76,7 +76,7 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
           {messages.map((msg, i) => {
             const color = agentColorMap.get(msg.agentId) ?? AGENT_COLORS[0]
             return (
-              <SubAgentMessageItem
+              <BackgroundAgentMessageItem
                 key={i}
                 message={msg}
                 expandAll={expandAll}
@@ -90,7 +90,7 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
   )
 })
 
-function SubAgentMessageItem({
+function BackgroundAgentMessageItem({
   message,
   expandAll,
   barColor,

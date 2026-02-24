@@ -11,6 +11,12 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
     chatInputRef: { current: null } as RefObject<{ focus: () => void; toggleVoice: () => void } | null>,
     dispatch: vi.fn() as Dispatch<SessionAction>,
     onToggleSidebar: vi.fn(),
+    onOpenProjectSwitcher: vi.fn(),
+    onOpenThemeSelector: vi.fn(),
+    onOpenTerminal: vi.fn(),
+    onHistoryBack: vi.fn(() => null),
+    onHistoryForward: vi.fn(() => null),
+    onNavigateToSession: vi.fn(),
     ...overrides,
   }
 }
@@ -235,6 +241,26 @@ describe("useKeyboardShortcuts", () => {
 
       fireKey("b", { ctrlKey: true })
       expect(opts.onToggleSidebar).toHaveBeenCalled()
+    })
+  })
+
+  describe("Ctrl+Cmd+S - open theme selector", () => {
+    it("calls onOpenThemeSelector on Ctrl+Cmd+S", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("s", { ctrlKey: true, metaKey: true })
+      expect(opts.onOpenThemeSelector).toHaveBeenCalled()
+    })
+  })
+
+  describe("Ctrl+Cmd+T - open terminal", () => {
+    it("calls onOpenTerminal on Ctrl+Cmd+T", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("t", { ctrlKey: true, metaKey: true })
+      expect(opts.onOpenTerminal).toHaveBeenCalled()
     })
   })
 

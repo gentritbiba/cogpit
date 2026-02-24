@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   Cpu,
   RotateCcw,
+  Bot,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,6 +57,8 @@ interface StatsPanelProps {
   hasSettingsChanges?: boolean
   /** Called when user confirms restarting the session to apply settings */
   onApplySettings?: () => Promise<void>
+  /** Called when user clicks a background agent to open its session */
+  onLoadSession?: (dirName: string, fileName: string) => void
 }
 
 // ── Token Usage Per Turn Chart ─────────────────────────────────────────────
@@ -596,6 +599,117 @@ function BackgroundServers({
   )
 }
 
+// ── Background Agents ─────────────────────────────────────────────────────
+
+const AGENT_BADGE_COLORS = [
+  "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",
+  "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
+  "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  "bg-rose-500/15 text-rose-300 border-rose-500/30",
+  "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+]
+
+interface BgAgent {
+  agentId: string
+  dirName: string
+  fileName: string
+  parentSessionId: string
+  modifiedAt: number
+  isActive: boolean
+  preview: string
+}
+
+function BackgroundAgents({
+  cwd,
+  onLoadSession,
+}: {
+  cwd: string
+  onLoadSession?: (dirName: string, fileName: string) => void
+}) {
+  const [agents, setAgents] = useState<BgAgent[]>([])
+
+  useEffect(() => {
+    if (!cwd) return
+
+    let cancelled = false
+
+    async function fetchAgents() {
+      try {
+        const res = await authFetch(
+          `/api/background-agents?cwd=${encodeURIComponent(cwd)}`
+        )
+        if (cancelled) return
+        if (res.ok) {
+          const data: BgAgent[] = await res.json()
+          setAgents(data)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    fetchAgents()
+    const interval = setInterval(fetchAgents, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [cwd])
+
+  if (agents.length === 0) return null
+
+  return (
+    <section>
+      <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
+        Background Agents ({agents.length})
+      </h3>
+      <div className="space-y-1.5">
+        {agents.map((agent, idx) => {
+          const badgeColor = AGENT_BADGE_COLORS[idx % AGENT_BADGE_COLORS.length]
+          const shortId = agent.agentId.length > 8 ? agent.agentId.slice(0, 8) : agent.agentId
+          const preview = agent.preview
+            ? agent.preview.split("\n").find((l) => l.trim())?.trim() ?? agent.agentId
+            : agent.agentId
+
+          return (
+            <button
+              key={agent.agentId}
+              onClick={() => onLoadSession?.(agent.dirName, agent.fileName)}
+              className="w-full rounded border border-border elevation-2 depth-low px-2.5 py-2 text-left transition-colors hover:bg-elevation-3 disabled:cursor-default"
+              disabled={!onLoadSession}
+            >
+              <div className="flex items-center gap-1.5">
+                <Bot className="size-3 shrink-0 text-indigo-400" />
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-mono",
+                    badgeColor
+                  )}
+                >
+                  {shortId}
+                </span>
+                <span
+                  className={cn(
+                    "ml-auto inline-block size-1.5 rounded-full shrink-0",
+                    agent.isActive ? "bg-green-400 animate-pulse" : "bg-muted"
+                  )}
+                  title={agent.isActive ? "Active" : "Done"}
+                />
+              </div>
+              {preview !== agent.agentId && (
+                <p className="mt-1 truncate text-[10px] text-muted-foreground leading-snug">
+                  {preview}
+                </p>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 // ── Turn Navigator ────────────────────────────────────────────────────────
 
 function TurnNavigator({
@@ -780,6 +894,7 @@ export function StatsPanel({
   onModelChange,
   hasSettingsChanges,
   onApplySettings,
+  onLoadSession,
 }: StatsPanelProps) {
   const { turns } = session
 
@@ -898,6 +1013,12 @@ export function StatsPanel({
           turns={turns}
           onToggleServer={onToggleServer}
           onServersChanged={onServersChanged}
+        />
+
+        {/* Background Agents */}
+        <BackgroundAgents
+          cwd={session.cwd}
+          onLoadSession={onLoadSession}
         />
 
         {/* Turn Navigator */}

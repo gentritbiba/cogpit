@@ -15,6 +15,7 @@ interface UseKeyboardShortcutsOpts {
   onToggleSidebar: () => void
   onOpenProjectSwitcher: () => void
   onOpenThemeSelector: () => void
+  onOpenTerminal: () => void
   onHistoryBack: () => HistoryEntry | null
   onHistoryForward: () => HistoryEntry | null
   onNavigateToSession: (dirName: string, fileName: string) => void
@@ -60,6 +61,7 @@ export function useKeyboardShortcuts({
   onToggleSidebar,
   onOpenProjectSwitcher,
   onOpenThemeSelector,
+  onOpenTerminal,
   onHistoryBack,
   onHistoryForward,
   onNavigateToSession,
@@ -95,10 +97,16 @@ export function useKeyboardShortcuts({
         onOpenProjectSwitcher()
       }
 
-      // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open theme selector
-      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "t") {
+      // Ctrl+Cmd+S (Mac) or Ctrl+Alt+S (Windows/Linux) — open theme selector
+      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "s") {
         e.preventDefault()
         onOpenThemeSelector()
+      }
+
+      // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open terminal at project
+      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "t") {
+        e.preventDefault()
+        onOpenTerminal()
       }
 
       if (e.key === "Escape") {
@@ -178,5 +186,5 @@ export function useKeyboardShortcuts({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

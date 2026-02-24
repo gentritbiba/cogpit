@@ -97,6 +97,53 @@ export function registerEditorRoutes(use: UseFn) {
     })
   })
 
+  // POST /api/open-terminal — open the user's default terminal at a directory
+  // Body: { path: string }
+  use("/api/open-terminal", async (req, res, next) => {
+    if (req.method !== "POST") return next()
+
+    let body = ""
+    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
+    req.on("end", async () => {
+      res.setHeader("Content-Type", "application/json")
+
+      try {
+        const { path } = JSON.parse(body)
+        if (!path || typeof path !== "string") {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "path string required" }))
+          return
+        }
+
+        try {
+          await stat(path)
+        } catch {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Path does not exist" }))
+          return
+        }
+
+        const os = platform()
+        try {
+          if (os === "darwin") {
+            await openWithEditor("open", ["-a", "Terminal", path])
+          } else if (os === "win32") {
+            await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
+          } else {
+            await openWithEditor("x-terminal-emulator", ["--working-directory", path])
+          }
+          res.end(JSON.stringify({ success: true }))
+        } catch {
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: "Failed to open terminal" }))
+        }
+      } catch {
+        res.statusCode = 400
+        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+      }
+    })
+  })
+
   // POST /api/open-in-editor — open a file or project in the user's default code editor
   // Body: { path: string, mode?: "file" | "diff" }
   //   mode "file" (default): open the file/folder directly
