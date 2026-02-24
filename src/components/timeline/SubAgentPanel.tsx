@@ -123,7 +123,7 @@ function SubAgentMessageItem({
         {message.text.length > 0 && (
           <div className="flex gap-2 items-start">
             <Cog className="w-3.5 h-3.5 text-green-400 mt-0.5 shrink-0" />
-            <div className="prose dark:prose-invert prose-xs max-w-none text-foreground text-xs break-words">
+            <div className="max-w-none text-xs break-words">
               <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{message.text.join("\n\n")}</ReactMarkdown>
             </div>
           </div>

@@ -79,7 +79,7 @@ export const AssistantText = memo(function AssistantText({
             </span>
           )}
         </div>
-        <div className="prose dark:prose-invert prose-sm max-w-none text-foreground break-words overflow-hidden [&_pre]:bg-elevation-1 [&_pre]:rounded [&_pre]:p-2 [&_pre]:overflow-x-auto [&_code]:text-foreground [&_code]:bg-elevation-1 [&_code]:px-1 [&_code]:rounded [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
+        <div className="max-w-none text-sm break-words overflow-hidden">
           <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{text}</ReactMarkdown>
         </div>
       </div>
