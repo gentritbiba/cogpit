@@ -81,15 +81,18 @@ export default function App() {
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
   const handleToggleThemeSelector = useCallback(() => setShowThemeSelector((p) => !p), [])
   const handleOpenTerminal = useCallback(() => {
-    const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject
-    if (!dirName) return
-    const projectPath = dirNameToPath(dirName)
+    // Prefer the real cwd from the loaded session; dirNameToPath is lossy for paths with hyphens
+    const projectPath = state.session?.cwd
+      ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
+      ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
+      ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
+    if (!projectPath) return
     authFetch("/api/open-terminal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath }),
     }).catch(() => {})
-  }, [state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
+  }, [state.session?.cwd, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
   const handleCloseThemeSelector = useCallback(() => setShowThemeSelector(false), [])
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
   const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])

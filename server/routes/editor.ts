@@ -1,4 +1,5 @@
 import type { UseFn } from "../helpers"
+import { getConfig } from "../config"
 import { execFile } from "node:child_process"
 import { stat, writeFile, unlink } from "node:fs/promises"
 import { platform, tmpdir } from "node:os"
@@ -125,8 +126,22 @@ export function registerEditorRoutes(use: UseFn) {
 
         const os = platform()
         try {
-          if (os === "darwin") {
-            await openWithEditor("open", ["-a", "Terminal", path])
+          const configuredTerminal = getConfig()?.terminalApp
+          if (configuredTerminal) {
+            if (os === "darwin" && !configuredTerminal.startsWith("/")) {
+              await openWithEditor("open", ["-a", configuredTerminal, path])
+            } else {
+              await openWithEditor(configuredTerminal, [path])
+            }
+          } else if (os === "darwin") {
+            const tp = process.env.TERM_PROGRAM?.toLowerCase()
+            const termApp = tp === "ghostty" ? "Ghostty"
+              : tp === "iterm.app" ? "iTerm"
+              : tp === "warpterminal" ? "Warp"
+              : tp === "alacritty" ? "Alacritty"
+              : tp === "kitty" ? "kitty"
+              : "Terminal"
+            await openWithEditor("open", ["-a", termApp, path])
           } else if (os === "win32") {
             await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
           } else {

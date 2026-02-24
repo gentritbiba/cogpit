@@ -129,6 +129,7 @@ export function registerConfigRoutes(use: UseFn) {
         claudeDir: config.claudeDir,
         networkAccess: config.networkAccess || false,
         networkPassword: config.networkPassword ? "set" : null,
+        terminalApp: config.terminalApp || null,
       } : null))
       return
     }
@@ -190,6 +191,7 @@ export function registerConfigRoutes(use: UseFn) {
             claudeDir: validation.resolved || claudeDir,
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
+            terminalApp: parsed.terminalApp || undefined,
           })
           refreshDirs()
 

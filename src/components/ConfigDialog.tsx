@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor, TerminalSquare } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -47,6 +47,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [networkPassword, setNetworkPassword] = useState("")
   const [showNetworkPassword, setShowNetworkPassword] = useState(false)
 
+  // Terminal app
+  const [terminalApp, setTerminalApp] = useState("")
+  const [initialTerminalApp, setInitialTerminalApp] = useState("")
+
   // Track whether network settings changed (to enable save without path change)
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
@@ -68,6 +72,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           setInitialNetworkAccess(access)
           setHasExistingPassword(!!data?.networkPassword)
           setNetworkPassword("")
+          const term = data?.terminalApp || ""
+          setTerminalApp(term)
+          setInitialTerminalApp(term)
           // Fetch connected devices if network is active
           if (access && data?.networkPassword) {
             authFetch("/api/connected-devices")
@@ -97,6 +104,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       networkAccess,
       // Only send password if user typed one (blank = keep existing)
       networkPassword: networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
+      terminalApp: terminalApp.trim() || undefined,
     })
     if (result.success && result.claudeDir) {
       onSaved(result.claudeDir)
@@ -106,10 +114,11 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
   const MIN_PASSWORD_LENGTH = 12
   const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
+  const terminalChanged = terminalApp !== initialTerminalApp
   const pathChanged = status === "valid"
   const passwordTooShort = networkAccess && networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
   const needsPassword = networkAccess && !hasExistingPassword && networkPassword.length === 0
-  const canSave = (pathChanged || networkChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
+  const canSave = (pathChanged || networkChanged || terminalChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -153,6 +162,23 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               {error}
             </div>
           )}
+
+          {/* Terminal App */}
+          <div className="space-y-2 pt-3 border-t border-border">
+            <div className="flex items-center gap-2">
+              <TerminalSquare className="size-4 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-foreground">Terminal Application</p>
+                <p className="text-xs text-muted-foreground">Custom terminal for Ctrl+Cmd+T (blank = system default)</p>
+              </div>
+            </div>
+            <Input
+              value={terminalApp}
+              onChange={(e) => setTerminalApp(e.target.value)}
+              placeholder="/Applications/Ghostty.app/Contents/MacOS/ghostty"
+              className="bg-elevation-0 border-border/70 focus:border-border text-sm"
+            />
+          </div>
 
           {/* Network Access */}
           <div className="space-y-3 pt-3 border-t border-border">

@@ -680,12 +680,18 @@ export const Dashboard = memo(function Dashboard({
             <span className="text-xs font-medium text-muted-foreground">Keyboard Shortcuts</span>
           </div>
           <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11px]">
-            <Shortcut keys={isMac ? ["⌃", "⌘", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
-            <Shortcut keys={["Ctrl", "Shift", "1–9"]} label="Jump to Nth live session" />
-            <Shortcut keys={["Ctrl", "Shift", "↑ / ↓"]} label="Navigate live sessions" />
+            <Shortcut keys={["Space"]} label="Focus chat input" />
             <Shortcut keys={["Ctrl", "B"]} label="Toggle sidebar" />
             <Shortcut keys={["Ctrl", "E"]} label="Expand all turns" />
             <Shortcut keys={["Ctrl", "Shift", "E"]} label="Collapse all turns" />
+            <Shortcut keys={isMac ? ["⌃", "⌘", "T"] : ["Ctrl", "Alt", "T"]} label="Open terminal" />
+            <Shortcut keys={isMac ? ["⌃", "⌘", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
+            <Shortcut keys={isMac ? ["⌃", "⌘", "S"] : ["Ctrl", "Alt", "S"]} label="Switch theme" />
+            <Shortcut keys={["⌃", "Tab"]} label="Recent session (back)" />
+            <Shortcut keys={["⌃", "Shift", "Tab"]} label="Recent session (forward)" />
+            <Shortcut keys={["Ctrl", "Shift", "↑ / ↓"]} label="Navigate live sessions" />
+            <Shortcut keys={["Ctrl", "Shift", "1–9"]} label="Jump to Nth live session" />
+            <Shortcut keys={["Ctrl", "Shift", "M"]} label="Toggle voice input" />
             <Shortcut keys={["Esc"]} label="Clear search" />
           </div>
         </div>

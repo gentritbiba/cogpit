@@ -19,6 +19,7 @@ export interface AppConfig {
   claudeDir: string
   networkAccess?: boolean
   networkPassword?: string
+  terminalApp?: string
 }
 
 let cachedConfig: AppConfig | null = null
@@ -36,6 +37,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
         claudeDir: parsed.claudeDir,
         networkAccess: !!parsed.networkAccess,
         networkPassword: parsed.networkPassword || undefined,
+        terminalApp: parsed.terminalApp || undefined,
       }
       return cachedConfig
     }

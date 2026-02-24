@@ -131,6 +131,7 @@ Navigate live sessions and control the dashboard from your keyboard:
 | **Ctrl+Shift+M** | Toggle voice input |
 | **Ctrl+E** | Expand all turns |
 | **Ctrl+Shift+E** | Collapse all turns |
+| **Ctrl+Cmd+T** (macOS) / **Ctrl+Alt+T** (Linux) | Open terminal in session directory |
 | **Esc** | Clear search |
 
 On macOS, use **⌘** instead of Ctrl. A shortcuts reference is also shown at the bottom of the dashboard.
@@ -216,6 +217,8 @@ bun run typecheck
 On first launch, Cogpit shows a setup screen to configure the path to your `.claude` directory (defaults to `~/.claude`). In the desktop app, the configuration is stored in the system's app data directory. In the web version, it's saved to `config.local.json` at the project root. Both can be changed later via the settings dialog.
 
 The configured directory must contain a `projects/` subdirectory where Claude Code stores session files.
+
+**Terminal application** can be customized via the settings dialog. By default, the open-terminal shortcut auto-detects the running terminal on macOS (Ghostty, iTerm, Warp, Alacritty, kitty) and falls back to Terminal.app. You can override this by setting a custom terminal application name or path in the `Terminal Application` field.
 
 **Network access** can be enabled in the settings dialog by toggling "Network Access" on and setting a password. Remote devices on the same LAN can then connect to `http://<your-ip>:19384` and authenticate with the password. The connection URL is shown in the app header. Changing network settings requires an app restart.
 
