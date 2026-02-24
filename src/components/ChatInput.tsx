@@ -223,13 +223,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           return
         }
         if (e.key === "Enter" && !e.shiftKey) {
-          // If the user hasn't typed a space yet (still filtering), select the suggestion
-          if (!text.includes(" ") || text.split(" ").length <= 1) {
-            e.preventDefault()
-            const selected = filteredSlashList[slashSelectedIndex]
-            if (selected) handleSlashSelect(selected)
-            return
-          }
+          e.preventDefault()
+          const selected = filteredSlashList[slashSelectedIndex]
+          if (selected) handleSlashSelect(selected)
+          return
         }
         if (e.key === "Escape") {
           e.preventDefault()

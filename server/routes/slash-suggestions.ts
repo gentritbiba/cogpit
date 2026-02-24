@@ -12,7 +12,7 @@ export interface SlashSuggestion {
 }
 
 /** Parse YAML frontmatter from a markdown file's content */
-function parseFrontmatter(content: string): Record<string, string> {
+export function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
   const result: Record<string, string> = {}
@@ -135,8 +135,15 @@ async function scanSkills(): Promise<SlashSuggestion[]> {
   return results
 }
 
+/** Check if a file path is safe to read (inside a .claude directory, .md extension) */
+export function isAllowedCommandPath(filePath: string): boolean {
+  const resolved = resolve(filePath)
+  const claudeSegment = `${sep}.claude${sep}`
+  return resolved.includes(claudeSegment) && resolved.endsWith(".md")
+}
+
 /** Expand a command file: strip frontmatter, replace $ARGUMENTS */
-async function expandCommand(
+export async function expandCommand(
   filePath: string,
   args: string,
 ): Promise<string | null> {
@@ -197,17 +204,15 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
           return
         }
 
-        // Security: resolve path to collapse ".." and only allow .md files inside .claude directories
-        const resolved = resolve(filePath)
-        const claudeSegment = `${sep}.claude${sep}`
-        if (!resolved.includes(claudeSegment) || !resolved.endsWith(".md")) {
+        // Security: only allow .md files inside .claude directories
+        if (!isAllowedCommandPath(filePath)) {
           res.statusCode = 403
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ error: "Access denied" }))
           return
         }
 
-        const expanded = await expandCommand(resolved, args || "")
+        const expanded = await expandCommand(resolve(filePath), args || "")
         if (expanded === null) {
           res.statusCode = 404
           res.setHeader("Content-Type", "application/json")
