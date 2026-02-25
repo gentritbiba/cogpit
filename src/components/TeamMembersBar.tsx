@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Users, Crown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TeamMember } from "@/lib/team-types"
@@ -12,7 +13,7 @@ interface TeamMembersBarProps {
   onTeamClick?: () => void
 }
 
-export function TeamMembersBar({
+export const TeamMembersBar = memo(function TeamMembersBar({
   teamName,
   members,
   currentMemberName,
@@ -43,7 +44,7 @@ export function TeamMembersBar({
               onClick={() => onMemberClick(member)}
               disabled={isLoading}
               className={cn(
-                "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] transition-all whitespace-nowrap",
+                "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] transition-colors whitespace-nowrap",
                 isCurrent
                   ? "bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/30"
                   : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground",
@@ -70,4 +71,4 @@ export function TeamMembersBar({
       </div>
     </div>
   )
-}
+})

@@ -44,7 +44,6 @@ import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
-import { useNotifications } from "@/hooks/useNotifications"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { parseSession, detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
@@ -80,14 +79,20 @@ export default function App() {
     [dispatch]
   )
   const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
+  const handleToggleStats = useCallback(() => setShowStats((p) => !p), [])
+  const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [])
   const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
   const handleToggleThemeSelector = useCallback(() => setShowThemeSelector((p) => !p), [])
+
+  // Real filesystem path for the pending (pre-created) session.
+  // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
+  const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
+
   const handleOpenTerminal = useCallback(() => {
-    // Prefer the real cwd from the loaded session; dirNameToPath is lossy for paths with hyphens
     const projectPath = state.session?.cwd
+      ?? pendingPath
       ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
-      ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
       ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
     if (!projectPath) { console.warn("[open-terminal] no project path available"); return }
     authFetch("/api/open-terminal", {
@@ -97,7 +102,7 @@ export default function App() {
     }).then((res) => {
       if (!res.ok) res.json().then((d) => console.error("[open-terminal]", d.error)).catch(() => {})
     }).catch((err) => console.error("[open-terminal] fetch failed:", err))
-  }, [state.session?.cwd, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
+  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.dashboardProject])
   const handleCloseThemeSelector = useCallback(() => setShowThemeSelector(false), [])
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
   const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
@@ -143,29 +148,8 @@ export default function App() {
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
 
   // Slash command/skill suggestions
-  const slashSuggestions = useSlashSuggestions(state.session?.cwd)
+  const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
 
-  // Notification sound setting
-  const [notificationSoundEnabled, setNotificationSoundEnabled] = useState(true)
-  useEffect(() => {
-    authFetch("/api/config")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.notificationSound !== undefined) {
-          setNotificationSoundEnabled(data.notificationSound !== false)
-        }
-      })
-      .catch(() => {})
-  }, [])
-
-  // Desktop notifications for session idle, agent completion, permission prompts
-  useNotifications({
-    isLive,
-    sessionLabel: state.session?.slug || state.session?.sessionId?.slice(0, 12) || null,
-    backgroundAgents,
-    pendingInteraction,
-    soundEnabled: notificationSoundEnabled,
-  })
 
   // Permissions management
   const perms = usePermissions()
@@ -476,8 +460,11 @@ export default function App() {
     : null
 
   // Navigate back to parent session when viewing a sub-agent
+  // Team members also live under subagents/ but are NOT read-only subagent views —
+  // they should get the normal chat input so users can send prompts directly.
   const subAgentInfo = state.sessionSource ? parseSubAgentPath(state.sessionSource.fileName) : null
-  const isSubAgentView = subAgentInfo !== null
+  const isTeamMemberView = subAgentInfo !== null && !!teamContext?.currentMemberName
+  const isSubAgentView = subAgentInfo !== null && !isTeamMemberView
 
   const handleBackToMain = useCallback(() => {
     if (!state.sessionSource || !subAgentInfo) return
@@ -556,7 +543,7 @@ export default function App() {
 
   // SSE connection indicator (shows when session loaded but SSE disconnected)
   const sseIndicator = state.session && state.sessionSource && sseState === "disconnected" && (
-    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high toast-enter">
+    <div role="status" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3 px-3 py-2 depth-high toast-enter">
       <WifiOff className="size-3.5 text-amber-400" />
       <span className="text-xs text-amber-400">Live connection lost</span>
       <span className="text-[10px] text-muted-foreground">Reconnecting automatically...</span>
@@ -565,7 +552,7 @@ export default function App() {
 
   // Error toast
   const errorToast = activeError && (
-    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-elevation-3/95 backdrop-blur-sm px-3 py-2 depth-high max-w-md toast-enter">
+    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-elevation-3 px-3 py-2 depth-high max-w-md toast-enter">
       <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
       <span className="text-xs text-red-400 flex-1">{activeError}</span>
       {clearActiveError && (
@@ -717,7 +704,7 @@ export default function App() {
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center gap-1">
                       <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                      <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
                       <div className="flex items-center gap-1 mt-2">
                         <Button
                           variant="ghost"
@@ -837,8 +824,8 @@ export default function App() {
         networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={handleToggleSidebar}
-        onToggleStats={() => setShowStats(!showStats)}
-        onToggleWorktrees={() => setShowWorktrees((p) => !p)}
+        onToggleStats={handleToggleStats}
+        onToggleWorktrees={handleToggleWorktrees}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
@@ -935,7 +922,7 @@ export default function App() {
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center gap-1">
                     <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                    <p className="text-xs text-muted-foreground font-mono">{shortPath(dirNameToPath(state.pendingDirName ?? ""))}</p>
+                    <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
                     <div className="flex items-center gap-1 mt-2">
                       <Button
                         variant="ghost"
@@ -953,7 +940,7 @@ export default function App() {
                         onClick={() => authFetch("/api/open-in-editor", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ path: dirNameToPath(state.pendingDirName ?? "") }),
+                          body: JSON.stringify({ path: pendingPath ?? "" }),
                         }).catch(() => {})}
                       >
                         <Code2 className="size-3" />
@@ -966,7 +953,7 @@ export default function App() {
                         onClick={() => authFetch("/api/reveal-in-folder", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ path: dirNameToPath(state.pendingDirName ?? "") }),
+                          body: JSON.stringify({ path: pendingPath ?? "" }),
                         }).catch(() => {})}
                       >
                         <FolderSearch className="size-3" />
@@ -1050,15 +1037,6 @@ export default function App() {
         onClose={config.handleCloseConfigDialog}
         onSaved={(newPath: string) => {
           config.handleConfigSaved(newPath)
-          // Refresh notification sound setting after config save
-          authFetch("/api/config")
-            .then((res) => res.json())
-            .then((data) => {
-              if (data?.notificationSound !== undefined) {
-                setNotificationSoundEnabled(data.notificationSound !== false)
-              }
-            })
-            .catch(() => {})
         }}
       />
 

@@ -77,7 +77,7 @@ function ToolAccessGrid({
               onClick={() => handleLeft(tool)}
               onContextMenu={(e) => handleRight(tool, e)}
               className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition-all",
+                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
                 state === "allowed"
                   ? "border-green-800 text-green-400 bg-green-500/10"
                   : state === "blocked"
@@ -147,7 +147,7 @@ export function PermissionsPanel({
               key={opt.value}
               onClick={() => onSetMode(opt.value)}
               className={cn(
-                "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
+                "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-colors",
                 isSelected
                   ? opt.color
                   : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"

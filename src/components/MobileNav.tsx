@@ -41,7 +41,7 @@ export const MobileNav = memo(function MobileNav({
             aria-label={tab.label}
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-all duration-150 min-h-[56px]",
+              "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
               "active:scale-95 active:bg-elevation-2",
               isActive
                 ? "text-blue-400"

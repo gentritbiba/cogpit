@@ -19,7 +19,7 @@ interface ProjectInfo {
 interface ProjectSwitcherModalProps {
   open: boolean
   onClose: () => void
-  onNewSession: (dirName: string) => void
+  onNewSession: (dirName: string, cwd?: string) => void
   currentProjectDirName: string | null
 }
 
@@ -85,7 +85,7 @@ export function ProjectSwitcherModal({
 
   const handleSelect = useCallback(
     (project: ProjectInfo) => {
-      onNewSession(project.dirName)
+      onNewSession(project.dirName, project.path)
       onClose()
     },
     [onNewSession, onClose]

@@ -8,6 +8,8 @@ export interface SessionState {
   sessionSource: SessionSource | null
   /** dirName of a pending (not-yet-created) session, set before first message */
   pendingDirName: string | null
+  /** Real filesystem path for the pending session (avoids lossy dirNameToPath) */
+  pendingCwd: string | null
   activeTurnIndex: number | null
   activeToolCallId: string | null
   searchQuery: string
@@ -41,13 +43,14 @@ export type SessionAction =
   | { type: "SET_LOADING_MEMBER"; name: string | null }
   | { type: "SET_SIDEBAR_TAB"; tab: "browse" | "teams" }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
-  | { type: "INIT_PENDING_SESSION"; dirName: string; isMobile: boolean }
+  | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
 
 const initialState: SessionState = {
   session: null,
   sessionSource: null,
   pendingDirName: null,
+  pendingCwd: null,
   activeTurnIndex: null,
   activeToolCallId: null,
   searchQuery: "",
@@ -70,6 +73,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         session: action.session,
         sessionSource: action.source,
         pendingDirName: null,
+        pendingCwd: null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -89,6 +93,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         session: null,
         sessionSource: null,
         pendingDirName: null,
+        pendingCwd: null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -212,6 +217,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         session: null,
         sessionSource: null,
         pendingDirName: action.dirName,
+        pendingCwd: action.cwd ?? null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
@@ -230,6 +236,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         session: action.session,
         sessionSource: action.source,
         pendingDirName: null,
+        pendingCwd: null,
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",

@@ -47,7 +47,7 @@ export function SessionSetupPanel({
                       key={opt.value}
                       onClick={() => onModelChange(opt.value)}
                       className={cn(
-                        "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
+                        "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-colors",
                         isSelected
                           ? "border-blue-500 text-blue-400 bg-blue-500/10"
                           : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"

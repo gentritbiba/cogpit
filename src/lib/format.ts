@@ -1,5 +1,29 @@
 import type { RawMessage } from "./types"
 
+// Re-export everything from the consolidated token-costs library
+export {
+  calculateCost,
+  calculateTurnCost,
+  calculateTurnCostEstimated,
+  calculateSubAgentCostEstimated,
+  estimateThinkingTokens,
+  estimateVisibleOutputTokens,
+  estimateTotalOutputTokens,
+  estimateSubAgentOutput,
+  formatCost,
+  computeAgentBreakdown,
+  computeModelBreakdown,
+  computeCacheBreakdown,
+  CHARS_PER_TOKEN,
+} from "./token-costs"
+export type {
+  CostInput,
+  AgentBreakdown,
+  ModelBreakdown,
+  CacheBreakdown,
+  UsageBucket,
+} from "./token-costs"
+
 export function shortenModel(model: string): string {
   if (!model) return "unknown"
   if (model.includes("opus-4-6")) return "opus 4.6"
@@ -84,59 +108,6 @@ export function parseSubAgentPath(fileName: string): {
   }
 }
 
-// ── Cost Calculation ──────────────────────────────────────────────────────
-
-// Pricing per million tokens (USD)
-interface ModelPricing {
-  input: number
-  output: number
-  cacheRead: number   // typically 0.1x input
-  cacheWrite: number  // typically 1.25x input
-}
-
-const MODEL_PRICING: Record<string, ModelPricing> = {
-  "opus-4-6":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
-  "opus-4-5":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
-  "opus-4-0":   { input: 15,  output: 75,  cacheRead: 1.5,   cacheWrite: 18.75 },
-  "sonnet-4-6": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
-  "sonnet-4-5": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
-  "sonnet-4-0": { input: 3,   output: 15,  cacheRead: 0.3,   cacheWrite: 3.75  },
-  "haiku-4-5":  { input: 0.8, output: 4,   cacheRead: 0.08,  cacheWrite: 1     },
-  "haiku-4-0":  { input: 0.8, output: 4,   cacheRead: 0.08,  cacheWrite: 1     },
-}
-
-// Fallback: opus pricing (most conservative)
-const DEFAULT_PRICING: ModelPricing = MODEL_PRICING["opus-4-6"]
-
-function getPricing(model: string): ModelPricing {
-  for (const key of Object.keys(MODEL_PRICING)) {
-    if (model.includes(key)) return MODEL_PRICING[key]
-  }
-  return DEFAULT_PRICING
-}
-
-export function calculateTurnCost(
-  model: string | null,
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationTokens: number,
-  cacheReadTokens: number,
-): number {
-  const p = getPricing(model ?? "")
-  return (
-    (inputTokens / 1_000_000) * p.input +
-    (outputTokens / 1_000_000) * p.output +
-    (cacheCreationTokens / 1_000_000) * p.cacheWrite +
-    (cacheReadTokens / 1_000_000) * p.cacheRead
-  )
-}
-
-export function formatCost(usd: number): string {
-  if (usd < 0.01) return `$${usd.toFixed(4)}`
-  if (usd < 1) return `$${usd.toFixed(3)}`
-  return `$${usd.toFixed(2)}`
-}
-
 // ── Context Window ────────────────────────────────────────────────────────
 
 // Auto-compact reserves ~33k tokens as buffer before the hard limit.
@@ -201,3 +172,4 @@ export function getContextUsage(
   }
   return null
 }
+

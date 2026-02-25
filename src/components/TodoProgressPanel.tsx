@@ -38,7 +38,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
           <div className="h-1 rounded-full bg-elevation-2 overflow-hidden">
             <div
               className={cn(
-                "h-full rounded-full transition-all duration-500",
+                "h-full rounded-full transition-[width] duration-500",
                 pct === 100
                   ? "bg-green-500"
                   : "bg-blue-500"

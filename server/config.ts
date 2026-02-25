@@ -20,7 +20,6 @@ export interface AppConfig {
   networkAccess?: boolean
   networkPassword?: string
   terminalApp?: string
-  notificationSound?: boolean
 }
 
 let cachedConfig: AppConfig | null = null
@@ -39,7 +38,6 @@ export async function loadConfig(): Promise<AppConfig | null> {
         networkAccess: !!parsed.networkAccess,
         networkPassword: parsed.networkPassword || undefined,
         terminalApp: parsed.terminalApp || undefined,
-        notificationSound: parsed.notificationSound !== false,
       }
       return cachedConfig
     }

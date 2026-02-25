@@ -19,6 +19,7 @@ export function useLiveSession(
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
   const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
+  const sseStateRef = useRef<SseConnectionState>("disconnected")
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
 
@@ -69,12 +70,18 @@ export function useLiveSession(
     }
 
     es.onopen = () => {
-      setSseState("connected")
+      if (sseStateRef.current !== "connected") {
+        sseStateRef.current = "connected"
+        setSseState("connected")
+      }
     }
 
     es.onmessage = (event) => {
       try {
-        setSseState("connected")
+        if (sseStateRef.current !== "connected") {
+          sseStateRef.current = "connected"
+          setSseState("connected")
+        }
         const data = JSON.parse(event.data)
         if (data.type === "init") {
           if (data.recentlyActive) {
@@ -106,12 +113,14 @@ export function useLiveSession(
 
     es.onerror = () => {
       setIsLive(false)
+      sseStateRef.current = "disconnected"
       setSseState("disconnected")
     }
 
     return () => {
       es.close()
       setIsLive(false)
+      sseStateRef.current = "disconnected"
       setSseState("disconnected")
       if (staleTimer) clearTimeout(staleTimer)
       if (rafId !== null) cancelAnimationFrame(rafId)

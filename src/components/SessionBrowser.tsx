@@ -23,6 +23,7 @@ import {
   Loader2,
   DollarSign,
   Copy,
+  ChevronDown,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +34,11 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { parseSession } from "@/lib/parser"
@@ -48,6 +54,9 @@ import {
   truncate,
   shortPath,
   projectName,
+  computeAgentBreakdown,
+  computeModelBreakdown,
+  computeCacheBreakdown,
 } from "@/lib/format"
 
 // ── API types ──────────────────────────────────────────────────────────────
@@ -94,7 +103,7 @@ interface SessionBrowserProps {
   onSidebarTabChange: (tab: "browse" | "teams") => void
   onSelectTeam?: (teamName: string) => void
   /** Create a new Claude session in the given project */
-  onNewSession?: (dirName: string) => void
+  onNewSession?: (dirName: string, cwd?: string) => void
   /** True while a new session is being created */
   creatingSession?: boolean
   /** When true, renders full-width mobile layout */
@@ -386,7 +395,7 @@ export const SessionBrowser = memo(function SessionBrowser({
                       size="sm"
                       className={cn(isMobile ? "h-8 w-8 p-0" : "h-6 w-6 p-0")}
                       disabled={creatingSession}
-                      onClick={() => onNewSession(selectedProject.dirName)}
+                      onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
                     >
                       {creatingSession
                         ? <Loader2 className={cn(isMobile ? "size-4" : "size-3.5", "animate-spin")} />
@@ -408,7 +417,7 @@ export const SessionBrowser = memo(function SessionBrowser({
                   onChange={(e) => setSearchFilter(e.target.value)}
                   placeholder={view === "projects" ? "Filter projects..." : "Filter sessions..."}
                   className={cn(
-                    "w-full rounded-lg border border-border/60 elevation-2 depth-low pl-8 text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all",
+                    "w-full rounded-lg border border-border/60 elevation-2 depth-low pl-8 text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors",
                     isMobile ? "py-2.5 text-sm" : "py-2 text-xs",
                     searchFilter && "pr-8"
                   )}
@@ -539,7 +548,7 @@ const ProjectsList = memo(function ProjectsList({
             key={project.dirName}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
+              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
               isMobile ? "py-3 min-h-[44px]" : "py-2"
             )}
           >
@@ -620,7 +629,7 @@ const SessionsList = memo(function SessionsList({
               key={s.fileName}
               onClick={() => onSelectSession(s)}
               className={cn(
-                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-all elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
+                "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
                 isMobile ? "py-3.5" : "py-2.5"
               )}
             >
@@ -872,8 +881,168 @@ function SessionDetail({ session }: { session: ParsedSession }) {
             />
           </div>
         </div>
+
+        <Separator className="bg-border/50" />
+
+        {/* Token Breakdown */}
+        <TokenBreakdown session={session} />
       </div>
     </ScrollArea>
+  )
+}
+
+// ── Token Breakdown (collapsible analytics) ──────────────────────────────
+
+function TokenBreakdown({ session }: { session: ParsedSession }) {
+  const [open, setOpen] = useState(false)
+
+  const agentBreakdown = useMemo(
+    () => computeAgentBreakdown(session.turns),
+    [session.turns],
+  )
+  const modelBreakdown = useMemo(
+    () => computeModelBreakdown(session.turns, shortenModel),
+    [session.turns],
+  )
+  const cacheBreakdown = useMemo(
+    () => computeCacheBreakdown(session.turns),
+    [session.turns],
+  )
+
+  const hasSubAgents =
+    agentBreakdown.subAgents.input > 0 || agentBreakdown.subAgents.output > 0
+  const hasMultipleModels = modelBreakdown.length > 1
+
+  // If there's nothing interesting to show, skip the section
+  if (!hasSubAgents && !hasMultipleModels && cacheBreakdown.total === 0) return null
+
+  const cacheReadPct = cacheBreakdown.total > 0 ? (cacheBreakdown.cacheRead / cacheBreakdown.total) * 100 : 0
+  const cacheWritePct = cacheBreakdown.total > 0 ? (cacheBreakdown.cacheWrite / cacheBreakdown.total) * 100 : 0
+  const newInputPct = cacheBreakdown.total > 0 ? (cacheBreakdown.newInput / cacheBreakdown.total) * 100 : 0
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="py-3">
+      <CollapsibleTrigger className="flex w-full items-center gap-1.5 group">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-l-2 border-blue-500/30 pl-2 flex-1 text-left">
+          Token Breakdown
+        </h3>
+        <ChevronDown
+          className={cn(
+            "size-3 text-muted-foreground transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </CollapsibleTrigger>
+
+      <CollapsibleContent className="mt-2 flex flex-col gap-3">
+        {/* By Agent */}
+        {hasSubAgents && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              By Agent
+            </span>
+            <BreakdownRow
+              label="Main Agent"
+              input={agentBreakdown.mainAgent.input + agentBreakdown.mainAgent.cacheRead + agentBreakdown.mainAgent.cacheWrite}
+              output={agentBreakdown.mainAgent.output}
+              cost={agentBreakdown.mainAgent.cost}
+            />
+            <BreakdownRow
+              label="Sub-Agents"
+              input={agentBreakdown.subAgents.input + agentBreakdown.subAgents.cacheRead + agentBreakdown.subAgents.cacheWrite}
+              output={agentBreakdown.subAgents.output}
+              cost={agentBreakdown.subAgents.cost}
+            />
+          </div>
+        )}
+
+        {/* By Model */}
+        {hasMultipleModels && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              By Model
+            </span>
+            {modelBreakdown.map((m) => (
+              <BreakdownRow
+                key={m.model}
+                label={m.shortName}
+                input={m.input + m.cacheRead + m.cacheWrite}
+                output={m.output}
+                cost={m.cost}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Cache Efficiency */}
+        {cacheBreakdown.total > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              Cache Efficiency
+            </span>
+            {/* Stacked bar */}
+            <div className="h-2 w-full rounded-full overflow-hidden flex bg-border/30">
+              {cacheReadPct > 0 && (
+                <div
+                  className="h-full bg-emerald-500/70"
+                  style={{ width: `${cacheReadPct}%` }}
+                />
+              )}
+              {newInputPct > 0 && (
+                <div
+                  className="h-full bg-blue-500/70"
+                  style={{ width: `${newInputPct}%` }}
+                />
+              )}
+              {cacheWritePct > 0 && (
+                <div
+                  className="h-full bg-amber-500/70"
+                  style={{ width: `${cacheWritePct}%` }}
+                />
+              )}
+            </div>
+            {/* Labels */}
+            <div className="flex justify-between text-[9px] text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <span className="inline-block size-1.5 rounded-full bg-emerald-500/70" />
+                {cacheReadPct.toFixed(0)}% read
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block size-1.5 rounded-full bg-blue-500/70" />
+                {newInputPct.toFixed(0)}% new
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block size-1.5 rounded-full bg-amber-500/70" />
+                {cacheWritePct.toFixed(0)}% write
+              </span>
+            </div>
+          </div>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+function BreakdownRow({
+  label,
+  input,
+  output,
+  cost,
+}: {
+  label: string
+  input: number
+  output: number
+  cost: number
+}) {
+  return (
+    <div className="flex items-center gap-1 text-[10px]">
+      <span className="flex-1 truncate text-muted-foreground">{label}</span>
+      <span className="font-mono text-blue-400 w-12 text-right">{formatTokenCount(input)}</span>
+      <span className="text-muted-foreground/50">in</span>
+      <span className="font-mono text-emerald-400 w-10 text-right">{formatTokenCount(output)}</span>
+      <span className="text-muted-foreground/50">out</span>
+      <span className="font-mono text-amber-400 w-12 text-right">{formatCost(cost)}</span>
+    </div>
   )
 }
 

@@ -1,4 +1,4 @@
-import { type RefObject, type Dispatch, useRef, useEffect, useState } from "react"
+import { type RefObject, type Dispatch, useRef, useEffect, useState, memo } from "react"
 import {
   Search,
   ChevronsDownUp,
@@ -41,7 +41,7 @@ interface ChatAreaProps {
   onToggleExpandAll: () => void
 }
 
-export function ChatArea({
+export const ChatArea = memo(function ChatArea({
   session,
   activeTurnIndex,
   activeToolCallId,
@@ -85,7 +85,7 @@ export function ChatArea({
     <div className={cn("relative", isMobile ? "flex flex-col flex-1 min-h-0" : "h-full")}>
       {/* Search bar (mobile only - desktop has it in StatsPanel) */}
       {isMobile && (
-        <div className="flex items-center gap-1.5 shrink-0 border-b border-border/50 bg-elevation-1 backdrop-blur-sm px-2 py-1.5">
+        <div className="flex items-center gap-1.5 shrink-0 border-b border-border/50 bg-elevation-1 px-2 py-1.5">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -174,4 +174,4 @@ export function ChatArea({
       </div>
     </div>
   )
-}
+})

@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { join } from "node:path"
-import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises"
+import { mkdtemp, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
 import { parseFrontmatter, expandCommand, isAllowedCommandPath } from "../../routes/slash-suggestions"

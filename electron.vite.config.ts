@@ -29,8 +29,23 @@ export default defineConfig({
     root: ".",
     build: {
       outDir: "out/renderer",
+      sourcemap: false,
       rollupOptions: {
         input: "index.html",
+        output: {
+          manualChunks: {
+            "react-vendor": ["react", "react-dom"],
+            "ui-vendor": ["react-resizable-panels", "@tanstack/react-virtual", "react-markdown"],
+            "radix": [
+              "@radix-ui/react-collapsible",
+              "@radix-ui/react-context-menu",
+              "@radix-ui/react-dialog",
+              "@radix-ui/react-scroll-area",
+              "@radix-ui/react-tooltip",
+            ],
+            "syntax": ["shiki"],
+          },
+        },
       },
     },
     plugins: [

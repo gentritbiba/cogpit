@@ -118,14 +118,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       }
       if (newlyCompleted.size > 0) {
         setRecentlyCompleted((prev) => new Set([...prev, ...newlyCompleted]))
-        // Auto-clear after 30s
-        setTimeout(() => {
-          setRecentlyCompleted((prev) => {
-            const next = new Set(prev)
-            for (const id of newlyCompleted) next.delete(id)
-            return next
-          })
-        }, 30_000)
       }
       prevActiveRef.current = currentActive
     } catch (err) {
@@ -241,7 +233,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search sessions & prompts…"
-            className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
           {searchQuery && !searching && (
             <button
@@ -302,20 +294,38 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             const proc = procBySession.get(s.sessionId)
             const hasProcess = matchedSessionIds.has(s.sessionId)
 
+            const handleClick = () => {
+              if (recentlyCompleted.has(s.sessionId)) {
+                setRecentlyCompleted((prev) => {
+                  const next = new Set(prev)
+                  next.delete(s.sessionId)
+                  return next
+                })
+              }
+              onSelectSession(s.dirName, s.fileName)
+            }
+
             const sessionRow = (
               <div
                 role="button"
                 tabIndex={0}
                 data-live-session
-                onClick={() => onSelectSession(s.dirName, s.fileName)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
+                onClick={handleClick}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick() } }}
                 className={cn(
-                  "group w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-all duration-150 cursor-pointer card-hover",
+                  "group relative w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-150 cursor-pointer card-hover",
                   isActiveSession
                     ? "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
                     : "elevation-1 border border-border/40 hover:bg-elevation-2"
                 )}
               >
+                {/* Completion indicator — persists until clicked */}
+                {recentlyCompleted.has(s.sessionId) && (
+                  <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
+                  </span>
+                )}
                 {/* Top row: status dot + last prompt + kill button */}
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">

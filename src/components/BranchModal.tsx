@@ -97,7 +97,7 @@ function MiniBranchGraph({
           return (
             <g
               key={branch.id}
-              className="transition-all duration-500"
+              className="transition-opacity duration-500"
               style={{ opacity: isActive ? 1 : 0.3 }}
             >
               {bi === 0 ? (

@@ -27,7 +27,7 @@ interface MobileHeaderProps {
   onGoHome: () => void
   onKillAll: () => void
   onOpenSettings: () => void
-  onNewSession: (dirName: string) => void
+  onNewSession: (dirName: string, cwd?: string) => void
 }
 
 export function MobileHeader({
@@ -143,7 +143,7 @@ export function MobileHeader({
             size="sm"
             className="h-8 w-8 p-0 text-muted-foreground hover:text-green-400"
             disabled={creatingSession}
-            onClick={() => onNewSession(sessionSource.dirName)}
+            onClick={() => onNewSession(sessionSource.dirName, session?.cwd)}
             aria-label={creatingSession ? "Creating session..." : "New session"}
           >
             {creatingSession ? (

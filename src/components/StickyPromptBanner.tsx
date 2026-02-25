@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, memo } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react"
 import { User, ChevronUp } from "lucide-react"
 import type { ParsedSession } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
@@ -20,62 +20,101 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     index: number
     userMsgVisible: boolean
   } | null>(null)
-  const rafRef = useRef(0)
+
+  // Track visible turn elements via IntersectionObserver (no synchronous layout reads)
+  const visibleTurnsRef = useRef(new Map<number, IntersectionObserverEntry>())
+  const observerRef = useRef<IntersectionObserver | null>(null)
+  const mutationObserverRef = useRef<MutationObserver | null>(null)
+
+  const computeStickyTurn = useCallback(() => {
+    const visible = visibleTurnsRef.current
+    if (visible.size === 0) {
+      setStickyTurn(null)
+      return
+    }
+
+    // Find the topmost visible turn (smallest intersectionRect.top or largest negative boundingClientRect.top)
+    let bestIndex: number | null = null
+    let bestTop = Infinity
+
+    for (const [index, entry] of visible) {
+      // The turn that is closest to the top of the viewport and still intersecting
+      if (entry.boundingClientRect.top < bestTop) {
+        bestTop = entry.boundingClientRect.top
+        bestIndex = index
+      }
+    }
+
+    if (bestIndex === null) {
+      setStickyTurn(null)
+      return
+    }
+
+    // User message is considered visible if the top of the turn is within 120px of the container top
+    const entry = visible.get(bestIndex)!
+    const rootTop = entry.rootBounds?.top ?? 0
+    const userMsgVisible = entry.boundingClientRect.top + 120 > rootTop
+
+    setStickyTurn({ index: bestIndex, userMsgVisible })
+  }, [])
 
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
-    const update = () => {
-      const containerTop = container.getBoundingClientRect().top
-      const probe = containerTop + 80
-      const turnEls = container.querySelectorAll<HTMLElement>("[data-turn-index]")
+    // Create IntersectionObserver rooted in the scroll container
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const el = entry.target as HTMLElement
+          const index = parseInt(el.dataset.turnIndex!, 10)
+          if (entry.isIntersecting) {
+            visibleTurnsRef.current.set(index, entry)
+          } else {
+            visibleTurnsRef.current.delete(index)
+          }
+        }
+        computeStickyTurn()
+      },
+      {
+        root: container,
+        // Use a top margin to detect turns near the top edge
+        rootMargin: "0px 0px 0px 0px",
+        threshold: [0, 0.1],
+      }
+    )
+    observerRef.current = observer
 
-      let bestIndex: number | null = null
-      let bestTop = -Infinity
+    // Observe all existing turn elements
+    const turnEls = container.querySelectorAll<HTMLElement>("[data-turn-index]")
+    for (const el of turnEls) observer.observe(el)
 
-      for (const el of turnEls) {
-        const rect = el.getBoundingClientRect()
-        // Find the turn that spans across our probe point
-        if (rect.top <= probe && rect.bottom > probe && rect.top > bestTop) {
-          bestIndex = parseInt(el.dataset.turnIndex!, 10)
-          bestTop = rect.top
+    // Watch for new turn elements being added (live sessions, virtualized lists)
+    const mutationObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof HTMLElement) {
+            if (node.dataset.turnIndex !== undefined) {
+              observer.observe(node)
+            }
+            // Also check children
+            const children = node.querySelectorAll<HTMLElement>("[data-turn-index]")
+            for (const child of children) observer.observe(child)
+          }
         }
       }
-
-      if (bestIndex === null) {
-        setStickyTurn(null)
-        return
-      }
-
-      // Check if the user message area (first ~120px of the turn) is still visible
-      const turnEl = container.querySelector<HTMLElement>(
-        `[data-turn-index="${bestIndex}"]`
-      )
-      if (!turnEl) {
-        setStickyTurn(null)
-        return
-      }
-
-      const turnTop = turnEl.getBoundingClientRect().top
-      const userMsgVisible = turnTop + 120 > containerTop
-
-      setStickyTurn({ index: bestIndex, userMsgVisible })
-    }
-
-    const handleScroll = () => {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(update)
-    }
-
-    container.addEventListener("scroll", handleScroll, { passive: true })
-    update()
+    })
+    mutationObserver.observe(container, { childList: true, subtree: true })
+    mutationObserverRef.current = mutationObserver
 
     return () => {
-      container.removeEventListener("scroll", handleScroll)
-      cancelAnimationFrame(rafRef.current)
+      observer.disconnect()
+      mutationObserver.disconnect()
+      visibleTurnsRef.current.clear()
+      observerRef.current = null
+      mutationObserverRef.current = null
     }
-  }, [scrollContainerRef])
+  }, [scrollContainerRef, computeStickyTurn])
 
   const promptText = useMemo(() => {
     if (!stickyTurn) return null
@@ -108,9 +147,9 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       aria-label={`Scroll to turn ${stickyTurn.index + 1} prompt`}
       className={cn(
         "absolute inset-x-0 top-0 z-20",
-        "border-b border-blue-500/10 bg-elevation-1/90 backdrop-blur-md",
+        "border-b border-blue-500/10 bg-elevation-1",
         "px-4 py-2.5 flex items-center gap-3 cursor-pointer",
-        "transition-all duration-200 hover:bg-elevation-1"
+        "transition-colors duration-200 hover:bg-elevation-2"
       )}
       onClick={scrollToPrompt}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") scrollToPrompt() }}

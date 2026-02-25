@@ -231,6 +231,16 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const [canScrollDown, setCanScrollDown] = useState(false)
   const [allExpanded, setAllExpanded] = useState(true)
 
+  // Stable cache key: total tool call count across all turns (cheaper than session object identity)
+  const totalToolCallCount = useMemo(() => {
+    let count = 0
+    for (const turn of session.turns) {
+      count += turn.toolCalls.length
+      for (const msg of turn.subAgentActivity) count += msg.toolCalls.length
+    }
+    return count
+  }, [session.turns.length, session.turns.at(-1)?.toolCalls.length])
+
   const { fileChanges, additions, deletions } = useMemo(() => {
     const changes: FileChange[] = []
     let add = 0
@@ -254,7 +264,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
       })
     })
     return { fileChanges: changes, additions: add, deletions: del }
-  }, [session])
+  }, [totalToolCallCount, session.turns])
 
   // Extract absolute paths from rm/git rm Bash commands
   const rmPaths = useMemo(() => {
@@ -289,7 +299,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
       })
     })
     return paths
-  }, [session])
+  }, [totalToolCallCount, session.turns])
 
   // Collect ALL file paths from any tool call + rm commands
   const { uniquePaths, rmDirs, pathsHash } = useMemo(() => {

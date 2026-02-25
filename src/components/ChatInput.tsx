@@ -470,7 +470,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
                 : isUserQuestion
                   ? "border-pink-700/50 focus:border-pink-500/30 focus:ring-pink-500/20"
                   : "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20",
-              "transition-all duration-200"
+              "transition-colors duration-200"
             )}
           />
           {isConnected && !isPlanApproval && !isUserQuestion && (
@@ -562,7 +562,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           variant="ghost"
           size="sm"
           className={cn(
-            "h-9 w-9 shrink-0 p-0 rounded-lg transition-all duration-200",
+            "h-9 w-9 shrink-0 p-0 rounded-lg transition-colors duration-200",
             text.trim() || images.length > 0
               ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
               : "text-muted-foreground"

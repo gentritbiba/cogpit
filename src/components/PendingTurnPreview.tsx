@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Loader2 } from "lucide-react"
 import { UserMessage } from "./timeline/UserMessage"
 
@@ -15,7 +16,7 @@ function formatElapsed(sec: number): string {
   return `${m}m ${s}s`
 }
 
-export function PendingTurnPreview({
+export const PendingTurnPreview = memo(function PendingTurnPreview({
   message,
   turnNumber,
   statusText = "Agent is working...",
@@ -50,4 +51,4 @@ export function PendingTurnPreview({
       </div>
     </div>
   )
-}
+})

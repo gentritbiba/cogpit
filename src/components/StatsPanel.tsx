@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from "react"
+import { useMemo, useState, useCallback, useEffect, useRef, memo } from "react"
 import {
   AlertTriangle,
   Server,
@@ -31,6 +31,7 @@ import { cn, MODEL_OPTIONS } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { ParsedSession, Turn, ToolCall } from "@/lib/types"
 import { formatTokenCount, truncate, parseSubAgentPath } from "@/lib/format"
+import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
 import { getUserMessageText, getToolColor } from "@/lib/parser"
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -67,150 +68,174 @@ interface StatsPanelProps {
 
 // ── Token Usage Per Turn Chart ─────────────────────────────────────────────
 
-function TokenChart({ turns }: { turns: Turn[] }) {
+function InputOutputChart({ turns }: { turns: Turn[] }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
+
   const data = useMemo(() => {
     return turns.map((t, i) => {
       const newInput = t.tokenUsage?.input_tokens ?? 0
       const cacheRead = t.tokenUsage?.cache_read_input_tokens ?? 0
       const cacheWrite = t.tokenUsage?.cache_creation_input_tokens ?? 0
+      const totalInput = newInput + cacheRead + cacheWrite
+      const hasSubAgents = t.subAgentActivity.length > 0
+
+      // Estimate output from actual content (JSONL output_tokens is unreliable)
+      const thinkingTokens = estimateThinkingTokens(t)
+      const visibleTokens = estimateVisibleOutputTokens(t)
+      const totalOutput = Math.max(thinkingTokens + visibleTokens, t.tokenUsage?.output_tokens ?? 0)
+
+      const cost = t.tokenUsage
+        ? calculateCost({ model: t.model, inputTokens: newInput, outputTokens: totalOutput, cacheWriteTokens: cacheWrite, cacheReadTokens: cacheRead })
+        : 0
+
       return {
         turn: i + 1,
-        // Total context = new + cache_creation + cache_read (real input to model)
-        totalInput: newInput + cacheRead + cacheWrite,
-        output: t.tokenUsage?.output_tokens ?? 0,
-        // Sub-breakdown for stacking
+        totalInput,
+        totalOutput,
+        thinkingTokens,
+        visibleTokens,
         newInput,
         cacheRead,
         cacheWrite,
+        hasSubAgents,
+        cost,
       }
     })
   }, [turns])
 
   if (data.length === 0) return null
 
-  const maxVal = Math.max(...data.map((d) => d.totalInput))
+  const maxInput = Math.max(...data.map((d) => d.totalInput))
+  const maxOutput = Math.max(...data.map((d) => d.totalOutput))
+  const maxVal = Math.max(maxInput, maxOutput)
   if (maxVal === 0) return null
 
   const svgWidth = 280
-  const svgHeight = 120
+  const svgHeight = 130
   const padTop = 16
-  const padBottom = 20
+  const padBottom = 22
   const padLeft = 36
   const padRight = 8
   const chartW = svgWidth - padLeft - padRight
   const chartH = svgHeight - padTop - padBottom
-  const barW = Math.max(2, Math.min(12, chartW / data.length - 1))
+  // Each turn gets a group: input bar + output bar + gap between groups
+  const groupW = Math.max(5, Math.min(20, chartW / data.length))
+  const barW = Math.max(2, (groupW - 1) / 2)
+
+  const hovered = hoveredIdx !== null ? data[hoveredIdx] : null
 
   return (
-    <section>
+    <section className="relative">
       <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <span className="h-3.5 w-0.5 rounded-full bg-blue-500/40" />
-        Tokens Per Turn
+        Input / Output Per Turn
       </h3>
-      <svg width="100%" viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+
+      {/* Tooltip overlapping the chart (stays within overflow bounds) */}
+      {hovered && (
+        <div className="pointer-events-none absolute left-0 right-0 top-[28px] z-10 px-1">
+          <div className="rounded-md border border-border bg-elevation-2 px-2.5 py-2 text-[10px] shadow-lg w-fit">
+            <div className="font-medium text-foreground mb-1">Turn {hovered.turn}</div>
+            <div className="flex flex-col gap-0.5 text-muted-foreground">
+              <span>Input: <span className="text-blue-400">{formatTokenCount(hovered.totalInput)}</span>
+                <span className="text-[9px] ml-1 opacity-60">
+                  ({formatTokenCount(hovered.cacheRead)} cached, {formatTokenCount(hovered.cacheWrite)} written, {formatTokenCount(hovered.newInput)} new)
+                </span>
+              </span>
+              <span>Output: <span className="text-green-400">{formatTokenCount(hovered.totalOutput)}</span>
+                {hovered.thinkingTokens > 0 && (
+                  <span className="text-[9px] ml-1 opacity-60">
+                    ({formatTokenCount(hovered.thinkingTokens)} thinking, {formatTokenCount(hovered.visibleTokens)} text)
+                  </span>
+                )}
+              </span>
+              {hovered.cost > 0 && <span>Cost: <span className="text-amber-400">~{formatCost(hovered.cost)}</span></span>}
+              {hovered.hasSubAgents && <span className="text-amber-400/70">Has sub-agent activity</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <svg
+        width="100%"
+        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+        onMouseLeave={() => setHoveredIdx(null)}
+      >
         {/* Y-axis labels */}
-        <text
-          x={padLeft - 4}
-          y={padTop}
-          textAnchor="end"
-          dominantBaseline="central"
-          className="fill-muted-foreground text-[8px]"
-        >
+        <text x={padLeft - 4} y={padTop} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-[8px]">
           {formatTokenCount(maxVal)}
         </text>
-        <text
-          x={padLeft - 4}
-          y={padTop + chartH}
-          textAnchor="end"
-          dominantBaseline="central"
-          className="fill-muted-foreground text-[8px]"
-        >
+        <text x={padLeft - 4} y={padTop + chartH} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-[8px]">
           0
         </text>
         {/* Grid line */}
-        <line
-          x1={padLeft}
-          y1={padTop + chartH}
-          x2={padLeft + chartW}
-          y2={padTop + chartH}
-          stroke="var(--border)"
-          strokeWidth={0.5}
-        />
+        <line x1={padLeft} y1={padTop + chartH} x2={padLeft + chartW} y2={padTop + chartH} stroke="var(--border)" strokeWidth={0.5} />
 
         {data.map((d, i) => {
-          const x =
-            padLeft + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * (chartW - barW))
+          const groupX = padLeft + (data.length === 1 ? (chartW - groupW) / 2 : (i / (data.length - 1)) * (chartW - groupW))
+          const baseY = padTop + chartH
 
-          // Stacked input bar: cache_read (bottom) + cache_write (middle) + new (top)
+          // Input bar: stacked cache_read / cache_write / new
           const cacheReadH = (d.cacheRead / maxVal) * chartH
           const cacheWriteH = (d.cacheWrite / maxVal) * chartH
           const newInputH = (d.newInput / maxVal) * chartH
-          const totalInputH = cacheReadH + cacheWriteH + newInputH
-          const inputBaseY = padTop + chartH
 
-          // Output tokens bar (green, next to input)
-          const outputH = (d.output / maxVal) * chartH
-          const outputY = padTop + chartH - outputH
+          // Output bar: stacked thinking (dim) / visible (bright)
+          const thinkingH = (d.thinkingTokens / maxVal) * chartH
+          const visibleH = (d.visibleTokens / maxVal) * chartH
+
+          const isHovered = hoveredIdx === i
 
           return (
-            <g key={i}>
-              {/* Cache read (bottom of stack, lightest) */}
+            <g
+              key={i}
+              onMouseEnter={() => setHoveredIdx(i)}
+              style={{ cursor: "crosshair" }}
+            >
+              {/* Invisible hover target for the full group width */}
+              <rect x={groupX} y={padTop} width={groupW} height={chartH} fill="transparent" />
+
+              {/* Hover highlight */}
+              {isHovered && (
+                <rect x={groupX - 1} y={padTop} width={groupW + 2} height={chartH} fill="var(--foreground)" opacity={0.04} rx={2} />
+              )}
+
+              {/* Input bar — left half */}
               {cacheReadH > 0 && (
-                <rect
-                  x={x}
-                  y={inputBaseY - cacheReadH}
-                  width={barW / 2}
-                  height={cacheReadH}
-                  rx={2}
-                  fill="#60a5fa"
-                  opacity={0.25}
-                />
+                <rect x={groupX} y={baseY - cacheReadH} width={barW} height={cacheReadH} rx={1} fill="#60a5fa" opacity={isHovered ? 0.45 : 0.25} />
               )}
-              {/* Cache write (middle of stack) */}
               {cacheWriteH > 0 && (
-                <rect
-                  x={x}
-                  y={inputBaseY - cacheReadH - cacheWriteH}
-                  width={barW / 2}
-                  height={cacheWriteH}
-                  rx={2}
-                  fill="#60a5fa"
-                  opacity={0.5}
-                />
+                <rect x={groupX} y={baseY - cacheReadH - cacheWriteH} width={barW} height={cacheWriteH} rx={1} fill="#60a5fa" opacity={isHovered ? 0.7 : 0.5} />
               )}
-              {/* New input tokens (top of stack, darkest) */}
               {newInputH > 0 && (
-                <rect
-                  x={x}
-                  y={inputBaseY - totalInputH}
-                  width={barW / 2}
-                  height={newInputH}
-                  rx={2}
-                  fill="#60a5fa"
-                  opacity={0.85}
-                />
+                <rect x={groupX} y={baseY - cacheReadH - cacheWriteH - newInputH} width={barW} height={newInputH} rx={1} fill="#60a5fa" opacity={isHovered ? 1 : 0.85} />
               )}
-              {/* Output tokens */}
-              <rect
-                x={x + barW / 2}
-                y={outputY}
-                width={barW / 2}
-                height={outputH}
-                rx={2}
-                fill="#4ade80"
-                opacity={0.75}
-              />
+
+              {/* Output bar — right half: thinking (dim purple) + visible (bright green) */}
+              {thinkingH > 0 && (
+                <rect x={groupX + barW + 1} y={baseY - thinkingH} width={barW} height={thinkingH} rx={1} fill="#a78bfa" opacity={isHovered ? 0.7 : 0.45} />
+              )}
+              {visibleH > 0 && (
+                <rect x={groupX + barW + 1} y={baseY - thinkingH - visibleH} width={barW} height={visibleH} rx={1} fill="#4ade80" opacity={isHovered ? 0.95 : 0.7} />
+              )}
+
+              {/* Sub-agent indicator dot */}
+              {d.hasSubAgents && (
+                <circle cx={groupX + groupW / 2} cy={baseY + 5} r={1.5} fill="#f59e0b" opacity={0.8} />
+              )}
             </g>
           )
         })}
 
         {/* Legend */}
-        <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={2} fill="#60a5fa" opacity={0.85} />
-        <text x={padLeft + 9} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">New</text>
-        <rect x={padLeft + 30} y={svgHeight - 10} width={6} height={6} rx={2} fill="#60a5fa" opacity={0.25} />
-        <text x={padLeft + 39} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Cache</text>
-        <rect x={padLeft + 65} y={svgHeight - 10} width={6} height={6} rx={2} fill="#4ade80" opacity={0.75} />
-        <text x={padLeft + 74} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Output</text>
+        <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#60a5fa" opacity={0.85} />
+        <text x={padLeft + 9} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Input</text>
+        <rect x={padLeft + 38} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#4ade80" opacity={0.7} />
+        <text x={padLeft + 47} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Output</text>
+        <rect x={padLeft + 76} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#a78bfa" opacity={0.45} />
+        <text x={padLeft + 85} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Think</text>
+        <circle cx={padLeft + 112} cy={svgHeight - 7} r={2} fill="#f59e0b" opacity={0.8} />
+        <text x={padLeft + 117} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Agent</text>
       </svg>
     </section>
   )
@@ -345,7 +370,7 @@ function ErrorLog({
           <button
             key={i}
             onClick={() => onJumpToTurn?.(err.turnIndex)}
-            className="w-full rounded-lg border border-red-900/40 bg-red-950/20 depth-low px-3 py-2.5 text-left transition-all hover:bg-red-950/40 hover:border-red-800/40"
+            className="w-full rounded-lg border border-red-900/40 bg-red-950/20 depth-low px-3 py-2.5 text-left transition-colors hover:bg-red-950/40 hover:border-red-800/40"
           >
             <div className="flex items-center gap-1.5 text-[11px]">
               <span className="font-medium text-red-400">{err.toolName}</span>
@@ -692,15 +717,21 @@ function AgentsPanel({
     return null
   }, [subAgentView, sessionSource])
 
+  // Filter background agents to only those belonging to the current session
+  const sessionBgAgents = useMemo(() => {
+    if (!parentSessionId) return bgAgents
+    return bgAgents.filter((a) => a.parentSessionId === parentSessionId)
+  }, [bgAgents, parentSessionId])
+
   // Build combined list: background agents + inline-only sub-agents (deduplicated)
   const inlineOnlyAgents = useMemo(() => {
-    const bgAgentIds = new Set(bgAgents.map((a) => a.agentId))
+    const bgAgentIds = new Set(sessionBgAgents.map((a) => a.agentId))
     return inlineAgents.filter(
       (a) => !a.isBackground && !bgAgentIds.has(a.agentId)
     )
-  }, [bgAgents, inlineAgents])
+  }, [sessionBgAgents, inlineAgents])
 
-  const totalCount = bgAgents.length + inlineOnlyAgents.length
+  const totalCount = sessionBgAgents.length + inlineOnlyAgents.length
   if (totalCount === 0) return null
 
   // Determine which agent is currently being viewed
@@ -726,7 +757,7 @@ function AgentsPanel({
 
       <div className="max-h-[280px] overflow-y-auto space-y-1.5 pr-0.5">
         {/* Background agents */}
-        {bgAgents.map((agent, idx) => {
+        {sessionBgAgents.map((agent, idx) => {
           const badgeColor = AGENT_BADGE_COLORS[idx % AGENT_BADGE_COLORS.length]
           const shortId = agent.agentId.length > 8 ? agent.agentId.slice(0, 8) : agent.agentId
           const preview = agent.preview
@@ -779,7 +810,7 @@ function AgentsPanel({
 
         {/* Inline sub-agents (non-background) */}
         {inlineOnlyAgents.map((agent, idx) => {
-          const badgeColor = AGENT_BADGE_COLORS[(bgAgents.length + idx) % AGENT_BADGE_COLORS.length]
+          const badgeColor = AGENT_BADGE_COLORS[(sessionBgAgents.length + idx) % AGENT_BADGE_COLORS.length]
           const shortId = agent.agentId.length > 8 ? agent.agentId.slice(0, 8) : agent.agentId
           const isViewing = currentAgentId === agent.agentId
 
@@ -919,20 +950,36 @@ function ToolCallIndex({
   turns: Turn[]
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
 }) {
+  // Pre-compute per-turn cost share: turn cost / number of tool calls in that turn
+  const turnCostShare = useMemo(() => turns.map((t) => {
+    const u = t.tokenUsage
+    if (!u || t.toolCalls.length === 0) return 0
+    const estOutput = estimateThinkingTokens(t) + estimateVisibleOutputTokens(t)
+    const output = Math.max(estOutput, u.output_tokens)
+    return calculateCost({
+      model: t.model,
+      inputTokens: u.input_tokens,
+      outputTokens: output,
+      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: u.cache_read_input_tokens ?? 0,
+    }) / t.toolCalls.length
+  }), [turns])
+
   const toolCallGroups = useMemo(() => {
-    const groups = new Map<string, { calls: { tc: ToolCall; turnIndex: number }[]; count: number }>()
+    const groups = new Map<string, { calls: { tc: ToolCall; turnIndex: number }[]; count: number; estimatedCost: number }>()
     for (let i = 0; i < turns.length; i++) {
       for (const tc of turns[i].toolCalls) {
         if (!groups.has(tc.name)) {
-          groups.set(tc.name, { calls: [], count: 0 })
+          groups.set(tc.name, { calls: [], count: 0, estimatedCost: 0 })
         }
         const g = groups.get(tc.name)!
         g.calls.push({ tc, turnIndex: i })
         g.count++
+        g.estimatedCost += turnCostShare[i]
       }
     }
     return Array.from(groups.entries()).sort((a, b) => b[1].count - a[1].count)
-  }, [turns])
+  }, [turns, turnCostShare])
 
   if (toolCallGroups.length === 0) return null
 
@@ -951,35 +998,43 @@ function ToolCallIndex({
                 <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">
                   <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-state=open]>&]:rotate-90" />
                   <span className={cn("font-medium", colorClass)}>{name}</span>
-                  <Badge
-                    variant="secondary"
-                    className="ml-auto h-4 px-1.5 text-[10px] font-normal"
-                  >
-                    {group.count}
-                  </Badge>
+                  <span className="ml-auto flex items-center gap-1.5">
+                    {group.estimatedCost > 0 && (
+                      <span className="text-[9px] font-mono text-amber-400/70">
+                        ~{formatCost(group.estimatedCost)}
+                      </span>
+                    )}
+                    <Badge
+                      variant="secondary"
+                      className="h-4 px-1.5 text-[10px] font-normal"
+                    >
+                      {group.count}
+                    </Badge>
+                  </span>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="ml-4 flex flex-col gap-0.5 border-l border-border pl-2 pt-0.5">
                     {group.calls.slice(0, 50).map(({ tc, turnIndex }, i) => {
                       const preview = getToolCallPreview(tc)
                       return (
-                        <button
-                          key={`${tc.id}-${i}`}
-                          onClick={() => onJumpToTurn?.(turnIndex, tc.id)}
-                          className={cn(
-                            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors",
-                            tc.isError
-                              ? "text-red-400 hover:bg-red-950/30"
-                              : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
-                          )}
-                        >
-                          {tc.isError && (
-                            <AlertTriangle className="size-2.5 shrink-0 text-red-500" />
-                          )}
-                          <span className="truncate">
-                            {preview || tc.id.slice(0, 8)}
-                          </span>
-                        </button>
+                        <div key={`${tc.id}-${i}`}>
+                          <button
+                            onClick={() => onJumpToTurn?.(turnIndex, tc.id)}
+                            className={cn(
+                              "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors w-full",
+                              tc.isError
+                                ? "text-red-400 hover:bg-red-950/30"
+                                : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
+                            )}
+                          >
+                            {tc.isError && (
+                              <AlertTriangle className="size-2.5 shrink-0 text-red-500" />
+                            )}
+                            <span className="truncate">
+                              {preview || tc.id.slice(0, 8)}
+                            </span>
+                          </button>
+                        </div>
                       )
                     })}
                     {group.calls.length > 50 && (
@@ -1000,7 +1055,7 @@ function ToolCallIndex({
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export function StatsPanel({
+export const StatsPanel = memo(function StatsPanel({
   session,
   onJumpToTurn,
   onToggleServer,
@@ -1043,7 +1098,7 @@ export function StatsPanel({
     )}>
       {/* Header + Search bar (desktop only) */}
       {onSearchChange && (
-        <div className="sticky top-0 z-10 border-b border-border/50 backdrop-blur-sm">
+        <div className="sticky top-0 z-10 border-b border-border/50 bg-elevation-1">
           <div className="flex items-center justify-between px-3 py-2">
             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
               <Search className="size-3" />
@@ -1074,7 +1129,7 @@ export function StatsPanel({
                 value={searchQuery ?? ""}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search..."
-                className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
               />
             </div>
           </div>
@@ -1105,7 +1160,7 @@ export function StatsPanel({
                       key={opt.value}
                       onClick={() => onModelChange(opt.value)}
                       className={cn(
-                        "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-all",
+                        "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-colors",
                         isSelected
                           ? "border-blue-500 text-blue-400 bg-blue-500/10"
                           : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"
@@ -1124,7 +1179,7 @@ export function StatsPanel({
         {hasSettingsChanges && onApplySettings && (
           <button
             onClick={() => setShowRestartDialog(true)}
-            className="flex items-center justify-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 transition-all hover:bg-amber-500/20 hover:border-amber-500/70"
+            className="flex items-center justify-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/20 hover:border-amber-500/70"
           >
             <RotateCcw className="size-3" />
             Apply Changes
@@ -1159,8 +1214,8 @@ export function StatsPanel({
           onJumpToTurn={onJumpToTurn}
         />
 
-        {/* Token Per Turn Chart */}
-        <TokenChart turns={turns} />
+        {/* Input / Output Per Turn Chart */}
+        <InputOutputChart turns={turns} />
 
         {/* Activity Heatmap */}
         <ActivityHeatmap turns={turns} />
@@ -1208,4 +1263,4 @@ export function StatsPanel({
       </Dialog>
     </aside>
   )
-}
+})

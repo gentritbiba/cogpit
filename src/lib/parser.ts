@@ -16,7 +16,12 @@ import type {
   SummaryMessage,
   UserContent,
 } from "./types"
-import { calculateTurnCost } from "./format"
+import {
+  calculateTurnCostEstimated,
+  calculateSubAgentCostEstimated,
+  estimateTotalOutputTokens,
+  estimateSubAgentOutput,
+} from "./token-costs"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -541,19 +546,11 @@ function computeStats(turns: Turn[]): SessionStats {
 
   for (const turn of turns) {
     if (turn.tokenUsage) {
-      const cacheCreate = turn.tokenUsage.cache_creation_input_tokens ?? 0
-      const cacheRead = turn.tokenUsage.cache_read_input_tokens ?? 0
       stats.totalInputTokens += turn.tokenUsage.input_tokens
-      stats.totalOutputTokens += turn.tokenUsage.output_tokens
-      stats.totalCacheCreationTokens += cacheCreate
-      stats.totalCacheReadTokens += cacheRead
-      stats.totalCostUSD += calculateTurnCost(
-        turn.model,
-        turn.tokenUsage.input_tokens,
-        turn.tokenUsage.output_tokens,
-        cacheCreate,
-        cacheRead,
-      )
+      stats.totalOutputTokens += estimateTotalOutputTokens(turn)
+      stats.totalCacheCreationTokens += turn.tokenUsage.cache_creation_input_tokens ?? 0
+      stats.totalCacheReadTokens += turn.tokenUsage.cache_read_input_tokens ?? 0
+      stats.totalCostUSD += calculateTurnCostEstimated(turn)
     }
     if (turn.durationMs) {
       stats.totalDurationMs += turn.durationMs
@@ -569,19 +566,11 @@ function computeStats(turns: Turn[]): SessionStats {
         if (tc.isError) stats.errorCount++
       }
       if (sa.tokenUsage) {
-        const cacheCreate = sa.tokenUsage.cache_creation_input_tokens ?? 0
-        const cacheRead = sa.tokenUsage.cache_read_input_tokens ?? 0
         stats.totalInputTokens += sa.tokenUsage.input_tokens
-        stats.totalOutputTokens += sa.tokenUsage.output_tokens
-        stats.totalCacheCreationTokens += cacheCreate
-        stats.totalCacheReadTokens += cacheRead
-        stats.totalCostUSD += calculateTurnCost(
-          sa.model,
-          sa.tokenUsage.input_tokens,
-          sa.tokenUsage.output_tokens,
-          cacheCreate,
-          cacheRead,
-        )
+        stats.totalOutputTokens += estimateSubAgentOutput(sa)
+        stats.totalCacheCreationTokens += sa.tokenUsage.cache_creation_input_tokens ?? 0
+        stats.totalCacheReadTokens += sa.tokenUsage.cache_read_input_tokens ?? 0
+        stats.totalCostUSD += calculateSubAgentCostEstimated(sa)
       }
     }
   }

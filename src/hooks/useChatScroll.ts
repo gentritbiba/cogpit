@@ -132,7 +132,9 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     prevTurnCountRef.current = turnCount
   }, [turnCount, pendingMessage, clearPending])
 
-  // Live content → auto-scroll
+  // Live content → auto-scroll (keyed on turn count to avoid running on every session object change)
+  const liveTurnCount = session?.turns.length ?? 0
+  const liveLastTurnToolCount = session?.turns.at(-1)?.toolCalls.length ?? 0
   useEffect(() => {
     if (!session || !isLive) return
     if (chatIsAtBottomRef.current) {
@@ -141,7 +143,7 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
       })
     }
     requestAnimationFrame(updateScrollIndicators)
-  }, [session, isLive, updateScrollIndicators])
+  }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators])
 
   return {
     chatScrollRef,

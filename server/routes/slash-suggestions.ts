@@ -58,8 +58,38 @@ async function scanCommands(
   return results
 }
 
+/** Scan a skills directory (contains subdirs each with a SKILL.md) */
+async function scanSkillsDir(
+  dir: string,
+  source: "project" | "user",
+): Promise<SlashSuggestion[]> {
+  const results: SlashSuggestion[] = []
+  try {
+    const entries = await readdir(dir)
+    for (const entry of entries) {
+      const skillMdPath = join(dir, entry, "SKILL.md")
+      try {
+        const content = await readFile(skillMdPath, "utf-8")
+        const fm = parseFrontmatter(content)
+        results.push({
+          name: fm.name || entry,
+          description: fm.description || "",
+          type: "skill",
+          source,
+          filePath: skillMdPath,
+        })
+      } catch {
+        // no SKILL.md in this subdirectory
+      }
+    }
+  } catch {
+    // directory doesn't exist
+  }
+  return results
+}
+
 /** Scan installed plugins for skills */
-async function scanSkills(): Promise<SlashSuggestion[]> {
+async function scanPluginSkills(): Promise<SlashSuggestion[]> {
   const results: SlashSuggestion[] = []
   const pluginsDir = join(homedir(), ".claude", "plugins")
   const installedPath = join(pluginsDir, "installed_plugins.json")
@@ -166,23 +196,33 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
     const url = new URL(req.url || "/", "http://localhost")
     const cwd = url.searchParams.get("cwd") || ""
 
-    const globalCommandsDir = join(homedir(), ".claude", "commands")
+    const globalClaudeDir = join(homedir(), ".claude")
 
     // Scan all sources in parallel
-    const [userCommands, projectCommands, skills] = await Promise.all([
-      scanCommands(globalCommandsDir, "user"),
-      cwd
-        ? scanCommands(join(cwd, ".claude", "commands"), "project")
-        : Promise.resolve([]),
-      scanSkills(),
-    ])
+    const [userCommands, projectCommands, userSkills, projectSkills, pluginSkills] =
+      await Promise.all([
+        scanCommands(join(globalClaudeDir, "commands"), "user"),
+        cwd
+          ? scanCommands(join(cwd, ".claude", "commands"), "project")
+          : Promise.resolve([]),
+        scanSkillsDir(join(globalClaudeDir, "skills"), "user"),
+        cwd
+          ? scanSkillsDir(join(cwd, ".claude", "skills"), "project")
+          : Promise.resolve([]),
+        scanPluginSkills(),
+      ])
 
     // Deduplicate: project commands override user commands with same name
     const commandMap = new Map<string, SlashSuggestion>()
     for (const cmd of userCommands) commandMap.set(cmd.name, cmd)
     for (const cmd of projectCommands) commandMap.set(cmd.name, cmd)
 
-    const suggestions = [...commandMap.values(), ...skills]
+    // Deduplicate skills: project overrides user, plugin skills kept separately
+    const skillMap = new Map<string, SlashSuggestion>()
+    for (const s of userSkills) skillMap.set(s.name, s)
+    for (const s of projectSkills) skillMap.set(s.name, s)
+
+    const suggestions = [...commandMap.values(), ...skillMap.values(), ...pluginSkills]
 
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify({ suggestions }))

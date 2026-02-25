@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, memo } from "react"
 import {
   ChevronRight,
   Eye,
@@ -40,7 +40,7 @@ interface DesktopHeaderProps {
   onOpenSettings: () => void
 }
 
-export function DesktopHeader({
+export const DesktopHeader = memo(function DesktopHeader({
   session,
   isLive,
   showSidebar,
@@ -248,4 +248,4 @@ export function DesktopHeader({
       </div>
     </header>
   )
-}
+})

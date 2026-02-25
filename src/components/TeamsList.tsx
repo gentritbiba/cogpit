@@ -106,7 +106,7 @@ export function TeamsList({ onSelectTeam }: TeamsListProps) {
                   <div className="ml-5.5 flex items-center gap-2">
                     <div className="flex-1 h-1.5 bg-elevation-2 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-green-500 rounded-full transition-all"
+                        className="h-full bg-green-500 rounded-full transition-[width] duration-300"
                         style={{ width: `${progressPct}%` }}
                       />
                     </div>

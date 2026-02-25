@@ -160,7 +160,7 @@ export const ServerPanel = memo(function ServerPanel({
                 aria-label={`${isVisible ? "Hide" : "Show"} ${info.title}`}
                 aria-pressed={isVisible}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-all",
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
                   isVisible
                     ? "bg-green-500/15 text-green-400 border border-green-500/30"
                     : "bg-elevation-2 text-muted-foreground border border-border/70 hover:border-border hover:text-foreground"

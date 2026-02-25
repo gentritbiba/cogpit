@@ -6,9 +6,15 @@ directories:
   output: release
   buildResources: build
 
+asar: true
+compression: maximum
+
 files:
   - out/**/*
-  - "!node_modules/**/*.{md,map,ts}"
+  - "!out/**/*.map"
+  - "!node_modules/**/*.{md,map,ts,d.ts}"
+  - "!node_modules/**/{CHANGELOG,README,LICENSE,LICENCE,readme,changelog}*"
+  - "!node_modules/**/{test,tests,__tests__,spec,specs,example,examples,docs}/**"
 
 extraMetadata:
   main: out/main/main.js

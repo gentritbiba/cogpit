@@ -43,7 +43,7 @@ export function useConfigValidation() {
     clearTimeout(timerRef.current)
   }, [])
 
-  const save = useCallback(async (path: string, networkOpts?: { networkAccess?: boolean; networkPassword?: string; terminalApp?: string; notificationSound?: boolean }): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
+  const save = useCallback(async (path: string, networkOpts?: { networkAccess?: boolean; networkPassword?: string; terminalApp?: string }): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
     try {
       const res = await authFetch("/api/config", {
         method: "POST",

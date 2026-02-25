@@ -90,7 +90,7 @@ interface ActiveSessionInfo {
 
 interface DashboardProps {
   onSelectSession: (dirName: string, fileName: string) => void
-  onNewSession?: (dirName: string) => void
+  onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   /** dirName of the currently selected project (from URL state) */
   selectedProjectDirName?: string | null
@@ -300,7 +300,7 @@ export const Dashboard = memo(function Dashboard({
                       size="sm"
                       className="h-8 gap-1.5 text-xs border-border hover:border-border/80"
                       disabled={creatingSession}
-                      onClick={() => onNewSession(selectedProject.dirName)}
+                      onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
                     >
                       {creatingSession ? (
                         <Loader2 className="size-3.5 animate-spin" />

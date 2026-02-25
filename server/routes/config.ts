@@ -130,7 +130,6 @@ export function registerConfigRoutes(use: UseFn) {
         networkAccess: config.networkAccess || false,
         networkPassword: config.networkPassword ? "set" : null,
         terminalApp: config.terminalApp || null,
-        notificationSound: config.notificationSound !== false,
       } : null))
       return
     }
@@ -193,7 +192,6 @@ export function registerConfigRoutes(use: UseFn) {
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,
-            notificationSound: parsed.notificationSound !== false,
           })
           refreshDirs()
 

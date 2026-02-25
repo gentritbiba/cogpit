@@ -1,4 +1,4 @@
-import { type Dispatch } from "react"
+import { type Dispatch, memo } from "react"
 import {
   Loader2,
   FolderOpen,
@@ -29,13 +29,13 @@ interface SessionInfoBarProps {
   creatingSession: boolean
   isMobile: boolean
   dispatch: Dispatch<SessionAction>
-  onNewSession: (dirName: string) => void
+  onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
   onOpenTerminal?: () => void
   onBackToMain?: () => void
 }
 
-export function SessionInfoBar({
+export const SessionInfoBar = memo(function SessionInfoBar({
   session,
   sessionSource,
   creatingSession,
@@ -142,7 +142,7 @@ export function SessionInfoBar({
                 size="sm"
                 className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
                 disabled={creatingSession}
-                onClick={() => onNewSession(sessionSource.dirName)}
+                onClick={() => onNewSession(sessionSource.dirName, session.cwd)}
               >
                 {creatingSession ? (
                   <Loader2 className="size-3 animate-spin" />
@@ -254,7 +254,7 @@ export function SessionInfoBar({
             size="sm"
             className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
             disabled={creatingSession}
-            onClick={() => onNewSession(sessionSource.dirName)}
+            onClick={() => onNewSession(sessionSource.dirName, session.cwd)}
           >
             {creatingSession ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
             New
@@ -274,4 +274,4 @@ export function SessionInfoBar({
       )}
     </div>
   )
-}
+})

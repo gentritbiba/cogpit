@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "electron:dev": "electron-vite dev",
     "electron:build": "electron-vite build",
+    "electron:preview": "electron-vite build && electron .",
     "electron:package": "electron-vite build && electron-builder",
     "postinstall": "electron-builder install-app-deps"
   },

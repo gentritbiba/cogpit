@@ -32,11 +32,11 @@ export function useNewSession({
 
   /** Instantly show the empty chat view for a new session (no backend call). */
   const handleNewSession = useCallback(
-    (dirName: string) => {
+    (dirName: string, cwd?: string) => {
       pendingDirNameRef.current = dirName
       setCreateError(null)
       setCreatingSession(false)
-      dispatch({ type: "INIT_PENDING_SESSION", dirName, isMobile })
+      dispatch({ type: "INIT_PENDING_SESSION", dirName, cwd, isMobile })
     },
     [dispatch, isMobile]
   )
