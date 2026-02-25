@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Dashboard for browsing and inspecting Claude Code agent sessions",
   "license": "MIT",
   "author": {
