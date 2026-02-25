@@ -156,6 +156,8 @@ export interface ToolCall {
 
 export interface SubAgentMessage {
   agentId: string
+  agentName: string | null
+  subagentType: string | null
   type: "user" | "assistant"
   content: unknown
   toolCalls: ToolCall[]

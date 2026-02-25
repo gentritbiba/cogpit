@@ -1047,6 +1047,7 @@ export default function App() {
         onClose={handleCloseProjectSwitcher}
         onNewSession={handleNewSession}
         currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
+        currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
       />
 
       <ThemeSelectorModal

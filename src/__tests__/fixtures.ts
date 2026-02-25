@@ -271,7 +271,7 @@ export function subAgentSession(): string {
   const taskToolId = "task_tool_1"
   return toJsonl([
     userMsg("Use a team to solve this"),
-    toolUseAssistant("Task", { prompt: "Research the topic" }, taskToolId),
+    toolUseAssistant("Task", { prompt: "Research the topic", name: "researcher", subagent_type: "Explore" }, taskToolId),
     agentProgressMsg("agent-1", taskToolId, "assistant", [
       { type: "text", text: "Researching..." },
     ]),

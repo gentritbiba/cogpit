@@ -35,6 +35,8 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
 function makeSubAgent(overrides: Partial<SubAgentMessage> = {}): SubAgentMessage {
   return {
     agentId: "sa1",
+    agentName: null,
+    subagentType: null,
     type: "assistant",
     content: [],
     toolCalls: [],

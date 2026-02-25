@@ -182,6 +182,9 @@ function buildTurns(messages: RawMessage[]): Turn[] {
   // Track parentToolUseIDs from Task tool calls with run_in_background: true
   const backgroundAgentParentIds = new Set<string>()
 
+  // Track Task tool call metadata (name, subagent_type) by tool_use ID
+  const taskMetaMap = new Map<string, { name: string | null; subagentType: string | null }>()
+
   function flushSubAgentMessages(parentId: string) {
     if (!current) return
     const agentMsgs = subAgentMap.get(parentId)
@@ -388,12 +391,16 @@ function buildTurns(messages: RawMessage[]): Turn[] {
           msgToolCalls.push(tc)
           pendingToolUses.set(block.id, { turn: current, index: idx })
 
-          // Track Task tool calls with run_in_background for background agent detection
+          // Track Task tool calls metadata for agent name/type display
           if (block.name === "Task") {
             const input = block.input as Record<string, unknown>
             if (input.run_in_background === true) {
               backgroundAgentParentIds.add(block.id)
             }
+            taskMetaMap.set(block.id, {
+              name: (input.name as string) ?? null,
+              subagentType: (input.subagent_type as string) ?? null,
+            })
           }
         }
       }
@@ -428,8 +435,11 @@ function buildTurns(messages: RawMessage[]): Turn[] {
         ? ((data.message.message as Record<string, unknown>).model as string | undefined) ?? null
         : null
 
+      const taskMeta = taskMetaMap.get(parentId)
       const agentMsg: SubAgentMessage = {
         agentId: data.agentId,
+        agentName: taskMeta?.name ?? null,
+        subagentType: taskMeta?.subagentType ?? null,
         type: data.message.type,
         content: data.message.message.content,
         toolCalls: [],

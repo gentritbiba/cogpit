@@ -21,6 +21,7 @@ interface ProjectSwitcherModalProps {
   onClose: () => void
   onNewSession: (dirName: string, cwd?: string) => void
   currentProjectDirName: string | null
+  currentProjectCwd: string | null
 }
 
 export function ProjectSwitcherModal({
@@ -28,6 +29,7 @@ export function ProjectSwitcherModal({
   onClose,
   onNewSession,
   currentProjectDirName,
+  currentProjectCwd,
 }: ProjectSwitcherModalProps) {
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [filter, setFilter] = useState("")
@@ -59,13 +61,13 @@ export function ProjectSwitcherModal({
     function handleShortcut(e: KeyboardEvent) {
       if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "n" && currentProjectDirName) {
         e.preventDefault()
-        onNewSession(currentProjectDirName)
+        onNewSession(currentProjectDirName, currentProjectCwd ?? undefined)
         onClose()
       }
     }
     window.addEventListener("keydown", handleShortcut)
     return () => window.removeEventListener("keydown", handleShortcut)
-  }, [open, currentProjectDirName, onNewSession, onClose])
+  }, [open, currentProjectDirName, currentProjectCwd, onNewSession, onClose])
 
   const filtered = useMemo(() => {
     if (!filter) return projects

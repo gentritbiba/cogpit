@@ -1238,6 +1238,32 @@ describe("sub-agent progress parsing", () => {
     expect(assistantMsgs.length).toBeGreaterThan(0)
     expect(assistantMsgs[0].model).toBe("claude-sonnet-4-5-20250115")
   })
+
+  it("extracts agentName and subagentType from Task tool call input", () => {
+    const session = parseSession(subAgentSession())
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs.length).toBeGreaterThan(0)
+    expect(subMsgs[0].agentName).toBe("researcher")
+    expect(subMsgs[0].subagentType).toBe("Explore")
+  })
+
+  it("sets agentName and subagentType to null when Task input lacks them", () => {
+    const taskToolId = "task_no_meta"
+    const jsonl = toJsonl([
+      userMsg("Do something"),
+      toolUseAssistant("Task", { prompt: "Just do it" }, taskToolId),
+      agentProgressMsg("agent-x", taskToolId, "assistant", [
+        { type: "text", text: "Working..." },
+      ]),
+      toolResultMsg(taskToolId, "Done"),
+      textAssistant("Finished"),
+    ])
+    const session = parseSession(jsonl)
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs.length).toBeGreaterThan(0)
+    expect(subMsgs[0].agentName).toBeNull()
+    expect(subMsgs[0].subagentType).toBeNull()
+  })
 })
 
 // ── Edge cases ──────────────────────────────────────────────────────────

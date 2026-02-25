@@ -2,6 +2,7 @@ import { useState, memo } from "react"
 import { Users, ChevronRight, ChevronDown, Brain, Cog } from "lucide-react"
 import { ToolCallCard } from "./ToolCallCard"
 import type { SubAgentMessage } from "@/lib/types"
+import { buildAgentLabelMap } from "./agent-utils"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 
@@ -18,10 +19,6 @@ const AGENT_COLORS = [
   { badge: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", bar: "bg-emerald-400" },
 ]
 
-function shortId(id: string) {
-  return id.length > 8 ? id.slice(0, 8) : id
-}
-
 export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }: SubAgentPanelProps) {
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
@@ -30,6 +27,7 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
 
   const agentIds = [...new Set(messages.map((m) => m.agentId))]
   const agentColorMap = new Map(agentIds.map((id, i) => [id, AGENT_COLORS[i % AGENT_COLORS.length]]))
+  const agentLabelMap = buildAgentLabelMap(messages)
   const multipleAgents = agentIds.length > 1
 
   return (
@@ -52,10 +50,10 @@ export const SubAgentPanel = memo(function SubAgentPanel({ messages, expandAll }
           return (
             <span
               key={id}
-              className={`text-[10px] px-1.5 py-0 h-4 inline-flex items-center gap-1 rounded border font-mono ${color.badge}`}
+              className={`text-[10px] px-1.5 py-0 h-4 inline-flex items-center gap-1 rounded border ${color.badge}`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${color.bar}`} />
-              {shortId(id)}
+              {agentLabelMap.get(id)}
             </span>
           )
         })}
