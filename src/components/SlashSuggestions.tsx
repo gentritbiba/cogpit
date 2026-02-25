@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef } from "react"
-import { Terminal, Sparkles, Loader2 } from "lucide-react"
+import { Terminal, Sparkles, Loader2, Pencil } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 
@@ -10,6 +10,7 @@ interface SlashSuggestionsProps {
   selectedIndex: number
   onSelect: (suggestion: SlashSuggestion) => void
   onHover: (index: number) => void
+  onEdit?: (filePath: string) => void
 }
 
 function getSourceBadge(suggestion: SlashSuggestion) {
@@ -42,6 +43,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
   selectedIndex,
   onSelect,
   onHover,
+  onEdit,
 }: SlashSuggestionsProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLElement>>(new Map())
@@ -107,6 +109,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
                   isSelected={idx === selectedIndex}
                   onSelect={onSelect}
                   onHover={onHover}
+                  onEdit={onEdit}
                   itemRefs={itemRefs}
                 />
               )
@@ -130,6 +133,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
                   isSelected={idx === selectedIndex}
                   onSelect={onSelect}
                   onHover={onHover}
+                  onEdit={onEdit}
                   itemRefs={itemRefs}
                 />
               )
@@ -147,6 +151,7 @@ function SuggestionItem({
   isSelected,
   onSelect,
   onHover,
+  onEdit,
   itemRefs,
 }: {
   suggestion: SlashSuggestion
@@ -154,6 +159,7 @@ function SuggestionItem({
   isSelected: boolean
   onSelect: (s: SlashSuggestion) => void
   onHover: (i: number) => void
+  onEdit?: (filePath: string) => void
   itemRefs: React.MutableRefObject<Map<number, HTMLElement>>
 }) {
   const setRef = useCallback(
@@ -168,7 +174,7 @@ function SuggestionItem({
     <div
       ref={setRef}
       className={cn(
-        "flex items-start gap-2.5 px-3 py-2 cursor-pointer transition-colors duration-75",
+        "group flex items-start gap-2.5 px-3 py-2 cursor-pointer transition-colors duration-75",
         isSelected ? "bg-blue-500/10" : "hover:bg-elevation-3",
       )}
       role="option"
@@ -199,6 +205,19 @@ function SuggestionItem({
           </p>
         )}
       </div>
+      {onEdit && suggestion.filePath && (
+        <button
+          className="self-center shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground hover:bg-elevation-3"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            onEdit(suggestion.filePath)
+          }}
+          aria-label={`Edit ${suggestion.name}`}
+        >
+          <Pencil className="size-3" />
+        </button>
+      )}
       {isSelected && (
         <span className="text-[10px] text-muted-foreground self-center shrink-0 font-mono">
           ↵

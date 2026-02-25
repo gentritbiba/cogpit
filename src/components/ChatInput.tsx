@@ -28,6 +28,7 @@ interface ChatInputProps {
   slashSuggestions?: SlashSuggestion[]
   slashSuggestionsLoading?: boolean
   expandCommand?: (filePath: string, args: string) => Promise<string | null>
+  onEditConfig?: (filePath: string) => void
 }
 
 function formatElapsed(sec: number): string {
@@ -48,6 +49,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   slashSuggestions = [],
   slashSuggestionsLoading = false,
   expandCommand,
+  onEditConfig,
 }, ref) {
   const [text, setText] = useState("")
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle")
@@ -401,6 +403,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           selectedIndex={slashSelectedIndex}
           onSelect={handleSlashSelect}
           onHover={setSlashSelectedIndex}
+          onEdit={onEditConfig}
         />
       )}
 

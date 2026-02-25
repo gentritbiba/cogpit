@@ -26,6 +26,7 @@ import { registerEditorRoutes } from "../server/routes/editor"
 import { registerWorktreeRoutes } from "../server/routes/worktrees"
 import { registerUsageRoutes } from "../server/routes/usage"
 import { registerSlashSuggestionRoutes } from "../server/routes/slash-suggestions"
+import { registerConfigBrowserRoutes } from "../server/routes/config-browser"
 
 // ── PTY types ───────────────────────────────────────────────────────
 interface PtySession {
@@ -104,6 +105,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerWorktreeRoutes(use)
   registerUsageRoutes(use)
   registerSlashSuggestionRoutes(use)
+  registerConfigBrowserRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

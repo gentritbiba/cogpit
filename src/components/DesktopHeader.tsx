@@ -12,6 +12,7 @@ import {
   Globe,
   WifiOff,
   GitBranch,
+  SlidersHorizontal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,6 +40,8 @@ interface DesktopHeaderProps {
   onToggleWorktrees?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
+  showConfig?: boolean
+  onToggleConfig?: () => void
 }
 
 export const DesktopHeader = memo(function DesktopHeader({
@@ -56,6 +59,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   onToggleWorktrees,
   onKillAll,
   onOpenSettings,
+  showConfig,
+  onToggleConfig,
 }: DesktopHeaderProps) {
   const [copied, setCopied] = useState(false)
   const [urlCopied, setUrlCopied] = useState(false)
@@ -185,6 +190,22 @@ export const DesktopHeader = memo(function DesktopHeader({
       ) : null}
 
       <div className="flex items-center gap-1 shrink-0">
+        {onToggleConfig && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn("h-7 w-7 p-0", showConfig ? "bg-blue-500/20" : "text-muted-foreground hover:text-foreground")}
+                onClick={onToggleConfig}
+                aria-label={showConfig ? "Close Config Browser" : "Config Browser"}
+              >
+                <SlidersHorizontal className={cn("size-3.5", showConfig && "text-blue-400")} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{showConfig ? "Close Config Browser" : "Config Browser"}</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

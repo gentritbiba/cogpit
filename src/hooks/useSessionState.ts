@@ -17,7 +17,8 @@ export interface SessionState {
   sessionChangeKey: number
   currentMemberName: string | null
   loadingMember: string | null
-  mainView: "sessions" | "teams"
+  mainView: "sessions" | "teams" | "config"
+  configFilePath: string | null
   selectedTeam: string | null
   sidebarTab: "browse" | "teams"
   mobileTab: MobileTab
@@ -45,6 +46,8 @@ export type SessionAction =
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
+  | { type: "OPEN_CONFIG"; filePath?: string }
+  | { type: "CLOSE_CONFIG" }
 
 const initialState: SessionState = {
   session: null,
@@ -59,6 +62,7 @@ const initialState: SessionState = {
   currentMemberName: null,
   loadingMember: null,
   mainView: "sessions",
+  configFilePath: null,
   selectedTeam: null,
   sidebarTab: "browse",
   mobileTab: "sessions",
@@ -248,6 +252,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         sessionChangeKey: state.sessionChangeKey + 1,
         mobileTab: action.isMobile ? "chat" : state.mobileTab,
       }
+
+    case "OPEN_CONFIG":
+      return { ...state, mainView: "config", configFilePath: action.filePath ?? null }
+
+    case "CLOSE_CONFIG":
+      return { ...state, mainView: "sessions", configFilePath: null }
 
     default:
       return state

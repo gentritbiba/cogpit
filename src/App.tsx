@@ -49,6 +49,7 @@ import { parseSession, detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { ConfigBrowser } from "@/components/ConfigBrowser"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
@@ -81,6 +82,16 @@ export default function App() {
   const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
   const handleToggleStats = useCallback(() => setShowStats((p) => !p), [])
   const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [])
+  const handleToggleConfig = useCallback(() => {
+    if (state.mainView === "config") {
+      dispatch({ type: "CLOSE_CONFIG" })
+    } else {
+      dispatch({ type: "OPEN_CONFIG" })
+    }
+  }, [state.mainView, dispatch])
+  const handleEditConfig = useCallback((filePath: string) => {
+    dispatch({ type: "OPEN_CONFIG", filePath })
+  }, [dispatch])
   const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
   const handleToggleThemeSelector = useCallback(() => setShowThemeSelector((p) => !p), [])
@@ -622,6 +633,7 @@ export default function App() {
         slashSuggestions={slashSuggestions.suggestions}
         slashSuggestionsLoading={slashSuggestions.loading}
         expandCommand={slashSuggestions.expandCommand}
+        onEditConfig={handleEditConfig}
       />
     </div>
   )
@@ -827,12 +839,14 @@ export default function App() {
         onToggleSidebar={handleToggleSidebar}
         onToggleStats={handleToggleStats}
         onToggleWorktrees={handleToggleWorktrees}
+        showConfig={state.mainView === "config"}
+        onToggleConfig={handleToggleConfig}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {showSidebar && (
+        {showSidebar && state.mainView !== "config" && (
           <SessionBrowser
             session={state.session}
             activeSessionKey={activeSessionKey}
@@ -848,7 +862,17 @@ export default function App() {
         )}
 
         <main className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
-          {state.mainView === "teams" && state.selectedTeam ? (
+          {state.mainView === "config" ? (
+            <ConfigBrowser
+              projectPath={
+                state.session?.cwd
+                ?? pendingPath
+                ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
+                ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
+              }
+              initialFilePath={state.configFilePath}
+            />
+          ) : state.mainView === "teams" && state.selectedTeam ? (
             <TeamsDashboard
               teamName={state.selectedTeam}
               onBack={actions.handleBackFromTeam}
@@ -989,7 +1013,7 @@ export default function App() {
           )}
         </main>
 
-        {showStats && state.session && state.mainView !== "teams" && (
+        {showStats && state.session && state.mainView !== "teams" && state.mainView !== "config" && (
           <StatsPanel
             session={state.session}
             onJumpToTurn={actions.handleJumpToTurn}
