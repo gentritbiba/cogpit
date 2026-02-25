@@ -22,6 +22,7 @@ interface ChatAreaProps {
   searchQuery: string
   expandAll: boolean
   isMobile: boolean
+  isSubAgentView?: boolean
   dispatch: Dispatch<SessionAction>
   searchInputRef: RefObject<HTMLInputElement | null>
   // Scroll
@@ -48,6 +49,7 @@ export const ChatArea = memo(function ChatArea({
   searchQuery,
   expandAll,
   isMobile,
+  isSubAgentView = false,
   dispatch,
   searchInputRef,
   chatScrollRef,
@@ -142,6 +144,7 @@ export const ChatArea = memo(function ChatArea({
                   searchQuery={searchQuery}
                   expandAll={expandAll}
                   isAgentActive={isConnected}
+                  isSubAgentView={isSubAgentView}
                   scrollContainerRef={chatScrollRef}
                   branchesAtTurn={undoRedo.branchesAtTurn}
                   onRestoreToHere={undoRedo.requestUndo}

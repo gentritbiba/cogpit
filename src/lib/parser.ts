@@ -780,6 +780,21 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   if (lastToolCall.result !== null && !lastToolCall.isError) return null
 
   if (lastToolCall.name === "ExitPlanMode") {
+    // Detect ExitPlanMode loop: if the previous turn also had a pending
+    // ExitPlanMode (error/null result), the agent is stuck re-calling it
+    // because stream-json user messages can't properly approve plan mode.
+    // Suppress the approval bar to break the loop.
+    if (turns.length >= 2) {
+      const prevTurn = turns[turns.length - 2]
+      const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
+      if (
+        prevLastTC?.name === "ExitPlanMode" &&
+        (prevLastTC.result === null || prevLastTC.isError)
+      ) {
+        return null
+      }
+    }
+
     const input = lastToolCall.input as Record<string, unknown>
     return {
       type: "plan",
@@ -788,6 +803,18 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   }
 
   if (lastToolCall.name === "AskUserQuestion") {
+    // Symmetric loop detection for AskUserQuestion (same issue as ExitPlanMode)
+    if (turns.length >= 2) {
+      const prevTurn = turns[turns.length - 2]
+      const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
+      if (
+        prevLastTC?.name === "AskUserQuestion" &&
+        (prevLastTC.result === null || prevLastTC.isError)
+      ) {
+        return null
+      }
+    }
+
     const input = lastToolCall.input as Record<string, unknown>
     const questions = input.questions as UserQuestionState["questions"] | undefined
     if (questions && questions.length > 0) {

@@ -676,6 +676,7 @@ export default function App() {
                     searchQuery={state.searchQuery}
                     expandAll={state.expandAll}
                     isMobile
+                    isSubAgentView={isSubAgentView}
                     dispatch={dispatch}
                     searchInputRef={searchInputRef}
                     chatScrollRef={scroll.chatScrollRef}
@@ -877,6 +878,7 @@ export default function App() {
                     searchQuery={state.searchQuery}
                     expandAll={state.expandAll}
                     isMobile={false}
+                    isSubAgentView={isSubAgentView}
                     dispatch={dispatch}
                     searchInputRef={searchInputRef}
                     chatScrollRef={scroll.chatScrollRef}

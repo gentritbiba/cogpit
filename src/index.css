@@ -240,6 +240,10 @@
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
   }
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
 }
 
 /* Mobile: prevent overscroll bounce and enable smooth scrolling */

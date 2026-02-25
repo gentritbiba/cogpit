@@ -15,6 +15,7 @@ import {
   join,
   randomUUID,
   stat,
+  buildPermArgs,
 } from "../helpers"
 import type { PersistentSession, UseFn } from "../helpers"
 
@@ -78,23 +79,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
           projectPath = "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
         }
 
-        // Build permission args
-        let permArgs: string[]
-        if (permissions && typeof permissions.mode === "string" && permissions.mode !== "bypassPermissions") {
-          permArgs = ["--permission-mode", permissions.mode]
-          if (Array.isArray(permissions.allowedTools)) {
-            for (const tool of permissions.allowedTools) {
-              permArgs.push("--allowedTools", tool)
-            }
-          }
-          if (Array.isArray(permissions.disallowedTools)) {
-            for (const tool of permissions.disallowedTools) {
-              permArgs.push("--disallowedTools", tool)
-            }
-          }
-        } else {
-          permArgs = ["--dangerously-skip-permissions"]
-        }
+        const permArgs = buildPermArgs(permissions)
 
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
@@ -240,23 +225,7 @@ export function registerClaudeNewRoutes(use: UseFn) {
           projectPath = "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
         }
 
-        // Build permission args
-        let permArgs: string[]
-        if (permissions && typeof permissions.mode === "string" && permissions.mode !== "bypassPermissions") {
-          permArgs = ["--permission-mode", permissions.mode]
-          if (Array.isArray(permissions.allowedTools)) {
-            for (const tool of permissions.allowedTools) {
-              permArgs.push("--allowedTools", tool)
-            }
-          }
-          if (Array.isArray(permissions.disallowedTools)) {
-            for (const tool of permissions.disallowedTools) {
-              permArgs.push("--disallowedTools", tool)
-            }
-          }
-        } else {
-          permArgs = ["--dangerously-skip-permissions"]
-        }
+        const permArgs = buildPermArgs(permissions)
 
         const modelArgs = model ? ["--model", model] : []
         const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []

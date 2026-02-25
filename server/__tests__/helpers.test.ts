@@ -20,6 +20,7 @@ import {
   securityHeaders,
   bodySizeLimit,
   authMiddleware,
+  buildPermArgs,
 } from "../helpers"
 
 // ── isWithinDir ─────────────────────────────────────────────────────────
@@ -563,6 +564,46 @@ describe("isRateLimited isolation between IPs", () => {
 
     // req2 should still be allowed
     expect(isRateLimited(req2)).toBe(false)
+  })
+})
+
+// ── buildPermArgs ────────────────────────────────────────────────────────
+
+describe("buildPermArgs", () => {
+  it("returns bypass flag when permissions is undefined", () => {
+    expect(buildPermArgs()).toEqual(["--dangerously-skip-permissions"])
+  })
+
+  it("returns bypass flag for bypassPermissions mode", () => {
+    expect(buildPermArgs({ mode: "bypassPermissions" })).toEqual(["--dangerously-skip-permissions"])
+  })
+
+  it("builds args for a non-bypass mode with allowed/disallowed tools", () => {
+    const result = buildPermArgs({
+      mode: "plan",
+      allowedTools: ["Bash", "Read"],
+      disallowedTools: ["Write"],
+    })
+    expect(result).toContain("--permission-mode")
+    expect(result).toContain("plan")
+    expect(result).toContain("Bash")
+    expect(result).toContain("Read")
+    expect(result).toContain("Write")
+  })
+
+  it("auto-appends ExitPlanMode and AskUserQuestion for non-bypass modes", () => {
+    const result = buildPermArgs({ mode: "default" })
+    expect(result).toContain("ExitPlanMode")
+    expect(result).toContain("AskUserQuestion")
+  })
+
+  it("handles missing allowedTools/disallowedTools arrays", () => {
+    const result = buildPermArgs({ mode: "plan" })
+    expect(result[0]).toBe("--permission-mode")
+    expect(result[1]).toBe("plan")
+    expect(result).toContain("ExitPlanMode")
+    expect(result).toContain("AskUserQuestion")
+    expect(result).toHaveLength(6) // --permission-mode, plan, --allowedTools, ExitPlanMode, --allowedTools, AskUserQuestion
   })
 })
 

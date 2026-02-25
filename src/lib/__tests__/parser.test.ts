@@ -7,7 +7,7 @@ import {
   getToolColor,
   detectPendingInteraction,
 } from "@/lib/parser"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession, SubAgentMessage, TokenUsage } from "@/lib/types"
 import {
   resetFixtureCounter,
   userMsg,
@@ -1086,6 +1086,71 @@ describe("detectPendingInteraction", () => {
     const result = detectPendingInteraction(session)
     expect(result).not.toBeNull()
     expect(result!.type).toBe("plan")
+  })
+
+  // Helper for multi-turn loop detection tests
+  function makeMultiTurnSession(...turnDefs: Array<{ id: string; tool: string; result: string | null; isError: boolean }>): ParsedSession {
+    return {
+      sessionId: "test",
+      version: "",
+      gitBranch: "",
+      cwd: "",
+      slug: "",
+      model: "",
+      turns: turnDefs.map((t) => ({
+        id: t.id,
+        userMessage: "yes" as string | null | (string | { type: string })[],
+        contentBlocks: [] as { type: string; text?: string }[],
+        thinking: [] as { text: string; isSummary?: boolean }[],
+        assistantText: [] as string[],
+        toolCalls: [
+          { id: `tc_${t.id}`, name: t.tool, input: {}, result: t.result, isError: t.isError, timestamp: "" },
+        ],
+        subAgentActivity: [] as SubAgentMessage[],
+        timestamp: "",
+        durationMs: null as number | null,
+        tokenUsage: null as TokenUsage | null,
+        model: null as string | null,
+      })),
+      stats: {
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCostUSD: 0,
+        toolCallCounts: {},
+        errorCount: 0,
+        totalDurationMs: 0,
+        turnCount: turnDefs.length,
+      },
+      rawMessages: [],
+    }
+  }
+
+  it("returns null when ExitPlanMode loops (previous turn also had pending ExitPlanMode)", () => {
+    const session = makeMultiTurnSession(
+      { id: "t1", tool: "ExitPlanMode", result: "Plan approval pending", isError: true },
+      { id: "t2", tool: "ExitPlanMode", result: "Plan approval pending", isError: true },
+    )
+    expect(detectPendingInteraction(session)).toBeNull()
+  })
+
+  it("detects ExitPlanMode when previous turn had a different tool (not a loop)", () => {
+    const session = makeMultiTurnSession(
+      { id: "t1", tool: "Read", result: "file contents", isError: false },
+      { id: "t2", tool: "ExitPlanMode", result: "Plan approval pending", isError: true },
+    )
+    const result = detectPendingInteraction(session)
+    expect(result).not.toBeNull()
+    expect(result!.type).toBe("plan")
+  })
+
+  it("returns null when AskUserQuestion loops (previous turn also had pending AskUserQuestion)", () => {
+    const session = makeMultiTurnSession(
+      { id: "t1", tool: "AskUserQuestion", result: "Answer questions?", isError: true },
+      { id: "t2", tool: "AskUserQuestion", result: "Answer questions?", isError: true },
+    )
+    expect(detectPendingInteraction(session)).toBeNull()
   })
 })
 

@@ -23,6 +23,7 @@ interface ConversationTimelineProps {
   searchQuery: string
   expandAll: boolean
   isAgentActive?: boolean
+  isSubAgentView?: boolean
   scrollContainerRef?: React.RefObject<HTMLElement | null>
   // Undo/redo props
   branchesAtTurn?: (turnIndex: number) => Branch[]
@@ -79,6 +80,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   searchQuery,
   expandAll,
   isAgentActive = false,
+  isSubAgentView = false,
   scrollContainerRef,
   branchesAtTurn,
   onRestoreToHere,
@@ -124,6 +126,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
         activeToolCallId={activeToolCallId}
         expandAll={expandAll}
         isAgentActive={isAgentActive}
+        isSubAgentView={isSubAgentView}
         hasUndoCallbacks={hasUndoCallbacks}
         branchesAtTurn={branchesAtTurn}
         onRestoreToHere={onRestoreToHere}
@@ -147,6 +150,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
       activeToolCallId={activeToolCallId}
       expandAll={expandAll}
       isAgentActive={isAgentActive}
+      isSubAgentView={isSubAgentView}
       hasUndoCallbacks={hasUndoCallbacks}
       branchesAtTurn={branchesAtTurn}
       onRestoreToHere={onRestoreToHere}
@@ -168,6 +172,7 @@ interface TimelineInnerProps {
   activeToolCallId: string | null
   expandAll: boolean
   isAgentActive: boolean
+  isSubAgentView: boolean
   hasUndoCallbacks: boolean
   branchesAtTurn?: (turnIndex: number) => Branch[]
   onRestoreToHere?: (turnIndex: number) => void
@@ -187,6 +192,7 @@ function NonVirtualTimeline({
   activeToolCallId,
   expandAll,
   isAgentActive,
+  isSubAgentView,
   hasUndoCallbacks,
   branchesAtTurn,
   onRestoreToHere,
@@ -241,6 +247,7 @@ function NonVirtualTimeline({
               activeToolCallId={activeToolCallId}
               expandAll={expandAll}
               isAgentActive={isAgentActive && isLastTurn}
+              isSubAgentView={isSubAgentView}
               branchCount={branchCount}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
@@ -284,6 +291,7 @@ function VirtualizedTimeline({
   activeToolCallId,
   expandAll,
   isAgentActive,
+  isSubAgentView,
   hasUndoCallbacks,
   branchesAtTurn,
   onRestoreToHere,
@@ -367,6 +375,7 @@ function VirtualizedTimeline({
               activeToolCallId={activeToolCallId}
               expandAll={expandAll}
               isAgentActive={isAgentActive && isLastTurn}
+              isSubAgentView={isSubAgentView}
               branchCount={branchCount}
               onRestoreToHere={onRestoreToHere}
               onOpenBranches={onOpenBranches}
@@ -467,6 +476,7 @@ const TurnSection = memo(function TurnSection({
   activeToolCallId,
   expandAll,
   isAgentActive = false,
+  isSubAgentView = false,
   branchCount = 0,
   onRestoreToHere,
   onOpenBranches,
@@ -477,6 +487,7 @@ const TurnSection = memo(function TurnSection({
   activeToolCallId: string | null
   expandAll: boolean
   isAgentActive?: boolean
+  isSubAgentView?: boolean
   branchCount?: number
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
@@ -533,10 +544,17 @@ const TurnSection = memo(function TurnSection({
       <div className="space-y-4">
         {/* User message */}
         {turn.userMessage && (
-          <div className="rounded-lg bg-blue-500/[0.06] border border-blue-500/10 p-3">
+          <div className={cn(
+            "rounded-lg p-3",
+            isSubAgentView
+              ? "bg-green-500/[0.06] border border-green-500/10"
+              : "bg-blue-500/[0.06] border border-blue-500/10"
+          )}>
             <UserMessage
               content={turn.userMessage}
               timestamp={turn.timestamp}
+              label={isSubAgentView ? "Agent" : undefined}
+              variant={isSubAgentView ? "agent" : undefined}
             />
           </div>
         )}
@@ -572,16 +590,23 @@ const TurnSection = memo(function TurnSection({
               block.text.forEach((text, ti) => {
                 const isLastTextInBlock = ti === block.text.length - 1
                 elements.push(
-                  <div key={`text-${i}-${ti}`} className="rounded-lg bg-green-500/[0.06] border border-green-500/10 p-3">
+                  <div key={`text-${i}-${ti}`} className={cn(
+                    "rounded-lg p-3",
+                    isSubAgentView
+                      ? "bg-indigo-500/[0.06] border border-indigo-500/10"
+                      : "bg-green-500/[0.06] border border-green-500/10"
+                  )}>
                     <AssistantText
                       text={text}
                       model={turn.model}
                       tokenUsage={null}
+                      label={isSubAgentView ? "Sub Agent" : undefined}
+                      variant={isSubAgentView ? "subagent" : undefined}
                       timestamp={block.timestamp}
                     />
                     {/* Tool calls go inside the last text card of this group */}
                     {isLastTextInBlock && toolCalls.length > 0 && (
-                      <div className="mt-3 pt-3 border-t border-green-500/10">
+                      <div className={cn("mt-3 pt-3 border-t", isSubAgentView ? "border-indigo-500/10" : "border-green-500/10")}>
                         <CollapsibleToolCalls
                           toolCalls={toolCalls}
                           expandAll={expandAll}

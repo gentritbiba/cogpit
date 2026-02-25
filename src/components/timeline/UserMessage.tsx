@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from "react"
-import { User, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react"
+import { User, Cog, ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
@@ -16,9 +16,11 @@ function stripSystemTags(text: string): string {
 interface UserMessageProps {
   content: UserContent
   timestamp: string
+  label?: string
+  variant?: "user" | "agent"
 }
 
-export const UserMessage = memo(function UserMessage({ content, timestamp }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ content, timestamp, label = "User", variant = "user" }: UserMessageProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [modalImage, setModalImage] = useState<string | null>(null)
@@ -39,13 +41,13 @@ export const UserMessage = memo(function UserMessage({ content, timestamp }: Use
   return (
     <div className="flex gap-3 group">
       <div className="flex-shrink-0 mt-1">
-        <div className="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center">
-          <User className="w-4 h-4 text-blue-400" />
+        <div className={variant === "agent" ? "w-7 h-7 rounded-full bg-green-500/20 flex items-center justify-center" : "w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center"}>
+          {variant === "agent" ? <Cog className="w-4 h-4 text-green-400" /> : <User className="w-4 h-4 text-blue-400" />}
         </div>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-medium text-blue-400">User</span>
+          <span className={variant === "agent" ? "text-xs font-medium text-green-400" : "text-xs font-medium text-blue-400"}>{label}</span>
           {timestamp && (
             <span className="text-xs text-muted-foreground">
               {new Date(timestamp).toLocaleTimeString()}
