@@ -114,11 +114,13 @@ Gracefully terminates the process listening on the port. Falls back to `SIGKILL`
 
 ## Data Structures
 
-### SubAgentMessage (with background flag)
+### SubAgentMessage (with background flag and metadata)
 
 ```typescript
 interface SubAgentMessage {
   agentId: string
+  agentName: string | null              // ← Extracted from Task input.name
+  subagentType: string | null           // ← Extracted from Task input.subagent_type
   type: "user" | "assistant"
   content: unknown
   toolCalls: ToolCall[]
@@ -131,6 +133,12 @@ interface SubAgentMessage {
 }
 ```
 
+**Agent metadata extraction:** When a Task tool call creates an agent, the parser captures:
+- `agentName` — from `input.name` (e.g., "researcher")
+- `subagentType` — from `input.subagent_type` (e.g., "Explore")
+
+These are carried forward to all `SubAgentMessage` objects from that agent. If the Task doesn't specify these fields, they default to `null`. The UI uses these to display human-readable labels instead of cryptic agent IDs.
+
 ### TurnContentBlock (separate background_agent block)
 
 ```typescript
@@ -141,6 +149,60 @@ type TurnContentBlock =
   | { kind: "text"; text: string[] }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
 ```
+
+---
+
+## Agent Label Formatting Utilities
+
+Located in `src/components/timeline/agent-utils.ts`, these functions format agent labels for consistent display across UI components.
+
+### `formatAgentLabel(agentId, subagentType?, agentName?)`
+
+Standalone function for formatting agent labels from individual parameters.
+
+**Signature:**
+```typescript
+function formatAgentLabel(
+  agentId: string,
+  subagentType?: string | null,
+  agentName?: string | null
+): string
+```
+
+**Returns:** Formatted label following priority:
+1. `"{type} - {shortId(8)}"` if `type` (subagentType ?? agentName) is available
+2. `"{shortId(8)}"` if no type metadata
+
+**Example outputs:**
+```
+formatAgentLabel("abc123def456", "Explore", "researcher")
+// Returns: "Explore - abc123de"
+
+formatAgentLabel("abc123def456", null, "researcher")
+// Returns: "researcher - abc123de"
+
+formatAgentLabel("abc123def456", null, null)
+// Returns: "abc123de"
+```
+
+**Usage:** Components that have `agentId` + metadata but not a full `SubAgentMessage` object:
+- `StatsPanel.tsx` — Formatting agent IDs for background agents display
+- `SessionInfoBar.tsx` — Showing agent label when viewing a sub-agent session
+
+### `agentLabel(msg: SubAgentMessage)`
+
+Legacy function that extracts metadata from `SubAgentMessage` and formats the label.
+
+**Signature:**
+```typescript
+function agentLabel(msg: SubAgentMessage): string
+```
+
+**Implementation:** Delegates to `formatAgentLabel(msg.agentId, msg.subagentType, msg.agentName)` (single source of truth).
+
+**Usage:** Components that render `SubAgentMessage` objects directly:
+- `BackgroundAgentPanel.tsx` — Timeline display of background agent activity
+- `SubAgentPanel.tsx` — Timeline display of foreground sub-agent activity
 
 ---
 

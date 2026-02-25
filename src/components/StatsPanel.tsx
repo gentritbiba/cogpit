@@ -31,6 +31,8 @@ import { cn, MODEL_OPTIONS } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { ParsedSession, Turn, ToolCall } from "@/lib/types"
 import { formatTokenCount, truncate, parseSubAgentPath } from "@/lib/format"
+import { formatAgentLabel } from "@/components/timeline/agent-utils"
+import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
 import { getUserMessageText, getToolColor } from "@/lib/parser"
 
@@ -638,30 +640,23 @@ const AGENT_BADGE_COLORS = [
   "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
 ]
 
-interface BgAgent {
-  agentId: string
-  dirName: string
-  fileName: string
-  parentSessionId: string
-  modifiedAt: number
-  isActive: boolean
-  preview: string
-}
 
 /** Extract inline sub-agent IDs and first text preview from session content blocks */
 function extractInlineAgents(session: ParsedSession): Array<{
   agentId: string
+  agentName: string | null
+  subagentType: string | null
   preview: string
   isBackground: boolean
 }> {
-  const seen = new Map<string, { preview: string; isBackground: boolean }>()
+  const seen = new Map<string, { agentName: string | null; subagentType: string | null; preview: string; isBackground: boolean }>()
   for (const turn of session.turns) {
     for (const block of turn.contentBlocks) {
       if (block.kind !== "sub_agent" && block.kind !== "background_agent") continue
       for (const msg of block.messages) {
         if (seen.has(msg.agentId)) continue
         const preview = msg.text[0]?.split("\n").find((l) => l.trim())?.trim() ?? ""
-        seen.set(msg.agentId, { preview, isBackground: msg.isBackground })
+        seen.set(msg.agentId, { agentName: msg.agentName, subagentType: msg.subagentType, preview, isBackground: msg.isBackground })
       }
     }
   }
@@ -759,7 +754,7 @@ function AgentsPanel({
         {/* Background agents */}
         {sessionBgAgents.map((agent, idx) => {
           const badgeColor = AGENT_BADGE_COLORS[idx % AGENT_BADGE_COLORS.length]
-          const shortId = agent.agentId.length > 8 ? agent.agentId.slice(0, 8) : agent.agentId
+          const label = formatAgentLabel(agent.agentId, agent.subagentType, agent.agentName)
           const preview = agent.preview
             ? agent.preview.split("\n").find((l) => l.trim())?.trim() ?? agent.agentId
             : agent.agentId
@@ -781,11 +776,11 @@ function AgentsPanel({
                 <Bot className="size-3 shrink-0 text-indigo-400" />
                 <span
                   className={cn(
-                    "inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-mono",
+                    "inline-flex items-center rounded border px-1.5 py-0 text-[10px]",
                     badgeColor
                   )}
                 >
-                  {shortId}
+                  {label}
                 </span>
                 <span className="text-[9px] text-violet-400/70 font-medium uppercase">bg</span>
                 {isViewing && (
@@ -811,7 +806,7 @@ function AgentsPanel({
         {/* Inline sub-agents (non-background) */}
         {inlineOnlyAgents.map((agent, idx) => {
           const badgeColor = AGENT_BADGE_COLORS[(sessionBgAgents.length + idx) % AGENT_BADGE_COLORS.length]
-          const shortId = agent.agentId.length > 8 ? agent.agentId.slice(0, 8) : agent.agentId
+          const label = formatAgentLabel(agent.agentId, agent.subagentType, agent.agentName)
           const isViewing = currentAgentId === agent.agentId
 
           // Construct the session path for this sub-agent
@@ -840,11 +835,11 @@ function AgentsPanel({
                 <Bot className="size-3 shrink-0 text-cyan-400" />
                 <span
                   className={cn(
-                    "inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-mono",
+                    "inline-flex items-center rounded border px-1.5 py-0 text-[10px]",
                     badgeColor
                   )}
                 >
-                  {shortId}
+                  {label}
                 </span>
                 {isViewing && (
                   <span className="text-[9px] text-blue-400 font-medium">viewing</span>

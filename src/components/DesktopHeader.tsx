@@ -22,6 +22,7 @@ import {
 import type { ParsedSession } from "@/lib/types"
 import { cn, copyToClipboard } from "@/lib/utils"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
+import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
   session: ParsedSession | null
@@ -91,6 +92,8 @@ export const DesktopHeader = memo(function DesktopHeader({
           </TooltipTrigger>
           <TooltipContent>{session ? "Back to Dashboard" : "Cogpit"}</TooltipContent>
         </Tooltip>
+
+        <span className="text-[10px] font-mono text-muted-foreground/50 select-none">v{packageJson.version}</span>
 
         {session ? (
           <>

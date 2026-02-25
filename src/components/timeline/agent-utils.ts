@@ -1,12 +1,22 @@
 import type { SubAgentMessage } from "@/lib/types"
 
+function shortId(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) : id
+}
+
+/** Format: "type - shortId", falling back to just shortId when no metadata */
 export function agentLabel(msg: SubAgentMessage): string {
-  const name = msg.agentName
-  const type = msg.subagentType
-  if (name && type) return `${name} - ${type}`
-  if (name) return name
-  if (type) return type
-  return msg.agentId.length > 8 ? msg.agentId.slice(0, 8) : msg.agentId
+  return formatAgentLabel(msg.agentId, msg.subagentType, msg.agentName)
+}
+
+/**
+ * Standalone version for contexts that don't have SubAgentMessage objects
+ * (e.g., StatsPanel, SessionInfoBar).
+ */
+export function formatAgentLabel(agentId: string, subagentType?: string | null, agentName?: string | null): string {
+  const type = subagentType ?? agentName
+  if (type) return `${type} - ${shortId(agentId)}`
+  return shortId(agentId)
 }
 
 export function buildAgentLabelMap(messages: SubAgentMessage[]): Map<string, string> {

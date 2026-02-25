@@ -21,6 +21,7 @@ import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { SessionAction } from "@/hooks/useSessionState"
 import { shortenModel, formatTokenCount, getContextUsage, parseSubAgentPath } from "@/lib/format"
+import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { authFetch } from "@/lib/auth"
 
 interface SessionInfoBarProps {
@@ -49,7 +50,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
   // Detect if viewing a sub-agent session
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const isSubAgentView = subAgentInfo !== null
-  const subAgentId = subAgentInfo?.agentId.slice(0, 8) ?? null
+  const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
 
   return (
     <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-border/50 bg-elevation-1 ${isMobile ? "px-2" : "px-3"}`}>
@@ -66,7 +67,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
           )}
           <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-indigo-400 border-indigo-500/30 bg-indigo-500/10 gap-1">
             <Bot className="size-2.5" />
-            Agent {subAgentId}
+            Agent {subAgentLabel}
           </Badge>
         </>
       )}
