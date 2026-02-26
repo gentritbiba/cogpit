@@ -15,6 +15,8 @@ import {
   FileJson,
   BookOpen,
   X,
+  Search,
+  Pencil,
 } from "lucide-react"
 import type { ThemedToken } from "shiki"
 import { Button } from "@/components/ui/button"
@@ -271,6 +273,67 @@ function NewFileDialog({
   )
 }
 
+// ── Item context popup (double-click) ─────────────────────────────────
+
+function ItemContextPopup({
+  item,
+  position,
+  onRename,
+  onDelete,
+  onClose,
+}: {
+  item: ConfigItem
+  position: { x: number; y: number }
+  onRename: () => void
+  onDelete: () => void
+  onClose: () => void
+}) {
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) onClose()
+    }
+    const keyHandler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("mousedown", handler)
+    document.addEventListener("keydown", keyHandler)
+    return () => {
+      document.removeEventListener("mousedown", handler)
+      document.removeEventListener("keydown", keyHandler)
+    }
+  }, [onClose])
+
+  return (
+    <div
+      ref={popupRef}
+      className="fixed z-50 min-w-[120px] bg-elevation-2 border border-border rounded-md shadow-lg py-1"
+      style={{ left: position.x, top: position.y }}
+    >
+      {!item.readOnly && (
+        <>
+          <button
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-foreground/80 hover:bg-elevation-3 hover:text-foreground transition-colors"
+            onClick={() => { onRename(); onClose() }}
+          >
+            <Pencil className="size-3" />
+            Rename
+          </button>
+          <button
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+            onClick={() => { onDelete(); onClose() }}
+          >
+            <Trash2 className="size-3" />
+            Delete
+          </button>
+        </>
+      )}
+      {item.readOnly && (
+        <p className="px-3 py-1.5 text-[10px] text-muted-foreground/50">Read-only file</p>
+      )}
+    </div>
+  )
+}
+
 // ── Category section ───────────────────────────────────────────────────
 
 function CategorySection({
@@ -279,6 +342,13 @@ function CategorySection({
   selectedPath,
   onSelect,
   onNewFile,
+  onDeleteItem,
+  onRenameItem,
+  renamingPath,
+  renameValue,
+  onRenameValueChange,
+  onRenameSubmit,
+  onRenameCancel,
   creatingInCategory,
   onCreated,
   onCancelCreate,
@@ -288,12 +358,20 @@ function CategorySection({
   selectedPath: string | null
   onSelect: (item: ConfigItem) => void
   onNewFile?: () => void
+  onDeleteItem: (item: ConfigItem) => void
+  onRenameItem: (item: ConfigItem) => void
+  renamingPath: string | null
+  renameValue: string
+  onRenameValueChange: (v: string) => void
+  onRenameSubmit: () => void
+  onRenameCancel: () => void
   creatingInCategory: { globalDir: string | null; projectDir: string | null; fileType: "command" | "skill" | "agent" } | null
   onCreated: (path: string, fileType: string, scope: string) => void
   onCancelCreate: () => void
 }) {
   const meta = CATEGORY_META[category]
   const Icon = meta.icon
+  const [contextMenu, setContextMenu] = useState<{ item: ConfigItem; position: { x: number; y: number } } | null>(null)
 
   if (items.length === 0 && !onNewFile) return null
 
@@ -322,6 +400,32 @@ function CategorySection({
       {/* Items */}
       {items.map((item) => {
         const isSelected = selectedPath === item.path
+        const isRenaming = renamingPath === item.path
+
+        if (isRenaming) {
+          return (
+            <div key={item.path} className="flex items-center gap-1 px-3 py-1 border-l-2 border-blue-400 bg-blue-500/10">
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => onRenameValueChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onRenameSubmit()
+                  if (e.key === "Escape") onRenameCancel()
+                }}
+                autoFocus
+                className="flex-1 bg-elevation-0 border border-border rounded px-2 py-0.5 text-xs text-foreground outline-none focus:border-blue-500/50 min-w-0"
+              />
+              <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={onRenameSubmit} disabled={!renameValue.trim()}>
+                <Save className="size-3 text-green-400" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={onRenameCancel}>
+                <X className="size-3" />
+              </Button>
+            </div>
+          )
+        }
+
         return (
           <button
             key={item.path}
@@ -332,6 +436,10 @@ function CategorySection({
                 : "hover:bg-elevation-2 text-foreground/80 hover:text-foreground border-l-2 border-transparent",
             )}
             onClick={() => onSelect(item)}
+            onDoubleClick={(e) => {
+              e.preventDefault()
+              setContextMenu({ item, position: { x: e.clientX, y: e.clientY } })
+            }}
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
@@ -359,6 +467,17 @@ function CategorySection({
           fileType={creatingInCategory.fileType}
           onCreated={onCreated}
           onCancel={onCancelCreate}
+        />
+      )}
+
+      {/* Context popup */}
+      {contextMenu && (
+        <ItemContextPopup
+          item={contextMenu.item}
+          position={contextMenu.position}
+          onRename={() => onRenameItem(contextMenu.item)}
+          onDelete={() => onDeleteItem(contextMenu.item)}
+          onClose={() => setContextMenu(null)}
         />
       )}
     </div>
@@ -650,6 +769,9 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
   const [loading, setLoading] = useState(true)
   const [selectedFile, setSelectedFile] = useState<ConfigItem | null>(null)
   const [creating, setCreating] = useState<{ category: Category; globalDir: string | null; projectDir: string | null; fileType: "command" | "skill" | "agent" } | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [renamingItem, setRenamingItem] = useState<ConfigItem | null>(null)
+  const [renameValue, setRenameValue] = useState("")
   const initialFileLoadedRef = useRef(false)
 
   // Fetch tree
@@ -684,6 +806,23 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
   // Derive categories from the flat tree
   const categories = categorizeItems(sections)
 
+  // Filter categories by search query
+  const filteredCategories = Object.fromEntries(
+    Object.entries(categories).map(([cat, items]) => [
+      cat,
+      searchQuery
+        ? items.filter((item) => {
+            const q = searchQuery.toLowerCase()
+            return (
+              item.name.toLowerCase().includes(q) ||
+              item.description.toLowerCase().includes(q) ||
+              item.path.toLowerCase().includes(q)
+            )
+          })
+        : items,
+    ]),
+  ) as Record<Category, ConfigItem[]>
+
   // Find the global baseDir for creating new files
   const globalBaseDir = sections.find((s) => s.scope === "global")?.baseDir
   const projectBaseDir = sections.find((s) => s.scope === "project")?.baseDir
@@ -717,6 +856,58 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
     })
   }, [globalBaseDir, projectBaseDir])
 
+  const handleDeleteItem = useCallback(async (item: ConfigItem) => {
+    if (item.readOnly) return
+    if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
+    try {
+      const res = await authFetch(`/api/config-browser/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" })
+      if (res.ok) {
+        if (selectedFile?.path === item.path) setSelectedFile(null)
+        fetchTree()
+      }
+    } catch { /* ignore */ }
+  }, [fetchTree, selectedFile])
+
+  const handleStartRename = useCallback((item: ConfigItem) => {
+    if (item.readOnly) return
+    // For skills (SKILL.md), use the parent dir name; otherwise use the filename without extension
+    const name = item.name === "SKILL.md"
+      ? item.path.split("/").slice(-2, -1)[0] || item.name
+      : item.name.replace(/\.[^.]+$/, "")
+    setRenamingItem(item)
+    setRenameValue(name)
+  }, [])
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renamingItem || !renameValue.trim()) return
+    try {
+      const res = await authFetch("/api/config-browser/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldPath: renamingItem.path, newName: renameValue.trim() }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRenamingItem(null)
+        setRenameValue("")
+        await fetchTree()
+        // Select the renamed file
+        if (data.newPath) {
+          setSelectedFile({
+            ...renamingItem,
+            path: data.newPath,
+            name: data.newPath.split("/").pop() || renamingItem.name,
+          })
+        }
+      }
+    } catch { /* ignore */ }
+  }, [renamingItem, renameValue, fetchTree])
+
+  const handleRenameCancel = useCallback(() => {
+    setRenamingItem(null)
+    setRenameValue("")
+  }, [])
+
   return (
     <div className="flex flex-1 min-h-0 min-w-0">
       {/* Sidebar */}
@@ -729,6 +920,23 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
             </span>
           )}
         </div>
+        <div className="px-2 py-1.5 border-b border-border/50">
+          <div className="flex items-center gap-1.5 bg-elevation-0 border border-border rounded px-2 py-1">
+            <Search className="size-3 text-muted-foreground/50 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search files..."
+              className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none min-w-0"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="text-muted-foreground/50 hover:text-foreground">
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        </div>
         <ScrollArea className="flex-1">
           <div className="py-2">
             {loading ? (
@@ -740,10 +948,17 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
                   <CategorySection
                     key={cat}
                     category={cat}
-                    items={categories[cat]}
+                    items={filteredCategories[cat]}
                     selectedPath={selectedFile?.path ?? null}
                     onSelect={handleSelect}
                     onNewFile={canCreate ? () => handleNewFile(cat) : undefined}
+                    onDeleteItem={handleDeleteItem}
+                    onRenameItem={handleStartRename}
+                    renamingPath={renamingItem?.path ?? null}
+                    renameValue={renameValue}
+                    onRenameValueChange={setRenameValue}
+                    onRenameSubmit={handleRenameSubmit}
+                    onRenameCancel={handleRenameCancel}
                     creatingInCategory={creating?.category === cat ? creating : null}
                     onCreated={handleFileCreated}
                     onCancelCreate={() => setCreating(null)}

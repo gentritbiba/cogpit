@@ -15,7 +15,7 @@ export interface ChatInputHandle {
   focus: () => void
 }
 
-type VoiceStatus = "idle" | "loading" | "listening"
+type VoiceStatus = "idle" | "loading" | "listening" | "error"
 
 interface ChatInputProps {
   status: ChatStatus
@@ -54,6 +54,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const [text, setText] = useState("")
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("idle")
   const [voiceProgress, setVoiceProgress] = useState(0)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const transcriberRef = useRef<WhisperTranscriber | null>(null)
 
@@ -298,6 +299,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   )
 
   const toggleVoice = useCallback(async () => {
+    // Clear previous error and proceed to retry
+    if (voiceStatus === "error") {
+      setVoiceError(null)
+      setVoiceStatus("idle")
+      // Fall through to retry initialization below
+    }
+
     // Stop listening
     if (voiceStatus === "listening" && transcriberRef.current) {
       transcriberRef.current.stopRecording()
@@ -312,6 +320,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     if (!transcriberRef.current) {
       setVoiceStatus("loading")
       setVoiceProgress(0)
+      setVoiceError(null)
+
+      // Diagnostics: log environment before attempting voice init
+      console.log("[Voice] crossOriginIsolated:", window.crossOriginIsolated)
+      console.log("[Voice] SharedArrayBuffer:", typeof SharedArrayBuffer !== "undefined")
+      console.log("[Voice] mediaDevices:", !!navigator.mediaDevices)
+
       const transcriber = new WhisperTranscriber({
         modelSize: "base-en-q5_1",
         onTranscription: (transcript: string) => {
@@ -341,10 +356,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       const origConfirm = window.confirm
       try {
         window.confirm = () => true
-        await transcriber.loadModel()
+        // Add timeout to prevent hanging forever if WASM init fails
+        await Promise.race([
+          transcriber.loadModel(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Model loading timed out")), 120_000)),
+        ])
         transcriberRef.current = transcriber
-      } catch {
-        setVoiceStatus("idle")
+      } catch (err) {
+        console.error("[Voice] Failed to load model:", err)
+        setVoiceError(err instanceof Error ? err.message : "Failed to load voice model")
+        setVoiceStatus("error")
         return
       } finally {
         window.confirm = origConfirm
@@ -355,8 +376,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     try {
       setVoiceStatus("listening")
       await transcriberRef.current.startRecording()
-    } catch {
-      setVoiceStatus("idle")
+    } catch (err) {
+      console.error("[Voice] Failed to start recording:", err)
+      const msg = err instanceof Error ? err.message : "Failed to start recording"
+      if (msg.includes("Permission") || msg.includes("NotAllowed")) {
+        setVoiceError("Microphone access denied — check system permissions")
+      } else {
+        setVoiceError(msg)
+      }
+      setVoiceStatus("error")
     }
   }, [voiceStatus])
 
@@ -537,7 +565,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
                   ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
                   : voiceStatus === "loading"
                     ? "text-blue-400"
-                    : "text-muted-foreground hover:text-foreground"
+                    : voiceStatus === "error"
+                      ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                      : "text-muted-foreground hover:text-foreground"
               )}
               onClick={toggleVoice}
               disabled={voiceStatus === "loading"}
@@ -556,7 +586,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               ? `Loading voice model... ${Math.round(voiceProgress)}%`
               : voiceStatus === "listening"
                 ? "Stop listening (Ctrl+Shift+M)"
-                : "Voice input (Ctrl+Shift+M)"}
+                : voiceStatus === "error"
+                  ? voiceError || "Voice input error — click to retry"
+                  : "Voice input (Ctrl+Shift+M)"}
           </TooltipContent>
         </Tooltip>
 

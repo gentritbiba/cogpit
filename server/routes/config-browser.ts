@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, unlink, mkdir, stat } from "node:fs/promises"
+import { readdir, readFile, writeFile, unlink, mkdir, stat, rename } from "node:fs/promises"
 import { join, resolve, sep, dirname, basename } from "node:path"
 import { homedir } from "node:os"
 import type { UseFn } from "../helpers"
@@ -431,6 +431,69 @@ export function registerConfigBrowserRoutes(use: UseFn) {
     }
 
     next()
+  })
+
+  // POST /api/config-browser/rename — rename a config file
+  use("/api/config-browser/rename", async (req, res, next) => {
+    if (req.method !== "POST") return next()
+
+    let body = ""
+    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
+    req.on("end", async () => {
+      try {
+        const { oldPath, newName } = JSON.parse(body)
+        if (!oldPath || !newName) {
+          res.statusCode = 400
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "oldPath and newName required" }))
+          return
+        }
+
+        // Prevent path traversal
+        if (newName.includes('/') || newName.includes('\\') || newName.includes('..')) {
+          res.statusCode = 400
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Invalid name" }))
+          return
+        }
+
+        if (!isUserOwned(oldPath)) {
+          res.statusCode = 403
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ error: "Cannot rename plugin files" }))
+          return
+        }
+
+        const resolvedOld = resolve(oldPath)
+        const oldName = basename(resolvedOld)
+
+        // For skills (SKILL.md), rename the parent directory
+        if (oldName === "SKILL.md") {
+          const oldDir = dirname(resolvedOld)
+          const parentDir = dirname(oldDir)
+          const newDir = join(parentDir, newName)
+          await rename(oldDir, newDir)
+          const newPath = join(newDir, "SKILL.md")
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ ok: true, newPath }))
+        } else {
+          // For regular files, rename the file itself
+          const dir = dirname(resolvedOld)
+          // Preserve the original extension if the user didn't provide one
+          const oldExt = oldName.includes(".") ? oldName.slice(oldName.lastIndexOf(".")) : ""
+          const hasExt = newName.includes(".")
+          const finalName = hasExt ? newName : `${newName}${oldExt}`
+          const newPath = join(dir, finalName)
+          await rename(resolvedOld, newPath)
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ ok: true, newPath }))
+        }
+      } catch {
+        res.statusCode = 500
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ error: "Failed to rename file" }))
+      }
+    })
   })
 
   // POST /api/config-browser/create — create new file from template

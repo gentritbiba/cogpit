@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session, shell } from "electron"
+import { app, BrowserWindow, Menu, session, shell, systemPreferences } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createAppServer } from "./server.ts"
@@ -92,6 +92,14 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media")
   })
+  session.defaultSession.setPermissionCheckHandler(() => true)
+
+  // macOS: request system-level microphone access BEFORE loading the window
+  // so the OS permission dialog appears proactively. Without this, getUserMedia
+  // fails with NotAllowedError because macOS blocks unregistered apps.
+  if (process.platform === "darwin") {
+    await systemPreferences.askForMediaAccess("microphone").catch(() => {})
+  }
 
   // Custom menu: removes macOS "Show Tab Bar" (Ctrl+Cmd+T) which
   // conflicts with the open-terminal shortcut in the renderer.
