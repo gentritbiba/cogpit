@@ -49,7 +49,7 @@ Every session is rendered as a structured conversation with:
 - **Compaction markers** — collapsible indicators when context was compressed
 - **Chronological ordering** — content blocks preserve actual execution order
 
-Turn lists with 30+ entries are automatically virtualized for smooth scrolling.
+Turn lists with 15+ entries are automatically virtualized for smooth scrolling.
 
 **Full-text search** filters across user messages, assistant text, thinking blocks, tool names, and tool input/output — all case-insensitive and in real-time.
 
