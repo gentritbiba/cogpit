@@ -33,6 +33,7 @@ interface ConversationTimelineProps {
   onRedoAll?: () => void
   onRedoUpTo?: (ghostTurnIndex: number) => void
   onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 // Threshold: only virtualize when we have enough turns to benefit
@@ -59,6 +60,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   onRedoAll,
   onRedoUpTo,
   onEditCommand,
+  onExpandCommand,
 }: ConversationTimelineProps) {
   const hasUndoCallbacks = onRestoreToHere !== undefined
 
@@ -102,6 +104,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     onRedoUpTo,
     sessionTurnCount: session.turns.length,
     onEditCommand,
+    onExpandCommand,
   }
 
   if (shouldVirtualize) {

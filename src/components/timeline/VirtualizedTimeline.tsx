@@ -29,6 +29,7 @@ export interface TimelineInnerProps {
   onRedoUpTo?: (ghostTurnIndex: number) => void
   sessionTurnCount: number
   onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 // ── Context menu wrapper ─────────────────────────────────────────────────────
@@ -176,6 +177,7 @@ export function NonVirtualTimeline(props: TimelineInnerProps) {
               onRestoreToHere={props.onRestoreToHere}
               onOpenBranches={props.onOpenBranches}
               onEditCommand={props.onEditCommand}
+              onExpandCommand={props.onExpandCommand}
             />
           </div>
         </MaybeContextMenuTurn>
@@ -279,6 +281,7 @@ export function VirtualizedTimeline(
                 onRestoreToHere={props.onRestoreToHere}
                 onOpenBranches={props.onOpenBranches}
                 onEditCommand={props.onEditCommand}
+                onExpandCommand={props.onExpandCommand}
               />
               {!isLastVirtualRow && <Separator className="bg-border/60" />}
             </div>

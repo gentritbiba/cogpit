@@ -1,5 +1,5 @@
-import { useState, useMemo, memo } from "react"
-import { User, Cog, ChevronDown, ChevronRight, Eye, EyeOff, Terminal, Pencil } from "lucide-react"
+import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
+import { User, Cog, ChevronDown, ChevronRight, Eye, EyeOff, Terminal, Pencil, Loader2 } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
@@ -7,9 +7,10 @@ import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 
 const SYSTEM_TAG_RE =
-  /<(?:system-reminder|local-command-caveat|command-name|command-message|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
+  /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
 
 const COMMAND_MESSAGE_RE = /<command-message>([^<]+)<\/command-message>/
+const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/
 
 function stripSystemTags(text: string): string {
   return text.replace(SYSTEM_TAG_RE, "").trim()
@@ -18,6 +19,11 @@ function stripSystemTags(text: string): string {
 function extractCommandName(text: string): string | null {
   const match = text.match(COMMAND_MESSAGE_RE)
   return match ? match[1] : null
+}
+
+function extractCommandArgs(text: string): string | null {
+  const match = text.match(COMMAND_ARGS_RE)
+  return match ? match[1].trim() : null
 }
 
 // ── Variant styles ───────────────────────────────────────────────────────
@@ -37,6 +43,29 @@ const VARIANT_STYLES = {
   },
 } as const
 
+// ── Expanded command content ─────────────────────────────────────────────
+
+function ExpandedCommandContent({ loading, content }: { loading: boolean; content: string | null }): ReactNode {
+  let inner: ReactNode
+  if (loading) {
+    inner = (
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground/60 font-mono">
+        <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+      </span>
+    )
+  } else if (content) {
+    inner = <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{content}</ReactMarkdown>
+  } else {
+    inner = <span className="text-muted-foreground/60 font-mono">Could not load command content</span>
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-border/50 bg-elevation-2 p-3 text-xs text-muted-foreground overflow-auto max-h-80">
+      {inner}
+    </div>
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────
 
 interface UserMessageProps {
@@ -45,16 +74,39 @@ interface UserMessageProps {
   label?: string
   variant?: "user" | "agent"
   onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
-export const UserMessage = memo(function UserMessage({ content, timestamp, label = "User", variant = "user", onEditCommand }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ content, timestamp, label = "User", variant = "user", onEditCommand, onExpandCommand }: UserMessageProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
+  const [commandExpanded, setCommandExpanded] = useState(false)
+  const [commandContent, setCommandContent] = useState<string | null>(null)
+  const [commandLoading, setCommandLoading] = useState(false)
   const [modalImage, setModalImage] = useState<string | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
+  const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
   const cleanText = useMemo(() => stripSystemTags(rawText), [rawText])
+
+  const handleToggleExpand = useCallback(async () => {
+    if (commandExpanded) {
+      setCommandExpanded(false)
+      return
+    }
+    if (commandContent !== null) {
+      setCommandExpanded(true)
+      return
+    }
+    if (!onExpandCommand || !commandName) return
+    setCommandLoading(true)
+    setCommandExpanded(true)
+    const result = await onExpandCommand(commandName, commandArgs ?? undefined)
+    setCommandContent(result)
+    setCommandLoading(false)
+  }, [commandExpanded, commandContent, onExpandCommand, commandName, commandArgs])
+
   const images = useMemo(() => getUserMessageImages(content), [content])
   const imageUrls = useMemo(
     () => images.map((img) => `data:${img.source.media_type};base64,${img.source.data}`),
@@ -103,19 +155,36 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, label
         </div>
 
         {commandName && (
-          <div className="flex items-center gap-2 mb-2">
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-500/25 bg-blue-500/10 px-2 py-1 text-xs font-mono text-blue-400">
-              <Terminal className="w-3 h-3" />
-              /{commandName}
-            </span>
-            {onEditCommand && (
-              <button
-                onClick={() => onEditCommand(commandName)}
-                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-3 transition-colors"
-              >
-                <Pencil className="w-3 h-3" />
-                Edit
-              </button>
+          <div className="mb-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-500/25 bg-blue-500/10 px-2 py-1 text-xs font-mono text-blue-400">
+                <Terminal className="w-3 h-3" />
+                /{commandName}
+                {commandArgs && (
+                  <span className="text-blue-400/60">{commandArgs}</span>
+                )}
+              </span>
+              {onExpandCommand && (
+                <button
+                  onClick={handleToggleExpand}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-3 transition-colors"
+                >
+                  {commandExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  {commandExpanded ? "Collapse" : "Expand"}
+                </button>
+              )}
+              {commandExpanded && onEditCommand && (
+                <button
+                  onClick={() => onEditCommand(commandName)}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-3 transition-colors"
+                >
+                  <Pencil className="w-3 h-3" />
+                  Edit
+                </button>
+              )}
+            </div>
+            {commandExpanded && (
+              <ExpandedCommandContent loading={commandLoading} content={commandContent} />
             )}
           </div>
         )}

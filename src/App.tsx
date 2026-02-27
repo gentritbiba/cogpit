@@ -97,6 +97,23 @@ export default function App() {
     dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
   }, [dispatch])
 
+  const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
+    const match = suggestionsRef.current.find((s) => s.name === commandName)
+    if (!match?.filePath) return null
+    try {
+      const res = await authFetch("/api/expand-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: match.filePath, args: args || "" }),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.content ?? null
+    } catch {
+      return null
+    }
+  }, [])
+
   const handleOpenTerminal = useCallback(() => {
     const projectPath = state.session?.cwd
       ?? pendingPath
@@ -392,6 +409,7 @@ export default function App() {
       handleStopSession: handlers.handleStopSession,
       handleEditConfig: panels.handleEditConfig,
       handleEditCommand,
+      handleExpandCommand,
       handleOpenBranches: handlers.handleOpenBranches,
       handleBranchFromHere: handlers.handleBranchFromHere,
       handleToggleExpandAll,
@@ -403,7 +421,7 @@ export default function App() {
     claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
     scroll, undoRedo, pendingInteraction, isSubAgentView,
     slashSuggestions.suggestions, slashSuggestions.loading,
-    handlers.handleStopSession, panels.handleEditConfig, handleEditCommand,
+    handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
   ])
 
@@ -602,6 +620,7 @@ export default function App() {
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
                     onEditCommand={handleEditCommand}
+                    onExpandCommand={handleExpandCommand}
                   />
                 </div>
               ) : state.pendingDirName ? (
@@ -821,6 +840,7 @@ export default function App() {
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
                     onEditCommand={handleEditCommand}
+                    onExpandCommand={handleExpandCommand}
                   />
                 </ResizablePanel>
 

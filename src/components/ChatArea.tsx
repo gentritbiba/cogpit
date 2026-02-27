@@ -38,6 +38,7 @@ interface ChatAreaProps {
   isConnected: boolean
   onToggleExpandAll: () => void
   onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 export const ChatArea = memo(function ChatArea({
@@ -62,6 +63,7 @@ export const ChatArea = memo(function ChatArea({
   isConnected,
   onToggleExpandAll,
   onEditCommand,
+  onExpandCommand,
 }: ChatAreaProps) {
   const elapsedSec = useElapsedTimer(isConnected)
 
@@ -137,6 +139,7 @@ export const ChatArea = memo(function ChatArea({
                   onRedoAll={undoRedo.requestRedoAll}
                   onRedoUpTo={undoRedo.requestRedoUpTo}
                   onEditCommand={onEditCommand}
+                  onExpandCommand={onExpandCommand}
                 />
               )}
               {pendingMessage && (

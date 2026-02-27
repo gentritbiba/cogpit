@@ -43,6 +43,7 @@ export interface TurnSectionProps {
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
   onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 // ── TurnSection ──────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ export const TurnSection = memo(function TurnSection({
   onRestoreToHere,
   onOpenBranches,
   onEditCommand,
+  onExpandCommand,
 }: TurnSectionProps) {
   return (
     <div
@@ -84,6 +86,7 @@ export const TurnSection = memo(function TurnSection({
               label={isSubAgentView ? "Agent" : undefined}
               variant={isSubAgentView ? "agent" : undefined}
               onEditCommand={onEditCommand}
+              onExpandCommand={onExpandCommand}
             />
           </div>
         )}
