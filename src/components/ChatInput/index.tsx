@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeH
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
-import type { PendingInteraction } from "@/lib/parser"
+import { useSessionContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import { PlanApprovalBar } from "./PlanApprovalBar"
@@ -11,32 +11,9 @@ import { useVoiceInput } from "./useVoiceInput"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 
-// Re-export sub-components and hooks for external consumers
-export { PlanApprovalBar } from "./PlanApprovalBar"
-export { UserQuestionBar } from "./UserQuestionBar"
-export { useVoiceInput, getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
-export type { VoiceStatus } from "./useVoiceInput"
-export { useImageUpload } from "./useImageUpload"
-export type { UploadedImage } from "./useImageUpload"
-
-export type ChatStatus = "ready" | "sending" | "error" | "idle" | "connected"
-
 export interface ChatInputHandle {
   toggleVoice: () => void
   focus: () => void
-}
-
-interface ChatInputProps {
-  status: ChatStatus
-  error?: string
-  isConnected?: boolean
-  onSend: (message: string, images?: Array<{ data: string; mediaType: string }>) => void
-  onInterrupt?: () => void
-  onStopSession?: () => void
-  pendingInteraction?: PendingInteraction
-  slashSuggestions?: SlashSuggestion[]
-  slashSuggestionsLoading?: boolean
-  onEditConfig?: (filePath: string) => void
 }
 
 /** Auto-resize a textarea to fit its content (max 200px). */
@@ -46,7 +23,7 @@ function autoResize(el: HTMLTextAreaElement | null): void {
   el.style.height = Math.min(el.scrollHeight, 200) + "px"
 }
 
-function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean | undefined): string {
+function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean): string {
   if (isPlanApproval) return "Provide feedback to request changes..."
   if (isUserQuestion) return "Type a custom response..."
   if (isConnected) return "Message... (Enter to send)"
@@ -59,18 +36,15 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
-  status,
-  error,
-  isConnected,
-  onSend,
-  onInterrupt,
-  onStopSession,
-  pendingInteraction,
-  slashSuggestions = [],
-  slashSuggestionsLoading = false,
-  onEditConfig,
-}, ref) {
+export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
+  const {
+    chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt },
+    actions: { handleEditConfig: onEditConfig },
+    pendingInteraction,
+    slashSuggestions,
+    slashSuggestionsLoading,
+  } = useSessionContext()
+
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -104,7 +78,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   useEffect(() => { setSlashSelectedIndex(0) }, [slashFilter])
 
-  const elapsedSec = useElapsedTimer(!!isConnected)
+  const elapsedSec = useElapsedTimer(isConnected)
 
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
     setText(`/${suggestion.name} `)
@@ -191,9 +165,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               rows={1}
               className={cn("w-full resize-none rounded-xl border elevation-1 px-3.5 py-2.5 text-sm text-foreground", "placeholder:text-muted-foreground focus:outline-none focus:ring-2", getTextareaBorderClass(isPlanApproval, isUserQuestion), "transition-colors duration-200")}
             />
-            <InputToolbar isConnected={isConnected} isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onInterrupt={onInterrupt} onStopSession={onStopSession} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
+            <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
           </div>
-          <ActionButtons isConnected={isConnected} hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onInterrupt={onInterrupt} onStopSession={onStopSession} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
+          <ActionButtons hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
         </div>
         {status === "error" && error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
       </div>

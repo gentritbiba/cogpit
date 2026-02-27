@@ -3,6 +3,7 @@ import type { LucideIcon } from "lucide-react"
 import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
+import { useSessionContext } from "@/contexts/SessionContext"
 
 export type MobileTab = "chat" | "sessions" | "stats" | "teams"
 
@@ -17,9 +18,7 @@ interface TabDefinition {
 interface MobileNavProps {
   activeTab: MobileTab
   onTabChange: (tab: MobileTab) => void
-  hasSession: boolean
   hasTeam: boolean
-  isLive?: boolean
 }
 
 const TAB_DEFINITIONS: TabDefinition[] = [
@@ -32,10 +31,10 @@ const TAB_DEFINITIONS: TabDefinition[] = [
 export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
-  hasSession,
   hasTeam,
-  isLive,
 }: MobileNavProps) {
+  const { session, isLive } = useSessionContext()
+  const hasSession = session !== null
   const visibleTabs = TAB_DEFINITIONS.filter((t) => {
     if (t.requiresSession && !hasSession) return false
     if (t.requiresTeam && !hasTeam) return false

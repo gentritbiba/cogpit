@@ -81,7 +81,6 @@ export default function App() {
     [dispatch]
   )
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
-  const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
   const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
@@ -167,8 +166,6 @@ export default function App() {
 
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
-
-
 
   // Permissions management
   const perms = usePermissions()
@@ -270,11 +267,12 @@ export default function App() {
   const sessionHistory = useSessionHistory()
 
   // Track session visits for history
+  const pushHistory = sessionHistory.push
   useEffect(() => {
     if (state.sessionSource) {
-      sessionHistory.push(state.sessionSource.dirName, state.sessionSource.fileName)
+      pushHistory(state.sessionSource.dirName, state.sessionSource.fileName)
     }
-  }, [state.sessionSource, sessionHistory.push])
+  }, [state.sessionSource, pushHistory])
 
   // App-level handlers (extracted from App.tsx)
   const handlers = useAppHandlers({
@@ -295,14 +293,16 @@ export default function App() {
 
   // Wire up branch switch now that undoRedo is available
   // We need to re-create handlers that depend on undoRedo.requestBranchSwitch
+  const requestBranchSwitch = undoRedo.requestBranchSwitch
+  const setBranchModalTurn = handlers.setBranchModalTurn
   const handleRedoToTurn = useCallback((branchId: string, archiveTurnIdx: number) => {
-    undoRedo.requestBranchSwitch(branchId, archiveTurnIdx)
-    handlers.setBranchModalTurn(null)
-  }, [undoRedo.requestBranchSwitch])
+    requestBranchSwitch(branchId, archiveTurnIdx)
+    setBranchModalTurn(null)
+  }, [requestBranchSwitch, setBranchModalTurn])
   const handleRedoEntireBranch = useCallback((branchId: string) => {
-    undoRedo.requestBranchSwitch(branchId)
-    handlers.setBranchModalTurn(null)
-  }, [undoRedo.requestBranchSwitch])
+    requestBranchSwitch(branchId)
+    setBranchModalTurn(null)
+  }, [requestBranchSwitch, setBranchModalTurn])
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -347,10 +347,11 @@ export default function App() {
   const isTeamMemberView = subAgentInfo !== null && !!teamContext?.currentMemberName
   const isSubAgentView = subAgentInfo !== null && !isTeamMemberView
 
+  const navigateToSession = actions.handleDashboardSelect
   const handleBackToMain = useCallback(() => {
     if (!state.sessionSource || !subAgentInfo) return
-    actions.handleDashboardSelect(state.sessionSource.dirName, subAgentInfo.parentFileName)
-  }, [state.sessionSource, subAgentInfo, actions.handleDashboardSelect])
+    navigateToSession(state.sessionSource.dirName, subAgentInfo.parentFileName)
+  }, [state.sessionSource, subAgentInfo, navigateToSession])
 
   const branchModalBranches = handlers.branchModalTurn !== null ? undoRedo.branchesAtTurn(handlers.branchModalTurn) : []
 
@@ -537,19 +538,7 @@ export default function App() {
 
   const chatInputNode = (
     <div className="shrink-0">
-      <ChatInput
-        ref={chatInputRef}
-        status={claudeChat.status}
-        error={claudeChat.error}
-        isConnected={claudeChat.isConnected}
-        onSend={claudeChat.sendMessage}
-        onInterrupt={claudeChat.interrupt}
-        onStopSession={handlers.handleStopSession}
-        pendingInteraction={pendingInteraction}
-        slashSuggestions={slashSuggestions.suggestions}
-        slashSuggestionsLoading={slashSuggestions.loading}
-        onEditConfig={panels.handleEditConfig}
-      />
+      <ChatInput ref={chatInputRef} />
     </div>
   )
 
@@ -588,40 +577,13 @@ export default function App() {
                 <div className="flex flex-1 min-h-0 flex-col">
                   {teamMembersBar}
                   <SessionInfoBar
-                    session={state.session}
-                    sessionSource={state.sessionSource}
                     creatingSession={creatingSession}
-                    isMobile
-                    dispatch={dispatch}
                     onNewSession={handleNewSession}
                     onDuplicateSession={handlers.handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                   />
-                  <ChatArea
-                    session={state.session}
-                    activeTurnIndex={state.activeTurnIndex}
-                    activeToolCallId={state.activeToolCallId}
-                    searchQuery={state.searchQuery}
-                    expandAll={state.expandAll}
-                    isMobile
-                    isSubAgentView={isSubAgentView}
-                    dispatch={dispatch}
-                    searchInputRef={searchInputRef}
-                    chatScrollRef={scroll.chatScrollRef}
-                    scrollEndRef={scroll.scrollEndRef}
-                    canScrollUp={scroll.canScrollUp}
-                    canScrollDown={scroll.canScrollDown}
-                    handleScroll={scroll.handleScroll}
-                    undoRedo={undoRedo}
-                    onOpenBranches={handlers.handleOpenBranches}
-                    onBranchFromHere={handlers.handleBranchFromHere}
-                    pendingMessage={claudeChat.pendingMessage}
-                    isConnected={claudeChat.isConnected}
-                    onToggleExpandAll={handleToggleExpandAll}
-                    onEditCommand={handleEditCommand}
-                    onExpandCommand={handleExpandCommand}
-                  />
+                  <ChatArea searchInputRef={searchInputRef} />
                 </div>
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
@@ -667,18 +629,15 @@ export default function App() {
 
           {state.mobileTab === "stats" && state.session && (
             <StatsPanel
-              session={state.session}
               onJumpToTurn={handlers.handleMobileJumpToTurn}
               onToggleServer={serverPanel.handleToggleServer}
               onServersChanged={serverPanel.handleServersChanged}
-              isMobile
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
               hasSettingsChanges={handlers.hasSettingsChanges}
               onApplySettings={handlers.handleApplySettings}
               onLoadSession={handlers.handleLoadSessionScrollAware}
-              sessionSource={state.sessionSource}
               backgroundAgents={backgroundAgents}
             />
           )}
@@ -730,9 +689,7 @@ export default function App() {
         <MobileNav
           activeTab={state.mobileTab}
           onTabChange={actions.handleMobileTabChange}
-          hasSession={!!state.session || !!state.pendingDirName}
           hasTeam={!!teamContext}
-          isLive={isLive}
         />
 
         {undoConfirmDialog}
@@ -750,14 +707,10 @@ export default function App() {
     <SessionProvider value={sessionContextValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       <DesktopHeader
-        session={state.session}
-        isLive={isLive}
         showSidebar={panels.showSidebar}
         showStats={panels.showStats}
         showWorktrees={panels.showWorktrees}
         killing={killing}
-        networkUrl={config.networkUrl}
-        networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={panels.handleToggleSidebar}
         onToggleStats={panels.handleToggleStats}
@@ -805,11 +758,7 @@ export default function App() {
             <div className="flex flex-1 min-h-0 flex-col">
               {teamMembersBar}
               <SessionInfoBar
-                session={state.session}
-                sessionSource={state.sessionSource}
                 creatingSession={creatingSession}
-                isMobile={false}
-                dispatch={dispatch}
                 onNewSession={handleNewSession}
                 onDuplicateSession={handlers.handleDuplicateSession}
                 onOpenTerminal={handleOpenTerminal}
@@ -818,30 +767,7 @@ export default function App() {
 
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
                 <ResizablePanel defaultSize={hasFileChanges ? 50 : 100} minSize="500px">
-                  <ChatArea
-                    session={state.session}
-                    activeTurnIndex={state.activeTurnIndex}
-                    activeToolCallId={state.activeToolCallId}
-                    searchQuery={state.searchQuery}
-                    expandAll={state.expandAll}
-                    isMobile={false}
-                    isSubAgentView={isSubAgentView}
-                    dispatch={dispatch}
-                    searchInputRef={searchInputRef}
-                    chatScrollRef={scroll.chatScrollRef}
-                    scrollEndRef={scroll.scrollEndRef}
-                    canScrollUp={scroll.canScrollUp}
-                    canScrollDown={scroll.canScrollDown}
-                    handleScroll={scroll.handleScroll}
-                    undoRedo={undoRedo}
-                    onOpenBranches={handlers.handleOpenBranches}
-                    onBranchFromHere={handlers.handleBranchFromHere}
-                    pendingMessage={claudeChat.pendingMessage}
-                    isConnected={claudeChat.isConnected}
-                    onToggleExpandAll={handleToggleExpandAll}
-                    onEditCommand={handleEditCommand}
-                    onExpandCommand={handleExpandCommand}
-                  />
+                  <ChatArea searchInputRef={searchInputRef} />
                 </ResizablePanel>
 
                 {hasFileChanges && (
@@ -940,14 +866,9 @@ export default function App() {
 
         {panels.showStats && state.session && state.mainView !== "teams" && state.mainView !== "config" && (
           <StatsPanel
-            session={state.session}
             onJumpToTurn={actions.handleJumpToTurn}
             onToggleServer={serverPanel.handleToggleServer}
             onServersChanged={serverPanel.handleServersChanged}
-            searchQuery={state.searchQuery}
-            onSearchChange={handleSearchChange}
-            expandAll={state.expandAll}
-            onToggleExpandAll={handleToggleExpandAll}
             searchInputRef={searchInputRef}
             permissionsPanel={permissionsPanelNode}
             selectedModel={selectedModel}
@@ -955,7 +876,6 @@ export default function App() {
             hasSettingsChanges={handlers.hasSettingsChanges}
             onApplySettings={handlers.handleApplySettings}
             onLoadSession={handlers.handleLoadSessionScrollAware}
-            sessionSource={state.sessionSource}
             backgroundAgents={backgroundAgents}
           />
         )}

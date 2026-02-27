@@ -18,6 +18,8 @@ export type RenderItem =
 
 export function useFileChangesData(session: ParsedSession) {
   // Stable cache key: total tool call count across all turns (cheaper than session object identity)
+  const turnCount = session.turns.length
+  const lastTurnToolCallCount = session.turns.at(-1)?.toolCalls.length ?? 0
   const totalToolCallCount = useMemo(() => {
     let count = 0
     for (const turn of session.turns) {
@@ -25,7 +27,8 @@ export function useFileChangesData(session: ParsedSession) {
       for (const msg of turn.subAgentActivity) count += msg.toolCalls.length
     }
     return count
-  }, [session.turns.length, session.turns.at(-1)?.toolCalls.length])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cheap proxy deps to avoid full array comparison
+  }, [turnCount, lastTurnToolCallCount])
 
   const { fileChanges, additions, deletions } = useMemo(() => {
     const changes: FileChange[] = []
@@ -50,6 +53,7 @@ export function useFileChangesData(session: ParsedSession) {
       })
     })
     return { fileChanges: changes, additions: add, deletions: del }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- totalToolCallCount is an intentional cache-busting key
   }, [totalToolCallCount, session.turns])
 
   // Extract absolute paths from rm/git rm Bash commands
@@ -85,6 +89,7 @@ export function useFileChangesData(session: ParsedSession) {
       })
     })
     return paths
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- totalToolCallCount is an intentional cache-busting key
   }, [totalToolCallCount, session.turns])
 
   // Collect ALL file paths from any tool call + rm commands

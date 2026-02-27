@@ -25,23 +25,16 @@ import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { AgentsPanel } from "@/components/stats/AgentsPanel"
 import { TurnNavigator } from "@/components/stats/TurnNavigator"
 import { ToolCallIndex } from "@/components/stats/ToolCallIndex"
-import type { ParsedSession } from "@/lib/types"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface StatsPanelProps {
-  session: ParsedSession
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
   onToggleServer?: (id: string, outputPath: string, title: string) => void
   onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
-  /** When true, renders full-width mobile layout */
-  isMobile?: boolean
-  /** Search + expand controls (desktop only -- passed when sidebar hosts search) */
-  searchQuery?: string
-  onSearchChange?: (query: string) => void
-  expandAll?: boolean
-  onToggleExpandAll?: () => void
   searchInputRef?: React.RefObject<HTMLInputElement | null>
   /** Permissions panel props */
   permissionsPanel?: React.ReactNode
@@ -54,8 +47,6 @@ interface StatsPanelProps {
   onApplySettings?: () => Promise<void>
   /** Called when user clicks a background agent to open its session */
   onLoadSession?: (dirName: string, fileName: string) => void
-  /** Current session source for detecting sub-agent view */
-  sessionSource?: { dirName: string; fileName: string } | null
   /** Background agents from useBackgroundAgents (passed from App to avoid double-polling) */
   backgroundAgents?: BgAgent[]
 }
@@ -63,20 +54,12 @@ interface StatsPanelProps {
 // ── Search Header ──────────────────────────────────────────────────────────
 
 interface SearchHeaderProps {
-  searchQuery?: string
-  onSearchChange: (query: string) => void
-  expandAll?: boolean
-  onToggleExpandAll?: () => void
   searchInputRef?: React.RefObject<HTMLInputElement | null>
 }
 
-function SearchHeader({
-  searchQuery,
-  onSearchChange,
-  expandAll,
-  onToggleExpandAll,
-  searchInputRef,
-}: SearchHeaderProps): JSX.Element {
+function SearchHeader({ searchInputRef }: SearchHeaderProps): JSX.Element {
+  const { state: { searchQuery, expandAll }, dispatch } = useAppContext()
+  const { actions: { handleToggleExpandAll } } = useSessionContext()
   return (
     <div className="sticky top-0 z-10 border-b border-border/50 bg-elevation-1">
       <div className="flex items-center justify-between px-3 py-2">
@@ -84,21 +67,19 @@ function SearchHeader({
           <Search className="size-3" />
           Session
         </span>
-        {onToggleExpandAll && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 shrink-0"
-            onClick={onToggleExpandAll}
-            aria-label={expandAll ? "Collapse all" : "Expand all"}
-          >
-            {expandAll ? (
-              <ChevronsDownUp className="size-3" />
-            ) : (
-              <ChevronsUpDown className="size-3" />
-            )}
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 shrink-0"
+          onClick={handleToggleExpandAll}
+          aria-label={expandAll ? "Collapse all" : "Expand all"}
+        >
+          {expandAll ? (
+            <ChevronsDownUp className="size-3" />
+          ) : (
+            <ChevronsUpDown className="size-3" />
+          )}
+        </Button>
       </div>
       <div className="px-2 pb-2 pt-1">
         <div className="relative">
@@ -107,7 +88,7 @@ function SearchHeader({
             ref={searchInputRef}
             type="text"
             value={searchQuery ?? ""}
-            onChange={(e) => onSearchChange(e.target.value)}
+            onChange={(e) => dispatch({ type: "SET_SEARCH_QUERY", value: e.target.value })}
             placeholder="Search..."
             className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
@@ -206,15 +187,9 @@ function RestartDialog({ open, isRestarting, onOpenChange, onConfirm }: RestartD
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export const StatsPanel = memo(function StatsPanel({
-  session,
   onJumpToTurn,
   onToggleServer,
   onServersChanged,
-  isMobile,
-  searchQuery,
-  onSearchChange,
-  expandAll,
-  onToggleExpandAll,
   searchInputRef,
   permissionsPanel,
   selectedModel,
@@ -222,9 +197,11 @@ export const StatsPanel = memo(function StatsPanel({
   hasSettingsChanges,
   onApplySettings,
   onLoadSession,
-  sessionSource,
   backgroundAgents,
 }: StatsPanelProps) {
+  const { isMobile } = useAppContext()
+  const { session: sessionOrNull, sessionSource } = useSessionContext()
+  const session = sessionOrNull!
   const { turns } = session
 
   const [showRestartDialog, setShowRestartDialog] = useState(false)
@@ -246,12 +223,8 @@ export const StatsPanel = memo(function StatsPanel({
       "shrink-0 min-h-0 h-full overflow-y-auto elevation-1",
       isMobile ? "w-full flex-1 mobile-scroll" : "w-[300px] border-l border-border panel-enter-right"
     )}>
-      {onSearchChange && (
+      {searchInputRef && (
         <SearchHeader
-          searchQuery={searchQuery}
-          onSearchChange={onSearchChange}
-          expandAll={expandAll}
-          onToggleExpandAll={onToggleExpandAll}
           searchInputRef={searchInputRef}
         />
       )}

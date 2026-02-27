@@ -1,4 +1,4 @@
-import { type RefObject, type Dispatch, memo } from "react"
+import { type RefObject, memo } from "react"
 import {
   Search,
   ChevronsDownUp,
@@ -11,63 +11,29 @@ import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
-import type { ParsedSession } from "@/lib/types"
-import type { SessionAction } from "@/hooks/useSessionState"
-import type { useUndoRedo } from "@/hooks/useUndoRedo"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
 
 interface ChatAreaProps {
-  session: ParsedSession
-  activeTurnIndex: number | null
-  activeToolCallId: string | null
-  searchQuery: string
-  expandAll: boolean
-  isMobile: boolean
-  isSubAgentView?: boolean
-  dispatch: Dispatch<SessionAction>
   searchInputRef: RefObject<HTMLInputElement | null>
-  chatScrollRef: RefObject<HTMLDivElement | null>
-  scrollEndRef: RefObject<HTMLDivElement | null>
-  canScrollUp: boolean
-  canScrollDown: boolean
-  handleScroll: () => void
-  undoRedo: ReturnType<typeof useUndoRedo>
-  onOpenBranches: (turnIndex: number) => void
-  onBranchFromHere?: (turnIndex: number) => void
-  pendingMessage: string | null
-  isConnected: boolean
-  onToggleExpandAll: () => void
-  onEditCommand?: (commandName: string) => void
-  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 export const ChatArea = memo(function ChatArea({
-  session,
-  activeTurnIndex,
-  activeToolCallId,
-  searchQuery,
-  expandAll,
-  isMobile,
-  isSubAgentView = false,
-  dispatch,
   searchInputRef,
-  chatScrollRef,
-  scrollEndRef,
-  canScrollUp,
-  canScrollDown,
-  handleScroll,
-  undoRedo,
-  onOpenBranches,
-  onBranchFromHere,
-  pendingMessage,
-  isConnected,
-  onToggleExpandAll,
-  onEditCommand,
-  onExpandCommand,
 }: ChatAreaProps) {
+  const { state, dispatch, isMobile } = useAppContext()
+  const { session, chat, scroll, actions } = useSessionContext()
+
+  const { searchQuery, expandAll } = state
+  const { pendingMessage, isConnected } = chat
+  const { chatScrollRef, scrollEndRef, canScrollUp, canScrollDown, handleScroll } = scroll
+
   const elapsedSec = useElapsedTimer(isConnected)
 
-  const showTimeline = session.turns.length > 0 || !pendingMessage
+  // session is guaranteed non-null when ChatArea renders
+  const currentSession = session!
+  const showTimeline = currentSession.turns.length > 0 || !pendingMessage
 
   return (
     <div className={cn("relative", isMobile ? "flex flex-col flex-1 min-h-0" : "h-full")}>
@@ -88,7 +54,7 @@ export const ChatArea = memo(function ChatArea({
             variant="ghost"
             size="sm"
             className="h-8 w-8 p-0 shrink-0"
-            onClick={onToggleExpandAll}
+            onClick={actions.handleToggleExpandAll}
             aria-label={expandAll ? "Collapse all" : "Expand all"}
           >
             {expandAll ? (
@@ -103,7 +69,7 @@ export const ChatArea = memo(function ChatArea({
       {/* Scrollable chat area */}
       <div className={cn("relative", isMobile ? "flex-1 min-h-0" : "h-full")}>
         <StickyPromptBanner
-          session={session}
+          session={currentSession}
           scrollContainerRef={chatScrollRef}
         />
         <div
@@ -120,32 +86,12 @@ export const ChatArea = memo(function ChatArea({
           <div className={isMobile ? "py-3 px-1" : "mx-auto max-w-4xl py-4"}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
-                <ConversationTimeline
-                  session={session}
-                  activeTurnIndex={activeTurnIndex}
-                  activeToolCallId={activeToolCallId}
-                  searchQuery={searchQuery}
-                  expandAll={expandAll}
-                  isAgentActive={isConnected}
-                  isSubAgentView={isSubAgentView}
-                  scrollContainerRef={chatScrollRef}
-                  branchesAtTurn={undoRedo.branchesAtTurn}
-                  onRestoreToHere={undoRedo.requestUndo}
-                  onOpenBranches={onOpenBranches}
-                  onBranchFromHere={onBranchFromHere}
-                  canRedo={undoRedo.canRedo}
-                  redoTurnCount={undoRedo.redoTurnCount}
-                  redoGhostTurns={undoRedo.redoGhostTurns}
-                  onRedoAll={undoRedo.requestRedoAll}
-                  onRedoUpTo={undoRedo.requestRedoUpTo}
-                  onEditCommand={onEditCommand}
-                  onExpandCommand={onExpandCommand}
-                />
+                <ConversationTimeline />
               )}
               {pendingMessage && (
                 <PendingTurnPreview
                   message={pendingMessage}
-                  turnNumber={session.turns.length + 1}
+                  turnNumber={currentSession.turns.length + 1}
                   elapsedSec={isConnected ? elapsedSec : undefined}
                 />
               )}

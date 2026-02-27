@@ -3,38 +3,23 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
+import { useSessionContext } from "@/contexts/SessionContext"
 import type { VoiceStatus } from "./useVoiceInput"
 import { getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
 
 interface InputToolbarProps {
-  isConnected: boolean | undefined
   isPlanApproval: boolean
   isUserQuestion: boolean
   elapsedSec: number
-  hasContent: boolean
-  voiceStatus: VoiceStatus
-  voiceProgress: number
-  voiceError: string | null
-  onInterrupt?: () => void
-  onStopSession?: () => void
-  onToggleVoice: () => void
-  onSubmit: () => void
 }
 
 export function InputToolbar({
-  isConnected,
   isPlanApproval,
   isUserQuestion,
   elapsedSec,
-  hasContent,
-  voiceStatus,
-  voiceProgress,
-  voiceError,
-  onInterrupt,
-  onStopSession,
-  onToggleVoice,
-  onSubmit,
 }: InputToolbarProps) {
+  const { chat: { isConnected } } = useSessionContext()
+
   return (
     <>
       {/* Active session indicator inside textarea */}
@@ -55,17 +40,28 @@ export function InputToolbar({
   )
 }
 
+interface ActionButtonsProps {
+  hasContent: boolean
+  voiceStatus: VoiceStatus
+  voiceProgress: number
+  voiceError: string | null
+  onToggleVoice: () => void
+  onSubmit: () => void
+}
+
 export function ActionButtons({
-  isConnected,
   hasContent,
   voiceStatus,
   voiceProgress,
   voiceError,
-  onInterrupt,
-  onStopSession,
   onToggleVoice,
   onSubmit,
-}: Omit<InputToolbarProps, "isPlanApproval" | "isUserQuestion" | "elapsedSec">) {
+}: ActionButtonsProps) {
+  const {
+    chat: { isConnected, interrupt: onInterrupt },
+    actions: { handleStopSession: onStopSession },
+  } = useSessionContext()
+
   return (
     <>
       {/* Interrupt button -- sends Escape to Claude */}
@@ -86,7 +82,7 @@ export function ActionButtons({
       )}
 
       {/* Stop session -- kills the server process */}
-      {isConnected && onStopSession && (
+      {isConnected && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

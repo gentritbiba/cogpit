@@ -139,6 +139,7 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     if (!session || !isLive) return
     if (chatIsAtBottomRef.current) smoothScrollToEnd()
     requestAnimationFrame(updateScrollIndicators)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
   }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
 
   return {

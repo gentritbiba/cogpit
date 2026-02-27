@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { TeamMember } from "@/lib/team-types"
-import { getMemberColorClass, getMemberEffectiveColor, isTeamLead } from "@/lib/team-types"
+import { getMemberColorClass, getMemberEffectiveColor } from "@/lib/team-types"
 
 interface TeamChatInputProps {
   teamName: string

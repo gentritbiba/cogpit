@@ -77,17 +77,18 @@ export const SessionBrowser = memo(function SessionBrowser({
     onDuplicateSession,
   })
 
+  const { view, selectedProject, loadProjects, loadSessions, setFetchError } = browser
   const handleRetry = useCallback(() => {
-    if (browser.view === "projects") {
-      browser.loadProjects()
-    } else if (browser.view === "sessions" && browser.selectedProject) {
-      browser.loadSessions(browser.selectedProject)
+    if (view === "projects") {
+      loadProjects()
+    } else if (view === "sessions" && selectedProject) {
+      loadSessions(selectedProject)
     }
-  }, [browser.view, browser.selectedProject, browser.loadProjects, browser.loadSessions])
+  }, [view, selectedProject, loadProjects, loadSessions])
 
   const handleClearError = useCallback(() => {
-    browser.setFetchError(null)
-  }, [browser.setFetchError])
+    setFetchError(null)
+  }, [setFetchError])
 
   // Mobile teams-only mode: just show the teams list
   if (teamsOnly) {

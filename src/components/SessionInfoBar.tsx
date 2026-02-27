@@ -1,4 +1,4 @@
-import { type Dispatch, memo } from "react"
+import { memo } from "react"
 import {
   Loader2,
   FolderOpen,
@@ -17,20 +17,15 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
-import type { ParsedSession } from "@/lib/types"
-import type { SessionSource } from "@/hooks/useLiveSession"
-import type { SessionAction } from "@/hooks/useSessionState"
 import { shortenModel, parseSubAgentPath } from "@/lib/format"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { ContextBadge, HeaderActionButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
 
 interface SessionInfoBarProps {
-  session: ParsedSession
-  sessionSource: SessionSource | null
   creatingSession: boolean
-  isMobile: boolean
-  dispatch: Dispatch<SessionAction>
   onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
   onOpenTerminal?: () => void
@@ -38,16 +33,15 @@ interface SessionInfoBarProps {
 }
 
 export const SessionInfoBar = memo(function SessionInfoBar({
-  session,
-  sessionSource,
   creatingSession,
-  isMobile,
-  dispatch,
   onNewSession,
   onDuplicateSession,
   onOpenTerminal,
   onBackToMain,
 }: SessionInfoBarProps) {
+  const { isMobile } = useAppContext()
+  const { session: sessionOrNull, sessionSource } = useSessionContext()
+  const session = sessionOrNull!
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const isSubAgentView = subAgentInfo !== null
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
@@ -106,11 +100,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
       {/* Action buttons */}
       {sessionSource && (
         <SessionActions
-          session={session}
-          sessionSource={sessionSource}
           creatingSession={creatingSession}
-          isMobile={isMobile}
-          dispatch={dispatch}
           onNewSession={onNewSession}
           onDuplicateSession={onDuplicateSession}
           onOpenTerminal={onOpenTerminal}
@@ -123,11 +113,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
 // ── SessionActions ───────────────────────────────────────────────────────────
 
 interface SessionActionsProps {
-  session: ParsedSession
-  sessionSource: SessionSource
   creatingSession: boolean
-  isMobile: boolean
-  dispatch: Dispatch<SessionAction>
   onNewSession: (dirName: string, cwd?: string) => void
   onDuplicateSession?: () => void
   onOpenTerminal?: () => void
@@ -139,21 +125,21 @@ interface SessionActionsProps {
  * project-level actions is shown with tooltips.
  */
 function SessionActions({
-  session,
-  sessionSource,
   creatingSession,
-  isMobile,
-  dispatch,
   onNewSession,
   onDuplicateSession,
   onOpenTerminal,
 }: SessionActionsProps): React.ReactNode {
+  const { isMobile, dispatch } = useAppContext()
+  const { session: sessionOrNull, sessionSource } = useSessionContext()
+  const session = sessionOrNull!
+  const sessionSrc = sessionSource!
   const newIcon = creatingSession
     ? <Loader2 className="size-3 animate-spin" />
     : <Plus className="size-3" />
 
   function handleNewSession(): void {
-    onNewSession(sessionSource.dirName, session.cwd)
+    onNewSession(sessionSrc.dirName, session.cwd)
   }
 
   if (isMobile) {
@@ -243,7 +229,7 @@ function SessionActions({
         label="All Sessions"
         tooltip="View all sessions in this project"
         onClick={() => {
-          const dirName = sessionSource.dirName
+          const dirName = sessionSrc.dirName
           dispatch({ type: "GO_HOME", isMobile: false })
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
         }}

@@ -3,7 +3,6 @@ import type {
   ParsedSession,
   ContentBlock,
   ImageBlock,
-  UserMessage,
   AssistantMessage,
   UserContent,
 } from "./types"

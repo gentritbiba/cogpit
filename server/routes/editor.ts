@@ -251,7 +251,7 @@ export function registerEditorRoutes(use: UseFn) {
           try {
             await openWithEditor(diffEditor, ["--diff", tmpFile, path])
             res.end(JSON.stringify({ success: true, editor: diffEditor, mode: "diff" }))
-          } catch (err) {
+          } catch {
             res.statusCode = 500
             res.end(JSON.stringify({ error: `Failed to open diff in ${diffEditor}` }))
           } finally {

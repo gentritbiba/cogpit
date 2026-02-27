@@ -20,21 +20,18 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
-import type { ParsedSession } from "@/lib/types"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
 import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
-  session: ParsedSession | null
-  isLive: boolean
   showSidebar: boolean
   showStats: boolean
   showWorktrees?: boolean
   killing: boolean
-  networkUrl: string | null
-  networkAccessDisabled: boolean
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
@@ -46,14 +43,10 @@ interface DesktopHeaderProps {
 }
 
 export const DesktopHeader = memo(function DesktopHeader({
-  session,
-  isLive,
   showSidebar,
   showStats,
   showWorktrees,
   killing,
-  networkUrl,
-  networkAccessDisabled,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
@@ -63,6 +56,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   showConfig,
   onToggleConfig,
 }: DesktopHeaderProps) {
+  const { config: { networkUrl, networkAccessDisabled } } = useAppContext()
+  const { session, isLive } = useSessionContext()
   const [cmdCopied, copyCmd] = useCopyWithFeedback()
   const [urlCopied, copyUrl] = useCopyWithFeedback()
 

@@ -107,25 +107,27 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     mutationObserver.observe(container, { childList: true, subtree: true })
     mutationObserverRef.current = mutationObserver
 
+    const visibleTurns = visibleTurnsRef.current
     return () => {
       observer.disconnect()
       mutationObserver.disconnect()
-      visibleTurnsRef.current.clear()
+      visibleTurns.clear()
       observerRef.current = null
       mutationObserverRef.current = null
     }
   }, [scrollContainerRef, computeStickyTurn])
 
+  const stickyTurnIndex = stickyTurn?.index ?? null
   const promptText = useMemo(() => {
-    if (!stickyTurn) return null
-    const turn = session.turns[stickyTurn.index]
+    if (stickyTurnIndex === null || !stickyTurn) return null
+    const turn = session.turns[stickyTurnIndex]
     if (!turn?.userMessage) return null
     const raw = getUserMessageText(turn.userMessage)
     const clean = raw.replace(SYSTEM_TAG_RE, "").trim()
     if (!clean) return null
     const firstLine = clean.split("\n")[0]
     return firstLine.length > 150 ? firstLine.slice(0, 150) + "..." : firstLine
-  }, [stickyTurn?.index, session.turns])
+  }, [stickyTurnIndex, stickyTurn, session.turns])
 
   const scrollToPrompt = () => {
     const container = scrollContainerRef.current

@@ -61,6 +61,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     prevChangeCountRef.current = fileChanges.length
     prevTurnCountRef.current = session.turns.length
     updateScrollIndicators()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only runs on session switch
   }, [sessionChangeKey])
 
   // Detect new turns (user sent a new prompt)

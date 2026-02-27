@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { resolve, dirname } from "node:path"
-import { readdir, readFile, open, join } from "../../helpers"
+import { readdir, open, join } from "../../helpers"
 
 export interface WorktreeRaw {
   path: string

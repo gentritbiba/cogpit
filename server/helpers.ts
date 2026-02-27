@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process"
-import { readdir, stat, open } from "node:fs/promises"
+import { readdir, open } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { spawn } from "node:child_process"

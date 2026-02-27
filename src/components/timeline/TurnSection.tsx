@@ -1,4 +1,3 @@
-import { memo } from "react"
 import { Clock, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { UserMessage } from "./UserMessage"
@@ -9,6 +8,8 @@ import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { collectToolCalls } from "@/lib/timelineHelpers"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
 import type { Turn, TurnContentBlock } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/format"
@@ -31,37 +32,25 @@ const BORDER_STYLES = {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface TurnSectionProps {
+interface TurnSectionProps {
   turn: Turn
   index: number
-  isActive: boolean
-  activeToolCallId: string | null
-  expandAll: boolean
-  isAgentActive?: boolean
-  isSubAgentView?: boolean
   branchCount?: number
-  onRestoreToHere?: (turnIndex: number) => void
-  onOpenBranches?: (turnIndex: number) => void
-  onEditCommand?: (commandName: string) => void
-  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 // ── TurnSection ──────────────────────────────────────────────────────────────
 
-export const TurnSection = memo(function TurnSection({
+export function TurnSection({
   turn,
   index,
-  isActive,
-  activeToolCallId,
-  expandAll,
-  isAgentActive = false,
-  isSubAgentView = false,
   branchCount = 0,
-  onRestoreToHere,
-  onOpenBranches,
-  onEditCommand,
-  onExpandCommand,
 }: TurnSectionProps) {
+  const { state: { activeTurnIndex, activeToolCallId, expandAll } } = useAppContext()
+  const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
+
+  const isActive = activeTurnIndex === index
+  const isAgentActive = isLive && session !== null && index === session.turns.length - 1
+
   return (
     <div
       className={cn(
@@ -73,8 +62,8 @@ export const TurnSection = memo(function TurnSection({
         index={index}
         turn={turn}
         branchCount={branchCount}
-        onRestoreToHere={onRestoreToHere}
-        onOpenBranches={onOpenBranches}
+        onRestoreToHere={undoRedo.requestUndo}
+        onOpenBranches={actions.handleOpenBranches}
       />
 
       <div className="space-y-4">
@@ -85,8 +74,8 @@ export const TurnSection = memo(function TurnSection({
               timestamp={turn.timestamp}
               label={isSubAgentView ? "Agent" : undefined}
               variant={isSubAgentView ? "agent" : undefined}
-              onEditCommand={onEditCommand}
-              onExpandCommand={onExpandCommand}
+              onEditCommand={actions.handleEditCommand}
+              onExpandCommand={actions.handleExpandCommand}
             />
           </div>
         )}
@@ -102,7 +91,7 @@ export const TurnSection = memo(function TurnSection({
       </div>
     </div>
   )
-})
+}
 
 // ── Turn header ──────────────────────────────────────────────────────────────
 

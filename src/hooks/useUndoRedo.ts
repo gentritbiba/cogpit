@@ -92,6 +92,7 @@ export function useUndoRedo(
       })
 
     return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when sessionId changes, not on every session object update
   }, [session?.sessionId])
 
   // Save undo state to server

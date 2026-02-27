@@ -6,61 +6,41 @@ import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
-import type { Turn, Branch } from "@/lib/types"
+import { useAppContext } from "@/contexts/AppContext"
+import { useSessionContext } from "@/contexts/SessionContext"
+import type { Turn } from "@/lib/types"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface TimelineInnerProps {
+interface TimelineInnerProps {
   filteredTurns: { turn: Turn; index: number }[]
-  activeTurnIndex: number | null
-  activeToolCallId: string | null
-  expandAll: boolean
-  isAgentActive: boolean
-  isSubAgentView: boolean
-  hasUndoCallbacks: boolean
-  branchesAtTurn?: (turnIndex: number) => Branch[]
-  onRestoreToHere?: (turnIndex: number) => void
-  onOpenBranches?: (turnIndex: number) => void
-  onBranchFromHere?: (turnIndex: number) => void
-  canRedo: boolean
-  redoTurnCount: number
-  redoGhostTurns: Turn[]
-  onRedoAll?: () => void
-  onRedoUpTo?: (ghostTurnIndex: number) => void
-  sessionTurnCount: number
-  onEditCommand?: (commandName: string) => void
-  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
 // ── Context menu wrapper ─────────────────────────────────────────────────────
 
 /** Conditionally wraps children in a TurnContextMenu when undo callbacks are available. */
 function MaybeContextMenuTurn({
-  turn,
   index,
-  props,
   children,
 }: {
-  turn: Turn
   index: number
-  props: TimelineInnerProps
   children: React.ReactNode
 }) {
-  const { hasUndoCallbacks, branchesAtTurn, onRestoreToHere, onOpenBranches, onBranchFromHere } = props
+  const { undoRedo, actions } = useSessionContext()
+  const { requestUndo, branchesAtTurn } = undoRedo
+  const { handleOpenBranches, handleBranchFromHere } = actions
 
-  if (!hasUndoCallbacks || !onRestoreToHere || !onOpenBranches) {
+  if (!requestUndo || !handleOpenBranches) {
     return <>{children}</>
   }
-
-  const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
 
   return (
     <TurnContextMenu
       turnIndex={index}
-      branches={turnBranches}
-      onRestoreToHere={onRestoreToHere}
-      onOpenBranches={onOpenBranches}
-      onBranchFromHere={onBranchFromHere}
+      branches={branchesAtTurn(index)}
+      onRestoreToHere={requestUndo}
+      onOpenBranches={handleOpenBranches}
+      onBranchFromHere={handleBranchFromHere}
     >
       {children}
     </TurnContextMenu>
@@ -69,27 +49,17 @@ function MaybeContextMenuTurn({
 
 // ── Redo section ─────────────────────────────────────────────────────────────
 
-function RedoSection({
-  canRedo,
-  redoTurnCount,
-  redoGhostTurns,
-  onRedoAll,
-  onRedoUpTo,
-  sessionTurnCount,
-}: {
-  canRedo: boolean
-  redoTurnCount: number
-  redoGhostTurns: Turn[]
-  onRedoAll?: () => void
-  onRedoUpTo?: (ghostTurnIndex: number) => void
-  sessionTurnCount: number
-}) {
-  if (!canRedo || !onRedoAll) return null
+function RedoSection() {
+  const { session, undoRedo } = useSessionContext()
+  const { canRedo, redoTurnCount, redoGhostTurns, requestRedoAll, requestRedoUpTo } = undoRedo
+  const sessionTurnCount = session?.turns.length ?? 0
+
+  if (!canRedo || !requestRedoAll) return null
   return (
     <>
       <UndoRedoBar
         redoTurnCount={redoTurnCount}
-        onRedoAll={onRedoAll}
+        onRedoAll={requestRedoAll}
       />
       {redoGhostTurns.length > 0 && (
         <div className="select-none">
@@ -98,13 +68,10 @@ function RedoSection({
               <TurnSection
                 turn={turn}
                 index={sessionTurnCount + i}
-                isActive={false}
-                activeToolCallId={null}
-                expandAll={false}
               />
-              {onRedoUpTo && (
+              {requestRedoUpTo && (
                 <button
-                  onClick={() => onRedoUpTo(i)}
+                  onClick={() => requestRedoUpTo(i)}
                   className="absolute top-4 right-4 opacity-0 group-hover/ghost:opacity-100 transition-opacity z-10 flex items-center gap-1 text-[10px] text-green-400 hover:text-green-300 bg-elevation-1 border border-border/50 rounded px-2 py-1"
                 >
                   <Redo2 className="size-3" />
@@ -124,17 +91,9 @@ function RedoSection({
 
 // ── Non-virtualized timeline ─────────────────────────────────────────────────
 
-export function NonVirtualTimeline(props: TimelineInnerProps) {
-  const {
-    filteredTurns,
-    activeTurnIndex,
-    canRedo,
-    redoTurnCount,
-    redoGhostTurns,
-    onRedoAll,
-    onRedoUpTo,
-    sessionTurnCount,
-  } = props
+export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
+  const { state: { activeTurnIndex } } = useAppContext()
+  const { undoRedo } = useSessionContext()
 
   const turnRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
@@ -160,7 +119,7 @@ export function NonVirtualTimeline(props: TimelineInnerProps) {
   return (
     <div className="space-y-3">
       {filteredTurns.map(({ turn, index }) => (
-        <MaybeContextMenuTurn key={turn.id} turn={turn} index={index} props={props}>
+        <MaybeContextMenuTurn key={turn.id} index={index}>
           <div ref={setTurnRef(index)} data-turn-index={index}>
             {turn.compactionSummary && (
               <CompactionMarker summary={turn.compactionSummary} />
@@ -168,48 +127,24 @@ export function NonVirtualTimeline(props: TimelineInnerProps) {
             <TurnSection
               turn={turn}
               index={index}
-              isActive={activeTurnIndex === index}
-              activeToolCallId={props.activeToolCallId}
-              expandAll={props.expandAll}
-              isAgentActive={props.isAgentActive && index === sessionTurnCount - 1}
-              isSubAgentView={props.isSubAgentView}
-              branchCount={props.branchesAtTurn ? props.branchesAtTurn(index).length : 0}
-              onRestoreToHere={props.onRestoreToHere}
-              onOpenBranches={props.onOpenBranches}
-              onEditCommand={props.onEditCommand}
-              onExpandCommand={props.onExpandCommand}
+              branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
             />
           </div>
         </MaybeContextMenuTurn>
       ))}
-      <RedoSection
-        canRedo={canRedo}
-        redoTurnCount={redoTurnCount}
-        redoGhostTurns={redoGhostTurns}
-        onRedoAll={onRedoAll}
-        onRedoUpTo={onRedoUpTo}
-        sessionTurnCount={sessionTurnCount}
-      />
+      <RedoSection />
     </div>
   )
 }
 
 // ── Virtualized timeline ─────────────────────────────────────────────────────
 
-export function VirtualizedTimeline(
-  props: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }
-) {
-  const {
-    filteredTurns,
-    scrollContainerRef,
-    activeTurnIndex,
-    canRedo,
-    redoTurnCount,
-    redoGhostTurns,
-    onRedoAll,
-    onRedoUpTo,
-    sessionTurnCount,
-  } = props
+export function VirtualizedTimeline({
+  filteredTurns,
+  scrollContainerRef,
+}: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }) {
+  const { state: { activeTurnIndex } } = useAppContext()
+  const { undoRedo } = useSessionContext()
 
   const virtualizer = useVirtualizer({
     count: filteredTurns.length,
@@ -253,7 +188,7 @@ export function VirtualizedTimeline(
         const isLastVirtualRow = virtualRow.index === filteredTurns.length - 1
 
         return (
-          <MaybeContextMenuTurn key={turn.id} turn={turn} index={index} props={props}>
+          <MaybeContextMenuTurn key={turn.id} index={index}>
             <div
               data-index={virtualRow.index}
               data-turn-index={index}
@@ -272,16 +207,7 @@ export function VirtualizedTimeline(
               <TurnSection
                 turn={turn}
                 index={index}
-                isActive={activeTurnIndex === index}
-                activeToolCallId={props.activeToolCallId}
-                expandAll={props.expandAll}
-                isAgentActive={props.isAgentActive && index === sessionTurnCount - 1}
-                isSubAgentView={props.isSubAgentView}
-                branchCount={props.branchesAtTurn ? props.branchesAtTurn(index).length : 0}
-                onRestoreToHere={props.onRestoreToHere}
-                onOpenBranches={props.onOpenBranches}
-                onEditCommand={props.onEditCommand}
-                onExpandCommand={props.onExpandCommand}
+                branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
               />
               {!isLastVirtualRow && <Separator className="bg-border/60" />}
             </div>
@@ -289,14 +215,7 @@ export function VirtualizedTimeline(
         )
       })}
       <div style={{ position: "absolute", top: `${virtualizer.getTotalSize()}px`, width: "100%" }}>
-        <RedoSection
-          canRedo={canRedo}
-          redoTurnCount={redoTurnCount}
-          redoGhostTurns={redoGhostTurns}
-          onRedoAll={onRedoAll}
-          onRedoUpTo={onRedoUpTo}
-          sessionTurnCount={sessionTurnCount}
-        />
+        <RedoSection />
       </div>
     </div>
   )
