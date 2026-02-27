@@ -45,7 +45,9 @@ import { useKillAll } from "@/hooks/useKillAll"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
-import { parseSession, detectPendingInteraction } from "@/lib/parser"
+import { usePanelState } from "@/hooks/usePanelState"
+import { useAppHandlers } from "@/hooks/useAppHandlers"
+import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
@@ -67,12 +69,9 @@ export default function App() {
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
 
-  // Local UI state
-  const [showSidebar, setShowSidebar] = useState(true)
-  const [showStats, setShowStats] = useState(true)
-  const [showWorktrees, setShowWorktrees] = useState(false)
-  const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
-  const [showThemeSelector, setShowThemeSelector] = useState(false)
+  // Panel/sidebar toggle state
+  const panels = usePanelState(state, dispatch)
+
   const searchInputRef = useRef<HTMLInputElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -81,22 +80,9 @@ export default function App() {
     (tab: "browse" | "teams") => dispatch({ type: "SET_SIDEBAR_TAB", tab }),
     [dispatch]
   )
-  const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
-  const handleToggleStats = useCallback(() => setShowStats((p) => !p), [])
-  const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [])
-  const handleToggleConfig = useCallback(() => {
-    if (state.mainView === "config") {
-      dispatch({ type: "CLOSE_CONFIG" })
-    } else {
-      dispatch({ type: "OPEN_CONFIG" })
-    }
-  }, [state.mainView, dispatch])
-  const handleEditConfig = useCallback((filePath: string) => {
-    dispatch({ type: "OPEN_CONFIG", filePath })
-  }, [dispatch])
-  const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
-  const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])
-  const handleToggleThemeSelector = useCallback(() => setShowThemeSelector((p) => !p), [])
+  const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
+  const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
+  const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
@@ -125,10 +111,6 @@ export default function App() {
       if (!res.ok) res.json().then((d) => console.error("[open-terminal]", d.error)).catch(() => {})
     }).catch((err) => console.error("[open-terminal] fetch failed:", err))
   }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.dashboardProject])
-  const handleCloseThemeSelector = useCallback(() => setShowThemeSelector(false), [])
-  const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
-  const handleSearchChange = useCallback((q: string) => dispatch({ type: "SET_SEARCH_QUERY", value: q }), [dispatch])
-  const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
 
   // Server panel state
   const serverPanel = useServerPanel(state.session?.sessionId)
@@ -140,7 +122,7 @@ export default function App() {
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
 
   // Worktree data — only fetched when panel is open
-  const worktreeData = useWorktrees(showWorktrees ? currentDirName : null)
+  const worktreeData = useWorktrees(panels.showWorktrees ? currentDirName : null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -176,12 +158,6 @@ export default function App() {
 
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
-
-  // In-memory map: sessionId → model the persistent process was spawned with.
-  // No localStorage — processes don't survive page reload, so stale data would be wrong.
-  const [appliedModels, setAppliedModels] = useState<Record<string, string>>({})
-  const selectedModelRef = useRef(selectedModel)
-  selectedModelRef.current = selectedModel
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -283,15 +259,43 @@ export default function App() {
     }
   }, [state.sessionSource, sessionHistory.push])
 
+  // App-level handlers (extracted from App.tsx)
+  const handlers = useAppHandlers({
+    state: { session: state.session, sessionSource: state.sessionSource },
+    dispatch,
+    isMobile,
+    handleJumpToTurn: actions.handleJumpToTurn,
+    markPermissionsApplied: perms.markApplied,
+    hasPermsPendingChanges: perms.hasPendingChanges,
+    selectedModel,
+    setSelectedModel,
+    scrollRequestScrollToTop: scroll.requestScrollToTop,
+    handleDashboardSelect: actions.handleDashboardSelect,
+  })
+
+  // Undo/redo system
+  const undoRedo = useUndoRedo(state.session, state.sessionSource, handlers.reloadSession)
+
+  // Wire up branch switch now that undoRedo is available
+  // We need to re-create handlers that depend on undoRedo.requestBranchSwitch
+  const handleRedoToTurn = useCallback((branchId: string, archiveTurnIdx: number) => {
+    undoRedo.requestBranchSwitch(branchId, archiveTurnIdx)
+    handlers.setBranchModalTurn(null)
+  }, [undoRedo.requestBranchSwitch])
+  const handleRedoEntireBranch = useCallback((branchId: string) => {
+    undoRedo.requestBranchSwitch(branchId)
+    handlers.setBranchModalTurn(null)
+  }, [undoRedo.requestBranchSwitch])
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     isMobile,
     searchInputRef,
     chatInputRef,
     dispatch,
-    onToggleSidebar: handleToggleSidebar,
-    onOpenProjectSwitcher: handleOpenProjectSwitcher,
-    onOpenThemeSelector: handleToggleThemeSelector,
+    onToggleSidebar: panels.handleToggleSidebar,
+    onOpenProjectSwitcher: panels.handleOpenProjectSwitcher,
+    onOpenThemeSelector: panels.handleToggleThemeSelector,
     onOpenTerminal: handleOpenTerminal,
     onHistoryBack: sessionHistory.goBack,
     onHistoryForward: sessionHistory.goForward,
@@ -299,168 +303,8 @@ export default function App() {
     onCommitNavigation: sessionHistory.commitNavigation,
   })
 
-  // Reload session from server (used after undo/redo JSONL mutations)
-  const reloadSession = useCallback(async () => {
-    if (!state.sessionSource) return
-    const { dirName, fileName } = state.sessionSource
-    const res = await authFetch(
-      `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
-    )
-    if (!res.ok) return
-    const rawText = await res.text()
-    const newSession = parseSession(rawText)
-    dispatch({
-      type: "RELOAD_SESSION_CONTENT",
-      session: newSession,
-      source: { dirName, fileName, rawText },
-    })
-  }, [state.sessionSource, dispatch])
-
-  // Undo/redo system
-  const undoRedo = useUndoRedo(state.session, state.sessionSource, reloadSession)
-
-  // Branch modal state
-  const [branchModalTurn, setBranchModalTurn] = useState<number | null>(null)
-  const branchModalBranches = branchModalTurn !== null ? undoRedo.branchesAtTurn(branchModalTurn) : []
-  const handleOpenBranches = useCallback((turnIndex: number) => setBranchModalTurn(turnIndex), [])
-  const handleCloseBranchModal = useCallback(() => setBranchModalTurn(null), [])
-  const handleRedoToTurn = useCallback((branchId: string, archiveTurnIdx: number) => {
-    undoRedo.requestBranchSwitch(branchId, archiveTurnIdx)
-    setBranchModalTurn(null)
-  }, [undoRedo.requestBranchSwitch])
-  const handleRedoEntireBranch = useCallback((branchId: string) => {
-    undoRedo.requestBranchSwitch(branchId)
-    setBranchModalTurn(null)
-  }, [undoRedo.requestBranchSwitch])
-
-  // Duplicate any session by dirName/fileName and load it
-  const handleDuplicateSessionByPath = useCallback(async (dirName: string, fileName: string) => {
-    try {
-      const res = await authFetch("/api/branch-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName }),
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      const contentRes = await authFetch(
-        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
-      )
-      if (!contentRes.ok) return
-      const rawText = await contentRes.text()
-      const newSession = parseSession(rawText)
-      dispatch({
-        type: "LOAD_SESSION",
-        session: newSession,
-        source: { dirName: data.dirName, fileName: data.fileName, rawText },
-        isMobile,
-      })
-    } catch {
-      // silently fail
-    }
-  }, [dispatch, isMobile])
-
-  // Duplicate the current session (full copy) — used by SessionInfoBar
-  const handleDuplicateSession = useCallback(() => {
-    if (!state.sessionSource) return
-    handleDuplicateSessionByPath(state.sessionSource.dirName, state.sessionSource.fileName)
-  }, [state.sessionSource, handleDuplicateSessionByPath])
-
-  // Delete any session by dirName/fileName
-  const handleDeleteSession = useCallback(async (dirName: string, fileName: string) => {
-    try {
-      await authFetch("/api/delete-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName }),
-      })
-    } catch {
-      // silently fail
-    }
-  }, [])
-
-  // Duplicate from a specific turn (creates a new session truncated at that turn)
-  const handleBranchFromHere = useCallback(async (turnIndex: number) => {
-    if (!state.sessionSource) return
-    const { dirName, fileName } = state.sessionSource
-    try {
-      const res = await authFetch("/api/branch-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName, turnIndex }),
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      const contentRes = await authFetch(
-        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
-      )
-      if (!contentRes.ok) return
-      const rawText = await contentRes.text()
-      const newSession = parseSession(rawText)
-      dispatch({
-        type: "LOAD_SESSION",
-        session: newSession,
-        source: { dirName: data.dirName, fileName: data.fileName, rawText },
-        isMobile,
-      })
-    } catch {
-      // silently fail
-    }
-  }, [state.sessionSource, dispatch, isMobile])
-
-  // Mobile StatsPanel jump callback
-  const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {
-    actions.handleJumpToTurn(index, toolCallId)
-    dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
-  }, [actions.handleJumpToTurn, dispatch])
-
   // Kill-all handler
   const { killing, handleKillAll } = useKillAll()
-
-  // When session changes: record baseline for new sessions, restore model for revisits
-  const currentSessionId = state.session?.sessionId ?? null
-  const prevSessionIdRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (currentSessionId === prevSessionIdRef.current) return
-    prevSessionIdRef.current = currentSessionId
-    if (!currentSessionId) return
-    setAppliedModels(prev => {
-      if (currentSessionId in prev) {
-        setSelectedModel(prev[currentSessionId])
-        return prev
-      }
-      return { ...prev, [currentSessionId]: selectedModelRef.current }
-    })
-  }, [currentSessionId])
-
-  // Detect if model or permissions have changed from what the persistent process uses
-  const hasSettingsChanges = currentSessionId != null &&
-    currentSessionId in appliedModels &&
-    (selectedModel !== appliedModels[currentSessionId] || perms.hasPendingChanges)
-
-  // Restart the persistent process to apply new model/permissions
-  const handleApplySettings = useCallback(async () => {
-    if (!currentSessionId) return
-    await authFetch("/api/stop-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: currentSessionId }),
-    })
-    setAppliedModels(prev => ({ ...prev, [currentSessionId]: selectedModel }))
-    perms.markApplied()
-  }, [currentSessionId, selectedModel, perms])
-
-  // Stop/kill the running session process
-  const handleStopSession = useCallback(async () => {
-    if (!currentSessionId) return
-    try {
-      await authFetch("/api/stop-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: currentSessionId }),
-      })
-    } catch { /* ignore — session may already be dead */ }
-  }, [currentSessionId])
 
   // Permissions panel element (shared between desktop/mobile StatsPanel)
   const permissionsPanelNode = useMemo(() => (
@@ -491,13 +335,7 @@ export default function App() {
     actions.handleDashboardSelect(state.sessionSource.dirName, subAgentInfo.parentFileName)
   }, [state.sessionSource, subAgentInfo, actions.handleDashboardSelect])
 
-  // Load a session — sub-agent sessions scroll to top, others scroll to bottom
-  const handleLoadSessionScrollAware = useCallback((dirName: string, fileName: string) => {
-    if (parseSubAgentPath(fileName)) {
-      scroll.requestScrollToTop()
-    }
-    actions.handleDashboardSelect(dirName, fileName)
-  }, [scroll.requestScrollToTop, actions.handleDashboardSelect])
+  const branchModalBranches = handlers.branchModalTurn !== null ? undoRedo.branchesAtTurn(handlers.branchModalTurn) : []
 
   // Read-only banner shown when viewing a sub-agent session (replaces chat input)
   const subAgentReadOnlyNode = isSubAgentView ? (
@@ -551,11 +389,11 @@ export default function App() {
     slashSuggestions: slashSuggestions.suggestions,
     slashSuggestionsLoading: slashSuggestions.loading,
     actions: {
-      handleStopSession,
-      handleEditConfig,
+      handleStopSession: handlers.handleStopSession,
+      handleEditConfig: panels.handleEditConfig,
       handleEditCommand,
-      handleOpenBranches,
-      handleBranchFromHere,
+      handleOpenBranches: handlers.handleOpenBranches,
+      handleBranchFromHere: handlers.handleBranchFromHere,
       handleToggleExpandAll,
     },
   }), [
@@ -565,8 +403,8 @@ export default function App() {
     claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
     scroll, undoRedo, pendingInteraction, isSubAgentView,
     slashSuggestions.suggestions, slashSuggestions.loading,
-    handleStopSession, handleEditConfig, handleEditCommand,
-    handleOpenBranches, handleBranchFromHere, handleToggleExpandAll,
+    handlers.handleStopSession, panels.handleEditConfig, handleEditCommand,
+    handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
   ])
 
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
@@ -643,16 +481,16 @@ export default function App() {
     />
   )
 
-  const branchModalCurrentTurns = branchModalTurn !== null && state.session
-    ? state.session.turns.slice(branchModalTurn)
+  const branchModalCurrentTurns = handlers.branchModalTurn !== null && state.session
+    ? state.session.turns.slice(handlers.branchModalTurn)
     : []
 
-  const branchModal = branchModalTurn !== null && branchModalBranches.length > 0 && (
+  const branchModal = handlers.branchModalTurn !== null && branchModalBranches.length > 0 && (
     <BranchModal
       branches={branchModalBranches}
-      branchPointTurnIndex={branchModalTurn}
+      branchPointTurnIndex={handlers.branchModalTurn}
       currentTurns={branchModalCurrentTurns}
-      onClose={handleCloseBranchModal}
+      onClose={handlers.handleCloseBranchModal}
       onRedoToTurn={handleRedoToTurn}
       onRedoEntireBranch={handleRedoEntireBranch}
     />
@@ -688,11 +526,11 @@ export default function App() {
         isConnected={claudeChat.isConnected}
         onSend={claudeChat.sendMessage}
         onInterrupt={claudeChat.interrupt}
-        onStopSession={handleStopSession}
+        onStopSession={handlers.handleStopSession}
         pendingInteraction={pendingInteraction}
         slashSuggestions={slashSuggestions.suggestions}
         slashSuggestionsLoading={slashSuggestions.loading}
-        onEditConfig={handleEditConfig}
+        onEditConfig={panels.handleEditConfig}
       />
     </div>
   )
@@ -714,8 +552,8 @@ export default function App() {
               onSelectTeam={actions.handleSelectTeam}
               onNewSession={handleNewSession}
               creatingSession={creatingSession}
-              onDuplicateSession={handleDuplicateSessionByPath}
-              onDeleteSession={handleDeleteSession}
+              onDuplicateSession={handlers.handleDuplicateSessionByPath}
+              onDeleteSession={handlers.handleDeleteSession}
               isMobile
             />
           )}
@@ -738,7 +576,7 @@ export default function App() {
                     isMobile
                     dispatch={dispatch}
                     onNewSession={handleNewSession}
-                    onDuplicateSession={handleDuplicateSession}
+                    onDuplicateSession={handlers.handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                   />
@@ -758,8 +596,8 @@ export default function App() {
                     canScrollDown={scroll.canScrollDown}
                     handleScroll={scroll.handleScroll}
                     undoRedo={undoRedo}
-                    onOpenBranches={handleOpenBranches}
-                    onBranchFromHere={handleBranchFromHere}
+                    onOpenBranches={handlers.handleOpenBranches}
+                    onBranchFromHere={handlers.handleBranchFromHere}
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
@@ -801,8 +639,8 @@ export default function App() {
                   creatingSession={creatingSession}
                   selectedProjectDirName={state.dashboardProject}
                   onSelectProject={handleSelectProject}
-                  onDuplicateSession={handleDuplicateSessionByPath}
-                  onDeleteSession={handleDeleteSession}
+                  onDuplicateSession={handlers.handleDuplicateSessionByPath}
+                  onDeleteSession={handlers.handleDeleteSession}
                 />
               )}
             </div>
@@ -811,16 +649,16 @@ export default function App() {
           {state.mobileTab === "stats" && state.session && (
             <StatsPanel
               session={state.session}
-              onJumpToTurn={handleMobileJumpToTurn}
+              onJumpToTurn={handlers.handleMobileJumpToTurn}
               onToggleServer={serverPanel.handleToggleServer}
               onServersChanged={serverPanel.handleServersChanged}
               isMobile
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
-              hasSettingsChanges={hasSettingsChanges}
-              onApplySettings={handleApplySettings}
-              onLoadSession={handleLoadSessionScrollAware}
+              hasSettingsChanges={handlers.hasSettingsChanges}
+              onApplySettings={handlers.handleApplySettings}
+              onLoadSession={handlers.handleLoadSessionScrollAware}
               sessionSource={state.sessionSource}
               backgroundAgents={backgroundAgents}
             />
@@ -895,24 +733,24 @@ export default function App() {
       <DesktopHeader
         session={state.session}
         isLive={isLive}
-        showSidebar={showSidebar}
-        showStats={showStats}
-        showWorktrees={showWorktrees}
+        showSidebar={panels.showSidebar}
+        showStats={panels.showStats}
+        showWorktrees={panels.showWorktrees}
         killing={killing}
         networkUrl={config.networkUrl}
         networkAccessDisabled={config.networkAccessDisabled}
         onGoHome={actions.handleGoHome}
-        onToggleSidebar={handleToggleSidebar}
-        onToggleStats={handleToggleStats}
-        onToggleWorktrees={handleToggleWorktrees}
+        onToggleSidebar={panels.handleToggleSidebar}
+        onToggleStats={panels.handleToggleStats}
+        onToggleWorktrees={panels.handleToggleWorktrees}
         showConfig={state.mainView === "config"}
-        onToggleConfig={handleToggleConfig}
+        onToggleConfig={panels.handleToggleConfig}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {showSidebar && state.mainView !== "config" && (
+        {panels.showSidebar && state.mainView !== "config" && (
           <SessionBrowser
             session={state.session}
             activeSessionKey={activeSessionKey}
@@ -922,8 +760,8 @@ export default function App() {
             onSelectTeam={actions.handleSelectTeam}
             onNewSession={handleNewSession}
             creatingSession={creatingSession}
-            onDuplicateSession={handleDuplicateSessionByPath}
-            onDeleteSession={handleDeleteSession}
+            onDuplicateSession={handlers.handleDuplicateSessionByPath}
+            onDeleteSession={handlers.handleDeleteSession}
           />
         )}
 
@@ -954,7 +792,7 @@ export default function App() {
                 isMobile={false}
                 dispatch={dispatch}
                 onNewSession={handleNewSession}
-                onDuplicateSession={handleDuplicateSession}
+                onDuplicateSession={handlers.handleDuplicateSession}
                 onOpenTerminal={handleOpenTerminal}
                 onBackToMain={isSubAgentView ? handleBackToMain : undefined}
               />
@@ -977,8 +815,8 @@ export default function App() {
                     canScrollDown={scroll.canScrollDown}
                     handleScroll={scroll.handleScroll}
                     undoRedo={undoRedo}
-                    onOpenBranches={handleOpenBranches}
-                    onBranchFromHere={handleBranchFromHere}
+                    onOpenBranches={handlers.handleOpenBranches}
+                    onBranchFromHere={handlers.handleBranchFromHere}
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
@@ -1074,13 +912,13 @@ export default function App() {
               creatingSession={creatingSession}
               selectedProjectDirName={state.dashboardProject}
               onSelectProject={handleSelectProject}
-              onDuplicateSession={handleDuplicateSessionByPath}
-              onDeleteSession={handleDeleteSession}
+              onDuplicateSession={handlers.handleDuplicateSessionByPath}
+              onDeleteSession={handlers.handleDeleteSession}
             />
           )}
         </main>
 
-        {showStats && state.session && state.mainView !== "teams" && state.mainView !== "config" && (
+        {panels.showStats && state.session && state.mainView !== "teams" && state.mainView !== "config" && (
           <StatsPanel
             session={state.session}
             onJumpToTurn={actions.handleJumpToTurn}
@@ -1094,9 +932,9 @@ export default function App() {
             permissionsPanel={permissionsPanelNode}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
-            hasSettingsChanges={hasSettingsChanges}
-            onApplySettings={handleApplySettings}
-            onLoadSession={handleLoadSessionScrollAware}
+            hasSettingsChanges={handlers.hasSettingsChanges}
+            onApplySettings={handlers.handleApplySettings}
+            onLoadSession={handlers.handleLoadSessionScrollAware}
             sessionSource={state.sessionSource}
             backgroundAgents={backgroundAgents}
           />
@@ -1105,8 +943,8 @@ export default function App() {
       </div>
 
       <WorktreePanel
-        open={showWorktrees}
-        onOpenChange={setShowWorktrees}
+        open={panels.showWorktrees}
+        onOpenChange={panels.setShowWorktrees}
         worktrees={worktreeData.worktrees}
         loading={worktreeData.loading}
         dirName={currentDirName}
@@ -1116,7 +954,7 @@ export default function App() {
           if (currentDirName) {
             actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
           }
-          setShowWorktrees(false)
+          panels.setShowWorktrees(false)
         }}
       />
 
@@ -1134,16 +972,16 @@ export default function App() {
       />
 
       <ProjectSwitcherModal
-        open={showProjectSwitcher}
-        onClose={handleCloseProjectSwitcher}
+        open={panels.showProjectSwitcher}
+        onClose={panels.handleCloseProjectSwitcher}
         onNewSession={handleNewSession}
         currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
         currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
       />
 
       <ThemeSelectorModal
-        open={showThemeSelector}
-        onClose={handleCloseThemeSelector}
+        open={panels.showThemeSelector}
+        onClose={panels.handleCloseThemeSelector}
         currentTheme={themeCtx.theme}
         onSelectTheme={themeCtx.setTheme}
         onPreviewTheme={themeCtx.setPreview}
