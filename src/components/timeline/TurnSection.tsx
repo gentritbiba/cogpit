@@ -1,3 +1,5 @@
+import { memo } from "react"
+import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { UserMessage } from "./UserMessage"
@@ -38,21 +40,66 @@ interface TurnSectionProps {
   branchCount?: number
 }
 
-// ── TurnSection ──────────────────────────────────────────────────────────────
+// ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
-export function TurnSection({
-  turn,
-  index,
-  branchCount = 0,
-}: TurnSectionProps) {
+export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) {
   const { state: { activeTurnIndex, activeToolCallId, expandAll } } = useAppContext()
   const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
 
-  const isActive = activeTurnIndex === index
-  const isAgentActive = isLive && session !== null && index === session.turns.length - 1
+  return (
+    <TurnSectionInner
+      turn={turn}
+      index={index}
+      branchCount={branchCount}
+      isActive={activeTurnIndex === index}
+      activeToolCallId={activeToolCallId}
+      expandAll={expandAll}
+      isAgentActive={isLive && session !== null && index === session.turns.length - 1}
+      isSubAgentView={isSubAgentView}
+      onRestoreToHere={undoRedo.requestUndo}
+      onOpenBranches={actions.handleOpenBranches}
+      onEditCommand={actions.handleEditCommand}
+      onExpandCommand={actions.handleExpandCommand}
+    />
+  )
+}
+
+// ── Memo'd inner component (skips re-render when display values unchanged) ──
+
+interface TurnSectionInnerProps {
+  turn: Turn
+  index: number
+  branchCount: number
+  isActive: boolean
+  activeToolCallId: string | null
+  expandAll: boolean
+  isAgentActive: boolean
+  isSubAgentView: boolean
+  onRestoreToHere?: (turnIndex: number) => void
+  onOpenBranches?: (turnIndex: number) => void
+  onEditCommand?: (commandName: string) => void
+  onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+}
+
+const TurnSectionInner = memo(function TurnSectionInner({
+  turn,
+  index,
+  branchCount,
+  isActive,
+  activeToolCallId,
+  expandAll,
+  isAgentActive,
+  isSubAgentView,
+  onRestoreToHere,
+  onOpenBranches,
+  onEditCommand,
+  onExpandCommand,
+}: TurnSectionInnerProps) {
+  const { ref, isNear } = useNearViewport()
 
   return (
     <div
+      ref={ref}
       className={cn(
         "group relative py-5 px-4 transition-colors",
         isActive && "ring-1 ring-blue-500/30",
@@ -62,35 +109,47 @@ export function TurnSection({
         index={index}
         turn={turn}
         branchCount={branchCount}
-        onRestoreToHere={undoRedo.requestUndo}
-        onOpenBranches={actions.handleOpenBranches}
+        onRestoreToHere={onRestoreToHere}
+        onOpenBranches={onOpenBranches}
       />
 
-      <div className="space-y-4">
-        {turn.userMessage && (
-          <div className={cn("rounded-lg p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
-            <UserMessage
-              content={turn.userMessage}
-              timestamp={turn.timestamp}
-              label={isSubAgentView ? "Agent" : undefined}
-              variant={isSubAgentView ? "agent" : undefined}
-              onEditCommand={actions.handleEditCommand}
-              onExpandCommand={actions.handleExpandCommand}
-            />
-          </div>
-        )}
+      {isNear ? (
+        <div className="space-y-4">
+          {turn.userMessage && (
+            <div className={cn("rounded-lg p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
+              <UserMessage
+                content={turn.userMessage}
+                timestamp={turn.timestamp}
+                label={isSubAgentView ? "Agent" : undefined}
+                variant={isSubAgentView ? "agent" : undefined}
+                onEditCommand={onEditCommand}
+                onExpandCommand={onExpandCommand}
+              />
+            </div>
+          )}
 
-        <ContentBlocks
-          blocks={turn.contentBlocks}
-          model={turn.model}
-          expandAll={expandAll}
-          activeToolCallId={activeToolCallId}
-          isAgentActive={isAgentActive}
-          isSubAgentView={isSubAgentView}
-        />
-      </div>
+          <ContentBlocks
+            blocks={turn.contentBlocks}
+            model={turn.model}
+            expandAll={expandAll}
+            activeToolCallId={activeToolCallId}
+            isAgentActive={isAgentActive}
+            isSubAgentView={isSubAgentView}
+          />
+        </div>
+      ) : (
+        <TurnPlaceholder turn={turn} />
+      )}
     </div>
   )
+})
+
+// ── Lightweight placeholder for turns outside the viewport zone ──────────────
+
+function TurnPlaceholder({ turn }: { turn: Turn }) {
+  // Estimate height based on content to minimize layout shift when scrolling
+  const estimatedHeight = (turn.userMessage ? 40 : 0) + turn.contentBlocks.length * 60
+  return <div style={{ minHeight: Math.max(60, estimatedHeight) }} />
 }
 
 // ── Turn header ──────────────────────────────────────────────────────────────
@@ -138,7 +197,7 @@ function TurnHeader({
         </button>
       )}
       {branchCount > 0 && onOpenBranches && (
-        <div className={cn(!onRestoreToHere ? "ml-auto" : "")}>
+        <div className={cn(!onRestoreToHere && "ml-auto")}>
           <BranchIndicator
             branchCount={branchCount}
             onClick={() => onOpenBranches(index)}

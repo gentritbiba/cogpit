@@ -5,7 +5,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 
 // Threshold: only virtualize when we have enough turns to benefit
-const VIRTUALIZE_THRESHOLD = 30
+const VIRTUALIZE_THRESHOLD = 15
 
 // ── Main component ───────────────────────────────────────────────────────────
 

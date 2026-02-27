@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Maximize2, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -162,9 +162,11 @@ function resolveTokens(
 // ── Gutter icon ─────────────────────────────────────────────────────────────
 
 function GutterIcon({ type }: { type: DiffLine["type"] }): React.ReactElement {
-  if (type === "removed") return <Minus className="w-3 h-3 inline" />
-  if (type === "added") return <Plus className="w-3 h-3 inline" />
-  return <span className="text-[9px]">&nbsp;</span>
+  switch (type) {
+    case "removed": return <Minus className="w-3 h-3 inline" />
+    case "added":   return <Plus className="w-3 h-3 inline" />
+    default:        return <span className="text-[9px]">&nbsp;</span>
+  }
 }
 
 // ── Diff rendering ──────────────────────────────────────────────────────────
@@ -215,8 +217,15 @@ function DiffLines({
 // ── Stat summary ────────────────────────────────────────────────────────────
 
 function DiffStats({ lines }: { lines: DiffLine[] }): React.ReactElement {
-  const added = lines.filter((l) => l.type === "added").length
-  const removed = lines.filter((l) => l.type === "removed").length
+  const { added, removed } = useMemo(() => {
+    let added = 0
+    let removed = 0
+    for (const l of lines) {
+      if (l.type === "added") added++
+      else if (l.type === "removed") removed++
+    }
+    return { added, removed }
+  }, [lines])
   return (
     <span className="text-[10px] text-muted-foreground font-mono">
       {removed > 0 && <span className="text-red-400">-{removed}</span>}
@@ -244,7 +253,7 @@ export function EditDiffView({
 }: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const isDark = useIsDarkMode()
-  const lines = computeDiff(oldString, newString)
+  const lines = useMemo(() => computeDiff(oldString, newString), [oldString, newString])
   const { oldTokens, newTokens } = useHighlightedTokens(
     oldString,
     newString,

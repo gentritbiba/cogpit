@@ -1,4 +1,6 @@
+import { memo, useMemo } from "react"
 import { Brain, Cog } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { ToolCallCard } from "./ToolCallCard"
 import type { SubAgentMessage } from "@/lib/types"
 import ReactMarkdown from "react-markdown"
@@ -11,19 +13,21 @@ interface AgentMessageItemProps {
   thinkingIconColor?: string
 }
 
-export function AgentMessageItem({
+export const AgentMessageItem = memo(function AgentMessageItem({
   message,
   expandAll,
   barColor,
   thinkingIconColor = "text-violet-400",
 }: AgentMessageItemProps): React.ReactElement | null {
+  const markdownText = useMemo(() => message.text.join("\n\n"), [message.text])
+
   return (
     <div className="flex gap-0">
-      <div className={`w-[3px] shrink-0 rounded-full ${barColor}`} />
+      <div className={cn("w-[3px] shrink-0 rounded-full", barColor)} />
       <div className="space-y-2 pl-3 min-w-0 flex-1">
         {message.thinking.length > 0 && (
           <div className="flex gap-2 items-start">
-            <Brain className={`w-3.5 h-3.5 ${thinkingIconColor} mt-0.5 shrink-0`} />
+            <Brain className={cn("w-3.5 h-3.5 mt-0.5 shrink-0", thinkingIconColor)} />
             <div className="space-y-1">
               {message.thinking.map((t, i) => (
                 <pre
@@ -42,7 +46,7 @@ export function AgentMessageItem({
             <Cog className="w-3.5 h-3.5 text-green-400 mt-0.5 shrink-0" />
             <div className="max-w-none text-xs break-words">
               <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
-                {message.text.join("\n\n")}
+                {markdownText}
               </ReactMarkdown>
             </div>
           </div>
@@ -58,4 +62,4 @@ export function AgentMessageItem({
       </div>
     </div>
   )
-}
+})
