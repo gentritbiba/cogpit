@@ -17,9 +17,7 @@ import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 interface DiffLine {
   type: "added" | "removed" | "unchanged"
   text: string
-  /** Index into the old lines array (for removed/unchanged) */
   oldIdx?: number
-  /** Index into the new lines array (for added/unchanged) */
   newIdx?: number
 }
 
@@ -29,7 +27,6 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
   const m = oldLines.length
   const n = newLines.length
 
-  // Build LCS table
   const dp: number[][] = Array.from({ length: m + 1 }, () =>
     Array(n + 1).fill(0)
   )
@@ -43,7 +40,6 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
     }
   }
 
-  // Backtrack to produce diff
   const result: DiffLine[] = []
   let i = m
   let j = n
@@ -113,9 +109,29 @@ function useHighlightedTokens(
   return { oldTokens, newTokens }
 }
 
+// ── Diff line style lookups ─────────────────────────────────────────────────
+
+const LINE_BG: Record<DiffLine["type"], string> = {
+  removed: "bg-red-50 dark:bg-red-950/40",
+  added: "bg-green-50 dark:bg-green-950/40",
+  unchanged: "",
+}
+
+const GUTTER_STYLE: Record<DiffLine["type"], string> = {
+  removed: "text-red-500/50 border-red-500/20",
+  added: "text-green-500/50 border-green-500/20",
+  unchanged: "text-muted-foreground border-border/40",
+}
+
+const PLAIN_TEXT_STYLE: Record<DiffLine["type"], string> = {
+  removed: "text-red-700 dark:text-red-300",
+  added: "text-green-700 dark:text-green-300",
+  unchanged: "text-muted-foreground",
+}
+
 // ── Token rendering ─────────────────────────────────────────────────────────
 
-function renderTokens(tokens: ThemedToken[], dimmed?: boolean) {
+function renderTokens(tokens: ThemedToken[], dimmed?: boolean): React.ReactElement[] {
   return tokens.map((token, i) => (
     <span
       key={i}
@@ -125,6 +141,30 @@ function renderTokens(tokens: ThemedToken[], dimmed?: boolean) {
       {token.content}
     </span>
   ))
+}
+
+/** Resolve the correct token line for a diff line based on its type */
+function resolveTokens(
+  line: DiffLine,
+  oldTokens: TokenizedLines | null,
+  newTokens: TokenizedLines | null
+): ThemedToken[] | undefined {
+  switch (line.type) {
+    case "removed":
+      return oldTokens?.[line.oldIdx ?? -1]
+    case "added":
+      return newTokens?.[line.newIdx ?? -1]
+    case "unchanged":
+      return newTokens?.[line.newIdx ?? -1] ?? oldTokens?.[line.oldIdx ?? -1]
+  }
+}
+
+// ── Gutter icon ─────────────────────────────────────────────────────────────
+
+function GutterIcon({ type }: { type: DiffLine["type"] }): React.ReactElement {
+  if (type === "removed") return <Minus className="w-3 h-3 inline" />
+  if (type === "added") return <Plus className="w-3 h-3 inline" />
+  return <span className="text-[9px]">&nbsp;</span>
 }
 
 // ── Diff rendering ──────────────────────────────────────────────────────────
@@ -139,7 +179,7 @@ function DiffLines({
   oldTokens: TokenizedLines | null
   newTokens: TokenizedLines | null
   compact?: boolean
-}) {
+}): React.ReactElement {
   return (
     <div
       className={cn(
@@ -148,58 +188,21 @@ function DiffLines({
       )}
     >
       {lines.map((line, idx) => {
-        // Pick highlighted tokens for this line if available
-        const tokens =
-          line.type === "removed"
-            ? oldTokens?.[line.oldIdx ?? -1]
-            : line.type === "added"
-              ? newTokens?.[line.newIdx ?? -1]
-              : // For unchanged lines, prefer new tokens (same content)
-                newTokens?.[line.newIdx ?? -1] ??
-                oldTokens?.[line.oldIdx ?? -1]
+        const tokens = resolveTokens(line, oldTokens, newTokens)
 
         return (
-          <div
-            key={idx}
-            className={cn(
-              "flex",
-              line.type === "removed" && "bg-red-50 dark:bg-red-950/40",
-              line.type === "added" && "bg-green-50 dark:bg-green-950/40"
-            )}
-          >
-            <span
-              className={cn(
-                "select-none shrink-0 w-5 text-right pr-1 border-r",
-                line.type === "removed"
-                  ? "text-red-500/50 border-red-500/20"
-                  : line.type === "added"
-                    ? "text-green-500/50 border-green-500/20"
-                    : "text-muted-foreground border-border/40"
-              )}
-            >
-              {line.type === "removed" ? (
-                <Minus className="w-3 h-3 inline" />
-              ) : line.type === "added" ? (
-                <Plus className="w-3 h-3 inline" />
-              ) : (
-                <span className="text-[9px]">&nbsp;</span>
-              )}
+          <div key={idx} className={cn("flex", LINE_BG[line.type])}>
+            <span className={cn("select-none shrink-0 w-5 text-right pr-1 border-r", GUTTER_STYLE[line.type])}>
+              <GutterIcon type={line.type} />
             </span>
             <span className="pl-2 whitespace-pre">
               {tokens ? (
                 renderTokens(tokens, line.type === "unchanged")
               ) : (
-                <span
-                  className={cn(
-                    line.type === "removed" && "text-red-700 dark:text-red-300",
-                    line.type === "added" && "text-green-700 dark:text-green-300",
-                    line.type === "unchanged" && "text-muted-foreground"
-                  )}
-                >
+                <span className={PLAIN_TEXT_STYLE[line.type]}>
                   {line.text || "\u00A0"}
                 </span>
               )}
-              {/* Render nbsp for empty highlighted lines */}
               {tokens && tokens.length === 0 && "\u00A0"}
             </span>
           </div>
@@ -211,7 +214,7 @@ function DiffLines({
 
 // ── Stat summary ────────────────────────────────────────────────────────────
 
-function DiffStats({ lines }: { lines: DiffLine[] }) {
+function DiffStats({ lines }: { lines: DiffLine[] }): React.ReactElement {
   const added = lines.filter((l) => l.type === "added").length
   const removed = lines.filter((l) => l.type === "removed").length
   return (
@@ -238,7 +241,7 @@ export function EditDiffView({
   newString,
   filePath,
   compact: isCompact = true,
-}: EditDiffViewProps) {
+}: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const isDark = useIsDarkMode()
   const lines = computeDiff(oldString, newString)
@@ -253,7 +256,6 @@ export function EditDiffView({
 
   return (
     <>
-      {/* Inline diff */}
       <div className={cn(
         "rounded border border-border/40 bg-elevation-1 overflow-hidden",
         isCompact && "mt-1.5"
@@ -283,7 +285,6 @@ export function EditDiffView({
         />
       </div>
 
-      {/* Full-screen modal - only in compact mode */}
       {isCompact && (
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
           <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col bg-elevation-0 border-border/40">

@@ -1,4 +1,4 @@
-import { type RefObject, type Dispatch, useRef, useEffect, useState, memo } from "react"
+import { type RefObject, type Dispatch, memo } from "react"
 import {
   Search,
   ChevronsDownUp,
@@ -10,6 +10,7 @@ import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
+import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionAction } from "@/hooks/useSessionState"
 import type { useUndoRedo } from "@/hooks/useUndoRedo"
@@ -25,21 +26,18 @@ interface ChatAreaProps {
   isSubAgentView?: boolean
   dispatch: Dispatch<SessionAction>
   searchInputRef: RefObject<HTMLInputElement | null>
-  // Scroll
   chatScrollRef: RefObject<HTMLDivElement | null>
   scrollEndRef: RefObject<HTMLDivElement | null>
   canScrollUp: boolean
   canScrollDown: boolean
   handleScroll: () => void
-  // Undo/redo
   undoRedo: ReturnType<typeof useUndoRedo>
   onOpenBranches: (turnIndex: number) => void
   onBranchFromHere?: (turnIndex: number) => void
-  // Pending message
   pendingMessage: string | null
   isConnected: boolean
-  // Callbacks
   onToggleExpandAll: () => void
+  onEditCommand?: (commandName: string) => void
 }
 
 export const ChatArea = memo(function ChatArea({
@@ -63,25 +61,11 @@ export const ChatArea = memo(function ChatArea({
   pendingMessage,
   isConnected,
   onToggleExpandAll,
+  onEditCommand,
 }: ChatAreaProps) {
-  const connectedAtRef = useRef<number | null>(null)
-  const [elapsedSec, setElapsedSec] = useState(0)
+  const elapsedSec = useElapsedTimer(isConnected)
 
-  useEffect(() => {
-    if (!isConnected) {
-      connectedAtRef.current = null
-      setElapsedSec(0)
-      return
-    }
-    connectedAtRef.current = Date.now()
-    setElapsedSec(0)
-    const interval = setInterval(() => {
-      if (connectedAtRef.current !== null) {
-        setElapsedSec(Math.floor((Date.now() - connectedAtRef.current) / 1000))
-      }
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [isConnected])
+  const showTimeline = session.turns.length > 0 || !pendingMessage
 
   return (
     <div className={cn("relative", isMobile ? "flex flex-col flex-1 min-h-0" : "h-full")}>
@@ -133,10 +117,7 @@ export const ChatArea = memo(function ChatArea({
         >
           <div className={isMobile ? "py-3 px-1" : "mx-auto max-w-4xl py-4"}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
-              {/* Hide the empty-state placeholder when a pending message is
-                  waiting for the first turn to arrive (e.g. right after session
-                  creation). The timeline renders normally once turns exist. */}
-              {(session.turns.length > 0 || !pendingMessage) && (
+              {showTimeline && (
                 <ConversationTimeline
                   session={session}
                   activeTurnIndex={activeTurnIndex}
@@ -155,6 +136,7 @@ export const ChatArea = memo(function ChatArea({
                   redoGhostTurns={undoRedo.redoGhostTurns}
                   onRedoAll={undoRedo.requestRedoAll}
                   onRedoUpTo={undoRedo.requestRedoUpTo}
+                  onEditCommand={onEditCommand}
                 />
               )}
               {pendingMessage && (

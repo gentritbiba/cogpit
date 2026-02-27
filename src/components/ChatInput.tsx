@@ -4,6 +4,8 @@ import { WhisperTranscriber } from "whisper-web-transcriber"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { formatElapsed } from "@/lib/format"
+import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import type { PendingInteraction } from "@/lib/parser"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
@@ -27,15 +29,45 @@ interface ChatInputProps {
   pendingInteraction?: PendingInteraction
   slashSuggestions?: SlashSuggestion[]
   slashSuggestionsLoading?: boolean
-  expandCommand?: (filePath: string, args: string) => Promise<string | null>
   onEditConfig?: (filePath: string) => void
 }
 
-function formatElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m ${s}s`
+/** Auto-resize a textarea to fit its content (max 200px). */
+function autoResize(el: HTMLTextAreaElement | null): void {
+  if (!el) return
+  el.style.height = "auto"
+  el.style.height = Math.min(el.scrollHeight, 200) + "px"
+}
+
+function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean | undefined): string {
+  if (isPlanApproval) return "Provide feedback to request changes..."
+  if (isUserQuestion) return "Type a custom response..."
+  if (isConnected) return "Message... (Enter to send)"
+  return "Send a message... (Enter to send)"
+}
+
+function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean): string {
+  if (isPlanApproval) return "border-purple-700/50 focus:border-purple-500/30 focus:ring-purple-500/20"
+  if (isUserQuestion) return "border-pink-700/50 focus:border-pink-500/30 focus:ring-pink-500/20"
+  return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
+}
+
+function getVoiceButtonClass(voiceStatus: VoiceStatus): string {
+  switch (voiceStatus) {
+    case "listening": return "text-red-400 hover:text-red-300 hover:bg-red-500/10"
+    case "loading": return "text-blue-400"
+    case "error": return "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+    default: return "text-muted-foreground hover:text-foreground"
+  }
+}
+
+function getVoiceTooltip(voiceStatus: VoiceStatus, voiceProgress: number, voiceError: string | null): string {
+  switch (voiceStatus) {
+    case "loading": return `Loading voice model... ${Math.round(voiceProgress)}%`
+    case "listening": return "Stop listening (Ctrl+Shift+M)"
+    case "error": return voiceError || "Voice input error — click to retry"
+    default: return "Voice input (Ctrl+Shift+M)"
+  }
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -48,7 +80,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   pendingInteraction,
   slashSuggestions = [],
   slashSuggestionsLoading = false,
-  expandCommand,
   onEditConfig,
 }, ref) {
   const [text, setText] = useState("")
@@ -62,8 +93,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const showSlash = text.startsWith("/") && !text.includes(" ")
 
-  // Compute filtered list for keyboard navigation count
-  const slashFilter = showSlash ? text.slice(1).split(" ")[0] : ""
+  // The filter text is everything after the leading "/" (no spaces possible due to showSlash guard)
+  const slashFilter = showSlash ? text.slice(1) : ""
   const filteredSlashList = useMemo(() => {
     if (!showSlash) return []
     const query = slashFilter.toLowerCase()
@@ -85,23 +116,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const [images, setImages] = useState<Array<{ file: File; preview: string; data: string; mediaType: string }>>([])
   const [isDragOver, setIsDragOver] = useState(false)
 
-  const connectedAtRef = useRef<number | null>(null)
-  const [elapsedSec, setElapsedSec] = useState(0)
-  useEffect(() => {
-    if (!isConnected) {
-      connectedAtRef.current = null
-      setElapsedSec(0)
-      return
-    }
-    connectedAtRef.current = Date.now()
-    setElapsedSec(0)
-    const interval = setInterval(() => {
-      if (connectedAtRef.current !== null) {
-        setElapsedSec(Math.floor((Date.now() - connectedAtRef.current) / 1000))
-      }
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [isConnected])
+  const elapsedSec = useElapsedTimer(!!isConnected)
 
   const addImageFiles = useCallback((files: FileList | File[]) => {
     const SUPPORTED_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -147,24 +162,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     setImages((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
-  // Handle selecting a slash suggestion
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
-    // If text already has args after the command name, preserve them
-    const parts = text.slice(1).split(" ")
-    const args = parts.slice(1).join(" ")
-    setText(`/${suggestion.name}${args ? " " + args : " "}`)
+    setText(`/${suggestion.name} `)
     setSlashSelectedIndex(0)
-    // Focus and move cursor to end
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (el) {
         el.focus()
         el.selectionStart = el.selectionEnd = el.value.length
-        el.style.height = "auto"
-        el.style.height = Math.min(el.scrollHeight, 200) + "px"
+        autoResize(el)
       }
     })
-  }, [text])
+  }, [])
 
   const handleSubmit = useCallback(async () => {
     const trimmed = text.trim()
@@ -173,33 +182,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       ? images.map((img) => ({ data: img.data, mediaType: img.mediaType }))
       : undefined
 
-    // Check if this is a slash command that needs expanding
-    if (trimmed.startsWith("/") && expandCommand) {
-      const parts = trimmed.slice(1).split(/\s+/)
-      const cmdName = parts[0]
-      const args = parts.slice(1).join(" ")
-      const match = slashSuggestions.find(
-        (s) => s.name === cmdName && s.type === "command",
-      )
-      if (match) {
-        const expanded = await expandCommand(match.filePath, args)
-        if (expanded) {
-          onSend(expanded, imagePayload)
-          setText("")
-          setImages([])
-          if (textareaRef.current) textareaRef.current.style.height = "auto"
-          return
-        }
-      }
-    }
-
     onSend(trimmed, imagePayload)
     setText("")
     setImages([])
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-  }, [text, images, onSend, expandCommand, slashSuggestions])
+  }, [text, images, onSend])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -219,13 +208,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           )
           return
         }
-        if (e.key === "Tab") {
-          e.preventDefault()
-          const selected = filteredSlashList[slashSelectedIndex]
-          if (selected) handleSlashSelect(selected)
-          return
-        }
-        if (e.key === "Enter" && !e.shiftKey) {
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
           e.preventDefault()
           const selected = filteredSlashList[slashSelectedIndex]
           if (selected) handleSlashSelect(selected)
@@ -233,7 +216,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         }
         if (e.key === "Escape") {
           e.preventDefault()
-          // Clear the slash to dismiss
           setText("")
           return
         }
@@ -249,15 +231,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         handleSubmit()
       }
     },
-    [handleSubmit, isConnected, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect, text]
+    [handleSubmit, isConnected, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect]
   )
 
   const handleInput = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value)
-      const el = e.target
-      el.style.height = "auto"
-      el.style.height = Math.min(el.scrollHeight, 200) + "px"
+      autoResize(e.target)
     },
     []
   )
@@ -303,7 +283,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     if (voiceStatus === "error") {
       setVoiceError(null)
       setVoiceStatus("idle")
-      // Fall through to retry initialization below
     }
 
     // Stop listening
@@ -322,7 +301,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       setVoiceProgress(0)
       setVoiceError(null)
 
-      // Diagnostics: log environment before attempting voice init
       console.log("[Voice] crossOriginIsolated:", window.crossOriginIsolated)
       console.log("[Voice] SharedArrayBuffer:", typeof SharedArrayBuffer !== "undefined")
       console.log("[Voice] mediaDevices:", !!navigator.mediaDevices)
@@ -333,13 +311,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           if (transcript) {
             setText((prev) => {
               const joined = prev ? prev + " " + transcript : transcript
-              requestAnimationFrame(() => {
-                const el = textareaRef.current
-                if (el) {
-                  el.style.height = "auto"
-                  el.style.height = Math.min(el.scrollHeight, 200) + "px"
-                }
-              })
+              requestAnimationFrame(() => autoResize(textareaRef.current))
               return joined
             })
           }
@@ -349,14 +321,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           if (s === "recording") setVoiceStatus("listening")
         },
       })
-      // Fix: override base path so the library finds its WASM files served from /whisper/
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Override base path so the library finds its WASM files served from /whisper/
       ;(transcriber as unknown as { getScriptBasePath: () => string }).getScriptBasePath = () => "/whisper/"
       // Suppress confirm() dialog the library shows before first model download
       const origConfirm = window.confirm
       try {
         window.confirm = () => true
-        // Add timeout to prevent hanging forever if WASM init fails
         await Promise.race([
           transcriber.loadModel(),
           new Promise((_, reject) => setTimeout(() => reject(new Error("Model loading timed out")), 120_000)),
@@ -404,6 +374,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   const isPlanApproval = pendingInteraction?.type === "plan"
   const isUserQuestion = pendingInteraction?.type === "question"
+  const hasContent = text.trim().length > 0 || images.length > 0
 
   return (
     <div
@@ -483,24 +454,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={
-              isPlanApproval
-                ? "Provide feedback to request changes..."
-                : isUserQuestion
-                  ? "Type a custom response..."
-                  : isConnected
-                    ? "Message... (Enter to send)"
-                    : "Send a message... (Enter to send)"
-            }
+            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected)}
             rows={1}
             className={cn(
               "w-full resize-none rounded-xl border elevation-1 px-3.5 py-2.5 text-sm text-foreground",
               "placeholder:text-muted-foreground focus:outline-none focus:ring-2",
-              isPlanApproval
-                ? "border-purple-700/50 focus:border-purple-500/30 focus:ring-purple-500/20"
-                : isUserQuestion
-                  ? "border-pink-700/50 focus:border-pink-500/30 focus:ring-pink-500/20"
-                  : "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20",
+              getTextareaBorderClass(isPlanApproval, isUserQuestion),
               "transition-colors duration-200"
             )}
           />
@@ -519,7 +478,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           )}
         </div>
 
-        {/* Interrupt button — sends Escape to Claude */}
+        {/* Interrupt button -- sends Escape to Claude */}
         {isConnected && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -536,7 +495,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           </Tooltip>
         )}
 
-        {/* Stop session — kills the server process */}
+        {/* Stop session -- kills the server process */}
         {isConnected && onStopSession && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -559,16 +518,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             <Button
               variant="ghost"
               size="sm"
-              className={cn(
-                "h-9 w-9 shrink-0 p-0 rounded-lg",
-                voiceStatus === "listening"
-                  ? "text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                  : voiceStatus === "loading"
-                    ? "text-blue-400"
-                    : voiceStatus === "error"
-                      ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
-                      : "text-muted-foreground hover:text-foreground"
-              )}
+              className={cn("h-9 w-9 shrink-0 p-0 rounded-lg", getVoiceButtonClass(voiceStatus))}
               onClick={toggleVoice}
               disabled={voiceStatus === "loading"}
             >
@@ -582,13 +532,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {voiceStatus === "loading"
-              ? `Loading voice model... ${Math.round(voiceProgress)}%`
-              : voiceStatus === "listening"
-                ? "Stop listening (Ctrl+Shift+M)"
-                : voiceStatus === "error"
-                  ? voiceError || "Voice input error — click to retry"
-                  : "Voice input (Ctrl+Shift+M)"}
+            {getVoiceTooltip(voiceStatus, voiceProgress, voiceError)}
           </TooltipContent>
         </Tooltip>
 
@@ -598,11 +542,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           size="sm"
           className={cn(
             "h-9 w-9 shrink-0 p-0 rounded-lg transition-colors duration-200",
-            text.trim() || images.length > 0
+            hasContent
               ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
               : "text-muted-foreground"
           )}
-          disabled={!text.trim() && images.length === 0}
+          disabled={!hasContent}
           onClick={handleSubmit}
           aria-label="Send message"
         >
@@ -617,7 +561,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   )
 }))
 
-// ── Plan Approval Bar ──────────────────────────────────────────────────────
+// -- Plan Approval Bar --------------------------------------------------------
 
 function PlanApprovalBar({
   allowedPrompts,
@@ -674,7 +618,7 @@ function PlanApprovalBar({
   )
 }
 
-// ── User Question Bar ──────────────────────────────────────────────────────
+// -- User Question Bar --------------------------------------------------------
 
 function UserQuestionBar({
   questions,

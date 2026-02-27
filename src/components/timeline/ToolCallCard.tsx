@@ -36,15 +36,12 @@ function getToolSummary(tc: ToolCall): string {
   const input = tc.input
   switch (tc.name) {
     case "Read":
-      return String(input.file_path ?? input.path ?? "")
     case "Write":
-      return String(input.file_path ?? input.path ?? "")
     case "Edit":
       return String(input.file_path ?? input.path ?? "")
     case "Bash":
       return String(input.command ?? "")
     case "Grep":
-      return String(input.pattern ?? "")
     case "Glob":
       return String(input.pattern ?? "")
     case "Task":
@@ -67,14 +64,64 @@ function getToolSummary(tc: ToolCall): string {
       const keys = Object.keys(input)
       if (keys.length === 0) return ""
       const first = input[keys[0]]
-      return typeof first === "string"
-        ? first.length > 80
-          ? first.slice(0, 80) + "..."
-          : first
-        : ""
+      if (typeof first !== "string") return ""
+      return first.length > 80 ? first.slice(0, 80) + "..." : first
     }
   }
 }
+
+// ── Reusable toggle button for expand/collapse sections ──────────────────
+
+function ToggleButton({
+  isOpen,
+  onClick,
+  label,
+  activeClass,
+}: {
+  isOpen: boolean
+  onClick: () => void
+  label: string
+  activeClass?: string
+}): React.ReactElement {
+  const Chevron = isOpen ? ChevronDown : ChevronRight
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "text-[10px] flex items-center gap-0.5 transition-colors",
+        isOpen && activeClass
+          ? activeClass
+          : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      <Chevron className="w-3 h-3" />
+      {label}
+    </button>
+  )
+}
+
+// ── Status icon for tool call completion state ───────────────────────────
+
+function StatusIcon({
+  toolCall,
+  isAgentActive,
+}: {
+  toolCall: ToolCall
+  isAgentActive?: boolean
+}): React.ReactElement | null {
+  if (toolCall.isError) {
+    return <XCircle className="w-4 h-4 text-red-400" />
+  }
+  if (toolCall.result !== null) {
+    return <CheckCircle className="w-4 h-4 text-green-500/60" />
+  }
+  if (isAgentActive) {
+    return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+  }
+  return null
+}
+
+// ── Main component ───────────────────────────────────────────────────────
 
 interface ToolCallCardProps {
   toolCall: ToolCall
@@ -98,10 +145,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const visibleResult =
     isLongResult && !resultExpanded ? resultText.slice(0, 500) + "..." : resultText
 
-  // Check if this is an Edit tool with diff-able content
-  const isEdit = toolCall.name === "Edit"
   const hasEditDiff =
-    isEdit &&
+    toolCall.name === "Edit" &&
     typeof toolCall.input.old_string === "string" &&
     typeof toolCall.input.new_string === "string" &&
     typeof toolCall.input.file_path === "string"
@@ -138,58 +183,30 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
-          {toolCall.isError ? (
-            <XCircle className="w-4 h-4 text-red-400" />
-          ) : toolCall.result !== null ? (
-            <CheckCircle className="w-4 h-4 text-green-500/60" />
-          ) : isAgentActive ? (
-            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-          ) : null}
+          <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
       </div>
 
       <div className="flex gap-3 mt-1.5">
         {hasEditDiff && (
-          <button
+          <ToggleButton
+            isOpen={showDiff}
             onClick={() => setDiffOpen(!diffOpen)}
-            className={cn(
-              "text-[10px] flex items-center gap-0.5 transition-colors",
-              showDiff
-                ? "text-amber-400"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {showDiff ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
-            Diff
-          </button>
+            label="Diff"
+            activeClass="text-amber-400"
+          />
         )}
-        <button
+        <ToggleButton
+          isOpen={showInput}
           onClick={() => setInputOpen(!inputOpen)}
-          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
-        >
-          {showInput ? (
-            <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ChevronRight className="w-3 h-3" />
-          )}
-          Input
-        </button>
+          label="Input"
+        />
         {toolCall.result !== null && (
-          <button
+          <ToggleButton
+            isOpen={showResult}
             onClick={() => setResultOpen(!resultOpen)}
-            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
-          >
-            {showResult ? (
-              <ChevronDown className="w-3 h-3" />
-            ) : (
-              <ChevronRight className="w-3 h-3" />
-            )}
-            Result
-          </button>
+            label="Result"
+          />
         )}
       </div>
 

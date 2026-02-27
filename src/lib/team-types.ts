@@ -71,6 +71,18 @@ export interface TeamDetail {
   inboxes: Record<string, InboxMessage[]>
 }
 
+// ── Member Helpers ──────────────────────────────────────────────────────────
+
+/** Check if a team member is the team lead */
+export function isTeamLead(member: TeamMember): boolean {
+  return member.agentType === "team-lead"
+}
+
+/** Get the effective color for a member (leads use default zinc) */
+export function getMemberEffectiveColor(member: TeamMember): string | undefined {
+  return isTeamLead(member) ? undefined : member.color
+}
+
 // ── Member Color Mapping ────────────────────────────────────────────────────
 
 const MEMBER_COLORS: Record<string, string> = {

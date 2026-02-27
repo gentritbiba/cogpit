@@ -42,14 +42,37 @@ const COLUMNS: Column[] = [
   },
 ]
 
+function sortById(a: TeamTask, b: TeamTask): number {
+  return Number(a.id) - Number(b.id)
+}
+
+function groupTasksByStatus(tasks: TeamTask[]): Record<Column["key"], TeamTask[]> {
+  const groups: Record<Column["key"], TeamTask[]> = {
+    pending: [],
+    in_progress: [],
+    completed: [],
+  }
+  for (const task of tasks) {
+    const group = groups[task.status as Column["key"]]
+    if (group) group.push(task)
+  }
+  for (const group of Object.values(groups)) {
+    group.sort(sortById)
+  }
+  return groups
+}
+
+function hasUncompletedBlockers(task: TeamTask, allTasks: TeamTask[]): boolean {
+  if (task.blockedBy.length === 0) return false
+  return task.blockedBy.some((id) => {
+    const blocker = allTasks.find((t) => t.id === id)
+    return blocker && blocker.status !== "completed"
+  })
+}
+
 export function TaskBoard({ tasks, members }: TaskBoardProps) {
   const memberMap = new Map(members.map((m) => [m.name, m]))
-
-  const tasksByStatus = {
-    pending: tasks.filter((t) => t.status === "pending").sort((a, b) => Number(a.id) - Number(b.id)),
-    in_progress: tasks.filter((t) => t.status === "in_progress").sort((a, b) => Number(a.id) - Number(b.id)),
-    completed: tasks.filter((t) => t.status === "completed").sort((a, b) => Number(a.id) - Number(b.id)),
-  }
+  const tasksByStatus = groupTasksByStatus(tasks)
 
   return (
     <div className="grid grid-cols-3 gap-3">
@@ -74,11 +97,7 @@ export function TaskBoard({ tasks, members }: TaskBoardProps) {
               <div className="flex flex-col gap-1.5">
                 {colTasks.map((task) => {
                   const ownerMember = task.owner ? memberMap.get(task.owner) : null
-                  const isBlocked = task.blockedBy.length > 0 &&
-                    task.blockedBy.some((id) => {
-                      const blocker = tasks.find((t) => t.id === id)
-                      return blocker && blocker.status !== "completed"
-                    })
+                  const isBlocked = hasUncompletedBlockers(task, tasks)
 
                   return (
                     <div

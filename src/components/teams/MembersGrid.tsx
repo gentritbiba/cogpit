@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { shortenModel } from "@/lib/format"
 import type { TeamMember, TeamTask } from "@/lib/team-types"
-import { getMemberColorClass, getMemberBorderClass } from "@/lib/team-types"
+import { getMemberColorClass, getMemberBorderClass, getMemberEffectiveColor, isTeamLead } from "@/lib/team-types"
 
 interface MembersGridProps {
   members: TeamMember[]
@@ -18,9 +18,9 @@ export function MembersGrid({ members, tasks, onMemberClick }: MembersGridProps)
         const activeTask = tasks.find(
           (t) => t.owner === member.name && t.status === "in_progress"
         )
-        const isLead = member.agentType === "team-lead"
-        const colorDot = getMemberColorClass(isLead ? undefined : member.color)
-        const borderClass = getMemberBorderClass(isLead ? undefined : member.color)
+        const effectiveColor = getMemberEffectiveColor(member)
+        const colorDot = getMemberColorClass(effectiveColor)
+        const borderClass = getMemberBorderClass(effectiveColor)
 
         return (
           <button
@@ -40,7 +40,7 @@ export function MembersGrid({ members, tasks, onMemberClick }: MembersGridProps)
               <span className="text-xs font-medium text-foreground truncate">
                 {member.name}
               </span>
-              {isLead && (
+              {isTeamLead(member) && (
                 <Crown className="size-3 shrink-0 text-yellow-500" />
               )}
               <ExternalLink className="size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />

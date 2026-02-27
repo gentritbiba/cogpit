@@ -2,11 +2,17 @@ import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, truncate } from "@/lib/format"
 import type { InboxMessage, TeamMember } from "@/lib/team-types"
-import { getMemberColorClass, getMemberTextColorClass } from "@/lib/team-types"
+import { getMemberColorClass, getMemberTextColorClass, getMemberEffectiveColor } from "@/lib/team-types"
 
 interface MessageTimelineProps {
   inboxes: Record<string, InboxMessage[]>
   members: TeamMember[]
+}
+
+const TYPE_BADGES: Record<string, { label: string; className: string } | undefined> = {
+  task_assignment: { label: "task", className: "text-[9px] text-muted-foreground bg-elevation-2 rounded px-1" },
+  idle: { label: "idle", className: "text-[9px] text-muted-foreground bg-elevation-2 rounded px-1" },
+  shutdown: { label: "shutdown", className: "text-[9px] text-red-700 bg-red-950/50 rounded px-1" },
 }
 
 interface ParsedMessage {
@@ -109,10 +115,11 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
     <div className="flex flex-col gap-0.5">
       {filtered.map((msg, i) => {
         const member = memberMap.get(msg.from)
-        const isLead = member?.agentType === "team-lead"
-        const colorDot = getMemberColorClass(isLead ? undefined : msg.color)
-        const textColor = getMemberTextColorClass(isLead ? undefined : msg.color)
+        const effectiveColor = member ? getMemberEffectiveColor(member) : msg.color
+        const colorDot = getMemberColorClass(effectiveColor)
+        const textColor = getMemberTextColorClass(effectiveColor)
         const isSystemish = msg.type === "idle" || msg.type === "system"
+        const typeBadge = TYPE_BADGES[msg.type]
 
         return (
           <div
@@ -139,19 +146,9 @@ export function MessageTimeline({ inboxes, members }: MessageTimelineProps) {
                 <span className="text-[10px] text-muted-foreground">
                   {formatRelativeTime(msg.timestamp)}
                 </span>
-                {msg.type === "task_assignment" && (
-                  <span className="text-[9px] text-muted-foreground bg-elevation-2 rounded px-1">
-                    task
-                  </span>
-                )}
-                {msg.type === "idle" && (
-                  <span className="text-[9px] text-muted-foreground bg-elevation-2 rounded px-1">
-                    idle
-                  </span>
-                )}
-                {msg.type === "shutdown" && (
-                  <span className="text-[9px] text-red-700 bg-red-950/50 rounded px-1">
-                    shutdown
+                {typeBadge && (
+                  <span className={typeBadge.className}>
+                    {typeBadge.label}
                   </span>
                 )}
               </div>

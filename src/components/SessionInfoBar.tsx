@@ -20,8 +20,9 @@ import {
 import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { SessionAction } from "@/hooks/useSessionState"
-import { shortenModel, formatTokenCount, getContextUsage, parseSubAgentPath } from "@/lib/format"
+import { shortenModel, parseSubAgentPath } from "@/lib/format"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
+import { ContextBadge, HeaderActionButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
 
 interface SessionInfoBarProps {
@@ -47,13 +48,13 @@ export const SessionInfoBar = memo(function SessionInfoBar({
   onOpenTerminal,
   onBackToMain,
 }: SessionInfoBarProps) {
-  // Detect if viewing a sub-agent session
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const isSubAgentView = subAgentInfo !== null
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
 
   return (
     <div className={`flex h-8 shrink-0 items-center gap-2 border-b border-border/50 bg-elevation-1 ${isMobile ? "px-2" : "px-3"}`}>
+      {/* Sub-agent navigation */}
       {isSubAgentView && (
         <>
           {onBackToMain && (
@@ -71,6 +72,8 @@ export const SessionInfoBar = memo(function SessionInfoBar({
           </Badge>
         </>
       )}
+
+      {/* Session metadata badges */}
       <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
         {shortenModel(session.model)}
       </Badge>
@@ -91,188 +94,161 @@ export const SessionInfoBar = memo(function SessionInfoBar({
           </TooltipContent>
         </Tooltip>
       )}
-      {(() => {
-        const ctx = getContextUsage(session.rawMessages)
-        if (!ctx) return null
-        const pctLeft = Math.max(0, 100 - ctx.percent)
-        const remaining = Math.max(0, ctx.compactAt - ctx.used)
-        const borderColor = pctLeft < 10 ? "border-red-700/60" : pctLeft < 30 ? "border-amber-700/60" : "border-green-700/60"
-        const textColor = pctLeft < 10 ? "text-red-400" : pctLeft < 30 ? "text-amber-400" : "text-green-400"
-        const bgColor = pctLeft < 10 ? "bg-red-500/5" : pctLeft < 30 ? "bg-amber-500/5" : "bg-green-500/5"
 
-        if (isMobile) {
-          return (
-            <Badge
-              variant="outline"
-              className={`h-5 px-1.5 text-[10px] font-semibold ${borderColor} ${textColor} ${bgColor}`}
-            >
-              {pctLeft.toFixed(0)}% · {formatTokenCount(remaining)}
-            </Badge>
-          )
-        }
-
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Badge
-                variant="outline"
-                className={`h-5 px-1.5 text-[10px] font-semibold ${borderColor} ${textColor} ${bgColor} gap-1`}
-              >
-                {pctLeft.toFixed(0)}% · {formatTokenCount(remaining)}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent className="text-xs space-y-1">
-              <div className="font-medium">Context Left Until Auto-Compact</div>
-              <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>
-              <div className="text-muted-foreground">
-                {formatTokenCount(ctx.used)} / {formatTokenCount(ctx.limit)} tokens used ({ctx.percentAbsolute.toFixed(1)}%)
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        )
-      })()}
+      <ContextBadge
+        rawMessages={session.rawMessages}
+        showRemaining
+        showTooltip={!isMobile}
+      />
 
       <div className="flex-1" />
 
-      {sessionSource && !isMobile && (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
-                disabled={creatingSession}
-                onClick={() => onNewSession(sessionSource.dirName, session.cwd)}
-              >
-                {creatingSession ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Plus className="size-3" />
-                )}
-                New
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>New session in this project</TooltipContent>
-          </Tooltip>
-          {onDuplicateSession && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
-                  onClick={onDuplicateSession}
-                >
-                  <Copy className="size-3" />
-                  Duplicate
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Duplicate this session</TooltipContent>
-            </Tooltip>
-          )}
-          {session.cwd && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                  onClick={() => authFetch("/api/open-in-editor", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ path: session.cwd }),
-                  })}
-                >
-                  <Code2 className="size-3" />
-                  Open
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open project in editor</TooltipContent>
-            </Tooltip>
-          )}
-          {session.cwd && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                  onClick={() => authFetch("/api/reveal-in-folder", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ path: session.cwd }),
-                  })}
-                >
-                  <FolderSearch className="size-3" />
-                  Reveal
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Reveal in file manager</TooltipContent>
-            </Tooltip>
-          )}
-          {onOpenTerminal && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                  onClick={onOpenTerminal}
-                >
-                  <TerminalSquare className="size-3" />
-                  Terminal
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Open terminal in project</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                onClick={() => {
-                  const dirName = sessionSource.dirName
-                  dispatch({ type: "GO_HOME", isMobile: false })
-                  dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-                }}
-              >
-                <FolderOpen className="size-3" />
-                All Sessions
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>View all sessions in this project</TooltipContent>
-          </Tooltip>
-        </>
-      )}
-
-      {sessionSource && isMobile && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
-            disabled={creatingSession}
-            onClick={() => onNewSession(sessionSource.dirName, session.cwd)}
-          >
-            {creatingSession ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
-            New
-          </Button>
-          {onDuplicateSession && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
-              onClick={onDuplicateSession}
-            >
-              <Copy className="size-3" />
-              Duplicate
-            </Button>
-          )}
-        </>
+      {/* Action buttons */}
+      {sessionSource && (
+        <SessionActions
+          session={session}
+          sessionSource={sessionSource}
+          creatingSession={creatingSession}
+          isMobile={isMobile}
+          dispatch={dispatch}
+          onNewSession={onNewSession}
+          onDuplicateSession={onDuplicateSession}
+          onOpenTerminal={onOpenTerminal}
+        />
       )}
     </div>
   )
 })
+
+// ── SessionActions ───────────────────────────────────────────────────────────
+
+interface SessionActionsProps {
+  session: ParsedSession
+  sessionSource: SessionSource
+  creatingSession: boolean
+  isMobile: boolean
+  dispatch: Dispatch<SessionAction>
+  onNewSession: (dirName: string, cwd?: string) => void
+  onDuplicateSession?: () => void
+  onOpenTerminal?: () => void
+}
+
+/**
+ * Action buttons shown in the session info bar. On mobile only "New" and
+ * "Duplicate" are shown (without tooltips). On desktop the full set of
+ * project-level actions is shown with tooltips.
+ */
+function SessionActions({
+  session,
+  sessionSource,
+  creatingSession,
+  isMobile,
+  dispatch,
+  onNewSession,
+  onDuplicateSession,
+  onOpenTerminal,
+}: SessionActionsProps): React.ReactNode {
+  const newIcon = creatingSession
+    ? <Loader2 className="size-3 animate-spin" />
+    : <Plus className="size-3" />
+
+  function handleNewSession(): void {
+    onNewSession(sessionSource.dirName, session.cwd)
+  }
+
+  if (isMobile) {
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
+          disabled={creatingSession}
+          onClick={handleNewSession}
+        >
+          {newIcon}
+          New
+        </Button>
+        {onDuplicateSession && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
+            onClick={onDuplicateSession}
+          >
+            <Copy className="size-3" />
+            Duplicate
+          </Button>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <HeaderActionButton
+        icon={newIcon}
+        label="New"
+        tooltip="New session in this project"
+        onClick={handleNewSession}
+        disabled={creatingSession}
+        className="text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
+      />
+      {onDuplicateSession && (
+        <HeaderActionButton
+          icon={<Copy className="size-3" />}
+          label="Duplicate"
+          tooltip="Duplicate this session"
+          onClick={onDuplicateSession}
+          className="text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
+        />
+      )}
+      {session.cwd && (
+        <HeaderActionButton
+          icon={<Code2 className="size-3" />}
+          label="Open"
+          tooltip="Open project in editor"
+          onClick={() => authFetch("/api/open-in-editor", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: session.cwd }),
+          })}
+          className="text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
+        />
+      )}
+      {session.cwd && (
+        <HeaderActionButton
+          icon={<FolderSearch className="size-3" />}
+          label="Reveal"
+          tooltip="Reveal in file manager"
+          onClick={() => authFetch("/api/reveal-in-folder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: session.cwd }),
+          })}
+          className="text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+        />
+      )}
+      {onOpenTerminal && (
+        <HeaderActionButton
+          icon={<TerminalSquare className="size-3" />}
+          label="Terminal"
+          tooltip="Open terminal in project"
+          onClick={onOpenTerminal}
+          className="text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+        />
+      )}
+      <HeaderActionButton
+        icon={<FolderOpen className="size-3" />}
+        label="All Sessions"
+        tooltip="View all sessions in this project"
+        onClick={() => {
+          const dirName = sessionSource.dirName
+          dispatch({ type: "GO_HOME", isMobile: false })
+          dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
+        }}
+        className="text-muted-foreground hover:text-foreground"
+      />
+    </>
+  )
+}

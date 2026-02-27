@@ -1,19 +1,13 @@
 import { memo } from "react"
 import { Loader2 } from "lucide-react"
 import { UserMessage } from "./timeline/UserMessage"
+import { formatElapsed } from "@/lib/format"
 
 interface PendingTurnPreviewProps {
   message: string
   turnNumber: number
   statusText?: string
   elapsedSec?: number
-}
-
-function formatElapsed(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m ${s}s`
 }
 
 export const PendingTurnPreview = memo(function PendingTurnPreview({

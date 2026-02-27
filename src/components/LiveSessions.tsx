@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, memo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
 import { Loader2, RefreshCw, GitBranch, MessageSquare, Activity, X, Cpu, HardDrive, AlertTriangle, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -48,6 +48,40 @@ interface LiveSessionsProps {
   onDeleteSession?: (dirName: string, fileName: string) => void
 }
 
+function describeProcess(p: RunningProcess): string {
+  if (p.args.includes("--continue")) return "interactive (--continue)"
+  if (p.args.includes("--resume")) return "resumed session"
+  if (p.args.includes("stream-json")) return "persistent (Cogpit)"
+  if (p.args.includes("-p ")) {
+    const msgMatch = p.args.match(/-p\s+(.{1,60})/)
+    return msgMatch?.[1] ? `one-shot: "${truncate(msgMatch[1], 40)}"` : "one-shot (-p)"
+  }
+  return "interactive"
+}
+
+/** Partition processes into a session-keyed map and an unmatched list. */
+function partitionProcesses(processes: RunningProcess[]): {
+  procBySession: Map<string, RunningProcess>
+  unmatchedProcs: RunningProcess[]
+} {
+  const procBySession = new Map<string, RunningProcess>()
+  const unmatchedProcs: RunningProcess[] = []
+
+  for (const p of processes) {
+    if (!p.sessionId) {
+      unmatchedProcs.push(p)
+      continue
+    }
+    const existing = procBySession.get(p.sessionId)
+    if (!existing || p.memMB > existing.memMB) {
+      procBySession.set(p.sessionId, p)
+      if (existing) unmatchedProcs.push(existing)
+    }
+  }
+
+  return { procBySession, unmatchedProcs }
+}
+
 export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession }: LiveSessionsProps) {
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
@@ -62,18 +96,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const debouncedSearchRef = useRef(debouncedSearch)
   debouncedSearchRef.current = debouncedSearch
 
-  // Track recently-completed sessions for visual indicator
-  const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set())
-  const prevActiveRef = useRef<Set<string>>(new Set())
-
-  // Debounce search input
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
     return () => clearTimeout(timer)
   }, [searchQuery])
 
   const fetchData = useCallback(async (search?: string) => {
-    // Cancel any in-flight request
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
@@ -98,28 +126,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       setSessions(sessData)
       setProcesses(procData)
       setFetchError(null)
-
-      // Detect sessions that just completed (had process → no process)
-      const procSessionIds = new Set(
-        (procData as RunningProcess[])
-          .filter((p) => p.sessionId)
-          .map((p) => p.sessionId!)
-      )
-      const currentActive = new Set(
-        (sessData as ActiveSessionInfo[])
-          .filter((s) => procSessionIds.has(s.sessionId))
-          .map((s) => s.sessionId)
-      )
-      const newlyCompleted = new Set<string>()
-      for (const id of prevActiveRef.current) {
-        if (!currentActive.has(id)) {
-          newlyCompleted.add(id)
-        }
-      }
-      if (newlyCompleted.size > 0) {
-        setRecentlyCompleted((prev) => new Set([...prev, ...newlyCompleted]))
-      }
-      prevActiveRef.current = currentActive
     } catch (err) {
       if (ac.signal.aborted) return
       setFetchError(err instanceof Error ? err.message : "Failed to load data")
@@ -131,37 +137,19 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     }
   }, [])
 
-  // Re-fetch when debounced search changes
   useEffect(() => {
     fetchData(debouncedSearch || undefined)
   }, [debouncedSearch, fetchData])
 
-  // Poll every 10s
   useEffect(() => {
-    const interval = setInterval(() => fetchData(debouncedSearch || undefined), 10000)
+    const interval = setInterval(() => fetchData(debouncedSearchRef.current || undefined), 10000)
     return () => clearInterval(interval)
-  }, [fetchData, debouncedSearch])
+  }, [fetchData])
 
-  // Build a map: sessionId -> process info
-  const procBySession = new Map<string, RunningProcess>()
-  // Processes not linked to any session (interactive terminals, orphans)
-  const unmatchedProcs: RunningProcess[] = []
-
-  for (const p of processes) {
-    if (p.sessionId) {
-      // If multiple processes share a session ID, keep the largest (main one)
-      const existing = procBySession.get(p.sessionId)
-      if (!existing || p.memMB > existing.memMB) {
-        procBySession.set(p.sessionId, p)
-        if (existing) unmatchedProcs.push(existing)
-      }
-    } else {
-      unmatchedProcs.push(p)
-    }
-  }
-
-  // Sessions that have a running process
-  const matchedSessionIds = new Set(procBySession.keys())
+  const { procBySession, unmatchedProcs } = useMemo(
+    () => partitionProcesses(processes),
+    [processes]
+  )
 
   const handleKill = useCallback(async (pid: number, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -172,7 +160,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       })
-      // Refresh after a short delay to let process die
       setTimeout(() => fetchData(debouncedSearchRef.current || undefined), 1500)
     } catch { /* ignore */ }
     setTimeout(() => {
@@ -184,16 +171,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     }, 2000)
   }, [fetchData])
 
-  // Describe a process in a short human-readable way
-  function describeProcess(p: RunningProcess): string {
-    if (p.args.includes("--continue")) return "interactive (--continue)"
-    if (p.args.includes("--resume")) return "resumed session"
-    if (p.args.includes("stream-json")) return "persistent (Cogpit)"
-    if (p.args.includes("-p ")) {
-      const msgMatch = p.args.match(/-p\s+(.{1,60})/)
-      return msgMatch?.[1] ? `one-shot: "${truncate(msgMatch[1], 40)}"` : "one-shot (-p)"
-    }
-    return "interactive"
+  function handleDeleteSession(s: ActiveSessionInfo) {
+    onDeleteSession?.(s.dirName, s.fileName)
+    setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
   }
 
   return (
@@ -232,7 +212,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions & prompts…"
+            placeholder="Search sessions & prompts\u2026"
             className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 pl-8 pr-8 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
           {searchQuery && !searching && (
@@ -269,7 +249,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               {debouncedSearch ? (
                 <>
                   <Search className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">No sessions match "{debouncedSearch}"</p>
+                  <p className="text-xs text-muted-foreground">No sessions match &quot;{debouncedSearch}&quot;</p>
                   <p className="text-[10px] text-muted-foreground mt-1">Try a different search term</p>
                 </>
               ) : (
@@ -289,29 +269,17 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
           )}
 
           {sessions.map((s) => {
-            const isActiveSession =
-              activeSessionKey === `${s.dirName}/${s.fileName}`
+            const isActiveSession = activeSessionKey === `${s.dirName}/${s.fileName}`
             const proc = procBySession.get(s.sessionId)
-            const hasProcess = matchedSessionIds.has(s.sessionId)
-
-            const handleClick = () => {
-              if (recentlyCompleted.has(s.sessionId)) {
-                setRecentlyCompleted((prev) => {
-                  const next = new Set(prev)
-                  next.delete(s.sessionId)
-                  return next
-                })
-              }
-              onSelectSession(s.dirName, s.fileName)
-            }
+            const hasProcess = proc !== undefined
 
             const sessionRow = (
               <div
                 role="button"
                 tabIndex={0}
                 data-live-session
-                onClick={handleClick}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleClick() } }}
+                onClick={() => onSelectSession(s.dirName, s.fileName)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
                 className={cn(
                   "group relative w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-150 cursor-pointer card-hover",
                   isActiveSession
@@ -319,13 +287,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                     : "elevation-1 border border-border/40 hover:bg-elevation-2"
                 )}
               >
-                {/* Completion indicator — persists until clicked */}
-                {recentlyCompleted.has(s.sessionId) && (
-                  <span className="absolute top-1.5 right-1.5 flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-400" />
-                  </span>
-                )}
                 {/* Top row: status dot + last prompt + kill button */}
                 <div className="flex items-center gap-2">
                   <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
@@ -334,8 +295,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                         <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
                         <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                       </>
-                    ) : recentlyCompleted.has(s.sessionId) ? (
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
                     ) : (
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
                     )}
@@ -343,7 +302,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                   <span className="text-xs font-medium truncate flex-1 text-foreground">
                     {s.lastUserMessage || s.firstUserMessage || s.slug || truncate(s.sessionId, 16)}
                   </span>
-                  {hasProcess && proc ? (
+                  {hasProcess ? (
                     <button
                       onClick={(e) => handleKill(proc.pid, e)}
                       disabled={killingPids.has(proc.pid)}
@@ -360,7 +319,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                   )}
                 </div>
 
-                {/* Project name */}
+                {/* Project path */}
                 <div className={cn(
                   "ml-5.5 text-[10px]",
                   isActiveSession ? "text-blue-400/70" : "text-muted-foreground"
@@ -391,7 +350,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                   )}
                   <span>{formatFileSize(s.size)}</span>
                   <span>{formatRelativeTime(s.lastModified)}</span>
-                  {hasProcess && proc && (
+                  {hasProcess && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="flex items-center gap-0.5 text-green-500">
@@ -412,10 +371,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                   key={`${s.dirName}/${s.fileName}`}
                   sessionLabel={s.slug || s.firstUserMessage?.slice(0, 30) || s.sessionId.slice(0, 12)}
                   onDuplicate={onDuplicateSession ? () => onDuplicateSession(s.dirName, s.fileName) : undefined}
-                  onDelete={onDeleteSession ? () => {
-                    onDeleteSession(s.dirName, s.fileName)
-                    setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
-                  } : undefined}
+                  onDelete={onDeleteSession ? () => handleDeleteSession(s) : undefined}
                 >
                   {sessionRow}
                 </SessionContextMenu>
@@ -425,7 +381,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             return <div key={`${s.dirName}/${s.fileName}`}>{sessionRow}</div>
           })}
 
-          {/* Unmatched processes — running claude instances without a known session */}
+          {/* Unmatched processes */}
           {unmatchedProcs.length > 0 && (
             <>
               <div className="px-2.5 pt-3 pb-1">

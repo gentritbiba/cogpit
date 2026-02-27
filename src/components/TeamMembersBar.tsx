@@ -2,7 +2,7 @@ import { memo } from "react"
 import { Users, Crown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TeamMember } from "@/lib/team-types"
-import { getMemberColorClass } from "@/lib/team-types"
+import { getMemberColorClass, getMemberEffectiveColor, isTeamLead } from "@/lib/team-types"
 
 interface TeamMembersBarProps {
   teamName: string
@@ -33,10 +33,9 @@ export const TeamMembersBar = memo(function TeamMembersBar({
       <div className="h-3.5 w-px bg-border/50 shrink-0" />
       <div className="flex items-center gap-1">
         {members.map((member) => {
-          const isLead = member.agentType === "team-lead"
           const isCurrent = member.name === currentMemberName
           const isLoading = member.name === loadingMember
-          const colorDot = getMemberColorClass(isLead ? undefined : member.color)
+          const colorDot = getMemberColorClass(getMemberEffectiveColor(member))
 
           return (
             <button
@@ -62,7 +61,7 @@ export const TeamMembersBar = memo(function TeamMembersBar({
                 />
               )}
               <span>{member.name}</span>
-              {isLead && (
+              {isTeamLead(member) && (
                 <Crown className="size-2.5 shrink-0 text-yellow-500/70" />
               )}
             </button>

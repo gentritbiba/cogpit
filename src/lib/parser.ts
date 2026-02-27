@@ -82,31 +82,24 @@ function parseLines(jsonlText: string): RawMessage[] {
 }
 
 function extractSessionMetadata(messages: RawMessage[]) {
-  let sessionId = ""
-  let version = ""
-  let gitBranch = ""
-  let cwd = ""
-  let slug = ""
-  let model = ""
-  let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
+  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
 
   for (const msg of messages) {
-    if (msg.sessionId && !sessionId) sessionId = msg.sessionId
-    if (msg.version && !version) version = msg.version
-    if (msg.gitBranch && !gitBranch) gitBranch = msg.gitBranch
-    if (msg.cwd && !cwd) cwd = msg.cwd
-    if (msg.slug && !slug) slug = msg.slug
-    if ((msg as Record<string, unknown>).branchedFrom && !branchedFrom) {
-      branchedFrom = (msg as Record<string, unknown>).branchedFrom as { sessionId: string; turnIndex?: number | null }
+    if (msg.sessionId && !meta.sessionId) meta.sessionId = msg.sessionId
+    if (msg.version && !meta.version) meta.version = msg.version
+    if (msg.gitBranch && !meta.gitBranch) meta.gitBranch = msg.gitBranch
+    if (msg.cwd && !meta.cwd) meta.cwd = msg.cwd
+    if (msg.slug && !meta.slug) meta.slug = msg.slug
+    if ((msg as Record<string, unknown>).branchedFrom && !meta.branchedFrom) {
+      meta.branchedFrom = (msg as Record<string, unknown>).branchedFrom as typeof meta.branchedFrom
     }
-    if (isAssistantMessage(msg) && msg.message.model && !model) {
-      model = msg.message.model
+    if (isAssistantMessage(msg) && msg.message.model && !meta.model) {
+      meta.model = msg.message.model
     }
-    // stop early once we have everything
-    if (sessionId && version && gitBranch && cwd && model) break
+    if (meta.sessionId && meta.version && meta.gitBranch && meta.cwd && meta.model) break
   }
 
-  return { sessionId, version, gitBranch, cwd, slug, model, branchedFrom }
+  return meta
 }
 
 function buildCompactionSummary(turns: Turn[], title: string): string {
@@ -123,17 +116,12 @@ function buildCompactionSummary(turns: Turn[], title: string): string {
   const prompts: string[] = []
   for (const turn of turns) {
     if (!turn.userMessage) continue
-    const text = typeof turn.userMessage === "string"
-      ? turn.userMessage
-      : (turn.userMessage as { type: string; text?: string }[])
-          .filter((b) => b.type === "text" && b.text)
-          .map((b) => b.text ?? "")
-          .join(" ")
-    if (text) {
-      const firstLine = text.split("\n")[0].trim()
-      if (firstLine.length > 0) {
-        prompts.push(firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine)
-      }
+    const text = extractTextFromContent(
+      typeof turn.userMessage === "string" ? turn.userMessage : turn.userMessage as ContentBlock[]
+    )
+    const firstLine = text.split("\n")[0].trim()
+    if (firstLine.length > 0) {
+      prompts.push(firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine)
     }
   }
 
@@ -147,7 +135,6 @@ function buildCompactionSummary(turns: Turn[], title: string): string {
   if (topTools) parts.push(`Tools: ${topTools}`)
   if (prompts.length > 0) {
     parts.push("Prompts:")
-    // Show up to 6 prompts
     const shown = prompts.slice(0, 6)
     for (const p of shown) parts.push(`- ${p}`)
     if (prompts.length > 6) parts.push(`- ...and ${prompts.length - 6} more`)
@@ -174,10 +161,9 @@ function buildTurns(messages: RawMessage[]): Turn[] {
   // Map from parentToolUseID -> sub-agent messages for grouping
   const subAgentMap = new Map<string, SubAgentMessage[]>()
 
-  // Track which parentToolUseIDs already have a sub_agent content block
+  // Track which parentToolUseIDs already have a content block (sub_agent or background_agent)
   // so we can append to an existing block rather than creating duplicates
-  const subAgentBlockMap = new Map<string, { kind: "sub_agent"; messages: SubAgentMessage[] }>()
-  const backgroundAgentBlockMap = new Map<string, { kind: "background_agent"; messages: SubAgentMessage[] }>()
+  const agentBlockMap = new Map<string, { kind: "sub_agent" | "background_agent"; messages: SubAgentMessage[] }>()
 
   // Track parentToolUseIDs from Task tool calls with run_in_background: true
   const backgroundAgentParentIds = new Set<string>()
@@ -191,30 +177,17 @@ function buildTurns(messages: RawMessage[]): Turn[] {
     if (!agentMsgs || agentMsgs.length === 0) return
 
     current.subAgentActivity.push(...agentMsgs)
-
-    const isBackground = backgroundAgentParentIds.has(parentId)
-
-    if (isBackground) {
-      const existingBlock = backgroundAgentBlockMap.get(parentId)
-      if (existingBlock) {
-        existingBlock.messages.push(...agentMsgs)
-      } else {
-        const block = { kind: "background_agent" as const, messages: [...agentMsgs] }
-        current.contentBlocks.push(block)
-        backgroundAgentBlockMap.set(parentId, block)
-      }
-    } else {
-      // Append to existing sub_agent block for this parentId, or create new one
-      const existingBlock = subAgentBlockMap.get(parentId)
-      if (existingBlock) {
-        existingBlock.messages.push(...agentMsgs)
-      } else {
-        const block = { kind: "sub_agent" as const, messages: [...agentMsgs] }
-        current.contentBlocks.push(block)
-        subAgentBlockMap.set(parentId, block)
-      }
-    }
     subAgentMap.delete(parentId)
+
+    const kind = backgroundAgentParentIds.has(parentId) ? "background_agent" as const : "sub_agent" as const
+    const existingBlock = agentBlockMap.get(parentId)
+    if (existingBlock) {
+      existingBlock.messages.push(...agentMsgs)
+    } else {
+      const block = { kind, messages: [...agentMsgs] }
+      current.contentBlocks.push(block)
+      agentBlockMap.set(parentId, block)
+    }
   }
 
   function finalizeTurn() {
@@ -229,8 +202,7 @@ function buildTurns(messages: RawMessage[]): Turn[] {
     }
     turns.push(current)
     current = null
-    subAgentBlockMap.clear()
-    backgroundAgentBlockMap.clear()
+    agentBlockMap.clear()
   }
 
   for (const msg of messages) {
@@ -541,6 +513,31 @@ function mergeTokenUsage(
   }
 }
 
+function countToolCalls(
+  toolCalls: readonly { name: string; isError: boolean }[],
+  counts: Record<string, number>,
+): number {
+  let errors = 0
+  for (const tc of toolCalls) {
+    counts[tc.name] = (counts[tc.name] ?? 0) + 1
+    if (tc.isError) errors++
+  }
+  return errors
+}
+
+function addUsageToStats(
+  stats: SessionStats,
+  usage: { input_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number },
+  estimatedOutput: number,
+  cost: number,
+): void {
+  stats.totalInputTokens += usage.input_tokens
+  stats.totalOutputTokens += estimatedOutput
+  stats.totalCacheCreationTokens += usage.cache_creation_input_tokens ?? 0
+  stats.totalCacheReadTokens += usage.cache_read_input_tokens ?? 0
+  stats.totalCostUSD += cost
+}
+
 function computeStats(turns: Turn[]): SessionStats {
   const stats: SessionStats = {
     totalInputTokens: 0,
@@ -556,31 +553,15 @@ function computeStats(turns: Turn[]): SessionStats {
 
   for (const turn of turns) {
     if (turn.tokenUsage) {
-      stats.totalInputTokens += turn.tokenUsage.input_tokens
-      stats.totalOutputTokens += estimateTotalOutputTokens(turn)
-      stats.totalCacheCreationTokens += turn.tokenUsage.cache_creation_input_tokens ?? 0
-      stats.totalCacheReadTokens += turn.tokenUsage.cache_read_input_tokens ?? 0
-      stats.totalCostUSD += calculateTurnCostEstimated(turn)
+      addUsageToStats(stats, turn.tokenUsage, estimateTotalOutputTokens(turn), calculateTurnCostEstimated(turn))
     }
-    if (turn.durationMs) {
-      stats.totalDurationMs += turn.durationMs
-    }
-    for (const tc of turn.toolCalls) {
-      stats.toolCallCounts[tc.name] = (stats.toolCallCounts[tc.name] ?? 0) + 1
-      if (tc.isError) stats.errorCount++
-    }
+    if (turn.durationMs) stats.totalDurationMs += turn.durationMs
+    stats.errorCount += countToolCalls(turn.toolCalls, stats.toolCallCounts)
+
     for (const sa of turn.subAgentActivity) {
-      for (const tc of sa.toolCalls) {
-        stats.toolCallCounts[tc.name] =
-          (stats.toolCallCounts[tc.name] ?? 0) + 1
-        if (tc.isError) stats.errorCount++
-      }
+      stats.errorCount += countToolCalls(sa.toolCalls, stats.toolCallCounts)
       if (sa.tokenUsage) {
-        stats.totalInputTokens += sa.tokenUsage.input_tokens
-        stats.totalOutputTokens += estimateSubAgentOutput(sa)
-        stats.totalCacheCreationTokens += sa.tokenUsage.cache_creation_input_tokens ?? 0
-        stats.totalCacheReadTokens += sa.tokenUsage.cache_read_input_tokens ?? 0
-        stats.totalCostUSD += calculateSubAgentCostEstimated(sa)
+        addUsageToStats(stats, sa.tokenUsage, estimateSubAgentOutput(sa), calculateSubAgentCostEstimated(sa))
       }
     }
   }
@@ -764,6 +745,17 @@ export interface UserQuestionState {
 export type PendingInteraction = PlanApprovalState | UserQuestionState | null
 
 /**
+ * Check if the previous turn's last tool call is the same interactive tool
+ * with a pending/error result -- indicates a stuck loop we should suppress.
+ */
+function isStuckInteractiveLoop(turns: Turn[], toolName: string): boolean {
+  if (turns.length < 2) return false
+  const prevTurn = turns[turns.length - 2]
+  const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
+  return prevLastTC?.name === toolName && (prevLastTC.result === null || prevLastTC.isError)
+}
+
+/**
  * Detect if the session is waiting for user interaction (plan approval or
  * AskUserQuestion). Returns the interaction state or null.
  */
@@ -777,59 +769,28 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   const lastToolCall = lastTurn.toolCalls[lastTurn.toolCalls.length - 1]
   if (!lastToolCall) return null
 
-  // For interactive tools (AskUserQuestion, ExitPlanMode), Claude Code writes
-  // an immediate error tool_result containing the permission prompt text
-  // (e.g. "Answer questions?") while the interaction is still pending.
-  // A non-error result means the user actually responded.
-  const isInteractiveTool =
-    lastToolCall.name === "ExitPlanMode" || lastToolCall.name === "AskUserQuestion"
+  const { name } = lastToolCall
+  if (name !== "ExitPlanMode" && name !== "AskUserQuestion") return null
 
-  if (!isInteractiveTool) return null
-
-  // If there's a successful (non-error) result, the user already responded
+  // A successful (non-error) result means the user already responded
   if (lastToolCall.result !== null && !lastToolCall.isError) return null
 
-  if (lastToolCall.name === "ExitPlanMode") {
-    // Detect ExitPlanMode loop: if the previous turn also had a pending
-    // ExitPlanMode (error/null result), the agent is stuck re-calling it
-    // because stream-json user messages can't properly approve plan mode.
-    // Suppress the approval bar to break the loop.
-    if (turns.length >= 2) {
-      const prevTurn = turns[turns.length - 2]
-      const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
-      if (
-        prevLastTC?.name === "ExitPlanMode" &&
-        (prevLastTC.result === null || prevLastTC.isError)
-      ) {
-        return null
-      }
-    }
+  // Suppress if the agent is stuck re-calling the same interactive tool
+  if (isStuckInteractiveLoop(turns, name)) return null
 
-    const input = lastToolCall.input as Record<string, unknown>
+  const input = lastToolCall.input as Record<string, unknown>
+
+  if (name === "ExitPlanMode") {
     return {
       type: "plan",
       allowedPrompts: input.allowedPrompts as PlanApprovalState["allowedPrompts"],
     }
   }
 
-  if (lastToolCall.name === "AskUserQuestion") {
-    // Symmetric loop detection for AskUserQuestion (same issue as ExitPlanMode)
-    if (turns.length >= 2) {
-      const prevTurn = turns[turns.length - 2]
-      const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
-      if (
-        prevLastTC?.name === "AskUserQuestion" &&
-        (prevLastTC.result === null || prevLastTC.isError)
-      ) {
-        return null
-      }
-    }
-
-    const input = lastToolCall.input as Record<string, unknown>
-    const questions = input.questions as UserQuestionState["questions"] | undefined
-    if (questions && questions.length > 0) {
-      return { type: "question", questions }
-    }
+  // AskUserQuestion
+  const questions = input.questions as UserQuestionState["questions"] | undefined
+  if (questions && questions.length > 0) {
+    return { type: "question", questions }
   }
 
   return null

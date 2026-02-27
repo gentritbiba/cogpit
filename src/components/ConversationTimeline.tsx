@@ -12,9 +12,73 @@ import { BackgroundAgentPanel } from "./timeline/BackgroundAgentPanel"
 import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
-import type { ParsedSession, Turn, ToolCall, Branch } from "@/lib/types"
+import type { ParsedSession, Turn, TurnContentBlock, ToolCall, Branch } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/format"
+
+// ── Style constants ──────────────────────────────────────────────────────────
+
+const CARD_STYLES = {
+  user:        "bg-blue-500/[0.06] border border-blue-500/10",
+  userAgent:   "bg-green-500/[0.06] border border-green-500/10",
+  assistant:   "bg-green-500/[0.06] border border-green-500/10",
+  subAgent:    "bg-indigo-500/[0.06] border border-indigo-500/10",
+  thinking:    "bg-violet-500/[0.06] border border-violet-500/10",
+  orphanTools: "bg-muted-foreground/[0.06] border border-border/30",
+} as const
+
+const BORDER_STYLES = {
+  assistant: "border-green-500/10",
+  subAgent:  "border-indigo-500/10",
+} as const
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function matchesSearch(turn: Turn, query: string): boolean {
+  if (!query) return true
+  const q = query.toLowerCase()
+
+  if (turn.userMessage) {
+    const text =
+      typeof turn.userMessage === "string"
+        ? turn.userMessage
+        : JSON.stringify(turn.userMessage)
+    if (text.toLowerCase().includes(q)) return true
+  }
+
+  for (const t of turn.assistantText) {
+    if (t.toLowerCase().includes(q)) return true
+  }
+
+  for (const tb of turn.thinking) {
+    if (tb.thinking.toLowerCase().includes(q)) return true
+  }
+
+  for (const tc of turn.toolCalls) {
+    if (tc.name.toLowerCase().includes(q)) return true
+    if (JSON.stringify(tc.input).toLowerCase().includes(q)) return true
+    if (tc.result?.toLowerCase().includes(q)) return true
+  }
+
+  return false
+}
+
+/** Collect consecutive tool_calls blocks starting at `startIndex`. */
+function collectToolCalls(blocks: TurnContentBlock[], startIndex: number): { toolCalls: ToolCall[]; nextIndex: number } {
+  const toolCalls: ToolCall[] = []
+  let j = startIndex
+  while (j < blocks.length && blocks[j].kind === "tool_calls") {
+    toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
+    j++
+  }
+  return { toolCalls, nextIndex: j }
+}
+
+function toolCallCountLabel(count: number): string {
+  return `${count} tool call${count !== 1 ? "s" : ""}`
+}
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface ConversationTimelineProps {
   session: ParsedSession
@@ -25,7 +89,6 @@ interface ConversationTimelineProps {
   isAgentActive?: boolean
   isSubAgentView?: boolean
   scrollContainerRef?: React.RefObject<HTMLElement | null>
-  // Undo/redo props
   branchesAtTurn?: (turnIndex: number) => Branch[]
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
@@ -35,136 +98,8 @@ interface ConversationTimelineProps {
   redoGhostTurns?: Turn[]
   onRedoAll?: () => void
   onRedoUpTo?: (ghostTurnIndex: number) => void
+  onEditCommand?: (commandName: string) => void
 }
-
-function matchesSearch(turn: Turn, query: string): boolean {
-  if (!query) return true
-  const q = query.toLowerCase()
-
-  // Check user message
-  if (turn.userMessage) {
-    const text =
-      typeof turn.userMessage === "string"
-        ? turn.userMessage
-        : JSON.stringify(turn.userMessage)
-    if (text.toLowerCase().includes(q)) return true
-  }
-
-  // Check assistant text
-  for (const t of turn.assistantText) {
-    if (t.toLowerCase().includes(q)) return true
-  }
-
-  // Check thinking
-  for (const tb of turn.thinking) {
-    if (tb.thinking.toLowerCase().includes(q)) return true
-  }
-
-  // Check tool calls
-  for (const tc of turn.toolCalls) {
-    if (tc.name.toLowerCase().includes(q)) return true
-    if (JSON.stringify(tc.input).toLowerCase().includes(q)) return true
-    if (tc.result?.toLowerCase().includes(q)) return true
-  }
-
-  return false
-}
-
-// Threshold: only virtualize when we have enough turns to benefit
-const VIRTUALIZE_THRESHOLD = 30
-
-export const ConversationTimeline = memo(function ConversationTimeline({
-  session,
-  activeTurnIndex,
-  activeToolCallId,
-  searchQuery,
-  expandAll,
-  isAgentActive = false,
-  isSubAgentView = false,
-  scrollContainerRef,
-  branchesAtTurn,
-  onRestoreToHere,
-  onOpenBranches,
-  onBranchFromHere,
-  canRedo = false,
-  redoTurnCount = 0,
-  redoGhostTurns = [],
-  onRedoAll,
-  onRedoUpTo,
-}: ConversationTimelineProps) {
-  const hasUndoCallbacks = onRestoreToHere !== undefined
-
-  // Apply search filter
-  const allTurns = useMemo(
-    () => session.turns.map((turn, index) => ({ turn, index })),
-    [session.turns]
-  )
-  const filteredTurns = useMemo(
-    () => searchQuery
-      ? allTurns.filter(({ turn }) => matchesSearch(turn, searchQuery))
-      : allTurns,
-    [allTurns, searchQuery]
-  )
-
-  // Decide whether to virtualize
-  const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && scrollContainerRef?.current != null
-
-  if (filteredTurns.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-        {searchQuery ? "No turns match your search." : "No turns in this session."}
-      </div>
-    )
-  }
-
-  if (shouldVirtualize) {
-    return (
-      <VirtualizedTimeline
-        filteredTurns={filteredTurns}
-        scrollContainerRef={scrollContainerRef}
-        activeTurnIndex={activeTurnIndex}
-        activeToolCallId={activeToolCallId}
-        expandAll={expandAll}
-        isAgentActive={isAgentActive}
-        isSubAgentView={isSubAgentView}
-        hasUndoCallbacks={hasUndoCallbacks}
-        branchesAtTurn={branchesAtTurn}
-        onRestoreToHere={onRestoreToHere}
-        onOpenBranches={onOpenBranches}
-        onBranchFromHere={onBranchFromHere}
-        canRedo={canRedo}
-        redoTurnCount={redoTurnCount}
-        redoGhostTurns={redoGhostTurns}
-        onRedoAll={onRedoAll}
-        onRedoUpTo={onRedoUpTo}
-        sessionTurnCount={session.turns.length}
-      />
-    )
-  }
-
-  // Non-virtualized rendering for small sessions
-  return (
-    <NonVirtualTimeline
-      filteredTurns={filteredTurns}
-      activeTurnIndex={activeTurnIndex}
-      activeToolCallId={activeToolCallId}
-      expandAll={expandAll}
-      isAgentActive={isAgentActive}
-      isSubAgentView={isSubAgentView}
-      hasUndoCallbacks={hasUndoCallbacks}
-      branchesAtTurn={branchesAtTurn}
-      onRestoreToHere={onRestoreToHere}
-      onOpenBranches={onOpenBranches}
-      onBranchFromHere={onBranchFromHere}
-      canRedo={canRedo}
-      redoTurnCount={redoTurnCount}
-      redoGhostTurns={redoGhostTurns}
-      onRedoAll={onRedoAll}
-      onRedoUpTo={onRedoUpTo}
-      sessionTurnCount={session.turns.length}
-    />
-  )
-})
 
 interface TimelineInnerProps {
   filteredTurns: { turn: Turn; index: number }[]
@@ -184,27 +119,99 @@ interface TimelineInnerProps {
   onRedoAll?: () => void
   onRedoUpTo?: (ghostTurnIndex: number) => void
   sessionTurnCount: number
+  onEditCommand?: (commandName: string) => void
 }
 
-function NonVirtualTimeline({
-  filteredTurns,
+// Threshold: only virtualize when we have enough turns to benefit
+const VIRTUALIZE_THRESHOLD = 30
+
+// ── Main component ───────────────────────────────────────────────────────────
+
+export const ConversationTimeline = memo(function ConversationTimeline({
+  session,
   activeTurnIndex,
   activeToolCallId,
+  searchQuery,
   expandAll,
-  isAgentActive,
-  isSubAgentView,
-  hasUndoCallbacks,
+  isAgentActive = false,
+  isSubAgentView = false,
+  scrollContainerRef,
   branchesAtTurn,
   onRestoreToHere,
   onOpenBranches,
   onBranchFromHere,
-  canRedo,
-  redoTurnCount,
-  redoGhostTurns,
+  canRedo = false,
+  redoTurnCount = 0,
+  redoGhostTurns = [],
   onRedoAll,
   onRedoUpTo,
-  sessionTurnCount,
-}: TimelineInnerProps) {
+  onEditCommand,
+}: ConversationTimelineProps) {
+  const hasUndoCallbacks = onRestoreToHere !== undefined
+
+  const allTurns = useMemo(
+    () => session.turns.map((turn, index) => ({ turn, index })),
+    [session.turns]
+  )
+  const filteredTurns = useMemo(
+    () => searchQuery
+      ? allTurns.filter(({ turn }) => matchesSearch(turn, searchQuery))
+      : allTurns,
+    [allTurns, searchQuery]
+  )
+
+  const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && scrollContainerRef?.current != null
+
+  if (filteredTurns.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
+        {searchQuery ? "No turns match your search." : "No turns in this session."}
+      </div>
+    )
+  }
+
+  const sharedProps: TimelineInnerProps = {
+    filteredTurns,
+    activeTurnIndex,
+    activeToolCallId,
+    expandAll,
+    isAgentActive,
+    isSubAgentView,
+    hasUndoCallbacks,
+    branchesAtTurn,
+    onRestoreToHere,
+    onOpenBranches,
+    onBranchFromHere,
+    canRedo,
+    redoTurnCount,
+    redoGhostTurns,
+    onRedoAll,
+    onRedoUpTo,
+    sessionTurnCount: session.turns.length,
+    onEditCommand,
+  }
+
+  if (shouldVirtualize) {
+    return <VirtualizedTimeline {...sharedProps} scrollContainerRef={scrollContainerRef} />
+  }
+
+  return <NonVirtualTimeline {...sharedProps} />
+})
+
+// ── Non-virtualized timeline ─────────────────────────────────────────────────
+
+function NonVirtualTimeline(props: TimelineInnerProps) {
+  const {
+    filteredTurns,
+    activeTurnIndex,
+    canRedo,
+    redoTurnCount,
+    redoGhostTurns,
+    onRedoAll,
+    onRedoUpTo,
+    sessionTurnCount,
+  } = props
+
   const turnRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   const setTurnRef = useCallback(
@@ -228,15 +235,9 @@ function NonVirtualTimeline({
 
   return (
     <div className="space-y-3">
-      {filteredTurns.map(({ turn, index }) => {
-        const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
-        const branchCount = turnBranches.length
-        const isLastTurn = index === sessionTurnCount - 1
-
-        const turnKey = turn.id
-
-        const turnContent = (
-          <div key={turnKey} ref={setTurnRef(index)} data-turn-index={index}>
+      {filteredTurns.map(({ turn, index }) => (
+        <MaybeContextMenuTurn key={turn.id} turn={turn} index={index} props={props}>
+          <div ref={setTurnRef(index)} data-turn-index={index}>
             {turn.compactionSummary && (
               <CompactionMarker summary={turn.compactionSummary} />
             )}
@@ -244,34 +245,18 @@ function NonVirtualTimeline({
               turn={turn}
               index={index}
               isActive={activeTurnIndex === index}
-              activeToolCallId={activeToolCallId}
-              expandAll={expandAll}
-              isAgentActive={isAgentActive && isLastTurn}
-              isSubAgentView={isSubAgentView}
-              branchCount={branchCount}
-              onRestoreToHere={onRestoreToHere}
-              onOpenBranches={onOpenBranches}
+              activeToolCallId={props.activeToolCallId}
+              expandAll={props.expandAll}
+              isAgentActive={props.isAgentActive && index === sessionTurnCount - 1}
+              isSubAgentView={props.isSubAgentView}
+              branchCount={props.branchesAtTurn ? props.branchesAtTurn(index).length : 0}
+              onRestoreToHere={props.onRestoreToHere}
+              onOpenBranches={props.onOpenBranches}
+              onEditCommand={props.onEditCommand}
             />
           </div>
-        )
-
-        if (hasUndoCallbacks && onRestoreToHere && onOpenBranches) {
-          return (
-            <TurnContextMenu
-              key={turnKey}
-              turnIndex={index}
-              branches={turnBranches}
-              onRestoreToHere={onRestoreToHere}
-              onOpenBranches={onOpenBranches}
-              onBranchFromHere={onBranchFromHere}
-            >
-              {turnContent}
-            </TurnContextMenu>
-          )
-        }
-
-        return turnContent
-      })}
+        </MaybeContextMenuTurn>
+      ))}
       <RedoSection
         canRedo={canRedo}
         redoTurnCount={redoTurnCount}
@@ -284,34 +269,30 @@ function NonVirtualTimeline({
   )
 }
 
-function VirtualizedTimeline({
-  filteredTurns,
-  scrollContainerRef,
-  activeTurnIndex,
-  activeToolCallId,
-  expandAll,
-  isAgentActive,
-  isSubAgentView,
-  hasUndoCallbacks,
-  branchesAtTurn,
-  onRestoreToHere,
-  onOpenBranches,
-  onBranchFromHere,
-  canRedo,
-  redoTurnCount,
-  redoGhostTurns,
-  onRedoAll,
-  onRedoUpTo,
-  sessionTurnCount,
-}: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }) {
+// ── Virtualized timeline ─────────────────────────────────────────────────────
+
+function VirtualizedTimeline(
+  props: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }
+) {
+  const {
+    filteredTurns,
+    scrollContainerRef,
+    activeTurnIndex,
+    canRedo,
+    redoTurnCount,
+    redoGhostTurns,
+    onRedoAll,
+    onRedoUpTo,
+    sessionTurnCount,
+  } = props
+
   const virtualizer = useVirtualizer({
     count: filteredTurns.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 200, // reasonable estimate per turn
+    estimateSize: () => 200,
     overscan: 5,
   })
 
-  // Build a turnIndex → virtualIndex lookup map to avoid O(n) findIndex on scroll
   const turnIndexToVirtualIdx = useMemo(() => {
     const map = new Map<number, number>()
     for (let i = 0; i < filteredTurns.length; i++) {
@@ -344,64 +325,43 @@ function VirtualizedTimeline({
     >
       {virtualizer.getVirtualItems().map((virtualRow) => {
         const { turn, index } = filteredTurns[virtualRow.index]
-        const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
-        const branchCount = turnBranches.length
-        const isLast = virtualRow.index === filteredTurns.length - 1
-        const isLastTurn = index === sessionTurnCount - 1
+        const isLastVirtualRow = virtualRow.index === filteredTurns.length - 1
 
-        const turnKey = turn.id
-
-        const turnContent = (
-          <div
-            key={turnKey}
-            data-index={virtualRow.index}
-            data-turn-index={index}
-            ref={virtualizer.measureElement}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              transform: `translateY(${virtualRow.start}px)`,
-            }}
-          >
-            {turn.compactionSummary && (
-              <CompactionMarker summary={turn.compactionSummary} />
-            )}
-            <TurnSection
-              turn={turn}
-              index={index}
-              isActive={activeTurnIndex === index}
-              activeToolCallId={activeToolCallId}
-              expandAll={expandAll}
-              isAgentActive={isAgentActive && isLastTurn}
-              isSubAgentView={isSubAgentView}
-              branchCount={branchCount}
-              onRestoreToHere={onRestoreToHere}
-              onOpenBranches={onOpenBranches}
-            />
-            {!isLast && <Separator className="bg-border/60" />}
-          </div>
-        )
-
-        if (hasUndoCallbacks && onRestoreToHere && onOpenBranches) {
-          return (
-            <TurnContextMenu
-              key={turnKey}
-              turnIndex={index}
-              branches={turnBranches}
-              onRestoreToHere={onRestoreToHere}
-              onOpenBranches={onOpenBranches}
-              onBranchFromHere={onBranchFromHere}
+        return (
+          <MaybeContextMenuTurn key={turn.id} turn={turn} index={index} props={props}>
+            <div
+              data-index={virtualRow.index}
+              data-turn-index={index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
             >
-              {turnContent}
-            </TurnContextMenu>
-          )
-        }
-
-        return turnContent
+              {turn.compactionSummary && (
+                <CompactionMarker summary={turn.compactionSummary} />
+              )}
+              <TurnSection
+                turn={turn}
+                index={index}
+                isActive={activeTurnIndex === index}
+                activeToolCallId={props.activeToolCallId}
+                expandAll={props.expandAll}
+                isAgentActive={props.isAgentActive && index === sessionTurnCount - 1}
+                isSubAgentView={props.isSubAgentView}
+                branchCount={props.branchesAtTurn ? props.branchesAtTurn(index).length : 0}
+                onRestoreToHere={props.onRestoreToHere}
+                onOpenBranches={props.onOpenBranches}
+                onEditCommand={props.onEditCommand}
+              />
+              {!isLastVirtualRow && <Separator className="bg-border/60" />}
+            </div>
+          </MaybeContextMenuTurn>
+        )
       })}
-      {/* Redo section pinned after virtual content */}
       <div style={{ position: "absolute", top: `${virtualizer.getTotalSize()}px`, width: "100%" }}>
         <RedoSection
           canRedo={canRedo}
@@ -415,6 +375,43 @@ function VirtualizedTimeline({
     </div>
   )
 }
+
+// ── Context menu wrapper ─────────────────────────────────────────────────────
+
+/** Conditionally wraps children in a TurnContextMenu when undo callbacks are available. */
+function MaybeContextMenuTurn({
+  turn,
+  index,
+  props,
+  children,
+}: {
+  turn: Turn
+  index: number
+  props: TimelineInnerProps
+  children: React.ReactNode
+}) {
+  const { hasUndoCallbacks, branchesAtTurn, onRestoreToHere, onOpenBranches, onBranchFromHere } = props
+
+  if (!hasUndoCallbacks || !onRestoreToHere || !onOpenBranches) {
+    return <>{children}</>
+  }
+
+  const turnBranches = branchesAtTurn ? branchesAtTurn(index) : []
+
+  return (
+    <TurnContextMenu
+      turnIndex={index}
+      branches={turnBranches}
+      onRestoreToHere={onRestoreToHere}
+      onOpenBranches={onOpenBranches}
+      onBranchFromHere={onBranchFromHere}
+    >
+      {children}
+    </TurnContextMenu>
+  )
+}
+
+// ── Redo section ─────────────────────────────────────────────────────────────
 
 function RedoSection({
   canRedo,
@@ -469,6 +466,22 @@ function RedoSection({
   )
 }
 
+// ── Turn section ─────────────────────────────────────────────────────────────
+
+interface TurnSectionProps {
+  turn: Turn
+  index: number
+  isActive: boolean
+  activeToolCallId: string | null
+  expandAll: boolean
+  isAgentActive?: boolean
+  isSubAgentView?: boolean
+  branchCount?: number
+  onRestoreToHere?: (turnIndex: number) => void
+  onOpenBranches?: (turnIndex: number) => void
+  onEditCommand?: (commandName: string) => void
+}
+
 const TurnSection = memo(function TurnSection({
   turn,
   index,
@@ -480,18 +493,8 @@ const TurnSection = memo(function TurnSection({
   branchCount = 0,
   onRestoreToHere,
   onOpenBranches,
-}: {
-  turn: Turn
-  index: number
-  isActive: boolean
-  activeToolCallId: string | null
-  expandAll: boolean
-  isAgentActive?: boolean
-  isSubAgentView?: boolean
-  branchCount?: number
-  onRestoreToHere?: (turnIndex: number) => void
-  onOpenBranches?: (turnIndex: number) => void
-}) {
+  onEditCommand,
+}: TurnSectionProps) {
   return (
     <div
       className={cn(
@@ -499,186 +502,207 @@ const TurnSection = memo(function TurnSection({
         isActive && "ring-1 ring-blue-500/30",
       )}
     >
-      {/* Turn header */}
-      <div className="flex items-center gap-2 mb-4">
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
-          {index + 1}
-        </div>
-        {turn.durationMs !== null && (
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-muted-foreground gap-1"
-          >
-            <Clock className="w-2.5 h-2.5" />
-            {formatDuration(turn.durationMs)}
-          </Badge>
-        )}
-        {turn.timestamp && (
-          <span className="text-[10px] text-muted-foreground">
-            {new Date(turn.timestamp).toLocaleTimeString()}
-          </span>
-        )}
-        {/* Hover-visible restore button */}
-        {onRestoreToHere && (
-          <button
-            onClick={() => onRestoreToHere(index)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-muted-foreground hover:text-amber-400 ml-auto"
-            title="Undo this turn and all after it"
-          >
-            <RotateCcw className="size-3" />
-            <span className="hidden sm:inline">Restore</span>
-          </button>
-        )}
-        {/* Branch indicator badge */}
-        {branchCount > 0 && onOpenBranches && (
-          <div className={cn(!onRestoreToHere ? "ml-auto" : "")}>
-            <BranchIndicator
-              branchCount={branchCount}
-              onClick={() => onOpenBranches(index)}
-            />
-          </div>
-        )}
-      </div>
+      <TurnHeader
+        index={index}
+        turn={turn}
+        branchCount={branchCount}
+        onRestoreToHere={onRestoreToHere}
+        onOpenBranches={onOpenBranches}
+      />
 
-      {/* Timeline content – each message followed by its tool calls */}
       <div className="space-y-4">
-        {/* User message */}
         {turn.userMessage && (
-          <div className={cn(
-            "rounded-lg p-3",
-            isSubAgentView
-              ? "bg-green-500/[0.06] border border-green-500/10"
-              : "bg-blue-500/[0.06] border border-blue-500/10"
-          )}>
+          <div className={cn("rounded-lg p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
             <UserMessage
               content={turn.userMessage}
               timestamp={turn.timestamp}
               label={isSubAgentView ? "Agent" : undefined}
               variant={isSubAgentView ? "agent" : undefined}
+              onEditCommand={onEditCommand}
             />
           </div>
         )}
 
-        {/* Content blocks: each text message card contains its following tool calls */}
-        {(() => {
-          const elements: React.ReactNode[] = []
-          const blocks = turn.contentBlocks
-          let i = 0
-          while (i < blocks.length) {
-            const block = blocks[i]
-
-            if (block.kind === "thinking") {
-              elements.push(
-                <div key={`thinking-${i}`} className="rounded-lg bg-violet-500/[0.06] border border-violet-500/10 p-3">
-                  <ThinkingBlock blocks={block.blocks} expandAll={expandAll} />
-                </div>
-              )
-              i++
-              continue
-            }
-
-            if (block.kind === "text") {
-              // Collect all tool_calls blocks that follow this text block
-              const toolCalls: ToolCall[] = []
-              let j = i + 1
-              while (j < blocks.length && blocks[j].kind === "tool_calls") {
-                toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
-                j++
-              }
-
-              // Render each text string as its own card with the grouped tool calls underneath
-              block.text.forEach((text, ti) => {
-                const isLastTextInBlock = ti === block.text.length - 1
-                elements.push(
-                  <div key={`text-${i}-${ti}`} className={cn(
-                    "rounded-lg p-3",
-                    isSubAgentView
-                      ? "bg-indigo-500/[0.06] border border-indigo-500/10"
-                      : "bg-green-500/[0.06] border border-green-500/10"
-                  )}>
-                    <AssistantText
-                      text={text}
-                      model={turn.model}
-                      tokenUsage={null}
-                      label={isSubAgentView ? "Sub Agent" : undefined}
-                      variant={isSubAgentView ? "subagent" : undefined}
-                      timestamp={block.timestamp}
-                    />
-                    {/* Tool calls go inside the last text card of this group */}
-                    {isLastTextInBlock && toolCalls.length > 0 && (
-                      <div className={cn("mt-3 pt-3 border-t", isSubAgentView ? "border-indigo-500/10" : "border-green-500/10")}>
-                        <CollapsibleToolCalls
-                          toolCalls={toolCalls}
-                          expandAll={expandAll}
-                          activeToolCallId={activeToolCallId}
-                          isAgentActive={isAgentActive}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )
-              })
-
-              i = j // skip past the consumed tool_calls blocks
-              continue
-            }
-
-            if (block.kind === "tool_calls") {
-              // Orphan tool calls (no preceding text) — merge consecutive ones
-              const toolCalls: ToolCall[] = [...block.toolCalls]
-              let j = i + 1
-              while (j < blocks.length && blocks[j].kind === "tool_calls") {
-                toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
-                j++
-              }
-              elements.push(
-                <div key={`tools-${i}`} className="rounded-lg bg-muted-foreground/[0.06] border border-border/30 p-3">
-                  <CollapsibleToolCalls
-                    toolCalls={toolCalls}
-                    expandAll={expandAll}
-                    activeToolCallId={activeToolCallId}
-                    isAgentActive={isAgentActive}
-                  />
-                </div>
-              )
-              i = j
-              continue
-            }
-
-            if (block.kind === "sub_agent") {
-              elements.push(
-                <div key={`agent-${i}`} className="rounded-lg bg-indigo-500/[0.06] border border-indigo-500/10 p-3">
-                  <SubAgentPanel
-                    messages={block.messages}
-                    expandAll={expandAll}
-                  />
-                </div>
-              )
-              i++
-              continue
-            }
-
-            if (block.kind === "background_agent") {
-              elements.push(
-                <div key={`bg-agent-${i}`} className="rounded-lg bg-violet-500/[0.06] border border-violet-500/10 p-3">
-                  <BackgroundAgentPanel
-                    messages={block.messages}
-                    expandAll={expandAll}
-                  />
-                </div>
-              )
-              i++
-              continue
-            }
-
-            i++
-          }
-          return elements
-        })()}
+        <ContentBlocks
+          blocks={turn.contentBlocks}
+          model={turn.model}
+          expandAll={expandAll}
+          activeToolCallId={activeToolCallId}
+          isAgentActive={isAgentActive}
+          isSubAgentView={isSubAgentView}
+        />
       </div>
     </div>
   )
 })
+
+// ── Turn header ──────────────────────────────────────────────────────────────
+
+function TurnHeader({
+  index,
+  turn,
+  branchCount,
+  onRestoreToHere,
+  onOpenBranches,
+}: {
+  index: number
+  turn: Turn
+  branchCount: number
+  onRestoreToHere?: (turnIndex: number) => void
+  onOpenBranches?: (turnIndex: number) => void
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
+        {index + 1}
+      </div>
+      {turn.durationMs !== null && (
+        <Badge
+          variant="outline"
+          className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-muted-foreground gap-1"
+        >
+          <Clock className="w-2.5 h-2.5" />
+          {formatDuration(turn.durationMs)}
+        </Badge>
+      )}
+      {turn.timestamp && (
+        <span className="text-[10px] text-muted-foreground">
+          {new Date(turn.timestamp).toLocaleTimeString()}
+        </span>
+      )}
+      {onRestoreToHere && (
+        <button
+          onClick={() => onRestoreToHere(index)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-muted-foreground hover:text-amber-400 ml-auto"
+          title="Undo this turn and all after it"
+        >
+          <RotateCcw className="size-3" />
+          <span className="hidden sm:inline">Restore</span>
+        </button>
+      )}
+      {branchCount > 0 && onOpenBranches && (
+        <div className={cn(!onRestoreToHere ? "ml-auto" : "")}>
+          <BranchIndicator
+            branchCount={branchCount}
+            onClick={() => onOpenBranches(index)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Content blocks renderer ──────────────────────────────────────────────────
+
+function ContentBlocks({
+  blocks,
+  model,
+  expandAll,
+  activeToolCallId,
+  isAgentActive,
+  isSubAgentView,
+}: {
+  blocks: TurnContentBlock[]
+  model: string | null
+  expandAll: boolean
+  activeToolCallId: string | null
+  isAgentActive: boolean
+  isSubAgentView: boolean
+}) {
+  const elements: React.ReactNode[] = []
+  const assistantCard = isSubAgentView ? CARD_STYLES.subAgent : CARD_STYLES.assistant
+  const assistantBorder = isSubAgentView ? BORDER_STYLES.subAgent : BORDER_STYLES.assistant
+
+  let i = 0
+  while (i < blocks.length) {
+    const block = blocks[i]
+
+    if (block.kind === "thinking") {
+      elements.push(
+        <div key={`thinking-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.thinking)}>
+          <ThinkingBlock blocks={block.blocks} expandAll={expandAll} />
+        </div>
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "text") {
+      const { toolCalls, nextIndex } = collectToolCalls(blocks, i + 1)
+
+      block.text.forEach((text, ti) => {
+        const isLastTextInBlock = ti === block.text.length - 1
+        elements.push(
+          <div key={`text-${i}-${ti}`} className={cn("rounded-lg p-3", assistantCard)}>
+            <AssistantText
+              text={text}
+              model={model}
+              tokenUsage={null}
+              label={isSubAgentView ? "Sub Agent" : undefined}
+              variant={isSubAgentView ? "subagent" : undefined}
+              timestamp={block.timestamp}
+            />
+            {isLastTextInBlock && toolCalls.length > 0 && (
+              <div className={cn("mt-3 pt-3 border-t", assistantBorder)}>
+                <CollapsibleToolCalls
+                  toolCalls={toolCalls}
+                  expandAll={expandAll}
+                  activeToolCallId={activeToolCallId}
+                  isAgentActive={isAgentActive}
+                />
+              </div>
+            )}
+          </div>
+        )
+      })
+
+      i = nextIndex
+      continue
+    }
+
+    if (block.kind === "tool_calls") {
+      const { toolCalls, nextIndex } = collectToolCalls(blocks, i)
+      elements.push(
+        <div key={`tools-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.orphanTools)}>
+          <CollapsibleToolCalls
+            toolCalls={toolCalls}
+            expandAll={expandAll}
+            activeToolCallId={activeToolCallId}
+            isAgentActive={isAgentActive}
+          />
+        </div>
+      )
+      i = nextIndex
+      continue
+    }
+
+    if (block.kind === "sub_agent") {
+      elements.push(
+        <div key={`agent-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.subAgent)}>
+          <SubAgentPanel messages={block.messages} expandAll={expandAll} />
+        </div>
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "background_agent") {
+      elements.push(
+        <div key={`bg-agent-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.thinking)}>
+          <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
+        </div>
+      )
+      i++
+      continue
+    }
+
+    i++
+  }
+
+  return <>{elements}</>
+}
+
+// ── Collapsible tool calls ───────────────────────────────────────────────────
 
 const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls,
@@ -697,7 +721,6 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
   const isOpen = expandAll || manualOpen || hasInProgressCall
 
-  // Auto-expand when a specific tool call in this group is targeted
   const lastScrolledToolCallRef = useRef<string | null>(null)
   const scrollRafRef = useRef<number | null>(null)
   useEffect(() => {
@@ -709,8 +732,6 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     if (!toolCalls.some((tc) => tc.id === activeToolCallId)) return
     lastScrolledToolCallRef.current = activeToolCallId
     setManualOpen(true)
-    // Scroll to the target after DOM update (double rAF for layout).
-    // Track the frame IDs so we can cancel if the component unmounts mid-scroll.
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = requestAnimationFrame(() => {
         scrollRafRef.current = null
@@ -722,7 +743,6 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     })
   }, [activeToolCallId, toolCalls])
 
-  // Cancel pending scroll animation frames on unmount
   useEffect(() => {
     return () => {
       if (scrollRafRef.current !== null) cancelAnimationFrame(scrollRafRef.current)
@@ -737,6 +757,8 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   }, [toolCalls])
 
+  const label = toolCallCountLabel(toolCalls.length)
+
   if (isOpen) {
     return (
       <div className="space-y-2">
@@ -746,7 +768,7 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
             className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronDown className="size-3" />
-            <span>{toolCalls.length} tool call{toolCalls.length !== 1 ? "s" : ""}</span>
+            <span>{label}</span>
           </button>
         )}
         {toolCalls.map((tc, i) => {
@@ -768,7 +790,6 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     )
   }
 
-  // Collapsed summary
   return (
     <button
       onClick={() => setManualOpen(true)}
@@ -776,7 +797,7 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     >
       <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
       <span className="text-xs text-muted-foreground shrink-0">
-        {toolCalls.length} tool call{toolCalls.length !== 1 ? "s" : ""}
+        {label}
       </span>
       <div className="flex items-center gap-1 flex-wrap">
         {toolCounts.map(([name, count]) => (
@@ -797,10 +818,11 @@ const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   )
 })
 
+// ── Compaction marker ────────────────────────────────────────────────────────
+
 const CompactionMarker = memo(function CompactionMarker({ summary }: { summary: string }) {
   const [open, setOpen] = useState(false)
 
-  // First line is the title (bold markdown), rest is details
   const lines = summary.split("\n")
   const title = lines[0].replace(/^\*\*|\*\*$/g, "")
   const details = lines.slice(1)

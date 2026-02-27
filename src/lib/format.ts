@@ -54,6 +54,14 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`
 }
 
+/** Format a number of seconds as a compact elapsed string (e.g. "42s", "2m 5s"). */
+export function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}m ${s}s`
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)}MB`
   if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)}KB`

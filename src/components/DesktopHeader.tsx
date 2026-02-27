@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from "react"
+import { memo } from "react"
 import {
   ChevronRight,
   Eye,
@@ -21,8 +21,10 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
-import { cn, copyToClipboard } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
+import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
+import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
@@ -62,25 +64,18 @@ export const DesktopHeader = memo(function DesktopHeader({
   showConfig,
   onToggleConfig,
 }: DesktopHeaderProps) {
-  const [copied, setCopied] = useState(false)
-  const [urlCopied, setUrlCopied] = useState(false)
+  const [cmdCopied, copyCmd] = useCopyWithFeedback()
+  const [urlCopied, copyUrl] = useCopyWithFeedback()
 
-  const copyNetworkUrl = useCallback(async () => {
-    if (!networkUrl) return
-    const ok = await copyToClipboard(networkUrl)
-    if (!ok) return
-    setUrlCopied(true)
-    setTimeout(() => setUrlCopied(false), 1500)
-  }, [networkUrl])
-
-  const copyResumeCmd = useCallback(async () => {
+  function handleCopyResumeCmd(): void {
     if (!session) return
-    const cmd = `claude --resume ${session.sessionId}`
-    const ok = await copyToClipboard(cmd)
-    if (!ok) return
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }, [session])
+    copyCmd(`claude --resume ${session.sessionId}`)
+  }
+
+  function handleCopyNetworkUrl(): void {
+    if (!networkUrl) return
+    copyUrl(networkUrl)
+  }
 
   return (
     <header className="flex h-11 shrink-0 items-center border-b border-border/50 bg-elevation-2 depth-mid px-3 electron-drag">
@@ -106,9 +101,9 @@ export const DesktopHeader = memo(function DesktopHeader({
               <TooltipTrigger asChild>
                 <button
                   className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
-                  onClick={copyResumeCmd}
+                  onClick={handleCopyResumeCmd}
                 >
-                  {copied ? (
+                  {cmdCopied ? (
                     <span className="flex items-center gap-1.5 text-green-400">
                       <Check className="size-3" /> Copied
                     </span>
@@ -124,22 +119,17 @@ export const DesktopHeader = memo(function DesktopHeader({
                 )}
               </TooltipContent>
             </Tooltip>
-            {isLive && (
-              <span className="relative flex h-2 w-2 shrink-0" aria-label="Session is live" role="status">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-              </span>
-            )}
+            {isLive && <LiveIndicator aria-label="Session is live" />}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={copyResumeCmd}
-                  aria-label={copied ? "Copied!" : "Copy resume command"}
+                  onClick={handleCopyResumeCmd}
+                  aria-label={cmdCopied ? "Copied!" : "Copy resume command"}
                 >
-                  {copied ? (
+                  {cmdCopied ? (
                     <Check className="size-3 text-green-400" />
                   ) : (
                     <Copy className="size-3" />
@@ -147,7 +137,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {copied ? "Copied!" : "Copy resume command"}
+                {cmdCopied ? "Copied!" : "Copy resume command"}
               </TooltipContent>
             </Tooltip>
           </>
@@ -160,106 +150,51 @@ export const DesktopHeader = memo(function DesktopHeader({
 
       <TokenUsageIndicator />
 
-      {networkUrl ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={copyNetworkUrl}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
-            >
-              <Globe className="size-3 text-green-500" />
-              {urlCopied ? (
-                <span className="text-green-400">Copied!</span>
-              ) : (
-                networkUrl
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Click to copy connection URL</TooltipContent>
-        </Tooltip>
-      ) : networkAccessDisabled ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1">
-              <WifiOff className="size-3" />
-              <span>Network off</span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>Network access is disabled</TooltipContent>
-        </Tooltip>
-      ) : null}
+      <NetworkStatus
+        networkUrl={networkUrl}
+        networkAccessDisabled={networkAccessDisabled}
+        urlCopied={urlCopied}
+        onCopyUrl={handleCopyNetworkUrl}
+      />
 
       <div className="flex items-center gap-1 shrink-0">
         {onToggleConfig && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn("h-7 w-7 p-0", showConfig ? "bg-blue-500/20" : "text-muted-foreground hover:text-foreground")}
-                onClick={onToggleConfig}
-                aria-label={showConfig ? "Close Config Browser" : "Config Browser"}
-              >
-                <SlidersHorizontal className={cn("size-3.5", showConfig && "text-blue-400")} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showConfig ? "Close Config Browser" : "Config Browser"}</TooltipContent>
-          </Tooltip>
+          <HeaderIconButton
+            icon={SlidersHorizontal}
+            label={showConfig ? "Close Config Browser" : "Config Browser"}
+            onClick={onToggleConfig}
+            className={showConfig ? "bg-blue-500/20" : "text-muted-foreground hover:text-foreground"}
+            iconClassName={showConfig ? "text-blue-400" : undefined}
+          />
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-              onClick={onOpenSettings}
-              aria-label="Settings"
-            >
-              <Settings className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Settings</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-              onClick={onKillAll}
-              disabled={killing}
-              aria-label="Kill all Claude processes"
-            >
-              <Skull className={cn("size-3.5", killing && "text-red-400 animate-pulse")} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Kill all Claude processes</TooltipContent>
-        </Tooltip>
+        <HeaderIconButton
+          icon={Settings}
+          label="Settings"
+          onClick={onOpenSettings}
+          className="text-muted-foreground hover:text-foreground"
+        />
+        <HeaderIconButton
+          icon={Skull}
+          label="Kill all Claude processes"
+          onClick={onKillAll}
+          disabled={killing}
+          className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+          iconClassName={killing ? "text-red-400 animate-pulse" : undefined}
+        />
         {onToggleWorktrees && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn("h-7 w-7 p-0", showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
-                onClick={onToggleWorktrees}
-                aria-label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
-              >
-                <GitBranch className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showWorktrees ? "Hide Worktrees" : "Show Worktrees"}</TooltipContent>
-          </Tooltip>
+          <HeaderIconButton
+            icon={GitBranch}
+            label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
+            onClick={onToggleWorktrees}
+            className={showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
+          />
         )}
         {session && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onToggleStats} aria-label={showStats ? "Hide Stats" : "Show Stats"}>
-                {showStats ? <PanelRightClose className="size-3.5" /> : <BarChart3 className="size-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{showStats ? "Hide Stats" : "Show Stats"}</TooltipContent>
-          </Tooltip>
+          <HeaderIconButton
+            icon={showStats ? PanelRightClose : BarChart3}
+            label={showStats ? "Hide Stats" : "Show Stats"}
+            onClick={onToggleStats}
+          />
         )}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -273,3 +208,52 @@ export const DesktopHeader = memo(function DesktopHeader({
     </header>
   )
 })
+
+// ── NetworkStatus ────────────────────────────────────────────────────────────
+
+interface NetworkStatusProps {
+  networkUrl: string | null
+  networkAccessDisabled: boolean
+  urlCopied: boolean
+  onCopyUrl: () => void
+}
+
+/** Renders the network URL button or "Network off" indicator. */
+function NetworkStatus({ networkUrl, networkAccessDisabled, urlCopied, onCopyUrl }: NetworkStatusProps): React.ReactNode {
+  if (networkUrl) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onCopyUrl}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
+          >
+            <Globe className="size-3 text-green-500" />
+            {urlCopied ? (
+              <span className="text-green-400">Copied!</span>
+            ) : (
+              networkUrl
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Click to copy connection URL</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  if (networkAccessDisabled) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1">
+            <WifiOff className="size-3" />
+            <span>Network off</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>Network access is disabled</TooltipContent>
+      </Tooltip>
+    )
+  }
+
+  return null
+}

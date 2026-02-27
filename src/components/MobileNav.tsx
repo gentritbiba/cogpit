@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { LiveIndicator } from "@/components/header-shared"
 
 export type MobileTab = "chat" | "sessions" | "stats" | "teams"
 
@@ -12,6 +13,13 @@ interface MobileNavProps {
   isLive?: boolean
 }
 
+const TAB_DEFINITIONS: { id: MobileTab; label: string; icon: typeof MessageSquare; requiresSession?: boolean; requiresTeam?: boolean }[] = [
+  { id: "sessions", label: "Sessions", icon: FolderOpen },
+  { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "stats", label: "Stats", icon: BarChart3, requiresSession: true },
+  { id: "teams", label: "Teams", icon: Users, requiresTeam: true },
+]
+
 export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
@@ -19,14 +27,11 @@ export const MobileNav = memo(function MobileNav({
   hasTeam,
   isLive,
 }: MobileNavProps) {
-  const tabs: { id: MobileTab; label: string; icon: typeof MessageSquare; show: boolean }[] = [
-    { id: "sessions", label: "Sessions", icon: FolderOpen, show: true },
-    { id: "chat", label: "Chat", icon: MessageSquare, show: true },
-    { id: "stats", label: "Stats", icon: BarChart3, show: hasSession },
-    { id: "teams", label: "Teams", icon: Users, show: hasTeam },
-  ]
-
-  const visibleTabs = tabs.filter((t) => t.show)
+  const visibleTabs = TAB_DEFINITIONS.filter((t) => {
+    if (t.requiresSession && !hasSession) return false
+    if (t.requiresTeam && !hasTeam) return false
+    return true
+  })
 
   return (
     <nav className="flex shrink-0 items-stretch border-t border-border/50 bg-elevation-1 depth-mid pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Navigation">
@@ -43,9 +48,7 @@ export const MobileNav = memo(function MobileNav({
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
               "active:scale-95 active:bg-elevation-2",
-              isActive
-                ? "text-blue-400"
-                : "text-muted-foreground"
+              isActive ? "text-blue-400" : "text-muted-foreground",
             )}
           >
             <div className="relative">
@@ -54,10 +57,7 @@ export const MobileNav = memo(function MobileNav({
               )}
               <Icon className="size-5" />
               {tab.id === "chat" && isLive && (
-                <span className="absolute -right-1 -top-1 flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-                </span>
+                <LiveIndicator className="absolute -right-1 -top-1" />
               )}
             </div>
             <span className="text-[10px] font-medium">{tab.label}</span>

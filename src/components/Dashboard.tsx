@@ -28,6 +28,12 @@ import { shortenModel, formatRelativeTime, formatFileSize, truncate, shortPath, 
 import { authFetch } from "@/lib/auth"
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
+const LIVE_THRESHOLD_MS = 2 * 60 * 1000
+
+function isLive(lastModified: string | null): boolean {
+  if (!lastModified) return false
+  return Date.now() - new Date(lastModified).getTime() < LIVE_THRESHOLD_MS
+}
 
 function Shortcut({ keys, label }: { keys: string[]; label: string }) {
   return (
@@ -39,10 +45,87 @@ function Shortcut({ keys, label }: { keys: string[]; label: string }) {
             key={i}
             className="inline-flex items-center justify-center rounded border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground min-w-[20px]"
           >
-            {k === "Ctrl" ? (isMac ? "⌘" : "Ctrl") : k}
+            {k === "Ctrl" ? (isMac ? "\u2318" : "Ctrl") : k}
           </kbd>
         ))}
       </span>
+    </div>
+  )
+}
+
+function LiveDot({ size = "md" }: { size?: "sm" | "md" }) {
+  const dotSize = size === "sm" ? "h-1.5 w-1.5" : "h-2 w-2"
+  const pingSize = size === "sm" ? "h-full w-full" : "h-full w-full"
+  return (
+    <span className={cn("relative flex", dotSize)}>
+      <span className={cn("absolute inline-flex animate-ping rounded-full bg-green-400 opacity-75", pingSize)} />
+      <span className={cn("relative inline-flex rounded-full bg-green-500", dotSize)} />
+    </span>
+  )
+}
+
+function SearchInput({ value, onChange, placeholder }: {
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="mb-4 relative max-w-sm">
+      <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-muted-foreground"
+      />
+      {value && (
+        <button
+          onClick={() => onChange("")}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+        >
+          <X className="size-3" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
+      <AlertTriangle className="size-4 text-red-400 shrink-0" />
+      <span className="text-sm text-red-400 flex-1">{message}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
+        onClick={onRetry}
+      >
+        <RefreshCw className="size-3 mr-1" />
+        Retry
+      </Button>
+    </div>
+  )
+}
+
+function SkeletonCards({ count = 3, includeMessagePlaceholder = false }: {
+  count?: number
+  includeMessagePlaceholder?: boolean
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="rounded-lg border border-border/40 elevation-1 p-4">
+          <div className="skeleton h-4 w-3/4 rounded mb-3" />
+          <div className="skeleton h-3 w-1/2 rounded mb-4" />
+          {includeMessagePlaceholder && <div className="skeleton h-8 w-full rounded mb-3" />}
+          <div className="flex gap-3">
+            <div className="skeleton h-3 w-16 rounded" />
+            <div className="skeleton h-3 w-16 rounded" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -92,13 +175,9 @@ interface DashboardProps {
   onSelectSession: (dirName: string, fileName: string) => void
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
-  /** dirName of the currently selected project (from URL state) */
   selectedProjectDirName?: string | null
-  /** Callback to change the selected project (pushes URL) */
   onSelectProject?: (dirName: string | null) => void
-  /** Duplicate a session (full copy) */
   onDuplicateSession?: (dirName: string, fileName: string) => void
-  /** Delete a session file */
   onDeleteSession?: (dirName: string, fileName: string) => void
 }
 
@@ -116,7 +195,6 @@ export const Dashboard = memo(function Dashboard({
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Session list state (for when viewing a project)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [sessionsPage, setSessionsPage] = useState(1)
@@ -124,10 +202,9 @@ export const Dashboard = memo(function Dashboard({
   const [searchFilter, setSearchFilter] = useState("")
   const [fetchError, setFetchError] = useState<string | null>(null)
 
-  // Track which dirName we last loaded sessions for, to avoid re-fetching
   const loadedForDirName = useRef<string | null>(null)
 
-  const fetchData = useCallback(async (isRefresh = false) => {
+  const fetchDashboard = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     try {
       const [projectsRes, sessionsRes] = await Promise.all([
@@ -151,15 +228,33 @@ export const Dashboard = memo(function Dashboard({
   }, [])
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(() => fetchData(), 10000)
+    fetchDashboard()
+    const interval = setInterval(() => fetchDashboard(), 10000)
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [fetchDashboard])
 
-  // Load sessions when selectedProjectDirName changes (from URL or click)
+  const fetchSessions = useCallback(async (dirName: string, page = 1, append = false) => {
+    setSessionsLoading(true)
+    setFetchError(null)
+    if (!append) setSessions([])
+    try {
+      const res = await authFetch(`/api/sessions/${encodeURIComponent(dirName)}?page=${page}&limit=20`)
+      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
+      const data = await res.json()
+      setSessions((prev) => append ? [...prev, ...data.sessions] : data.sessions)
+      setSessionsTotal(data.total)
+      setSessionsPage(page)
+      loadedForDirName.current = dirName
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Failed to load sessions")
+    } finally {
+      setSessionsLoading(false)
+    }
+  }, [])
+
+  // Load sessions when selectedProjectDirName changes
   useEffect(() => {
     if (!selectedProjectDirName) {
-      // Going back to projects list — clear session data
       if (loadedForDirName.current) {
         setSessions([])
         setSessionsTotal(0)
@@ -169,36 +264,15 @@ export const Dashboard = memo(function Dashboard({
       }
       return
     }
-
-    // Already loaded for this project
     if (loadedForDirName.current === selectedProjectDirName) return
-
-    // Fetch sessions for this project
-    loadedForDirName.current = selectedProjectDirName
     setSearchFilter("")
-    setSessionsLoading(true)
-    setSessions([])
-    setFetchError(null)
-    authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
-        return res.json()
-      })
-      .then((data) => {
-        setSessions(data.sessions)
-        setSessionsTotal(data.total)
-        setSessionsPage(1)
-      })
-      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
-      .finally(() => setSessionsLoading(false))
-  }, [selectedProjectDirName])
+    fetchSessions(selectedProjectDirName)
+  }, [selectedProjectDirName, fetchSessions])
 
-  // Resolve the selected project info from the projects list
   const selectedProject = useMemo(() => {
     if (!selectedProjectDirName) return null
     const found = projects.find((p) => p.dirName === selectedProjectDirName)
     if (found) return found
-    // Fallback: minimal info from dirName
     const fallbackPath = dirNameToPath(selectedProjectDirName)
     return {
       dirName: selectedProjectDirName,
@@ -209,46 +283,25 @@ export const Dashboard = memo(function Dashboard({
     }
   }, [selectedProjectDirName, projects, sessionsTotal])
 
-  const handleSelectProject = useCallback((project: ProjectInfo) => {
-    onSelectProject?.(project.dirName)
-  }, [onSelectProject])
-
   const handleBack = useCallback(() => {
     onSelectProject?.(null)
   }, [onSelectProject])
 
-  const loadMoreSessions = useCallback(async () => {
+  const loadMoreSessions = useCallback(() => {
     if (!selectedProjectDirName) return
-    const nextPage = sessionsPage + 1
-    setSessionsLoading(true)
-    try {
-      const res = await authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=${nextPage}&limit=20`)
-      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
-      const data = await res.json()
-      setSessions((prev) => [...prev, ...data.sessions])
-      setSessionsTotal(data.total)
-      setSessionsPage(nextPage)
-    } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load more sessions")
-    } finally {
-      setSessionsLoading(false)
-    }
-  }, [selectedProjectDirName, sessionsPage])
+    fetchSessions(selectedProjectDirName, sessionsPage + 1, true)
+  }, [selectedProjectDirName, sessionsPage, fetchSessions])
 
-  // Build a map of active session counts per project for the folder cards
   const activeCountByProject = useMemo(() => {
-    const now = Date.now()
     const map: Record<string, number> = {}
     for (const s of activeSessions) {
-      const age = now - new Date(s.lastModified).getTime()
-      if (age < 2 * 60 * 1000) {
+      if (isLive(s.lastModified)) {
         map[s.dirName] = (map[s.dirName] || 0) + 1
       }
     }
     return map
   }, [activeSessions])
 
-  // Filter projects
   const filteredProjects = useMemo(() => {
     if (!searchFilter) return projects
     const q = searchFilter.toLowerCase()
@@ -257,7 +310,6 @@ export const Dashboard = memo(function Dashboard({
     )
   }, [projects, searchFilter])
 
-  // Filter sessions
   const filteredSessions = useMemo(() => {
     if (!searchFilter) return sessions
     const q = searchFilter.toLowerCase()
@@ -269,6 +321,28 @@ export const Dashboard = memo(function Dashboard({
         s.sessionId.toLowerCase().includes(q)
     )
   }, [sessions, searchFilter])
+
+  function handleDeleteSession(dirName: string, fileName: string) {
+    onDeleteSession?.(dirName, fileName)
+    setSessions((prev) => prev.filter((x) => x.fileName !== fileName))
+    setSessionsTotal((prev) => prev - 1)
+  }
+
+  function wrapWithContextMenu(key: string, label: string, dirName: string, fileName: string, content: React.ReactNode): React.ReactNode {
+    if (!onDuplicateSession && !onDeleteSession) {
+      return <div key={key}>{content}</div>
+    }
+    return (
+      <SessionContextMenu
+        key={key}
+        sessionLabel={label}
+        onDuplicate={onDuplicateSession ? () => onDuplicateSession(dirName, fileName) : undefined}
+        onDelete={onDeleteSession ? () => handleDeleteSession(dirName, fileName) : undefined}
+      >
+        {content}
+      </SessionContextMenu>
+    )
+  }
 
   // ── Sessions view (drilled into a project) ──
   if (selectedProject) {
@@ -318,79 +392,23 @@ export const Dashboard = memo(function Dashboard({
             </div>
           </div>
 
-          {/* Search */}
-          <div className="mb-4 relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filter sessions..."
-              className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-muted-foreground"
-            />
-            {searchFilter && (
-              <button
-                onClick={() => setSearchFilter("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </div>
+          <SearchInput value={searchFilter} onChange={setSearchFilter} placeholder="Filter sessions..." />
 
-          {/* Error banner */}
           {fetchError && (
-            <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
-              <AlertTriangle className="size-4 text-red-400 shrink-0" />
-              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                onClick={() => {
-                  setFetchError(null)
-                  loadedForDirName.current = null
-                  if (selectedProjectDirName) {
-                    // Re-trigger session load by resetting the ref
-                    setSessionsLoading(true)
-                    setSessions([])
-                    authFetch(`/api/sessions/${encodeURIComponent(selectedProjectDirName)}?page=1&limit=20`)
-                      .then((res) => {
-                        if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
-                        return res.json()
-                      })
-                      .then((data) => {
-                        loadedForDirName.current = selectedProjectDirName
-                        setSessions(data.sessions)
-                        setSessionsTotal(data.total)
-                        setSessionsPage(1)
-                      })
-                      .catch((err) => setFetchError(err instanceof Error ? err.message : "Failed to load sessions"))
-                      .finally(() => setSessionsLoading(false))
-                  }
-                }}
-              >
-                <RefreshCw className="size-3 mr-1" />
-                Retry
-              </Button>
-            </div>
+            <ErrorBanner
+              message={fetchError}
+              onRetry={() => {
+                setFetchError(null)
+                loadedForDirName.current = null
+                if (selectedProjectDirName) {
+                  fetchSessions(selectedProjectDirName)
+                }
+              }}
+            />
           )}
 
-          {/* Sessions grid */}
           {sessionsLoading && sessions.length === 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-border/40 elevation-1 p-4">
-                  <div className="skeleton h-4 w-3/4 rounded mb-3" />
-                  <div className="skeleton h-3 w-1/2 rounded mb-4" />
-                  <div className="skeleton h-8 w-full rounded mb-3" />
-                  <div className="flex gap-3">
-                    <div className="skeleton h-3 w-16 rounded" />
-                    <div className="skeleton h-3 w-16 rounded" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <SkeletonCards includeMessagePlaceholder />
           ) : filteredSessions.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <FileText className="size-8 text-muted-foreground mb-3" />
@@ -402,9 +420,7 @@ export const Dashboard = memo(function Dashboard({
             <>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredSessions.map((s) => {
-                  const isLive = s.lastModified
-                    ? Date.now() - new Date(s.lastModified).getTime() < 2 * 60 * 1000
-                    : false
+                  const live = isLive(s.lastModified)
 
                   const card = (
                     <button
@@ -412,12 +428,11 @@ export const Dashboard = memo(function Dashboard({
                       className={cn(
                         "card-glow group relative w-full rounded-lg border elevation-1 p-4 text-left transition-smooth",
                         "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
-                        isLive
+                        live
                           ? "border-l-[3px] border-l-green-500 border-t-border/40 border-r-border/40 border-b-border/40 live-pulse"
                           : "border-border/40"
                       )}
                     >
-                      {/* Slug + model */}
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <span className="text-xs font-medium text-foreground truncate">
                           {s.slug || truncate(s.sessionId, 12)}
@@ -429,14 +444,12 @@ export const Dashboard = memo(function Dashboard({
                         )}
                       </div>
 
-                      {/* First user message */}
                       {s.firstUserMessage && (
                         <p className="text-[13px] text-muted-foreground mb-2.5 line-clamp-2 leading-relaxed">
                           {truncate(s.firstUserMessage, 120)}
                         </p>
                       )}
 
-                      {/* Bottom stats */}
                       <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                         {(s.turnCount ?? 0) > 0 && (
                           <span className="flex items-center gap-1">
@@ -459,38 +472,24 @@ export const Dashboard = memo(function Dashboard({
                         )}
                       </div>
 
-                      {/* Live dot */}
-                      {isLive && (
-                        <span className="absolute top-3 right-3 flex h-2 w-2">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                      {live && (
+                        <span className="absolute top-3 right-3">
+                          <LiveDot />
                         </span>
                       )}
                     </button>
                   )
 
-                  if (onDuplicateSession || onDeleteSession) {
-                    return (
-                      <SessionContextMenu
-                        key={s.fileName}
-                        sessionLabel={s.slug || s.sessionId.slice(0, 12)}
-                        onDuplicate={onDuplicateSession ? () => onDuplicateSession(selectedProject.dirName, s.fileName) : undefined}
-                        onDelete={onDeleteSession ? () => {
-                          onDeleteSession(selectedProject.dirName, s.fileName)
-                          setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
-                          setSessionsTotal((prev) => prev - 1)
-                        } : undefined}
-                      >
-                        {card}
-                      </SessionContextMenu>
-                    )
-                  }
-
-                  return <div key={s.fileName}>{card}</div>
+                  return wrapWithContextMenu(
+                    s.fileName,
+                    s.slug || s.sessionId.slice(0, 12),
+                    selectedProject.dirName,
+                    s.fileName,
+                    card
+                  )
                 })}
               </div>
 
-              {/* Load more */}
               {sessions.length < sessionsTotal && !searchFilter && (
                 <div className="mt-4 text-center">
                   <Button
@@ -540,7 +539,7 @@ export const Dashboard = memo(function Dashboard({
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-              onClick={() => fetchData(true)}
+              onClick={() => fetchDashboard(true)}
               disabled={refreshing}
               aria-label="Refresh projects"
             >
@@ -548,56 +547,17 @@ export const Dashboard = memo(function Dashboard({
             </Button>
           </div>
 
-          {/* Search */}
-          <div className="mb-4 relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              placeholder="Filter projects..."
-              className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-muted-foreground"
-            />
-            {searchFilter && (
-              <button
-                onClick={() => setSearchFilter("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </div>
+          <SearchInput value={searchFilter} onChange={setSearchFilter} placeholder="Filter projects..." />
 
-          {/* Error banner */}
           {fetchError && !selectedProjectDirName && (
-            <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
-              <AlertTriangle className="size-4 text-red-400 shrink-0" />
-              <span className="text-sm text-red-400 flex-1">{fetchError}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                onClick={() => { setFetchError(null); fetchData(true) }}
-              >
-                <RefreshCw className="size-3 mr-1" />
-                Retry
-              </Button>
-            </div>
+            <ErrorBanner
+              message={fetchError}
+              onRetry={() => { setFetchError(null); fetchDashboard(true) }}
+            />
           )}
 
           {loading ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-lg border border-border/40 elevation-1 p-4">
-                  <div className="skeleton h-4 w-3/4 rounded mb-3" />
-                  <div className="skeleton h-3 w-1/2 rounded mb-4" />
-                  <div className="flex gap-3">
-                    <div className="skeleton h-3 w-16 rounded" />
-                    <div className="skeleton h-3 w-16 rounded" />
-                  </div>
-                </div>
-              ))}
-            </div>
+            <SkeletonCards />
           ) : filteredProjects.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <Activity className="size-8 text-muted-foreground mb-3" />
@@ -613,7 +573,7 @@ export const Dashboard = memo(function Dashboard({
                 return (
                   <button
                     key={project.dirName}
-                    onClick={() => handleSelectProject(project)}
+                    onClick={() => onSelectProject?.(project.dirName)}
                     className={cn(
                       "card-glow group relative rounded-lg border elevation-1 p-4 text-left transition-smooth",
                       "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
@@ -622,7 +582,6 @@ export const Dashboard = memo(function Dashboard({
                         : "border-border/40"
                     )}
                   >
-                    {/* Folder name */}
                     <div className="flex items-center gap-2.5 mb-2">
                       <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
                       <span className="text-sm font-medium text-foreground truncate flex-1">
@@ -631,12 +590,10 @@ export const Dashboard = memo(function Dashboard({
                       <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
                     </div>
 
-                    {/* Path */}
                     <p className="text-[11px] text-muted-foreground mb-3 truncate font-mono">
                       {shortPath(project.path)}
                     </p>
 
-                    {/* Bottom stats */}
                     <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <FileText className="size-3" />
@@ -644,10 +601,7 @@ export const Dashboard = memo(function Dashboard({
                       </span>
                       {activeCount > 0 && (
                         <span className="flex items-center gap-1 text-green-400">
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500" />
-                          </span>
+                          <LiveDot size="sm" />
                           {activeCount} active
                         </span>
                       )}
@@ -659,11 +613,9 @@ export const Dashboard = memo(function Dashboard({
                       )}
                     </div>
 
-                    {/* Active indicator */}
                     {activeCount > 0 && (
-                      <span className="absolute top-3 right-3 flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+                      <span className="absolute top-3 right-3">
+                        <LiveDot />
                       </span>
                     )}
                   </button>
@@ -684,13 +636,13 @@ export const Dashboard = memo(function Dashboard({
             <Shortcut keys={["Ctrl", "B"]} label="Toggle sidebar" />
             <Shortcut keys={["Ctrl", "E"]} label="Expand all turns" />
             <Shortcut keys={["Ctrl", "Shift", "E"]} label="Collapse all turns" />
-            <Shortcut keys={isMac ? ["⌃", "⌘", "T"] : ["Ctrl", "Alt", "T"]} label="Open terminal" />
-            <Shortcut keys={isMac ? ["⌃", "⌘", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
-            <Shortcut keys={isMac ? ["⌃", "⌘", "S"] : ["Ctrl", "Alt", "S"]} label="Switch theme" />
-            <Shortcut keys={["⌃", "Tab"]} label="Recent session (back)" />
-            <Shortcut keys={["⌃", "Shift", "Tab"]} label="Recent session (forward)" />
-            <Shortcut keys={["Ctrl", "Shift", "↑ / ↓"]} label="Navigate live sessions" />
-            <Shortcut keys={["Ctrl", "Shift", "1–9"]} label="Jump to Nth live session" />
+            <Shortcut keys={isMac ? ["\u2303", "\u2318", "T"] : ["Ctrl", "Alt", "T"]} label="Open terminal" />
+            <Shortcut keys={isMac ? ["\u2303", "\u2318", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
+            <Shortcut keys={isMac ? ["\u2303", "\u2318", "S"] : ["Ctrl", "Alt", "S"]} label="Switch theme" />
+            <Shortcut keys={["\u2303", "Tab"]} label="Recent session (back)" />
+            <Shortcut keys={["\u2303", "Shift", "Tab"]} label="Recent session (forward)" />
+            <Shortcut keys={["Ctrl", "Shift", "\u2191 / \u2193"]} label="Navigate live sessions" />
+            <Shortcut keys={["Ctrl", "Shift", "1\u20139"]} label="Jump to Nth live session" />
             <Shortcut keys={["Ctrl", "Shift", "M"]} label="Toggle voice input" />
             <Shortcut keys={["Esc"]} label="Clear search" />
           </div>

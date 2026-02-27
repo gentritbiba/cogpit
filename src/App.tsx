@@ -100,6 +100,15 @@ export default function App() {
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
 
+  const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
+  const suggestionsRef = useRef(slashSuggestions.suggestions)
+  suggestionsRef.current = slashSuggestions.suggestions
+
+  const handleEditCommand = useCallback((commandName: string) => {
+    const match = suggestionsRef.current.find((s) => s.name === commandName)
+    dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
+  }, [dispatch])
+
   const handleOpenTerminal = useCallback(() => {
     const projectPath = state.session?.cwd
       ?? pendingPath
@@ -158,8 +167,6 @@ export default function App() {
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
 
-  // Slash command/skill suggestions
-  const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
 
 
   // Permissions management
@@ -632,7 +639,6 @@ export default function App() {
         pendingInteraction={pendingInteraction}
         slashSuggestions={slashSuggestions.suggestions}
         slashSuggestionsLoading={slashSuggestions.loading}
-        expandCommand={slashSuggestions.expandCommand}
         onEditConfig={handleEditConfig}
       />
     </div>
@@ -702,6 +708,7 @@ export default function App() {
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
+                    onEditCommand={handleEditCommand}
                   />
                 </div>
               ) : state.pendingDirName ? (
@@ -916,6 +923,7 @@ export default function App() {
                     pendingMessage={claudeChat.pendingMessage}
                     isConnected={claudeChat.isConnected}
                     onToggleExpandAll={handleToggleExpandAll}
+                    onEditCommand={handleEditCommand}
                   />
                 </ResizablePanel>
 

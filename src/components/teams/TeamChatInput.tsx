@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { TeamMember } from "@/lib/team-types"
-import { getMemberColorClass } from "@/lib/team-types"
+import { getMemberColorClass, getMemberEffectiveColor, isTeamLead } from "@/lib/team-types"
 
 interface TeamChatInputProps {
   teamName: string
@@ -73,7 +73,12 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
   )
 
   const selected = members.find((m) => m.name === selectedMember)
-  const isLead = selected?.agentType === "team-lead"
+
+  function getPlaceholder(): string {
+    if (!selectedMember) return "Select a team member first..."
+    if (sending) return "Sending..."
+    return `Message ${selectedMember}... (Enter to send)`
+  }
 
   return (
     <div className="border-t border-border/40 bg-elevation-2 px-4 py-2">
@@ -93,7 +98,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
               <span
                 className={cn(
                   "inline-flex h-2 w-2 shrink-0 rounded-full",
-                  getMemberColorClass(isLead ? undefined : selected.color)
+                  getMemberColorClass(getMemberEffectiveColor(selected))
                 )}
               />
             )}
@@ -105,9 +110,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
 
           {showDropdown && (
             <div className="absolute bottom-full left-0 mb-1 w-48 rounded-lg border border-border/50 bg-elevation-1 py-1 depth-high z-50">
-              {members.map((m) => {
-                const mIsLead = m.agentType === "team-lead"
-                return (
+              {members.map((m) => (
                   <button
                     key={m.name}
                     onClick={() => {
@@ -124,7 +127,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
                     <span
                       className={cn(
                         "inline-flex h-2 w-2 shrink-0 rounded-full",
-                        getMemberColorClass(mIsLead ? undefined : m.color)
+                        getMemberColorClass(getMemberEffectiveColor(m))
                       )}
                     />
                     <span className="truncate">{m.name}</span>
@@ -132,8 +135,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
                       {m.agentType}
                     </span>
                   </button>
-                )
-              })}
+                ))}
             </div>
           )}
         </div>
@@ -145,13 +147,7 @@ export function TeamChatInput({ teamName, members }: TeamChatInputProps) {
             value={text}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder={
-              !selectedMember
-                ? "Select a team member first..."
-                : sending
-                  ? "Sending..."
-                  : `Message ${selectedMember}... (Enter to send)`
-            }
+            placeholder={getPlaceholder()}
             disabled={!selectedMember || sending}
             rows={1}
             className={cn(
