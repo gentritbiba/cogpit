@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { copyToClipboard } from "@/lib/utils"
 
 const FEEDBACK_DURATION_MS = 1500
@@ -9,12 +9,20 @@ const FEEDBACK_DURATION_MS = 1500
  */
 export function useCopyWithFeedback(): [boolean, (text: string) => void] {
   const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
 
   const copy = useCallback(async (text: string) => {
     const ok = await copyToClipboard(text)
     if (!ok) return
     setCopied(true)
-    setTimeout(() => setCopied(false), FEEDBACK_DURATION_MS)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setCopied(false), FEEDBACK_DURATION_MS)
   }, [])
 
   return [copied, copy]

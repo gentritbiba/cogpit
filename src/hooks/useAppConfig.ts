@@ -1,6 +1,33 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch, isRemoteClient, getToken } from "@/lib/auth"
 
+interface NetworkState {
+  url: string | null
+  disabled: boolean
+}
+
+/** Fetch network info and return parsed state. */
+async function fetchNetworkInfo(): Promise<NetworkState> {
+  try {
+    const res = await authFetch("/api/network-info")
+    const data = (await res.json()) as { enabled: boolean; url?: string }
+    return {
+      url: data.enabled && data.url ? data.url : null,
+      disabled: !data.enabled,
+    }
+  } catch {
+    return { url: null, disabled: false }
+  }
+}
+
+/** Fetch the config endpoint and return the claudeDir or throw. */
+async function fetchConfig(signal?: AbortSignal): Promise<string | null> {
+  const res = await authFetch("/api/config", { signal })
+  if (!res.ok) throw new Error(`Config request failed (${res.status})`)
+  const data = (await res.json()) as { claudeDir?: string }
+  return data?.claudeDir ?? null
+}
+
 export function useAppConfig() {
   const [configLoading, setConfigLoading] = useState(true)
   const [configError, setConfigError] = useState<string | null>(null)
@@ -11,6 +38,12 @@ export function useAppConfig() {
   // Bump to re-fetch config (e.g. after authentication)
   const [fetchKey, setFetchKey] = useState(0)
 
+  const refreshNetwork = useCallback(async () => {
+    const info = await fetchNetworkInfo()
+    setNetworkUrl(info.url)
+    setNetworkAccessDisabled(info.disabled)
+  }, [])
+
   useEffect(() => {
     // Remote clients without a token: stay in loading state until they authenticate
     if (isRemoteClient() && !getToken()) return
@@ -18,13 +51,9 @@ export function useAppConfig() {
     const controller = new AbortController()
     setConfigLoading(true)
     setConfigError(null)
-    authFetch("/api/config", { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Config request failed (${res.status})`)
-        return res.json() as Promise<{ claudeDir?: string }>
-      })
-      .then((data) => {
-        setClaudeDir(data?.claudeDir ?? null)
+    fetchConfig(controller.signal)
+      .then((dir) => {
+        setClaudeDir(dir)
         setConfigError(null)
       })
       .catch((err) => {
@@ -45,55 +74,29 @@ export function useAppConfig() {
     return () => window.removeEventListener("cogpit-auth-changed", handler)
   }, [])
 
-  // Fetch network info
-  useEffect(() => {
-    authFetch("/api/network-info")
-      .then((res) => res.json())
-      .then((data: { enabled: boolean; url?: string }) => {
-        setNetworkUrl(data.enabled && data.url ? data.url : null)
-        setNetworkAccessDisabled(!data.enabled)
-      })
-      .catch(() => {
-        setNetworkUrl(null)
-        setNetworkAccessDisabled(false)
-      })
-  }, [claudeDir])
+  // Fetch network info when claudeDir changes
+  useEffect(() => { refreshNetwork() }, [claudeDir, refreshNetwork])
 
   const handleCloseConfigDialog = useCallback(() => setShowConfigDialog(false), [])
 
   const handleConfigSaved = useCallback((newPath: string) => {
     setShowConfigDialog(false)
     if (newPath !== claudeDir) {
-      // Path changed — full reload to re-fetch sessions, etc.
       setClaudeDir(newPath)
       window.location.reload()
     } else {
-      // Network-only change — re-fetch network info without full reload
-      authFetch("/api/network-info")
-        .then((res) => res.json())
-        .then((data: { enabled: boolean; url?: string }) => {
-          setNetworkUrl(data.enabled && data.url ? data.url : null)
-          setNetworkAccessDisabled(!data.enabled)
-        })
-        .catch(() => {
-          setNetworkUrl(null)
-          setNetworkAccessDisabled(false)
-        })
+      refreshNetwork()
     }
-  }, [claudeDir])
+  }, [claudeDir, refreshNetwork])
 
   const openConfigDialog = useCallback(() => setShowConfigDialog(true), [])
 
   const retryConfig = useCallback(() => {
     setConfigLoading(true)
     setConfigError(null)
-    authFetch("/api/config")
-      .then((res) => {
-        if (!res.ok) throw new Error(`Config request failed (${res.status})`)
-        return res.json() as Promise<{ claudeDir?: string }>
-      })
-      .then((data) => {
-        setClaudeDir(data?.claudeDir ?? null)
+    fetchConfig()
+      .then((dir) => {
+        setClaudeDir(dir)
         setConfigError(null)
       })
       .catch((err) => {

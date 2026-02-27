@@ -3,22 +3,26 @@ import { getUserMessageText } from "./parser"
 
 // ── Extract reversible tool calls from a Turn ────────────────────────────
 
+function resolveFilePath(input: Record<string, unknown>): string {
+  return (input.file_path ?? input.path ?? "") as string
+}
+
 export function extractReversibleCalls(turn: Turn): ArchivedToolCall[] {
   const calls: ArchivedToolCall[] = []
   for (const tc of turn.toolCalls) {
-    if (tc.isError) continue // skip failed tool calls
+    if (tc.isError) continue
+    const filePath = resolveFilePath(tc.input)
+    if (!filePath) continue
+
     if (tc.name === "Edit") {
       const oldStr = tc.input.old_string as string | undefined
       const newStr = tc.input.new_string as string | undefined
-      const filePath = (tc.input.file_path ?? tc.input.path ?? "") as string
-      const replaceAll = tc.input.replace_all as boolean | undefined
-      if (oldStr !== undefined && newStr !== undefined && filePath) {
-        calls.push({ type: "Edit", filePath, oldString: oldStr, newString: newStr, replaceAll: replaceAll ?? false })
+      if (oldStr !== undefined && newStr !== undefined) {
+        calls.push({ type: "Edit", filePath, oldString: oldStr, newString: newStr, replaceAll: (tc.input.replace_all as boolean) ?? false })
       }
     } else if (tc.name === "Write") {
-      const filePath = (tc.input.file_path ?? tc.input.path ?? "") as string
       const content = tc.input.content as string | undefined
-      if (filePath && content !== undefined) {
+      if (content !== undefined) {
         calls.push({ type: "Write", filePath, content })
       }
     }
@@ -90,6 +94,32 @@ export function buildUndoOperations(
   return ops
 }
 
+// ── Shared helper: convert archived tool calls into forward (redo) operations ─
+
+function buildForwardOps(calls: ArchivedToolCall[], turnIndex: number): FileOperation[] {
+  const ops: FileOperation[] = []
+  for (const call of calls) {
+    if (call.type === "Edit") {
+      ops.push({
+        type: "apply-edit",
+        filePath: call.filePath,
+        oldString: call.oldString,
+        newString: call.newString,
+        replaceAll: call.replaceAll,
+        turnIndex,
+      })
+    } else if (call.type === "Write") {
+      ops.push({
+        type: "create-write",
+        filePath: call.filePath,
+        content: call.content,
+        turnIndex,
+      })
+    }
+  }
+  return ops
+}
+
 // ── Build the list of file operations for redo (forward order) ───────────
 
 export function buildRedoOperations(
@@ -98,30 +128,10 @@ export function buildRedoOperations(
   toTurnIndex: number    // target position (inclusive)
 ): FileOperation[] {
   const ops: FileOperation[] = []
-  // Walk forward from fromTurnIndex + 1 to toTurnIndex
   for (let i = fromTurnIndex + 1; i <= toTurnIndex; i++) {
     const turn = turns[i]
     if (!turn) continue
-    const calls = extractReversibleCalls(turn)
-    for (const call of calls) {
-      if (call.type === "Edit") {
-        ops.push({
-          type: "apply-edit",
-          filePath: call.filePath,
-          oldString: call.oldString,
-          newString: call.newString,
-          replaceAll: call.replaceAll,
-          turnIndex: i,
-        })
-      } else if (call.type === "Write") {
-        ops.push({
-          type: "create-write",
-          filePath: call.filePath,
-          content: call.content,
-          turnIndex: i,
-        })
-      }
-    }
+    ops.push(...buildForwardOps(extractReversibleCalls(turn), i))
   }
   return ops
 }
@@ -130,32 +140,14 @@ export function buildRedoOperations(
 
 export function buildRedoFromArchived(
   archivedTurns: ArchivedTurn[],
-  upToIndex?: number // optional: only redo up to this archived turn index
+  upToIndex?: number
 ): FileOperation[] {
   const ops: FileOperation[] = []
   const limit = upToIndex !== undefined ? upToIndex + 1 : archivedTurns.length
   for (let i = 0; i < limit; i++) {
     const at = archivedTurns[i]
     if (!at) continue
-    for (const call of at.toolCalls) {
-      if (call.type === "Edit") {
-        ops.push({
-          type: "apply-edit",
-          filePath: call.filePath,
-          oldString: call.oldString,
-          newString: call.newString,
-          replaceAll: call.replaceAll,
-          turnIndex: at.index,
-        })
-      } else if (call.type === "Write") {
-        ops.push({
-          type: "create-write",
-          filePath: call.filePath,
-          content: call.content,
-          turnIndex: at.index,
-        })
-      }
-    }
+    ops.push(...buildForwardOps(at.toolCalls, at.index))
   }
   return ops
 }

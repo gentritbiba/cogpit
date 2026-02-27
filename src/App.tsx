@@ -57,6 +57,8 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
+import { AppProvider } from "@/contexts/AppContext"
+import { SessionProvider, type SessionContextValue } from "@/contexts/SessionContext"
 
 export default function App() {
   const config = useAppConfig()
@@ -516,6 +518,57 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [activeError, clearActiveError])
 
+  // ─── Build context values ──────────────────────────────────────────────────
+
+  const appContextValue = useMemo(() => ({
+    state,
+    dispatch,
+    config,
+    theme: themeCtx,
+    networkAuth,
+    isMobile,
+  }), [state, dispatch, config, themeCtx, networkAuth, isMobile])
+
+  const sessionContextValue = useMemo<SessionContextValue>(() => ({
+    session: state.session,
+    sessionSource: state.sessionSource,
+    isLive,
+    sseState,
+    chat: {
+      status: claudeChat.status,
+      error: claudeChat.error,
+      pendingMessage: claudeChat.pendingMessage,
+      isConnected: claudeChat.isConnected,
+      sendMessage: claudeChat.sendMessage,
+      interrupt: claudeChat.interrupt,
+      stopAgent: claudeChat.stopAgent,
+      clearPending: claudeChat.clearPending,
+    },
+    scroll,
+    undoRedo,
+    pendingInteraction,
+    isSubAgentView,
+    slashSuggestions: slashSuggestions.suggestions,
+    slashSuggestionsLoading: slashSuggestions.loading,
+    actions: {
+      handleStopSession,
+      handleEditConfig,
+      handleEditCommand,
+      handleOpenBranches,
+      handleBranchFromHere,
+      handleToggleExpandAll,
+    },
+  }), [
+    state.session, state.sessionSource,
+    isLive, sseState,
+    claudeChat.status, claudeChat.error, claudeChat.pendingMessage, claudeChat.isConnected,
+    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
+    scroll, undoRedo, pendingInteraction, isSubAgentView,
+    slashSuggestions.suggestions, slashSuggestions.loading,
+    handleStopSession, handleEditConfig, handleEditCommand,
+    handleOpenBranches, handleBranchFromHere, handleToggleExpandAll,
+  ])
+
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
   if (!networkAuth.authenticated) {
     return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
@@ -647,6 +700,8 @@ export default function App() {
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
+      <AppProvider value={appContextValue}>
+      <SessionProvider value={sessionContextValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         <main className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
@@ -827,11 +882,15 @@ export default function App() {
         {branchModal}
         {errorToast || sseIndicator}
       </div>
+      </SessionProvider>
+      </AppProvider>
     )
   }
 
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
+    <AppProvider value={appContextValue}>
+    <SessionProvider value={sessionContextValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       <DesktopHeader
         session={state.session}
@@ -1092,5 +1151,7 @@ export default function App() {
 
       {errorToast || sseIndicator}
     </div>
+    </SessionProvider>
+    </AppProvider>
   )
 }

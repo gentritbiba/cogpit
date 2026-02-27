@@ -20,6 +20,34 @@ function DeviceIcon({ name }: { name: string }) {
   return <Monitor className="size-4 text-muted-foreground" />
 }
 
+function ValidationStatus({ status, error }: { status: string; error: string | null }) {
+  if (status === "validating") {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Checking path...
+      </div>
+    )
+  }
+  if (status === "valid") {
+    return (
+      <div className="flex items-center gap-2 text-sm text-green-400">
+        <CheckCircle className="size-3.5" />
+        Valid .claude directory found
+      </div>
+    )
+  }
+  if (status === "invalid" && error) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-red-400">
+        <XCircle className="size-3.5" />
+        {error}
+      </div>
+    )
+  }
+  return null
+}
+
 function formatTimeAgo(ts: number): string {
   const diff = Math.floor((Date.now() - ts) / 1000)
   if (diff < 60) return "just now"
@@ -113,12 +141,28 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   }, [path, networkAccess, networkPassword, terminalApp, save, onSaved])
 
   const MIN_PASSWORD_LENGTH = 12
-  const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
-  const terminalChanged = terminalApp !== initialTerminalApp
-  const pathChanged = status === "valid"
-  const passwordTooShort = networkAccess && networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
-  const needsPassword = networkAccess && !hasExistingPassword && networkPassword.length === 0
-  const canSave = (pathChanged || networkChanged || terminalChanged) && status !== "validating" && status !== "invalid" && !passwordTooShort && !needsPassword
+
+  function computeCanSave(): boolean {
+    // Block save while path is being validated or is invalid
+    if (status === "validating" || status === "invalid") return false
+
+    // Check if anything actually changed
+    const pathChanged = status === "valid"
+    const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
+    const terminalChanged = terminalApp !== initialTerminalApp
+    if (!pathChanged && !networkChanged && !terminalChanged) return false
+
+    // Validate password requirements when network is enabled
+    if (networkAccess) {
+      const passwordTooShort = networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
+      const needsPassword = !hasExistingPassword && networkPassword.length === 0
+      if (passwordTooShort || needsPassword) return false
+    }
+
+    return true
+  }
+
+  const canSave = computeCanSave()
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -144,24 +188,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             />
           </div>
 
-          {status === "validating" && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
-              Checking path...
-            </div>
-          )}
-          {status === "valid" && (
-            <div className="flex items-center gap-2 text-sm text-green-400">
-              <CheckCircle className="size-3.5" />
-              Valid .claude directory found
-            </div>
-          )}
-          {status === "invalid" && error && (
-            <div className="flex items-center gap-2 text-sm text-red-400">
-              <XCircle className="size-3.5" />
-              {error}
-            </div>
-          )}
+          <ValidationStatus status={status} error={error} />
 
           {/* Terminal App */}
           <div className="space-y-2 pt-3 border-t border-border">

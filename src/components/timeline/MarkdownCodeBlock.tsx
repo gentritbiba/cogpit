@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, type HTMLAttributes } from "r
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { highlightCode } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
-import { copyToClipboard } from "@/lib/utils"
+import { cn, copyToClipboard } from "@/lib/utils"
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -40,7 +40,7 @@ function parseLang(className: string | undefined): string | null {
 
 // ── Copy button ─────────────────────────────────────────────────────────────
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text }: { text: string }): React.ReactElement {
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
 
@@ -78,6 +78,16 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+// ── Line number gutter (shared between highlighted and plain rendering) ──
+
+function LineNumber({ num }: { num: number }): React.ReactElement {
+  return (
+    <span className="inline-block w-8 text-right mr-3 text-muted-foreground/30 select-none text-[11px]">
+      {num}
+    </span>
+  )
+}
+
 // ── MarkdownCodeBlock component ─────────────────────────────────────────────
 
 type CodeProps = HTMLAttributes<HTMLElement> & {
@@ -86,7 +96,7 @@ type CodeProps = HTMLAttributes<HTMLElement> & {
   node?: unknown
 }
 
-export function MarkdownCodeBlock({ children, className, node: _node, ...rest }: CodeProps) {
+export function MarkdownCodeBlock({ children, className, node: _node, ...rest }: CodeProps): React.ReactElement {
   const isInline = !className && typeof children === "string" && !children.includes("\n")
   const lang = parseLang(className)
   const code = String(children).replace(/\n$/, "")
@@ -107,6 +117,8 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 
 // ── Highlighted code block with Shiki ───────────────────────────────────────
 
+type TokenLine = Array<{ content: string; color?: string }>
+
 function HighlightedCodeBlock({
   code,
   lang,
@@ -114,13 +126,13 @@ function HighlightedCodeBlock({
 }: {
   code: string
   lang: string | null
-} & HTMLAttributes<HTMLElement>) {
+} & HTMLAttributes<HTMLElement>): React.ReactElement {
   const isDark = useIsDarkMode()
-  const [tokens, setTokens] = useState<
-    Array<Array<{ content: string; color?: string }>> | null
-  >(null)
+  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
   const [collapsed, setCollapsed] = useState(false)
-  const lineCount = code.split("\n").length
+  const lines = code.split("\n")
+  const lineCount = lines.length
+  const isLong = lineCount > 30
 
   useEffect(() => {
     if (!lang) {
@@ -136,11 +148,10 @@ function HighlightedCodeBlock({
     }
   }, [code, lang, isDark])
 
-  const isLong = lineCount > 30
+  const Chevron = collapsed ? ChevronRight : ChevronDown
 
   return (
     <div className="my-3 rounded-lg border border-border/50 bg-elevation-1 overflow-hidden">
-      {/* Header bar with language label + copy button */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-elevation-2/50 border-b border-border/30">
         <div className="flex items-center gap-2">
           {isLong && (
@@ -149,11 +160,7 @@ function HighlightedCodeBlock({
               className="text-muted-foreground hover:text-foreground transition-colors"
               aria-label={collapsed ? "Expand code" : "Collapse code"}
             >
-              {collapsed ? (
-                <ChevronRight className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
+              <Chevron className="w-3.5 h-3.5" />
             </button>
           )}
           {lang && (
@@ -170,42 +177,31 @@ function HighlightedCodeBlock({
         <CopyButton text={code} />
       </div>
 
-      {/* Code content */}
       {!collapsed && (
         <div className="overflow-x-auto">
           <pre className="p-3 text-[12px] leading-[1.6] font-mono m-0">
-            {tokens ? (
-              <code className="block" {...rest}>
-                {tokens.map((line, i) => (
+            <code className={cn("block", !tokens && "text-foreground/90")} {...rest}>
+              {lines.map((line, i) => {
+                const tokenLine = tokens?.[i]
+                return (
                   <span key={i} className="block">
-                    <span className="inline-block w-8 text-right mr-3 text-muted-foreground/30 select-none text-[11px]">
-                      {i + 1}
-                    </span>
-                    {line.map((token, j) => (
-                      <span key={j} style={{ color: token.color }}>
-                        {token.content}
-                      </span>
-                    ))}
+                    <LineNumber num={i + 1} />
+                    {tokenLine
+                      ? tokenLine.map((token, j) => (
+                          <span key={j} style={{ color: token.color }}>
+                            {token.content}
+                          </span>
+                        ))
+                      : line || "\u00A0"
+                    }
                   </span>
-                ))}
-              </code>
-            ) : (
-              <code className="block text-foreground/90" {...rest}>
-                {code.split("\n").map((line, i) => (
-                  <span key={i} className="block">
-                    <span className="inline-block w-8 text-right mr-3 text-muted-foreground/30 select-none text-[11px]">
-                      {i + 1}
-                    </span>
-                    {line || "\u00A0"}
-                  </span>
-                ))}
-              </code>
-            )}
+                )
+              })}
+            </code>
           </pre>
         </div>
       )}
 
-      {/* Collapsed indicator */}
       {collapsed && (
         <button
           onClick={() => setCollapsed(false)}

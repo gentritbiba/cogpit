@@ -21,7 +21,6 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
@@ -196,14 +195,11 @@ export const DesktopHeader = memo(function DesktopHeader({
             onClick={onToggleStats}
           />
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onToggleSidebar} aria-label={showSidebar ? "Hide Sidebar" : "Show Sidebar"}>
-              {showSidebar ? <PanelLeftClose className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}</TooltipContent>
-        </Tooltip>
+        <HeaderIconButton
+          icon={showSidebar ? PanelLeftClose : ChevronRight}
+          label={showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}
+          onClick={onToggleSidebar}
+        />
       </div>
     </header>
   )

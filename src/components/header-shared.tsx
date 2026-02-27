@@ -1,5 +1,5 @@
 import { memo } from "react"
-import type { ReactNode } from "react"
+import type { ReactNode, HTMLAttributes } from "react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,14 +14,15 @@ import type { RawMessage } from "@/lib/types"
 
 // ── LiveIndicator ────────────────────────────────────────────────────────────
 
+type LiveIndicatorProps = HTMLAttributes<HTMLSpanElement>
+
 /** Pulsing green dot that indicates a live session. */
 export const LiveIndicator = memo(function LiveIndicator({
   className,
-}: {
-  className?: string
-}) {
+  ...rest
+}: LiveIndicatorProps) {
   return (
-    <span className={cn("relative flex h-2 w-2 shrink-0", className)}>
+    <span className={cn("relative flex h-2 w-2 shrink-0", className)} {...rest}>
       <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
       <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
     </span>
@@ -35,7 +36,6 @@ interface HeaderIconButtonProps {
   label: string
   onClick: () => void
   disabled?: boolean
-  active?: boolean
   className?: string
   iconClassName?: string
   size?: "sm" | "default"
@@ -51,7 +51,6 @@ export const HeaderIconButton = memo(function HeaderIconButton({
   label,
   onClick,
   disabled,
-  active,
   className,
   iconClassName,
   size = "sm",

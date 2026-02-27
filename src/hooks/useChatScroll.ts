@@ -9,6 +9,18 @@ interface UseChatScrollOpts {
   sessionChangeKey: number
 }
 
+/**
+ * Run an action immediately, then twice more across animation frames
+ * to ensure it takes effect after React renders and layout settles.
+ */
+function runAcrossFrames(action: () => void): void {
+  action()
+  requestAnimationFrame(() => {
+    action()
+    requestAnimationFrame(action)
+  })
+}
+
 export function useChatScroll({ session, isLive, pendingMessage, clearPending, sessionChangeKey }: UseChatScrollOpts) {
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const scrollEndRef = useRef<HTMLDivElement>(null)
@@ -21,20 +33,18 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
   const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
 
+  const smoothScrollToEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      scrollEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    })
+  }, [])
+
   const scrollToBottomInstant = useCallback(() => {
-    const doScroll = () => {
+    runAcrossFrames(() => {
       const el = chatScrollRef.current
       if (el) el.scrollTop = el.scrollHeight
       chatIsAtBottomRef.current = true
       chatScrollOnNextRef.current = false
-    }
-    // Scroll immediately for instant feedback
-    doScroll()
-    // Then again after next frame (React may not have rendered yet)
-    requestAnimationFrame(() => {
-      doScroll()
-      // And once more after layout settles (virtualized lists, images, etc.)
-      requestAnimationFrame(doScroll)
     })
   }, [])
 
@@ -74,7 +84,7 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     prevTurnCountRef.current = count
   }, [])
 
-  // Session changed → force scroll after React renders new content
+  // Session changed -- force scroll after React renders new content
   const prevSessionChangeKeyRef = useRef(sessionChangeKey)
   useEffect(() => {
     if (sessionChangeKey === prevSessionChangeKeyRef.current) return
@@ -95,55 +105,41 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
       }
       chatScrollOnNextRef.current = false
     }
-    doScroll()
-    requestAnimationFrame(() => {
-      doScroll()
-      requestAnimationFrame(doScroll)
-    })
+    runAcrossFrames(doScroll)
     const timer = setTimeout(doScroll, 150)
     return () => clearTimeout(timer)
   }, [sessionChangeKey])
 
-  // Pending message → scroll to bottom
+  // Pending message -- scroll to bottom
   useEffect(() => {
     if (pendingMessage) {
       chatScrollOnNextRef.current = true
-      requestAnimationFrame(() => {
-        scrollEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      })
+      smoothScrollToEnd()
     }
-  }, [pendingMessage])
+  }, [pendingMessage, smoothScrollToEnd])
 
-  // New turns → auto-scroll
+  // New turns -- auto-scroll
   const turnCount = session?.turns.length ?? 0
   useEffect(() => {
     if (turnCount === 0) return
     if (turnCount > prevTurnCountRef.current) {
-      if (pendingMessage) {
-        clearPending()
-      }
+      if (pendingMessage) clearPending()
       if (chatScrollOnNextRef.current || chatIsAtBottomRef.current) {
-        requestAnimationFrame(() => {
-          scrollEndRef.current?.scrollIntoView({ behavior: "smooth" })
-        })
+        smoothScrollToEnd()
         chatScrollOnNextRef.current = false
       }
     }
     prevTurnCountRef.current = turnCount
-  }, [turnCount, pendingMessage, clearPending])
+  }, [turnCount, pendingMessage, clearPending, smoothScrollToEnd])
 
-  // Live content → auto-scroll (keyed on turn count to avoid running on every session object change)
+  // Live content -- auto-scroll (keyed on turn count to avoid running on every session object change)
   const liveTurnCount = session?.turns.length ?? 0
   const liveLastTurnToolCount = session?.turns.at(-1)?.toolCalls.length ?? 0
   useEffect(() => {
     if (!session || !isLive) return
-    if (chatIsAtBottomRef.current) {
-      requestAnimationFrame(() => {
-        scrollEndRef.current?.scrollIntoView({ behavior: "smooth" })
-      })
-    }
+    if (chatIsAtBottomRef.current) smoothScrollToEnd()
     requestAnimationFrame(updateScrollIndicators)
-  }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators])
+  }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
 
   return {
     chatScrollRef,

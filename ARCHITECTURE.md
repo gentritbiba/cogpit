@@ -219,11 +219,11 @@ if (input.run_in_background === true) {
 **Mobile (<1024px):**
 ```
 ┌─────────────────────────┐
-│ MobileHeader            │
-├─────────────────────────┤
-│ Tabs: Browse|Chat|Stats │
+│ DesktopHeader           │
 ├─────────────────────────┤
 │ [Active tab content]    │
+├─────────────────────────┤
+│ MobileNav (tab bar)     │
 └─────────────────────────┘
 ```
 

@@ -147,8 +147,8 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     [sessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession]
   )
 
-  const interrupt = useCallback(() => {
-    // For HTTP-based approach, we stop the server-side process
+  /** Send a stop request to the server for the current session. */
+  const sendStopRequest = useCallback(() => {
     if (!sessionId) return
     authFetch("/api/stop-session", {
       method: "POST",
@@ -156,24 +156,18 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       body: JSON.stringify({ sessionId }),
     }).catch(() => {})
   }, [sessionId])
+
+  const interrupt = useCallback(() => {
+    sendStopRequest()
+  }, [sendStopRequest])
 
   const stopAgent = useCallback(() => {
-    if (!sessionId) return
-
-    // Abort the fetch request
     activeAbortRef.current?.abort()
     activeAbortRef.current = null
-
-    // Kill the server-side process
-    authFetch("/api/stop-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    }).catch(() => {})
-
+    sendStopRequest()
     setStatus("idle")
     setPendingMessage(null)
-  }, [sessionId])
+  }, [sendStopRequest])
 
   const clearPending = useCallback(() => {
     setPendingMessage(null)

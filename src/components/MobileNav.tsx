@@ -1,9 +1,18 @@
 import { memo } from "react"
+import type { LucideIcon } from "lucide-react"
 import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
 
 export type MobileTab = "chat" | "sessions" | "stats" | "teams"
+
+interface TabDefinition {
+  id: MobileTab
+  label: string
+  icon: LucideIcon
+  requiresSession?: boolean
+  requiresTeam?: boolean
+}
 
 interface MobileNavProps {
   activeTab: MobileTab
@@ -13,7 +22,7 @@ interface MobileNavProps {
   isLive?: boolean
 }
 
-const TAB_DEFINITIONS: { id: MobileTab; label: string; icon: typeof MessageSquare; requiresSession?: boolean; requiresTeam?: boolean }[] = [
+const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "sessions", label: "Sessions", icon: FolderOpen },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "stats", label: "Stats", icon: BarChart3, requiresSession: true },

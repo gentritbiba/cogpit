@@ -122,17 +122,11 @@ export function parseSubAgentPath(fileName: string): {
 // Compaction fires at roughly (limit - buffer), not at the absolute limit.
 const AUTO_COMPACT_BUFFER = 33_000
 
-const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "opus": 200_000,
-  "sonnet": 200_000,
-  "haiku": 200_000,
-}
+/** All current Claude models share a 200k context window. */
+const DEFAULT_CONTEXT_LIMIT = 200_000
 
-export function getContextLimit(model: string): number {
-  for (const key of Object.keys(MODEL_CONTEXT_LIMITS)) {
-    if (model.includes(key)) return MODEL_CONTEXT_LIMITS[key]
-  }
-  return 200_000
+export function getContextLimit(_model: string): number {
+  return DEFAULT_CONTEXT_LIMIT
 }
 
 export interface ContextUsage {

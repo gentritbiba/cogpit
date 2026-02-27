@@ -71,20 +71,29 @@ const MODEL_TIERS: Array<{ match: string; tier: PricingTier; extendedTier?: Pric
 const DEFAULT_TIER = TIER_SONNET_LATEST
 const DEFAULT_EXTENDED_TIER = TIER_EXTENDED
 
+// Generic fallbacks by model family (when no specific version matches)
+const FAMILY_FALLBACKS: Array<{ match: string; tier: PricingTier }> = [
+  { match: "haiku", tier: TIER_HAIKU_45 },
+  { match: "sonnet", tier: TIER_SONNET_LATEST },
+  { match: "opus", tier: TIER_SONNET_LATEST },
+]
+
 function resolveTier(model: string, totalInputTokens?: number): PricingTier {
   const isExtended = (totalInputTokens ?? 0) > EXTENDED_CONTEXT_THRESHOLD
+
+  // Try specific model versions first
   for (const entry of MODEL_TIERS) {
     if (model.includes(entry.match)) {
-      if (isExtended && entry.extendedTier) return entry.extendedTier
-      return entry.tier
+      return (isExtended && entry.extendedTier) ? entry.extendedTier : entry.tier
     }
   }
-  // Generic fallbacks
-  if (model.includes("haiku")) return TIER_HAIKU_45
-  if (model.includes("sonnet")) return TIER_SONNET_LATEST
-  if (model.includes("opus")) return TIER_SONNET_LATEST
-  if (isExtended) return DEFAULT_EXTENDED_TIER
-  return DEFAULT_TIER
+
+  // Fall back to model family
+  for (const entry of FAMILY_FALLBACKS) {
+    if (model.includes(entry.match)) return entry.tier
+  }
+
+  return isExtended ? DEFAULT_EXTENDED_TIER : DEFAULT_TIER
 }
 
 // ── Cost Calculation ─────────────────────────────────────────────────────────
@@ -136,22 +145,36 @@ export function calculateTurnCost(
 // event — a placeholder that does NOT include the final count.  Thinking tokens
 // are never included.  We estimate real output from actual content.
 
+/** Convert character count to approximate token count. */
+function charsToTokens(chars: number): number {
+  return Math.ceil(chars / CHARS_PER_TOKEN)
+}
+
+/** Sum string lengths from an array. */
+function totalLength(strings: readonly string[]): number {
+  let n = 0
+  for (const s of strings) n += s.length
+  return n
+}
+
+/** Sum JSON-stringified input lengths from tool calls. */
+function totalToolInputLength(toolCalls: readonly { input: Record<string, unknown> }[]): number {
+  let n = 0
+  for (const tc of toolCalls) n += JSON.stringify(tc.input).length
+  return n
+}
+
 /** Estimate thinking tokens from a turn's thinking blocks. */
 export function estimateThinkingTokens(turn: Turn): number {
-  let chars = 0
-  for (const block of turn.thinking) chars += block.thinking.length
-  return Math.ceil(chars / CHARS_PER_TOKEN)
+  return charsToTokens(totalLength(turn.thinking.map((b) => b.thinking)))
 }
 
 /** Estimate non-thinking output tokens (text + tool use JSON). */
 export function estimateVisibleOutputTokens(turn: Turn): number {
-  let chars = 0
-  for (const text of turn.assistantText) chars += text.length
-  for (const tc of turn.toolCalls) chars += JSON.stringify(tc.input).length
-  return Math.ceil(chars / CHARS_PER_TOKEN)
+  return charsToTokens(totalLength(turn.assistantText) + totalToolInputLength(turn.toolCalls))
 }
 
-/** Estimate total output tokens (thinking + visible).  Uses max(estimated, reported). */
+/** Estimate total output tokens (thinking + visible). Uses max(estimated, reported). */
 export function estimateTotalOutputTokens(turn: Turn): number {
   const estimated = estimateThinkingTokens(turn) + estimateVisibleOutputTokens(turn)
   return Math.max(estimated, turn.tokenUsage?.output_tokens ?? 0)
@@ -159,11 +182,8 @@ export function estimateTotalOutputTokens(turn: Turn): number {
 
 /** Estimate output tokens for a sub-agent message. */
 export function estimateSubAgentOutput(sa: SubAgentMessage): number {
-  let chars = 0
-  for (const t of sa.thinking) chars += t.length
-  for (const t of sa.text) chars += t.length
-  for (const tc of sa.toolCalls) chars += JSON.stringify(tc.input).length
-  return Math.max(Math.ceil(chars / CHARS_PER_TOKEN), sa.tokenUsage?.output_tokens ?? 0)
+  const chars = totalLength(sa.thinking) + totalLength(sa.text) + totalToolInputLength(sa.toolCalls)
+  return Math.max(charsToTokens(chars), sa.tokenUsage?.output_tokens ?? 0)
 }
 
 // ── Turn-level cost helpers ──────────────────────────────────────────────────
