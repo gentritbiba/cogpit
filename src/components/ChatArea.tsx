@@ -12,7 +12,7 @@ import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { useAppContext } from "@/contexts/AppContext"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
 
 interface ChatAreaProps {
@@ -23,7 +23,8 @@ export const ChatArea = memo(function ChatArea({
   searchInputRef,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
-  const { session, chat, scroll, actions } = useSessionContext()
+  const { session, actions } = useSessionContext()
+  const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery, expandAll } = state
   const { pendingMessage, isConnected } = chat
@@ -86,7 +87,7 @@ export const ChatArea = memo(function ChatArea({
           <div className={isMobile ? "py-3 px-1" : "mx-auto max-w-4xl py-4"}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
-                <ConversationTimeline />
+                <ConversationTimeline chatScrollRef={chatScrollRef} />
               )}
               {pendingMessage && (
                 <PendingTurnPreview

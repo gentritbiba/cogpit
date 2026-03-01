@@ -9,12 +9,14 @@ export interface PanelState {
   showSidebar: boolean
   showStats: boolean
   showWorktrees: boolean
+  showFileChanges: boolean
   showProjectSwitcher: boolean
   showThemeSelector: boolean
 
   handleToggleSidebar: () => void
   handleToggleStats: () => void
   handleToggleWorktrees: () => void
+  handleToggleFileChanges: () => void
   handleToggleConfig: () => void
   handleEditConfig: (filePath: string) => void
   handleOpenProjectSwitcher: () => void
@@ -33,12 +35,14 @@ export function usePanelState(
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(true)
   const [showWorktrees, setShowWorktrees] = useState(false)
+  const [showFileChanges, setShowFileChanges] = useState(true)
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
 
   const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
   const handleToggleStats = useCallback(() => setShowStats((p) => !p), [])
   const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [])
+  const handleToggleFileChanges = useCallback(() => setShowFileChanges((p) => !p), [])
   const handleToggleConfig = useCallback(() => {
     if (state.mainView === "config") {
       dispatch({ type: "CLOSE_CONFIG" })
@@ -58,11 +62,13 @@ export function usePanelState(
     showSidebar,
     showStats,
     showWorktrees,
+    showFileChanges,
     showProjectSwitcher,
     showThemeSelector,
     handleToggleSidebar,
     handleToggleStats,
     handleToggleWorktrees,
+    handleToggleFileChanges,
     handleToggleConfig,
     handleEditConfig,
     handleOpenProjectSwitcher,

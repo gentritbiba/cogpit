@@ -54,6 +54,18 @@ interface BaseMessage {
   slug?: string
 }
 
+/** Summary result from an Agent/Task tool call (new format, v2.1.63+) */
+export interface AgentToolUseResult {
+  status: string
+  prompt: string
+  agentId: string
+  content: ContentBlock[]
+  totalDurationMs?: number
+  totalTokens?: number
+  totalToolUseCount?: number
+  usage?: TokenUsage
+}
+
 export interface UserMessage extends BaseMessage {
   type: "user"
   message: {
@@ -63,7 +75,7 @@ export interface UserMessage extends BaseMessage {
   isMeta?: boolean
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
-  toolUseResult?: unknown
+  toolUseResult?: AgentToolUseResult
   sourceToolAssistantUUID?: string
 }
 
@@ -167,6 +179,11 @@ export interface SubAgentMessage {
   tokenUsage: TokenUsage | null
   model: string | null
   isBackground: boolean
+  /** Summary fields from toolUseResult (new format, v2.1.63+) */
+  prompt?: string
+  status?: string
+  durationMs?: number
+  toolUseCount?: number
 }
 
 /** Ordered content block within a turn – preserves chronological order */

@@ -25,6 +25,8 @@ import {
   metadataSession,
   compactionSession,
   subAgentSession,
+  agentToolSession,
+  backgroundAgentToolSession,
 } from "@/__tests__/fixtures"
 
 beforeEach(() => {
@@ -1263,6 +1265,98 @@ describe("sub-agent progress parsing", () => {
     expect(subMsgs.length).toBeGreaterThan(0)
     expect(subMsgs[0].agentName).toBeNull()
     expect(subMsgs[0].subagentType).toBeNull()
+  })
+})
+
+// ── New Agent tool format (v2.1.63+) ─────────────────────────────────────
+
+describe("Agent tool with toolUseResult (new format)", () => {
+  it("creates sub_agent content block from toolUseResult", () => {
+    const session = parseSession(agentToolSession())
+    const turn = session.turns[0]
+    const subAgentBlocks = turn.contentBlocks.filter((b) => b.kind === "sub_agent")
+    expect(subAgentBlocks).toHaveLength(1)
+    expect(subAgentBlocks[0].messages).toHaveLength(1)
+    expect(subAgentBlocks[0].messages[0].agentId).toBe("agent-new-1")
+  })
+
+  it("extracts text from toolUseResult content", () => {
+    const session = parseSession(agentToolSession())
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs).toHaveLength(1)
+    expect(subMsgs[0].text).toEqual(["Here are the research findings."])
+  })
+
+  it("preserves agent name and subagent type from Agent tool input", () => {
+    const session = parseSession(agentToolSession())
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs[0].agentName).toBe("researcher")
+    expect(subMsgs[0].subagentType).toBe("Explore")
+  })
+
+  it("includes summary stats from toolUseResult", () => {
+    const session = parseSession(agentToolSession())
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs[0].durationMs).toBe(5000)
+    expect(subMsgs[0].toolUseCount).toBe(3)
+    expect(subMsgs[0].status).toBe("completed")
+    expect(subMsgs[0].prompt).toBe("Research the topic thoroughly")
+  })
+
+  it("extracts token usage from toolUseResult", () => {
+    const session = parseSession(agentToolSession())
+    const subMsgs = session.turns[0].subAgentActivity
+    expect(subMsgs[0].tokenUsage).toEqual({
+      input_tokens: 10000,
+      output_tokens: 5000,
+      cache_creation_input_tokens: 100,
+      cache_read_input_tokens: 200,
+    })
+  })
+
+  it("creates background_agent block when run_in_background is true", () => {
+    const session = parseSession(backgroundAgentToolSession())
+    const turn = session.turns[0]
+    const bgBlocks = turn.contentBlocks.filter((b) => b.kind === "background_agent")
+    expect(bgBlocks).toHaveLength(1)
+    expect(bgBlocks[0].messages[0].isBackground).toBe(true)
+    expect(bgBlocks[0].messages[0].agentId).toBe("agent-bg-1")
+  })
+
+  it("does not duplicate sub_agent block when old-format progress also exists", () => {
+    // If a session somehow has both agent_progress AND toolUseResult,
+    // we should only create one block (the old format takes precedence)
+    const agentToolId = "agent_dual_1"
+    const jsonl = toJsonl([
+      userMsg("Dual format"),
+      toolUseAssistant("Agent", { prompt: "Test", subagent_type: "Explore" }, agentToolId),
+      agentProgressMsg("agent-d", agentToolId, "assistant", [
+        { type: "text", text: "Progress message" },
+      ]),
+      {
+        ...toolResultMsg(agentToolId, "Done"),
+        toolUseResult: {
+          status: "completed",
+          prompt: "Test",
+          agentId: "agent-d",
+          content: [{ type: "text", text: "Result" }],
+          totalDurationMs: 1000,
+          totalTokens: 500,
+          totalToolUseCount: 0,
+        },
+      },
+      textAssistant("Done"),
+    ])
+    const session = parseSession(jsonl)
+    const turn = session.turns[0]
+    const subBlocks = turn.contentBlocks.filter((b) => b.kind === "sub_agent")
+    // Only one sub_agent block should exist (from the old-format progress)
+    expect(subBlocks).toHaveLength(1)
+  })
+
+  it("assigns Agent tool the correct color", () => {
+    expect(getToolColor("Agent")).toBe("text-indigo-400")
+    expect(getToolColor("Task")).toBe("text-indigo-400")
   })
 })
 

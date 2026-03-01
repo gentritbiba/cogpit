@@ -1,4 +1,4 @@
-import { memo } from "react"
+import { memo, useRef, useLayoutEffect } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -56,7 +56,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       expandAll={expandAll}
       isAgentActive={isLive && session !== null && index === session.turns.length - 1}
       isSubAgentView={isSubAgentView}
-      onRestoreToHere={undoRedo.requestUndo}
+      onRestoreToHere={isSubAgentView ? undefined : undoRedo.requestUndo}
       onOpenBranches={actions.handleOpenBranches}
       onEditCommand={actions.handleEditCommand}
       onExpandCommand={actions.handleExpandCommand}
@@ -97,11 +97,22 @@ const TurnSectionInner = memo(function TurnSectionInner({
 }: TurnSectionInnerProps) {
   const { ref, isNear } = useNearViewport()
 
+  // Measure actual content height while visible so the placeholder preserves it
+  // exactly when the turn scrolls out of the viewport zone (prevents scroll jumping).
+  const contentRef = useRef<HTMLDivElement>(null)
+  const lastHeightRef = useRef(0)
+
+  useLayoutEffect(() => {
+    if (isNear && contentRef.current) {
+      lastHeightRef.current = contentRef.current.offsetHeight
+    }
+  }, [isNear])
+
   return (
     <div
       ref={ref}
       className={cn(
-        "group relative py-5 px-4 transition-colors",
+        "group relative py-5 px-4",
         isActive && "ring-1 ring-blue-500/30",
       )}
     >
@@ -114,7 +125,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       />
 
       {isNear ? (
-        <div className="space-y-4">
+        <div ref={contentRef} className="space-y-4">
           {turn.userMessage && (
             <div className={cn("rounded-lg p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
               <UserMessage
@@ -138,18 +149,16 @@ const TurnSectionInner = memo(function TurnSectionInner({
           />
         </div>
       ) : (
-        <TurnPlaceholder turn={turn} />
+        <div style={{ minHeight: lastHeightRef.current || estimateTurnHeight(turn) }} />
       )}
     </div>
   )
 })
 
-// ── Lightweight placeholder for turns outside the viewport zone ──────────────
+// ── Height estimation for turns that haven't been measured yet ────────────────
 
-function TurnPlaceholder({ turn }: { turn: Turn }) {
-  // Estimate height based on content to minimize layout shift when scrolling
-  const estimatedHeight = (turn.userMessage ? 40 : 0) + turn.contentBlocks.length * 60
-  return <div style={{ minHeight: Math.max(60, estimatedHeight) }} />
+function estimateTurnHeight(turn: Turn): number {
+  return Math.max(60, (turn.userMessage ? 40 : 0) + turn.contentBlocks.length * 60)
 }
 
 // ── Turn header ──────────────────────────────────────────────────────────────

@@ -211,6 +211,7 @@ const TOOL_COLORS: Record<string, string> = {
   Grep: "text-purple-400",
   Glob: "text-cyan-400",
   Task: "text-indigo-400",
+  Agent: "text-indigo-400",
   WebFetch: "text-orange-400",
   WebSearch: "text-orange-400",
   NotebookEdit: "text-green-400",

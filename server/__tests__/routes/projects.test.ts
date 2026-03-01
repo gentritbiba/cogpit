@@ -9,6 +9,7 @@ vi.mock("../../helpers", () => ({
   isWithinDir: vi.fn(),
   projectDirToReadableName: vi.fn(),
   getSessionMeta: vi.fn(),
+  getSessionStatus: vi.fn().mockResolvedValue({ status: "idle" }),
   readdir: vi.fn(),
   readFile: vi.fn(),
   stat: vi.fn(),
@@ -19,6 +20,7 @@ import {
   isWithinDir,
   projectDirToReadableName,
   getSessionMeta,
+  getSessionStatus,
   readdir,
   readFile,
   stat,
@@ -27,6 +29,7 @@ import {
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedProjectDirToReadableName = vi.mocked(projectDirToReadableName)
 const mockedGetSessionMeta = vi.mocked(getSessionMeta)
+const mockedGetSessionStatus = vi.mocked(getSessionStatus)
 const mockedReaddir = vi.mocked(readdir)
 const mockedReadFile = vi.mocked(readFile)
 const mockedStat = vi.mocked(stat)
@@ -62,6 +65,8 @@ describe("project routes", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    // getSessionStatus always returns idle by default
+    mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)

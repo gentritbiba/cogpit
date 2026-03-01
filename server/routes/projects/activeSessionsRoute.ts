@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { dirs, projectDirToReadableName, getSessionMeta, searchSessionMessages, readdir, stat, join } from "../../helpers"
+import { dirs, projectDirToReadableName, getSessionMeta, getSessionStatus, searchSessionMessages, readdir, stat, join } from "../../helpers"
 import type { NextFn } from "../../helpers"
 
 export async function handleActiveSessions(
@@ -67,7 +67,10 @@ export async function handleActiveSessions(
     const results = await Promise.all(
       scanPool.map(async (c) => {
         try {
-          const meta = await getSessionMeta(c.filePath)
+          const [meta, statusInfo] = await Promise.all([
+            getSessionMeta(c.filePath),
+            getSessionStatus(c.filePath),
+          ])
           const { shortName } = projectDirToReadableName(c.dirName)
           const lastModified = new Date(c.mtimeMs).toISOString()
 
@@ -104,6 +107,8 @@ export async function handleActiveSessions(
             turnCount: meta.turnCount,
             size: c.size,
             isActive: now - c.mtimeMs < 5 * 60 * 1000,
+            agentStatus: statusInfo.status,
+            agentToolName: statusInfo.toolName,
             ...(matchedMessage !== undefined && { matchedMessage }),
           }
         } catch {

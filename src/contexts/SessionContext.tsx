@@ -35,7 +35,7 @@ export interface ScrollState {
   resetTurnCount: (count: number) => void
 }
 
-// ── Combined Session Context ────────────────────────────────────────────────
+// ── Session Context (stable — session data, undo/redo, actions) ─────────────
 
 export interface SessionContextValue {
   /** The parsed session data (null when no session is loaded) */
@@ -46,10 +46,6 @@ export interface SessionContextValue {
   isLive: boolean
   /** SSE connection state */
   sseState: SseConnectionState
-  /** Pty chat state and actions */
-  chat: ChatState
-  /** Scroll management for the chat area */
-  scroll: ScrollState
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */
@@ -73,25 +69,47 @@ export interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null)
 
-// ── Provider ────────────────────────────────────────────────────────────────
+// ── Session Chat Context (volatile — chat status, scroll indicators) ────────
+
+export interface SessionChatContextValue {
+  chat: ChatState
+  scroll: ScrollState
+}
+
+const SessionChatContext = createContext<SessionChatContextValue | null>(null)
+
+// ── Providers ────────────────────────────────────────────────────────────────
 
 interface SessionProviderProps {
   value: SessionContextValue
+  chatValue: SessionChatContextValue
   children: ReactNode
 }
 
-export function SessionProvider({ value, children }: SessionProviderProps): ReactNode {
+export function SessionProvider({ value, chatValue, children }: SessionProviderProps): ReactNode {
   return (
-    <SessionContext.Provider value={value}>{children}</SessionContext.Provider>
+    <SessionContext.Provider value={value}>
+      <SessionChatContext.Provider value={chatValue}>
+        {children}
+      </SessionChatContext.Provider>
+    </SessionContext.Provider>
   )
 }
 
-// ── Hook ────────────────────────────────────────────────────────────────────
+// ── Hooks ────────────────────────────────────────────────────────────────────
 
 export function useSessionContext(): SessionContextValue {
   const ctx = useContext(SessionContext)
   if (!ctx) {
     throw new Error("useSessionContext must be used within a SessionProvider")
+  }
+  return ctx
+}
+
+export function useSessionChatContext(): SessionChatContextValue {
+  const ctx = useContext(SessionChatContext)
+  if (!ctx) {
+    throw new Error("useSessionChatContext must be used within a SessionProvider")
   }
   return ctx
 }

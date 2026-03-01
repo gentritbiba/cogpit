@@ -1,4 +1,4 @@
-import { useMemo, memo } from "react"
+import { useMemo, memo, type RefObject } from "react"
 import { VirtualizedTimeline, NonVirtualTimeline } from "./timeline/VirtualizedTimeline"
 import { matchesSearch } from "@/lib/timelineHelpers"
 import { useAppContext } from "@/contexts/AppContext"
@@ -9,9 +9,15 @@ const VIRTUALIZE_THRESHOLD = 15
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export const ConversationTimeline = memo(function ConversationTimeline() {
+interface ConversationTimelineProps {
+  chatScrollRef: RefObject<HTMLDivElement | null>
+}
+
+export const ConversationTimeline = memo(function ConversationTimeline({
+  chatScrollRef,
+}: ConversationTimelineProps) {
   const { state: { searchQuery } } = useAppContext()
-  const { session, scroll: { chatScrollRef } } = useSessionContext()
+  const { session } = useSessionContext()
 
   const turns = session?.turns
   const allTurns = useMemo(

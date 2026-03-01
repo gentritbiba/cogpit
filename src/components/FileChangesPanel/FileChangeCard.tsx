@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useLayoutEffect } from "react"
+import { useNearViewport } from "@/hooks/useNearViewport"
 import { ChevronDown, ChevronRight, Trash2, CheckCircle, XCircle, Code2, GitCompareArrows } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -24,6 +25,7 @@ interface FileChangeCardProps {
 }
 
 export function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: FileChangeCardProps) {
+  const { ref, isNear } = useNearViewport()
   const [open, setOpen] = useState(defaultOpen)
   const prevDefaultRef = useRef(defaultOpen)
   useEffect(() => {
@@ -41,8 +43,21 @@ export function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: Fi
     ? String(toolCall.input.new_string ?? "")
     : String(toolCall.input.content ?? "")
 
+  // Only mount the expensive EditDiffView (LCS + Shiki) when near viewport.
+  // When the diff unmounts, preserve its last measured height as a placeholder
+  // so the scroll container's total height stays stable (prevents scroll jumping).
+  const showDiff = open && isNear
+  const diffRef = useRef<HTMLDivElement>(null)
+  const lastDiffHeightRef = useRef(0)
+
+  useLayoutEffect(() => {
+    if (showDiff && diffRef.current) {
+      lastDiffHeightRef.current = diffRef.current.offsetHeight
+    }
+  }, [showDiff])
+
   return (
-    <div className="rounded-md border border-border elevation-2 depth-low">
+    <div ref={ref} data-file-change className="rounded-md border border-border elevation-2 depth-low">
       <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t-md hover:bg-elevation-3 transition-colors group">
         <button
           onClick={() => setOpen(!open)}
@@ -115,8 +130,8 @@ export function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: Fi
           ) : null}
         </div>
       </div>
-      {open && (
-        <div className="overflow-hidden rounded-b-md">
+      {showDiff ? (
+        <div ref={diffRef} className="overflow-hidden rounded-b-md">
           <EditDiffView
             oldString={oldString}
             newString={newString}
@@ -124,7 +139,9 @@ export function FileChangeCard({ turnIndex, toolCall, agentId, defaultOpen }: Fi
             compact={false}
           />
         </div>
-      )}
+      ) : open && lastDiffHeightRef.current > 0 ? (
+        <div style={{ height: lastDiffHeightRef.current }} />
+      ) : null}
     </div>
   )
 }

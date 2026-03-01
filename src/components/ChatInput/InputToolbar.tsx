@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import type { VoiceStatus } from "./useVoiceInput"
 import { getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
 
@@ -18,7 +18,7 @@ export function InputToolbar({
   isUserQuestion,
   elapsedSec,
 }: InputToolbarProps) {
-  const { chat: { isConnected } } = useSessionContext()
+  const { chat: { isConnected } } = useSessionChatContext()
 
   return (
     <>
@@ -57,10 +57,8 @@ export function ActionButtons({
   onToggleVoice,
   onSubmit,
 }: ActionButtonsProps) {
-  const {
-    chat: { isConnected, interrupt: onInterrupt },
-    actions: { handleStopSession: onStopSession },
-  } = useSessionContext()
+  const { actions: { handleStopSession: onStopSession } } = useSessionContext()
+  const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
 
   return (
     <>

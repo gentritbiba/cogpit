@@ -26,11 +26,11 @@ function MaybeContextMenuTurn({
   index: number
   children: React.ReactNode
 }) {
-  const { undoRedo, actions } = useSessionContext()
+  const { isSubAgentView, undoRedo, actions } = useSessionContext()
   const { requestUndo, branchesAtTurn } = undoRedo
   const { handleOpenBranches, handleBranchFromHere } = actions
 
-  if (!requestUndo || !handleOpenBranches) {
+  if (isSubAgentView || !requestUndo || !handleOpenBranches) {
     return <>{children}</>
   }
 
@@ -50,11 +50,11 @@ function MaybeContextMenuTurn({
 // ── Redo section ─────────────────────────────────────────────────────────────
 
 function RedoSection() {
-  const { session, undoRedo } = useSessionContext()
+  const { session, isSubAgentView, undoRedo } = useSessionContext()
   const { canRedo, redoTurnCount, redoGhostTurns, requestRedoAll, requestRedoUpTo } = undoRedo
   const sessionTurnCount = session?.turns.length ?? 0
 
-  if (!canRedo || !requestRedoAll) return null
+  if (isSubAgentView || !canRedo || !requestRedoAll) return null
   return (
     <>
       <UndoRedoBar

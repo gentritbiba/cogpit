@@ -1,6 +1,7 @@
 import { useState, memo, useMemo } from "react"
-import { Users, ChevronRight, ChevronDown } from "lucide-react"
+import { Users, ChevronRight, ChevronDown, Clock, Wrench, CheckCircle2, XCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatDuration } from "@/lib/format"
 import type { SubAgentMessage } from "@/lib/types"
 import { buildAgentLabelMap } from "./agent-utils"
 import { AgentMessageItem } from "./AgentMessageItem"
@@ -47,6 +48,21 @@ export const AgentPanel = memo(function AgentPanel({
   const agentColorMap = useMemo(() => new Map(agentIds.map((id, i) => [id, colors[i % colors.length]])), [agentIds, colors])
   const agentLabelMap = useMemo(() => buildAgentLabelMap(messages), [messages])
 
+  // Aggregate summary stats from new-format messages (toolUseResult)
+  const summaryStats = useMemo(() => {
+    let totalDuration = 0
+    let totalToolUses = 0
+    let hasSummary = false
+    let allCompleted = true
+    for (const m of messages) {
+      if (m.durationMs != null) { totalDuration += m.durationMs; hasSummary = true }
+      if (m.toolUseCount != null) totalToolUses += m.toolUseCount
+      if (m.status && m.status !== "completed") allCompleted = false
+    }
+    if (!hasSummary) return null
+    return { totalDuration, totalToolUses, allCompleted }
+  }, [messages])
+
   if (messages.length === 0) return null
 
   return (
@@ -76,9 +92,27 @@ export const AgentPanel = memo(function AgentPanel({
             </span>
           )
         })}
-        <span className="text-[10px] text-muted-foreground">
-          ({messages.length} message{messages.length > 1 ? "s" : ""})
-        </span>
+        {summaryStats ? (
+          <span className="text-[10px] text-muted-foreground inline-flex items-center gap-2">
+            {summaryStats.allCompleted
+              ? <CheckCircle2 className="w-3 h-3 text-green-400" />
+              : <XCircle className="w-3 h-3 text-red-400" />}
+            <span className="inline-flex items-center gap-0.5">
+              <Clock className="w-3 h-3" />
+              {formatDuration(summaryStats.totalDuration)}
+            </span>
+            {summaryStats.totalToolUses > 0 && (
+              <span className="inline-flex items-center gap-0.5">
+                <Wrench className="w-3 h-3" />
+                {summaryStats.totalToolUses}
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">
+            ({messages.length} message{messages.length > 1 ? "s" : ""})
+          </span>
+        )}
         {isOpen
           ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground ml-auto" />
           : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground ml-auto" />

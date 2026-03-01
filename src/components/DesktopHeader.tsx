@@ -13,6 +13,7 @@ import {
   WifiOff,
   GitBranch,
   SlidersHorizontal,
+  FileCode2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -31,11 +32,14 @@ interface DesktopHeaderProps {
   showSidebar: boolean
   showStats: boolean
   showWorktrees?: boolean
+  showFileChanges?: boolean
+  hasFileChanges?: boolean
   killing: boolean
   onGoHome: () => void
   onToggleSidebar: () => void
   onToggleStats: () => void
   onToggleWorktrees?: () => void
+  onToggleFileChanges?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
   showConfig?: boolean
@@ -46,11 +50,14 @@ export const DesktopHeader = memo(function DesktopHeader({
   showSidebar,
   showStats,
   showWorktrees,
+  showFileChanges,
+  hasFileChanges,
   killing,
   onGoHome,
   onToggleSidebar,
   onToggleStats,
   onToggleWorktrees,
+  onToggleFileChanges,
   onKillAll,
   onOpenSettings,
   showConfig,
@@ -181,6 +188,15 @@ export const DesktopHeader = memo(function DesktopHeader({
             label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
             onClick={onToggleWorktrees}
             className={showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
+          />
+        )}
+        {hasFileChanges && onToggleFileChanges && (
+          <HeaderIconButton
+            icon={FileCode2}
+            label={showFileChanges ? "Hide File Changes" : "Show File Changes"}
+            onClick={onToggleFileChanges}
+            className={showFileChanges ? "text-amber-400" : "text-muted-foreground hover:text-foreground"}
+            iconClassName={showFileChanges ? "text-amber-400" : undefined}
           />
         )}
         {session && (

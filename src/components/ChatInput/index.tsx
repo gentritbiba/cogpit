@@ -2,9 +2,10 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeH
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
-import { useSessionContext } from "@/contexts/SessionContext"
+import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
+import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { UserQuestionBar } from "./UserQuestionBar"
 import { useVoiceInput } from "./useVoiceInput"
@@ -36,14 +37,39 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
 }
 
+function AgentStatusBar({ status, toolName }: { status: string; toolName?: string }) {
+  const label = getStatusLabel(status as "idle" | "thinking" | "tool_use" | "processing", toolName)
+  if (!label) return null
+
+  const dotColor = status === "tool_use" ? "bg-blue-400" : "bg-amber-400"
+
+  return (
+    <div className="flex items-center gap-2 mb-1.5 px-1">
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", dotColor)} />
+        <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotColor)} />
+      </span>
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+    </div>
+  )
+}
+
 export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
   const {
-    chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt },
+    session,
+    isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
     slashSuggestions,
     slashSuggestionsLoading,
   } = useSessionContext()
+  const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
+
+  // Derive agent status from raw messages — no stored state
+  const agentStatus = useMemo(() => {
+    if (!session || !isLive) return null
+    return deriveSessionStatus(session.rawMessages as Array<{ type: string; [key: string]: unknown }>)
+  }, [session, isLive])
 
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -137,6 +163,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
       )}
 
       <div className="mx-auto max-w-3xl">
+        {agentStatus && agentStatus.status !== "idle" && (
+          <AgentStatusBar status={agentStatus.status} toolName={agentStatus.toolName} />
+        )}
+
         {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
         {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={onSend} />}
 

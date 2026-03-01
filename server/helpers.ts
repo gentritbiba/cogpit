@@ -306,7 +306,7 @@ export {
   authMiddleware,
 } from "./security"
 
-export { getSessionMeta, searchSessionMessages } from "./sessionMetadata"
+export { getSessionMeta, getSessionStatus, searchSessionMessages } from "./sessionMetadata"
 export { watchSubagents } from "./subagentWatcher"
 export type { SubagentWatcher } from "./subagentWatcher"
 

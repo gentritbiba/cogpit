@@ -275,6 +275,13 @@
   contain: layout style;
 }
 
+/* Kill all CSS transitions inside panels while the resize handle is being
+   dragged. Prevents the browser from computing transition frames for every
+   element during continuous resize. */
+[data-panel-group]:has([data-resize-handle-active]) [data-panel] * {
+  transition: none !important;
+}
+
 /* Smooth transitions */
 .transition-smooth {
   transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),

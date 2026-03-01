@@ -60,7 +60,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { AppProvider } from "@/contexts/AppContext"
-import { SessionProvider, type SessionContextValue } from "@/contexts/SessionContext"
+import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 
 export default function App() {
   const config = useAppConfig()
@@ -147,6 +147,14 @@ export default function App() {
       turn.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write")
     )
   }, [state.session])
+
+  // Track whether the file changes panel has been collapsed via drag
+  const [fileChangesCollapsed, setFileChangesCollapsed] = useState(false)
+  const handleFileChangesPanelCollapse = useCallback(() => setFileChangesCollapsed(true), [])
+  const handleFileChangesPanelExpand = useCallback(() => setFileChangesCollapsed(false), [])
+
+  // Whether to actually show the file changes panel (toggle on + has changes)
+  const showFileChangesPanel = hasFileChanges && panels.showFileChanges
 
   // Detect pending interactive prompts (plan approval, user questions)
   const pendingInteractionRef = useRef<ReturnType<typeof detectPendingInteraction>>(null)
@@ -385,22 +393,13 @@ export default function App() {
     isMobile,
   }), [state, dispatch, config, themeCtx, networkAuth, isMobile])
 
+  // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
+  // so timeline components don't re-render when chat status or scroll indicators change.
   const sessionContextValue = useMemo<SessionContextValue>(() => ({
     session: state.session,
     sessionSource: state.sessionSource,
     isLive,
     sseState,
-    chat: {
-      status: claudeChat.status,
-      error: claudeChat.error,
-      pendingMessage: claudeChat.pendingMessage,
-      isConnected: claudeChat.isConnected,
-      sendMessage: claudeChat.sendMessage,
-      interrupt: claudeChat.interrupt,
-      stopAgent: claudeChat.stopAgent,
-      clearPending: claudeChat.clearPending,
-    },
-    scroll,
     undoRedo,
     pendingInteraction,
     isSubAgentView,
@@ -418,12 +417,30 @@ export default function App() {
   }), [
     state.session, state.sessionSource,
     isLive, sseState,
-    claudeChat.status, claudeChat.error, claudeChat.pendingMessage, claudeChat.isConnected,
-    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
-    scroll, undoRedo, pendingInteraction, isSubAgentView,
+    undoRedo, pendingInteraction, isSubAgentView,
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
+  ])
+
+  // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
+  // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
+  const sessionChatValue = useMemo<SessionChatContextValue>(() => ({
+    chat: {
+      status: claudeChat.status,
+      error: claudeChat.error,
+      pendingMessage: claudeChat.pendingMessage,
+      isConnected: claudeChat.isConnected,
+      sendMessage: claudeChat.sendMessage,
+      interrupt: claudeChat.interrupt,
+      stopAgent: claudeChat.stopAgent,
+      clearPending: claudeChat.clearPending,
+    },
+    scroll,
+  }), [
+    claudeChat.status, claudeChat.error, claudeChat.pendingMessage, claudeChat.isConnected,
+    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
+    scroll,
   ])
 
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
@@ -546,7 +563,7 @@ export default function App() {
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
-      <SessionProvider value={sessionContextValue}>
+      <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         <main className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
@@ -704,17 +721,20 @@ export default function App() {
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
     <AppProvider value={appContextValue}>
-    <SessionProvider value={sessionContextValue}>
+    <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       <DesktopHeader
         showSidebar={panels.showSidebar}
         showStats={panels.showStats}
         showWorktrees={panels.showWorktrees}
+        showFileChanges={panels.showFileChanges}
+        hasFileChanges={hasFileChanges}
         killing={killing}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={panels.handleToggleSidebar}
         onToggleStats={panels.handleToggleStats}
         onToggleWorktrees={panels.handleToggleWorktrees}
+        onToggleFileChanges={panels.handleToggleFileChanges}
         showConfig={state.mainView === "config"}
         onToggleConfig={panels.handleToggleConfig}
         onKillAll={handleKillAll}
@@ -766,15 +786,23 @@ export default function App() {
               />
 
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-                <ResizablePanel defaultSize={hasFileChanges ? 50 : 100} minSize="500px">
+                <ResizablePanel defaultSize={showFileChangesPanel ? 50 : 100} minSize="500px">
                   <ChatArea searchInputRef={searchInputRef} />
                 </ResizablePanel>
 
-                {hasFileChanges && (
+                {showFileChangesPanel && (
                   <>
                     <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize={50} minSize={0} collapsible>
-                      <FileChangesPanel session={state.session} sessionChangeKey={state.sessionChangeKey} />
+                    <ResizablePanel
+                      defaultSize={50}
+                      minSize={0}
+                      collapsible
+                      onCollapse={handleFileChangesPanelCollapse}
+                      onExpand={handleFileChangesPanelExpand}
+                    >
+                      {!fileChangesCollapsed && (
+                        <FileChangesPanel session={state.session} sessionChangeKey={state.sessionChangeKey} />
+                      )}
                     </ResizablePanel>
                   </>
                 )}

@@ -15,6 +15,7 @@ import type {
   ProgressMessage,
   SystemMessage,
   SummaryMessage,
+  AgentToolUseResult,
 } from "./types"
 
 // ── Local type guards (duplicated to avoid circular deps with parser.ts) ─────
@@ -217,6 +218,60 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
               }
             }
           }
+
+          // New format (v2.1.63+): Agent/Task results include toolUseResult
+          // with a summary instead of inline agent_progress messages.
+          // Synthesize a SubAgentMessage from the summary so the panel renders.
+          const toolUseResult = msg.toolUseResult as AgentToolUseResult | undefined
+          if (toolUseResult?.agentId) {
+            const toolUseId = content.find((b) => b.type === "tool_result")?.tool_use_id ?? ""
+            const taskMeta = taskMetaMap.get(toolUseId)
+            const isBackground = backgroundAgentParentIds.has(toolUseId)
+
+            // Extract text from the result content
+            const resultText: string[] = []
+            if (Array.isArray(toolUseResult.content)) {
+              for (const block of toolUseResult.content as ContentBlock[]) {
+                if (block.type === "text") resultText.push(block.text)
+              }
+            }
+
+            const agentMsg: SubAgentMessage = {
+              agentId: toolUseResult.agentId,
+              agentName: taskMeta?.name ?? null,
+              subagentType: taskMeta?.subagentType ?? null,
+              type: "assistant",
+              content: toolUseResult.content,
+              toolCalls: [],
+              thinking: [],
+              text: resultText,
+              timestamp: msg.timestamp ?? "",
+              tokenUsage: toolUseResult.usage ? {
+                input_tokens: toolUseResult.usage.input_tokens ?? 0,
+                output_tokens: toolUseResult.usage.output_tokens ?? 0,
+                cache_creation_input_tokens: toolUseResult.usage.cache_creation_input_tokens ?? 0,
+                cache_read_input_tokens: toolUseResult.usage.cache_read_input_tokens ?? 0,
+              } : null,
+              model: null,
+              isBackground,
+              prompt: toolUseResult.prompt,
+              status: toolUseResult.status,
+              durationMs: toolUseResult.totalDurationMs,
+              toolUseCount: toolUseResult.totalToolUseCount,
+            }
+
+            // Only add if no agent_progress messages already populated this agent
+            // (backward compat: old format has inline progress, new format has toolUseResult)
+            const existingBlock = agentBlockMap.get(toolUseId)
+            if (!existingBlock) {
+              current.subAgentActivity.push(agentMsg)
+              const kind = isBackground ? "background_agent" as const : "sub_agent" as const
+              const block = { kind, messages: [agentMsg] }
+              current.contentBlocks.push(block)
+              agentBlockMap.set(toolUseId, block)
+            }
+          }
+
           continue
         }
       }
@@ -345,8 +400,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           msgToolCalls.push(tc)
           pendingToolUses.set(block.id, { turn: current, index: idx })
 
-          // Track Task tool calls metadata for agent name/type display
-          if (block.name === "Task") {
+          // Track Task/Agent tool calls metadata for agent name/type display
+          if (block.name === "Task" || block.name === "Agent") {
             const input = block.input as Record<string, unknown>
             if (input.run_in_background === true) {
               backgroundAgentParentIds.add(block.id)

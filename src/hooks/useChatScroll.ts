@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react"
+import { useRef, useState, useCallback, useEffect, useMemo } from "react"
 import type { ParsedSession } from "@/lib/types"
 
 interface UseChatScrollOpts {
@@ -142,7 +142,7 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
   }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
 
-  return {
+  return useMemo(() => ({
     chatScrollRef,
     scrollEndRef,
     canScrollUp,
@@ -151,5 +151,5 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     scrollToBottomInstant,
     requestScrollToTop,
     resetTurnCount,
-  }
+  }), [canScrollUp, canScrollDown, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
 }

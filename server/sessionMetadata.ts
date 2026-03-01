@@ -1,4 +1,5 @@
 import { readFile, stat, open } from "node:fs/promises"
+import { deriveSessionStatusFromTail, type SessionStatusInfo } from "../src/lib/sessionStatus"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -92,6 +93,38 @@ export async function getSessionMeta(filePath: string) {
     turnCount,
     lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
     branchedFrom,
+  }
+}
+
+/**
+ * Read the tail of a session JSONL and derive the agent status.
+ * Reads only the last ~4KB for efficiency.
+ */
+export async function getSessionStatus(filePath: string): Promise<SessionStatusInfo> {
+  try {
+    const fileStat = await stat(filePath)
+    if (fileStat.size === 0) return { status: "idle" }
+
+    const readSize = Math.min(fileStat.size, 4096)
+    const fh = await open(filePath, "r")
+    try {
+      const buf = Buffer.alloc(readSize)
+      const offset = Math.max(0, fileStat.size - readSize)
+      const { bytesRead } = await fh.read(buf, 0, readSize, offset)
+      let text = buf.subarray(0, bytesRead).toString("utf-8")
+
+      // If we didn't read from the start, skip the first (potentially partial) line
+      if (offset > 0) {
+        const firstNewline = text.indexOf("\n")
+        if (firstNewline >= 0) text = text.slice(firstNewline + 1)
+      }
+
+      return deriveSessionStatusFromTail(text)
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return { status: "idle" }
   }
 }
 

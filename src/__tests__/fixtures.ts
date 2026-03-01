@@ -284,6 +284,73 @@ export function subAgentSession(): string {
   ])
 }
 
+/** Session using new Agent tool format (v2.1.63+) with toolUseResult instead of agent_progress */
+export function agentToolSession(): string {
+  const agentToolId = "agent_tool_1"
+  return toJsonl([
+    userMsg("Use an agent to solve this"),
+    toolUseAssistant("Agent", {
+      description: "Research the topic",
+      prompt: "Research the topic thoroughly",
+      subagent_type: "Explore",
+      name: "researcher",
+    }, agentToolId),
+    // New format: tool result carries toolUseResult with agent summary
+    {
+      ...toolResultMsg(agentToolId, "Research complete"),
+      toolUseResult: {
+        status: "completed",
+        prompt: "Research the topic thoroughly",
+        agentId: "agent-new-1",
+        content: [{ type: "text", text: "Here are the research findings." }],
+        totalDurationMs: 5000,
+        totalTokens: 15000,
+        totalToolUseCount: 3,
+        usage: {
+          input_tokens: 10000,
+          output_tokens: 5000,
+          cache_creation_input_tokens: 100,
+          cache_read_input_tokens: 200,
+        },
+      },
+    },
+    textAssistant("The agent finished the research."),
+    turnDurationMsg(6000),
+  ])
+}
+
+/** Session using new Agent tool format with background agent */
+export function backgroundAgentToolSession(): string {
+  const agentToolId = "bg_agent_tool_1"
+  return toJsonl([
+    userMsg("Run a background agent"),
+    toolUseAssistant("Agent", {
+      description: "Background work",
+      prompt: "Do background work",
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    }, agentToolId),
+    {
+      ...toolResultMsg(agentToolId, "Background work done"),
+      toolUseResult: {
+        status: "completed",
+        prompt: "Do background work",
+        agentId: "agent-bg-1",
+        content: [{ type: "text", text: "Background task complete." }],
+        totalDurationMs: 12000,
+        totalTokens: 8000,
+        totalToolUseCount: 5,
+        usage: {
+          input_tokens: 5000,
+          output_tokens: 3000,
+        },
+      },
+    },
+    textAssistant("Background agent finished."),
+    turnDurationMsg(13000),
+  ])
+}
+
 // ── Turn Builders (for undo-engine tests) ───────────────────────────────────
 
 export function makeTurn(overrides: Partial<Turn> = {}): Turn {

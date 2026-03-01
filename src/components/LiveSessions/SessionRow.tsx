@@ -9,6 +9,8 @@ import {
   shortPath,
   dirNameToPath,
 } from "@/lib/format"
+import { getStatusLabel } from "@/lib/sessionStatus"
+import type { SessionStatus } from "@/lib/sessionStatus"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -25,6 +27,8 @@ export interface ActiveSessionInfo {
   size: number
   isActive?: boolean
   matchedMessage?: string
+  agentStatus?: SessionStatus
+  agentToolName?: string
 }
 
 export interface RunningProcess {
@@ -59,6 +63,9 @@ export function SessionRow({
   onDeleteSession,
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
+  const statusLabel = hasProcess
+    ? (getStatusLabel(s.agentStatus, s.agentToolName) ?? "Idle")
+    : null
 
   const sessionRow = (
     <div
@@ -76,16 +83,7 @@ export function SessionRow({
     >
       {/* Top row: status dot + last prompt + kill button */}
       <div className="flex items-center gap-2">
-        <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-          {hasProcess ? (
-            <>
-              <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-            </>
-          ) : (
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground" />
-          )}
-        </span>
+        <StatusDot hasProcess={hasProcess} agentStatus={s.agentStatus} />
         <span className="text-xs font-medium truncate flex-1 text-foreground">
           {s.lastUserMessage || s.firstUserMessage || s.slug || truncate(s.sessionId, 16)}
         </span>
@@ -123,6 +121,14 @@ export function SessionRow({
 
       {/* Meta row */}
       <div className="ml-5.5 flex items-center gap-2 text-[10px] flex-wrap text-muted-foreground">
+        {statusLabel && (
+          <span className={cn(
+            "flex items-center gap-0.5 font-medium",
+            getStatusColor(s.agentStatus)
+          )}>
+            {statusLabel}
+          </span>
+        )}
         {(s.turnCount ?? 0) > 0 && (
           <span className="flex items-center gap-0.5">
             <MessageSquare className="size-2.5" />
@@ -165,4 +171,28 @@ export function SessionRow({
   }
 
   return <>{sessionRow}</>
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function getStatusColor(status?: SessionStatus): string {
+  switch (status) {
+    case "idle": return "text-green-400"
+    case "thinking": return "text-amber-400"
+    default: return "text-blue-400"
+  }
+}
+
+function StatusDot({ hasProcess, agentStatus }: { hasProcess: boolean; agentStatus?: SessionStatus }) {
+  const isActive = hasProcess && agentStatus !== "idle"
+  const dotColor = hasProcess
+    ? (agentStatus === "idle" ? "bg-green-500" : "bg-amber-500")
+    : (agentStatus && agentStatus !== "idle" ? "bg-amber-500/60" : "bg-muted-foreground")
+
+  return (
+    <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+      {isActive && <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-400 opacity-75" />}
+      <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotColor)} />
+    </span>
+  )
 }
