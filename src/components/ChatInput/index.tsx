@@ -37,19 +37,26 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
 }
 
+function agentDotColor(status: string): string {
+  if (status === "completed") return "bg-green-400"
+  if (status === "tool_use") return "bg-blue-400"
+  return "bg-amber-400"
+}
+
 function AgentStatusBar({ status, toolName }: { status: string; toolName?: string }) {
-  const label = getStatusLabel(status as "idle" | "thinking" | "tool_use" | "processing", toolName)
+  const label = getStatusLabel(status as "idle" | "thinking" | "tool_use" | "processing" | "completed", toolName)
   if (!label) return null
 
-  const dotColor = status === "tool_use" ? "bg-blue-400" : "bg-amber-400"
+  const isCompleted = status === "completed"
+  const dotColor = agentDotColor(status)
 
   return (
     <div className="flex items-center gap-2 mb-1.5 px-1">
       <span className="relative flex h-2 w-2 shrink-0">
-        <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", dotColor)} />
+        {!isCompleted && <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", dotColor)} />}
         <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotColor)} />
       </span>
-      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <span className={cn("text-[11px]", isCompleted ? "text-green-400" : "text-muted-foreground")}>{label}</span>
     </div>
   )
 }

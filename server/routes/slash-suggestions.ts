@@ -88,7 +88,12 @@ async function scanSkillsDir(
   return results
 }
 
-/** Scan installed plugins for skills */
+/** Publishers whose plugins are considered built-in to Claude Code */
+const BUILTIN_PUBLISHERS = new Set([
+  "claude-plugins-official",
+])
+
+/** Scan installed plugins for skills, commands, and agents */
 async function scanPluginSkills(): Promise<SlashSuggestion[]> {
   const results: SlashSuggestion[] = []
   const pluginsDir = join(homedir(), ".claude", "plugins")
@@ -104,8 +109,9 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
       if (!installList.length) continue
       const installPath = installList[0].installPath
 
-      // Derive a readable plugin display name from the key (e.g. "superpowers@superpowers-dev" -> "superpowers")
-      const pluginDisplayName = pluginKey.split("@")[0]
+      // Derive display name and publisher from key (e.g. "superpowers@superpowers-dev")
+      const [pluginDisplayName, publisher = ""] = pluginKey.split("@")
+      const source = BUILTIN_PUBLISHERS.has(publisher) ? "built-in" : pluginDisplayName
 
       // Look for skills in the install directory
       const skillsDir = join(installPath, "skills")
@@ -120,7 +126,7 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
               name: fm.name || skillDir,
               description: fm.description || "",
               type: "skill",
-              source: pluginDisplayName,
+              source,
               filePath: skillMdPath,
             })
           } catch {
@@ -129,6 +135,31 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
         }
       } catch {
         // no skills directory
+      }
+
+      // Look for agents in the install directory (e.g. code-simplifier has agents/)
+      const agentsDir = join(installPath, "agents")
+      try {
+        const agentFiles = await readdir(agentsDir)
+        for (const file of agentFiles) {
+          if (!file.endsWith(".md")) continue
+          const filePath = join(agentsDir, file)
+          try {
+            const content = await readFile(filePath, "utf-8")
+            const fm = parseFrontmatter(content)
+            results.push({
+              name: fm.name || file.replace(/\.md$/, ""),
+              description: fm.description || "",
+              type: "skill",
+              source,
+              filePath,
+            })
+          } catch {
+            // skip unreadable
+          }
+        }
+      } catch {
+        // no agents directory
       }
 
       // Also look for commands within the plugin (e.g. superpowers has commands/)
@@ -147,7 +178,7 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
               name: `${pluginDisplayName}:${cmdName}`,
               description: fm.description || "",
               type: "command",
-              source: pluginDisplayName,
+              source,
               filePath,
             })
           } catch {

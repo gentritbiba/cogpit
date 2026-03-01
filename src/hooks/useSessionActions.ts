@@ -7,6 +7,7 @@ import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
+import { cacheTurnCount } from "@/lib/turnCountCache"
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -44,6 +45,7 @@ export function useSessionActions({
       setLoadError(null)
       dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
       resetTurnCount(parsed.turns.length)
+      cacheTurnCount(parsed.sessionId, parsed.turns.length)
       scrollToBottomInstant()
     },
     [dispatch, isMobile, resetTurnCount, scrollToBottomInstant]

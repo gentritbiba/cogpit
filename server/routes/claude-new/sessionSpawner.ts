@@ -9,6 +9,7 @@ import {
   spawn,
   createInterface,
   readdir,
+  readFile,
   open,
   join,
   randomUUID,
@@ -344,11 +345,18 @@ export function registerCreateAndSendRoute(use: UseFn) {
         let responded = false
         const expectedPath = join(projectDir, fileName)
 
-        const respondSuccess = () => {
+        const respondSuccess = async () => {
           if (responded) return
           responded = true
+          // Read initial content so client can skip polling
+          let initialContent: string | undefined
+          try {
+            initialContent = await readFile(expectedPath, "utf-8")
+          } catch {
+            // File may not be readable yet — client will fall back to polling
+          }
           res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ success: true, dirName, fileName, sessionId }))
+          res.end(JSON.stringify({ success: true, dirName, fileName, sessionId, initialContent }))
         }
 
         const respondError = (error: string) => {

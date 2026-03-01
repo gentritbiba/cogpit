@@ -31,12 +31,12 @@ interface UseSessionBrowserReturn {
 // ── Hook ───────────────────────────────────────────────────────────────────
 
 export function useSessionBrowser({
-  session,
+  sessionId,
   onLoadSession,
   onDeleteSession,
   onDuplicateSession,
 }: {
-  session: ParsedSession | null
+  sessionId: string | null
   onLoadSession: (
     session: ParsedSession,
     source: { dirName: string; fileName: string; rawText: string }
@@ -44,7 +44,7 @@ export function useSessionBrowser({
   onDeleteSession?: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
 }): UseSessionBrowserReturn {
-  const [view, setView] = useState<View>(session ? "detail" : "projects")
+  const [view, setView] = useState<View>(sessionId ? "detail" : "projects")
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
@@ -75,7 +75,6 @@ export function useSessionBrowser({
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // When session changes externally, switch to detail view
-  const sessionId = session?.sessionId ?? null
   useEffect(() => {
     if (sessionId) setView("detail")
   }, [sessionId])

@@ -82,30 +82,36 @@ export function useNewSession({
           return null
         }
 
-        const { dirName: resDirName, fileName, sessionId } = await res.json()
+        const { dirName: resDirName, fileName, sessionId, initialContent } = await res.json()
         pendingDirNameRef.current = null
 
-        // Poll for the JSONL to have parseable content.
-        // The server responds as soon as the file exists, but it may still be
-        // very early in the write — poll until we get a parseable session.
-        const maxAttempts = 30
+        // Server includes file content when available — skip polling entirely
         let rawText = ""
         let parsed: ParsedSession | null = null
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          if (controller.signal.aborted) return null
-          const contentRes = await authFetch(
-            `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
-            { signal: controller.signal }
-          )
-          if (contentRes.ok) {
-            rawText = await contentRes.text()
-            if (rawText.trim()) {
-              parsed = parseSession(rawText)
-              // We have content — good enough to render. SSE will stream the rest.
-              break
+
+        if (initialContent?.trim()) {
+          rawText = initialContent
+          parsed = parseSession(rawText)
+        }
+
+        // Fall back to polling only if server didn't include content
+        if (!parsed) {
+          const maxAttempts = 30
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (controller.signal.aborted) return null
+            const contentRes = await authFetch(
+              `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
+              { signal: controller.signal }
+            )
+            if (contentRes.ok) {
+              rawText = await contentRes.text()
+              if (rawText.trim()) {
+                parsed = parseSession(rawText)
+                break
+              }
             }
+            await new Promise(r => setTimeout(r, 200))
           }
-          await new Promise(r => setTimeout(r, 200))
         }
 
         if (!parsed) {

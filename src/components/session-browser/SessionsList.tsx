@@ -15,6 +15,7 @@ import {
   formatRelativeTime,
   truncate,
 } from "@/lib/format"
+import { resolveTurnCount, turnCountColor } from "@/lib/turnCountCache"
 import type { SessionInfo } from "./types"
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -60,12 +61,16 @@ function WorktreeBranchLabel({ branch }: { branch: string }): React.ReactElement
 }
 
 function SessionCardMeta({ session }: { session: SessionInfo }): React.ReactElement {
+  const tc = resolveTurnCount(session.sessionId, session.turnCount)
   return (
     <div className="ml-5.5 flex items-center gap-2 text-[10px] text-muted-foreground flex-wrap">
-      {(session.turnCount ?? 0) > 0 && (
-        <span className="flex items-center gap-0.5">
-          <MessageSquare className="size-2.5" />
-          {session.turnCount}
+      {tc > 0 && (
+        <span className={cn(
+          "flex items-center gap-0.5 text-[11px] font-semibold",
+          turnCountColor(tc)
+        )}>
+          <MessageSquare className="size-3" />
+          {tc}
         </span>
       )}
       {session.gitBranch && (

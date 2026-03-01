@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback, startTransition } from "react"
 import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, TerminalSquare, Code2, FolderSearch, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
@@ -167,9 +167,12 @@ export default function App() {
     return next
   }, [state.session])
 
-  // Live session streaming
+  // Live session streaming — wrapped in startTransition so React can
+  // interrupt these low-priority renders to process user interactions (clicks).
   const { isLive, sseState } = useLiveSession(state.sessionSource, (updated) => {
-    dispatch({ type: "UPDATE_SESSION", session: updated })
+    startTransition(() => {
+      dispatch({ type: "UPDATE_SESSION", session: updated })
+    })
   })
 
   // Background agents (shared between notifications + StatsPanel)
@@ -241,8 +244,8 @@ export default function App() {
   const scroll = useChatScroll({
     session: state.session,
     isLive,
-    pendingMessage: claudeChat.pendingMessage,
-    clearPending: claudeChat.clearPending,
+    pendingMessages: claudeChat.pendingMessages,
+    consumePending: claudeChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
   })
 
@@ -384,6 +387,12 @@ export default function App() {
 
   // ─── Build context values ──────────────────────────────────────────────────
 
+  // Fine-grained deps: re-create context only when fields that AppContext
+  // consumers actually use change.  state.session / state.sessionSource are
+  // deliberately excluded — consumers get session data from SessionContext.
+  // This prevents the entire component tree from re-rendering on every SSE
+  // update during streaming (~60 Hz), which previously starved the main
+  // thread and made buttons unclickable.
   const appContextValue = useMemo(() => ({
     state,
     dispatch,
@@ -391,7 +400,16 @@ export default function App() {
     theme: themeCtx,
     networkAuth,
     isMobile,
-  }), [state, dispatch, config, themeCtx, networkAuth, isMobile])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [
+    state.activeTurnIndex, state.activeToolCallId,
+    state.searchQuery, state.expandAll,
+    state.mainView, state.mobileTab, state.sidebarTab,
+    state.dashboardProject, state.pendingDirName, state.pendingCwd,
+    state.currentMemberName, state.loadingMember,
+    state.selectedTeam, state.configFilePath, state.sessionChangeKey,
+    dispatch, config, themeCtx, networkAuth, isMobile,
+  ])
 
   // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
   // so timeline components don't re-render when chat status or scroll indicators change.
@@ -429,17 +447,17 @@ export default function App() {
     chat: {
       status: claudeChat.status,
       error: claudeChat.error,
-      pendingMessage: claudeChat.pendingMessage,
+      pendingMessages: claudeChat.pendingMessages,
       isConnected: claudeChat.isConnected,
       sendMessage: claudeChat.sendMessage,
       interrupt: claudeChat.interrupt,
       stopAgent: claudeChat.stopAgent,
-      clearPending: claudeChat.clearPending,
+      consumePending: claudeChat.consumePending,
     },
     scroll,
   }), [
-    claudeChat.status, claudeChat.error, claudeChat.pendingMessage, claudeChat.isConnected,
-    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.clearPending,
+    claudeChat.status, claudeChat.error, claudeChat.pendingMessages, claudeChat.isConnected,
+    claudeChat.sendMessage, claudeChat.interrupt, claudeChat.stopAgent, claudeChat.consumePending,
     scroll,
   ])
 
@@ -559,6 +577,15 @@ export default function App() {
     </div>
   )
 
+  const pendingPreviewList = claudeChat.pendingMessages.map((msg, i) => (
+    <PendingTurnPreview
+      key={i}
+      message={msg}
+      turnNumber={i + 1}
+      statusText={i === 0 ? "Creating session..." : `Queued (${i})`}
+    />
+  ))
+
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
@@ -568,7 +595,7 @@ export default function App() {
         <main className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
             <SessionBrowser
-              session={state.session}
+              sessionId={state.session?.sessionId ?? null}
               activeSessionKey={activeSessionKey}
               onLoadSession={actions.handleLoadSession}
               sidebarTab={state.sidebarTab}
@@ -604,13 +631,9 @@ export default function App() {
                 </div>
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
-                  {claudeChat.pendingMessage ? (
+                  {pendingPreviewList.length > 0 ? (
                     <div className="flex-1 overflow-y-auto px-1 py-3">
-                      <PendingTurnPreview
-                        message={claudeChat.pendingMessage}
-                        turnNumber={1}
-                        statusText="Creating session..."
-                      />
+                      {pendingPreviewList}
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center gap-1">
@@ -681,7 +704,7 @@ export default function App() {
                 />
               ) : (
                 <SessionBrowser
-                  session={state.session}
+                  sessionId={state.session?.sessionId ?? null}
                   activeSessionKey={activeSessionKey}
                   onLoadSession={actions.handleLoadSession}
                   sidebarTab="teams"
@@ -744,7 +767,7 @@ export default function App() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {panels.showSidebar && state.mainView !== "config" && (
           <SessionBrowser
-            session={state.session}
+            sessionId={state.session?.sessionId ?? null}
             activeSessionKey={activeSessionKey}
             onLoadSession={actions.handleLoadSession}
             sidebarTab={state.sidebarTab}
@@ -814,14 +837,10 @@ export default function App() {
           ) : state.pendingDirName ? (
             <div className="flex flex-1 min-h-0">
               <div className="flex flex-1 min-h-0 flex-col min-w-0">
-                {claudeChat.pendingMessage ? (
+                {pendingPreviewList.length > 0 ? (
                   <div className="flex-1 overflow-y-auto px-4 py-6">
                     <div className="mx-auto max-w-4xl">
-                      <PendingTurnPreview
-                        message={claudeChat.pendingMessage}
-                        turnNumber={1}
-                        statusText="Creating session..."
-                      />
+                      {pendingPreviewList}
                     </div>
                   </div>
                 ) : (

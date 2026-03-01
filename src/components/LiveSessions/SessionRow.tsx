@@ -11,6 +11,7 @@ import {
 } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
 import type { SessionStatus } from "@/lib/sessionStatus"
+import { resolveTurnCount, turnCountColor } from "@/lib/turnCountCache"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -66,6 +67,7 @@ export function SessionRow({
   const statusLabel = hasProcess
     ? (getStatusLabel(s.agentStatus, s.agentToolName) ?? "Idle")
     : null
+  const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
 
   const sessionRow = (
     <div
@@ -129,10 +131,13 @@ export function SessionRow({
             {statusLabel}
           </span>
         )}
-        {(s.turnCount ?? 0) > 0 && (
-          <span className="flex items-center gap-0.5">
-            <MessageSquare className="size-2.5" />
-            {s.turnCount}
+        {turnCount > 0 && (
+          <span className={cn(
+            "flex items-center gap-0.5 text-[11px] font-semibold",
+            turnCountColor(turnCount)
+          )}>
+            <MessageSquare className="size-3" />
+            {turnCount}
           </span>
         )}
         {s.gitBranch && (
@@ -175,24 +180,30 @@ export function SessionRow({
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
+function isIdleStatus(status?: SessionStatus): boolean {
+  return status === "idle" || status === "completed"
+}
+
 function getStatusColor(status?: SessionStatus): string {
-  switch (status) {
-    case "idle": return "text-green-400"
-    case "thinking": return "text-amber-400"
-    default: return "text-blue-400"
-  }
+  if (isIdleStatus(status)) return "text-green-400"
+  if (status === "thinking") return "text-amber-400"
+  return "text-blue-400"
+}
+
+function statusDotColor(hasProcess: boolean, agentStatus?: SessionStatus): string {
+  const idle = isIdleStatus(agentStatus)
+  if (hasProcess) return idle ? "bg-green-500" : "bg-amber-500"
+  if (agentStatus && !idle) return "bg-amber-500/60"
+  return "bg-muted-foreground"
 }
 
 function StatusDot({ hasProcess, agentStatus }: { hasProcess: boolean; agentStatus?: SessionStatus }) {
-  const isActive = hasProcess && agentStatus !== "idle"
-  const dotColor = hasProcess
-    ? (agentStatus === "idle" ? "bg-green-500" : "bg-amber-500")
-    : (agentStatus && agentStatus !== "idle" ? "bg-amber-500/60" : "bg-muted-foreground")
+  const isActive = hasProcess && !isIdleStatus(agentStatus)
 
   return (
     <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
       {isActive && <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-amber-400 opacity-75" />}
-      <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotColor)} />
+      <span className={cn("relative inline-flex h-2 w-2 rounded-full", statusDotColor(hasProcess, agentStatus))} />
     </span>
   )
 }

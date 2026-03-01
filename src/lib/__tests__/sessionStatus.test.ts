@@ -10,10 +10,25 @@ describe("deriveSessionStatus", () => {
     expect(deriveSessionStatus([])).toEqual({ status: "idle" })
   })
 
-  it("returns idle when last assistant has end_turn", () => {
+  it("returns completed when last assistant has end_turn and there was user activity", () => {
     const msgs = [
       { type: "user", message: { role: "user", content: "hello" } },
       { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("returns idle when end_turn but no real user messages", () => {
+    const msgs = [
+      { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
+  })
+
+  it("returns idle when end_turn and only meta user messages", () => {
+    const msgs = [
+      { type: "user", isMeta: true, message: { role: "user", content: "meta" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
     ]
     expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
@@ -57,32 +72,34 @@ describe("deriveSessionStatus", () => {
     expect(deriveSessionStatus(msgs).status).toBe("processing")
   })
 
-  it("skips meta user messages", () => {
+  it("skips meta user messages to find real status", () => {
     const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
       { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
       { type: "user", isMeta: true, message: { role: "user", content: "meta" } },
     ]
-    expect(deriveSessionStatus(msgs).status).toBe("idle")
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
   })
 
-  it("skips system/progress/summary messages", () => {
+  it("skips system/progress/summary messages to find real status", () => {
     const msgs = [
       { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
       { type: "system", subtype: "turn_duration" },
       { type: "progress", data: {} },
       { type: "summary", summary: "compacted" },
     ]
+    // No real user messages, so idle not completed
     expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 })
 
 describe("deriveSessionStatusFromTail", () => {
-  it("parses JSONL text and derives status", () => {
+  it("parses JSONL text and derives completed status", () => {
     const lines = [
       JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
       JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn", content: [] } }),
     ].join("\n")
-    expect(deriveSessionStatusFromTail(lines).status).toBe("idle")
+    expect(deriveSessionStatusFromTail(lines).status).toBe("completed")
   })
 
   it("skips malformed lines", () => {
@@ -117,5 +134,9 @@ describe("getStatusLabel", () => {
 
   it("returns Processing... for processing", () => {
     expect(getStatusLabel("processing")).toBe("Processing...")
+  })
+
+  it("returns Idle for completed", () => {
+    expect(getStatusLabel("completed")).toBe("Idle")
   })
 })

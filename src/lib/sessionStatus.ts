@@ -7,7 +7,7 @@
  * never stored as app state.
  */
 
-export type SessionStatus = "idle" | "thinking" | "tool_use" | "processing"
+export type SessionStatus = "idle" | "thinking" | "tool_use" | "processing" | "completed"
 
 export interface SessionStatusInfo {
   status: SessionStatus
@@ -43,7 +43,16 @@ export function deriveSessionStatus(
       const stopReason = message?.stop_reason
 
       if (stopReason === "end_turn") {
-        return { status: "idle", pendingQueue: Math.max(0, pendingEnqueues) }
+        // Scan backward from here for real user activity (typically found immediately)
+        let hasActivity = false
+        for (let j = i - 1; j >= 0; j--) {
+          const m = rawMessages[j]
+          if (m.type === "user" && !(m as { isMeta?: boolean }).isMeta) { hasActivity = true; break }
+        }
+        return {
+          status: hasActivity ? "completed" : "idle",
+          pendingQueue: Math.max(0, pendingEnqueues),
+        }
       }
       if (stopReason === "tool_use") {
         // Extract tool name from the assistant content
@@ -79,6 +88,7 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
     case "thinking": return "Thinking..."
     case "tool_use": return toolName ? `Using ${toolName}` : "Using tool..."
     case "processing": return "Processing..."
+    case "completed": return "Idle"
     default: return null
   }
 }

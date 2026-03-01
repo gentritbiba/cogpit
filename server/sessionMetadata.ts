@@ -1,5 +1,5 @@
 import { readFile, stat, open } from "node:fs/promises"
-import { deriveSessionStatusFromTail, type SessionStatusInfo } from "../src/lib/sessionStatus"
+import { deriveSessionStatus, type SessionStatusInfo } from "../src/lib/sessionStatus"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -97,29 +97,61 @@ export async function getSessionMeta(filePath: string) {
 }
 
 /**
- * Read the tail of a session JSONL and derive the agent status.
- * Reads only the last ~4KB for efficiency.
+ * Read backward through a session JSONL to derive agent status.
+ * Scans in 4KB chunks from the tail, parsing one line at a time until it
+ * finds a meaningful message (assistant or non-meta user). This reads only
+ * as far as needed — typically one chunk — and uses the same
+ * deriveSessionStatus() function as the client side.
  */
 export async function getSessionStatus(filePath: string): Promise<SessionStatusInfo> {
+  const CHUNK = 4096
+  const MAX_CHUNKS = 64 // safety cap: 256KB max scan
   try {
     const fileStat = await stat(filePath)
     if (fileStat.size === 0) return { status: "idle" }
 
-    const readSize = Math.min(fileStat.size, 4096)
     const fh = await open(filePath, "r")
     try {
-      const buf = Buffer.alloc(readSize)
-      const offset = Math.max(0, fileStat.size - readSize)
-      const { bytesRead } = await fh.read(buf, 0, readSize, offset)
-      let text = buf.subarray(0, bytesRead).toString("utf-8")
+      const meaningful: Array<{ type: string; [key: string]: unknown }> = []
+      let cursor = fileStat.size
+      let leftover = ""
 
-      // If we didn't read from the start, skip the first (potentially partial) line
-      if (offset > 0) {
-        const firstNewline = text.indexOf("\n")
-        if (firstNewline >= 0) text = text.slice(firstNewline + 1)
+      for (let chunk = 0; chunk < MAX_CHUNKS && cursor > 0; chunk++) {
+        const readSize = Math.min(CHUNK, cursor)
+        cursor -= readSize
+        const buf = Buffer.alloc(readSize)
+        const { bytesRead } = await fh.read(buf, 0, readSize, cursor)
+        const text = buf.subarray(0, bytesRead).toString("utf-8") + leftover
+
+        // Split into lines, rightmost first
+        const lines = text.split("\n")
+        // First element may be partial if we didn't hit offset 0
+        leftover = cursor > 0 ? lines[0] : ""
+        const startIdx = cursor > 0 ? 1 : 0
+
+        for (let i = lines.length - 1; i >= startIdx; i--) {
+          const line = lines[i]
+          if (!line) continue
+          let obj: { type: string; [key: string]: unknown }
+          try { obj = JSON.parse(line) } catch { continue }
+
+          if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {
+            // Prepend so array stays in file order (oldest first)
+            meaningful.unshift(obj)
+
+            // Can we derive status from what we've collected?
+            // end_turn needs user context to distinguish completed vs idle, so keep scanning.
+            const isEndTurn = obj.type === "assistant"
+              && (obj.message as { stop_reason?: string } | undefined)?.stop_reason === "end_turn"
+            const canDerive = (obj.type === "assistant" && !isEndTurn)
+              || (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta)
+            if (canDerive) return deriveSessionStatus(meaningful)
+          }
+        }
       }
 
-      return deriveSessionStatusFromTail(text)
+      // Exhausted chunks — derive from whatever we collected
+      return meaningful.length > 0 ? deriveSessionStatus(meaningful) : { status: "idle" }
     } finally {
       await fh.close()
     }

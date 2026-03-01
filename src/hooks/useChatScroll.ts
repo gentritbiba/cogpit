@@ -4,8 +4,8 @@ import type { ParsedSession } from "@/lib/types"
 interface UseChatScrollOpts {
   session: ParsedSession | null
   isLive: boolean
-  pendingMessage: string | null
-  clearPending: () => void
+  pendingMessages: string[]
+  consumePending: (count?: number) => void
   sessionChangeKey: number
 }
 
@@ -21,7 +21,7 @@ function runAcrossFrames(action: () => void): void {
   })
 }
 
-export function useChatScroll({ session, isLive, pendingMessage, clearPending, sessionChangeKey }: UseChatScrollOpts) {
+export function useChatScroll({ session, isLive, pendingMessages, consumePending, sessionChangeKey }: UseChatScrollOpts) {
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const scrollEndRef = useRef<HTMLDivElement>(null)
   const chatIsAtBottomRef = useRef(true)
@@ -110,37 +110,38 @@ export function useChatScroll({ session, isLive, pendingMessage, clearPending, s
     return () => clearTimeout(timer)
   }, [sessionChangeKey])
 
-  // Pending message -- scroll to bottom
+  // Pending messages -- scroll to bottom when queue changes
+  const pendingCount = pendingMessages.length
   useEffect(() => {
-    if (pendingMessage) {
+    if (pendingCount > 0) {
       chatScrollOnNextRef.current = true
       smoothScrollToEnd()
     }
-  }, [pendingMessage, smoothScrollToEnd])
+  }, [pendingCount, smoothScrollToEnd])
 
-  // New turns -- auto-scroll
+  // New turns -- auto-scroll and consume pending messages
   const turnCount = session?.turns.length ?? 0
   useEffect(() => {
     if (turnCount === 0) return
-    if (turnCount > prevTurnCountRef.current) {
-      if (pendingMessage) clearPending()
+    const newTurns = turnCount - prevTurnCountRef.current
+    if (newTurns > 0) {
+      if (pendingCount > 0) consumePending(Math.min(newTurns, pendingCount))
       if (chatScrollOnNextRef.current || chatIsAtBottomRef.current) {
         smoothScrollToEnd()
         chatScrollOnNextRef.current = false
       }
     }
     prevTurnCountRef.current = turnCount
-  }, [turnCount, pendingMessage, clearPending, smoothScrollToEnd])
+  }, [turnCount, pendingCount, consumePending, smoothScrollToEnd])
 
   // Live content -- auto-scroll (keyed on turn count to avoid running on every session object change)
-  const liveTurnCount = session?.turns.length ?? 0
   const liveLastTurnToolCount = session?.turns.at(-1)?.toolCalls.length ?? 0
   useEffect(() => {
     if (!session || !isLive) return
     if (chatIsAtBottomRef.current) smoothScrollToEnd()
     requestAnimationFrame(updateScrollIndicators)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
-  }, [liveTurnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
+  }, [turnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
 
   return useMemo(() => ({
     chatScrollRef,

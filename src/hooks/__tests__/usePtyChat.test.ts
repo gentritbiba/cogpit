@@ -15,13 +15,13 @@ describe("usePtyChat", () => {
     vi.resetAllMocks()
   })
 
-  it("starts with idle status", () => {
+  it("starts with idle status and empty pending queue", () => {
     const { result } = renderHook(() =>
       usePtyChat({ sessionSource: null })
     )
     expect(result.current.status).toBe("idle")
     expect(result.current.error).toBeUndefined()
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
     expect(result.current.isConnected).toBe(false)
   })
 
@@ -55,7 +55,8 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("idle")
-    expect(result.current.pendingMessage).toBeNull()
+    // Message stays in queue until consumed by useChatScroll on new turn
+    expect(result.current.pendingMessages).toEqual(["hello"])
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/send-message", expect.objectContaining({
       method: "POST",
     }))
@@ -150,7 +151,7 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("idle")
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
   })
 
   it("stopAgent aborts request and resets state", async () => {
@@ -176,7 +177,7 @@ describe("usePtyChat", () => {
     })
 
     expect(result.current.status).toBe("idle")
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
   })
 
   it("interrupt calls stop-session endpoint", () => {
@@ -209,16 +210,40 @@ describe("usePtyChat", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
-  it("clearPending clears pendingMessage", () => {
+  it("consumePending removes messages from queue", () => {
     const { result } = renderHook(() =>
       usePtyChat({ sessionSource: null })
     )
 
+    // Queue is already empty, consumePending should be safe to call
     act(() => {
-      result.current.clearPending()
+      result.current.consumePending()
     })
 
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
+  })
+
+  it("queues multiple messages instead of replacing", async () => {
+    // Make all fetches hang so messages stay pending
+    mockedAuthFetch.mockImplementation(() => new Promise(() => {}))
+
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+      })
+    )
+
+    act(() => {
+      result.current.sendMessage("first")
+    })
+    act(() => {
+      result.current.sendMessage("second")
+    })
+    act(() => {
+      result.current.sendMessage("third")
+    })
+
+    expect(result.current.pendingMessages).toEqual(["first", "second", "third"])
   })
 
   it("uses parsedSessionId over fileName-based id when available", async () => {
@@ -308,7 +333,7 @@ describe("usePtyChat", () => {
     // State should be reset
     expect(result.current.status).toBe("idle")
     expect(result.current.error).toBeUndefined()
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
   })
 
   it("handles error in onCreateSession", async () => {
@@ -327,7 +352,7 @@ describe("usePtyChat", () => {
 
     expect(result.current.status).toBe("error")
     expect(result.current.error).toBe("Create failed")
-    expect(result.current.pendingMessage).toBeNull()
+    expect(result.current.pendingMessages).toEqual([])
   })
 
   it("calls onPermissionsApplied during sendMessage", async () => {

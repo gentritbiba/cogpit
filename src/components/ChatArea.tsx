@@ -27,14 +27,14 @@ export const ChatArea = memo(function ChatArea({
   const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery, expandAll } = state
-  const { pendingMessage, isConnected } = chat
+  const { pendingMessages, isConnected } = chat
   const { chatScrollRef, scrollEndRef, canScrollUp, canScrollDown, handleScroll } = scroll
 
   const elapsedSec = useElapsedTimer(isConnected)
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
-  const showTimeline = currentSession.turns.length > 0 || !pendingMessage
+  const showTimeline = currentSession.turns.length > 0 || pendingMessages.length === 0
 
   return (
     <div className={cn("relative", isMobile ? "flex flex-col flex-1 min-h-0" : "h-full")}>
@@ -89,13 +89,15 @@ export const ChatArea = memo(function ChatArea({
               {showTimeline && (
                 <ConversationTimeline chatScrollRef={chatScrollRef} />
               )}
-              {pendingMessage && (
+              {pendingMessages.map((msg, i) => (
                 <PendingTurnPreview
-                  message={pendingMessage}
-                  turnNumber={currentSession.turns.length + 1}
-                  elapsedSec={isConnected ? elapsedSec : undefined}
+                  key={i}
+                  message={msg}
+                  turnNumber={currentSession.turns.length + 1 + i}
+                  elapsedSec={i === 0 && isConnected ? elapsedSec : undefined}
+                  statusText={i === 0 ? undefined : `Queued (${i})`}
                 />
-              )}
+              ))}
               <div ref={scrollEndRef} />
             </ErrorBoundary>
           </div>

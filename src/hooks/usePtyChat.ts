@@ -23,12 +23,12 @@ interface UsePtyChatOpts {
 export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null)
+  const [pendingMessages, setPendingMessages] = useState<string[]>([])
 
   // Track active requests per session so concurrent sessions work
   const activeAbortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(null)
-  /** Set during session creation to prevent the sessionId-change effect from clearing pendingMessage */
+  /** Set during session creation to prevent the sessionId-change effect from clearing pendingMessages */
   const creatingRef = useRef(false)
 
   // Use parsed session ID (actual UUID from JSONL) if available, else derive from fileName
@@ -45,10 +45,10 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
       sessionIdRef.current = sessionId
       setStatus("idle")
       setError(undefined)
-      // Preserve pendingMessage when transitioning from session creation —
-      // useChatScroll will clear it once the session's turns are rendered.
+      // Preserve pending messages when transitioning from session creation —
+      // useChatScroll will clear them once the session's turns are rendered.
       if (!wasCreating) {
-        setPendingMessage(null)
+        setPendingMessages([])
       }
       activeAbortRef.current = null
     }
@@ -65,7 +65,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     async (text: string, images?: Array<{ data: string; mediaType: string }>) => {
       // If there's no sessionId yet, this is a pending session — create it first
       if (!sessionId && onCreateSession) {
-        setPendingMessage(text)
+        setPendingMessages(prev => [...prev, text])
         setStatus("connected")
         setError(undefined)
         creatingRef.current = true
@@ -77,25 +77,25 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             // createAndSend handles its own error state; just reset ours
             creatingRef.current = false
             setStatus("idle")
-            setPendingMessage(null)
+            setPendingMessages([])
             return
           }
           // Session was created and first message was sent.
-          // Don't clear pendingMessage — useChatScroll will clear it
+          // Don't clear pendingMessages — useChatScroll will consume them
           // once the session's turns are rendered, ensuring a smooth transition.
           setStatus("idle")
         } catch (err) {
           creatingRef.current = false
           setError(err instanceof Error ? err.message : "Failed to create session")
           setStatus("error")
-          setPendingMessage(null)
+          setPendingMessages([])
         }
         return
       }
 
       if (!sessionId) return
 
-      setPendingMessage(text)
+      setPendingMessages(prev => [...prev, text])
       setStatus("connected")
       setError(undefined)
 
@@ -127,10 +127,10 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           if (!res.ok) {
             setError(data.error || `Request failed (${res.status})`)
             setStatus("error")
+            setPendingMessages(prev => prev.slice(0, -1))
           } else {
             setStatus("idle")
           }
-          setPendingMessage(null)
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === "AbortError") {
@@ -140,7 +140,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         if (activeAbortRef.current === abortController) {
           setError(err instanceof Error ? err.message : "Unknown error")
           setStatus("error")
-          setPendingMessage(null)
+          setPendingMessages(prev => prev.slice(0, -1))
         }
       }
     },
@@ -166,21 +166,22 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     activeAbortRef.current = null
     sendStopRequest()
     setStatus("idle")
-    setPendingMessage(null)
+    setPendingMessages([])
   }, [sendStopRequest])
 
-  const clearPending = useCallback(() => {
-    setPendingMessage(null)
+  /** Remove the oldest pending message (consumed by a new turn) */
+  const consumePending = useCallback((count = 1) => {
+    setPendingMessages(prev => prev.slice(count))
   }, [])
 
   return {
     status,
     error,
-    pendingMessage,
+    pendingMessages,
     sendMessage,
     interrupt,
     stopAgent,
-    clearPending,
+    consumePending,
     isConnected: status === "connected",
   }
 }

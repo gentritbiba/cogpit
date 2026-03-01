@@ -32,7 +32,8 @@ export interface SessionInfo {
 export type View = "projects" | "sessions" | "detail"
 
 export interface SessionBrowserProps {
-  session: ParsedSession | null
+  /** ID of the currently loaded session (drives sidebar view switching) */
+  sessionId: string | null
   /** "dirName/fileName" key identifying the currently loaded session */
   activeSessionKey: string | null
   onLoadSession: (

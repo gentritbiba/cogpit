@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils"
 import { projectName } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
+import { useSessionContext } from "@/contexts/SessionContext"
 import type { View, ProjectInfo, SessionInfo } from "./types"
 import { ProjectsList } from "./ProjectsList"
 import { SessionsList } from "./SessionsList"
@@ -27,7 +28,6 @@ import { SessionDetail } from "./SessionDetail"
 
 interface BrowseTabProps {
   view: View
-  session: ParsedSession | null
   selectedProject: ProjectInfo | null
   projects: ProjectInfo[]
   sessions: SessionInfo[]
@@ -227,7 +227,6 @@ function MobileDetailPlaceholder({ session }: { session: ParsedSession }): React
 
 export function BrowseTab({
   view,
-  session,
   selectedProject,
   projects,
   sessions,
@@ -249,6 +248,7 @@ export function BrowseTab({
   onRetry,
   onClearError,
 }: BrowseTabProps): React.ReactElement {
+  const { session } = useSessionContext()
   const searchPlaceholder = view === "projects" ? "Filter projects..." : "Filter sessions..."
 
   const handleRetry = useCallback(() => {

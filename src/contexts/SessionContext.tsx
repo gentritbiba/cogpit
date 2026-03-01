@@ -11,7 +11,7 @@ import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 export interface ChatState {
   status: PtyChatStatus
   error: string | undefined
-  pendingMessage: string | null
+  pendingMessages: string[]
   isConnected: boolean
   sendMessage: (
     text: string,
@@ -19,7 +19,7 @@ export interface ChatState {
   ) => void
   interrupt: () => void
   stopAgent: () => void
-  clearPending: () => void
+  consumePending: (count?: number) => void
 }
 
 // ── Scroll ──────────────────────────────────────────────────────────────────

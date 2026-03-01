@@ -28,6 +28,13 @@ function getSourceBadge(suggestion: SlashSuggestion) {
       </span>
     )
   }
+  if (suggestion.source === "built-in") {
+    return (
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20">
+        built-in
+      </span>
+    )
+  }
   // Plugin name
   return (
     <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-purple-500/15 text-purple-400 border border-purple-500/20">

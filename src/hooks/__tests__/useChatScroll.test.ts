@@ -41,7 +41,7 @@ function makeSession(turnCount: number): ParsedSession {
 }
 
 describe("useChatScroll", () => {
-  const clearPending = vi.fn()
+  const consumePending = vi.fn()
   let rafCallbacks: Array<() => void> = []
 
   beforeEach(() => {
@@ -61,8 +61,8 @@ describe("useChatScroll", () => {
   const defaultOpts = {
     session: null as ParsedSession | null,
     isLive: false,
-    pendingMessage: null as string | null,
-    clearPending,
+    pendingMessages: [] as string[],
+    consumePending,
     sessionChangeKey: 0,
   }
 
@@ -184,12 +184,12 @@ describe("useChatScroll", () => {
       result.current.resetTurnCount(3)
     })
 
-    // Now rerender with same session - should not trigger clearPending
+    // Now rerender with same session - should not trigger consumePending
     rerender({ ...defaultOpts, session })
-    expect(clearPending).not.toHaveBeenCalled()
+    expect(consumePending).not.toHaveBeenCalled()
   })
 
-  it("clears pending message when new turns arrive", () => {
+  it("consumes pending messages when new turns arrive", () => {
     const session1 = makeSession(1)
     const session2 = makeSession(2)
 
@@ -199,7 +199,7 @@ describe("useChatScroll", () => {
         initialProps: {
           ...defaultOpts,
           session: session1,
-          pendingMessage: "waiting...",
+          pendingMessages: ["waiting..."],
         },
       }
     )
@@ -208,10 +208,10 @@ describe("useChatScroll", () => {
     rerender({
       ...defaultOpts,
       session: session2,
-      pendingMessage: "waiting...",
+      pendingMessages: ["waiting..."],
     })
 
-    expect(clearPending).toHaveBeenCalled()
+    expect(consumePending).toHaveBeenCalledWith(1)
   })
 
   it("does not update scroll indicators when values haven't changed", () => {

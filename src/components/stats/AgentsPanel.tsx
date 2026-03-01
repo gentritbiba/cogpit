@@ -89,6 +89,17 @@ export function AgentsPanel({
     return bgAgents.filter((a) => a.parentSessionId === parentSessionId)
   }, [bgAgents, parentSessionId])
 
+  // Lookup map to enrich background agents with metadata from inline agents
+  const inlineMetaMap = useMemo(() => {
+    const map = new Map<string, { agentName: string | null; subagentType: string | null }>()
+    for (const a of inlineAgents) {
+      if (!map.has(a.agentId)) {
+        map.set(a.agentId, { agentName: a.agentName, subagentType: a.subagentType })
+      }
+    }
+    return map
+  }, [inlineAgents])
+
   // Build combined list: background agents + inline-only sub-agents (deduplicated)
   const inlineOnlyAgents = useMemo(() => {
     const bgAgentIds = new Set(sessionBgAgents.map((a) => a.agentId))
@@ -123,12 +134,13 @@ export function AgentsPanel({
           const preview = agent.preview
             ? agent.preview.split("\n").find((l) => l.trim())?.trim() ?? ""
             : ""
+          const meta = inlineMetaMap.get(agent.agentId)
           return (
             <AgentCard
               key={agent.agentId}
               agentId={agent.agentId}
-              subagentType={agent.subagentType}
-              agentName={agent.agentName}
+              subagentType={meta?.subagentType ?? null}
+              agentName={meta?.agentName ?? null}
               preview={preview !== agent.agentId ? preview : ""}
               colorIndex={idx}
               isViewing={currentAgentId === agent.agentId}

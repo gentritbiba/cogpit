@@ -57,7 +57,7 @@ function SidebarTabBar({
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export const SessionBrowser = memo(function SessionBrowser({
-  session,
+  sessionId,
   activeSessionKey,
   onLoadSession,
   sidebarTab,
@@ -71,7 +71,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   onDeleteSession,
 }: SessionBrowserProps): React.ReactElement {
   const browser = useSessionBrowser({
-    session,
+    sessionId,
     onLoadSession,
     onDeleteSession,
     onDuplicateSession,
@@ -128,7 +128,6 @@ export const SessionBrowser = memo(function SessionBrowser({
         {sidebarTab === "browse" && (
           <BrowseTab
             view={browser.view}
-            session={session}
             selectedProject={browser.selectedProject}
             projects={browser.projects}
             sessions={browser.sessions}
