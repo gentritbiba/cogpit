@@ -26,6 +26,13 @@ export function deriveSessionStatus(
 ): SessionStatusInfo {
   let pendingEnqueues = 0
 
+  /** Build a status result with the current pending queue count. */
+  function result(status: SessionStatus, toolName?: string): SessionStatusInfo {
+    const info: SessionStatusInfo = { status, pendingQueue: Math.max(0, pendingEnqueues) }
+    if (toolName) info.toolName = toolName
+    return info
+  }
+
   // Walk backward to find the last meaningful signal
   for (let i = rawMessages.length - 1; i >= 0; i--) {
     const msg = rawMessages[i]
@@ -49,31 +56,23 @@ export function deriveSessionStatus(
           const m = rawMessages[j]
           if (m.type === "user" && !(m as { isMeta?: boolean }).isMeta) { hasActivity = true; break }
         }
-        return {
-          status: hasActivity ? "completed" : "idle",
-          pendingQueue: Math.max(0, pendingEnqueues),
-        }
+        return result(hasActivity ? "completed" : "idle")
       }
       if (stopReason === "tool_use") {
-        // Extract tool name from the assistant content
         const content = message?.content
         const toolUseBlock = content?.findLast?.((b) => b.type === "tool_use")
-        return {
-          status: "tool_use",
-          toolName: toolUseBlock?.name,
-          pendingQueue: Math.max(0, pendingEnqueues),
-        }
+        return result("tool_use", toolUseBlock?.name)
       }
-      // stop_reason is null → streaming/thinking
-      return { status: "thinking", pendingQueue: Math.max(0, pendingEnqueues) }
+      // stop_reason is null -> streaming/thinking
+      return result("thinking")
     }
 
     if (msg.type === "user") {
       const isMeta = (msg as { isMeta?: boolean }).isMeta
       if (isMeta) continue
 
-      // User message (regular or tool result) — waiting for assistant
-      return { status: "processing", pendingQueue: Math.max(0, pendingEnqueues) }
+      // User message (regular or tool result) -- waiting for assistant
+      return result("processing")
     }
 
     // Skip progress, system, summary, etc.
