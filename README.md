@@ -1,5 +1,5 @@
 # Cogpit
-<img width="2056" height="1292" alt="image" src="https://github.com/user-attachments/assets/9c47d9db-772c-46f4-8cbf-97d68dd76e38" />
+<img width="1698" height="850" alt="image" src="https://github.com/user-attachments/assets/ebd16c91-b915-4717-a772-8eeb08e04754" />
 
 
 
