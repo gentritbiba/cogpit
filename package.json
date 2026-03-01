@@ -36,6 +36,7 @@
     "@tanstack/react-virtual": "^3.13.18",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.3",
     "express": "^5.2.1",
     "lucide-react": "^0.469.0",
     "node-pty": "^1.1.0",
