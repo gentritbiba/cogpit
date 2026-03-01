@@ -122,107 +122,106 @@ const BUILTIN_SKILLS: SlashSuggestion[] = [
   },
 ]
 
-/** Scan installed plugins for skills, commands, and agents */
-async function scanPluginSkills(): Promise<SlashSuggestion[]> {
+/**
+ * Scan a directory for .md files and return a suggestion for each.
+ * `nameFn` derives the suggestion name from the frontmatter and filename.
+ */
+async function scanMdFiles(
+  dir: string,
+  type: "command" | "skill",
+  source: string,
+  nameFn: (fm: Record<string, string>, file: string) => string,
+): Promise<SlashSuggestion[]> {
   const results: SlashSuggestion[] = []
-  const pluginsDir = join(homedir(), ".claude", "plugins")
-  const installedPath = join(pluginsDir, "installed_plugins.json")
-
   try {
-    const raw = await readFile(installedPath, "utf-8")
-    const data = JSON.parse(raw)
-    const plugins = data.plugins || {}
-
-    for (const [pluginKey, installs] of Object.entries(plugins)) {
-      const installList = installs as Array<{ installPath: string }>
-      if (!installList.length) continue
-      const installPath = installList[0].installPath
-
-      // Derive display name and publisher from key (e.g. "superpowers@superpowers-dev")
-      const [pluginDisplayName, publisher = ""] = pluginKey.split("@")
-      const source = BUILTIN_PUBLISHERS.has(publisher) ? "built-in" : pluginDisplayName
-
-      // Look for skills in the install directory
-      const skillsDir = join(installPath, "skills")
+    const files = await readdir(dir)
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue
+      const filePath = join(dir, file)
       try {
-        const skillDirs = await readdir(skillsDir)
-        for (const skillDir of skillDirs) {
-          const skillMdPath = join(skillsDir, skillDir, "SKILL.md")
-          try {
-            const content = await readFile(skillMdPath, "utf-8")
-            const fm = parseFrontmatter(content)
-            results.push({
-              name: fm.name || skillDir,
-              description: fm.description || "",
-              type: "skill",
-              source,
-              filePath: skillMdPath,
-            })
-          } catch {
-            // no SKILL.md in this directory
-          }
-        }
+        const content = await readFile(filePath, "utf-8")
+        const fm = parseFrontmatter(content)
+        results.push({
+          name: nameFn(fm, file),
+          description: fm.description || "",
+          type,
+          source,
+          filePath,
+        })
       } catch {
-        // no skills directory
-      }
-
-      // Look for agents in the install directory, but skip built-in publishers
-      // (their agents back the hardcoded BUILTIN_SKILLS and would cause duplicates)
-      if (!BUILTIN_PUBLISHERS.has(publisher)) {
-        const agentsDir = join(installPath, "agents")
-        try {
-          const agentFiles = await readdir(agentsDir)
-          for (const file of agentFiles) {
-            if (!file.endsWith(".md")) continue
-            const filePath = join(agentsDir, file)
-            try {
-              const content = await readFile(filePath, "utf-8")
-              const fm = parseFrontmatter(content)
-              results.push({
-                name: fm.name || file.replace(/\.md$/, ""),
-                description: fm.description || "",
-                type: "skill",
-                source,
-                filePath,
-              })
-            } catch {
-              // skip unreadable
-            }
-          }
-        } catch {
-          // no agents directory
-        }
-      }
-
-      // Also look for commands within the plugin (e.g. superpowers has commands/)
-      const pluginCommandsDir = join(installPath, "commands")
-      try {
-        const cmdFiles = await readdir(pluginCommandsDir)
-        for (const file of cmdFiles) {
-          if (!file.endsWith(".md")) continue
-          const filePath = join(pluginCommandsDir, file)
-          try {
-            const content = await readFile(filePath, "utf-8")
-            const fm = parseFrontmatter(content)
-            const cmdName = file.replace(/\.md$/, "")
-            // Namespace plugin commands: "plugin:command"
-            results.push({
-              name: `${pluginDisplayName}:${cmdName}`,
-              description: fm.description || "",
-              type: "command",
-              source,
-              filePath,
-            })
-          } catch {
-            // skip unreadable
-          }
-        }
-      } catch {
-        // no commands directory in plugin
+        // skip unreadable files
       }
     }
   } catch {
-    // installed_plugins.json doesn't exist
+    // directory doesn't exist
+  }
+  return results
+}
+
+/** Scan installed plugins for skills, commands, and agents */
+async function scanPluginSkills(): Promise<SlashSuggestion[]> {
+  const pluginsDir = join(homedir(), ".claude", "plugins")
+  const installedPath = join(pluginsDir, "installed_plugins.json")
+
+  let data: Record<string, unknown>
+  try {
+    const raw = await readFile(installedPath, "utf-8")
+    data = JSON.parse(raw)
+  } catch {
+    return [] // installed_plugins.json doesn't exist
+  }
+
+  const plugins = (data.plugins || {}) as Record<string, Array<{ installPath: string }>>
+  const results: SlashSuggestion[] = []
+
+  for (const [pluginKey, installList] of Object.entries(plugins)) {
+    if (!installList.length) continue
+    const installPath = installList[0].installPath
+
+    // Derive display name and publisher from key (e.g. "superpowers@superpowers-dev")
+    const [pluginDisplayName, publisher = ""] = pluginKey.split("@")
+    const source = BUILTIN_PUBLISHERS.has(publisher) ? "built-in" : pluginDisplayName
+    const nameFromFm = (fm: Record<string, string>, file: string) =>
+      fm.name || file.replace(/\.md$/, "")
+
+    // Skills: each subdirectory contains a SKILL.md
+    const skillsDir = join(installPath, "skills")
+    try {
+      const skillDirs = await readdir(skillsDir)
+      for (const skillDir of skillDirs) {
+        const skillMdPath = join(skillsDir, skillDir, "SKILL.md")
+        try {
+          const content = await readFile(skillMdPath, "utf-8")
+          const fm = parseFrontmatter(content)
+          results.push({
+            name: fm.name || skillDir,
+            description: fm.description || "",
+            type: "skill",
+            source,
+            filePath: skillMdPath,
+          })
+        } catch {
+          // no SKILL.md in this directory
+        }
+      }
+    } catch {
+      // no skills directory
+    }
+
+    // Agents: skip built-in publishers (their agents back the hardcoded BUILTIN_SKILLS)
+    if (!BUILTIN_PUBLISHERS.has(publisher)) {
+      const agentSuggestions = await scanMdFiles(
+        join(installPath, "agents"), "skill", source, nameFromFm,
+      )
+      results.push(...agentSuggestions)
+    }
+
+    // Commands: namespaced as "plugin:command"
+    const cmdSuggestions = await scanMdFiles(
+      join(installPath, "commands"), "command", source,
+      (fm, file) => `${pluginDisplayName}:${fm.name || file.replace(/\.md$/, "")}`,
+    )
+    results.push(...cmdSuggestions)
   }
 
   return results

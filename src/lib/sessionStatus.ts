@@ -81,11 +81,16 @@ export function deriveSessionStatus(
   return { status: "idle" }
 }
 
+/** Tools that indicate the agent is waiting for sub-agents to finish. */
+const AGENT_TOOLS = new Set(["Agent", "TaskOutput"])
+
 /** Human-readable label for a session status. Returns null for "idle". */
 export function getStatusLabel(status: SessionStatus | undefined, toolName?: string): string | null {
   switch (status) {
     case "thinking": return "Thinking..."
-    case "tool_use": return toolName ? `Using ${toolName}` : "Using tool..."
+    case "tool_use":
+      if (toolName && AGENT_TOOLS.has(toolName)) return "Running agents..."
+      return toolName ? `Using ${toolName}` : "Using tool..."
     case "processing": return "Processing..."
     case "completed": return "Done"
     default: return null

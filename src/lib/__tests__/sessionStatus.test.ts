@@ -128,6 +128,11 @@ describe("getStatusLabel", () => {
     expect(getStatusLabel("tool_use", "Edit")).toBe("Using Edit")
   })
 
+  it("returns Running agents... for Agent tool", () => {
+    expect(getStatusLabel("tool_use", "Agent")).toBe("Running agents...")
+    expect(getStatusLabel("tool_use", "TaskOutput")).toBe("Running agents...")
+  })
+
   it("returns generic label for tool_use without name", () => {
     expect(getStatusLabel("tool_use")).toBe("Using tool...")
   })

@@ -188,10 +188,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     onSelectSession(dirName, fileName)
   }, [onSelectSession])
 
-  function handleDeleteSession(s: ActiveSessionInfo) {
+  const handleDeleteSession = useCallback((s: ActiveSessionInfo) => {
     onDeleteSession?.(s.dirName, s.fileName)
     setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
-  }
+  }, [onDeleteSession])
 
   return (
     <div className="flex h-full flex-col">
