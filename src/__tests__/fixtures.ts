@@ -138,6 +138,11 @@ export function summaryMsg(summary = "Conversation compacted"): SummaryMessage {
   }
 }
 
+/**
+ * @deprecated Claude Code v2.1.63+ no longer emits agent_progress messages.
+ * Use agentToolSession() / backgroundAgentToolSession() for new-format fixtures.
+ * Kept for backward compat tests with old sessions.
+ */
 export function agentProgressMsg(
   agentId: string,
   parentToolUseID: string,
@@ -266,7 +271,10 @@ export function compactionSession(): string {
   ])
 }
 
-/** Session with sub-agent progress messages */
+/**
+ * @deprecated Old-format session using "Task" tool + agent_progress messages.
+ * Use agentToolSession() for new v2.1.63+ format. Kept for backward compat tests.
+ */
 export function subAgentSession(): string {
   const taskToolId = "task_tool_1"
   return toJsonl([

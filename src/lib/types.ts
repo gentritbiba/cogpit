@@ -99,6 +99,13 @@ export interface AssistantMessage extends BaseMessage {
   requestId?: string
 }
 
+/**
+ * @deprecated Claude Code v2.1.63+ no longer emits inline agent_progress messages.
+ * Subagent results now come as `toolUseResult` on the tool_result UserMessage.
+ * This interface is kept for backward compat with old sessions and for
+ * subagentWatcher.ts which synthesizes these for live progress display.
+ * New features should use AgentToolUseResult instead.
+ */
 export interface AgentProgressData {
   type: "agent_progress"
   message: {

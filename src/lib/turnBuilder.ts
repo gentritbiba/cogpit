@@ -401,6 +401,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           pendingToolUses.set(block.id, { turn: current, index: idx })
 
           // Track Task/Agent tool calls metadata for agent name/type display
+          // "Task" is deprecated (pre-v2.1.63); kept for old sessions
           if (block.name === "Task" || block.name === "Agent") {
             const input = block.input as Record<string, unknown>
             if (input.run_in_background === true) {
@@ -419,6 +420,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       continue
     }
 
+    // @deprecated agent_progress handling — Claude Code v2.1.63+ uses toolUseResult instead.
+    // Kept for old sessions and subagentWatcher live progress synthesis.
     if (isProgressMessage(msg) && msg.data.type === "agent_progress") {
       const data = msg.data
       const parentId = msg.parentToolUseID ?? ""

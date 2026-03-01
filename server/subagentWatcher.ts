@@ -9,6 +9,11 @@ import { randomUUID } from "node:crypto"
 // separate files under <sessionId>/subagents/agent-<id>.jsonl.  This watcher
 // monitors those files and synthesizes agent_progress entries into the parent
 // JSONL so the SSE file watcher can stream them to the UI.
+//
+// NOTE: As of Claude Code v2.1.63+, the final subagent result is delivered as
+// `toolUseResult` on the tool_result message (see AgentToolUseResult in types.ts).
+// This watcher is still needed for LIVE progress during execution — the
+// toolUseResult only appears when the subagent finishes.
 
 export interface SubagentWatcher {
   close(): void

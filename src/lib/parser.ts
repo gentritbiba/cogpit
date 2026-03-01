@@ -210,7 +210,7 @@ const TOOL_COLORS: Record<string, string> = {
   Bash: "text-red-400",
   Grep: "text-purple-400",
   Glob: "text-cyan-400",
-  Task: "text-indigo-400",
+  Task: "text-indigo-400", // @deprecated pre-v2.1.63, now "Agent"
   Agent: "text-indigo-400",
   WebFetch: "text-orange-400",
   WebSearch: "text-orange-400",
