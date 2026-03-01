@@ -136,7 +136,7 @@ describe("getStatusLabel", () => {
     expect(getStatusLabel("processing")).toBe("Processing...")
   })
 
-  it("returns Idle for completed", () => {
-    expect(getStatusLabel("completed")).toBe("Idle")
+  it("returns Done for completed", () => {
+    expect(getStatusLabel("completed")).toBe("Done")
   })
 })

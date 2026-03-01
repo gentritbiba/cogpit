@@ -49,6 +49,7 @@ interface SessionRowProps {
   killingPids: Set<number>
   onSelectSession: (dirName: string, fileName: string) => void
   onKill: (pid: number, e: React.MouseEvent) => void
+  isNewlyCompleted?: boolean
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
 }
@@ -58,6 +59,7 @@ export function SessionRow({
   isActiveSession,
   proc,
   killingPids,
+  isNewlyCompleted,
   onSelectSession,
   onKill,
   onDuplicateSession,
@@ -78,9 +80,7 @@ export function SessionRow({
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
       className={cn(
         "group relative w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left transition-colors duration-150 cursor-pointer card-hover",
-        isActiveSession
-          ? "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
-          : "elevation-1 border border-border/40 hover:bg-elevation-2"
+        cardStyle(isActiveSession, hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
       )}
     >
       {/* Top row: status dot + last prompt + kill button */}
@@ -175,10 +175,16 @@ export function SessionRow({
     )
   }
 
-  return <>{sessionRow}</>
+  return sessionRow
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
+
+function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
+  if (isActive) return "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
+  if (isNewlyCompleted) return "bg-green-500/8 ring-1 ring-green-500/30 border border-green-500/20"
+  return "elevation-1 border border-border/40 hover:bg-elevation-2"
+}
 
 function isIdleStatus(status?: SessionStatus): boolean {
   return status === "idle" || status === "completed"

@@ -582,7 +582,6 @@ export default function App() {
       key={i}
       message={msg}
       turnNumber={i + 1}
-      statusText={i === 0 ? "Creating session..." : `Queued (${i})`}
     />
   ))
 

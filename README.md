@@ -28,7 +28,7 @@ Grab the latest release for your platform from the [Releases page](https://githu
 ### Session Browser
 Browse all your Claude Code projects and sessions from a sidebar navigator. Sessions are grouped by project directory, sorted by recency, and show live status indicators for active sessions.
 
-- **Live sessions panel** — running sessions with status dots (green=running, amber=completed, gray=idle), RAM usage tooltips, and a kill button on hover
+- **Live sessions panel** — running sessions with status indicators (green=running, blue=tool_use, amber=thinking/processing, gray=idle, green ring=newly completed), RAM usage tooltips, and a kill button on hover
 - **Process monitor** — lists all system-wide `claude` processes with PID, memory, and CPU usage; detects orphaned processes not linked to any session
 - **Session cards** — model badge, turn count, git branch, file size, first message preview, and relative timestamps
 - **Search & filter** — debounced search across sessions and projects
@@ -62,7 +62,7 @@ Connect to active sessions via Server-Sent Events. New turns appear in real-time
 Send messages to running Claude Code sessions directly from the dashboard:
 - **Model override** per message (Opus, Sonnet, Haiku)
 - **Voice input** powered by Whisper WASM — real-time transcription with progress indicator while the model loads (Ctrl+Shift+M)
-- **Slash command suggestions** — type `/` to get command and skill suggestions scanned from project `.claude/` directory, user skills, and installed plugins; keyboard navigation with arrow keys, Tab, and Enter
+- **Slash command suggestions** — type `/` to get built-in skills (simplify, batch, debug) plus command and skill suggestions scanned from project `.claude/` directory, user skills, and installed plugins; keyboard navigation with arrow keys, Tab, and Enter
 - **Image support** — drag-and-drop, paste from clipboard, or attach files; preview strip with remove buttons, click to expand full-screen; auto-converts unsupported formats (e.g. TIFF → PNG)
 - **Plan approval bar** — when the agent enters plan mode, approve or reject with listed permission requests
 - **User question bar** — multiple-choice options with descriptions when the agent asks a question; supports multi-select

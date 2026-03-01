@@ -88,7 +88,7 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
     case "thinking": return "Thinking..."
     case "tool_use": return toolName ? `Using ${toolName}` : "Using tool..."
     case "processing": return "Processing..."
-    case "completed": return "Idle"
+    case "completed": return "Done"
     default: return null
   }
 }

@@ -52,6 +52,11 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
   const [searching, setSearching] = useState(false)
+  // Tracks sessions that transitioned to "completed" during this browser session
+  const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
+  const prevStatusRef = useRef<Map<string, string> | null>(null)
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
   const searchInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const debouncedSearchRef = useRef(debouncedSearch)
@@ -112,6 +117,43 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     [processes]
   )
 
+  // Detect status transitions to "completed" — only highlight newly completed sessions.
+  // Skip recording until we have real data so the mount render (empty sessions) doesn't
+  // cause the first real fetch to look like every session just transitioned.
+  useEffect(() => {
+    if (sessions.length === 0) return
+
+    const prev = prevStatusRef.current
+    const currentStatuses = new Map<string, string>()
+    for (const s of sessions) {
+      if (s.agentStatus && procBySession.has(s.sessionId)) {
+        currentStatuses.set(s.sessionId, s.agentStatus)
+      }
+    }
+
+    if (prev !== null) {
+      // After first load: detect transitions
+      setNewlyCompleted((nc) => {
+        let next: Set<string> | null = null
+        for (const [id, status] of currentStatuses) {
+          if (status === "completed" && prev.get(id) !== "completed") {
+            next ??= new Set(nc)
+            next.add(id)
+          }
+        }
+        for (const id of nc) {
+          if (currentStatuses.get(id) !== "completed") {
+            next ??= new Set(nc)
+            next.delete(id)
+          }
+        }
+        return next ?? nc
+      })
+    }
+
+    prevStatusRef.current = currentStatuses
+  }, [sessions, procBySession])
+
   const handleKill = useCallback(async (pid: number, e: React.MouseEvent) => {
     e.stopPropagation()
     setKillingPids(prev => new Set(prev).add(pid))
@@ -131,6 +173,20 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       })
     }, 2000)
   }, [fetchData])
+
+  const handleSelectSession = useCallback((dirName: string, fileName: string) => {
+    // Dismiss the completed highlight on click
+    const match = sessionsRef.current.find((s) => s.dirName === dirName && s.fileName === fileName)
+    if (match) {
+      setNewlyCompleted((prev) => {
+        if (!prev.has(match.sessionId)) return prev
+        const next = new Set(prev)
+        next.delete(match.sessionId)
+        return next
+      })
+    }
+    onSelectSession(dirName, fileName)
+  }, [onSelectSession])
 
   function handleDeleteSession(s: ActiveSessionInfo) {
     onDeleteSession?.(s.dirName, s.fileName)
@@ -236,7 +292,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               isActiveSession={activeSessionKey === `${s.dirName}/${s.fileName}`}
               proc={procBySession.get(s.sessionId)}
               killingPids={killingPids}
-              onSelectSession={onSelectSession}
+              isNewlyCompleted={newlyCompleted.has(s.sessionId)}
+              onSelectSession={handleSelectSession}
               onKill={handleKill}
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}

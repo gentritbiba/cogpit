@@ -5,7 +5,6 @@ import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
-import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { UserQuestionBar } from "./UserQuestionBar"
 import { useVoiceInput } from "./useVoiceInput"
@@ -37,46 +36,14 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
 }
 
-function agentDotColor(status: string): string {
-  if (status === "completed") return "bg-green-400"
-  if (status === "tool_use") return "bg-blue-400"
-  return "bg-amber-400"
-}
-
-function AgentStatusBar({ status, toolName }: { status: string; toolName?: string }) {
-  const label = getStatusLabel(status as "idle" | "thinking" | "tool_use" | "processing" | "completed", toolName)
-  if (!label) return null
-
-  const isCompleted = status === "completed"
-  const dotColor = agentDotColor(status)
-
-  return (
-    <div className="flex items-center gap-2 mb-1.5 px-1">
-      <span className="relative flex h-2 w-2 shrink-0">
-        {!isCompleted && <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", dotColor)} />}
-        <span className={cn("relative inline-flex h-2 w-2 rounded-full", dotColor)} />
-      </span>
-      <span className={cn("text-[11px]", isCompleted ? "text-green-400" : "text-muted-foreground")}>{label}</span>
-    </div>
-  )
-}
-
 export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
   const {
-    session,
-    isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
     slashSuggestions,
     slashSuggestionsLoading,
   } = useSessionContext()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
-
-  // Derive agent status from raw messages — no stored state
-  const agentStatus = useMemo(() => {
-    if (!session || !isLive) return null
-    return deriveSessionStatus(session.rawMessages as Array<{ type: string; [key: string]: unknown }>)
-  }, [session, isLive])
 
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -170,10 +137,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
       )}
 
       <div className="mx-auto max-w-3xl">
-        {agentStatus && agentStatus.status !== "idle" && (
-          <AgentStatusBar status={agentStatus.status} toolName={agentStatus.toolName} />
-        )}
-
         {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
         {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={onSend} />}
 

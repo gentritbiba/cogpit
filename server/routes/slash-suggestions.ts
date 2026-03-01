@@ -93,6 +93,35 @@ const BUILTIN_PUBLISHERS = new Set([
   "claude-plugins-official",
 ])
 
+/**
+ * Skills bundled into the Claude Code binary itself.
+ * These aren't discoverable from the filesystem — they're hardcoded in the CLI.
+ * Source: https://code.claude.com/docs/en/skills#bundled-skills
+ */
+const BUILTIN_SKILLS: SlashSuggestion[] = [
+  {
+    name: "simplify",
+    description: "Review changed code for reuse, quality, and efficiency, then fix any issues found",
+    type: "skill",
+    source: "built-in",
+    filePath: "",
+  },
+  {
+    name: "batch",
+    description: "Orchestrate large-scale changes across a codebase in parallel using isolated worktrees",
+    type: "skill",
+    source: "built-in",
+    filePath: "",
+  },
+  {
+    name: "debug",
+    description: "Troubleshoot your current Claude Code session by reading the session debug log",
+    type: "skill",
+    source: "built-in",
+    filePath: "",
+  },
+]
+
 /** Scan installed plugins for skills, commands, and agents */
 async function scanPluginSkills(): Promise<SlashSuggestion[]> {
   const results: SlashSuggestion[] = []
@@ -137,29 +166,32 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
         // no skills directory
       }
 
-      // Look for agents in the install directory (e.g. code-simplifier has agents/)
-      const agentsDir = join(installPath, "agents")
-      try {
-        const agentFiles = await readdir(agentsDir)
-        for (const file of agentFiles) {
-          if (!file.endsWith(".md")) continue
-          const filePath = join(agentsDir, file)
-          try {
-            const content = await readFile(filePath, "utf-8")
-            const fm = parseFrontmatter(content)
-            results.push({
-              name: fm.name || file.replace(/\.md$/, ""),
-              description: fm.description || "",
-              type: "skill",
-              source,
-              filePath,
-            })
-          } catch {
-            // skip unreadable
+      // Look for agents in the install directory, but skip built-in publishers
+      // (their agents back the hardcoded BUILTIN_SKILLS and would cause duplicates)
+      if (!BUILTIN_PUBLISHERS.has(publisher)) {
+        const agentsDir = join(installPath, "agents")
+        try {
+          const agentFiles = await readdir(agentsDir)
+          for (const file of agentFiles) {
+            if (!file.endsWith(".md")) continue
+            const filePath = join(agentsDir, file)
+            try {
+              const content = await readFile(filePath, "utf-8")
+              const fm = parseFrontmatter(content)
+              results.push({
+                name: fm.name || file.replace(/\.md$/, ""),
+                description: fm.description || "",
+                type: "skill",
+                source,
+                filePath,
+              })
+            } catch {
+              // skip unreadable
+            }
           }
+        } catch {
+          // no agents directory
         }
-      } catch {
-        // no agents directory
       }
 
       // Also look for commands within the plugin (e.g. superpowers has commands/)
@@ -248,8 +280,9 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
     for (const cmd of userCommands) commandMap.set(cmd.name, cmd)
     for (const cmd of projectCommands) commandMap.set(cmd.name, cmd)
 
-    // Deduplicate skills: project overrides user, plugin skills kept separately
+    // Deduplicate skills: built-in → user → project (later wins)
     const skillMap = new Map<string, SlashSuggestion>()
+    for (const s of BUILTIN_SKILLS) skillMap.set(s.name, s)
     for (const s of userSkills) skillMap.set(s.name, s)
     for (const s of projectSkills) skillMap.set(s.name, s)
 

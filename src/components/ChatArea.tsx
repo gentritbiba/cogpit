@@ -9,8 +9,8 @@ import { Input } from "@/components/ui/input"
 import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
+import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
-import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
@@ -27,10 +27,8 @@ export const ChatArea = memo(function ChatArea({
   const { chat, scroll } = useSessionChatContext()
 
   const { searchQuery, expandAll } = state
-  const { pendingMessages, isConnected } = chat
+  const { pendingMessages } = chat
   const { chatScrollRef, scrollEndRef, canScrollUp, canScrollDown, handleScroll } = scroll
-
-  const elapsedSec = useElapsedTimer(isConnected)
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
@@ -94,10 +92,9 @@ export const ChatArea = memo(function ChatArea({
                   key={i}
                   message={msg}
                   turnNumber={currentSession.turns.length + 1 + i}
-                  elapsedSec={i === 0 && isConnected ? elapsedSec : undefined}
-                  statusText={i === 0 ? undefined : `Queued (${i})`}
                 />
               ))}
+              <AgentStatusIndicator />
               <div ref={scrollEndRef} />
             </ErrorBoundary>
           </div>
