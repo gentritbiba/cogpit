@@ -5,7 +5,7 @@ Chronological record of all documentation audits for the agent-window project.
 ## Recent Audits
 
 ### 2026-03-02 — Session Context API, Local Command Output, Undo Enhancement
-- **File:** `audit-history/audit-20260302-session-context-PLACEHOLDER.md`
+- **File:** `audit-history/audit-20260302-session-context-03d96ef.md`
 - **Status:** PASS WITH DOCUMENTATION UPDATES REQUIRED
 - **Changes:** 10 files modified, new session-context route file + test file
 - **Key updates:**
