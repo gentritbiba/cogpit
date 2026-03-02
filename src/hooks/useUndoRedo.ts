@@ -257,6 +257,19 @@ export function useUndoRedo(
         await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, applyOperations, saveUndoState, setApplyError)
       }
 
+      // Kill the persistent Claude process so it restarts fresh from the
+      // truncated JSONL on the next message. Without this, the running
+      // process still holds the full (pre-undo) conversation in memory.
+      try {
+        await authFetch("/api/stop-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: session.sessionId }),
+        })
+      } catch {
+        // Best-effort: session may not have a running process
+      }
+
       await onReloadSession()
       setConfirmState(null)
     } catch (err) {

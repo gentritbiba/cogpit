@@ -27,37 +27,6 @@ export function parseFrontmatter(content: string): Record<string, string> {
   return result
 }
 
-/** Scan a commands directory and return suggestions */
-async function scanCommands(
-  dir: string,
-  source: "project" | "user",
-): Promise<SlashSuggestion[]> {
-  const results: SlashSuggestion[] = []
-  try {
-    const files = await readdir(dir)
-    for (const file of files) {
-      if (!file.endsWith(".md")) continue
-      const filePath = join(dir, file)
-      try {
-        const content = await readFile(filePath, "utf-8")
-        const fm = parseFrontmatter(content)
-        results.push({
-          name: file.replace(/\.md$/, ""),
-          description: fm.description || "",
-          type: "command",
-          source,
-          filePath,
-        })
-      } catch {
-        // skip unreadable files
-      }
-    }
-  } catch {
-    // directory doesn't exist
-  }
-  return results
-}
-
 /** Scan a skills directory (contains subdirs each with a SKILL.md) */
 async function scanSkillsDir(
   dir: string,
@@ -117,6 +86,13 @@ const BUILTIN_SKILLS: SlashSuggestion[] = [
     name: "debug",
     description: "Troubleshoot your current Claude Code session by reading the session debug log",
     type: "skill",
+    source: "built-in",
+    filePath: "",
+  },
+  {
+    name: "compact",
+    description: "Compact conversation history to free up context window space",
+    type: "command",
     source: "built-in",
     filePath: "",
   },
@@ -260,12 +236,14 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
 
     const globalClaudeDir = join(homedir(), ".claude")
 
+    const nameFromFile = (_fm: Record<string, string>, file: string) => file.replace(/\.md$/, "")
+
     // Scan all sources in parallel
     const [userCommands, projectCommands, userSkills, projectSkills, pluginSkills] =
       await Promise.all([
-        scanCommands(join(globalClaudeDir, "commands"), "user"),
+        scanMdFiles(join(globalClaudeDir, "commands"), "command", "user", nameFromFile),
         cwd
-          ? scanCommands(join(cwd, ".claude", "commands"), "project")
+          ? scanMdFiles(join(cwd, ".claude", "commands"), "command", "project", nameFromFile)
           : Promise.resolve([]),
         scanSkillsDir(join(globalClaudeDir, "skills"), "user"),
         cwd

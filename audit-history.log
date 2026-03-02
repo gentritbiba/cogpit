@@ -4,8 +4,23 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-03-02 — Session Context API, Local Command Output, Undo Enhancement
+- **File:** `audit-history/audit-20260302-session-context-PLACEHOLDER.md`
+- **Status:** PASS WITH DOCUMENTATION UPDATES REQUIRED
+- **Changes:** 10 files modified, new session-context route file + test file
+- **Key updates:**
+  - New `/api/session-context/` L1/L2/L3 API (session overview, turn detail, sub-agent resolution)
+  - `tsconfig.node.json` expanded include to allow server to import `src/lib/parser.ts`
+  - `UserMessage.tsx`: parses `<local-command-stdout>` / `<local-command-stderr>` into styled terminal cards
+  - `useUndoRedo.ts`: kills persistent Claude process after undo/redo apply
+  - `/compact` added to built-in slash suggestions
+  - Mac build: zip target removed from electron-builder.yml
+  - Version bump 0.1.0 → 0.1.1
+- **Risk:** LOW (all changes backward-compatible)
+- **Doc updates needed:** ARCHITECTURE.md (API table + file org), QUICK_REFERENCE.md (API table), README.md (/compact list, local command output cards)
+
 ### 2026-03-01 22:58:00 — Bundle Optimization & Subagent Content Loading
-- **File:** `audit-history/audit-PLACEHOLDER.md`
+- **File:** `audit-history/audit-20260301-225800-e51bfa7.md`
 - **Status:** PASS WITH DOCUMENTATION UPDATES REQUIRED
 - **Changes:** 54 files, 356 insertions(+), 515 deletions(-)
 - **Key updates:**

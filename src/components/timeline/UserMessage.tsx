@@ -5,12 +5,49 @@ import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
 import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 
 const SYSTEM_TAG_RE =
   /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
 
 const COMMAND_MESSAGE_RE = /<command-message>([^<]+)<\/command-message>/
 const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/
+
+// ── Local command output parsing ────────────────────────────────────────
+const LOCAL_CMD_OUTPUT_RE = /<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/g
+
+interface LocalCommandOutput {
+  text: string
+  stream: "stdout" | "stderr"
+}
+
+function parseLocalCommandOutputs(text: string): { outputs: LocalCommandOutput[]; remainingText: string } {
+  const outputs: LocalCommandOutput[] = []
+  const remaining = text
+    .replace(LOCAL_CMD_OUTPUT_RE, (_, stream, inner) => {
+      outputs.push({ text: inner.trim(), stream: stream as "stdout" | "stderr" })
+      return ""
+    })
+    .trim()
+  return { outputs, remainingText: remaining }
+}
+
+function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
+  const isError = output.stream === "stderr"
+  return (
+    <div className={cn(
+      "rounded-md border px-3 py-2 my-1 font-mono text-xs",
+      isError
+        ? "border-red-500/20 bg-red-500/10 text-red-300"
+        : "border-border/40 bg-elevation-2 text-muted-foreground",
+    )}>
+      <div className="flex items-center gap-1.5">
+        <Terminal className={cn("w-3 h-3 flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")} />
+        <span>{output.text}</span>
+      </div>
+    </div>
+  )
+}
 
 // ── Task notification parsing ───────────────────────────────────────────
 
@@ -178,6 +215,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, label
   const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
   const cleanText = useMemo(() => stripSystemTags(rawText), [rawText])
   const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(cleanText), [cleanText])
+  const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
 
   const handleToggleExpand = useCallback(async () => {
     if (commandExpanded) {
@@ -202,7 +240,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, label
     [images]
   )
   const hasTags = rawText !== cleanText
-  const displayText = showRaw ? rawText : textAfterNotifications
+  const displayText = showRaw ? rawText : textAfterOutputs
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
@@ -300,6 +338,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, label
           <div className="space-y-2 mb-2">
             {notifications.map((n) => (
               <TaskNotificationCard key={n.taskId} notification={n} />
+            ))}
+          </div>
+        )}
+
+        {!showRaw && cmdOutputs.length > 0 && (
+          <div className="space-y-1 mb-2">
+            {cmdOutputs.map((o, i) => (
+              <LocalCommandOutputCard key={i} output={o} />
             ))}
           </div>
         )}

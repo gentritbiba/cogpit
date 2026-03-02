@@ -146,6 +146,9 @@ function setupMockFetch(undoStateResponse: UndoState | null = null) {
     if (url.includes("/api/sessions/")) {
       return new Response("line1\nline2\nline3", { status: 200 })
     }
+    if (url.includes("/api/stop-session")) {
+      return new Response(JSON.stringify({ success: true }), { status: 200 })
+    }
     return new Response("not found", { status: 404 })
   })
 }
@@ -704,6 +707,34 @@ describe("useUndoRedo", () => {
       expect(result.current.isApplying).toBe(false)
     })
 
+    it("calls stop-session to restart the Claude process after undo", async () => {
+      const session = makeSession(5)
+      const source = makeSource()
+      const onReload = vi.fn().mockResolvedValue(undefined)
+
+      const { result } = renderHook(() =>
+        useUndoRedo(session, source, onReload)
+      )
+
+      await waitFor(() => {
+        expect(mockAuthFetch).toHaveBeenCalled()
+      })
+
+      act(() => result.current.requestUndo(3))
+
+      await act(async () => {
+        await result.current.confirmApply()
+      })
+
+      // Verify stop-session was called with the session ID
+      const stopCalls = mockAuthFetch.mock.calls.filter(
+        ([url]) => typeof url === "string" && url.includes("/api/stop-session")
+      )
+      expect(stopCalls).toHaveLength(1)
+      const body = JSON.parse((stopCalls[0][1] as RequestInit).body as string)
+      expect(body.sessionId).toBe("test-session")
+    })
+
     it("sets applyError when file operation fails", async () => {
       const session = makeSession(5)
       const source = makeSource()
@@ -743,6 +774,12 @@ describe("useUndoRedo", () => {
 
       expect(result.current.applyError).toBe("File not found")
       expect(onReload).not.toHaveBeenCalled()
+
+      // stop-session should not be called when apply fails
+      const stopCalls = mockAuthFetch.mock.calls.filter(
+        ([url]) => typeof url === "string" && url.includes("/api/stop-session")
+      )
+      expect(stopCalls).toHaveLength(0)
 
       // Reset to default
       mockBuildUndo.mockReturnValue([])

@@ -42,10 +42,6 @@ mac:
       arch:
         - x64
         - arm64
-    - target: zip
-      arch:
-        - x64
-        - arm64
   category: public.app-category.developer-tools
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist

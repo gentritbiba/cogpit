@@ -22,6 +22,7 @@ import { registerUndoRoutes } from "../server/routes/undo"
 import { registerFileRoutes } from "../server/routes/files"
 import { registerFileWatchRoutes } from "../server/routes/files-watch"
 import { registerSessionFileChangesRoutes } from "../server/routes/session-file-changes"
+import { registerSessionContextRoutes } from "../server/routes/session-context"
 import { registerEditorRoutes } from "../server/routes/editor"
 import { registerWorktreeRoutes } from "../server/routes/worktrees"
 import { registerUsageRoutes } from "../server/routes/usage"
@@ -101,6 +102,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerFileRoutes(use)
   registerFileWatchRoutes(use)
   registerSessionFileChangesRoutes(use)
+  registerSessionContextRoutes(use)
   registerEditorRoutes(use)
   registerWorktreeRoutes(use)
   registerUsageRoutes(use)

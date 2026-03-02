@@ -13,6 +13,7 @@ import { registerUndoRoutes } from "./routes/undo"
 import { registerFileRoutes } from "./routes/files"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
+import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerEditorRoutes } from "./routes/editor"
 import { registerWorktreeRoutes } from "./routes/worktrees"
 import { registerUsageRoutes } from "./routes/usage"
@@ -66,6 +67,7 @@ export function sessionApiPlugin(): Plugin {
       registerFileRoutes(use)
       registerFileWatchRoutes(use)
       registerSessionFileChangesRoutes(use)
+      registerSessionContextRoutes(use)
       registerEditorRoutes(use)
       registerWorktreeRoutes(use)
       registerUsageRoutes(use)
