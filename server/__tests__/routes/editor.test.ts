@@ -8,7 +8,31 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, platform: () => mockPlatform() }
 })
 
-import { terminalCommand } from "../../routes/editor"
+// Mock config for resolveActionPath
+const mockGetConfig = vi.fn()
+vi.mock("../../config", () => ({
+  getConfig: () => mockGetConfig(),
+  getDirs: (claudeDir: string) => ({
+    PROJECTS_DIR: claudeDir + "/projects",
+    TEAMS_DIR: claudeDir + "/teams",
+    TASKS_DIR: claudeDir + "/tasks",
+    UNDO_DIR: "/undo",
+  }),
+}))
+
+// Mock fs for resolveActionPath
+const mockReaddir = vi.fn()
+const mockOpen = vi.fn()
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>()
+  return {
+    ...actual,
+    readdir: (...args: unknown[]) => mockReaddir(...args),
+    open: (...args: unknown[]) => mockOpen(...args),
+  }
+})
+
+import { terminalCommand, resolveActionPath } from "../../routes/editor"
 
 describe("terminalCommand", () => {
   beforeEach(() => {
@@ -78,5 +102,59 @@ describe("terminalCommand", () => {
       const result = terminalCommand("alacritty", "/tmp/project")
       expect(result).toEqual({ cmd: "alacritty", args: ["--working-directory", "/tmp/project"] })
     })
+  })
+})
+
+describe("resolveActionPath", () => {
+  beforeEach(() => {
+    mockGetConfig.mockReset()
+    mockReaddir.mockReset()
+    mockOpen.mockReset()
+  })
+
+  it("returns path directly when provided", async () => {
+    const result = await resolveActionPath({ path: "/Users/me/my-project" })
+    expect(result).toBe("/Users/me/my-project")
+  })
+
+  it("prefers path over dirName when both provided", async () => {
+    const result = await resolveActionPath({ path: "/Users/me/my-project", dirName: "-Users-me-my-project" })
+    expect(result).toBe("/Users/me/my-project")
+  })
+
+  it("resolves cwd from session JSONL when only dirName is provided", async () => {
+    mockGetConfig.mockReturnValue({ claudeDir: "/home/.claude" })
+    mockReaddir.mockResolvedValue(["session1.jsonl"])
+    const jsonLine = JSON.stringify({ cwd: "/Users/me/my-project", sessionId: "abc" })
+    const mockFh = {
+      read: vi.fn().mockImplementation((b: Buffer) => {
+        Buffer.from(jsonLine).copy(b)
+        return Promise.resolve({ bytesRead: jsonLine.length })
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    }
+    mockOpen.mockResolvedValue(mockFh)
+
+    const result = await resolveActionPath({ dirName: "-Users-me-my-project" })
+    expect(result).toBe("/Users/me/my-project")
+  })
+
+  it("falls back to lossy conversion when no JSONL files exist", async () => {
+    mockGetConfig.mockReturnValue({ claudeDir: "/home/.claude" })
+    mockReaddir.mockResolvedValue([])
+
+    const result = await resolveActionPath({ dirName: "-Users-me-my-project" })
+    expect(result).toBe("/Users/me/my/project")
+  })
+
+  it("returns null when neither path nor dirName provided", async () => {
+    const result = await resolveActionPath({})
+    expect(result).toBeNull()
+  })
+
+  it("returns null when dirName given but dirs not configured", async () => {
+    mockGetConfig.mockReturnValue(null)
+    const result = await resolveActionPath({ dirName: "-Users-me-my-project" })
+    expect(result).toBeNull()
   })
 })

@@ -4,6 +4,19 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-03-03 — Editor API Routes: dirName Resolution
+- **File:** `audit-history/audit-20260303-014921-PLACEHOLDER.md`
+- **Status:** PASS WITH MINOR DOCUMENTATION UPDATES REQUIRED
+- **Changes:** 4 files modified, new `resolveActionPath` utility function
+- **Key updates:**
+  - New `resolveActionPath()` in `server/routes/editor.ts` — resolves paths from either `path` or `dirName` parameters
+  - `/api/reveal-in-folder`, `/api/open-terminal`, `/api/open-in-editor` now accept both `path` and `dirName` in request body
+  - Frontend components (`App.tsx`, `SessionInfoBar.tsx`) send both parameters to editor routes
+  - Enables opening archived sessions in editor when real `cwd` is unavailable but `dirName` is known
+  - Comprehensive test coverage with 6 new tests for `resolveActionPath` function
+- **Risk:** LOW (backward-compatible; new parameter is optional)
+- **Doc updates needed:** ARCHITECTURE.md (3 API route rows), QUICK_REFERENCE.md (3 rows, if section includes these routes)
+
 ### 2026-03-02 — Session Context API, Local Command Output, Undo Enhancement
 - **File:** `audit-history/audit-20260302-session-context-03d96ef.md`
 - **Status:** PASS WITH DOCUMENTATION UPDATES REQUIRED

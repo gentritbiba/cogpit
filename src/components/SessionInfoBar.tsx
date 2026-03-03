@@ -134,9 +134,19 @@ function SessionActions({
   const { session: sessionOrNull, sessionSource } = useSessionContext()
   const session = sessionOrNull!
   const sessionSrc = sessionSource!
+  const hasProject = !!(session.cwd || sessionSrc.dirName)
   const newIcon = creatingSession
     ? <Loader2 className="size-3 animate-spin" />
     : <Plus className="size-3" />
+
+  /** POST path + dirName to an action endpoint (fire-and-forget). */
+  function postAction(endpoint: string): void {
+    authFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: session.cwd || undefined, dirName: sessionSrc.dirName }),
+    })
+  }
 
   function handleNewSession(): void {
     onNewSession(sessionSrc.dirName, session.cwd)
@@ -189,29 +199,21 @@ function SessionActions({
           className="text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
         />
       )}
-      {session.cwd && (
+      {hasProject && (
         <HeaderActionButton
           icon={<Code2 className="size-3" />}
           label="Open"
           tooltip="Open project in editor"
-          onClick={() => authFetch("/api/open-in-editor", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: session.cwd }),
-          })}
+          onClick={() => postAction("/api/open-in-editor")}
           className="text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
         />
       )}
-      {session.cwd && (
+      {hasProject && (
         <HeaderActionButton
           icon={<FolderSearch className="size-3" />}
           label="Reveal"
           tooltip="Reveal in file manager"
-          onClick={() => authFetch("/api/reveal-in-folder", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: session.cwd }),
-          })}
+          onClick={() => postAction("/api/reveal-in-folder")}
           className="text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
         />
       )}

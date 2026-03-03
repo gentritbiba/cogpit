@@ -116,20 +116,28 @@ export default function App() {
     }
   }, [])
 
+  /** Fire-and-forget POST to an action endpoint with path + dirName resolution. */
+  const postAction = useCallback((endpoint: string) => {
+    authFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: pendingPath || undefined, dirName: state.pendingDirName || undefined }),
+    }).catch(() => {})
+  }, [pendingPath, state.pendingDirName])
+
   const handleOpenTerminal = useCallback(() => {
-    const projectPath = state.session?.cwd
-      ?? pendingPath
-      ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
-      ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
-    if (!projectPath) { console.warn("[open-terminal] no project path available"); return }
+    // Prefer the real cwd; send dirName so the server can resolve authoritatively
+    const projectPath = state.session?.cwd ?? pendingPath ?? undefined
+    const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
+    if (!projectPath && !dirName) { console.warn("[open-terminal] no project path available"); return }
     authFetch("/api/open-terminal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath }),
+      body: JSON.stringify({ path: projectPath, dirName }),
     }).then((res) => {
       if (!res.ok) res.json().then((d) => console.error("[open-terminal]", d.error)).catch(() => {})
     }).catch((err) => console.error("[open-terminal] fetch failed:", err))
-  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.dashboardProject])
+  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
 
   // Server panel state
   const serverPanel = useServerPanel(state.session?.sessionId)
@@ -875,11 +883,7 @@ export default function App() {
                         variant="ghost"
                         size="sm"
                         className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                        onClick={() => authFetch("/api/open-in-editor", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ path: pendingPath ?? "" }),
-                        }).catch(() => {})}
+                        onClick={() => postAction("/api/open-in-editor")}
                       >
                         <Code2 className="size-3" />
                         Open
@@ -888,11 +892,7 @@ export default function App() {
                         variant="ghost"
                         size="sm"
                         className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                        onClick={() => authFetch("/api/reveal-in-folder", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ path: pendingPath ?? "" }),
-                        }).catch(() => {})}
+                        onClick={() => postAction("/api/reveal-in-folder")}
                       >
                         <FolderSearch className="size-3" />
                         Reveal

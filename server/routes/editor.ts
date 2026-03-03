@@ -1,10 +1,60 @@
 import type { UseFn } from "../helpers"
-import { getConfig } from "../config"
+import { getConfig, getDirs } from "../config"
 import { execFile } from "node:child_process"
-import { stat, writeFile, unlink } from "node:fs/promises"
+import { stat, writeFile, unlink, readdir, open } from "node:fs/promises"
 import { platform, tmpdir } from "node:os"
 import { join, basename, dirname } from "node:path"
 import { randomBytes } from "node:crypto"
+
+/**
+ * Read the `cwd` field from the first line of a JSONL session file.
+ * Returns `null` if the file cannot be read or has no `cwd`.
+ */
+async function readCwdFromJsonl(filePath: string): Promise<string | null> {
+  let fh: Awaited<ReturnType<typeof open>> | null = null
+  try {
+    fh = await open(filePath, "r")
+    const buf = Buffer.alloc(4096)
+    const { bytesRead } = await fh.read(buf, 0, 4096, 0)
+    const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0]
+    if (!firstLine) return null
+    const parsed = JSON.parse(firstLine)
+    return parsed.cwd ?? null
+  } catch {
+    return null
+  } finally {
+    await fh?.close()
+  }
+}
+
+/**
+ * Resolve a real filesystem path from either a direct `path` or a `dirName`.
+ * When only `dirName` is provided, reads the `cwd` from an existing session
+ * JSONL file in the project directory (authoritative source).
+ * Falls back to the lossy dash-to-slash conversion only as a last resort.
+ */
+export async function resolveActionPath(body: { path?: string; dirName?: string }): Promise<string | null> {
+  if (body.path && typeof body.path === "string") return body.path
+
+  if (body.dirName && typeof body.dirName === "string") {
+    const config = getConfig()
+    if (!config) return null
+    const dirs = getDirs(config.claudeDir)
+    const projectDir = join(dirs.PROJECTS_DIR, body.dirName)
+    try {
+      const files = await readdir(projectDir)
+      for (const f of files) {
+        if (!f.endsWith(".jsonl")) continue
+        const cwd = await readCwdFromJsonl(join(projectDir, f))
+        if (cwd) return cwd
+      }
+    } catch { /* projectDir might not exist */ }
+    // Last resort: lossy conversion
+    return "/" + body.dirName.replace(/^-/, "").replace(/-/g, "/")
+  }
+
+  return null
+}
 
 /** Terminals that need --working-directory instead of a positional dir arg */
 const WD_FLAG_TERMINALS = new Set(["ghostty", "alacritty", "wezterm", "wezterm-gui", "rio"])
@@ -90,7 +140,7 @@ function getGitHeadContent(filePath: string): Promise<string> {
 
 export function registerEditorRoutes(use: UseFn) {
   // POST /api/reveal-in-folder — reveal a path in the OS file manager (Finder / Explorer / etc.)
-  // Body: { path: string }
+  // Body: { path?: string, dirName?: string }
   use("/api/reveal-in-folder", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -100,10 +150,11 @@ export function registerEditorRoutes(use: UseFn) {
       res.setHeader("Content-Type", "application/json")
 
       try {
-        const { path } = JSON.parse(body)
-        if (!path || typeof path !== "string") {
+        const parsed = JSON.parse(body)
+        const path = await resolveActionPath(parsed)
+        if (!path) {
           res.statusCode = 400
-          res.end(JSON.stringify({ error: "path string required" }))
+          res.end(JSON.stringify({ error: "path or dirName required" }))
           return
         }
 
@@ -138,7 +189,7 @@ export function registerEditorRoutes(use: UseFn) {
   })
 
   // POST /api/open-terminal — open the user's default terminal at a directory
-  // Body: { path: string }
+  // Body: { path?: string, dirName?: string }
   use("/api/open-terminal", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -148,10 +199,11 @@ export function registerEditorRoutes(use: UseFn) {
       res.setHeader("Content-Type", "application/json")
 
       try {
-        const { path } = JSON.parse(body)
-        if (!path || typeof path !== "string") {
+        const parsed = JSON.parse(body)
+        const path = await resolveActionPath(parsed)
+        if (!path) {
           res.statusCode = 400
-          res.end(JSON.stringify({ error: "path string required" }))
+          res.end(JSON.stringify({ error: "path or dirName required" }))
           return
         }
 
@@ -197,7 +249,7 @@ export function registerEditorRoutes(use: UseFn) {
   })
 
   // POST /api/open-in-editor — open a file or project in the user's default code editor
-  // Body: { path: string, mode?: "file" | "diff" }
+  // Body: { path?: string, dirName?: string, mode?: "file" | "diff" }
   //   mode "file" (default): open the file/folder directly
   //   mode "diff": open a side-by-side diff of HEAD vs working copy in the editor
   use("/api/open-in-editor", async (req, res, next) => {
@@ -209,10 +261,12 @@ export function registerEditorRoutes(use: UseFn) {
       res.setHeader("Content-Type", "application/json")
 
       try {
-        const { path, mode = "file" } = JSON.parse(body)
-        if (!path || typeof path !== "string") {
+        const parsed = JSON.parse(body)
+        const { mode = "file" } = parsed
+        const path = await resolveActionPath(parsed)
+        if (!path) {
           res.statusCode = 400
-          res.end(JSON.stringify({ error: "path string required" }))
+          res.end(JSON.stringify({ error: "path or dirName required" }))
           return
         }
 
