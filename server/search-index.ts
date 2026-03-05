@@ -1,5 +1,6 @@
 import Database from "better-sqlite3"
-import { readFileSync, statSync } from "node:fs"
+import { readFileSync, readdirSync, statSync } from "node:fs"
+import { join, basename } from "node:path"
 import { parseSession, getUserMessageText } from "../src/lib/parser"
 
 export interface IndexStats {
@@ -25,6 +26,7 @@ export interface SearchHit {
 export class SearchIndex {
   private db: InstanceType<typeof Database>
   private dbPath: string
+  projectsDir: string | null = null
   private _watcherRunning = false
   private _lastFullBuild: string | null = null
   private _lastUpdate: string | null = null
@@ -275,6 +277,201 @@ export class SearchIndex {
     }
 
     return hits
+  }
+
+  /**
+   * Clear all indexed data and re-index every JSONL file under `projectsDir`.
+   * Structure: projectsDir/{projectName}/{sessionId}.jsonl
+   * Subagents:  projectsDir/{projectName}/{sessionId}/subagents/agent-{id}.jsonl
+   *
+   * Stores `projectsDir` as a class field so `rebuild()` can reuse it.
+   */
+  buildFull(projectsDir: string): void {
+    this.projectsDir = projectsDir
+
+    // Clear everything
+    this.db.exec("DELETE FROM search_content")
+    this.db.exec("DELETE FROM indexed_files")
+
+    this.indexProjectsDir(projectsDir)
+    this._lastFullBuild = new Date().toISOString()
+    this._lastUpdate = new Date().toISOString()
+  }
+
+  /**
+   * Incrementally re-index only files whose mtime has changed since last index.
+   * New files (not in indexed_files) are always indexed.
+   */
+  updateStale(projectsDir: string): void {
+    this.projectsDir = projectsDir
+
+    const getIndexed = this.db.prepare(
+      "SELECT mtime_ms FROM indexed_files WHERE file_path = ?"
+    )
+
+    const filesToIndex: Array<{
+      path: string
+      sessionId: string
+      mtimeMs: number
+      isSubagent: boolean
+      parentSessionId: string | null
+    }> = []
+
+    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+      const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
+      if (!existing || existing.mtime_ms < mtimeMs) {
+        filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
+      }
+    })
+
+    for (const file of filesToIndex) {
+      try {
+        this.indexFile(file.path, file.sessionId, file.mtimeMs, {
+          isSubagent: file.isSubagent,
+          parentSessionId: file.parentSessionId,
+        })
+      } catch {
+        // Skip files that fail to parse
+      }
+    }
+
+    if (filesToIndex.length > 0) {
+      this._lastUpdate = new Date().toISOString()
+    }
+  }
+
+  /**
+   * Re-run buildFull using the previously stored projectsDir.
+   * No-op if projectsDir was never set.
+   */
+  rebuild(): void {
+    if (!this.projectsDir) return
+    this.buildFull(this.projectsDir)
+  }
+
+  /**
+   * Walk all project directories under `projectsDir` and index every discovered
+   * JSONL file (both sessions and subagents).
+   */
+  private indexProjectsDir(projectsDir: string): void {
+    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+      try {
+        this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
+      } catch {
+        // Skip files that fail to parse
+      }
+    })
+  }
+
+  /**
+   * Walk the projects directory tree and invoke `callback` for every JSONL file.
+   *
+   * Directory structure:
+   *   projectsDir/
+   *     {projectName}/
+   *       {sessionId}.jsonl              <- session file
+   *       {sessionId}/subagents/
+   *         agent-{agentId}.jsonl        <- subagent file (recursive)
+   *
+   * Skips the "memory" directory.
+   */
+  private discoverFiles(
+    projectsDir: string,
+    callback: (
+      filePath: string,
+      sessionId: string,
+      mtimeMs: number,
+      isSubagent: boolean,
+      parentSessionId: string | null
+    ) => void
+  ): void {
+    let entries: string[]
+    try {
+      entries = readdirSync(projectsDir)
+    } catch {
+      return
+    }
+
+    for (const projectName of entries) {
+      if (projectName === "memory") continue
+      const projectDir = join(projectsDir, projectName)
+      try {
+        const s = statSync(projectDir)
+        if (!s.isDirectory()) continue
+      } catch {
+        continue
+      }
+
+      let files: string[]
+      try {
+        files = readdirSync(projectDir)
+      } catch {
+        continue
+      }
+
+      for (const file of files) {
+        if (!file.endsWith(".jsonl")) continue
+        const filePath = join(projectDir, file)
+        const sessionId = basename(file, ".jsonl")
+        try {
+          const s = statSync(filePath)
+          callback(filePath, sessionId, s.mtimeMs, false, null)
+        } catch {
+          continue
+        }
+
+        // Discover subagent files recursively
+        this.discoverSubagents(filePath, sessionId, callback, 0, 4)
+      }
+    }
+  }
+
+  /**
+   * Recursively discover subagent JSONL files under the subagents directory
+   * that corresponds to `parentPath`.
+   *
+   * For a parent at `/path/to/session-1.jsonl`, looks for subagents at
+   * `/path/to/session-1/subagents/agent-*.jsonl`.
+   *
+   * Recurses up to `maxDepth` levels (default 4).
+   */
+  private discoverSubagents(
+    parentPath: string,
+    parentSessionId: string,
+    callback: (
+      filePath: string,
+      sessionId: string,
+      mtimeMs: number,
+      isSubagent: boolean,
+      parentSessionId: string | null
+    ) => void,
+    depth: number,
+    maxDepth: number
+  ): void {
+    if (depth >= maxDepth) return
+
+    // subagents dir lives at: parentPath minus .jsonl extension, plus /subagents
+    const subDir = parentPath.replace(/\.jsonl$/, "") + "/subagents"
+    let files: string[]
+    try {
+      files = readdirSync(subDir)
+    } catch {
+      return
+    }
+
+    for (const file of files) {
+      if (!file.startsWith("agent-") || !file.endsWith(".jsonl")) continue
+      const filePath = join(subDir, file)
+      try {
+        const s = statSync(filePath)
+        callback(filePath, parentSessionId, s.mtimeMs, true, parentSessionId)
+      } catch {
+        continue
+      }
+
+      // Recurse deeper for nested subagents
+      this.discoverSubagents(filePath, parentSessionId, callback, depth + 1, maxDepth)
+    }
   }
 
   close(): void {

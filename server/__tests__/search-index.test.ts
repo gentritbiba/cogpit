@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, afterEach, beforeEach } from "vitest"
 import { SearchIndex, type SearchHit } from "../search-index"
-import { unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
+import { unlinkSync, writeFileSync, mkdirSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 const TEST_DB = "/tmp/test-search-index.db"
@@ -555,6 +555,354 @@ describe("SearchIndex", () => {
       })
       expect(hits.length).toBeGreaterThan(0)
       expect(hits.every((h) => h.sessionId === "session-a")).toBe(true)
+      index.close()
+    })
+  })
+
+  describe("buildFull", () => {
+    beforeEach(() => {
+      mkdirSync(TEST_DIR, { recursive: true })
+    })
+    afterEach(() => {
+      try { rmSync(TEST_DIR, { recursive: true }) } catch {}
+    })
+
+    it("indexes all JSONL files in project directories", () => {
+      // Create fake project structure: projects/project-a/session-1.jsonl
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("keyword alpha"),
+      ])
+      writeTestJsonl(join(projectDir, "session-2.jsonl"), [
+        makeUserMessage("keyword beta"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      const stats = index.getStats()
+      expect(stats.indexedSessions).toBe(2)
+      expect(stats.lastFullBuild).not.toBeNull()
+
+      const hits = index.search("keyword")
+      expect(hits.length).toBe(2)
+      index.close()
+    })
+
+    it("indexes subagent files", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("main session content"),
+      ])
+      // Subagent dir structure: session-1/subagents/agent-abc123.jsonl
+      const subDir = join(projectDir, "session-1", "subagents")
+      mkdirSync(subDir, { recursive: true })
+      writeTestJsonl(join(subDir, "agent-abc123.jsonl"), [
+        makeUserMessage("subagent keyword here"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      const stats = index.getStats()
+      expect(stats.indexedSubagents).toBe(1)
+      expect(stats.indexedSessions).toBe(1)
+
+      const hits = index.search("subagent keyword")
+      expect(hits.length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("clears all existing data before rebuilding", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("first build content unique_marker_first"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.search("unique_marker_first").length).toBeGreaterThan(0)
+
+      // Remove the old file and add a new one
+      rmSync(join(projectDir, "session-1.jsonl"))
+      writeTestJsonl(join(projectDir, "session-2.jsonl"), [
+        makeUserMessage("second build content unique_marker_second"),
+      ])
+
+      // Rebuild should clear old data
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.search("unique_marker_first").length).toBe(0)
+      expect(index.search("unique_marker_second").length).toBeGreaterThan(0)
+      expect(index.getStats().indexedSessions).toBe(1)
+      index.close()
+    })
+
+    it("stores projectsDir for later use by rebuild()", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("content for rebuild test"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      // rebuild() should work without re-passing projectsDir
+      index.rebuild()
+      expect(index.getStats().indexedSessions).toBe(1)
+      index.close()
+    })
+
+    it("skips the 'memory' directory", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      const memoryDir = join(TEST_DIR, "projects", "memory")
+      mkdirSync(projectDir, { recursive: true })
+      mkdirSync(memoryDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("real session content"),
+      ])
+      writeTestJsonl(join(memoryDir, "session-memory.jsonl"), [
+        makeUserMessage("memory content should be skipped"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      expect(index.getStats().indexedSessions).toBe(1)
+      expect(index.search("memory content should be skipped").length).toBe(0)
+      index.close()
+    })
+
+    it("handles empty projects directory", () => {
+      const projectsDir = join(TEST_DIR, "projects")
+      mkdirSync(projectsDir, { recursive: true })
+
+      const index = new SearchIndex(TEST_DB)
+      // Should not throw
+      index.buildFull(projectsDir)
+
+      expect(index.getStats().indexedFiles).toBe(0)
+      expect(index.getStats().lastFullBuild).not.toBeNull()
+      index.close()
+    })
+
+    it("handles deeply nested subagents (recursive)", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("top-level session"),
+      ])
+      // Level 1 subagent
+      const sub1Dir = join(projectDir, "session-1", "subagents")
+      mkdirSync(sub1Dir, { recursive: true })
+      writeTestJsonl(join(sub1Dir, "agent-level1.jsonl"), [
+        makeUserMessage("level 1 subagent content"),
+      ])
+      // Level 2 subagent (nested under level 1)
+      const sub2Dir = join(sub1Dir, "agent-level1", "subagents")
+      mkdirSync(sub2Dir, { recursive: true })
+      writeTestJsonl(join(sub2Dir, "agent-level2.jsonl"), [
+        makeUserMessage("level 2 subagent content"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      const stats = index.getStats()
+      expect(stats.indexedSessions).toBe(1)
+      expect(stats.indexedSubagents).toBe(2)
+
+      expect(index.search("level 1 subagent").length).toBeGreaterThan(0)
+      expect(index.search("level 2 subagent").length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("skips files that fail to parse gracefully", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      // Valid file
+      writeTestJsonl(join(projectDir, "session-good.jsonl"), [
+        makeUserMessage("good session content"),
+      ])
+      // Invalid JSONL file (corrupt content)
+      writeFileSync(join(projectDir, "session-bad.jsonl"), "NOT VALID JSON\n{broken")
+
+      const index = new SearchIndex(TEST_DB)
+      // Should not throw, just skip the bad file
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      // The good file should still be indexed
+      expect(index.getStats().indexedFiles).toBeGreaterThanOrEqual(1)
+      expect(index.search("good session").length).toBeGreaterThan(0)
+      index.close()
+    })
+  })
+
+  describe("updateStale", () => {
+    beforeEach(() => {
+      mkdirSync(TEST_DIR, { recursive: true })
+    })
+    afterEach(() => {
+      try { rmSync(TEST_DIR, { recursive: true }) } catch {}
+    })
+
+    it("only re-indexes files with changed mtime", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      const fp = join(projectDir, "session-1.jsonl")
+      writeTestJsonl(fp, [makeUserMessage("original keyword")])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.search("original").length).toBeGreaterThan(0)
+
+      // updateStale with same mtime should NOT re-index (no changes)
+      const beforeStats = index.getStats()
+      index.updateStale(join(TEST_DIR, "projects"))
+      const afterStats = index.getStats()
+      expect(afterStats.indexedFiles).toBe(beforeStats.indexedFiles)
+
+      index.close()
+    })
+
+    it("detects and re-indexes modified files", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      const fp = join(projectDir, "session-1.jsonl")
+      writeTestJsonl(fp, [makeUserMessage("original unique_marker_stale")])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.search("unique_marker_stale").length).toBeGreaterThan(0)
+
+      // Modify the file (changes mtime)
+      // Need a small delay to ensure mtime changes
+      const originalMtime = statSync(fp).mtimeMs
+      // Touch the file with new content — writeFileSync updates mtime
+      writeTestJsonl(fp, [makeUserMessage("updated unique_marker_fresh")])
+
+      // Verify mtime actually changed (or force it)
+      const newMtime = statSync(fp).mtimeMs
+      if (newMtime <= originalMtime) {
+        // Force a different mtime by setting it manually
+        const { utimesSync } = require("node:fs")
+        const now = new Date()
+        utimesSync(fp, now, now)
+      }
+
+      index.updateStale(join(TEST_DIR, "projects"))
+
+      expect(index.search("unique_marker_fresh").length).toBeGreaterThan(0)
+      // Old content should be gone since re-index deletes old rows
+      expect(index.search("unique_marker_stale").length).toBe(0)
+      index.close()
+    })
+
+    it("discovers new files added since last build", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("session one content"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.getStats().indexedSessions).toBe(1)
+
+      // Add a new file
+      writeTestJsonl(join(projectDir, "session-2.jsonl"), [
+        makeUserMessage("session two new content"),
+      ])
+
+      index.updateStale(join(TEST_DIR, "projects"))
+      expect(index.getStats().indexedSessions).toBe(2)
+      expect(index.search("session two new").length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("updates _lastUpdate only when files were re-indexed", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("content here"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+
+      const afterBuild = index.getStats().lastUpdate
+
+      // updateStale with no changes should NOT update _lastUpdate
+      index.updateStale(join(TEST_DIR, "projects"))
+      const afterNoChange = index.getStats().lastUpdate
+      expect(afterNoChange).toBe(afterBuild)
+
+      index.close()
+    })
+
+    it("handles new subagent files in updateStale", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("parent session"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.getStats().indexedSubagents).toBe(0)
+
+      // Add a subagent file
+      const subDir = join(projectDir, "session-1", "subagents")
+      mkdirSync(subDir, { recursive: true })
+      writeTestJsonl(join(subDir, "agent-new.jsonl"), [
+        makeUserMessage("new subagent content"),
+      ])
+
+      index.updateStale(join(TEST_DIR, "projects"))
+      expect(index.getStats().indexedSubagents).toBe(1)
+      expect(index.search("new subagent content").length).toBeGreaterThan(0)
+      index.close()
+    })
+  })
+
+  describe("rebuild", () => {
+    beforeEach(() => {
+      mkdirSync(TEST_DIR, { recursive: true })
+    })
+    afterEach(() => {
+      try { rmSync(TEST_DIR, { recursive: true }) } catch {}
+    })
+
+    it("does nothing when projectsDir is not set", () => {
+      const index = new SearchIndex(TEST_DB)
+      // Should not throw
+      index.rebuild()
+      expect(index.getStats().indexedFiles).toBe(0)
+      index.close()
+    })
+
+    it("rebuilds using the stored projectsDir", () => {
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("rebuild test content"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.buildFull(join(TEST_DIR, "projects"))
+      expect(index.getStats().indexedSessions).toBe(1)
+
+      // Add another file
+      writeTestJsonl(join(projectDir, "session-2.jsonl"), [
+        makeUserMessage("second session content"),
+      ])
+
+      // Rebuild should re-discover everything
+      index.rebuild()
+      expect(index.getStats().indexedSessions).toBe(2)
       index.close()
     })
   })
