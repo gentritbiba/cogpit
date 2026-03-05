@@ -1,5 +1,6 @@
 import Database from "better-sqlite3"
-import { statSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
+import { parseSession, getUserMessageText } from "../src/lib/parser"
 
 export interface IndexStats {
   dbPath: string
@@ -76,6 +77,118 @@ export class SearchIndex {
       lastFullBuild: this._lastFullBuild,
       lastUpdate: this._lastUpdate,
     }
+  }
+
+  /**
+   * Parse a JSONL file and insert all searchable content into the FTS5 index.
+   * Idempotent: deletes old data for the file before re-indexing.
+   * All inserts run in a single transaction for performance.
+   */
+  indexFile(
+    filePath: string,
+    sessionId: string,
+    mtimeMs: number,
+    opts?: { isSubagent?: boolean; parentSessionId?: string | null }
+  ): void {
+    const content = readFileSync(filePath, "utf-8")
+    const session = parseSession(content)
+
+    const isSubagent = opts?.isSubagent ? 1 : 0
+    const parentSessionId = opts?.parentSessionId ?? null
+
+    const insert = this.db.prepare(
+      "INSERT INTO search_content (session_id, location, content) VALUES (?, ?, ?)"
+    )
+
+    const deleteContent = this.db.prepare(
+      "DELETE FROM search_content WHERE session_id = ?"
+    )
+    const deleteFile = this.db.prepare(
+      "DELETE FROM indexed_files WHERE file_path = ?"
+    )
+    const insertFile = this.db.prepare(
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+    )
+
+    const txn = this.db.transaction(() => {
+      // Delete old data for this session (idempotent re-index)
+      deleteContent.run(sessionId)
+      deleteFile.run(filePath)
+
+      for (let i = 0; i < session.turns.length; i++) {
+        const turn = session.turns[i]
+        const prefix = `turn/${i}`
+
+        // User message
+        const userText = getUserMessageText(turn.userMessage)
+        if (userText.trim()) {
+          insert.run(sessionId, `${prefix}/userMessage`, userText)
+        }
+
+        // Assistant text
+        const assistantJoined = turn.assistantText.join("\n\n").trim()
+        if (assistantJoined) {
+          insert.run(sessionId, `${prefix}/assistantMessage`, assistantJoined)
+        }
+
+        // Thinking blocks
+        const thinkingText = turn.thinking
+          .filter((t) => t.thinking && t.thinking.length > 0)
+          .map((t) => t.thinking)
+          .join("\n\n")
+          .trim()
+        if (thinkingText) {
+          insert.run(sessionId, `${prefix}/thinking`, thinkingText)
+        }
+
+        // Tool calls — inputs and results
+        for (const tc of turn.toolCalls) {
+          const inputStr = JSON.stringify(tc.input)
+          if (inputStr && inputStr !== "{}") {
+            insert.run(sessionId, `${prefix}/toolCall/${tc.id}/input`, inputStr)
+          }
+          if (tc.result) {
+            insert.run(sessionId, `${prefix}/toolCall/${tc.id}/result`, tc.result)
+          }
+        }
+
+        // Sub-agent inline activity
+        for (const sa of turn.subAgentActivity) {
+          const saPrefix = `agent/${sa.agentId}`
+          const saText = sa.text.join("\n\n").trim()
+          if (saText) {
+            insert.run(sessionId, `${saPrefix}/assistantMessage`, saText)
+          }
+          const saThinking = sa.thinking
+            .filter((t) => t.length > 0)
+            .join("\n\n")
+            .trim()
+          if (saThinking) {
+            insert.run(sessionId, `${saPrefix}/thinking`, saThinking)
+          }
+          for (const tc of sa.toolCalls) {
+            const inputStr = JSON.stringify(tc.input)
+            if (inputStr && inputStr !== "{}") {
+              insert.run(sessionId, `${saPrefix}/toolCall/${tc.id}/input`, inputStr)
+            }
+            if (tc.result) {
+              insert.run(sessionId, `${saPrefix}/toolCall/${tc.id}/result`, tc.result)
+            }
+          }
+        }
+
+        // Compaction summary
+        if (turn.compactionSummary) {
+          insert.run(sessionId, `${prefix}/compactionSummary`, turn.compactionSummary)
+        }
+      }
+
+      // Track the file
+      insertFile.run(filePath, mtimeMs, sessionId, isSubagent, parentSessionId)
+    })
+
+    txn()
+    this._lastUpdate = new Date().toISOString()
   }
 
   close(): void {
