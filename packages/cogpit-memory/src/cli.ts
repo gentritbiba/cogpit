@@ -160,13 +160,14 @@ Commands:
 `)
 }
 
-// Only run main() when executed directly (not when imported for testing)
-const isMainModule =
-  typeof process !== "undefined" &&
-  process.argv[1] &&
-  (process.argv[1].endsWith("/cli.ts") || process.argv[1].endsWith("/cli.js"))
+// Run main() when executed directly (not when imported for testing).
+// In compiled binary, argv[1] is the first user arg, not the script path.
+// Detect compiled mode via Bun.main or fallback to argv[1] check.
+const isBunCompiled = typeof Bun !== "undefined" && !process.argv[1]?.endsWith(".ts")
+const isScript =
+  process.argv[1]?.endsWith("/cli.ts") || process.argv[1]?.endsWith("/cli.js")
 
-if (isMainModule) {
+if (isBunCompiled || isScript) {
   main().catch((err) => {
     console.error(JSON.stringify({ error: String(err) }))
     process.exit(1)

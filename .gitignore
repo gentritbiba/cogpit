@@ -13,3 +13,4 @@ test-results/
 search-index.db
 search-index.db-shm
 search-index.db-wal
+packages/cogpit-memory/cogpit-memory
