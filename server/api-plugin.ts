@@ -1,6 +1,8 @@
 import type { Plugin } from "vite"
+import { join } from "node:path"
+import { homedir } from "node:os"
 import { loadConfig, getConfig } from "./config"
-import { refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { dirs, refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { registerConfigRoutes } from "./routes/config"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerClaudeRoutes } from "./routes/claude"
@@ -19,18 +21,41 @@ import { registerWorktreeRoutes } from "./routes/worktrees"
 import { registerUsageRoutes } from "./routes/usage"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
-import { registerSessionSearchRoutes } from "./routes/session-search"
+import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "./routes/session-search"
 import { registerLocalFileRoutes } from "./routes/local-file"
+import { registerSearchIndexRoutes } from "./routes/search-index-stats"
+import { SearchIndex } from "./search-index"
 
 export function sessionApiPlugin(): Plugin {
   return {
     name: "session-api",
     configureServer(server) {
       // Kill all active child processes when the server shuts down
-      server.httpServer?.on("close", () => cleanupProcesses())
+      server.httpServer?.on("close", () => {
+        cleanupProcesses()
+        const index = getSearchIndex()
+        if (index) {
+          index.stopWatching()
+          index.close()
+        }
+      })
 
-      // Load config on startup
-      loadConfig().then(() => refreshDirs())
+      // Load config on startup, then boot search index
+      loadConfig().then(() => {
+        refreshDirs()
+        // Boot search index after dirs are ready
+        try {
+          const dbPath = join(homedir(), ".claude", "agent-window", "search-index.db")
+          const index = new SearchIndex(dbPath)
+          setSearchIndex(index)
+          // Start watching after a short delay to not block startup
+          setTimeout(() => {
+            if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
+          }, 1000)
+        } catch {
+          // Non-fatal — search falls back to raw scan
+        }
+      })
 
       // Security middleware (before all routes)
       server.middlewares.use(securityHeaders)
@@ -77,6 +102,7 @@ export function sessionApiPlugin(): Plugin {
       registerConfigBrowserRoutes(use)
       registerSessionSearchRoutes(use)
       registerLocalFileRoutes(use)
+      registerSearchIndexRoutes(use)
     },
   }
 }

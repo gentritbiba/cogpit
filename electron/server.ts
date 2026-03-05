@@ -28,8 +28,10 @@ import { registerWorktreeRoutes } from "../server/routes/worktrees"
 import { registerUsageRoutes } from "../server/routes/usage"
 import { registerSlashSuggestionRoutes } from "../server/routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "../server/routes/config-browser"
-import { registerSessionSearchRoutes } from "../server/routes/session-search"
+import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "../server/routes/session-search"
 import { registerLocalFileRoutes } from "../server/routes/local-file"
+import { registerSearchIndexRoutes } from "../server/routes/search-index-stats"
+import { SearchIndex } from "../server/search-index"
 
 // ── PTY types ───────────────────────────────────────────────────────
 interface PtySession {
@@ -69,6 +71,19 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   refreshDirs()
   // Override undo dir to writable location
   dirs.UNDO_DIR = join(userDataDir, "undo-history")
+
+  // Boot search index
+  try {
+    const dbPath = join(userDataDir, "search-index.db")
+    const index = new SearchIndex(dbPath)
+    setSearchIndex(index)
+    // Start watching after a short delay to not block startup
+    setTimeout(() => {
+      if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
+    }, 1000)
+  } catch {
+    // Non-fatal — search falls back to raw scan
+  }
 
   const app = express()
   const httpServer = createServer(app)
@@ -112,6 +127,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerConfigBrowserRoutes(use)
   registerSessionSearchRoutes(use)
   registerLocalFileRoutes(use)
+  registerSearchIndexRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL
@@ -304,6 +320,11 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
     }
     ptySessions.clear()
     cleanupProcesses()
+    const index = getSearchIndex()
+    if (index) {
+      index.stopWatching()
+      index.close()
+    }
   })
 
   return { httpServer }
