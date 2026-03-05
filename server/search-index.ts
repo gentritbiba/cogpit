@@ -15,6 +15,13 @@ export interface IndexStats {
   lastUpdate: string | null
 }
 
+export interface SearchHit {
+  sessionId: string
+  location: string
+  snippet: string
+  matchCount: number
+}
+
 export class SearchIndex {
   private db: InstanceType<typeof Database>
   private dbPath: string
@@ -192,6 +199,82 @@ export class SearchIndex {
 
     txn()
     this._lastUpdate = new Date().toISOString()
+  }
+
+  /**
+   * Query the FTS5 index and return structured search results.
+   *
+   * - FTS5 trigram tokenizer is case-insensitive by default.
+   * - When `caseSensitive` is true, a post-filter checks the original query
+   *   against the snippet text (exact case match).
+   * - When `maxAgeMs` is provided, only files whose mtime in `indexed_files`
+   *   falls within the window are included (join on source_file).
+   * - `sessionId` restricts results to a single session.
+   * - `limit` defaults to 200 and is clamped to a max of 200.
+   */
+  search(
+    query: string,
+    opts?: {
+      limit?: number
+      sessionId?: string
+      maxAgeMs?: number
+      caseSensitive?: boolean
+    }
+  ): SearchHit[] {
+    const limit = Math.min(Math.max(1, opts?.limit ?? 200), 200)
+    const sessionId = opts?.sessionId
+    const maxAgeMs = opts?.maxAgeMs
+    const caseSensitive = opts?.caseSensitive ?? false
+
+    // FTS5 trigram requires the query wrapped in double quotes for phrase matching.
+    // Escape any internal double quotes by doubling them.
+    const ftsQuery = `"${query.replace(/"/g, '""')}"`
+
+    // snippet() column index 3 = content (session_id=0, source_file=1, location=2, content=3)
+    let sql = `
+      SELECT sc.session_id, sc.location,
+             snippet(search_content, 3, '', '', '...', 40) as snippet
+      FROM search_content sc
+    `
+    const params: (string | number)[] = []
+    const conditions: string[] = ["sc.content MATCH ?"]
+    params.push(ftsQuery)
+
+    if (maxAgeMs != null) {
+      sql += " JOIN indexed_files fi ON fi.file_path = sc.source_file"
+      conditions.push("fi.mtime_ms >= ?")
+      params.push(Date.now() - maxAgeMs)
+    }
+
+    if (sessionId) {
+      conditions.push("sc.session_id = ?")
+      params.push(sessionId)
+    }
+
+    sql += " WHERE " + conditions.join(" AND ")
+    sql += " LIMIT ?"
+    params.push(limit)
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      session_id: string
+      location: string
+      snippet: string
+    }>
+
+    let hits: SearchHit[] = rows.map((row) => ({
+      sessionId: row.session_id,
+      location: row.location,
+      snippet: row.snippet,
+      matchCount: 1, // FTS5 trigram doesn't expose per-row match count; 1 = "at least one match"
+    }))
+
+    // Post-filter for case sensitivity — FTS5 trigram is always case-insensitive,
+    // so we apply an exact-case check on the snippet text when requested.
+    if (caseSensitive) {
+      hits = hits.filter((h) => h.snippet.includes(query))
+    }
+
+    return hits
   }
 
   close(): void {

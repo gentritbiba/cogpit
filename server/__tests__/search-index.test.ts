@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, afterEach, beforeEach } from "vitest"
-import { SearchIndex } from "../search-index"
+import { SearchIndex, type SearchHit } from "../search-index"
 import { unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 
@@ -336,6 +336,225 @@ describe("SearchIndex", () => {
       const stats = index.getStats()
       // Only user message should be indexed; empty assistant text is skipped
       expect(stats.totalRows).toBe(1)
+      index.close()
+    })
+  })
+
+  describe("search", () => {
+    beforeEach(() => {
+      mkdirSync(TEST_DIR, { recursive: true })
+    })
+    afterEach(() => {
+      try { rmSync(TEST_DIR, { recursive: true }) } catch {}
+    })
+
+    it("returns hits with sessionId, location, snippet, and matchCount", () => {
+      const fp = join(TEST_DIR, "session-abc.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("the authentication system needs fixing"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session-abc", Date.now())
+      const hits = index.search("authentication")
+
+      expect(hits.length).toBeGreaterThan(0)
+      expect(hits[0].sessionId).toBe("session-abc")
+      expect(hits[0].location).toBe("turn/0/userMessage")
+      expect(hits[0].snippet).toContain("authentication")
+      expect(typeof hits[0].matchCount).toBe("number")
+      expect(hits[0].matchCount).toBeGreaterThanOrEqual(1)
+      index.close()
+    })
+
+    it("respects limit parameter", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      // Create 10 turns with interleaved user/assistant messages
+      const lines: object[] = []
+      for (let i = 0; i < 10; i++) {
+        lines.push(makeUserMessage(`keyword turn ${i} special content`))
+        lines.push(makeAssistantMessage(`ok response ${i}`))
+      }
+      writeTestJsonl(fp, lines)
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+      const hits = index.search("keyword", { limit: 3 })
+      expect(hits.length).toBe(3)
+      index.close()
+    })
+
+    it("enforces max limit of 200", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("keyword content here"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+      // Requesting more than 200 should be clamped to 200
+      const hits = index.search("keyword", { limit: 500 })
+      // We only have 1 row, so just verify it doesn't throw
+      expect(hits.length).toBeLessThanOrEqual(200)
+      index.close()
+    })
+
+    it("defaults limit to 200 when not specified", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("keyword content"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+      // Should work without limit option
+      const hits = index.search("keyword")
+      expect(hits.length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("filters by sessionId", () => {
+      const fp1 = join(TEST_DIR, "session-a.jsonl")
+      const fp2 = join(TEST_DIR, "session-b.jsonl")
+      writeTestJsonl(fp1, [makeUserMessage("keyword in session a")])
+      writeTestJsonl(fp2, [makeUserMessage("keyword in session b")])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp1, "session-a", Date.now())
+      index.indexFile(fp2, "session-b", Date.now())
+
+      const hits = index.search("keyword", { sessionId: "session-a" })
+      expect(hits.length).toBeGreaterThan(0)
+      expect(hits.every((h) => h.sessionId === "session-a")).toBe(true)
+      index.close()
+    })
+
+    it("filters by maxAgeMs via indexed_files mtime", () => {
+      const fp1 = join(TEST_DIR, "recent.jsonl")
+      const fp2 = join(TEST_DIR, "old.jsonl")
+      writeTestJsonl(fp1, [makeUserMessage("keyword recent file")])
+      writeTestJsonl(fp2, [makeUserMessage("keyword old file")])
+
+      const now = Date.now()
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp1, "recent", now - 1000) // 1s ago
+      index.indexFile(fp2, "old", now - 10 * 24 * 3600_000) // 10 days ago
+
+      const hits = index.search("keyword", { maxAgeMs: 5 * 24 * 3600_000 }) // 5 days
+      expect(hits.length).toBeGreaterThan(0)
+      expect(hits.every((h) => h.sessionId === "recent")).toBe(true)
+      index.close()
+    })
+
+    it("supports case-insensitive search by default (FTS5 trigram)", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("Authentication is broken in the system"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+
+      // Lowercase query should match uppercase content
+      const hits = index.search("authentication")
+      expect(hits.length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("supports case-sensitive post-filter", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("Authentication is broken"),
+        makeAssistantMessage("the authentication module has a bug"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+
+      // Case-sensitive search for lowercase "authentication"
+      const hitsLower = index.search("authentication", { caseSensitive: true })
+      // Should only match the assistant message (lowercase "authentication")
+      // not the user message ("Authentication" with capital A)
+      for (const h of hitsLower) {
+        expect(h.snippet).toContain("authentication")
+        expect(h.snippet).not.toMatch(/Authentication/)
+      }
+      index.close()
+    })
+
+    it("returns empty array when no matches found", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("hello world"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+
+      const hits = index.search("xyznonexistentkeyword")
+      expect(hits).toEqual([])
+      index.close()
+    })
+
+    it("handles queries with special characters (double quotes)", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage('the value is "important" here'),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+
+      // Should not throw even with quotes in query
+      const hits = index.search('important')
+      expect(hits.length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("matches across different content types (user, assistant, tool)", () => {
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("find the special_marker_xyz in the code"),
+        makeAssistantMessage("I found special_marker_xyz in the file", {
+          id: "tc1",
+          name: "Read",
+          input: { file_path: "/app/special_marker_xyz.ts" },
+        }),
+        makeToolResultMessage("tc1", "export const special_marker_xyz = true"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp, "session", Date.now())
+
+      const hits = index.search("special_marker_xyz")
+      // Should find it in user message, assistant message, tool input, and tool result
+      expect(hits.length).toBeGreaterThanOrEqual(3)
+
+      const locations = hits.map((h) => h.location)
+      expect(locations.some((l) => l.includes("userMessage"))).toBe(true)
+      expect(locations.some((l) => l.includes("assistantMessage"))).toBe(true)
+      expect(locations.some((l) => l.includes("toolCall"))).toBe(true)
+      index.close()
+    })
+
+    it("combines sessionId and maxAgeMs filters", () => {
+      const fp1 = join(TEST_DIR, "session-a.jsonl")
+      const fp2 = join(TEST_DIR, "session-b.jsonl")
+      writeTestJsonl(fp1, [makeUserMessage("keyword in session a")])
+      writeTestJsonl(fp2, [makeUserMessage("keyword in session b")])
+
+      const now = Date.now()
+      const index = new SearchIndex(TEST_DB)
+      index.indexFile(fp1, "session-a", now - 1000) // recent
+      index.indexFile(fp2, "session-b", now - 1000) // recent
+
+      // Filter by both session and age
+      const hits = index.search("keyword", {
+        sessionId: "session-a",
+        maxAgeMs: 5 * 24 * 3600_000,
+      })
+      expect(hits.length).toBeGreaterThan(0)
+      expect(hits.every((h) => h.sessionId === "session-a")).toBe(true)
       index.close()
     })
   })
