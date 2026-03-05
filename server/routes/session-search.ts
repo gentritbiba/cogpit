@@ -376,8 +376,8 @@ export function registerSessionSearchRoutes(use: UseFn) {
         }
 
         return sendJson(res, 200, response)
-      } catch {
-        // Index search failed — fall through to raw-scan fallback
+      } catch (err) {
+        console.warn("[search-index] Index search failed, falling back to raw scan:", err)
       }
     }
 

@@ -256,6 +256,7 @@ export class SearchIndex {
     }
 
     sql += " WHERE " + conditions.join(" AND ")
+    sql += " ORDER BY sc.rowid DESC"
     sql += " LIMIT ?"
     params.push(limit)
 
@@ -534,8 +535,8 @@ export class SearchIndex {
         this.debouncedReindex(join(projectsDir, filename))
       })
       this._watcherRunning = true
-    } catch {
-      // fs.watch may not support recursive on all platforms
+    } catch (err) {
+      console.warn("[search-index] fs.watch failed (recursive may not be supported):", err)
       this._watcherRunning = false
     }
   }

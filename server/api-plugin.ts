@@ -52,8 +52,8 @@ export function sessionApiPlugin(): Plugin {
           setTimeout(() => {
             if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
           }, 1000)
-        } catch {
-          // Non-fatal — search falls back to raw scan
+        } catch (err) {
+          console.warn("[search-index] Failed to boot search index:", err)
         }
       })
 

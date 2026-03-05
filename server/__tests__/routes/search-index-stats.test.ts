@@ -147,6 +147,7 @@ describe("registerSearchIndexRoutes", () => {
     })
 
     it("returns 200 with rebuilding status and triggers rebuild", async () => {
+      vi.useFakeTimers()
       const mockRebuild = vi.fn()
       mockedGetSearchIndex.mockReturnValue({
         rebuild: mockRebuild,
@@ -158,10 +159,15 @@ describe("registerSearchIndexRoutes", () => {
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
       expect(data.status).toBe("rebuilding")
+
+      // rebuild runs in setTimeout(0), advance timers
+      vi.runAllTimers()
       expect(mockRebuild).toHaveBeenCalledOnce()
+      vi.useRealTimers()
     })
 
     it("returns 200 even when rebuild throws", async () => {
+      vi.useFakeTimers()
       const mockRebuild = vi.fn().mockImplementation(() => {
         throw new Error("rebuild failed")
       })
@@ -176,6 +182,10 @@ describe("registerSearchIndexRoutes", () => {
       expect(res._getStatus()).toBe(200)
       const data = JSON.parse(res._getData())
       expect(data.status).toBe("rebuilding")
+
+      // rebuild runs in setTimeout(0) and throws — should not affect response
+      vi.runAllTimers()
+      vi.useRealTimers()
     })
   })
 })
