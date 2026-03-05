@@ -10,3 +10,6 @@ test-results/
 /release
 .gitnexus
 .worktrees/
+search-index.db
+search-index.db-shm
+search-index.db-wal
