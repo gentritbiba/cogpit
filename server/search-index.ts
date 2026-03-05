@@ -47,6 +47,7 @@ export class SearchIndex {
     if (!ftsExists) {
       this.db.exec(`CREATE VIRTUAL TABLE search_content USING fts5(
         session_id,
+        source_file,
         location,
         content,
         tokenize = 'trigram'
@@ -97,11 +98,11 @@ export class SearchIndex {
     const parentSessionId = opts?.parentSessionId ?? null
 
     const insert = this.db.prepare(
-      "INSERT INTO search_content (session_id, location, content) VALUES (?, ?, ?)"
+      "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
 
     const deleteContent = this.db.prepare(
-      "DELETE FROM search_content WHERE session_id = ?"
+      "DELETE FROM search_content WHERE source_file = ?"
     )
     const deleteFile = this.db.prepare(
       "DELETE FROM indexed_files WHERE file_path = ?"
@@ -111,8 +112,10 @@ export class SearchIndex {
     )
 
     const txn = this.db.transaction(() => {
-      // Delete old data for this session (idempotent re-index)
-      deleteContent.run(sessionId)
+      // Delete old data for this specific file (idempotent re-index)
+      // Scoped by source_file, not session_id, to avoid deleting content from
+      // other files that share the same session_id (e.g. parent + subagent)
+      deleteContent.run(filePath)
       deleteFile.run(filePath)
 
       for (let i = 0; i < session.turns.length; i++) {
@@ -122,13 +125,13 @@ export class SearchIndex {
         // User message
         const userText = getUserMessageText(turn.userMessage)
         if (userText.trim()) {
-          insert.run(sessionId, `${prefix}/userMessage`, userText)
+          insert.run(sessionId, filePath, `${prefix}/userMessage`, userText)
         }
 
         // Assistant text
         const assistantJoined = turn.assistantText.join("\n\n").trim()
         if (assistantJoined) {
-          insert.run(sessionId, `${prefix}/assistantMessage`, assistantJoined)
+          insert.run(sessionId, filePath, `${prefix}/assistantMessage`, assistantJoined)
         }
 
         // Thinking blocks
@@ -138,17 +141,17 @@ export class SearchIndex {
           .join("\n\n")
           .trim()
         if (thinkingText) {
-          insert.run(sessionId, `${prefix}/thinking`, thinkingText)
+          insert.run(sessionId, filePath, `${prefix}/thinking`, thinkingText)
         }
 
         // Tool calls — inputs and results
         for (const tc of turn.toolCalls) {
           const inputStr = JSON.stringify(tc.input)
           if (inputStr && inputStr !== "{}") {
-            insert.run(sessionId, `${prefix}/toolCall/${tc.id}/input`, inputStr)
+            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/input`, inputStr)
           }
           if (tc.result) {
-            insert.run(sessionId, `${prefix}/toolCall/${tc.id}/result`, tc.result)
+            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/result`, tc.result)
           }
         }
 
@@ -157,29 +160,29 @@ export class SearchIndex {
           const saPrefix = `agent/${sa.agentId}`
           const saText = sa.text.join("\n\n").trim()
           if (saText) {
-            insert.run(sessionId, `${saPrefix}/assistantMessage`, saText)
+            insert.run(sessionId, filePath, `${saPrefix}/assistantMessage`, saText)
           }
           const saThinking = sa.thinking
             .filter((t) => t.length > 0)
             .join("\n\n")
             .trim()
           if (saThinking) {
-            insert.run(sessionId, `${saPrefix}/thinking`, saThinking)
+            insert.run(sessionId, filePath, `${saPrefix}/thinking`, saThinking)
           }
           for (const tc of sa.toolCalls) {
             const inputStr = JSON.stringify(tc.input)
             if (inputStr && inputStr !== "{}") {
-              insert.run(sessionId, `${saPrefix}/toolCall/${tc.id}/input`, inputStr)
+              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/input`, inputStr)
             }
             if (tc.result) {
-              insert.run(sessionId, `${saPrefix}/toolCall/${tc.id}/result`, tc.result)
+              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/result`, tc.result)
             }
           }
         }
 
         // Compaction summary
         if (turn.compactionSummary) {
-          insert.run(sessionId, `${prefix}/compactionSummary`, turn.compactionSummary)
+          insert.run(sessionId, filePath, `${prefix}/compactionSummary`, turn.compactionSummary)
         }
       }
 
