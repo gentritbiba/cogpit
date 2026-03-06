@@ -10,7 +10,6 @@ import type { UseFn } from "../helpers"
 
 export function registerTeamSessionRoutes(use: UseFn) {
   // GET /api/session-team?leadSessionId=xxx[&subagentFile=xxx]
-  // Detect if a session belongs to a team. Returns team config + current member name.
   use("/api/session-team", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
@@ -104,7 +103,6 @@ export function registerTeamSessionRoutes(use: UseFn) {
     const memberName = decodeURIComponent(parts[1])
 
     try {
-      // Read team config to get leadSessionId and member prompt
       const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
       const configRaw = await readFile(configPath, "utf-8")
       const config = JSON.parse(configRaw)
@@ -120,9 +118,7 @@ export function registerTeamSessionRoutes(use: UseFn) {
         (m: { name: string }) => m.name === memberName
       )
 
-      // If clicking the lead, return their session directly
       if (member?.agentType === "team-lead") {
-        // Find lead's session file
         const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
         for (const entry of entries) {
           if (!entry.isDirectory() || entry.name === "memory") continue
@@ -142,7 +138,6 @@ export function registerTeamSessionRoutes(use: UseFn) {
         return
       }
 
-      // For non-lead members, find their subagent session
       const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name === "memory") continue

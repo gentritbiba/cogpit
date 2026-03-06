@@ -28,15 +28,11 @@ function writePrefs(prefs: UpdatePrefs): void {
   writeFileSync(getPrefsPath(), JSON.stringify(prefs, null, 2))
 }
 
-function isAppImage(): boolean {
-  return !!process.env.APPIMAGE
-}
-
 type UpdatePlatform = "appimage" | "mac-notification" | "linux-notification"
 
 function getUpdatePlatform(): UpdatePlatform {
   if (process.platform === "darwin") return "mac-notification"
-  if (isAppImage()) return "appimage"
+  if (process.env.APPIMAGE) return "appimage"
   return "linux-notification"
 }
 

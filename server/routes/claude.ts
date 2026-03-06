@@ -12,8 +12,6 @@ import {
 import type { PersistentSession, UseFn } from "../helpers"
 
 export function registerClaudeRoutes(use: UseFn) {
-  // POST /api/send-message - send a message to a Claude session
-  // Uses persistent processes to keep Anthropic prompt-cache warm.
   use("/api/send-message", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -38,7 +36,6 @@ export function registerClaudeRoutes(use: UseFn) {
         const modelArgs = model ? ["--model", model] : []
         const effortArgs = effort ? ["--effort", effort] : []
 
-        // Build the stream-json user message (works for text and images)
         const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
         const contentBlocks: unknown[] = []
         if (Array.isArray(images)) {
@@ -58,10 +55,8 @@ export function registerClaudeRoutes(use: UseFn) {
           message: { role: "user", content: contentBlocks },
         })
 
-        // ── Try to reuse a persistent process ──────────────────────
         const existing = persistentSessions.get(sessionId)
         if (existing && !existing.dead) {
-          // Persistent process is alive -- send message to its stdin
           activeProcesses.set(sessionId, existing.proc)
           let responded = false
           existing.onResult = (result) => {
@@ -78,7 +73,6 @@ export function registerClaudeRoutes(use: UseFn) {
             }
           }
 
-          // If the process dies while waiting, respond with error
           const onDeath = () => {
             if (responded) return
             responded = true
@@ -93,8 +87,6 @@ export function registerClaudeRoutes(use: UseFn) {
           return
         }
 
-        // ── Spawn a new persistent process ─────────────────────────
-        // Clean up stale entry if any
         if (existing) persistentSessions.delete(sessionId)
 
         const cleanEnv = { ...process.env }
@@ -146,7 +138,6 @@ export function registerClaudeRoutes(use: UseFn) {
           }
         })
 
-        // Read stdout for result messages and track Task tool calls
         const rl = createInterface({ input: child.stdout! })
         rl.on("line", (line) => {
           try {
@@ -203,7 +194,6 @@ export function registerClaudeRoutes(use: UseFn) {
           }
         })
 
-        // Wire up result handler for this first message
         let responded = false
         ps.onResult = (result) => {
           if (responded) return
@@ -219,7 +209,6 @@ export function registerClaudeRoutes(use: UseFn) {
           }
         }
 
-        // Send the first message
         child.stdin!.write(streamMsg + "\n")
       } catch {
         res.statusCode = 400

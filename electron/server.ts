@@ -135,12 +135,12 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL
-  if (viteDevUrl) {
+  const viteUrl = viteDevUrl ? new URL(viteDevUrl) : null
+  if (viteUrl) {
     // Dev mode: proxy non-API requests to Vite dev server (HMR + live CSS)
-    const vite = new URL(viteDevUrl)
     app.use((req, res) => {
       const proxyReq = httpRequest(
-        { hostname: vite.hostname, port: vite.port, path: req.url, method: req.method, headers: req.headers },
+        { hostname: viteUrl.hostname, port: viteUrl.port, path: req.url, method: req.method, headers: req.headers },
         (proxyRes) => {
           res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers)
           proxyRes.pipe(res)
@@ -180,10 +180,9 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
       return
     }
     // Dev mode: forward HMR WebSocket to Vite dev server
-    if (viteDevUrl) {
-      const vite = new URL(viteDevUrl)
+    if (viteUrl) {
       const proxyReq = httpRequest(
-        { hostname: vite.hostname, port: vite.port, path: req.url, method: req.method, headers: req.headers },
+        { hostname: viteUrl.hostname, port: viteUrl.port, path: req.url, method: req.method, headers: req.headers },
         (proxyRes) => {
           if (!proxyRes.headers.upgrade) { socket.destroy(); return }
         },

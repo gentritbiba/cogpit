@@ -83,7 +83,6 @@ export function registerPortRoutes(use: UseFn) {
           return
         }
 
-        // Use lsof to find PIDs on this port, then kill them
         const child = spawn("lsof", [
           "-t",
           "-i",

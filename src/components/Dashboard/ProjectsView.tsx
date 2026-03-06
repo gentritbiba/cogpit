@@ -36,7 +36,7 @@ function isLive(lastModified: string | null): boolean {
   return Date.now() - new Date(lastModified).getTime() < LIVE_THRESHOLD_MS
 }
 
-export interface ProjectsViewProps {
+interface ProjectsViewProps {
   projects: ProjectInfo[]
   activeSessions: ActiveSessionInfo[]
   loading: boolean

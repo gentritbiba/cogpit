@@ -3,7 +3,7 @@ import type { ParsedSession, ToolCall } from "@/lib/types"
 import { computeNetDiff, type EditOp } from "@/lib/diffUtils"
 import { authFetch } from "@/lib/auth"
 
-export interface FileChange {
+interface FileChange {
   turnIndex: number
   toolCall: ToolCall
   agentId?: string

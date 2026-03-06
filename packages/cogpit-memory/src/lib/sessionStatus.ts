@@ -100,4 +100,3 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
     default: return null
   }
 }
-

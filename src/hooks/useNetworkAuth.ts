@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { isRemoteClient, getToken, clearToken } from "@/lib/auth"
+import type { NetworkAuth } from "@/contexts/AppContext"
 
-export function useNetworkAuth() {
+export function useNetworkAuth(): NetworkAuth {
   const remote = isRemoteClient()
   const [authenticated, setAuthenticated] = useState(!remote || !!getToken())
 

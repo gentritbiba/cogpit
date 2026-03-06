@@ -87,7 +87,7 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
       }
     }
     middle.reverse()
-    for (let k = 0; k < middle.length; k++) result.push(middle[k])
+    result.push(...middle)
   }
 
   // Suffix unchanged lines

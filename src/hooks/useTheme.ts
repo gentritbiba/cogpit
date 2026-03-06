@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
+import type { ThemeContext } from "@/contexts/AppContext"
 
 export type ThemeId = "dark" | "oled" | "light"
 
@@ -55,7 +56,7 @@ function getThemeClasses(id: ThemeId): string {
   }
 }
 
-export function useTheme() {
+export function useTheme(): ThemeContext {
   const [theme, setThemeState] = useState<ThemeId>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)

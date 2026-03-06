@@ -1,12 +1,6 @@
 import type { UseFn } from "../helpers"
-import { findJsonlPath, readFile, stat } from "../helpers"
-
-interface ToolUseBlock {
-  type: "tool_use"
-  id: string
-  name: string
-  input: Record<string, unknown>
-}
+import { findJsonlPath, readFile, sendJson, stat } from "../helpers"
+import type { ToolUseBlock } from "../../src/lib/types"
 
 export interface FileChange {
   toolCallId: string
@@ -183,30 +177,17 @@ export function registerSessionFileChangesRoutes(use: UseFn) {
       const toolCallId = decodeURIComponent(parts[2])
       try {
         const jsonlPath = await findJsonlPath(sessionId)
-        if (!jsonlPath) {
-          res.statusCode = 404
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Session not found" }))
-          return
-        }
+        if (!jsonlPath) return sendJson(res, 404, { error: "Session not found" })
 
         const jsonlContent = await readFile(jsonlPath, "utf-8")
         const { changes } = await parseSessionFileChanges(jsonlContent, true)
 
         const change = changes.find((c) => c.toolCallId === toolCallId)
-        if (!change) {
-          res.statusCode = 404
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Tool call not found" }))
-          return
-        }
+        if (!change) return sendJson(res, 404, { error: "Tool call not found" })
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify(change))
+        sendJson(res, 200, change)
       } catch (err) {
-        res.statusCode = 500
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: String(err) }))
+        sendJson(res, 500, { error: String(err) })
       }
       return
     }
@@ -216,22 +197,14 @@ export function registerSessionFileChangesRoutes(use: UseFn) {
       const includeContent = url.searchParams.get("content") === "true"
       try {
         const jsonlPath = await findJsonlPath(sessionId)
-        if (!jsonlPath) {
-          res.statusCode = 404
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Session not found" }))
-          return
-        }
+        if (!jsonlPath) return sendJson(res, 404, { error: "Session not found" })
 
         const jsonlContent = await readFile(jsonlPath, "utf-8")
         const { changes, cwd } = await parseSessionFileChanges(jsonlContent, includeContent)
 
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ sessionId, cwd, changes }))
+        sendJson(res, 200, { sessionId, cwd, changes })
       } catch (err) {
-        res.statusCode = 500
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: String(err) }))
+        sendJson(res, 500, { error: String(err) })
       }
       return
     }

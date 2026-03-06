@@ -19,7 +19,6 @@ interface UseSessionBrowserReturn {
   setFetchError: (error: string | null) => void
   loadProjects: () => Promise<void>
   loadSessions: (project: ProjectInfo, page?: number, append?: boolean) => Promise<void>
-  loadSessionFile: (project: ProjectInfo, session: SessionInfo) => Promise<void>
   loadLiveSession: (dirName: string, fileName: string) => Promise<void>
   handleBack: () => void
   handleSelectSession: (s: SessionInfo) => void
@@ -214,7 +213,6 @@ export function useSessionBrowser({
     setFetchError,
     loadProjects,
     loadSessions,
-    loadSessionFile,
     loadLiveSession,
     handleBack,
     handleSelectSession,

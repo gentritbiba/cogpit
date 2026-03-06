@@ -23,8 +23,6 @@ interface AgentCardProps {
   onClick: () => void
 }
 
-export { AGENT_BADGE_COLORS }
-
 export function AgentCard({
   agentId,
   subagentType,

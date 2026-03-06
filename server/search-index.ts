@@ -129,6 +129,18 @@ export class SearchIndex {
       deleteContent.run(filePath)
       deleteFile.run(filePath)
 
+      function indexToolCalls(toolCalls: typeof session.turns[0]["toolCalls"], locationPrefix: string): void {
+        for (const tc of toolCalls) {
+          const inputStr = JSON.stringify(tc.input)
+          if (inputStr && inputStr !== "{}") {
+            insert.run(sessionId, filePath, `${locationPrefix}/toolCall/${tc.id}/input`, inputStr)
+          }
+          if (tc.result) {
+            insert.run(sessionId, filePath, `${locationPrefix}/toolCall/${tc.id}/result`, tc.result)
+          }
+        }
+      }
+
       for (let i = 0; i < session.turns.length; i++) {
         const turn = session.turns[i]
         const prefix = `turn/${i}`
@@ -147,7 +159,7 @@ export class SearchIndex {
 
         // Thinking blocks
         const thinkingText = turn.thinking
-          .filter((t) => t.thinking && t.thinking.length > 0)
+          .filter((t) => t.thinking)
           .map((t) => t.thinking)
           .join("\n\n")
           .trim()
@@ -155,16 +167,7 @@ export class SearchIndex {
           insert.run(sessionId, filePath, `${prefix}/thinking`, thinkingText)
         }
 
-        // Tool calls — inputs and results
-        for (const tc of turn.toolCalls) {
-          const inputStr = JSON.stringify(tc.input)
-          if (inputStr && inputStr !== "{}") {
-            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/input`, inputStr)
-          }
-          if (tc.result) {
-            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/result`, tc.result)
-          }
-        }
+        indexToolCalls(turn.toolCalls, prefix)
 
         // Sub-agent inline activity
         for (const sa of turn.subAgentActivity) {
@@ -180,15 +183,7 @@ export class SearchIndex {
           if (saThinking) {
             insert.run(sessionId, filePath, `${saPrefix}/thinking`, saThinking)
           }
-          for (const tc of sa.toolCalls) {
-            const inputStr = JSON.stringify(tc.input)
-            if (inputStr && inputStr !== "{}") {
-              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/input`, inputStr)
-            }
-            if (tc.result) {
-              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/result`, tc.result)
-            }
-          }
+          indexToolCalls(sa.toolCalls, saPrefix)
         }
 
         // Compaction summary
@@ -335,9 +330,17 @@ export class SearchIndex {
     this.db.exec("DELETE FROM search_content")
     this.db.exec("DELETE FROM indexed_files")
 
-    this.indexProjectsDir(projectsDir)
-    this._lastFullBuild = new Date().toISOString()
-    this._lastUpdate = new Date().toISOString()
+    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+      try {
+        this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
+      } catch {
+        // Skip files that fail to parse
+      }
+    })
+
+    const now = new Date().toISOString()
+    this._lastFullBuild = now
+    this._lastUpdate = now
   }
 
   /**
@@ -389,20 +392,6 @@ export class SearchIndex {
   rebuild(): void {
     if (!this.projectsDir) return
     this.buildFull(this.projectsDir)
-  }
-
-  /**
-   * Walk all project directories under `projectsDir` and index every discovered
-   * JSONL file (both sessions and subagents).
-   */
-  private indexProjectsDir(projectsDir: string): void {
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
-      try {
-        this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
-      } catch {
-        // Skip files that fail to parse
-      }
-    })
   }
 
   /**

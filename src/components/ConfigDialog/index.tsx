@@ -14,9 +14,6 @@ import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { authFetch } from "@/lib/auth"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 
-// Re-export extracted modules so external imports remain unchanged
-export { NetworkAccessSection } from "./NetworkAccessSection"
-
 function ValidationStatus({ status, error }: { status: string; error: string | null }) {
   if (status === "validating") {
     return (

@@ -16,8 +16,6 @@ export function registerTeamRoutes(use: UseFn) {
 
     const url = new URL(req.url || "/", "http://localhost")
     const pathParts = url.pathname.split("/").filter(Boolean)
-
-    // Only handle exact /api/teams (no sub-path)
     if (pathParts.length > 0) return next()
 
     try {
@@ -38,7 +36,6 @@ export function registerTeamRoutes(use: UseFn) {
           const configRaw = await readFile(configPath, "utf-8")
           const config = JSON.parse(configRaw)
 
-          // Count tasks
           const taskSummary = { total: 0, completed: 0, inProgress: 0, pending: 0 }
           try {
             const taskDir = join(dirs.TASKS_DIR, teamName)
@@ -56,7 +53,6 @@ export function registerTeamRoutes(use: UseFn) {
             }
           } catch { /* no tasks dir */ }
 
-          // Find lead name
           const leadMember = config.members?.find(
             (m: { agentType?: string }) => m.agentType === "team-lead"
           )
@@ -72,7 +68,6 @@ export function registerTeamRoutes(use: UseFn) {
         } catch { /* skip teams with bad config */ }
       }
 
-      // Sort by createdAt descending
       teams.sort((a, b) => b.createdAt - a.createdAt)
 
       res.setHeader("Content-Type", "application/json")
@@ -102,11 +97,9 @@ export function registerTeamRoutes(use: UseFn) {
     }
 
     try {
-      // Read config
       const configRaw = await readFile(join(teamDir, "config.json"), "utf-8")
       const config = JSON.parse(configRaw)
 
-      // Read tasks
       const tasks: unknown[] = []
       try {
         const taskDir = join(dirs.TASKS_DIR, teamName)
@@ -120,7 +113,6 @@ export function registerTeamRoutes(use: UseFn) {
         }
       } catch { /* no tasks */ }
 
-      // Read inboxes
       const inboxes: Record<string, unknown[]> = {}
       try {
         const inboxDir = join(teamDir, "inboxes")
@@ -162,7 +154,6 @@ export function registerTeamRoutes(use: UseFn) {
       return
     }
 
-    // SSE headers
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -178,7 +169,6 @@ export function registerTeamRoutes(use: UseFn) {
       }, 500)
     }
 
-    // Watch team config dir (config + inboxes)
     const watchers: ReturnType<typeof watch>[] = []
     try {
       const w = watch(teamDir, { recursive: true }, sendUpdate)
@@ -193,12 +183,10 @@ export function registerTeamRoutes(use: UseFn) {
 
     res.write(`data: ${JSON.stringify({ type: "init" })}\n\n`)
 
-    // Heartbeat
     const heartbeat = setInterval(() => {
       res.write(": heartbeat\n\n")
     }, 15000)
 
-    // Cleanup
     req.on("close", () => {
       for (const w of watchers) w.close()
       if (debounceTimer) clearTimeout(debounceTimer)
@@ -238,22 +226,17 @@ export function registerTeamRoutes(use: UseFn) {
           return
         }
 
-        // Read existing inbox
         let inbox: unknown[] = []
         try {
           const raw = await readFile(inboxPath, "utf-8")
           inbox = JSON.parse(raw)
           if (!Array.isArray(inbox)) inbox = []
-        } catch {
-          // file doesn't exist yet, start with empty array
-        }
+        } catch { /* file doesn't exist yet */ }
 
-        // Append new message
         const newMsg = {
           from: "user",
           text: message,
           timestamp: new Date().toISOString(),
-          color: undefined,
           read: false,
         }
         inbox.push(newMsg)

@@ -16,7 +16,7 @@ export interface PricingTier {
 }
 
 /** Total input tokens above this threshold trigger extended context pricing. */
-export const EXTENDED_CONTEXT_THRESHOLD = 200_000
+const EXTENDED_CONTEXT_THRESHOLD = 200_000
 
 // Standard tiers
 const TIER_HAIKU_35:         PricingTier = { input: 0.80, output: 4,     cacheWrite: 1,     cacheRead: 0.08, webSearch: 0.01 }
@@ -33,7 +33,7 @@ const TIER_EXTENDED:          PricingTier = { input: 10,   output: 37.5,  cacheW
 //
 // CC normalises full model IDs (e.g. "claude-opus-4-6-20260119") to a short
 // key.  We match with `includes()` for robustness.
-export const MODEL_TIERS: Array<{ match: string; tier: PricingTier; extendedTier?: PricingTier }> = [
+const MODEL_TIERS: Array<{ match: string; tier: PricingTier; extendedTier?: PricingTier }> = [
   // Haiku
   { match: "haiku-4-5",      tier: TIER_HAIKU_45 },
   { match: "haiku-4-0",      tier: TIER_HAIKU_35 },
@@ -58,7 +58,7 @@ const DEFAULT_TIER = TIER_SONNET_LATEST
 const DEFAULT_EXTENDED_TIER = TIER_EXTENDED
 
 // Generic fallbacks by model family (when no specific version matches)
-export const FAMILY_FALLBACKS: Array<{ match: string; tier: PricingTier }> = [
+const FAMILY_FALLBACKS: Array<{ match: string; tier: PricingTier }> = [
   { match: "haiku", tier: TIER_HAIKU_45 },
   { match: "sonnet", tier: TIER_SONNET_LATEST },
   { match: "opus", tier: TIER_SONNET_LATEST },

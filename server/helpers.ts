@@ -317,12 +317,10 @@ export function sendJson(res: import("node:http").ServerResponse, status: number
 }
 
 export { watchSubagents } from "./subagentWatcher"
-export type { SubagentWatcher } from "./subagentWatcher"
 
 // Re-export utilities needed by route handlers that spawn processes
 export { spawn, homedir, randomUUID }
 export { createInterface } from "node:readline"
-export { appendFile } from "node:fs/promises"
 export { readdir, readFile, stat, open } from "node:fs/promises"
 export { writeFile, mkdir, unlink, lstat } from "node:fs/promises"
 export { join, resolve, basename, dirname } from "node:path"

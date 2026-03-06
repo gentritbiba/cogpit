@@ -159,7 +159,7 @@ export function registerWorktreeRoutes(use: UseFn) {
         const prUrl = execFileSync("gh", ghArgs, {
           cwd: worktreePath,
           encoding: "utf-8",
-        }).toString().trim()
+        }).trim()
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ url: prUrl }))

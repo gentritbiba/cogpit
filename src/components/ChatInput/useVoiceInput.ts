@@ -36,10 +36,6 @@ export function useVoiceInput({ onTranscript }: UseVoiceInputOptions) {
       setVoiceProgress(0)
       setVoiceError(null)
 
-      console.log("[Voice] crossOriginIsolated:", window.crossOriginIsolated)
-      console.log("[Voice] SharedArrayBuffer:", typeof SharedArrayBuffer !== "undefined")
-      console.log("[Voice] mediaDevices:", !!navigator.mediaDevices)
-
       const transcriber = new WhisperTranscriber({
         modelSize: "base-en-q5_1",
         onTranscription: (transcript: string) => {

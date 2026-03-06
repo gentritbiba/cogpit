@@ -4,11 +4,6 @@ import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
 
-// Re-export sub-components for external consumers
-export { Shortcut, LiveDot, SearchInput, ErrorBanner, SkeletonCards } from "./DashboardWidgets"
-export { SessionsView } from "./SessionsView"
-export { ProjectsView } from "./ProjectsView"
-
 interface ProjectInfo {
   dirName: string
   path: string

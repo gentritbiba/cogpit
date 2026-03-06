@@ -60,7 +60,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
 
   const { images, isDragOver, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload()
 
-  // Slash suggestions state
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const showSlash = text.startsWith("/") && !text.includes(" ")
   const slashFilter = showSlash ? text.slice(1) : ""
@@ -89,7 +88,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
     })
   }, [])
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
     const imagePayload = images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined

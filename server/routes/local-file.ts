@@ -29,19 +29,16 @@ export function registerLocalFileRoutes(use: UseFn) {
       return sendJson(res, 400, { error: "path query parameter required" })
     }
 
-    // Must be an absolute path
     if (!filePath.startsWith("/")) {
       return sendJson(res, 400, { error: "path must be absolute" })
     }
 
-    // Only serve image files
     const ext = extname(filePath).toLowerCase()
     const contentType = IMAGE_EXTENSIONS[ext]
     if (!contentType) {
       return sendJson(res, 403, { error: "Only image files are allowed" })
     }
 
-    // Check file exists and size
     try {
       const info = await stat(filePath)
       if (!info.isFile()) {

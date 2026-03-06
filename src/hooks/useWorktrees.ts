@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
 import type { WorktreeInfo } from "../../server/helpers"
 
@@ -8,7 +8,6 @@ export function useWorktrees(dirName: string | null) {
   const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchWorktrees = useCallback(async () => {
     if (!dirName) return
@@ -37,11 +36,8 @@ export function useWorktrees(dirName: string | null) {
     }
 
     fetchWorktrees()
-    intervalRef.current = setInterval(fetchWorktrees, POLL_INTERVAL)
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current)
-    }
+    const interval = setInterval(fetchWorktrees, POLL_INTERVAL)
+    return () => clearInterval(interval)
   }, [dirName, fetchWorktrees])
 
   return { worktrees, loading, error, refetch: fetchWorktrees }

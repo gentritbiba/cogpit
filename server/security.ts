@@ -4,7 +4,7 @@ import { getConfig } from "./config"
 
 // ── Shared types (duplicated here to avoid circular imports) ─────────
 
-export type NextFn = (err?: unknown) => void
+type NextFn = (err?: unknown) => void
 
 // ── Network auth helpers ─────────────────────────────────────────────
 

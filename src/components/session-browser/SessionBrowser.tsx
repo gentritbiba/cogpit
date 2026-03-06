@@ -3,7 +3,7 @@ import { Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveSessions } from "@/components/LiveSessions"
 import { TeamsList } from "@/components/TeamsList"
-import type { SessionBrowserProps, PendingSessionInfo } from "./types"
+import type { SessionBrowserProps } from "./types"
 import { BrowseTab } from "./BrowseTab"
 import { useSessionBrowser } from "./useSessionBrowser"
 

@@ -2,7 +2,7 @@ import { BookOpen, Bot, Sparkles, Terminal, FileJson } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface ConfigTreeItem {
+interface ConfigTreeItem {
   name: string
   path: string
   type: "file" | "directory"

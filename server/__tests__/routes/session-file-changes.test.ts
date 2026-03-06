@@ -7,6 +7,11 @@ vi.mock("../../helpers", () => ({
   readFile: vi.fn(),
   stat: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
+  sendJson: (res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (body: string) => void }, status: number, data: unknown) => {
+    res.statusCode = status
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify(data))
+  },
 }))
 
 import { findJsonlPath, readFile, stat } from "../../helpers"

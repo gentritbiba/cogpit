@@ -40,7 +40,7 @@ interface SessionInfo {
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
 }
 
-export interface SessionsViewProps {
+interface SessionsViewProps {
   selectedProject: ProjectInfo
   sessions: SessionInfo[]
   sessionsTotal: number

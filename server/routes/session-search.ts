@@ -129,13 +129,11 @@ async function discoverAllSessions(maxAgeMs: number): Promise<Array<{ path: stri
     .filter(e => e.isDirectory() && e.name !== "memory")
     .map(e => join(dirs.PROJECTS_DIR, e.name))
 
-  // Read all project directories in parallel
   const nested = await Promise.all(
     projectDirs.map(async (projectDir) => {
       try {
         const files = (await readdir(projectDir)) as string[]
         const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-        // Stat all files in this directory in parallel
         const statResults = await Promise.all(
           jsonlFiles.map(async (f) => {
             const filePath = join(projectDir, f)
@@ -178,17 +176,14 @@ function walkSession(session: ParsedSession, query: string, caseSensitive: boole
     const turn = session.turns[i]
     const prefix = `${locationPrefix}turn/${i}`
 
-    // User message
     const userText = getUserMessageText(turn.userMessage)
     const userHit = searchField(userText || null, `${prefix}/userMessage`, query, caseSensitive)
     if (userHit) hits.push(userHit)
 
-    // Assistant text
     const assistantText = turn.assistantText.length > 0 ? turn.assistantText.join("\n\n") : null
     const assistantHit = searchField(assistantText, `${prefix}/assistantMessage`, query, caseSensitive)
     if (assistantHit) hits.push(assistantHit)
 
-    // Thinking blocks
     for (const tb of turn.thinking) {
       if (!tb.thinking) continue
       const thinkHit = searchField(tb.thinking, `${prefix}/thinking`, query, caseSensitive)
@@ -198,7 +193,6 @@ function walkSession(session: ParsedSession, query: string, caseSensitive: boole
       }
     }
 
-    // Tool calls (input + result)
     for (const tc of turn.toolCalls) {
       const inputStr = JSON.stringify(tc.input)
       const inputHit = searchField(inputStr, `${prefix}/toolCall/${tc.id}/input`, query, caseSensitive, { toolName: tc.name })
@@ -208,7 +202,6 @@ function walkSession(session: ParsedSession, query: string, caseSensitive: boole
       if (resultHit) hits.push(resultHit)
     }
 
-    // Sub-agent activity (inline data from parent session)
     for (const sa of turn.subAgentActivity) {
       const saPrefix = `${locationPrefix}agent/${sa.agentId}/`
 
@@ -242,7 +235,6 @@ function walkSession(session: ParsedSession, query: string, caseSensitive: boole
       }
     }
 
-    // Compaction summary
     if (turn.compactionSummary) {
       const compHit = searchField(turn.compactionSummary, `${prefix}/compactionSummary`, query, caseSensitive)
       if (compHit) hits.push(compHit)
@@ -276,7 +268,6 @@ async function walkSubagentFiles(
       filePath: join(subDir, f),
     }))
 
-  // Pre-filter all agent files in parallel
   const matched = await Promise.all(
     agentFiles.map(async ({ agentId, filePath }) => ({
       agentId,
@@ -285,7 +276,6 @@ async function walkSubagentFiles(
     })),
   )
 
-  // Walk matching files in parallel
   const hitArrays = await Promise.all(
     matched
       .filter(m => m.rawContent)
@@ -333,26 +323,20 @@ export function registerSessionSearchRoutes(use: UseFn) {
           caseSensitive,
         })
 
-        // Group hits by sessionId to build SessionSearchResult[]
         const grouped = new Map<string, SearchHit[]>()
         for (const hit of indexHits) {
-          let sessionHits = grouped.get(hit.sessionId)
-          if (!sessionHits) {
-            sessionHits = []
-            grouped.set(hit.sessionId, sessionHits)
-          }
-          const searchHit: SearchHit = {
+          const sessionHits = grouped.get(hit.sessionId) ?? []
+          if (!grouped.has(hit.sessionId)) grouped.set(hit.sessionId, sessionHits)
+          sessionHits.push({
             location: hit.location,
             snippet: hit.snippet,
             matchCount: hit.matchCount,
-          }
-          sessionHits.push(searchHit)
+          })
         }
 
-        const results: SessionSearchResult[] = []
-        for (const [sid, sessionHits] of grouped) {
-          results.push({ sessionId: sid, hits: sessionHits })
-        }
+        const results: SessionSearchResult[] = [...grouped].map(
+          ([sessionId, hits]) => ({ sessionId, hits }),
+        )
 
         // Only run the expensive COUNT query when hits were capped by LIMIT.
         // If we got fewer hits than the limit, we already have the full picture.
@@ -383,7 +367,6 @@ export function registerSessionSearchRoutes(use: UseFn) {
 
     // ── Fallback: raw scan ──────────────────────────────────────────────
     try {
-      // Phase 1: Discover files
       const files = sessionId ? await discoverSingleSession(sessionId) : await discoverAllSessions(maxAgeMs)
 
       let totalHits = 0
@@ -392,15 +375,12 @@ export function registerSessionSearchRoutes(use: UseFn) {
       let sessionsSearched = 0
 
       for (const file of files) {
-        // Early exit: skip expensive work once limit is reached
         if (returnedHits >= limit) break
 
-        // Phase 2: Raw text pre-filter
         const rawContent = await rawTextMatch(file.path, query, caseSensitive)
         sessionsSearched++
         if (!rawContent) continue
 
-        // Phase 3: Parse and walk
         const session = parseSession(rawContent)
 
         const sessionHits = walkSession(session, query, caseSensitive)

@@ -54,8 +54,6 @@ export async function handleBackgroundAgents(
       preview: string
     }> = []
 
-    const projectsDir = dirs.PROJECTS_DIR
-
     for (const f of files) {
       if (!f.endsWith(".output")) continue
       const fullPath = join(tasksDir, f)
@@ -71,7 +69,6 @@ export async function handleBackgroundAgents(
 
       const agentId = f.replace(".output", "")
 
-      // Resolve the symlink target
       let targetPath: string
       try {
         targetPath = await readlink(fullPath)
@@ -79,9 +76,9 @@ export async function handleBackgroundAgents(
 
       // Parse the target path to extract dirName and fileName
       // Target format: {PROJECTS_DIR}/{dirName}/{parentSessionId}/subagents/agent-{agentId}.jsonl
-      if (!targetPath.startsWith(projectsDir)) continue
+      if (!targetPath.startsWith(dirs.PROJECTS_DIR)) continue
 
-      const relativePath = targetPath.slice(projectsDir.length).replace(/^\//, "")
+      const relativePath = targetPath.slice(dirs.PROJECTS_DIR.length).replace(/^\//, "")
       const parts = relativePath.split("/")
       // parts: [dirName, parentSessionId, "subagents", "agent-{agentId}.jsonl"]
       if (parts.length < 4 || parts[2] !== "subagents") continue
@@ -90,14 +87,12 @@ export async function handleBackgroundAgents(
       const parentSessionId = parts[1]
       const fileName = `${parentSessionId}/subagents/${parts[3]}`
 
-      // Get modification time for activity status
       let modifiedAt = 0
       let preview = ""
       try {
         const s = await stat(targetPath)
         modifiedAt = s.mtimeMs
 
-        // Read a small preview from the JSONL
         if (s.size > 0) {
           const fh = await open(targetPath, "r")
           try {
@@ -130,13 +125,11 @@ export async function handleBackgroundAgents(
         }
       } catch { continue }
 
-      // Consider active if modified in the last 60 seconds
       const isActive = Date.now() - modifiedAt < 60_000
 
       agents.push({ agentId, dirName, fileName, parentSessionId, modifiedAt, isActive, preview })
     }
 
-    // Sort by modification time, most recent first
     agents.sort((a, b) => b.modifiedAt - a.modifiedAt)
 
     res.setHeader("Content-Type", "application/json")

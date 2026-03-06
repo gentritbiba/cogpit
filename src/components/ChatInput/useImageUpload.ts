@@ -98,7 +98,6 @@ export function useImageUpload() {
   return {
     images,
     isDragOver,
-    addImageFiles,
     removeImage,
     clearImages,
     handleDragOver,

@@ -64,7 +64,6 @@ export async function handleBackgroundTasks(
 
       const taskId = f.replace(".output", "")
 
-      // Read content to detect ports and get a preview
       let content = ""
       let modifiedAt = 0
       try {
@@ -81,7 +80,6 @@ export async function handleBackgroundTasks(
         }
       } catch { continue }
 
-      // Detect ports from output content
       const ports = new Set<number>()
       for (const m of content.matchAll(PORT_RE)) {
         const p = parseInt(m[1] || m[2] || m[3], 10)
@@ -102,7 +100,6 @@ export async function handleBackgroundTasks(
       })
     }
 
-    // TCP-probe all detected ports for liveness
     const allPorts = [...new Set(tasks.flatMap((t) => t.ports))]
     const portAlive: Record<number, boolean> = {}
     await Promise.all(
@@ -118,7 +115,6 @@ export async function handleBackgroundTasks(
       )
     )
 
-    // Only return tasks that have at least one active port
     const portOwner = new Map<number, (typeof tasks)[0]>()
     for (const task of tasks) {
       for (const port of task.ports) {

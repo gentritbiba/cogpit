@@ -295,7 +295,7 @@ export default function App() {
   })
 
   // Wire up the session finalized ref now that scroll is available
-  sessionFinalizedRef.current = (parsed) => {
+  sessionFinalizedRef.current = (_parsed) => {
     // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
     scroll.resetTurnCount(0)
     scroll.scrollToBottomInstant()

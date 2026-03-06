@@ -6,7 +6,7 @@ import type { SubAgentMessage, ToolCall, ContentBlock } from "@/lib/types"
 function extractToolResultText(content: string | ContentBlock[] | undefined | null): string {
   if (!content) return ""
   if (typeof content === "string") return content
-  return (content as ContentBlock[])
+  return content
     .map((b) => (b.type === "text" ? b.text : ""))
     .filter(Boolean)
     .join("\n")

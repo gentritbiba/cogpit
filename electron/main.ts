@@ -72,7 +72,7 @@ app.whenReady().then(async () => {
   const networkEnabled = config?.networkAccess && config?.networkPassword
 
   const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
-  const listenPort = isDev ? 19384 : (networkEnabled ? 19384 : 0)
+  const listenPort = (isDev || networkEnabled) ? 19384 : 0
 
   await new Promise<void>((resolve) => {
     httpServer.listen(listenPort, listenHost, () => resolve())

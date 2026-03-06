@@ -1,6 +1,6 @@
 {
   "name": "cogpit-memory",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "CLI tool for Claude Code session introspection — search, browse, and drill into past sessions",
   "main": "./dist/index.js",
   "types": "./src/index.ts",

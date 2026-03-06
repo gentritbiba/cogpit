@@ -10,7 +10,6 @@ import {
 import type { UseFn } from "../helpers"
 
 export function registerClaudeManageRoutes(use: UseFn) {
-  // POST /api/stop-session - stop a running claude child process
   use("/api/stop-session", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -28,7 +27,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
-        // Kill persistent session if it exists
         const ps = persistentSessions.get(sessionId)
         if (ps && !ps.dead) {
           ps.dead = true
@@ -49,7 +47,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
 
         if (child) {
           child.kill("SIGTERM")
-          // If it doesn't die within 3s, force kill
           const forceKill = setTimeout(() => {
             if (activeProcesses.has(sessionId)) {
               child.kill("SIGKILL")
@@ -67,13 +64,11 @@ export function registerClaudeManageRoutes(use: UseFn) {
     })
   })
 
-  // POST /api/kill-all - kill every active/persistent claude process
   use("/api/kill-all", (req, res, next) => {
     if (req.method !== "POST") return next()
 
     let killed = 0
 
-    // Kill persistent sessions
     for (const [sid, ps] of persistentSessions) {
       if (!ps.dead) {
         ps.dead = true
@@ -83,14 +78,12 @@ export function registerClaudeManageRoutes(use: UseFn) {
       persistentSessions.delete(sid)
     }
 
-    // Kill active (non-persistent) processes
     for (const [sid, proc] of activeProcesses) {
       try { proc.kill("SIGTERM") } catch { /* already dead */ }
       activeProcesses.delete(sid)
       killed++
     }
 
-    // Force-kill after 3s if any survive
     if (killed > 0) {
       const snapshot = [...persistentSessions.values()].map(p => p.proc).concat([...activeProcesses.values()])
       const forceKill = setTimeout(() => {
@@ -105,7 +98,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
     res.end(JSON.stringify({ success: true, killed }))
   })
 
-  // GET /api/running-processes - list all system-wide `claude` processes
   use("/api/running-processes", (req, res, next) => {
     if (req.method !== "GET") return next()
 
@@ -128,7 +120,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
       }> = []
 
       for (const line of stdout.split("\n")) {
-        // Match claude processes but not node/esbuild/zsh wrappers
         if (!line.includes("claude") || line.includes("grep") ||
             line.includes("node ") || line.includes("esbuild") ||
             line.includes("/bin/zsh")) continue
@@ -143,11 +134,9 @@ export function registerClaudeManageRoutes(use: UseFn) {
         const startTime = cols[8] || ""
         const args = cols.slice(10).join(" ")
 
-        // Extract session ID from --resume or --session-id flags
-        let sessionId: string | null = null
         const resumeMatch = args.match(/--resume\s+([0-9a-f-]{36})/)
         const sidMatch = args.match(/--session-id\s+([0-9a-f-]{36})/)
-        sessionId = resumeMatch?.[1] ?? sidMatch?.[1] ?? null
+        const sessionId = resumeMatch?.[1] ?? sidMatch?.[1] ?? null
 
         processes.push({
           pid,
@@ -160,7 +149,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
         })
       }
 
-      // Sort by memory descending
       processes.sort((a, b) => b.memMB - a.memMB)
 
       res.setHeader("Content-Type", "application/json")
@@ -172,7 +160,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
     })
   })
 
-  // POST /api/kill-process - kill a specific process by PID (only tracked claude processes)
   use("/api/kill-process", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -187,7 +174,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
-        // Only allow killing PIDs that we are tracking
         let isTracked = false
 
         for (const [sid, ps] of persistentSessions) {
@@ -217,7 +203,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
 
         try {
           process.kill(pid, "SIGTERM")
-          // Force-kill after 3s
           const forceKill = setTimeout(() => {
             try { process.kill(pid, "SIGKILL") } catch { /* already dead */ }
           }, 3000)
@@ -236,7 +221,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
     })
   })
 
-  // POST /api/delete-session - kill process and permanently delete a session JSONL file
   use("/api/delete-session", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -261,7 +245,6 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
-        // Kill any running process for this session before deleting
         const sessionId = fileName.replace(".jsonl", "")
         const ps = persistentSessions.get(sessionId)
         if (ps && !ps.dead) {

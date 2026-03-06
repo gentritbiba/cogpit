@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch, isRemoteClient, getToken } from "@/lib/auth"
+import type { AppConfig } from "@/contexts/AppContext"
 
 interface NetworkState {
   url: string | null
@@ -28,7 +29,7 @@ async function fetchConfig(signal?: AbortSignal): Promise<string | null> {
   return data?.claudeDir ?? null
 }
 
-export function useAppConfig() {
+export function useAppConfig(): AppConfig {
   const [configLoading, setConfigLoading] = useState(true)
   const [configError, setConfigError] = useState<string | null>(null)
   const [claudeDir, setClaudeDir] = useState<string | null>(null)
@@ -54,7 +55,6 @@ export function useAppConfig() {
     fetchConfig(controller.signal)
       .then((dir) => {
         setClaudeDir(dir)
-        setConfigError(null)
       })
       .catch((err) => {
         if (err instanceof Error && err.name === "AbortError") return
@@ -97,7 +97,6 @@ export function useAppConfig() {
     fetchConfig()
       .then((dir) => {
         setClaudeDir(dir)
-        setConfigError(null)
       })
       .catch((err) => {
         setClaudeDir(null)

@@ -120,7 +120,6 @@ export function ActionButtons({
         </TooltipContent>
       </Tooltip>
 
-      {/* Send button */}
       <Button
         variant="ghost"
         size="sm"

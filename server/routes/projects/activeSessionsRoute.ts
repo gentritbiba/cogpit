@@ -50,9 +50,7 @@ export async function handleActiveSessions(
             mtimeMs: s.mtimeMs,
             size: s.size,
           })
-        } catch {
-          // skip inaccessible files
-        }
+        } catch { /* skip */ }
       }
     }
 

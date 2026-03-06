@@ -97,7 +97,6 @@ function ChartLegend({ padLeft, svgHeight }: { padLeft: number; svgHeight: numbe
 
 interface BarGroupProps {
   data: TurnData
-  index: number
   groupX: number
   barW: number
   groupW: number
@@ -204,7 +203,6 @@ export function InputOutputChart({ turns }: { turns: Turn[] }): JSX.Element | nu
             <BarGroup
               key={i}
               data={d}
-              index={i}
               groupX={groupX}
               barW={barW}
               groupW={groupW}

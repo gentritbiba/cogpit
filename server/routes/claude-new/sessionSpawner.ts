@@ -18,8 +18,6 @@ import {
 } from "../../helpers"
 import type { PersistentSession, UseFn } from "../../helpers"
 
-// ── Allowed image types for stream-json messages ────────────────────
-
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 
 /**
@@ -84,9 +82,6 @@ export async function resolveProjectPath(
   return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
-/**
- * Register the POST /api/new-session route.
- */
 export function registerNewSessionRoute(use: UseFn) {
   use("/api/new-session", (req, res, next) => {
     if (req.method !== "POST") return next()
@@ -204,9 +199,6 @@ export function registerNewSessionRoute(use: UseFn) {
   })
 }
 
-/**
- * Register the POST /api/create-and-send route.
- */
 export function registerCreateAndSendRoute(use: UseFn) {
   use("/api/create-and-send", (req, res, next) => {
     if (req.method !== "POST") return next()
@@ -282,7 +274,6 @@ export function registerCreateAndSendRoute(use: UseFn) {
         persistentSessions.set(sessionId, ps)
         activeProcesses.set(sessionId, child)
 
-        // Read stdout for result messages and track Task tool calls
         const rl = createInterface({ input: child.stdout! })
         rl.on("line", (line) => {
           try {
@@ -339,12 +330,10 @@ export function registerCreateAndSendRoute(use: UseFn) {
           }
         })
 
-        // Send the first user message
         child.stdin!.write(streamMsg + "\n")
 
         // Respond as soon as the JSONL file exists on disk with content,
         // so the client can redirect immediately and stream via SSE.
-        // Don't wait for the entire first turn to complete.
         let responded = false
         const expectedPath = join(projectDir, fileName)
 
@@ -370,7 +359,6 @@ export function registerCreateAndSendRoute(use: UseFn) {
           res.end(JSON.stringify({ error }))
         }
 
-        // Poll for the JSONL file to appear on disk with content
         const pollForFile = async () => {
           const maxAttempts = 150 // 15 seconds max (100ms intervals)
           for (let i = 0; i < maxAttempts; i++) {
@@ -380,7 +368,6 @@ export function registerCreateAndSendRoute(use: UseFn) {
               if (s.size > 0) {
                 respondSuccess()
 
-                // Now resolve JSONL path for subagent watcher
                 ps.jsonlPath = expectedPath
                 ps.subagentWatcher = watchSubagents(expectedPath, sessionId, ps.pendingTaskCalls)
                 return
@@ -395,17 +382,14 @@ export function registerCreateAndSendRoute(use: UseFn) {
 
         pollForFile()
 
-        // If the process finishes or errors before we've responded, handle it
         ps.onResult = (result) => {
           ps.onResult = null
           if (result.is_error) {
             respondError(result.result || "Claude returned an error")
           } else {
-            // Process completed its first turn — respond if we haven't already
             respondSuccess()
           }
 
-          // Resolve JSONL path for subagent watcher if not already done
           if (!ps.jsonlPath) {
             findJsonlPath(sessionId).then((p) => {
               if (p) {

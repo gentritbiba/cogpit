@@ -487,7 +487,7 @@ async function rawScanSearch(
       sessionsSearched,
       results,
     }
-  } catch (err) {
+  } catch {
     // Return an empty successful response on unexpected errors rather than
     // letting them bubble up — the caller can check results.length === 0.
     return {

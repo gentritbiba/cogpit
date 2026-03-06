@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
  * Reactive dark mode detection via MutationObserver on <html class="dark">.
  * Safe for SSR/pre-rendering (guards against missing `document`).
  */
-export function useIsDarkMode() {
+export function useIsDarkMode(): boolean {
   const [isDark, setIsDark] = useState(
     () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
   )

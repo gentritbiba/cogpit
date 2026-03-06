@@ -6,7 +6,6 @@ export function registerProjectRoutes(use: UseFn) {
   // GET /api/projects - list all projects
   use("/api/projects", async (_req, res, next) => {
     if (_req.method !== "GET") return next()
-    // Only handle exact path
     if (_req.url && _req.url !== "/" && _req.url !== "") return next()
 
     try {
@@ -23,7 +22,6 @@ export function registerProjectRoutes(use: UseFn) {
 
         if (jsonlFiles.length === 0) continue
 
-        // Get file stats for latest session
         let latestTime = 0
         let latestFile: string | null = null
         for (const f of jsonlFiles) {
@@ -38,8 +36,7 @@ export function registerProjectRoutes(use: UseFn) {
 
         const { path: realPath, shortName } = projectDirToReadableName(entry.name)
 
-        // Read cwd from the latest session to get the real filesystem path
-        // (the path field derived from dirName is unreliable for dirs with hyphens)
+        // dirName-derived path is unreliable for dirs with hyphens; prefer cwd from session meta
         let cwd: string | null = null
         if (latestFile) {
           try {
@@ -57,7 +54,6 @@ export function registerProjectRoutes(use: UseFn) {
         })
       }
 
-      // Sort by last modified (most recent first)
       projects.sort((a, b) => {
         if (!a.lastModified) return 1
         if (!b.lastModified) return -1
@@ -80,7 +76,6 @@ export function registerProjectRoutes(use: UseFn) {
     const parts = url.pathname.split("/").filter(Boolean)
 
     if (parts.length === 1) {
-      // List sessions for this project
       const dirName = decodeURIComponent(parts[0])
       const projectDir = join(dirs.PROJECTS_DIR, dirName)
 
@@ -97,7 +92,6 @@ export function registerProjectRoutes(use: UseFn) {
         const files = await readdir(projectDir)
         const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"))
 
-        // Get file stats for sorting first (cheap operation)
         const fileStats = await Promise.all(
           jsonlFiles.map(async (f) => {
             try {
@@ -109,14 +103,12 @@ export function registerProjectRoutes(use: UseFn) {
           })
         )
 
-        // Sort by last modified (most recent first)
         fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
         const total = fileStats.length
         const start = (page - 1) * limit
         const paged = fileStats.slice(start, start + limit)
 
-        // Only read metadata for the current page
         const sessions = []
         for (const fs of paged) {
           const filePath = join(projectDir, fs.fileName)

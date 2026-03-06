@@ -39,9 +39,6 @@ export function findTruncationLine(
   return null
 }
 
-/**
- * Register the POST /api/branch-session route.
- */
 export function registerBranchSessionRoute(use: UseFn) {
   use("/api/branch-session", (req, res, next) => {
     if (req.method !== "POST") return next()
@@ -76,16 +73,13 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
 
-        // If turnIndex is provided, truncate lines after that turn
         if (turnIndex != null) {
           const truncLine = findTruncationLine(lines, turnIndex)
           if (truncLine !== null) {
             lines = lines.slice(0, truncLine)
           }
-          // If truncLine is null, turnIndex >= total turns — keep everything
         }
 
-        // Rewrite first line with new sessionId and branchedFrom
         const firstObj = JSON.parse(lines[0])
         const originalId = firstObj.sessionId || ""
         const newSessionId = randomUUID()

@@ -9,7 +9,7 @@ import {
   createEmptyUndoState,
   type FileOperation,
 } from "@/lib/undo-engine"
-import { buildSummary } from "./undo/undoHelpers"
+import { buildSummary, type UndoConfirmState } from "./undo/undoHelpers"
 import {
   ApplyAbort,
   applyUndo,
@@ -35,7 +35,7 @@ export interface UseUndoRedoResult {
   requestBranchSwitch: (branchId: string, archiveTurnIndex?: number) => void
 
   // Confirmation dialog
-  confirmState: import("./undo/undoHelpers").UndoConfirmState | null
+  confirmState: UndoConfirmState | null
   confirmApply: () => Promise<void>
   confirmCancel: () => void
 
@@ -50,7 +50,7 @@ export function useUndoRedo(
   onReloadSession: () => Promise<void>,
 ): UseUndoRedoResult {
   const [undoState, setUndoState] = useState<UndoState | null>(null)
-  const [confirmState, setConfirmState] = useState<import("./undo/undoHelpers").UndoConfirmState | null>(null)
+  const [confirmState, setConfirmState] = useState<UndoConfirmState | null>(null)
   const [isApplying, setIsApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
