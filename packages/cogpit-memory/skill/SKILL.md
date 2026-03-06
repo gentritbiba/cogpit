@@ -248,7 +248,9 @@ bunx cogpit-memory search "AuthProvider" --case-sensitive
 |------|---------|-------------|
 | `--session` | all sessions | Scope to single session |
 | `--max-age` | `5d` | Time window: `5d`, `12h`, `30d` |
-| `--limit` | `20` | Max returned hits |
+| `--limit` | `20` | Max total hits returned |
+| `--session-limit` | all | Cap unique sessions in results |
+| `--hits-per-session` | all | Max hits kept per session |
 | `--case-sensitive` | `false` | Case sensitivity |
 
 ### Response shape

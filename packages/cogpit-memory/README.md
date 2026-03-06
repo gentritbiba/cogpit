@@ -72,13 +72,17 @@ cogpit-memory search "authentication"                        # Cross-session sea
 cogpit-memory search "auth" --session <sessionId>            # Single session
 cogpit-memory search "bug" --max-age 30d --limit 50          # Custom window
 cogpit-memory search "AuthProvider" --case-sensitive          # Case-sensitive
+cogpit-memory search "auth" --limit 200 --session-limit 50    # 50 unique sessions
+cogpit-memory search "bug" --session-limit 20 --hits-per-session 2  # Compact results
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--session` | all | Scope to single session |
 | `--max-age` | `5d` | Time window — any duration (`5d`, `30d`, `365d`) |
-| `--limit` | `20` | Max returned hits |
+| `--limit` | `20` | Max total hits returned |
+| `--session-limit` | all | Cap unique sessions in results |
+| `--hits-per-session` | all | Max hits kept per session |
 | `--case-sensitive` | `false` | Case sensitivity |
 
 Each result includes the `cwd` (working directory where the session ran) and an array of hits. Each hit includes a `location` string (e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/toolCall/tc1/result`) that maps directly to L2/L3 drill-down commands.
