@@ -70,6 +70,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
 
   const {
     fileChanges,
+    fileContents,
     groupedByFile,
     groupedLastTurn,
     lastTurnIndex,
@@ -78,8 +79,8 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   // Compute grouped files for specific turn on demand
   const groupedForTurn = useMemo(() => {
     if (typeof scope !== "number") return null
-    return buildGroupedFiles(fileChanges, scope)
-  }, [fileChanges, scope])
+    return buildGroupedFiles(fileChanges, scope, fileContents)
+  }, [fileChanges, scope, fileContents])
 
   function getActiveGrouped(): typeof groupedByFile {
     if (typeof scope === "number") return groupedForTurn ?? []
@@ -88,12 +89,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   }
   const activeGrouped = getActiveGrouped()
 
-  // Refs for scrolling to grouped file cards
-  const fileCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map())
-  const setFileCardRef = useCallback((filePath: string) => (el: HTMLDivElement | null) => {
-    if (el) fileCardRefs.current.set(filePath, el)
-    else fileCardRefs.current.delete(filePath)
-  }, [])
+  // Scroll to file cards via DOM query (avoids per-file closure allocation)
 
   // Listen for focus-file events from TurnChangedFiles
   useEffect(() => {
@@ -111,7 +107,9 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
 
       // Scroll after a tick (to let scope change render)
       requestAnimationFrame(() => {
-        const el = fileCardRefs.current.get(detail.filePath)
+        const el = scrollRef.current?.querySelector(
+          `[data-file-path="${CSS.escape(detail.filePath)}"]`
+        ) as HTMLElement | null
         el?.scrollIntoView({ behavior: "smooth", block: "nearest" })
       })
     }
@@ -322,7 +320,6 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
               activeGrouped.map((file) => (
                 <GroupedFileCard
                   key={file.filePath}
-                  ref={setFileCardRef(file.filePath)}
                   file={file}
                   defaultOpen={allExpanded}
                   isHighlighted={highlightPath === file.filePath}

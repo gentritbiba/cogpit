@@ -288,7 +288,7 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
 
 // ── Tree row (recursive) ─────────────────────────────────────────────────────
 
-function TreeRow({
+const TreeRow = memo(function TreeRow({
   node,
   depth,
   allExpanded,
@@ -362,7 +362,7 @@ function TreeRow({
         ))}
     </>
   )
-}
+})
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 

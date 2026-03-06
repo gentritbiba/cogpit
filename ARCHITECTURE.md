@@ -127,6 +127,9 @@ Deep session search powered by the local `packages/cogpit-memory` indexing packa
   - `maxAge` (optional, default "30d") — Filter to recent sessions (e.g., "7d", "30d")
 - **Returns:** `ActiveSessionInfo[]` shaped for LiveSessions UI
   - Fields: dirName, projectShortName, cwd, firstUserMessage, lastUserMessage, gitBranch, lastModified, turnCount, isActive, matchedMessage (snippet), hitCount
+- **Implementation:** Spawns cogpit-memory CLI as child process
+  - Dev: `bun packages/cogpit-memory/src/cli.ts` (TypeScript source for fast reload)
+  - Packaged app: `node packages/cogpit-memory/dist/cli.js` (compiled, from app.asar.unpacked via asarUnpack configuration)
 - **Used by:** LiveSessions panel for fast deep search across all sessions via pre-built cogpit-memory index (faster than full JSONL scan)
 
 ---
@@ -154,6 +157,7 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/background-agents` | GET | Scan `projects/` for background agent symlinks |
 | `/api/kill-port` | POST | Kill process on port |
 | `/api/local-file` | GET | Serve local image files (query: `?path=/absolute/path/to/image`) |
+| `/api/file-content` | GET | Read text file content (query: `?path=/absolute/path`; max 2MB) |
 | `/api/open-terminal` | POST | Launch terminal in project directory |
 | `/api/pty` | WS | WebSocket PTY session |
 | `/api/ports` | GET | List listening processes (scans lsof) |

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, forwardRef } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, memo } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { ChevronDown, ChevronRight, Code2, GitCompareArrows } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -52,8 +52,7 @@ interface GroupedFileCardProps {
   diffMode: DiffMode
 }
 
-export const GroupedFileCard = forwardRef<HTMLDivElement, GroupedFileCardProps>(
-  function GroupedFileCard({ file, defaultOpen, isHighlighted, diffMode }, forwardedRef) {
+export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen, isHighlighted, diffMode }: GroupedFileCardProps) {
     const { ref: nearRef, isNear } = useNearViewport()
     const [open, setOpen] = useState(defaultOpen)
     const prevDefaultRef = useRef(defaultOpen)
@@ -65,14 +64,17 @@ export const GroupedFileCard = forwardRef<HTMLDivElement, GroupedFileCardProps>(
       }
     }, [defaultOpen])
 
+    // If region matching failed, force per-edit view regardless of panel setting
+    const effectiveDiffMode = file.forcePerEdit ? "per-edit" : diffMode
+
     const ext = file.filePath.split(".").pop()?.toLowerCase() ?? ""
     const extColor = EXT_COLORS[ext] ?? "text-muted-foreground"
 
-    const oldString = file.netRemoved.join("\n")
-    const newString = file.netAdded.join("\n")
+    const oldString = file.netOriginal
+    const newString = file.netCurrent
     const hasNetDiff = Boolean(oldString || newString)
     const hasPerEditDiff = file.edits.some((e) => Boolean(e.oldString || e.newString))
-    const hasDiff = diffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
+    const hasDiff = effectiveDiffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
 
     const showDiff = open && isNear && hasDiff
     const diffRef = useRef<HTMLDivElement>(null)
@@ -82,21 +84,15 @@ export const GroupedFileCard = forwardRef<HTMLDivElement, GroupedFileCardProps>(
       if (showDiff && diffRef.current) {
         lastDiffHeightRef.current = diffRef.current.offsetHeight
       }
-    }, [showDiff, diffMode])
+    }, [showDiff, effectiveDiffMode])
 
     const turnLabel = file.turnRange[0] === file.turnRange[1]
       ? `T${file.turnRange[0] + 1}`
       : `T${file.turnRange[0] + 1}–T${file.turnRange[1] + 1}`
 
-    const setRef = (el: HTMLDivElement | null) => {
-      ;(nearRef as React.MutableRefObject<HTMLDivElement | null>).current = el
-      if (typeof forwardedRef === "function") forwardedRef(el)
-      else if (forwardedRef) forwardedRef.current = el
-    }
-
     return (
       <div
-        ref={setRef}
+        ref={nearRef}
         data-file-path={file.filePath}
         className={cn(
           "rounded-md border elevation-2 depth-low transition-colors",
@@ -180,15 +176,15 @@ export const GroupedFileCard = forwardRef<HTMLDivElement, GroupedFileCardProps>(
           oldString={oldString}
           newString={newString}
           filePath={file.filePath}
-          diffMode={diffMode}
+          diffMode={effectiveDiffMode}
           edits={file.edits}
+          netStartLine={file.netStartLine}
         />
       </div>
     )
-  }
-)
+})
 
-function DiffContent({
+const DiffContent = memo(function DiffContent({
   showDiff,
   open,
   hasDiff,
@@ -199,6 +195,7 @@ function DiffContent({
   filePath,
   diffMode,
   edits,
+  netStartLine,
 }: {
   showDiff: boolean
   open: boolean
@@ -210,6 +207,7 @@ function DiffContent({
   filePath: string
   diffMode: DiffMode
   edits: IndividualEdit[]
+  netStartLine: number
 }): React.ReactElement | null {
   if (showDiff) {
     return (
@@ -222,6 +220,7 @@ function DiffContent({
             newString={newString}
             filePath={filePath}
             compact={false}
+            startLine={netStartLine}
           />
         )}
       </div>
@@ -238,9 +237,9 @@ function DiffContent({
     )
   }
   return null
-}
+})
 
-function PerEditDiffs({ edits, filePath }: { edits: IndividualEdit[]; filePath: string }) {
+const PerEditDiffs = memo(function PerEditDiffs({ edits, filePath }: { edits: IndividualEdit[]; filePath: string }) {
   const total = edits.length
   return (
     <div className="divide-y divide-border/30">
@@ -267,10 +266,11 @@ function PerEditDiffs({ edits, filePath }: { edits: IndividualEdit[]; filePath: 
               newString={edit.newString}
               filePath={filePath}
               compact={false}
+              startLine={edit.startLine}
             />
           </div>
         )
       })}
     </div>
   )
-}
+})

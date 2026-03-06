@@ -30,6 +30,7 @@ import { registerSlashSuggestionRoutes } from "../server/routes/slash-suggestion
 import { registerConfigBrowserRoutes } from "../server/routes/config-browser"
 import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "../server/routes/session-search"
 import { registerLocalFileRoutes } from "../server/routes/local-file"
+import { registerFileContentRoutes } from "../server/routes/file-content"
 import { registerSearchIndexRoutes } from "../server/routes/search-index-stats"
 import { registerCogpitSearchRoutes } from "../server/routes/cogpit-search"
 import { SearchIndex } from "../server/search-index"
@@ -128,6 +129,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerConfigBrowserRoutes(use)
   registerSessionSearchRoutes(use)
   registerLocalFileRoutes(use)
+  registerFileContentRoutes(use)
   registerSearchIndexRoutes(use)
   registerCogpitSearchRoutes(use)
 

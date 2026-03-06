@@ -1,6 +1,7 @@
-import { useMemo } from "react"
+import { useMemo, useState, useEffect } from "react"
 import type { ParsedSession, ToolCall } from "@/lib/types"
 import { computeNetDiff, type EditOp } from "@/lib/diffUtils"
+import { authFetch } from "@/lib/auth"
 
 export interface FileChange {
   turnIndex: number
@@ -38,22 +39,56 @@ export function useFileChangesData(session: ParsedSession) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- totalToolCallCount is an intentional cache-busting key
   }, [totalToolCallCount, session.turns])
 
+  // Fetch actual file contents from disk for line number resolution
+  const filePaths = useMemo(() => {
+    const paths = new Set<string>()
+    for (const fc of fileChanges) {
+      const fp = getToolCallFilePath(fc.toolCall)
+      if (fp) paths.add(fp)
+    }
+    return [...paths]
+  }, [fileChanges])
+
+  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
+
+  useEffect(() => {
+    if (filePaths.length === 0) return
+    let cancelled = false
+    Promise.all(
+      filePaths.map((p) =>
+        authFetch(`/api/file-content?path=${encodeURIComponent(p)}`)
+          .then((r) => (r.ok ? r.text() : null))
+          .then((text) => (text ? ([p, text] as const) : null))
+          .catch(() => null),
+      ),
+    ).then((results) => {
+      if (cancelled) return
+      const map = new Map<string, string>()
+      for (const r of results) {
+        if (r) map.set(r[0], r[1])
+      }
+      setFileContents(map)
+    })
+    return () => { cancelled = true }
+  }, [filePaths])
+
   // ── Grouped-by-file view with net diffs ─────────────────────────────────
 
   const lastTurnIndex = session.turns.length - 1
 
   /** Group file changes by file path, compute net diff per file. */
   const groupedByFile = useMemo(() => {
-    return buildGroupedFiles(fileChanges, "all")
-  }, [fileChanges])
+    return buildGroupedFiles(fileChanges, "all", fileContents)
+  }, [fileChanges, fileContents])
 
   /** Same but filtered to only the last turn. */
   const groupedLastTurn = useMemo(() => {
-    return buildGroupedFiles(fileChanges, lastTurnIndex)
-  }, [fileChanges, lastTurnIndex])
+    return buildGroupedFiles(fileChanges, lastTurnIndex, fileContents)
+  }, [fileChanges, lastTurnIndex, fileContents])
 
   return {
     fileChanges,
+    fileContents,
     groupedByFile,
     groupedLastTurn,
     lastTurnIndex,
@@ -69,6 +104,8 @@ export interface IndividualEdit {
   toolName: "Edit" | "Write"
   turnIndex: number
   agentId?: string
+  /** 1-based starting line number in the file (parsed from Edit tool result). */
+  startLine: number
 }
 
 export interface GroupedFile {
@@ -79,14 +116,36 @@ export interface GroupedFile {
   turnRange: [number, number]
   /** Which tool types were used: "Edit", "Write", or both. */
   opTypes: ("Edit" | "Write")[]
-  netAdded: string[]
-  netRemoved: string[]
+  /** Reconstructed content before edits (for diffing). */
+  netOriginal: string
+  /** Reconstructed content after edits (for diffing). */
+  netCurrent: string
   addCount: number
   delCount: number
   /** Last sub-agent ID that modified this file (for navigation). */
   subAgentId: string | null
   /** Individual edits in order, for per-edit diff view. */
   edits: IndividualEdit[]
+  /** True when region matching failed — UI should force per-edit view for this file. */
+  forcePerEdit: boolean
+  /** 1-based starting line for the net diff (from first edit's result). */
+  netStartLine: number
+}
+
+/**
+ * Find the 1-based line number of `searchStr` in raw file content.
+ * Returns 1 if not found.
+ */
+function findLineInFile(fileContent: string | undefined, searchStr: string): number {
+  if (!fileContent || !searchStr) return 1
+  const idx = fileContent.indexOf(searchStr)
+  if (idx === -1) return 1
+  // Count newlines before the match to get the 1-based line number
+  let line = 1
+  for (let i = 0; i < idx; i++) {
+    if (fileContent[i] === "\n") line++
+  }
+  return line
 }
 
 /** Extract the file path from an Edit or Write tool call. */
@@ -109,6 +168,7 @@ function toEditOp(tc: ToolCall): EditOp {
 export function buildGroupedFiles(
   changes: FileChange[],
   scope: "all" | number,
+  fileContents?: Map<string, string>,
 ): GroupedFile[] {
   const byFile = new Map<string, FileChange[]>()
   for (const fc of changes) {
@@ -125,36 +185,56 @@ export function buildGroupedFiles(
 
   const result: GroupedFile[] = []
   for (const [filePath, fcs] of byFile) {
-    const ops = fcs.map((fc) => toEditOp(fc.toolCall))
-    const net = computeNetDiff(ops)
-    const turns = fcs.map((fc) => fc.turnIndex)
+    // Single pass: build ops, edits, min/max turn, opTypes, last subAgentId
+    const ops: EditOp[] = []
+    const edits: IndividualEdit[] = []
+    let minTurn = Infinity
+    let maxTurn = -Infinity
+    let hasEdit = false
+    let hasWrite = false
+    let lastSubAgentId: string | undefined
 
-    const opTypes = [...new Set(fcs.map((fc) => fc.toolCall.name as "Edit" | "Write"))]
-    const subAgentFc = fcs.findLast((fc) => !!fc.agentId)
+    const rawContent = fileContents?.get(filePath)
+    for (let i = 0; i < fcs.length; i++) {
+      const fc = fcs[i]
+      const op = toEditOp(fc.toolCall)
+      ops.push(op)
 
-    const edits: IndividualEdit[] = fcs.map((fc, i) => {
-      const op = ops[i]
-      return {
+      if (fc.turnIndex < minTurn) minTurn = fc.turnIndex
+      if (fc.turnIndex > maxTurn) maxTurn = fc.turnIndex
+      if (fc.toolCall.name === "Edit") hasEdit = true
+      else hasWrite = true
+      if (fc.agentId) lastSubAgentId = fc.agentId
+
+      edits.push({
         oldString: op.oldString,
         newString: op.newString,
         toolName: fc.toolCall.name as "Edit" | "Write",
         turnIndex: fc.turnIndex,
         agentId: fc.agentId,
-      }
-    })
+        startLine: fc.toolCall.name === "Write" ? 1 : findLineInFile(rawContent, op.oldString),
+      })
+    }
+
+    const net = computeNetDiff(ops)
+    const opTypes: ("Edit" | "Write")[] = []
+    if (hasEdit) opTypes.push("Edit")
+    if (hasWrite) opTypes.push("Write")
 
     result.push({
       filePath,
       shortPath: filePath.split("/").slice(-3).join("/"),
       editCount: fcs.length,
-      turnRange: [Math.min(...turns), Math.max(...turns)],
+      turnRange: [minTurn, maxTurn],
       opTypes,
-      netAdded: net.added,
-      netRemoved: net.removed,
+      netOriginal: net.originalStr,
+      netCurrent: net.currentStr,
       addCount: net.addCount,
       delCount: net.delCount,
-      subAgentId: subAgentFc?.agentId ?? null,
+      subAgentId: lastSubAgentId ?? null,
       edits,
+      forcePerEdit: net.matchFailed,
+      netStartLine: edits.length > 0 ? edits[0].startLine : 1,
     })
   }
 

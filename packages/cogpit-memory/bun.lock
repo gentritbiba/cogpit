@@ -4,10 +4,10 @@
     "": {
       "name": "cogpit-memory",
       "dependencies": {
-        "@types/better-sqlite3": "^7.6.13",
         "better-sqlite3": "^12.6.2",
       },
       "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
         "bun-types": "latest",
         "esbuild": "^0.27.3",
       },

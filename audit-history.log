@@ -4,6 +4,18 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-03-06 17:32 — Cogpit-Memory CLI Integration & File Content API
+- **File:** `audit-history/audit-20260306T173214Z-8b6d782.md`
+- **Status:** PASS WITH MINOR DOC UPDATES
+- **Changes:** 3 files modified, 1 new route file (untracked)
+- **Key updates:**
+  - Cogpit-search refactored to shell out to CLI (dev: bun src/cli.ts, prod: node dist/cli.js)
+  - electron-builder.yml now unpacks cogpit-memory dist files from ASAR
+  - New /api/file-content GET route for reading text files (2MB limit)
+  - Both routes properly registered in electron/server.ts and server/api-plugin.ts
+- **Risk:** LOW (cogpit-search API contract unchanged, file-content follows patterns)
+- **Doc updates needed:** ARCHITECTURE.md (1 table row for /api/file-content, optional: 1 sentence on CLI execution)
+
 ### 2026-03-06 — Grouped File Changes Panel & Cogpit Search Route
 - **File:** `audit-history/audit-20260306-1619-uncommitted.md`
 - **Status:** DOCUMENTATION UPDATES REQUIRED

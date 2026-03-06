@@ -23,6 +23,7 @@ import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "./routes/session-search"
 import { registerLocalFileRoutes } from "./routes/local-file"
+import { registerFileContentRoutes } from "./routes/file-content"
 import { registerSearchIndexRoutes } from "./routes/search-index-stats"
 import { registerCogpitSearchRoutes } from "./routes/cogpit-search"
 import { SearchIndex } from "./search-index"
@@ -103,6 +104,7 @@ export function sessionApiPlugin(): Plugin {
       registerConfigBrowserRoutes(use)
       registerSessionSearchRoutes(use)
       registerLocalFileRoutes(use)
+      registerFileContentRoutes(use)
       registerSearchIndexRoutes(use)
       registerCogpitSearchRoutes(use)
     },

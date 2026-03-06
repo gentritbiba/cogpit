@@ -24,33 +24,25 @@ export function diffLineCount(oldStr: string, newStr: string): { add: number; de
   if (om === 0) return { add: on, del: 0 }
   if (on === 0) return { add: 0, del: om }
 
-  // LCS on the trimmed middle only
-  const dp: number[][] = Array.from({ length: om + 1 }, () => Array(on + 1).fill(0))
+  // Single-row LCS — O(on) memory instead of O(om * on).
+  // We only need the LCS length, not the alignment, so no backtracking needed.
+  let prev = new Array<number>(on + 1).fill(0)
+  let curr = new Array<number>(on + 1).fill(0)
   for (let i = 1; i <= om; i++) {
+    curr[0] = 0
+    const oldLine = oldLines[prefix + i - 1]
     for (let j = 1; j <= on; j++) {
-      dp[i][j] =
-        oldLines[prefix + i - 1] === newLines[prefix + j - 1]
-          ? dp[i - 1][j - 1] + 1
-          : Math.max(dp[i - 1][j], dp[i][j - 1])
+      if (oldLine === newLines[prefix + j - 1]) {
+        curr[j] = prev[j - 1] + 1
+      } else {
+        curr[j] = prev[j] > curr[j - 1] ? prev[j] : curr[j - 1]
+      }
     }
+    ;[prev, curr] = [curr, prev]
   }
 
-  // Count added/removed by backtracking
-  let add = 0
-  let del = 0
-  let i = om
-  let j = on
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[prefix + i - 1] === newLines[prefix + j - 1]) {
-      i--; j--
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      add++; j--
-    } else {
-      del++; i--
-    }
-  }
-
-  return { add, del }
+  const lcs = prev[on]
+  return { add: on - lcs, del: om - lcs }
 }
 
 // ── Net diff across multiple edits ─────────────────────────────────────────
@@ -63,79 +55,99 @@ export interface EditOp {
 }
 
 export interface NetDiffResult {
-  /** Lines that were net-removed (present in original, absent in final). */
-  removed: string[]
-  /** Lines that were net-added (absent in original, present in final). */
-  added: string[]
+  /** Reconstructed content before edits (for diffing). */
+  originalStr: string
+  /** Reconstructed content after edits (for diffing). */
+  currentStr: string
   addCount: number
   delCount: number
+  /** True when region matching failed (old_string not found in any region). Force per-edit view. */
+  matchFailed: boolean
 }
 
 /**
  * Compute the net diff for a single file across multiple sequential edit operations.
  *
- * Uses multiset-based line tracking: if a line was added by one edit and removed
- * by a later edit, they cancel out and neither appears in the result.
+ * Uses region-based simulation: tracks "original" vs "current" content for each
+ * independently edited region. When a later edit modifies text introduced by an
+ * earlier edit, the regions chain — so the original stays as-is and only the
+ * current content updates. This produces a proper before/after pair that can be
+ * diffed with LCS to show context lines, unchanged regions, and real changes.
  *
- * Write operations reset tracking (they replace the entire file).
+ * Write operations replace all tracked regions (they overwrite the entire file).
  */
 export function computeNetDiff(ops: EditOp[]): NetDiffResult {
-  const netAdded = new Map<string, number>()
-  const netRemoved = new Map<string, number>()
+  // Each region tracks a contiguous chunk of file content we've seen edited.
+  // `original` = what was there before any edits in this sequence touched it.
+  // `current`  = what's there now after applying edits.
+  interface Region {
+    original: string
+    current: string
+  }
 
-  function addToMultiset(set: Map<string, number>, line: string): void {
-    set.set(line, (set.get(line) ?? 0) + 1)
-  }
-  function removeFromMultiset(set: Map<string, number>, line: string): boolean {
-    const count = set.get(line) ?? 0
-    if (count <= 0) return false
-    if (count === 1) set.delete(line)
-    else set.set(line, count - 1)
-    return true
-  }
+  let regions: Region[] = []
+  let matchFailed = false
 
   for (const op of ops) {
     if (op.isWrite) {
-      // Write replaces entire file — reset all tracking
-      netAdded.clear()
-      netRemoved.clear()
-      // All lines of the new content are "added"
-      const lines = op.newString ? op.newString.split("\n") : []
-      for (const line of lines) {
-        addToMultiset(netAdded, line)
-      }
+      // Write replaces entire file — all prior regions are superseded.
+      // The Write content becomes both the "original baseline" and "current".
+      // If subsequent Edits modify it, original stays and current diverges.
+      regions = [{ original: op.newString, current: op.newString }]
       continue
     }
 
-    // Edit: process removals (old_string lines)
-    const oldLines = op.oldString ? op.oldString.split("\n") : []
-    for (const line of oldLines) {
-      // If this line was previously added, they cancel out
-      if (!removeFromMultiset(netAdded, line)) {
-        addToMultiset(netRemoved, line)
+    // Empty old_string = insertion (new content only), always a new region.
+    if (!op.oldString) {
+      regions.push({ original: op.oldString, current: op.newString })
+      continue
+    }
+
+    // Edit: try to find old_string inside an existing region's current content.
+    // If found, this edit is chaining on a previous edit in the same region.
+    let found = false
+    for (const region of regions) {
+      const idx = region.current.indexOf(op.oldString)
+      if (idx !== -1) {
+        region.current =
+          region.current.slice(0, idx) +
+          op.newString +
+          region.current.slice(idx + op.oldString.length)
+        found = true
+        break
       }
     }
 
-    // Edit: process additions (new_string lines)
-    const newLines = op.newString ? op.newString.split("\n") : []
-    for (const line of newLines) {
-      // If this line was previously removed, they cancel out
-      if (!removeFromMultiset(netRemoved, line)) {
-        addToMultiset(netAdded, line)
+    if (!found) {
+      // Check if a prior edit already transformed this content (duplicate/redundant edit).
+      // If old_string exists in a region's original but not its current, it was already handled.
+      const alreadyTransformed = regions.some(
+        (r) => r.original.includes(op.oldString) && !r.current.includes(op.oldString)
+      )
+      if (alreadyTransformed) {
+        // A prior edit already changed this region — possible conflict/drift.
+        // Flag it so the UI can fall back to per-edit view for this file.
+        matchFailed = true
+      } else {
+        // New region being edited for the first time.
+        regions.push({ original: op.oldString, current: op.newString })
       }
     }
   }
 
-  function flattenMultiset(set: Map<string, number>): string[] {
-    const lines: string[] = []
-    for (const [line, count] of set) {
-      for (let i = 0; i < count; i++) lines.push(line)
-    }
-    return lines
+  // Filter out regions with no net change (original === current).
+  const changed = regions.filter((r) => r.original !== r.current)
+
+  if (changed.length === 0) {
+    return { originalStr: "", currentStr: "", addCount: 0, delCount: 0, matchFailed }
   }
 
-  const removed = flattenMultiset(netRemoved)
-  const added = flattenMultiset(netAdded)
+  // Build before/after strings. LCS in EditDiffView will find common lines
+  // (context) and highlight actual additions/removals.
+  const originalStr = changed.map((r) => r.original).join("\n")
+  const currentStr = changed.map((r) => r.current).join("\n")
 
-  return { removed, added, addCount: added.length, delCount: removed.length }
+  const counts = diffLineCount(originalStr, currentStr)
+
+  return { originalStr, currentStr, addCount: counts.add, delCount: counts.del, matchFailed }
 }

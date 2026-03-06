@@ -12,10 +12,13 @@ directories:
   buildResources: build
 
 asar: true
+asarUnpack:
+  - packages/cogpit-memory/dist/**/*
 compression: maximum
 
 files:
   - out/**/*
+  - packages/cogpit-memory/dist/**/*
   - "!out/**/*.map"
   - "!node_modules/**/*.{md,map,ts,d.ts}"
   - "!node_modules/**/{CHANGELOG,README,LICENSE,LICENCE,readme,changelog}*"
