@@ -23,7 +23,7 @@ export function registerClaudeRoutes(use: UseFn) {
     })
     req.on("end", () => {
       try {
-        const { sessionId, message, images, cwd, permissions, model } = JSON.parse(body)
+        const { sessionId, message, images, cwd, permissions, model, effort } = JSON.parse(body)
 
         if (!sessionId || (!message && (!images || images.length === 0))) {
           res.statusCode = 400
@@ -36,6 +36,7 @@ export function registerClaudeRoutes(use: UseFn) {
         const permArgs = buildPermArgs(permissions)
 
         const modelArgs = model ? ["--model", model] : []
+        const effortArgs = effort ? ["--effort", effort] : []
 
         // Build the stream-json user message (works for text and images)
         const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -109,6 +110,7 @@ export function registerClaudeRoutes(use: UseFn) {
             "--resume", sessionId,
             ...permArgs,
             ...modelArgs,
+            ...effortArgs,
           ],
           {
             cwd: cwd || homedir(),
@@ -124,6 +126,7 @@ export function registerClaudeRoutes(use: UseFn) {
           cwd: cwd || homedir(),
           permArgs,
           modelArgs,
+          effortArgs,
           jsonlPath: null,
           pendingTaskCalls: new Map(),
           subagentWatcher: null,

@@ -1,4 +1,4 @@
-import type { Turn, TurnContentBlock, ToolCall } from "@/lib/types"
+import type { Turn, TurnContentBlock, ToolCall, ThinkingBlock } from "@/lib/types"
 
 /** Check whether any part of a turn matches a search query. */
 export function matchesSearch(turn: Turn, query: string): boolean {
@@ -44,4 +44,44 @@ export function collectToolCalls(blocks: TurnContentBlock[], startIndex: number)
 /** Human-readable label for a count of tool calls. */
 export function toolCallCountLabel(count: number): string {
   return `${count} tool call${count !== 1 ? "s" : ""}`
+}
+
+// ── Activity grouping (thinking + tool_calls) ──────────────────────────────
+
+export type ActivityItem =
+  | { kind: "thinking"; blocks: ThinkingBlock[] }
+  | { kind: "tool_calls"; toolCalls: ToolCall[] }
+
+/** Collect consecutive thinking + tool_calls blocks starting at `startIndex`. */
+export function collectActivity(
+  blocks: TurnContentBlock[],
+  startIndex: number,
+): { items: ActivityItem[]; toolCalls: ToolCall[]; thinkingCount: number; nextIndex: number } {
+  const items: ActivityItem[] = []
+  const allToolCalls: ToolCall[] = []
+  let thinkingCount = 0
+  let j = startIndex
+  while (j < blocks.length) {
+    const block = blocks[j]
+    if (block.kind === "thinking") {
+      items.push({ kind: "thinking", blocks: block.blocks })
+      thinkingCount += block.blocks.length
+      j++
+    } else if (block.kind === "tool_calls") {
+      items.push({ kind: "tool_calls", toolCalls: block.toolCalls })
+      allToolCalls.push(...block.toolCalls)
+      j++
+    } else {
+      break
+    }
+  }
+  return { items, toolCalls: allToolCalls, thinkingCount, nextIndex: j }
+}
+
+/** Human-readable label for a mixed activity group. */
+export function activityCountLabel(toolCallCount: number, thinkingCount: number): string {
+  if (thinkingCount === 0) return toolCallCountLabel(toolCallCount)
+  if (toolCallCount === 0) return `${thinkingCount} thinking block${thinkingCount !== 1 ? "s" : ""}`
+  const total = toolCallCount + thinkingCount
+  return `${total} action${total !== 1 ? "s" : ""}`
 }

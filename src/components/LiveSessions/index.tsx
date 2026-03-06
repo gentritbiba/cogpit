@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
+import { shortPath, dirNameToPath } from "@/lib/format"
 import { SessionRow } from "./SessionRow"
 import { ProcessList } from "./ProcessList"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { PendingSessionInfo } from "@/components/session-browser/types"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -18,6 +20,10 @@ interface LiveSessionsProps {
   onSelectSession: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (dirName: string, fileName: string) => void
+  /** Info about a session being created — shows a placeholder row */
+  pendingSession?: PendingSessionInfo | null
+  /** Ref to expose an imperative refresh callback */
+  refreshRef?: React.MutableRefObject<(() => void) | null>
 }
 
 /** Partition processes into a session-keyed map and an unmatched list. */
@@ -43,7 +49,7 @@ function partitionProcesses(processes: RunningProcess[]): {
   return { procBySession, unmatchedProcs }
 }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, pendingSession, refreshRef }: LiveSessionsProps) {
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
@@ -61,6 +67,17 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const abortRef = useRef<AbortController | null>(null)
   const debouncedSearchRef = useRef(debouncedSearch)
   debouncedSearchRef.current = debouncedSearch
+
+  // Expose imperative refresh so parent can force a data fetch (e.g. after session finalization)
+  const fetchDataRef = useRef<typeof fetchData | null>(null)
+  useEffect(() => {
+    if (refreshRef) {
+      refreshRef.current = () => fetchDataRef.current?.(debouncedSearchRef.current || undefined)
+    }
+    return () => {
+      if (refreshRef) refreshRef.current = null
+    }
+  }, [refreshRef])
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
@@ -102,6 +119,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       }
     }
   }, [])
+
+  // Keep fetchDataRef in sync so the imperative refresh always calls the latest version
+  fetchDataRef.current = fetchData
 
   useEffect(() => {
     fetchData(debouncedSearch || undefined)
@@ -285,6 +305,15 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             </div>
           )}
 
+          {/* Pending session placeholder — shown while a new session is being created */}
+          {pendingSession && (
+            <PendingSessionRow
+              dirName={pendingSession.dirName}
+              cwd={pendingSession.cwd}
+              firstMessage={pendingSession.firstMessage}
+            />
+          )}
+
           {sessions.map((s) => (
             <SessionRow
               key={`${s.dirName}/${s.fileName}`}
@@ -311,3 +340,41 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     </div>
   )
 })
+
+// ── Pending session placeholder ─────────────────────────────────────────
+
+function PendingSessionRow({ dirName, cwd, firstMessage }: {
+  dirName: string
+  cwd?: string | null
+  firstMessage?: string
+}) {
+  return (
+    <div
+      className="group relative w-full flex flex-col gap-1 rounded-lg px-2.5 py-2.5 text-left bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
+    >
+      {/* Top row: spinner + message */}
+      <div className="flex items-center gap-2">
+        <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+          <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-blue-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+        </span>
+        <span className="text-xs font-medium truncate flex-1 text-foreground">
+          {firstMessage || "New session"}
+        </span>
+        <Loader2 className="size-3 animate-spin text-blue-400 shrink-0" />
+      </div>
+
+      {/* Project path */}
+      <div className="ml-5.5 text-[10px] text-blue-400/70">
+        {shortPath(cwd ?? dirNameToPath(dirName), 2)}
+      </div>
+
+      {/* Status */}
+      <div className="ml-5.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-0.5 font-medium text-blue-400">
+          Creating session…
+        </span>
+      </div>
+    </div>
+  )
+}

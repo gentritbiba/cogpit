@@ -13,6 +13,7 @@ interface UsePtyChatOpts {
   permissions?: PermissionsConfig
   onPermissionsApplied?: () => void
   model?: string
+  effort?: string
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
   onCreateSession?: (
     message: string,
@@ -20,7 +21,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -45,10 +46,23 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     setPendingMessages([])
   }, [])
 
-  // When session changes, abort any in-flight request and reset state
+  // When session changes, abort any in-flight request and reset state.
+  // During session creation, the sessionId changes from null → UUID when
+  // FINALIZE_SESSION fires. In that case, preserve pendingMessages so
+  // useChatScroll can consume them smoothly as turns render.
   useEffect(() => {
     if (sessionIdRef.current !== sessionId) {
-      resetState()
+      if (creatingRef.current) {
+        // Session just transitioned from pending → created.
+        // Keep pendingMessages intact for smooth handoff; just update tracking.
+        creatingRef.current = false
+        activeAbortRef.current?.abort()
+        activeAbortRef.current = null
+        setStatus("idle")
+        setError(undefined)
+      } else {
+        resetState()
+      }
       sessionIdRef.current = sessionId
     }
   }, [sessionId, resetState])
@@ -115,6 +129,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
             cwd: cwd || undefined,
             permissions: permsConfig,
             model: model || undefined,
+            effort: effort || undefined,
           }),
           signal: abortController.signal,
         })
@@ -143,7 +158,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, cwd, permissions, onPermissionsApplied, model, onCreateSession]
+    [sessionId, cwd, permissions, onPermissionsApplied, model, effort, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.

@@ -31,6 +31,13 @@ export interface SessionInfo {
 
 export type View = "projects" | "sessions" | "detail"
 
+/** Info about a session that is currently being created (pending first message response) */
+export interface PendingSessionInfo {
+  dirName: string
+  cwd?: string | null
+  firstMessage?: string
+}
+
 export interface SessionBrowserProps {
   /** ID of the currently loaded session (drives sidebar view switching) */
   sessionId: string | null
@@ -47,6 +54,8 @@ export interface SessionBrowserProps {
   onNewSession?: (dirName: string, cwd?: string) => void
   /** True while a new session is being created */
   creatingSession?: boolean
+  /** Info about the session currently being created */
+  pendingSession?: PendingSessionInfo | null
   /** When true, renders full-width mobile layout */
   isMobile?: boolean
   /** When true, only show the Teams tab (used for mobile teams tab) */
@@ -57,4 +66,6 @@ export interface SessionBrowserProps {
   onDeleteSession?: (dirName: string, fileName: string) => void
   /** Called before fetching a new session to free connections held by the current session */
   onBeforeSessionSwitch?: () => void
+  /** Ref callback to imperatively trigger a refresh of the live sessions list */
+  liveSessionsRefreshRef?: React.MutableRefObject<(() => void) | null>
 }

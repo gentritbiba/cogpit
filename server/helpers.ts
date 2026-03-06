@@ -223,6 +223,7 @@ export interface PersistentSession {
   cwd: string
   permArgs: string[]
   modelArgs: string[]
+  effortArgs: string[]
   /** Path to the session's JSONL file */
   jsonlPath: string | null
   /** Active Task tool_use IDs -> prompt text (for matching subagent files) */

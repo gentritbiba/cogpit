@@ -181,9 +181,9 @@ export function SessionRow({
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
-  if (isActive) return "bg-blue-500/10 ring-1 ring-blue-500/50 shadow-[0_0_16px_-3px_rgba(59,130,246,0.25)]"
-  if (isNewlyCompleted) return "bg-green-500/8 ring-1 ring-green-500/30 border border-green-500/20"
-  return "elevation-1 border border-border/40 hover:bg-elevation-2"
+  if (isActive) return "bg-blue-500/10 ring-1 ring-blue-500/30 shadow-[0_0_16px_-3px_rgba(59,130,246,0.15)]"
+  if (isNewlyCompleted) return "bg-green-500/8 ring-1 ring-green-500/20"
+  return "elevation-1 hover:bg-elevation-2"
 }
 
 function isIdleStatus(status?: SessionStatus): boolean {

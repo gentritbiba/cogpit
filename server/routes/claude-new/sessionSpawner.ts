@@ -217,7 +217,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model, worktreeName } = JSON.parse(body)
+        const { dirName, message, images, permissions, model, effort, worktreeName } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           res.statusCode = 400
@@ -236,6 +236,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
         const permArgs = buildPermArgs(permissions)
 
         const modelArgs = model ? ["--model", model] : []
+        const effortArgs = effort ? ["--effort", effort] : []
         const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
@@ -255,6 +256,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
             "--session-id", sessionId,
             ...permArgs,
             ...modelArgs,
+            ...effortArgs,
             ...worktreeArgs,
           ],
           {
@@ -271,6 +273,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
           cwd: projectPath,
           permArgs,
           modelArgs,
+          effortArgs,
           jsonlPath: null,
           pendingTaskCalls: new Map(),
           subagentWatcher: null,

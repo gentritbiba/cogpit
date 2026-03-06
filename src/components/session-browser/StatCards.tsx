@@ -28,10 +28,10 @@ export function SidebarStatCard({
   const card = (
     <div
       className={cn(
-        "flex flex-col gap-0.5 rounded-md border px-2 py-1.5",
+        "flex flex-col gap-0.5 rounded-md px-2 py-1.5",
         isError
-          ? "border-red-900/50 bg-red-950/30 depth-low"
-          : "border-border/40 elevation-2 depth-low"
+          ? "bg-red-950/30 depth-low"
+          : "elevation-2 depth-low"
       )}
     >
       <div className="flex items-center gap-1 text-muted-foreground">

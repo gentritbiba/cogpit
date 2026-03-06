@@ -5,6 +5,7 @@ import {
   ChevronsUpDown,
   Cpu,
   RotateCcw,
+  Gauge,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { cn, MODEL_OPTIONS } from "@/lib/utils"
+import { cn, MODEL_OPTIONS, EFFORT_OPTIONS } from "@/lib/utils"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { InputOutputChart } from "@/components/stats/InputOutputChart"
 import { ActivityHeatmap } from "@/components/stats/ActivityHeatmap"
@@ -41,7 +42,10 @@ interface StatsPanelProps {
   /** Model selector */
   selectedModel?: string
   onModelChange?: (model: string) => void
-  /** Whether model or permissions have pending changes requiring restart */
+  /** Effort selector */
+  selectedEffort?: string
+  onEffortChange?: (effort: string) => void
+  /** Whether model, effort, or permissions have pending changes requiring restart */
   hasSettingsChanges?: boolean
   /** Called when user confirms restarting the session to apply settings */
   onApplySettings?: () => Promise<void>
@@ -137,6 +141,45 @@ function ModelSelector({ selectedModel, onModelChange }: ModelSelectorProps): JS
   )
 }
 
+// ── Effort Selector ───────────────────────────────────────────────────────
+
+interface EffortSelectorProps {
+  selectedEffort?: string
+  onEffortChange: (effort: string) => void
+}
+
+function EffortSelector({ selectedEffort, onEffortChange }: EffortSelectorProps): JSX.Element {
+  return (
+    <div className="rounded-lg border border-border elevation-2 depth-low p-3">
+      <section>
+        <SectionHeading>
+          <Gauge className="size-3" />
+          Thinking Effort
+        </SectionHeading>
+        <div className="grid grid-cols-2 gap-1">
+          {EFFORT_OPTIONS.map((opt) => {
+            const isSelected = (selectedEffort || "") === opt.value
+            return (
+              <button
+                key={opt.value}
+                onClick={() => onEffortChange(opt.value)}
+                className={cn(
+                  "rounded-md border px-2 py-1.5 text-[10px] font-medium transition-colors",
+                  isSelected
+                    ? "border-orange-500 text-orange-400 bg-orange-500/10"
+                    : "border-border text-muted-foreground hover:border-border hover:text-foreground elevation-1"
+                )}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 // ── Restart Dialog ─────────────────────────────────────────────────────────
 
 interface RestartDialogProps {
@@ -194,6 +237,8 @@ export const StatsPanel = memo(function StatsPanel({
   permissionsPanel,
   selectedModel,
   onModelChange,
+  selectedEffort,
+  onEffortChange,
   hasSettingsChanges,
   onApplySettings,
   onLoadSession,
@@ -238,6 +283,10 @@ export const StatsPanel = memo(function StatsPanel({
 
         {onModelChange && (
           <ModelSelector selectedModel={selectedModel} onModelChange={onModelChange} />
+        )}
+
+        {onEffortChange && (
+          <EffortSelector selectedEffort={selectedEffort} onEffortChange={onEffortChange} />
         )}
 
         {hasSettingsChanges && onApplySettings && (

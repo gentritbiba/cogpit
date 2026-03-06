@@ -199,18 +199,18 @@ export const DesktopHeader = memo(function DesktopHeader({
             iconClassName={showFileChanges ? "text-amber-400" : undefined}
           />
         )}
-        {session && (
-          <HeaderIconButton
-            icon={showStats ? PanelRightClose : BarChart3}
-            label={showStats ? "Hide Stats" : "Show Stats"}
-            onClick={onToggleStats}
-          />
-        )}
         <HeaderIconButton
           icon={showSidebar ? PanelLeftClose : ChevronRight}
           label={showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}
           onClick={onToggleSidebar}
         />
+        {session && (
+          <HeaderIconButton
+            icon={showStats ? PanelRightClose : BarChart3}
+            label={showStats ? "Hide Stats (⌘⇧B)" : "Show Stats (⌘⇧B)"}
+            onClick={onToggleStats}
+          />
+        )}
       </div>
     </header>
   )

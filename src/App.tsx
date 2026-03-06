@@ -53,6 +53,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable"
+import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 
@@ -195,9 +196,14 @@ export default function App() {
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
 
+  // Thinking effort level
+  const [selectedEffort, setSelectedEffort] = useState("high")
+
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
   const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
+  const liveSessionsRefreshRef = useRef<(() => void) | null>(null)
+  const [pendingFirstMessage, setPendingFirstMessage] = useState<string | null>(null)
   const {
     creatingSession,
     createError,
@@ -215,9 +221,35 @@ export default function App() {
     isMobile,
     onSessionFinalized: (parsed) => {
       sessionFinalizedRef.current?.(parsed)
+      // Force Live & Recent to refresh so the new session appears.
+      // Two refreshes: one quick to pick up the session early, one later
+      // in case the active-sessions API hadn't indexed it yet.
+      setTimeout(() => liveSessionsRefreshRef.current?.(), 300)
+      setTimeout(() => liveSessionsRefreshRef.current?.(), 2000)
+    },
+    onCreateStarted: (message) => {
+      setPendingFirstMessage(message)
     },
     model: selectedModel,
+    effort: selectedEffort,
   })
+
+  // Build the pending session info for the Live & Recent placeholder
+  const pendingSessionInfo = useMemo(() => {
+    if (!creatingSession || !state.pendingDirName) return null
+    return {
+      dirName: state.pendingDirName,
+      cwd: state.pendingCwd,
+      firstMessage: pendingFirstMessage ?? undefined,
+    }
+  }, [creatingSession, state.pendingDirName, state.pendingCwd, pendingFirstMessage])
+
+  // Clear pending first message when we leave the pending state
+  useEffect(() => {
+    if (!state.pendingDirName) {
+      setPendingFirstMessage(null)
+    }
+  }, [state.pendingDirName])
 
   // Claude chat
   const claudeChat = usePtyChat({
@@ -227,6 +259,7 @@ export default function App() {
     permissions: perms.config,
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
+    effort: selectedEffort,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -262,7 +295,7 @@ export default function App() {
   })
 
   // Wire up the session finalized ref now that scroll is available
-  sessionFinalizedRef.current = () => {
+  sessionFinalizedRef.current = (parsed) => {
     // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
     scroll.resetTurnCount(0)
     scroll.scrollToBottomInstant()
@@ -316,6 +349,8 @@ export default function App() {
     hasPermsPendingChanges: perms.hasPendingChanges,
     selectedModel,
     setSelectedModel,
+    selectedEffort,
+    setSelectedEffort,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
   })
@@ -343,6 +378,7 @@ export default function App() {
     chatInputRef,
     dispatch,
     onToggleSidebar: panels.handleToggleSidebar,
+    onToggleRightSidebar: panels.handleToggleStats,
     onOpenProjectSwitcher: panels.handleOpenProjectSwitcher,
     onOpenThemeSelector: panels.handleToggleThemeSelector,
     onOpenTerminal: handleOpenTerminal,
@@ -626,9 +662,11 @@ export default function App() {
               onSelectTeam={actions.handleSelectTeam}
               onNewSession={handleNewSession}
               creatingSession={creatingSession}
+              pendingSession={pendingSessionInfo}
               onDuplicateSession={handlers.handleDuplicateSessionByPath}
               onDeleteSession={handlers.handleDeleteSession}
               onBeforeSessionSwitch={handlePreSessionSwitch}
+              liveSessionsRefreshRef={liveSessionsRefreshRef}
               isMobile
             />
           )}
@@ -701,6 +739,8 @@ export default function App() {
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              selectedEffort={selectedEffort}
+              onEffortChange={setSelectedEffort}
               hasSettingsChanges={handlers.hasSettingsChanges}
               onApplySettings={handlers.handleApplySettings}
               onLoadSession={handlers.handleLoadSessionScrollAware}
@@ -713,6 +753,8 @@ export default function App() {
               permissionsPanel={permissionsPanelNode}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              selectedEffort={selectedEffort}
+              onEffortChange={setSelectedEffort}
               worktreeEnabled={worktreeEnabled}
               onWorktreeEnabledChange={setWorktreeEnabled}
               worktreeName={newSessionWorktreeName}
@@ -794,8 +836,12 @@ export default function App() {
         onOpenSettings={config.openConfigDialog}
       />
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {panels.showSidebar && state.mainView !== "config" && (
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
+        <HoverRevealPanel
+          side="left"
+          visible={panels.showSidebar && state.mainView !== "config"}
+          enabled={state.mainView !== "config"}
+        >
           <SessionBrowser
             sessionId={state.session?.sessionId ?? null}
             activeSessionKey={activeSessionKey}
@@ -805,11 +851,13 @@ export default function App() {
             onSelectTeam={actions.handleSelectTeam}
             onNewSession={handleNewSession}
             creatingSession={creatingSession}
+            pendingSession={pendingSessionInfo}
             onDuplicateSession={handlers.handleDuplicateSessionByPath}
             onDeleteSession={handlers.handleDeleteSession}
             onBeforeSessionSwitch={handlePreSessionSwitch}
+            liveSessionsRefreshRef={liveSessionsRefreshRef}
           />
-        )}
+        </HoverRevealPanel>
 
         <main className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
           {state.mainView === "config" ? (
@@ -919,6 +967,8 @@ export default function App() {
                 permissionsPanel={permissionsPanelNode}
                 selectedModel={selectedModel}
                 onModelChange={setSelectedModel}
+                selectedEffort={selectedEffort}
+                onEffortChange={setSelectedEffort}
                 worktreeEnabled={worktreeEnabled}
                 onWorktreeEnabledChange={setWorktreeEnabled}
                 worktreeName={newSessionWorktreeName}
@@ -938,7 +988,11 @@ export default function App() {
           )}
         </main>
 
-        {panels.showStats && state.session && state.mainView !== "teams" && state.mainView !== "config" && (
+        <HoverRevealPanel
+          side="right"
+          visible={panels.showStats && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
+          enabled={!!state.session && state.mainView !== "teams" && state.mainView !== "config"}
+        >
           <StatsPanel
             onJumpToTurn={actions.handleJumpToTurn}
             onToggleServer={serverPanel.handleToggleServer}
@@ -947,12 +1001,14 @@ export default function App() {
             permissionsPanel={permissionsPanelNode}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
+            selectedEffort={selectedEffort}
+            onEffortChange={setSelectedEffort}
             hasSettingsChanges={handlers.hasSettingsChanges}
             onApplySettings={handlers.handleApplySettings}
             onLoadSession={handlers.handleLoadSessionScrollAware}
             backgroundAgents={backgroundAgents}
           />
-        )}
+        </HoverRevealPanel>
 
       </div>
 

@@ -2,20 +2,30 @@ import { useState, useEffect, useRef, useMemo, memo } from "react"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ToolCallCard, getToolBadgeStyle } from "./ToolCallCard"
-import { toolCallCountLabel } from "@/lib/timelineHelpers"
-import type { ToolCall } from "@/lib/types"
+import { ThinkingBlock } from "./ThinkingBlock"
+import { toolCallCountLabel, activityCountLabel } from "@/lib/timelineHelpers"
+import type { ToolCall, ThinkingBlock as ThinkingBlockType } from "@/lib/types"
+import type { ActivityItem } from "@/lib/timelineHelpers"
 import { cn } from "@/lib/utils"
+
+const THINKING_BADGE_STYLE = "border-violet-700/50 text-violet-400"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls,
   expandAll,
   activeToolCallId,
   isAgentActive = false,
+  activityItems,
+  thinkingCount = 0,
 }: {
   toolCalls: ToolCall[]
   expandAll: boolean
   activeToolCallId: string | null
   isAgentActive?: boolean
+  /** When provided, renders items in order (thinking + tool calls interleaved). */
+  activityItems?: ActivityItem[]
+  /** Number of thinking blocks in the group (for label). */
+  thinkingCount?: number
 }) {
   const [manualOpen, setManualOpen] = useState(false)
   const targetRef = useRef<HTMLDivElement | null>(null)
@@ -59,7 +69,9 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     return Object.entries(counts).sort((a, b) => b[1] - a[1])
   }, [toolCalls])
 
-  const label = toolCallCountLabel(toolCalls.length)
+  const label = thinkingCount > 0
+    ? activityCountLabel(toolCalls.length, thinkingCount)
+    : toolCallCountLabel(toolCalls.length)
 
   if (isOpen) {
     return (
@@ -73,21 +85,46 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
             <span>{label}</span>
           </button>
         )}
-        {toolCalls.map((tc, i) => {
-          const isLastWithoutResult = isAgentActive && i === toolCalls.length - 1 && tc.result === null
-          return (
-            <div
-              key={tc.id}
-              ref={tc.id === activeToolCallId ? targetRef : undefined}
-              className={cn(
-                tc.id === activeToolCallId &&
-                  "ring-1 ring-blue-500/50 rounded-md"
-              )}
-            >
-              <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} />
-            </div>
-          )
-        })}
+        {activityItems ? (
+          activityItems.map((item, idx) => {
+            if (item.kind === "thinking") {
+              return (
+                <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll={expandAll} />
+              )
+            }
+            return item.toolCalls.map((tc, ti) => {
+              const isLastWithoutResult = isAgentActive && idx === activityItems.length - 1 && ti === item.toolCalls.length - 1 && tc.result === null
+              return (
+                <div
+                  key={tc.id}
+                  ref={tc.id === activeToolCallId ? targetRef : undefined}
+                  className={cn(
+                    tc.id === activeToolCallId &&
+                      "ring-1 ring-blue-500/50 rounded-md"
+                  )}
+                >
+                  <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} />
+                </div>
+              )
+            })
+          })
+        ) : (
+          toolCalls.map((tc, i) => {
+            const isLastWithoutResult = isAgentActive && i === toolCalls.length - 1 && tc.result === null
+            return (
+              <div
+                key={tc.id}
+                ref={tc.id === activeToolCallId ? targetRef : undefined}
+                className={cn(
+                  tc.id === activeToolCallId &&
+                    "ring-1 ring-blue-500/50 rounded-md"
+                )}
+              >
+                <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} />
+              </div>
+            )
+          })
+        )}
       </div>
     )
   }
@@ -102,6 +139,14 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         {label}
       </span>
       <div className="flex items-center gap-1 flex-wrap">
+        {thinkingCount > 0 && (
+          <Badge
+            variant="outline"
+            className={cn("text-[10px] px-1.5 py-0 h-4 font-mono", THINKING_BADGE_STYLE)}
+          >
+            Thinking{thinkingCount > 1 ? ` ×${thinkingCount}` : ""}
+          </Badge>
+        )}
         {toolCounts.map(([name, count]) => (
           <Badge
             key={name}

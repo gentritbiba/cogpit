@@ -11,6 +11,7 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
     chatInputRef: { current: null } as RefObject<{ focus: () => void; toggleVoice: () => void } | null>,
     dispatch: vi.fn() as Dispatch<SessionAction>,
     onToggleSidebar: vi.fn(),
+    onToggleRightSidebar: vi.fn(),
     onOpenProjectSwitcher: vi.fn(),
     onOpenThemeSelector: vi.fn(),
     onOpenTerminal: vi.fn(),
@@ -95,6 +96,25 @@ describe("useKeyboardShortcuts", () => {
 
       fireKey("b", { metaKey: true })
       expect(opts.onToggleSidebar).toHaveBeenCalled()
+    })
+  })
+
+  describe("Cmd+Shift+B - toggle right sidebar", () => {
+    it("calls onToggleRightSidebar on Cmd+Shift+B", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("B", { metaKey: true, shiftKey: true })
+      expect(opts.onToggleRightSidebar).toHaveBeenCalled()
+      expect(opts.onToggleSidebar).not.toHaveBeenCalled()
+    })
+
+    it("works with ctrlKey", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("B", { ctrlKey: true, shiftKey: true })
+      expect(opts.onToggleRightSidebar).toHaveBeenCalled()
     })
   })
 

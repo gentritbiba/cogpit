@@ -192,7 +192,7 @@ describe("useNewSession", () => {
     expect(result.current.createError).toBe("Unknown error")
   })
 
-  it("createAndSend sets error when content fetch never returns content", async () => {
+  it("createAndSend finalizes with minimal session when content fetch never returns content", async () => {
     vi.useFakeTimers()
     try {
       const { result } = renderHook(() => useNewSession(defaultOpts))
@@ -234,7 +234,16 @@ describe("useNewSession", () => {
       }
       await promise
 
-      expect(result.current.createError).toBe("Failed to load new session — no content available")
+      // Should finalize with a minimal session instead of erroring,
+      // so the user transitions to ChatArea and SSE picks up real content
+      expect(result.current.createError).toBeNull()
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "FINALIZE_SESSION",
+          session: expect.objectContaining({ sessionId: "sid", turns: [] }),
+        })
+      )
+      expect(onSessionFinalized).toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }

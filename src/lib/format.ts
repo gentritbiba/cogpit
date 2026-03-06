@@ -1,4 +1,4 @@
-import type { RawMessage } from "./types"
+import type { RawMessage, Turn } from "./types"
 
 export { calculateTurnCost, formatCost, computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./token-costs"
 
@@ -56,6 +56,28 @@ export function formatRelativeTime(iso: string): string {
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+/**
+ * Get the duration of a turn in ms.
+ * Prefers `turn.durationMs` (set by Claude Code's turn_duration system message).
+ * Falls back to computing the diff between the turn's first and last timestamps.
+ */
+export function getTurnDuration(turn: Turn): number | null {
+  if (turn.durationMs !== null) return turn.durationMs
+  if (!turn.timestamp) return null
+
+  let lastTs = ""
+  for (const tc of turn.toolCalls) {
+    if (tc.timestamp && tc.timestamp > lastTs) lastTs = tc.timestamp
+  }
+  for (const block of turn.contentBlocks) {
+    if (block.timestamp && block.timestamp > lastTs) lastTs = block.timestamp
+  }
+  if (!lastTs) return null
+
+  const diff = new Date(lastTs).getTime() - new Date(turn.timestamp).getTime()
+  return diff > 0 ? diff : null
 }
 
 export function truncate(s: string, max: number): string {

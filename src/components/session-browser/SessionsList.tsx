@@ -104,7 +104,7 @@ function SessionCard({
     <button
       onClick={onSelect}
       className={cn(
-        "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
+        "group w-full flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low hover:bg-elevation-3 card-hover",
         isMobile ? "py-3.5" : "py-2.5"
       )}
     >
@@ -211,7 +211,7 @@ export const SessionsList = memo(function SessionsList({
           <button
             onClick={onLoadMore}
             disabled={isLoading}
-            className="mx-2 mt-1 mb-1 rounded-md border border-border/40 elevation-2 depth-low px-3 py-2 text-xs text-muted-foreground hover:bg-elevation-3 hover:text-foreground transition-colors disabled:opacity-50"
+            className="mx-2 mt-1 mb-1 rounded-md elevation-2 depth-low px-3 py-2 text-xs text-muted-foreground hover:bg-elevation-3 hover:text-foreground transition-colors disabled:opacity-50"
           >
             {isLoading ? "Loading..." : "Load more sessions"}
           </button>

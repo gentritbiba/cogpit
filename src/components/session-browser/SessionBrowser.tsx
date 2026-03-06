@@ -3,7 +3,7 @@ import { Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveSessions } from "@/components/LiveSessions"
 import { TeamsList } from "@/components/TeamsList"
-import type { SessionBrowserProps } from "./types"
+import type { SessionBrowserProps, PendingSessionInfo } from "./types"
 import { BrowseTab } from "./BrowseTab"
 import { useSessionBrowser } from "./useSessionBrowser"
 
@@ -70,6 +70,8 @@ export const SessionBrowser = memo(function SessionBrowser({
   onDuplicateSession,
   onDeleteSession,
   onBeforeSessionSwitch,
+  pendingSession,
+  liveSessionsRefreshRef,
 }: SessionBrowserProps): React.ReactElement {
   const browser = useSessionBrowser({
     sessionId,
@@ -116,6 +118,8 @@ export const SessionBrowser = memo(function SessionBrowser({
           onSelectSession={browser.loadLiveSession}
           onDuplicateSession={onDuplicateSession}
           onDeleteSession={onDeleteSession}
+          pendingSession={pendingSession}
+          refreshRef={liveSessionsRefreshRef}
         />
       </div>
 

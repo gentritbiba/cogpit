@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
+import { formatDuration, getTurnDuration } from "@/lib/format"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { SessionStatus } from "@/lib/sessionStatus"
 
@@ -204,33 +205,80 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     return clearTimers
   }, [isCompleted, clearTimers])
 
-  if (!agentStatus || agentStatus.status === "idle" || fadePhase === "hidden") return null
+  const isActive = !isCompleted
+  const lastTurn = session?.turns[session.turns.length - 1] ?? null
 
-  const label = getStatusLabel(agentStatus.status, agentStatus.toolName)
-  if (!label) return null
+  // Compute turn duration for "Done" display
+  // NOTE: This useMemo must be called before early returns to satisfy Rules of Hooks.
+  const durationLabel = useMemo(() => {
+    if (!isCompleted || !lastTurn) return null
+    const ms = getTurnDuration(lastTurn)
+    return ms !== null ? formatDuration(ms) : null
+  }, [isCompleted, lastTurn])
+
+  const showStatus = agentStatus && agentStatus.status !== "idle" && fadePhase !== "hidden"
+  const label = showStatus ? getStatusLabel(agentStatus.status, agentStatus.toolName) : null
+
+  // Show duration standalone after status fades, hide only when a new turn starts
+  if (!label && !durationLabel) return null
 
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2.5 py-3 px-4 transition-opacity",
-        fadePhase === "fading" ? "opacity-0" : "opacity-100",
+    <div className="flex items-center gap-2.5 py-3 px-4">
+      {label && (
+        <div
+          className={cn(
+            "flex items-center gap-2.5 transition-opacity",
+            fadePhase === "fading" ? "opacity-0" : "opacity-100",
+          )}
+          style={{ transitionDuration: `${FADE_DURATION}ms` }}
+        >
+          <StatusIcon status={agentStatus.status} />
+          <span
+            className={cn(
+              "text-xs font-medium",
+              isCompleted ? "text-green-400" : "text-muted-foreground",
+            )}
+          >
+            {label}
+          </span>
+          {isActive && lastTurn?.timestamp && (
+            <LiveElapsed startTimestamp={lastTurn.timestamp} />
+          )}
+          {(agentStatus.pendingQueue ?? 0) > 0 && (
+            <span className="text-[10px] text-muted-foreground/60 ml-1">
+              +{agentStatus.pendingQueue} queued
+            </span>
+          )}
+        </div>
       )}
-      style={{ transitionDuration: `${FADE_DURATION}ms` }}
-    >
-      <StatusIcon status={agentStatus.status} />
-      <span
-        className={cn(
-          "text-xs font-medium",
-          isCompleted ? "text-green-400" : "text-muted-foreground",
-        )}
-      >
-        {label}
-      </span>
-      {(agentStatus.pendingQueue ?? 0) > 0 && (
-        <span className="text-[10px] text-muted-foreground/60 ml-1">
-          +{agentStatus.pendingQueue} queued
+      {durationLabel && (
+        <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+          {label ? "in " : ""}{durationLabel}
         </span>
       )}
     </div>
   )
 })
+
+// ── Live elapsed timer ──────────────────────────────────────────────────────
+
+function LiveElapsed({ startTimestamp }: { startTimestamp: string }) {
+  const startMs = useRef(new Date(startTimestamp).getTime())
+  const [elapsed, setElapsed] = useState(() => Date.now() - startMs.current)
+
+  useEffect(() => {
+    startMs.current = new Date(startTimestamp).getTime()
+    setElapsed(Date.now() - startMs.current)
+  }, [startTimestamp])
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - startMs.current), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <span className="text-[10px] text-muted-foreground/40 tabular-nums font-mono">
+      {formatDuration(Math.max(0, elapsed))}
+    </span>
+  )
+}

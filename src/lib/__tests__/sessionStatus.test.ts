@@ -98,6 +98,69 @@ describe("deriveSessionStatus", () => {
     ]
     expect(deriveSessionStatus(msgs).status).toBe("compacting")
   })
+
+  it("skips file-history-snapshot messages to find real status", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "file-history-snapshot", snapshot: {} },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("tracks pending queue count from queue-operations", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "queue-operation", operation: "enqueue" },
+      { type: "queue-operation", operation: "enqueue" },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("completed")
+    expect(result.pendingQueue).toBe(2)
+  })
+
+  it("decrements pending queue count on dequeue", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "queue-operation", operation: "enqueue" },
+      { type: "queue-operation", operation: "enqueue" },
+      { type: "queue-operation", operation: "dequeue" },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("completed")
+    expect(result.pendingQueue).toBe(1)
+  })
+
+  it("clamps pending queue count to 0 when negative", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "queue-operation", operation: "dequeue" },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.pendingQueue).toBe(0)
+  })
+
+  it("treats unknown stop_reason as thinking (catch-all)", () => {
+    const msgs = [
+      { type: "assistant", message: { stop_reason: "max_tokens", content: [] } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("thinking")
+  })
+
+  it("handles multiple system/progress messages after end_turn", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "system", subtype: "turn_duration" },
+      { type: "progress", data: {} },
+      { type: "system", subtype: "something_else" },
+      { type: "file-history-snapshot" },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
 })
 
 describe("getStatusLabel", () => {

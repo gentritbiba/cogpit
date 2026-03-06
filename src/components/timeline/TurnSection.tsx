@@ -1,20 +1,21 @@
-import { memo, useRef, useLayoutEffect } from "react"
+import { memo, useRef, useLayoutEffect, useState, useEffect } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { UserMessage } from "./UserMessage"
 import { ThinkingBlock } from "./ThinkingBlock"
 import { AssistantText } from "./AssistantText"
 import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
+import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
-import { collectToolCalls } from "@/lib/timelineHelpers"
+import { collectToolCalls, collectActivity } from "@/lib/timelineHelpers"
+import { deriveSessionStatus } from "@/lib/sessionStatus"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { Turn, TurnContentBlock } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { formatDuration } from "@/lib/format"
+import { formatDuration, getTurnDuration } from "@/lib/format"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
@@ -48,6 +49,16 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
 
   const isAgentActive = isLive && session !== null && index === session.turns.length - 1
 
+  // For the last active turn, derive completion from raw messages (immediate on end_turn).
+  // For all other turns, they're done by definition.
+  let isTurnDone = !isAgentActive
+  if (isAgentActive && session) {
+    const status = deriveSessionStatus(
+      session.rawMessages as Array<{ type: string; [key: string]: unknown }>
+    )
+    isTurnDone = status.status !== "thinking" && status.status !== "tool_use" && status.status !== "processing"
+  }
+
   return (
     <TurnSectionInner
       turn={turn}
@@ -57,7 +68,9 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       activeToolCallId={activeToolCallId}
       expandAll={expandAll}
       isAgentActive={isAgentActive}
+      isTurnDone={isTurnDone}
       isSubAgentView={isSubAgentView}
+      cwd={session?.cwd ?? ""}
       onRestoreToHere={isSubAgentView ? undefined : undoRedo.requestUndo}
       onOpenBranches={actions.handleOpenBranches}
       onEditCommand={actions.handleEditCommand}
@@ -76,7 +89,9 @@ interface TurnSectionInnerProps {
   activeToolCallId: string | null
   expandAll: boolean
   isAgentActive: boolean
+  isTurnDone: boolean
   isSubAgentView: boolean
+  cwd: string
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
   onEditCommand?: (commandName: string) => void
@@ -91,7 +106,9 @@ const TurnSectionInner = memo(function TurnSectionInner({
   activeToolCallId,
   expandAll,
   isAgentActive,
+  isTurnDone,
   isSubAgentView,
+  cwd,
   onRestoreToHere,
   onOpenBranches,
   onEditCommand,
@@ -110,6 +127,12 @@ const TurnSectionInner = memo(function TurnSectionInner({
     }
   }, [isNear])
 
+  const hasFileChanges =
+    turn.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write") ||
+    turn.subAgentActivity.some((msg) =>
+      msg.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write"),
+    )
+
   return (
     <div
       ref={ref}
@@ -122,6 +145,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
         index={index}
         turn={turn}
         branchCount={branchCount}
+        isTurnDone={isTurnDone}
         onRestoreToHere={onRestoreToHere}
         onOpenBranches={onOpenBranches}
       />
@@ -149,6 +173,10 @@ const TurnSectionInner = memo(function TurnSectionInner({
             isAgentActive={isAgentActive}
             isSubAgentView={isSubAgentView}
           />
+
+          {isTurnDone && hasFileChanges && (
+            <TurnChangedFiles turn={turn} cwd={cwd} />
+          )}
         </div>
       ) : (
         <div style={{ minHeight: lastHeightRef.current || estimateTurnHeight(turn) }} />
@@ -169,31 +197,38 @@ function TurnHeader({
   index,
   turn,
   branchCount,
+  isTurnDone,
   onRestoreToHere,
   onOpenBranches,
 }: {
   index: number
   turn: Turn
   branchCount: number
+  isTurnDone: boolean
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
 }) {
+  const showLiveTimer = !isTurnDone && !!turn.timestamp
+  const durationMs = isTurnDone ? getTurnDuration(turn) : null
+
   return (
     <div className="flex items-center gap-2 mb-4">
       <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
         {index + 1}
       </div>
-      {turn.durationMs !== null && (
-        <Badge
-          variant="outline"
-          className="text-[10px] px-1.5 py-0 h-4 border-border/50 text-muted-foreground gap-1"
-        >
+      {durationMs !== null ? (
+        <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60 font-mono tabular-nums">
           <Clock className="w-2.5 h-2.5" />
-          {formatDuration(turn.durationMs)}
-        </Badge>
-      )}
+          {formatDuration(durationMs)}
+        </span>
+      ) : showLiveTimer ? (
+        <span className="flex items-center gap-1 text-[10px] text-amber-400/70 font-mono tabular-nums">
+          <Clock className="w-2.5 h-2.5 animate-pulse" />
+          <LiveDuration startTimestamp={turn.timestamp} />
+        </span>
+      ) : null}
       {turn.timestamp && (
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-[10px] text-muted-foreground/40">
           {new Date(turn.timestamp).toLocaleTimeString()}
         </span>
       )}
@@ -217,6 +252,25 @@ function TurnHeader({
       )}
     </div>
   )
+}
+
+// ── Live ticking duration (no SSE dependency) ────────────────────────────────
+
+function LiveDuration({ startTimestamp }: { startTimestamp: string }) {
+  const startMs = useRef(new Date(startTimestamp).getTime())
+  const [elapsed, setElapsed] = useState(() => Date.now() - startMs.current)
+
+  useEffect(() => {
+    startMs.current = new Date(startTimestamp).getTime()
+    setElapsed(Date.now() - startMs.current)
+  }, [startTimestamp])
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - startMs.current), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return <span className="tabular-nums">{formatDuration(Math.max(0, elapsed))}</span>
 }
 
 // ── Content blocks renderer ──────────────────────────────────────────────────
@@ -244,13 +298,45 @@ function ContentBlocks({
   while (i < blocks.length) {
     const block = blocks[i]
 
-    if (block.kind === "thinking") {
-      elements.push(
-        <div key={`thinking-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.thinking)}>
-          <ThinkingBlock blocks={block.blocks} expandAll={expandAll} />
-        </div>
-      )
-      i++
+    // Group consecutive thinking + tool_calls blocks into one collapsible
+    if (block.kind === "thinking" || block.kind === "tool_calls") {
+      const { items, toolCalls, thinkingCount, nextIndex } = collectActivity(blocks, i)
+
+      // Single thinking block with no tool calls → render standalone (original style)
+      if (items.length === 1 && items[0].kind === "thinking") {
+        elements.push(
+          <div key={`thinking-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.thinking)}>
+            <ThinkingBlock blocks={items[0].blocks} expandAll={expandAll} />
+          </div>
+        )
+      // Single tool_calls group with no thinking → render as orphan tool calls (original style)
+      } else if (items.length === 1 && items[0].kind === "tool_calls") {
+        elements.push(
+          <div key={`tools-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.orphanTools)}>
+            <CollapsibleToolCalls
+              toolCalls={toolCalls}
+              expandAll={expandAll}
+              activeToolCallId={activeToolCallId}
+              isAgentActive={isAgentActive}
+            />
+          </div>
+        )
+      // Mixed or multiple items → grouped collapsible
+      } else {
+        elements.push(
+          <div key={`activity-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.orphanTools)}>
+            <CollapsibleToolCalls
+              toolCalls={toolCalls}
+              expandAll={expandAll}
+              activeToolCallId={activeToolCallId}
+              isAgentActive={isAgentActive}
+              activityItems={items}
+              thinkingCount={thinkingCount}
+            />
+          </div>
+        )
+      }
+      i = nextIndex
       continue
     }
 
@@ -281,22 +367,6 @@ function ContentBlocks({
           </div>
         )
       })
-      i = nextIndex
-      continue
-    }
-
-    if (block.kind === "tool_calls") {
-      const { toolCalls, nextIndex } = collectToolCalls(blocks, i)
-      elements.push(
-        <div key={`tools-${i}`} className={cn("rounded-lg p-3", CARD_STYLES.orphanTools)}>
-          <CollapsibleToolCalls
-            toolCalls={toolCalls}
-            expandAll={expandAll}
-            activeToolCallId={activeToolCallId}
-            isAgentActive={isAgentActive}
-          />
-        </div>
-      )
       i = nextIndex
       continue
     }

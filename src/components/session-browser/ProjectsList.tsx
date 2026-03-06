@@ -49,7 +49,7 @@ export const ProjectsList = memo(function ProjectsList({
             key={project.dirName}
             onClick={() => onSelectProject(project)}
             className={cn(
-              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low border border-border/40 hover:bg-elevation-3 card-hover",
+              "group flex flex-col gap-1 rounded-lg px-2.5 text-left transition-colors elevation-2 depth-low hover:bg-elevation-3 card-hover",
               isMobile ? "py-3 min-h-[44px]" : "py-2"
             )}
           >

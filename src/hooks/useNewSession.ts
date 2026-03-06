@@ -12,7 +12,10 @@ interface UseNewSessionOpts {
   dispatch: Dispatch<SessionAction>
   isMobile: boolean
   onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
+  /** Called when the user sends the first message and session creation begins */
+  onCreateStarted?: (message: string) => void
   model: string
+  effort: string
 }
 
 export function useNewSession({
@@ -20,7 +23,9 @@ export function useNewSession({
   dispatch,
   isMobile,
   onSessionFinalized,
+  onCreateStarted,
   model,
+  effort,
 }: UseNewSessionOpts) {
   const [creatingSession, setCreatingSession] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -60,6 +65,7 @@ export function useNewSession({
 
       setCreatingSession(true)
       setCreateError(null)
+      onCreateStarted?.(message)
 
       try {
         const res = await authFetch("/api/create-and-send", {
@@ -71,6 +77,7 @@ export function useNewSession({
             images,
             permissions: permissionsConfig,
             model: model || undefined,
+            effort: effort || undefined,
             worktreeName: worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           }),
           signal: controller.signal,
@@ -114,9 +121,12 @@ export function useNewSession({
           }
         }
 
+        // Even if we couldn't read content yet, finalize with a minimal session
+        // so the user transitions to the ChatArea. SSE streaming will populate
+        // the real content once the JSONL file has data.
         if (!parsed) {
-          setCreateError("Failed to load new session — no content available")
-          return null
+          rawText = ""
+          parsed = { sessionId, turns: [], cwd: undefined, model: undefined, totalCost: 0 }
         }
 
         const source: SessionSource = { dirName: resDirName, fileName, rawText }
@@ -134,7 +144,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized]
+    [permissionsConfig, model, effort, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

@@ -33,7 +33,7 @@ export function ProcessList({ unmatchedProcs, killingPids, onKill }: ProcessList
       {unmatchedProcs.map((p) => (
         <div
           key={p.pid}
-          className="group flex items-center gap-2 rounded-lg px-2.5 py-2 elevation-1 border border-border/40 hover:bg-elevation-2 card-hover"
+          className="group flex items-center gap-2 rounded-lg px-2.5 py-2 elevation-1 hover:bg-elevation-2 card-hover"
         >
           <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
             <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />

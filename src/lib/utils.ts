@@ -12,6 +12,12 @@ export const MODEL_OPTIONS = [
   { value: "haiku", label: "Haiku" },
 ]
 
+export const EFFORT_OPTIONS = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+]
+
 /** Convert a user message into a valid worktree/branch name. */
 export function slugifyWorktreeName(message: string): string {
   return message

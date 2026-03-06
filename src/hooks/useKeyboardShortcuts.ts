@@ -13,6 +13,7 @@ interface UseKeyboardShortcutsOpts {
   chatInputRef: RefObject<ChatInputHandle | null>
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
+  onToggleRightSidebar: () => void
   onOpenProjectSwitcher: () => void
   onOpenThemeSelector: () => void
   onOpenTerminal: () => void
@@ -59,6 +60,7 @@ export function useKeyboardShortcuts({
   chatInputRef,
   dispatch,
   onToggleSidebar,
+  onToggleRightSidebar,
   onOpenProjectSwitcher,
   onOpenThemeSelector,
   onOpenTerminal,
@@ -80,9 +82,13 @@ export function useKeyboardShortcuts({
         e.preventDefault()
         dispatch({ type: "SET_EXPAND_ALL", value: false })
       }
-      if (mod && e.key === "b") {
+      if (mod && e.key === "b" && !e.shiftKey) {
         e.preventDefault()
         onToggleSidebar()
+      }
+      if (mod && e.shiftKey && (e.key === "b" || e.key === "B")) {
+        e.preventDefault()
+        onToggleRightSidebar()
       }
 
       // Ctrl+Shift+M — toggle voice input and focus chat
@@ -186,5 +192,5 @@ export function useKeyboardShortcuts({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

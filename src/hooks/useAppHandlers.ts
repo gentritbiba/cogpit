@@ -23,6 +23,8 @@ interface AppHandlersDeps {
   hasPermsPendingChanges: boolean
   selectedModel: string
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>
+  selectedEffort: string
+  setSelectedEffort: React.Dispatch<React.SetStateAction<string>>
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
 }
@@ -62,6 +64,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     state, dispatch, isMobile, handleJumpToTurn,
     markPermissionsApplied, hasPermsPendingChanges,
     selectedModel, setSelectedModel,
+    selectedEffort, setSelectedEffort,
     scrollRequestScrollToTop, handleDashboardSelect,
   } = deps
 
@@ -168,11 +171,14 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     dispatch({ type: "SET_MOBILE_TAB", tab: "chat" })
   }, [handleJumpToTurn, dispatch])
 
-  // ── Model tracking ─────────────────────────────────────────────────────────
-  // In-memory map: sessionId -> model the persistent process was spawned with.
-  const [appliedModels, setAppliedModels] = useState<Record<string, string>>({})
+  // ── Model & effort tracking ────────────────────────────────────────────────
+  // In-memory map: sessionId -> settings the persistent process was spawned with.
+  interface AppliedSettings { model: string; effort: string }
+  const [appliedSettings, setAppliedSettings] = useState<Record<string, AppliedSettings>>({})
   const selectedModelRef = useRef(selectedModel)
   selectedModelRef.current = selectedModel
+  const selectedEffortRef = useRef(selectedEffort)
+  selectedEffortRef.current = selectedEffort
 
   const currentSessionId = state.session?.sessionId ?? null
   const prevSessionIdRef = useRef<string | null>(null)
@@ -180,18 +186,27 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     if (currentSessionId === prevSessionIdRef.current) return
     prevSessionIdRef.current = currentSessionId
     if (!currentSessionId) return
-    setAppliedModels(prev => {
+    setAppliedSettings(prev => {
       if (currentSessionId in prev) {
-        setSelectedModel(prev[currentSessionId])
+        setSelectedModel(prev[currentSessionId].model)
+        setSelectedEffort(prev[currentSessionId].effort)
         return prev
       }
-      return { ...prev, [currentSessionId]: selectedModelRef.current }
+      return {
+        ...prev,
+        [currentSessionId]: {
+          model: selectedModelRef.current,
+          effort: selectedEffortRef.current,
+        },
+      }
     })
-  }, [currentSessionId, setSelectedModel])
+  }, [currentSessionId, setSelectedModel, setSelectedEffort])
 
-  const hasSettingsChanges = currentSessionId != null &&
-    currentSessionId in appliedModels &&
-    (selectedModel !== appliedModels[currentSessionId] || hasPermsPendingChanges)
+  const applied = currentSessionId ? appliedSettings[currentSessionId] : undefined
+  const hasSettingsChanges = applied != null &&
+    (selectedModel !== applied.model ||
+     selectedEffort !== applied.effort ||
+     hasPermsPendingChanges)
 
   // ── Apply settings ─────────────────────────────────────────────────────────
   const handleApplySettings = useCallback(async () => {
@@ -201,9 +216,12 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId: currentSessionId }),
     })
-    setAppliedModels(prev => ({ ...prev, [currentSessionId]: selectedModel }))
+    setAppliedSettings(prev => ({
+      ...prev,
+      [currentSessionId]: { model: selectedModel, effort: selectedEffort },
+    }))
     markPermissionsApplied()
-  }, [currentSessionId, selectedModel, markPermissionsApplied])
+  }, [currentSessionId, selectedModel, selectedEffort, markPermissionsApplied])
 
   // ── Stop session ───────────────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {
