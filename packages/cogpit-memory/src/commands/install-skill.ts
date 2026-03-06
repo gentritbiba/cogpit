@@ -32,9 +32,11 @@ function findSkillContent(): string {
   throw new Error("Could not find SKILL.md — try reinstalling cogpit-memory")
 }
 
-export function installSkill(cwd?: string): { installed: boolean; path: string } {
-  const root = cwd ?? process.cwd()
-  const skillDir = join(root, ".claude", "skills", "cogpit-memory")
+export function installSkill(cwd?: string, global?: boolean): { installed: boolean; path: string } {
+  const root = global
+    ? join(process.env.HOME ?? process.env.USERPROFILE ?? "~", ".claude")
+    : join(cwd ?? process.cwd(), ".claude")
+  const skillDir = join(root, "skills", "cogpit-memory")
 
   mkdirSync(skillDir, { recursive: true })
 

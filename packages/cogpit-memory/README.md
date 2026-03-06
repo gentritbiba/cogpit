@@ -151,9 +151,11 @@ Browse at [skills.sh](https://skills.sh).
 
 ### Install via cogpit-memory CLI
 
-Installs into a single project's `.claude/skills/`:
-
 ```bash
+# Install globally (all projects)
+npx cogpit-memory install-skill -g
+
+# Install into a single project's .claude/skills/
 npx cogpit-memory install-skill
 
 # Or specify a project directory

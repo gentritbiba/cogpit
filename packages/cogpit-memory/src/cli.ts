@@ -65,6 +65,7 @@ export function parseArgs(argv: string[]): CLICommand {
       for (let i = 1; i < argv.length; i++) {
         switch (argv[i]) {
           case "--cwd": args.cwd = argv[++i]; break
+          case "-g": case "--global": args.global = true; break
         }
       }
       break
@@ -135,7 +136,7 @@ async function main() {
       break
 
     case "install-skill":
-      result = installSkill(cmd.args.cwd)
+      result = installSkill(cmd.args.cwd, cmd.args.global)
       break
 
     default:
@@ -170,7 +171,9 @@ Commands:
   index stats                 Show index stats
   index rebuild               Rebuild full index
 
-  install-skill [--cwd path]  Install Claude Code skill to .claude/skills/
+  install-skill [options]      Install Claude Code skill
+    --cwd <path>              Target project directory
+    -g, --global              Install to ~/.claude/skills/ (all projects)
 `)
 }
 
