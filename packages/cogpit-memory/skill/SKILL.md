@@ -9,7 +9,7 @@ CLI tool that gives any AI assistant memory of past Claude Code sessions. Retrie
 
 Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
 
-**Prerequisite:** Node.js must be installed (better-sqlite3 requires native bindings).
+**Prerequisite:** Bun must be installed (uses bun:sqlite for FTS5 search).
 
 ## Step 1 -- Verify the tool works
 

@@ -13,6 +13,7 @@ import { getSessionMeta, getSessionStatus } from "../lib/metadata"
 
 export interface SessionSummary {
   sessionId: string
+  filePath: string
   timestamp: string
   model: string
   cwd: string
@@ -99,6 +100,7 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
 
       results.push({
         sessionId: meta.sessionId,
+        filePath: file.path,
         timestamp: meta.timestamp,
         model: meta.model,
         cwd: meta.cwd,
@@ -168,6 +170,7 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
 
   return {
     sessionId: meta.sessionId,
+    filePath: latest.path,
     timestamp: meta.timestamp,
     model: meta.model,
     cwd: meta.cwd,

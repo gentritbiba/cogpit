@@ -246,7 +246,7 @@ export class SearchIndex {
     // snippet() column index 3 = content (session_id=0, source_file=1, location=2, content=3)
     let sql = `
       SELECT sc.session_id, sc.location,
-             snippet(search_content, 3, '', '', '...', 40) as snippet
+             snippet(search_content, 3, '', '', '...', 120) as snippet
       FROM search_content sc
     `
     const params: (string | number)[] = []

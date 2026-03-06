@@ -1,17 +1,28 @@
 {
   "name": "cogpit-memory",
-  "version": "0.1.0",
-  "type": "module",
-  "bin": {
-    "cogpit-memory": "./src/cli.ts"
-  },
-  "main": "./src/index.ts",
+  "version": "0.1.2",
+  "description": "CLI tool for Claude Code session introspection — search, browse, and drill into past sessions",
+  "main": "./dist/index.js",
   "types": "./src/index.ts",
+  "bin": {
+    "cogpit-memory": "./dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "skill/"
+  ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build --compile src/cli.ts --outfile cogpit-memory"
+    "build": "bun build --compile src/cli.ts --outfile cogpit-memory",
+    "build:npm": "node scripts/build-npm.mjs",
+    "prepublishOnly": "node scripts/build-npm.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
-    "bun-types": "latest"
+    "@types/better-sqlite3": "^7.6.13",
+    "bun-types": "latest",
+    "esbuild": "^0.27.3"
   }
 }

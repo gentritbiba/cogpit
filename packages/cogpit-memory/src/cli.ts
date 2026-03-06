@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * cogpit-memory CLI — query Claude Code session history.
  *
@@ -13,6 +12,7 @@ import { searchSessions } from "./commands/search"
 import { getSessionOverview, getTurnDetail, getAgentOverview, getAgentTurnDetail } from "./commands/context"
 import { listSessions, currentSession } from "./commands/sessions"
 import { indexStats, indexRebuild } from "./commands/index-cmd"
+import { installSkill } from "./commands/install-skill"
 
 export interface CLICommand {
   command: string
@@ -59,6 +59,14 @@ export function parseArgs(argv: string[]): CLICommand {
     }
     case "index": {
       args.subcommand = argv[1] ?? "stats"
+      break
+    }
+    case "install-skill": {
+      for (let i = 1; i < argv.length; i++) {
+        switch (argv[i]) {
+          case "--cwd": args.cwd = argv[++i]; break
+        }
+      }
       break
     }
   }
@@ -126,6 +134,10 @@ async function main() {
       }
       break
 
+    case "install-skill":
+      result = installSkill(cmd.args.cwd)
+      break
+
     default:
       console.error(JSON.stringify({ error: `Unknown command: ${cmd.command}` }))
       printUsage()
@@ -157,17 +169,20 @@ Commands:
 
   index stats                 Show index stats
   index rebuild               Rebuild full index
+
+  install-skill [--cwd path]  Install Claude Code skill to .claude/skills/
 `)
 }
 
 // Run main() when executed directly (not when imported for testing).
-// In compiled binary, argv[1] is the first user arg, not the script path.
-// Detect compiled mode via Bun.main or fallback to argv[1] check.
+// Detection covers: Bun compiled binary, bun src/cli.ts, node dist/cli.js,
+// and npx symlink (where argv[1] may be "cogpit-memory" not "cli.js").
 const isBunCompiled = typeof Bun !== "undefined" && !process.argv[1]?.endsWith(".ts")
-const isScript =
-  process.argv[1]?.endsWith("/cli.ts") || process.argv[1]?.endsWith("/cli.js")
+const isNodeScript = process.argv[1]?.endsWith("/cli.ts") || process.argv[1]?.endsWith("/cli.js")
+// CJS bundled output: require.main === module (works for npx symlinks too)
+const isCjsMain = typeof require !== "undefined" && typeof module !== "undefined" && require.main === module
 
-if (isBunCompiled || isScript) {
+if (isBunCompiled || isNodeScript || isCjsMain) {
   main().catch((err) => {
     console.error(JSON.stringify({ error: String(err) }))
     process.exit(1)
