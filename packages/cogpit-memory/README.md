@@ -81,7 +81,7 @@ cogpit-memory search "AuthProvider" --case-sensitive          # Case-sensitive
 | `--limit` | `20` | Max returned hits |
 | `--case-sensitive` | `false` | Case sensitivity |
 
-Each hit includes a `location` string (e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/toolCall/tc1/result`) that maps directly to L2/L3 drill-down commands.
+Each result includes the `cwd` (working directory where the session ran) and an array of hits. Each hit includes a `location` string (e.g. `turn/3/assistantMessage`, `agent/a7f3bc2/toolCall/tc1/result`) that maps directly to L2/L3 drill-down commands.
 
 ### `index` — Manage the FTS5 search index
 

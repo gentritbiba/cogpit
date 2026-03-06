@@ -9,7 +9,7 @@
  */
 
 import { existsSync } from "node:fs"
-import { readFile, readdir, stat } from "node:fs/promises"
+import { open, readFile, readdir, stat } from "node:fs/promises"
 import { join, basename } from "node:path"
 import { SearchIndex } from "../lib/search-index"
 import { DEFAULT_DB_PATH, dirs } from "../lib/dirs"
@@ -38,6 +38,7 @@ export interface SearchHit {
 
 export interface SessionSearchResult {
   sessionId: string
+  cwd: string
   hits: SearchHit[]
 }
 
@@ -85,14 +86,14 @@ export async function searchSessions(
       })
 
       // Group by sessionId
-      const grouped = new Map<string, SearchHit[]>()
+      const grouped = new Map<string, { filePath: string; hits: SearchHit[] }>()
       for (const hit of hits) {
-        let sessionHits = grouped.get(hit.sessionId)
-        if (!sessionHits) {
-          sessionHits = []
-          grouped.set(hit.sessionId, sessionHits)
+        let entry = grouped.get(hit.sessionId)
+        if (!entry) {
+          entry = { filePath: hit.filePath, hits: [] }
+          grouped.set(hit.sessionId, entry)
         }
-        sessionHits.push({
+        entry.hits.push({
           location: hit.location,
           snippet: hit.snippet,
           matchCount: hit.matchCount,
@@ -100,8 +101,9 @@ export async function searchSessions(
       }
 
       const results: SessionSearchResult[] = []
-      for (const [sid, sessionHits] of grouped) {
-        results.push({ sessionId: sid, hits: sessionHits })
+      for (const [sid, entry] of grouped) {
+        const cwd = await cwdFromFilePath(entry.filePath)
+        results.push({ sessionId: sid, cwd, hits: entry.hits })
       }
 
       // Only run the expensive COUNT query when hits were capped by LIMIT.
@@ -136,6 +138,43 @@ export async function searchSessions(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Read the cwd from the first few lines of a session JSONL file.
+ * The cwd is stored in the session metadata near the top of the file.
+ * Uses a partial read (4 KB) to avoid loading multi-MB session files.
+ * Caches results to avoid re-reading the same file.
+ */
+const CWD_READ_BYTES = 4096
+const cwdCache = new Map<string, string>()
+async function cwdFromFilePath(filePath: string): Promise<string> {
+  const cached = cwdCache.get(filePath)
+  if (cached !== undefined) return cached
+
+  try {
+    const fh = await open(filePath, "r")
+    try {
+      const buf = Buffer.alloc(CWD_READ_BYTES)
+      const { bytesRead } = await fh.read(buf, 0, CWD_READ_BYTES, 0)
+      const head = buf.subarray(0, bytesRead).toString("utf-8")
+      const lines = head.split("\n", 10)
+      for (const line of lines) {
+        if (!line) continue
+        try {
+          const obj = JSON.parse(line)
+          if (obj.cwd) {
+            cwdCache.set(filePath, obj.cwd)
+            return obj.cwd
+          }
+        } catch {}
+      }
+    } finally {
+      await fh.close()
+    }
+  } catch {}
+  cwdCache.set(filePath, "")
+  return ""
+}
 
 const SNIPPET_WINDOW = 150
 
@@ -425,6 +464,7 @@ async function rawScanSearch(
 
       const sessionResult: SessionSearchResult = {
         sessionId: session.sessionId || basename(file.path, ".jsonl"),
+        cwd: session.cwd || "",
         hits: [],
       }
 

@@ -262,6 +262,7 @@ bunx cogpit-memory search "AuthProvider" --case-sensitive
   "results": [
     {
       "sessionId": "abc-123",
+      "cwd": "/path/to/project",
       "hits": [
         {
           "location": "turn/3/userMessage",

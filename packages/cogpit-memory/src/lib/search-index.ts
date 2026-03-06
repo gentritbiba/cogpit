@@ -18,6 +18,7 @@ export interface IndexStats {
 
 export interface SearchHit {
   sessionId: string
+  filePath: string
   location: string
   snippet: string
   matchCount: number
@@ -245,7 +246,7 @@ export class SearchIndex {
 
     // snippet() column index 3 = content (session_id=0, source_file=1, location=2, content=3)
     let sql = `
-      SELECT sc.session_id, sc.location,
+      SELECT sc.session_id, sc.source_file, sc.location,
              snippet(search_content, 3, '', '', '...', 120) as snippet
       FROM search_content sc
     `
@@ -271,12 +272,14 @@ export class SearchIndex {
 
     const rows = this.db.prepare(sql).all(...params) as Array<{
       session_id: string
+      source_file: string
       location: string
       snippet: string
     }>
 
     let hits: SearchHit[] = rows.map((row) => ({
       sessionId: row.session_id,
+      filePath: row.source_file,
       location: row.location,
       snippet: row.snippet,
       matchCount: 1, // FTS5 trigram doesn't expose per-row match count; 1 = "at least one match"
