@@ -9,6 +9,7 @@ import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
+import { LiveElapsed } from "./AgentStatusIndicator"
 import { collectToolCalls, collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
 import { useAppContext } from "@/contexts/AppContext"
@@ -224,7 +225,7 @@ function TurnHeader({
       ) : showLiveTimer ? (
         <span className="flex items-center gap-1 text-[10px] text-amber-400/70 font-mono tabular-nums">
           <Clock className="w-2.5 h-2.5 animate-pulse" />
-          <LiveDuration startTimestamp={turn.timestamp} />
+          <LiveElapsed startTimestamp={turn.timestamp} className="tabular-nums" />
         </span>
       ) : null}
       {turn.timestamp && (
@@ -252,25 +253,6 @@ function TurnHeader({
       )}
     </div>
   )
-}
-
-// ── Live ticking duration (no SSE dependency) ────────────────────────────────
-
-function LiveDuration({ startTimestamp }: { startTimestamp: string }) {
-  const startMs = useRef(new Date(startTimestamp).getTime())
-  const [elapsed, setElapsed] = useState(() => Date.now() - startMs.current)
-
-  useEffect(() => {
-    startMs.current = new Date(startTimestamp).getTime()
-    setElapsed(Date.now() - startMs.current)
-  }, [startTimestamp])
-
-  useEffect(() => {
-    const id = setInterval(() => setElapsed(Date.now() - startMs.current), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  return <span className="tabular-nums">{formatDuration(Math.max(0, elapsed))}</span>
 }
 
 // ── Content blocks renderer ──────────────────────────────────────────────────

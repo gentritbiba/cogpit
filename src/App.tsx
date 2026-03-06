@@ -46,6 +46,7 @@ import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { DEFAULT_EFFORT } from "@/lib/utils"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
@@ -197,7 +198,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState("")
 
   // Thinking effort level
-  const [selectedEffort, setSelectedEffort] = useState("high")
+  const [selectedEffort, setSelectedEffort] = useState(DEFAULT_EFFORT)
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -227,9 +228,9 @@ export default function App() {
       setTimeout(() => liveSessionsRefreshRef.current?.(), 300)
       setTimeout(() => liveSessionsRefreshRef.current?.(), 2000)
     },
-    onCreateStarted: (message) => {
+    onCreateStarted: useCallback((message: string) => {
       setPendingFirstMessage(message)
-    },
+    }, []),
     model: selectedModel,
     effort: selectedEffort,
   })

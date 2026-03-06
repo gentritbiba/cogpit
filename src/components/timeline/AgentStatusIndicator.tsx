@@ -262,7 +262,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
 
 // ── Live elapsed timer ──────────────────────────────────────────────────────
 
-function LiveElapsed({ startTimestamp }: { startTimestamp: string }) {
+export function LiveElapsed({ startTimestamp, className }: { startTimestamp: string; className?: string }) {
   const startMs = useRef(new Date(startTimestamp).getTime())
   const [elapsed, setElapsed] = useState(() => Date.now() - startMs.current)
 
@@ -277,7 +277,7 @@ function LiveElapsed({ startTimestamp }: { startTimestamp: string }) {
   }, [])
 
   return (
-    <span className="text-[10px] text-muted-foreground/40 tabular-nums font-mono">
+    <span className={className ?? "text-[10px] text-muted-foreground/40 tabular-nums font-mono"}>
       {formatDuration(Math.max(0, elapsed))}
     </span>
   )

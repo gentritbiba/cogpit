@@ -12,6 +12,8 @@ export const MODEL_OPTIONS = [
   { value: "haiku", label: "Haiku" },
 ]
 
+export const DEFAULT_EFFORT = "high"
+
 export const EFFORT_OPTIONS = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },

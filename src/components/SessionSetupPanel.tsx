@@ -1,5 +1,5 @@
 import { Cpu, GitBranch, Gauge } from "lucide-react"
-import { cn, MODEL_OPTIONS, EFFORT_OPTIONS } from "@/lib/utils"
+import { cn, MODEL_OPTIONS, EFFORT_OPTIONS, DEFAULT_EFFORT } from "@/lib/utils"
 
 interface SessionSetupPanelProps {
   permissionsPanel?: React.ReactNode
@@ -75,9 +75,9 @@ export function SessionSetupPanel({
                 <Gauge className="size-3" />
                 Thinking Effort
               </h3>
-              <div className="grid grid-cols-2 gap-1">
+              <div className="grid grid-cols-3 gap-1">
                 {EFFORT_OPTIONS.map((opt) => {
-                  const isSelected = (selectedEffort || "") === opt.value
+                  const isSelected = (selectedEffort || DEFAULT_EFFORT) === opt.value
                   return (
                     <button
                       key={opt.value}
