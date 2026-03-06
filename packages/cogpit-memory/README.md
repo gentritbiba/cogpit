@@ -40,14 +40,14 @@ cogpit-memory search "authentication"
 cogpit-memory sessions                              # Recent sessions (last 7 days)
 cogpit-memory sessions --cwd /path/to/project       # Filter by project
 cogpit-memory sessions --current --cwd /path/to/project  # Most recent for a project
-cogpit-memory sessions --max-age 30d --limit 50     # Custom window
+cogpit-memory sessions --max-age 90d --limit 50     # Custom window
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--cwd` | all | Filter by working directory |
 | `--limit` | `20` | Max results |
-| `--max-age` | `7d` | Time window (`7d`, `12h`, `30d`) |
+| `--max-age` | `7d` | Time window — any duration (`7d`, `12h`, `90d`, `365d`) |
 | `--current` | — | Most recent session for `--cwd` |
 
 ### `context` — Layered session drill-down
@@ -77,7 +77,7 @@ cogpit-memory search "AuthProvider" --case-sensitive          # Case-sensitive
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--session` | all | Scope to single session |
-| `--max-age` | `5d` | Time window |
+| `--max-age` | `5d` | Time window — any duration (`5d`, `30d`, `365d`) |
 | `--limit` | `20` | Max returned hits |
 | `--case-sensitive` | `false` | Case sensitivity |
 
