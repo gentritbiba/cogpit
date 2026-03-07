@@ -91,11 +91,13 @@ describe("parseSessionFileChanges", () => {
     const { changes } = await parseSessionFileChanges(jsonl, false)
     expect(changes).toHaveLength(1)
     const c = changes[0]
-    expect(c.toolCallId).toBe("tc1")
+    expect(c.toolCallIds).toContain("tc1")
     expect(c.type).toBe("edit")
     expect(c.filePath).toBe("/src/a.ts")
     expect(c.turnIndex).toBe(0)
     expect(c.isError).toBe(false)
+    expect(c.hasEdit).toBe(true)
+    expect(c.hasWrite).toBe(false)
     expect(c.content).toBeUndefined()
   })
 
@@ -106,7 +108,7 @@ describe("parseSessionFileChanges", () => {
       userLine([toolResult("tc1")]),
     )
     const { changes } = await parseSessionFileChanges(jsonl, true)
-    expect(changes[0].content).toEqual({ oldString: "old", newString: "new" })
+    expect(changes[0].content).toEqual({ originalStr: "old", currentStr: "new" })
   })
 
   it("parses Write tool call with content when includeContent=true", async () => {
@@ -118,10 +120,11 @@ describe("parseSessionFileChanges", () => {
     const { changes } = await parseSessionFileChanges(jsonl, true)
     expect(changes).toHaveLength(1)
     expect(changes[0].type).toBe("write")
-    expect(changes[0].content).toEqual({ fileContent: "export const x = 1" })
+    expect(changes[0].hasWrite).toBe(true)
+    expect(changes[0].content).toEqual({ originalStr: "", currentStr: "export const x = 1" })
   })
 
-  it("marks tool call as error when tool_result has is_error=true", async () => {
+  it("marks file as error when any tool_result has is_error=true", async () => {
     const jsonl = makeJsonl(
       userLine([humanText("edit")]),
       assistantLine([toolUse("tc3", "Edit", { file_path: "/x.ts", old_string: "a", new_string: "b" })]),
@@ -142,8 +145,8 @@ describe("parseSessionFileChanges", () => {
     )
     const { changes } = await parseSessionFileChanges(jsonl, false)
     expect(changes).toHaveLength(2)
-    expect(changes.find((c) => c.toolCallId === "tc1")?.turnIndex).toBe(0)
-    expect(changes.find((c) => c.toolCallId === "tc2")?.turnIndex).toBe(1)
+    expect(changes.find((c) => c.filePath === "/a.ts")?.turnIndex).toBe(0)
+    expect(changes.find((c) => c.filePath === "/b.ts")?.turnIndex).toBe(1)
   })
 
   it("uses input.path as fallback for filePath", async () => {
@@ -162,6 +165,56 @@ describe("parseSessionFileChanges", () => {
     )
     const { changes } = await parseSessionFileChanges(jsonl, false)
     expect(changes).toHaveLength(0)
+  })
+
+  it("deduplicates multiple edits to the same file", async () => {
+    const jsonl = makeJsonl(
+      userLine([humanText("fix stuff")]),
+      assistantLine([
+        toolUse("tc1", "Edit", { file_path: "/src/a.ts", old_string: "foo", new_string: "bar" }),
+        toolUse("tc2", "Edit", { file_path: "/src/a.ts", old_string: "baz", new_string: "qux" }),
+      ]),
+      userLine([toolResult("tc1"), toolResult("tc2")]),
+    )
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes).toHaveLength(1)
+    expect(changes[0].filePath).toBe("/src/a.ts")
+    expect(changes[0].toolCallIds).toEqual(["tc1", "tc2"])
+    expect(changes[0].hasEdit).toBe(true)
+    expect(changes[0].additions).toBeGreaterThanOrEqual(0)
+    expect(changes[0].deletions).toBeGreaterThanOrEqual(0)
+  })
+
+  it("computes net diff for multiple edits with content", async () => {
+    const jsonl = makeJsonl(
+      userLine([humanText("fix stuff")]),
+      assistantLine([
+        toolUse("tc1", "Edit", { file_path: "/src/a.ts", old_string: "line1\nline2", new_string: "line1\nchanged" }),
+        toolUse("tc2", "Edit", { file_path: "/src/a.ts", old_string: "line3", new_string: "also_changed" }),
+      ]),
+      userLine([toolResult("tc1"), toolResult("tc2")]),
+    )
+    const { changes } = await parseSessionFileChanges(jsonl, true)
+    expect(changes).toHaveLength(1)
+    expect(changes[0].content).toBeDefined()
+    expect(changes[0].content!.originalStr).toContain("line2")
+    expect(changes[0].content!.currentStr).toContain("changed")
+  })
+
+  it("sets hasEdit and hasWrite when file has both operations", async () => {
+    const jsonl = makeJsonl(
+      userLine([humanText("create then edit")]),
+      assistantLine([
+        toolUse("tc1", "Write", { file_path: "/src/new.ts", content: "initial content" }),
+        toolUse("tc2", "Edit", { file_path: "/src/new.ts", old_string: "initial", new_string: "updated" }),
+      ]),
+      userLine([toolResult("tc1"), toolResult("tc2")]),
+    )
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes).toHaveLength(1)
+    expect(changes[0].hasEdit).toBe(true)
+    expect(changes[0].hasWrite).toBe(true)
+    expect(changes[0].type).toBe("edit") // mixed defaults to edit
   })
 
   it("detects deleted files from rm Bash commands", async () => {
@@ -189,7 +242,6 @@ describe("parseSessionFileChanges", () => {
   })
 
   it("does not duplicate deleted file already covered by Edit/Write", async () => {
-    // /file.ts is also in a Write tool call → should not appear as deleted
     mockedStat.mockRejectedValueOnce(new Error("ENOENT"))
     const jsonl = makeJsonl(
       userLine([humanText("write then rm")]),
@@ -297,6 +349,8 @@ describe("registerSessionFileChangesRoutes", () => {
     expect(data.sessionId).toBe("session-abc")
     expect(data.changes).toHaveLength(1)
     expect(data.changes[0].content).toBeUndefined()
+    expect(data.changes[0].additions).toBeDefined()
+    expect(data.changes[0].deletions).toBeDefined()
   })
 
   it("includes content when ?content=true", async () => {
@@ -312,10 +366,10 @@ describe("registerSessionFileChangesRoutes", () => {
     const { req, res, next } = createMockReqRes("GET", "/session-abc?content=true")
     await handler(req as never, res as never, next)
     const data = JSON.parse(res._getData())
-    expect(data.changes[0].content).toEqual({ oldString: "a", newString: "b" })
+    expect(data.changes[0].content).toEqual({ originalStr: "a", currentStr: "b" })
   })
 
-  it("returns single tool call at /sessionId/tool/:toolCallId", async () => {
+  it("returns file change at /sessionId/tool/:toolCallId", async () => {
     mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
     mockedReadFile.mockResolvedValueOnce(
       makeJsonl(
@@ -329,8 +383,8 @@ describe("registerSessionFileChangesRoutes", () => {
     await handler(req as never, res as never, next)
     expect(res._getStatus()).toBe(200)
     const data = JSON.parse(res._getData())
-    expect(data.toolCallId).toBe("tc1")
-    expect(data.content).toEqual({ oldString: "a", newString: "b" })
+    expect(data.toolCallIds).toContain("tc1")
+    expect(data.content).toEqual({ originalStr: "a", currentStr: "b" })
   })
 
   it("returns 404 for unknown tool call ID", async () => {

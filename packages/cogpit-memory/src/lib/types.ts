@@ -135,6 +135,11 @@ export interface SystemMessage extends BaseMessage {
   subtype?: string
   durationMs?: number
   isMeta?: boolean
+  content?: string
+  compactMetadata?: {
+    trigger: "auto" | "manual"
+    preTokens: number
+  }
 }
 
 export interface FileHistorySnapshotMessage extends BaseMessage {

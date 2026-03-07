@@ -78,6 +78,11 @@ export function deriveSessionStatus(
     // Compaction just happened — show "compacting" until the next real message arrives
     if (msg.type === "summary") return result("compacting")
 
+    // compact_boundary system message (Claude Code v2.1.34+) — same signal as summary
+    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") {
+      return result("compacting")
+    }
+
     // Skip progress, system, etc.
   }
 

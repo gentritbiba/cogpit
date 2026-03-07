@@ -1,33 +1,48 @@
 import type { UseFn } from "../helpers"
 import { findJsonlPath, readFile, sendJson, stat } from "../helpers"
 import type { ToolUseBlock } from "../../src/lib/types"
+import { computeNetDiff, type EditOp } from "../../src/lib/diffUtils"
 
-export interface FileChange {
-  toolCallId: string
-  type: "edit" | "write" | "deleted"
+export interface ComputedFileChange {
   filePath: string
-  turnIndex: number
+  type: "edit" | "write" | "deleted"
+  additions: number
+  deletions: number
+  hasEdit: boolean
+  hasWrite: boolean
   isError: boolean
+  toolCallIds: string[]
+  turnIndex: number
   content?: {
-    oldString?: string
-    newString?: string
-    fileContent?: string
+    originalStr: string
+    currentStr: string
   }
 }
 
 export async function parseSessionFileChanges(
   jsonlContent: string,
   includeContent: boolean,
-): Promise<{ changes: FileChange[]; cwd: string }> {
+): Promise<{ changes: ComputedFileChange[]; cwd: string }> {
   const lines = jsonlContent.split("\n").filter(Boolean)
 
   let cwd = ""
-  // Track which human-turn we're in (0-indexed)
   let lastHumanTurnIndex = 0
   let humanMessageCount = 0
 
-  // toolCallId → FileChange (for Edit/Write)
-  const changeMap = new Map<string, FileChange>()
+  // Per-file accumulator
+  interface FileAccum {
+    toolCallIds: string[]
+    hasEdit: boolean
+    hasWrite: boolean
+    isError: boolean
+    firstTurnIndex: number
+    ops: EditOp[]
+  }
+
+  const fileMap = new Map<string, FileAccum>()
+
+  // toolCallId → { filePath, isEdit, oldString, newString }
+  const toolCallDetails = new Map<string, { filePath: string; isEdit: boolean; oldString: string; newString: string }>()
   // toolCallId → error flag (populated from tool_result blocks)
   const resultMap = new Map<string, boolean>()
   // Bash rm paths: { path, turnIndex, isDir }
@@ -47,7 +62,6 @@ export async function parseSessionFileChanges(
       const content = (obj.message as Record<string, unknown>)?.content
       if (!Array.isArray(content)) continue
 
-      // Distinguish human messages (contain text blocks) from tool_result messages
       const hasHumanText = content.some(
         (b) => typeof b === "object" && b !== null && (b as Record<string, unknown>).type === "text",
       )
@@ -57,7 +71,6 @@ export async function parseSessionFileChanges(
         humanMessageCount++
       }
 
-      // Collect tool results (error status)
       for (const block of content) {
         if (typeof block !== "object" || block === null) continue
         const b = block as Record<string, unknown>
@@ -80,39 +93,40 @@ export async function parseSessionFileChanges(
           const filePath = (b.input.file_path ?? b.input.path) as string
           if (!filePath) continue
 
-          const change: FileChange = {
-            toolCallId: b.id,
-            type: b.name === "Edit" ? "edit" : "write",
-            filePath,
-            turnIndex: lastHumanTurnIndex,
-            isError: false,
-          }
+          const isEdit = b.name === "Edit"
+          const oldString = isEdit ? String(b.input.old_string ?? "") : ""
+          const newString = isEdit
+            ? String(b.input.new_string ?? "")
+            : String(b.input.content ?? "")
 
-          if (includeContent) {
-            if (b.name === "Edit") {
-              change.content = {
-                oldString: b.input.old_string as string | undefined,
-                newString: b.input.new_string as string | undefined,
-              }
-            } else {
-              change.content = {
-                fileContent: b.input.content as string | undefined,
-              }
+          toolCallDetails.set(b.id, { filePath, isEdit, oldString, newString })
+
+          let accum = fileMap.get(filePath)
+          if (!accum) {
+            accum = {
+              toolCallIds: [],
+              hasEdit: false,
+              hasWrite: false,
+              isError: false,
+              firstTurnIndex: lastHumanTurnIndex,
+              ops: [],
             }
+            fileMap.set(filePath, accum)
           }
 
-          changeMap.set(b.id, change)
+          accum.toolCallIds.push(b.id)
+          if (isEdit) accum.hasEdit = true
+          else accum.hasWrite = true
+          accum.ops.push({ oldString, newString, isWrite: !isEdit })
         }
 
         if (b.name === "Bash") {
           const cmd = b.input.command as string | undefined
           if (!cmd || !/^(?:rm|git\s+rm)\s/.test(cmd)) continue
           const isDir = /-r\b/.test(cmd)
-          // Quoted absolute paths
           for (const m of cmd.matchAll(/"(\/[^"]+)"/g)) {
             rmPaths.push({ path: m[1], turnIndex: lastHumanTurnIndex, isDir })
           }
-          // Unquoted tokens that look like absolute paths
           const afterFlags = cmd.replace(/^(?:rm|git\s+rm)\s+(?:-[a-z]+\s+)*/i, "")
           for (const token of afterFlags.split(/\s+/)) {
             if (token.startsWith("/")) {
@@ -125,37 +139,70 @@ export async function parseSessionFileChanges(
   }
 
   // Apply error status from tool results
-  for (const [toolId, change] of changeMap) {
+  for (const [toolId, details] of toolCallDetails) {
     const isError = resultMap.get(toolId)
-    if (isError !== undefined) change.isError = isError
+    if (isError) {
+      const accum = fileMap.get(details.filePath)
+      if (accum) accum.isError = true
+    }
   }
 
-  // Detect deleted files from rm commands (skip paths already in Edit/Write)
-  const editWritePaths = new Set(Array.from(changeMap.values()).map((c) => c.filePath))
+  // Build computed changes
+  const changes: ComputedFileChange[] = []
+
+  for (const [filePath, accum] of fileMap) {
+    const diff = computeNetDiff(accum.ops)
+    const type: "edit" | "write" = accum.hasWrite && !accum.hasEdit ? "write" : "edit"
+
+    const change: ComputedFileChange = {
+      filePath,
+      type,
+      additions: diff.addCount,
+      deletions: diff.delCount,
+      hasEdit: accum.hasEdit,
+      hasWrite: accum.hasWrite,
+      isError: accum.isError,
+      toolCallIds: accum.toolCallIds,
+      turnIndex: accum.firstTurnIndex,
+    }
+
+    if (includeContent) {
+      change.content = {
+        originalStr: diff.originalStr,
+        currentStr: diff.currentStr,
+      }
+    }
+
+    changes.push(change)
+  }
+
+  // Detect deleted files from rm commands
+  const editWritePaths = new Set(fileMap.keys())
   const lastTurnForRm = new Map<string, number>()
   for (const rm of rmPaths) {
     const prev = lastTurnForRm.get(rm.path)
     if (prev === undefined || rm.turnIndex > prev) lastTurnForRm.set(rm.path, rm.turnIndex)
   }
 
-  const deletedChanges: FileChange[] = []
   for (const [rmPath, rmTurnIndex] of lastTurnForRm) {
     if (editWritePaths.has(rmPath)) continue
     try {
       await stat(rmPath)
-      // still exists — not actually deleted
     } catch {
-      deletedChanges.push({
-        toolCallId: `deleted:${rmPath}`,
-        type: "deleted",
+      changes.push({
         filePath: rmPath,
-        turnIndex: rmTurnIndex,
+        type: "deleted",
+        additions: 0,
+        deletions: 0,
+        hasEdit: false,
+        hasWrite: false,
         isError: false,
+        toolCallIds: [`deleted:${rmPath}`],
+        turnIndex: rmTurnIndex,
       })
     }
   }
 
-  const changes = [...Array.from(changeMap.values()), ...deletedChanges]
   changes.sort((a, b) => a.turnIndex - b.turnIndex || a.filePath.localeCompare(b.filePath))
 
   return { changes, cwd }
@@ -182,7 +229,7 @@ export function registerSessionFileChangesRoutes(use: UseFn) {
         const jsonlContent = await readFile(jsonlPath, "utf-8")
         const { changes } = await parseSessionFileChanges(jsonlContent, true)
 
-        const change = changes.find((c) => c.toolCallId === toolCallId)
+        const change = changes.find((c) => c.toolCallIds.includes(toolCallId))
         if (!change) return sendJson(res, 404, { error: "Tool call not found" })
 
         sendJson(res, 200, change)

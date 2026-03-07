@@ -16,11 +16,45 @@ export interface ChatInputHandle {
   focus: () => void
 }
 
-/** Auto-resize a textarea to fit its content (max 200px). */
-function autoResize(el: HTMLTextAreaElement | null): void {
-  if (!el) return
+/**
+ * Auto-resize a textarea to fit its content (max 200px).
+ * Returns true if multiline layout is needed.
+ *
+ * When currently in multiline mode, the textarea is wider (buttons on own row).
+ * To prevent oscillation at the boundary, we temporarily shrink the width to
+ * simulate the single-line layout before deciding whether to exit multiline.
+ */
+function autoResize(el: HTMLTextAreaElement | null, currentlyMultiline: boolean): boolean {
+  if (!el) return false
+  const prev = el.offsetHeight
+  el.style.transition = "none"
   el.style.height = "auto"
-  el.style.height = Math.min(el.scrollHeight, 200) + "px"
+  const target = Math.min(el.scrollHeight, 200)
+
+  // Decide if we need multiline
+  let needsMultiline: boolean
+  if (currentlyMultiline) {
+    // Temporarily narrow the textarea to what it would be with inline buttons
+    // and check if text still wraps. This prevents the oscillation loop where:
+    // multiline → wider → text unwraps → exit multiline → narrower → text wraps → ...
+    const INLINE_BUTTONS_WIDTH_PX = 140
+    const savedW = el.style.width
+    el.style.width = `${Math.max(100, el.offsetWidth - INLINE_BUTTONS_WIDTH_PX)}px`
+    needsMultiline = el.scrollHeight > 48
+    el.style.width = savedW
+  } else {
+    needsMultiline = target > 44
+  }
+
+  if (prev !== target) {
+    el.style.height = prev + "px"
+    void el.offsetHeight // force layout at old height
+    el.style.transition = "height 150ms ease"
+    el.style.height = target + "px"
+  } else {
+    el.style.height = target + "px"
+  }
+  return needsMultiline
 }
 
 function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean): string {
@@ -31,9 +65,9 @@ function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConn
 }
 
 function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean): string {
-  if (isPlanApproval) return "border-purple-700/50 focus:border-purple-500/30 focus:ring-purple-500/20"
-  if (isUserQuestion) return "border-pink-700/50 focus:border-pink-500/30 focus:ring-pink-500/20"
-  return "border-border/50 focus:border-blue-500/30 focus:ring-blue-500/20"
+  if (isPlanApproval) return "border-purple-700/50 focus-within:border-purple-500/30 focus-within:ring-purple-500/20"
+  if (isUserQuestion) return "border-pink-700/50 focus-within:border-pink-500/30 focus-within:ring-pink-500/20"
+  return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
@@ -46,13 +80,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
 
   const [text, setText] = useState("")
+  const [isMultiline, setIsMultiline] = useState(false)
+  const isMultilineRef = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const updateMultiline = useCallback((v: boolean) => { isMultilineRef.current = v; setIsMultiline(v) }, [])
 
   const { voiceStatus, voiceProgress, voiceError, toggleVoice, destroyTranscriber } = useVoiceInput({
     onTranscript: (transcript) => {
       setText((prev) => {
         const joined = prev ? prev + " " + transcript : transcript
-        requestAnimationFrame(() => autoResize(textareaRef.current))
+        requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
         return joined
       })
     },
@@ -84,9 +122,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
     setSlashSelectedIndex(0)
     requestAnimationFrame(() => {
       const el = textareaRef.current
-      if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; autoResize(el) }
+      if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
     })
-  }, [])
+  }, [updateMultiline])
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
@@ -95,8 +133,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
     onSend(trimmed, imagePayload)
     setText("")
     clearImages()
+    updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, onSend, clearImages])
+  }, [text, images, onSend, clearImages, updateMultiline])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showSlash && filteredSlashList.length > 0) {
@@ -109,7 +148,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
   }, [handleSubmit, isConnected, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); autoResize(e.target) }, [])
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
   useImperativeHandle(ref, () => ({ toggleVoice, focus: () => textareaRef.current?.focus() }), [toggleVoice])
   useEffect(() => { return () => { destroyTranscriber() } }, [destroyTranscriber])
@@ -120,7 +159,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
 
   return (
     <div
-      className={cn("border-border/50 bg-elevation-1 px-3 py-2.5 relative", isDragOver && "ring-2 ring-blue-500/50 ring-inset")}
+      className={cn("border-border/50 bg-elevation-1 pt-2.5 pb-0 relative", isDragOver && "ring-2 ring-blue-500/50 ring-inset")}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -135,7 +174,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
         <SlashSuggestions suggestions={filteredSlashList} filter={slashFilter} loading={slashSuggestionsLoading} selectedIndex={slashSelectedIndex} onSelect={handleSlashSelect} onHover={setSlashSelectedIndex} onEdit={onEditConfig} />
       )}
 
-      <div className="mx-auto max-w-3xl">
+      <div>
         {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
         {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={onSend} />}
 
@@ -152,21 +191,32 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected)}
-              rows={1}
-              className={cn("w-full resize-none rounded-xl elevation-2 px-3.5 py-2.5 text-sm text-foreground", "placeholder:text-muted-foreground focus:outline-none focus:ring-2", getTextareaBorderClass(isPlanApproval, isUserQuestion), "transition-colors duration-200")}
-            />
+        <div className={cn(
+          "relative bg-elevation-2 border rounded-3xl chat-input-3d",
+          getTextareaBorderClass(isPlanApproval, isUserQuestion),
+          "focus-within:ring-2",
+          isMultiline ? "flex flex-col" : "flex items-end"
+        )}>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected)}
+            rows={1}
+            className={cn(
+              "w-full resize-none bg-transparent pl-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none",
+              isMultiline ? "py-3 pr-4" : "py-2.5 pr-2"
+            )}
+          />
+          <div className={cn(
+            "flex items-center shrink-0",
+            isMultiline ? "px-2 pb-2 justify-end" : "pr-1.5 pb-1.5"
+          )}>
             <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
+            <ActionButtons hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
           </div>
-          <ActionButtons hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
         </div>
         {status === "error" && error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
       </div>

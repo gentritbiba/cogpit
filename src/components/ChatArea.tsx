@@ -17,10 +17,12 @@ import { cn } from "@/lib/utils"
 
 interface ChatAreaProps {
   searchInputRef: RefObject<HTMLInputElement | null>
+  hasTodos?: boolean
 }
 
 export const ChatArea = memo(function ChatArea({
   searchInputRef,
+  hasTodos,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
   const { session, actions } = useSessionContext()
@@ -28,7 +30,7 @@ export const ChatArea = memo(function ChatArea({
 
   const { searchQuery, expandAll } = state
   const { pendingMessages } = chat
-  const { chatScrollRef, scrollEndRef, canScrollUp, canScrollDown, handleScroll } = scroll
+  const { chatScrollRef, scrollEndRef, handleScroll } = scroll
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
@@ -72,17 +74,11 @@ export const ChatArea = memo(function ChatArea({
           scrollContainerRef={chatScrollRef}
         />
         <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-elevation-0 to-transparent transition-opacity duration-200",
-            canScrollUp ? "opacity-100" : "opacity-0"
-          )}
-        />
-        <div
           ref={chatScrollRef}
           onScroll={handleScroll}
-          className={cn("h-full overflow-y-auto", isMobile && "mobile-scroll")}
+          className={cn("h-full overflow-y-auto overflow-x-hidden elevation-1", isMobile && "mobile-scroll")}
         >
-          <div className={isMobile ? "py-3 px-1" : "mx-auto max-w-4xl py-4"}>
+          <div className={isMobile ? "py-3 px-1 pb-24" : cn("mx-auto max-w-3xl pt-4", hasTodos ? "pb-48" : "pb-32")}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
                 <ConversationTimeline chatScrollRef={chatScrollRef} />
@@ -99,12 +95,6 @@ export const ChatArea = memo(function ChatArea({
             </ErrorBoundary>
           </div>
         </div>
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-elevation-0 to-transparent transition-opacity duration-200",
-            canScrollDown ? "opacity-100" : "opacity-0"
-          )}
-        />
       </div>
     </div>
   )

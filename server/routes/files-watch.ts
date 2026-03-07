@@ -6,6 +6,7 @@ import {
   watch,
   resolve,
 } from "../helpers"
+import { readdir } from "node:fs/promises"
 import type { UseFn } from "../helpers"
 
 export function registerFileWatchRoutes(use: UseFn) {
@@ -253,12 +254,48 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (!closed) flushNewLines()
     }, POLL_MS)
 
+    // ── In-progress compaction detection ──────────────────────────────
+    // When Claude Code compacts, it spawns a subagent with an ID like
+    // "acompact-<hash>" and writes to <sessionId>/subagents/agent-acompact-*.jsonl.
+    // Nothing is written to the parent JSONL until compaction finishes,
+    // so we poll the subagents dir and send a synthetic SSE event.
+    const sessionDir = filePath.replace(/\.jsonl$/, "")
+    const subagentsDir = sessionDir + "/subagents"
+    let compactingSignalSent = false
+
+    const compactionPoller = setInterval(async () => {
+      if (closed) return
+      try {
+        const files = await readdir(subagentsDir)
+        const compactFile = files.find(
+          (f) => f.startsWith("agent-acompact") && f.endsWith(".jsonl")
+        )
+        if (compactFile) {
+          const s = await stat(subagentsDir + "/" + compactFile)
+          const recentlyActive = Date.now() - s.mtimeMs < 30_000
+          if (recentlyActive && !compactingSignalSent) {
+            compactingSignalSent = true
+            res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
+          } else if (!recentlyActive) {
+            compactingSignalSent = false
+          }
+        } else {
+          compactingSignalSent = false
+        }
+      } catch {
+        // subagents dir may not exist — that's fine
+      }
+    }, 1000)
+
     // Heartbeat to keep connection alive
     heartbeat = setInterval(() => {
       if (!closed) res.write(": heartbeat\n\n")
     }, 15000)
 
     // Cleanup on disconnect
-    req.on("close", cleanup)
+    req.on("close", () => {
+      cleanup()
+      clearInterval(compactionPoller)
+    })
   })
 }

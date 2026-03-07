@@ -1,24 +1,11 @@
-import { useState, useCallback, memo } from "react"
+import { memo } from "react"
 import {
   Search,
   ChevronsDownUp,
   ChevronsUpDown,
-  Cpu,
-  RotateCcw,
-  Gauge,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { cn, MODEL_OPTIONS, EFFORT_OPTIONS, DEFAULT_EFFORT } from "@/lib/utils"
-import { OptionGrid } from "@/components/OptionGrid"
-import { SectionHeading } from "@/components/stats/SectionHeading"
+import { cn } from "@/lib/utils"
 import { InputOutputChart } from "@/components/stats/InputOutputChart"
 import { ActivityHeatmap } from "@/components/stats/ActivityHeatmap"
 import { ModelDistribution } from "@/components/stats/ModelDistribution"
@@ -38,18 +25,6 @@ interface StatsPanelProps {
   onToggleServer?: (id: string, outputPath: string, title: string) => void
   onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
   searchInputRef?: React.RefObject<HTMLInputElement | null>
-  /** Permissions panel props */
-  permissionsPanel?: React.ReactNode
-  /** Model selector */
-  selectedModel?: string
-  onModelChange?: (model: string) => void
-  /** Effort selector */
-  selectedEffort?: string
-  onEffortChange?: (effort: string) => void
-  /** Whether model, effort, or permissions have pending changes requiring restart */
-  hasSettingsChanges?: boolean
-  /** Called when user confirms restarting the session to apply settings */
-  onApplySettings?: () => Promise<void>
   /** Called when user clicks a background agent to open its session */
   onLoadSession?: (dirName: string, fileName: string) => void
   /** Background agents from useBackgroundAgents (passed from App to avoid double-polling) */
@@ -103,96 +78,6 @@ function SearchHeader({ searchInputRef }: SearchHeaderProps): JSX.Element {
   )
 }
 
-// ── Model Selector ─────────────────────────────────────────────────────────
-
-function ModelSelector({ selectedModel, onModelChange }: { selectedModel?: string; onModelChange: (model: string) => void }): JSX.Element {
-  return (
-    <div className="rounded-lg elevation-2 depth-low p-3">
-      <section>
-        <SectionHeading>
-          <Cpu className="size-3" />
-          Model
-        </SectionHeading>
-        <OptionGrid
-          options={MODEL_OPTIONS}
-          selected={selectedModel || ""}
-          onChange={onModelChange}
-          accentColor="blue"
-        />
-      </section>
-    </div>
-  )
-}
-
-// ── Effort Selector ───────────────────────────────────────────────────────
-
-function EffortSelector({ selectedEffort, onEffortChange }: { selectedEffort?: string; onEffortChange: (effort: string) => void }): JSX.Element {
-  return (
-    <div className="rounded-lg elevation-2 depth-low p-3">
-      <section>
-        <SectionHeading>
-          <Gauge className="size-3" />
-          Thinking Effort
-        </SectionHeading>
-        <OptionGrid
-          options={EFFORT_OPTIONS}
-          selected={selectedEffort || DEFAULT_EFFORT}
-          onChange={onEffortChange}
-          columns={3}
-          accentColor="orange"
-        />
-      </section>
-    </div>
-  )
-}
-
-// ── Restart Dialog ─────────────────────────────────────────────────────────
-
-interface RestartDialogProps {
-  open: boolean
-  isRestarting: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-}
-
-function RestartDialog({ open, isRestarting, onOpenChange, onConfirm }: RestartDialogProps): JSX.Element {
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o && !isRestarting) onOpenChange(o) }}>
-      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-foreground">
-            <RotateCcw className="size-4 text-amber-400" />
-            Restart session?
-          </DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            Applying new model or permission settings requires restarting the
-            underlying Claude process. Your conversation history will be
-            preserved, but the context cache will be cleared.
-          </DialogDescription>
-        </DialogHeader>
-
-        <DialogFooter className="gap-2">
-          <Button
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={isRestarting}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={onConfirm}
-            disabled={isRestarting}
-            className="bg-amber-600 hover:bg-amber-500 text-white"
-          >
-            {isRestarting ? "Restarting..." : "Apply & Restart"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export const StatsPanel = memo(function StatsPanel({
@@ -200,13 +85,6 @@ export const StatsPanel = memo(function StatsPanel({
   onToggleServer,
   onServersChanged,
   searchInputRef,
-  permissionsPanel,
-  selectedModel,
-  onModelChange,
-  selectedEffort,
-  onEffortChange,
-  hasSettingsChanges,
-  onApplySettings,
   onLoadSession,
   backgroundAgents,
 }: StatsPanelProps) {
@@ -214,20 +92,6 @@ export const StatsPanel = memo(function StatsPanel({
   const { session: sessionOrNull, sessionSource } = useSessionContext()
   const session = sessionOrNull!
   const { turns } = session
-
-  const [showRestartDialog, setShowRestartDialog] = useState(false)
-  const [isRestarting, setIsRestarting] = useState(false)
-
-  const handleConfirmRestart = useCallback(async () => {
-    if (!onApplySettings) return
-    setIsRestarting(true)
-    try {
-      await onApplySettings()
-      setShowRestartDialog(false)
-    } finally {
-      setIsRestarting(false)
-    }
-  }, [onApplySettings])
 
   return (
     <aside className={cn(
@@ -241,30 +105,6 @@ export const StatsPanel = memo(function StatsPanel({
       )}
 
       <div className={cn("flex flex-col gap-6", isMobile ? "p-4" : "p-3")}>
-        {permissionsPanel && (
-          <div className="rounded-lg elevation-2 depth-low p-3">
-            {permissionsPanel}
-          </div>
-        )}
-
-        {onModelChange && (
-          <ModelSelector selectedModel={selectedModel} onModelChange={onModelChange} />
-        )}
-
-        {onEffortChange && (
-          <EffortSelector selectedEffort={selectedEffort} onEffortChange={onEffortChange} />
-        )}
-
-        {hasSettingsChanges && onApplySettings && (
-          <button
-            onClick={() => setShowRestartDialog(true)}
-            className="flex items-center justify-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-500/20 hover:border-amber-500/70"
-          >
-            <RotateCcw className="size-3" />
-            Apply Changes
-          </button>
-        )}
-
         <BackgroundServers
           cwd={session.cwd}
           turns={turns}
@@ -286,13 +126,6 @@ export const StatsPanel = memo(function StatsPanel({
         <ModelDistribution turns={turns} />
         <ErrorLog turns={turns} onJumpToTurn={onJumpToTurn} />
       </div>
-
-      <RestartDialog
-        open={showRestartDialog}
-        isRestarting={isRestarting}
-        onOpenChange={setShowRestartDialog}
-        onConfirm={handleConfirmRestart}
-      />
     </aside>
   )
 })

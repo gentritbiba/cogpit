@@ -138,6 +138,22 @@ export function summaryMsg(summary = "Conversation compacted"): SummaryMessage {
   }
 }
 
+export function compactBoundaryMsg(
+  trigger: "auto" | "manual" = "auto",
+  preTokens = 167000,
+  content = "Conversation compacted"
+): SystemMessage {
+  return {
+    type: "system",
+    subtype: "compact_boundary",
+    content,
+    isMeta: false,
+    compactMetadata: { trigger, preTokens },
+    uuid: nextId(),
+    timestamp: "2025-01-15T10:00:03Z",
+  }
+}
+
 /**
  * @deprecated Claude Code v2.1.63+ no longer emits agent_progress messages.
  * Use agentToolSession() / backgroundAgentToolSession() for new-format fixtures.

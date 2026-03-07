@@ -5,26 +5,38 @@ import type { TodoProgress } from "@/hooks/useTodoProgress"
 
 interface TodoProgressPanelProps {
   progress: TodoProgress
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }
 
 export const TodoProgressPanel = memo(function TodoProgressPanel({
   progress,
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: TodoProgressPanelProps) {
-  const [collapsed, setCollapsed] = useState(true)
+  const [internalExpanded, setInternalExpanded] = useState(false)
+  const expanded = controlledExpanded ?? internalExpanded
+
+  function toggleExpanded(): void {
+    const next = !expanded
+    onExpandedChange?.(next)
+    setInternalExpanded(next)
+  }
+
   const { todos, completed, total } = progress
   const pct = total > 0 ? (completed / total) * 100 : 0
 
   return (
-    <div className="shrink-0 border-t border-border/80 bg-elevation-1">
+    <div className="shrink-0 bg-elevation-1">
       {/* Header — always visible */}
       <button
-        onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors hover:bg-elevation-2"
+        onClick={toggleExpanded}
+        className="flex w-full items-center gap-2.5 py-1.5 text-left transition-colors hover:bg-elevation-2 rounded-md px-2"
       >
-        {collapsed ? (
-          <ChevronUp className="size-3 text-muted-foreground" />
-        ) : (
+        {expanded ? (
           <ChevronDown className="size-3 text-muted-foreground" />
+        ) : (
+          <ChevronUp className="size-3 text-muted-foreground" />
         )}
         <span className="text-[11px] font-medium text-muted-foreground">
           TODOs
@@ -58,8 +70,8 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
       </button>
 
       {/* Task list — collapsible */}
-      {!collapsed && (
-        <div className="px-3 pb-2 pt-0.5">
+      {expanded && (
+        <div className="pb-2 pt-0.5 px-2">
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             {todos.map((todo, i) => (
               <div
@@ -76,11 +88,10 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                 <span
                   className={cn(
                     "text-[11px] truncate",
-                    todo.status === "completed"
-                      ? "text-muted-foreground line-through"
-                      : todo.status === "in_progress"
-                        ? "text-blue-300"
-                        : "text-muted-foreground"
+                    todo.status === "in_progress"
+                      ? "text-blue-300"
+                      : "text-muted-foreground",
+                    todo.status === "completed" && "line-through",
                   )}
                 >
                   {todo.content}

@@ -9,7 +9,7 @@ import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { LiveElapsed } from "./AgentStatusIndicator"
-import { collectToolCalls, collectActivity } from "@/lib/timelineHelpers"
+import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -147,7 +147,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       {isNear ? (
         <div ref={contentRef} className="space-y-3">
           {turn.userMessage && (
-            <div className={cn("rounded-lg p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
+            <div className={cn("rounded-2xl p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
               <UserMessage
                 content={turn.userMessage}
                 timestamp={turn.timestamp}
@@ -325,10 +325,10 @@ function ContentBlocks({
     }
 
     if (block.kind === "text") {
-      const { toolCalls, nextIndex } = collectToolCalls(blocks, i + 1)
+      const { items, toolCalls, thinkingCount, nextIndex } = collectActivity(blocks, i + 1)
       block.text.forEach((text, ti) => {
         const isLastTextInBlock = ti === block.text.length - 1
-        const hasFollowingTools = isLastTextInBlock && toolCalls.length > 0
+        const hasFollowingActivity = isLastTextInBlock && (toolCalls.length > 0 || thinkingCount > 0)
         elements.push(
           <div key={`text-${i}-${ti}`}>
             <AssistantText
@@ -337,13 +337,15 @@ function ContentBlocks({
               tokenUsage={null}
               timestamp={block.timestamp}
             />
-            {hasFollowingTools && (
+            {hasFollowingActivity && (
               <div className="mt-1.5 border-l-2 border-border/40 pl-3 ml-1">
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
+                  activityItems={thinkingCount > 0 ? items : undefined}
+                  thinkingCount={thinkingCount}
                 />
               </div>
             )}

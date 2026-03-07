@@ -17,6 +17,7 @@ export function useLiveSession(
 ) {
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
+  const [isCompacting, setIsCompacting] = useState(false)
   const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
   const sseStateRef = useRef<SseConnectionState>("disconnected")
@@ -88,8 +89,13 @@ export function useLiveSession(
             setIsLive(true)
           }
           resetStaleTimer()
+        } else if (data.type === "compacting_in_progress") {
+          setIsLive(true)
+          setIsCompacting(true)
+          resetStaleTimer()
         } else if (data.type === "lines" && data.lines.length > 0) {
           setIsLive(true)
+          setIsCompacting(false)
           resetStaleTimer()
 
           const newText = data.lines.join("\n") + "\n"
@@ -127,5 +133,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, rawText])
 
-  return { isLive, sseState }
+  return { isLive, sseState, isCompacting }
 }

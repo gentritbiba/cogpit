@@ -93,18 +93,18 @@ export function SessionRow({
           onClick={() => onSelectSession(s.dirName, s.fileName)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
           className={cn(
-            "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors duration-100 cursor-pointer",
+            "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
             cardStyle(isActiveSession, hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
           )}
         >
           {/* Title */}
-          <span className="text-[11px] leading-tight truncate flex-1 text-foreground">
+          <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
           </span>
 
           {/* Matched search snippet */}
           {s.matchedMessage && (
-            <span className="text-[9px] text-amber-500/70 truncate max-w-[80px] italic shrink-0">
+            <span className="text-[10px] text-amber-500/70 truncate max-w-[80px] italic shrink-0">
               {s.matchedMessage}
             </span>
           )}
@@ -112,7 +112,7 @@ export function SessionRow({
           {/* Turn count */}
           {turnCount > 0 && (
             <span className={cn(
-              "flex items-center gap-0.5 text-[10px] font-medium shrink-0",
+              "flex items-center gap-0.5 text-[11px] font-medium shrink-0",
               turnCountColor(turnCount)
             )}>
               <MessageSquare className="size-2.5" />
@@ -121,7 +121,7 @@ export function SessionRow({
           )}
 
           {/* Relative time */}
-          <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+          <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
             {formatRelativeTime(s.lastActivityAt || s.lastModified)}
           </span>
 

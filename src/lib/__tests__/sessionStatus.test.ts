@@ -99,6 +99,15 @@ describe("deriveSessionStatus", () => {
     expect(deriveSessionStatus(msgs).status).toBe("compacting")
   })
 
+  it("returns compacting when last meaningful message is a compact_boundary", () => {
+    const msgs = [
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+      { type: "system", subtype: "turn_duration" },
+      { type: "system", subtype: "compact_boundary", content: "Conversation compacted", isMeta: false },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("compacting")
+  })
+
   it("skips file-history-snapshot messages to find real status", () => {
     const msgs = [
       { type: "user", message: { role: "user", content: "hello" } },

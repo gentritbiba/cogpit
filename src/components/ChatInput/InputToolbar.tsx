@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react"
 import { Send, Square, Mic, MicOff, Loader2, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
@@ -6,6 +7,12 @@ import { formatElapsed } from "@/lib/format"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import type { VoiceStatus } from "./useVoiceInput"
 import { getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
+
+function getVoiceIcon(status: VoiceStatus): LucideIcon {
+  if (status === "loading") return Loader2
+  if (status === "listening") return MicOff
+  return Mic
+}
 
 interface InputToolbarProps {
   isPlanApproval: boolean
@@ -22,9 +29,9 @@ export function InputToolbar({
 
   return (
     <>
-      {/* Active session indicator inside textarea */}
+      {/* Active session indicator */}
       {isConnected && !isPlanApproval && !isUserQuestion && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 mr-1">
           {elapsedSec > 0 && (
             <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
               {formatElapsed(elapsedSec)}
@@ -60,8 +67,10 @@ export function ActionButtons({
   const { actions: { handleStopSession: onStopSession } } = useSessionContext()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
 
+  const VoiceIcon = getVoiceIcon(voiceStatus)
+
   return (
-    <>
+    <div className="flex items-center">
       {/* Interrupt button -- sends Escape to Claude */}
       {isConnected && (
         <Tooltip>
@@ -69,10 +78,10 @@ export function ActionButtons({
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 shrink-0 p-0 rounded-lg text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+              className="h-7 w-7 shrink-0 p-0 rounded-full text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
               onClick={onInterrupt}
             >
-              <Square className="size-3.5 fill-current" />
+              <Square className="size-3 fill-current" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Interrupt agent (Esc)</TooltipContent>
@@ -86,10 +95,10 @@ export function ActionButtons({
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 shrink-0 p-0 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              className="h-7 w-7 shrink-0 p-0 rounded-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
               onClick={onStopSession}
             >
-              <Power className="size-4" />
+              <Power className="size-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Stop session</TooltipContent>
@@ -102,17 +111,11 @@ export function ActionButtons({
           <Button
             variant="ghost"
             size="sm"
-            className={cn("h-9 w-9 shrink-0 p-0 rounded-lg", getVoiceButtonClass(voiceStatus))}
+            className={cn("h-7 w-7 shrink-0 p-0 rounded-full", getVoiceButtonClass(voiceStatus))}
             onClick={onToggleVoice}
             disabled={voiceStatus === "loading"}
           >
-            {voiceStatus === "loading" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : voiceStatus === "listening" ? (
-              <MicOff className="size-4" />
-            ) : (
-              <Mic className="size-4" />
-            )}
+            <VoiceIcon className={cn("size-3.5", voiceStatus === "loading" && "animate-spin")} />
           </Button>
         </TooltipTrigger>
         <TooltipContent>
@@ -124,7 +127,7 @@ export function ActionButtons({
         variant="ghost"
         size="sm"
         className={cn(
-          "h-9 w-9 shrink-0 p-0 rounded-lg transition-colors duration-200",
+          "h-7 w-7 shrink-0 p-0 rounded-full transition-colors duration-200",
           hasContent
             ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
             : "text-muted-foreground"
@@ -133,8 +136,8 @@ export function ActionButtons({
         onClick={onSubmit}
         aria-label="Send message"
       >
-        <Send className="size-4" />
+        <Send className="size-3.5" />
       </Button>
-    </>
+    </div>
   )
 }

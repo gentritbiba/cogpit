@@ -38,10 +38,13 @@ function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> 
   return map
 }
 
-/** Group sessions by project path for compact display. */
+/** Group sessions by project path for compact display, sorted newest-first. */
 function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessionInfo[]> {
+  const sorted = [...sessions].sort(
+    (a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
+  )
   const groups = new Map<string, ActiveSessionInfo[]>()
-  for (const s of sessions) {
+  for (const s of sorted) {
     const key = shortPath(s.cwd ?? dirNameToPath(s.dirName), 2)
     const list = groups.get(key)
     if (list) list.push(s)
@@ -145,6 +148,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // Group sessions by project path
   const grouped = useMemo(() => groupByProject(sessions), [sessions])
 
+  // Derive pending session's project path once (used for group matching)
+  const pendingProjectPath = useMemo(
+    () => pendingSession ? shortPath(pendingSession.cwd || dirNameToPath(pendingSession.dirName), 2) : null,
+    [pendingSession],
+  )
+
   // Detect status transitions to "completed" — only highlight newly completed sessions.
   useEffect(() => {
     if (sessions.length === 0) return
@@ -229,7 +238,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search sessions & prompts\u2026"
-            className="w-full rounded-md border border-border/60 elevation-2 depth-low py-1.5 pl-7 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
+            className="w-full rounded-md border border-border/60 py-1.5 pl-7 pr-7 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
           {searchQuery && !searching && (
             <button
@@ -244,7 +253,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
           )}
         </div>
         {processes.length > 0 && (
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap">
             {processes.length}
           </span>
         )}
@@ -281,14 +290,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               {debouncedSearch ? (
                 <>
                   <Search className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">No sessions match &quot;{debouncedSearch}&quot;</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Try a different search term</p>
+                  <p className="text-[13px] text-muted-foreground">No sessions match &quot;{debouncedSearch}&quot;</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Try a different search term</p>
                 </>
               ) : (
                 <>
                   <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-xs text-muted-foreground">No active sessions</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">Start Claude Code to see sessions here</p>
+                  <p className="text-[13px] text-muted-foreground">No active sessions</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code to see sessions here</p>
                 </>
               )}
             </div>
@@ -301,57 +310,46 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
           )}
 
           {/* Grouped sessions by project — pending session is placed inside its matching group */}
-          {(() => {
-            const pendingProjectPath = pendingSession
-              ? shortPath(pendingSession.cwd || dirNameToPath(pendingSession.dirName), 2)
-              : null
-            return [...grouped.entries()].map(([projectPath, projectSessions], idx) => (
-              <ProjectGroup
-                key={projectPath}
-                projectPath={projectPath}
-                sessions={projectSessions}
-                defaultCollapsed={idx >= 3}
-                forceExpand={!!debouncedSearch}
-                activeSessionKey={activeSessionKey}
-                procBySession={procBySession}
-                killingPids={killingPids}
-                newlyCompleted={newlyCompleted}
-                sessionNames={sessionNames}
-                onSelectSession={handleSelectSession}
-                onKill={handleKill}
-                onDuplicateSession={onDuplicateSession}
-                onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
-                onRenameSession={renameSession}
-                pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
-              />
-            ))
-          })()}
+          {[...grouped.entries()].map(([projectPath, projectSessions], idx) => (
+            <ProjectGroup
+              key={projectPath}
+              projectPath={projectPath}
+              sessions={projectSessions}
+              defaultCollapsed={idx >= 3}
+              forceExpand={!!debouncedSearch}
+              activeSessionKey={activeSessionKey}
+              procBySession={procBySession}
+              killingPids={killingPids}
+              newlyCompleted={newlyCompleted}
+              sessionNames={sessionNames}
+              onSelectSession={handleSelectSession}
+              onKill={handleKill}
+              onDuplicateSession={onDuplicateSession}
+              onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
+              onRenameSession={renameSession}
+              pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
+            />
+          ))}
 
           {/* Pending session in a new group if no matching project group exists yet */}
-          {pendingSession && (() => {
-            const pendingProjectPath = shortPath(pendingSession.cwd || dirNameToPath(pendingSession.dirName), 2)
-            if (!grouped.has(pendingProjectPath)) {
-              return (
-                <ProjectGroup
-                  key={`pending-${pendingProjectPath}`}
-                  projectPath={pendingProjectPath}
-                  sessions={[]}
-                  activeSessionKey={activeSessionKey}
-                  procBySession={procBySession}
-                  killingPids={killingPids}
-                  newlyCompleted={newlyCompleted}
-                  sessionNames={sessionNames}
-                  onSelectSession={handleSelectSession}
-                  onKill={handleKill}
-                  onDuplicateSession={onDuplicateSession}
-                  onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
-                  onRenameSession={renameSession}
-                  pendingSession={pendingSession}
-                />
-              )
-            }
-            return null
-          })()}
+          {pendingProjectPath && !grouped.has(pendingProjectPath) && pendingSession && (
+            <ProjectGroup
+              key={`pending-${pendingProjectPath}`}
+              projectPath={pendingProjectPath}
+              sessions={[]}
+              activeSessionKey={activeSessionKey}
+              procBySession={procBySession}
+              killingPids={killingPids}
+              newlyCompleted={newlyCompleted}
+              sessionNames={sessionNames}
+              onSelectSession={handleSelectSession}
+              onKill={handleKill}
+              onDuplicateSession={onDuplicateSession}
+              onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
+              onRenameSession={renameSession}
+              pendingSession={pendingSession}
+            />
+          )}
 
         </div>
       </ScrollArea>
@@ -398,8 +396,9 @@ function ProjectGroup({
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const isCollapsed = (forceExpand || hasPending) ? false : collapsed
 
-  // Each row is ~28px; show 5 visible, rest scrollable
+  // Each row is ~32px; show 5 visible, rest scrollable
   const VISIBLE_COUNT = 5
+  const ROW_HEIGHT = 32
   const totalCount = sessions.length + (hasPending ? 1 : 0)
   const needsScroll = totalCount > VISIBLE_COUNT
 
@@ -415,10 +414,10 @@ function ProjectGroup({
           !isCollapsed && "rotate-90"
         )} />
         <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
-        <span className="text-[10px] font-medium text-muted-foreground/70 truncate">
+        <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
           {projectPath}
         </span>
-        <span className="text-[9px] text-muted-foreground/40 shrink-0">
+        <span className="text-[10px] text-muted-foreground/40 shrink-0">
           {totalCount}
         </span>
       </button>
@@ -430,7 +429,7 @@ function ProjectGroup({
             "flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1",
             needsScroll && "overflow-y-auto scrollbar-thin"
           )}
-          style={needsScroll ? { maxHeight: VISIBLE_COUNT * 28 } : undefined}
+          style={needsScroll ? { maxHeight: VISIBLE_COUNT * ROW_HEIGHT } : undefined}
         >
           {hasPending && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
@@ -463,7 +462,7 @@ function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
   return (
     <div className="relative w-full flex items-center gap-1.5 rounded-r-md px-2 py-1 text-left border-l-2 border-l-blue-500 rounded-l-none">
       <Loader2 className="size-2.5 animate-spin text-blue-400 shrink-0" />
-      <span className="text-[11px] leading-tight truncate flex-1 text-foreground">
+      <span className="text-xs leading-tight truncate flex-1 text-foreground">
         {firstMessage || "New session"}
       </span>
     </div>

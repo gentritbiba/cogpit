@@ -215,8 +215,19 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-optical-sizing: auto;
+    letter-spacing: 0.01em;
+    text-rendering: optimizeLegibility;
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+  }
+  /* Chromium/Electron renders light-on-dark text thinner — bump weight to compensate */
+  .dark body {
+    font-weight: 430;
   }
   button,
   [role="button"] {
@@ -438,5 +449,28 @@ html.electron .electron-drag {
   .transition-smooth {
     transition: none;
   }
+}
+
+/* ── Chat input 3D lighting (ChatGPT-style subtle depth) ── */
+.chat-input-3d {
+  box-shadow:
+    var(--edge-highlight-subtle),
+    0 1px 3px rgba(0, 0, 0, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.dark .chat-input-3d {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.1),
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.2);
+}
+.dark .chat-input-3d:focus-within {
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.1),
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.2),
+    0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 

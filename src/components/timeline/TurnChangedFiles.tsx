@@ -346,7 +346,7 @@ const TreeRow = memo(function TreeRow({
           <ChevronRight className="size-3 text-muted-foreground/40 shrink-0" />
         )}
         <Folder className="size-3 text-blue-400/40 shrink-0" />
-        <span className="text-foreground/40">{node.name}</span>
+        <span className="text-foreground/40 truncate">{node.name}</span>
         <div className="flex-1 min-w-2" />
         {!expanded && <LineCounts add={node.additions} del={node.deletions} dimmed />}
       </div>

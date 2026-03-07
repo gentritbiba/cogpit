@@ -3,14 +3,13 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, TerminalSquare, Code2, F
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
-import { SessionSetupPanel } from "@/components/SessionSetupPanel"
+import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { ServerPanel } from "@/components/ServerPanel"
-import { PermissionsPanel } from "@/components/PermissionsPanel"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
 import { DesktopHeader } from "@/components/DesktopHeader"
@@ -148,6 +147,7 @@ export default function App() {
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
+  const [todosExpanded, setTodosExpanded] = useState(false)
 
   // Derive the current project dirName from session, pending session, or dashboard selection
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
@@ -195,7 +195,7 @@ export default function App() {
 
   // Live session streaming — wrapped in startTransition so React can
   // interrupt these low-priority renders to process user interactions (clicks).
-  const { isLive, sseState } = useLiveSession(state.sessionSource, (updated) => {
+  const { isLive, sseState, isCompacting } = useLiveSession(state.sessionSource, (updated) => {
     startTransition(() => {
       dispatch({ type: "UPDATE_SESSION", session: updated })
     })
@@ -227,8 +227,7 @@ export default function App() {
     cancelCreation,
     worktreeEnabled,
     setWorktreeEnabled,
-    worktreeName: newSessionWorktreeName,
-    setWorktreeName: setNewSessionWorktreeName,
+    // worktreeName and setWorktreeName omitted — ChatInputSettings only uses the toggle
   } = useNewSession({
     permissionsConfig: perms.config,
     dispatch,
@@ -305,6 +304,19 @@ export default function App() {
     consumePending: claudeChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
   })
+
+  const chatScrollRef = scroll.chatScrollRef
+
+  const handleTodosExpandedChange = useCallback((expanded: boolean) => {
+    setTodosExpanded(expanded)
+    // Scroll chat to compensate for padding change (pb-48 vs pb-32 = 64px)
+    requestAnimationFrame(() => {
+      const el = chatScrollRef.current
+      if (el) {
+        el.scrollTo({ top: el.scrollTop + (expanded ? 64 : -64), behavior: "smooth" })
+      }
+    })
+  }, [chatScrollRef])
 
   // Wire up the session finalized ref now that scroll is available
   sessionFinalizedRef.current = (_parsed) => {
@@ -403,18 +415,6 @@ export default function App() {
   // Kill-all handler
   const { killing, handleKillAll } = useKillAll()
 
-  // Permissions panel element (shared between desktop/mobile StatsPanel)
-  const permissionsPanelNode = useMemo(() => (
-    <PermissionsPanel
-      config={perms.config}
-      hasPendingChanges={perms.hasPendingChanges}
-      onSetMode={perms.setMode}
-      onToggleAllowed={perms.toggleAllowedTool}
-      onToggleDisallowed={perms.toggleDisallowedTool}
-      onReset={perms.resetToDefault}
-    />
-  ), [perms.config, perms.hasPendingChanges, perms.setMode, perms.toggleAllowedTool, perms.toggleDisallowedTool, perms.resetToDefault])
-
   // Active session key for sidebar highlighting
   const activeSessionKey = state.sessionSource
     ? `${state.sessionSource.dirName}/${state.sessionSource.fileName}`
@@ -459,9 +459,11 @@ export default function App() {
     </div>
   ) : null
 
-  // Collect all error messages for toast display
+  // Collect all error messages for toast display — first non-null wins
   const activeError = actions.loadError || createError || null
-  const clearActiveError = actions.loadError ? actions.clearLoadError : createError ? clearCreateError : undefined
+  let clearActiveError: (() => void) | undefined
+  if (actions.loadError) clearActiveError = actions.clearLoadError
+  else if (createError) clearActiveError = clearCreateError
 
   // Auto-dismiss error toasts after 8 seconds
   useEffect(() => {
@@ -503,6 +505,7 @@ export default function App() {
     sessionSource: state.sessionSource,
     isLive,
     sseState,
+    isCompacting,
     undoRedo,
     pendingInteraction,
     isSubAgentView,
@@ -519,7 +522,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState,
+    isLive, sseState, isCompacting,
     undoRedo, pendingInteraction, isSubAgentView,
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
@@ -658,9 +661,22 @@ export default function App() {
     />
   )
 
+  const isNewSession = !!state.pendingDirName && !state.session
+
   const chatInputNode = (
-    <div className="shrink-0">
+    <div className="shrink-0 bg-elevation-1">
       <ChatInput ref={chatInputRef} />
+      <ChatInputSettings
+        selectedModel={selectedModel}
+        onModelChange={setSelectedModel}
+        selectedEffort={selectedEffort}
+        onEffortChange={setSelectedEffort}
+        isNewSession={isNewSession}
+        worktreeEnabled={worktreeEnabled}
+        onWorktreeEnabledChange={isNewSession ? setWorktreeEnabled : undefined}
+        onApplySettings={handlers.handleApplySettings}
+        activeModelId={state.session?.model}
+      />
     </div>
   )
 
@@ -764,29 +780,8 @@ export default function App() {
               onJumpToTurn={handlers.handleMobileJumpToTurn}
               onToggleServer={serverPanel.handleToggleServer}
               onServersChanged={serverPanel.handleServersChanged}
-              permissionsPanel={permissionsPanelNode}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              selectedEffort={selectedEffort}
-              onEffortChange={setSelectedEffort}
-              hasSettingsChanges={handlers.hasSettingsChanges}
-              onApplySettings={handlers.handleApplySettings}
               onLoadSession={handlers.handleLoadSessionScrollAware}
               backgroundAgents={backgroundAgents}
-            />
-          )}
-
-          {state.mobileTab === "stats" && state.pendingDirName && !state.session && (
-            <SessionSetupPanel
-              permissionsPanel={permissionsPanelNode}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-              selectedEffort={selectedEffort}
-              onEffortChange={setSelectedEffort}
-              worktreeEnabled={worktreeEnabled}
-              onWorktreeEnabledChange={setWorktreeEnabled}
-              worktreeName={newSessionWorktreeName}
-              onWorktreeNameChange={setNewSessionWorktreeName}
             />
           )}
 
@@ -912,7 +907,7 @@ export default function App() {
             <div className="flex flex-1 min-h-0">
               <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
                 <ResizablePanel defaultSize={showFileChangesPanel ? 70 : 100} minSize="500px">
-                  <div className="flex flex-col h-full min-h-0">
+                  <div className="relative h-full min-h-0 flex flex-col">
                     {teamMembersBar}
                     <SessionInfoBar
                       creatingSession={creatingSession}
@@ -921,9 +916,13 @@ export default function App() {
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     />
-                    <ChatArea searchInputRef={searchInputRef} />
-                    {todoProgress && <TodoProgressPanel progress={todoProgress} />}
-                    {subAgentReadOnlyNode || chatInputNode}
+                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} />
+                    <div className="absolute bottom-0 left-0 right-0 z-20 flex justify-center pointer-events-none">
+                      <div className="w-full max-w-3xl px-3 pt-6 bg-gradient-to-t from-elevation-1 from-80% to-transparent pointer-events-auto">
+                        {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
+                        {subAgentReadOnlyNode || chatInputNode}
+                      </div>
+                    </div>
                   </div>
                 </ResizablePanel>
 
@@ -946,62 +945,49 @@ export default function App() {
               </ResizablePanelGroup>
             </div>
           ) : state.pendingDirName ? (
-            <div className="flex flex-1 min-h-0">
-              <div className="flex flex-1 min-h-0 flex-col min-w-0">
-                {pendingPreviewList.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto px-4 py-6">
-                    <div className="mx-auto max-w-4xl">
-                      {pendingPreviewList}
-                    </div>
+            <div className="flex flex-1 min-h-0 flex-col min-w-0">
+              {pendingPreviewList.length > 0 ? (
+                <div className="flex-1 overflow-y-auto px-4 py-6">
+                  <div className="mx-auto max-w-4xl">
+                    {pendingPreviewList}
                   </div>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                    <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                    <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
-                    <div className="flex items-center gap-1 mt-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                        onClick={handleOpenTerminal}
-                      >
-                        <TerminalSquare className="size-3" />
-                        Terminal
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                        onClick={() => postAction("/api/open-in-editor")}
-                      >
-                        <Code2 className="size-3" />
-                        Open
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                        onClick={() => postAction("/api/reveal-in-folder")}
-                      >
-                        <FolderSearch className="size-3" />
-                        Reveal
-                      </Button>
-                    </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-1">
+                  <p className="text-sm text-muted-foreground">New session — type your first message below</p>
+                  <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
+                  <div className="flex items-center gap-1 mt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                      onClick={handleOpenTerminal}
+                    >
+                      <TerminalSquare className="size-3" />
+                      Terminal
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
+                      onClick={() => postAction("/api/open-in-editor")}
+                    >
+                      <Code2 className="size-3" />
+                      Open
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+                      onClick={() => postAction("/api/reveal-in-folder")}
+                    >
+                      <FolderSearch className="size-3" />
+                      Reveal
+                    </Button>
                   </div>
-                )}
-                {chatInputNode}
-              </div>
-              <SessionSetupPanel
-                permissionsPanel={permissionsPanelNode}
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-                selectedEffort={selectedEffort}
-                onEffortChange={setSelectedEffort}
-                worktreeEnabled={worktreeEnabled}
-                onWorktreeEnabledChange={setWorktreeEnabled}
-                worktreeName={newSessionWorktreeName}
-                onWorktreeNameChange={setNewSessionWorktreeName}
-              />
+                </div>
+              )}
+              {chatInputNode}
             </div>
           ) : (
             <Dashboard
@@ -1026,13 +1012,6 @@ export default function App() {
             onToggleServer={serverPanel.handleToggleServer}
             onServersChanged={serverPanel.handleServersChanged}
             searchInputRef={searchInputRef}
-            permissionsPanel={permissionsPanelNode}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
-            selectedEffort={selectedEffort}
-            onEffortChange={setSelectedEffort}
-            hasSettingsChanges={handlers.hasSettingsChanges}
-            onApplySettings={handlers.handleApplySettings}
             onLoadSession={handlers.handleLoadSessionScrollAware}
             backgroundAgents={backgroundAgents}
           />

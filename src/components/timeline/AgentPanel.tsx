@@ -80,7 +80,7 @@ export const AgentPanel = memo(function AgentPanel({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full text-left py-1 hover:opacity-80 transition-opacity"
+        className="flex items-center gap-2 w-full min-w-0 text-left py-1 hover:opacity-80 transition-opacity flex-wrap"
       >
         {isOpen
           ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />

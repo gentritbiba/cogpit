@@ -46,6 +46,8 @@ export interface SessionContextValue {
   isLive: boolean
   /** SSE connection state */
   sseState: SseConnectionState
+  /** Whether the session is currently compacting (in progress) */
+  isCompacting: boolean
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

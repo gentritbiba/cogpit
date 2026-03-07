@@ -152,7 +152,7 @@ const FADE_DELAY = 2000 // ms to show "Done" before fading
 const FADE_DURATION = 600 // ms for the fade-out transition
 
 export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
-  const { session, isLive, sseState } = useSessionContext()
+  const { session, isLive, sseState, isCompacting } = useSessionContext()
 
   // Suppress stale "completed" when isLive transitions false→true (new turn starting).
   // Without this, the old "Done" briefly flashes before the new user message arrives.
@@ -160,6 +160,10 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
 
   const agentStatus = useMemo(() => {
     if (!session || sseState !== "connected") return null
+
+    // In-progress compaction detected via subagent file watcher
+    if (isCompacting) return { status: "compacting" as const }
+
     const status = deriveSessionStatus(
       session.rawMessages as Array<{ type: string; [key: string]: unknown }>
     )
@@ -179,7 +183,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     if (status.status !== "completed") suppressCompletedRef.current = false
 
     return status
-  }, [session, isLive, sseState])
+  }, [session, isLive, sseState, isCompacting])
 
   // Three-phase lifecycle: "visible" → "fading" → "hidden"
   const [fadePhase, setFadePhase] = useState<"visible" | "fading" | "hidden">("visible")

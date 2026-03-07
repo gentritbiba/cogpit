@@ -17,6 +17,7 @@ import {
   toolUseAssistant,
   turnDurationMsg,
   summaryMsg,
+  compactBoundaryMsg,
   agentProgressMsg,
   toJsonl,
   simpleSession,
@@ -624,6 +625,37 @@ describe("compaction summary", () => {
     const lastTurn = session.turns[session.turns.length - 1]
     const summary = lastTurn.compactionSummary!
     expect(summary).toContain("...and 2 more")
+  })
+
+  it("detects compact_boundary system message as compaction", () => {
+    const jsonl = toJsonl([
+      userMsg("First message"),
+      textAssistant("Response"),
+      turnDurationMsg(1000),
+      compactBoundaryMsg("auto", 167000),
+      userMsg("After compaction"),
+      textAssistant("After response"),
+    ])
+    const session = parseSession(jsonl)
+    expect(session.turns[0].compactionSummary).toBeUndefined()
+    const lastTurn = session.turns[session.turns.length - 1]
+    expect(lastTurn.compactionSummary).toBeDefined()
+    expect(lastTurn.compactionSummary).toContain("1 turn")
+  })
+
+  it("detects manual compact_boundary with custom content", () => {
+    const jsonl = toJsonl([
+      userMsg("Working on feature"),
+      textAssistant("Done"),
+      turnDurationMsg(500),
+      compactBoundaryMsg("manual", 131000, "Conversation compacted"),
+      userMsg("Continue"),
+      textAssistant("Continuing"),
+    ])
+    const session = parseSession(jsonl)
+    const lastTurn = session.turns[session.turns.length - 1]
+    expect(lastTurn.compactionSummary).toBeDefined()
+    expect(lastTurn.compactionSummary).toContain("Conversation compacted")
   })
 })
 

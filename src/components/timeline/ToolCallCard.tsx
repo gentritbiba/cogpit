@@ -1,4 +1,4 @@
-import { useState, memo } from "react"
+import { useState, useEffect, useMemo, memo } from "react"
 import {
   CheckCircle,
   XCircle,
@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { EditDiffView } from "./EditDiffView"
+import { highlightCode, getLangFromPath } from "@/lib/shiki"
+import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 
 const TOOL_BADGE_STYLES: Record<string, string> = {
   Read: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -89,9 +91,7 @@ function ToggleButton({
       onClick={onClick}
       className={cn(
         "text-[10px] flex items-center gap-0.5 transition-colors",
-        isOpen && activeClass
-          ? activeClass
-          : "text-muted-foreground hover:text-foreground"
+        isOpen && activeClass ? activeClass : "text-muted-foreground hover:text-foreground",
       )}
     >
       <Chevron className="w-3 h-3" />
@@ -119,6 +119,87 @@ function StatusIcon({
     return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
   }
   return null
+}
+
+// ── Syntax-highlighted Read result ─────────────────────────────────────
+
+type TokenLine = Array<{ content: string; color?: string }>
+
+/** Regex to match the `cat -n` line-number prefix: spaces + number + arrow */
+const LINE_PREFIX_RE = /^(\s*\d+)→(.*)$/
+
+function parseReadResult(text: string): { lineNums: string[]; codeLines: string[] } {
+  const lines = text.split("\n")
+  const lineNums: string[] = []
+  const codeLines: string[] = []
+  for (const line of lines) {
+    const m = line.match(LINE_PREFIX_RE)
+    if (m) {
+      lineNums.push(m[1])
+      codeLines.push(m[2])
+    } else {
+      lineNums.push("")
+      codeLines.push(line)
+    }
+  }
+  return { lineNums, codeLines }
+}
+
+function ReadResultHighlighted({
+  result,
+  filePath,
+  expanded,
+}: {
+  result: string
+  filePath: string
+  expanded: boolean
+}) {
+  const isDark = useIsDarkMode()
+  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
+  const lang = getLangFromPath(filePath)
+
+  const slicedResult = expanded ? result : result.slice(0, 500)
+  const { lineNums, codeLines } = useMemo(() => parseReadResult(slicedResult), [slicedResult])
+  const code = useMemo(() => codeLines.join("\n"), [codeLines])
+
+  useEffect(() => {
+    if (!lang) {
+      setTokens(null)
+      return
+    }
+    let cancelled = false
+    highlightCode(code, lang, isDark).then((r) => {
+      if (!cancelled) setTokens(r)
+    })
+    return () => { cancelled = true }
+  }, [code, lang, isDark])
+
+  return (
+    <pre className="text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]">
+      <code className="block">
+        {codeLines.map((line, i) => {
+          const tokenLine = tokens?.[i]
+          return (
+            <span key={i} className="block">
+              {lineNums[i] && (
+                <span className="inline-block w-10 text-right mr-2 text-muted-foreground/30 select-none">
+                  {lineNums[i]}
+                </span>
+              )}
+              {tokenLine
+                ? tokenLine.map((token, j) => (
+                    <span key={j} style={{ color: token.color }}>
+                      {token.content}
+                    </span>
+                  ))
+                : line || "\u00A0"
+              }
+            </span>
+          )
+        })}
+      </code>
+    </pre>
+  )
 }
 
 // ── Main component ───────────────────────────────────────────────────────
@@ -224,16 +305,24 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
 
       {showResult && toolCall.result !== null && (
         <div className="mt-1.5">
-          <pre
-            className={cn(
-              "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
-              toolCall.isError
-                ? "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border-red-500/20"
-                : "text-muted-foreground bg-elevation-0 border-border/30"
-            )}
-          >
-            {visibleResult}
-          </pre>
+          {toolCall.name === "Read" && !toolCall.isError && typeof toolCall.input.file_path === "string" ? (
+            <ReadResultHighlighted
+              result={resultText}
+              filePath={toolCall.input.file_path as string}
+              expanded={!isLongResult || resultExpanded}
+            />
+          ) : (
+            <pre
+              className={cn(
+                "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
+                toolCall.isError
+                  ? "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border-red-500/20"
+                  : "text-muted-foreground bg-elevation-0 border-border/30"
+              )}
+            >
+              {visibleResult}
+            </pre>
+          )}
           {isLongResult && (
             <button
               onClick={() => setResultExpanded(!resultExpanded)}
