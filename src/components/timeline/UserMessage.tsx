@@ -1,11 +1,11 @@
-import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Terminal, Pencil, Loader2, CheckCircle2, XCircle, Clock } from "lucide-react"
+import { useState, useMemo, useCallback, useEffect, memo, type ReactNode } from "react"
+import { ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, Terminal, Pencil, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
 import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { CompletedIcon, FailedIcon, RunningIcon, ProcessingIcon } from "@/components/ui/StatusIcons"
 
 const SYSTEM_TAG_RE =
   /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
@@ -82,13 +82,13 @@ function parseTaskNotifications(text: string): { notifications: TaskNotification
   return { notifications, remainingText }
 }
 
-const ERROR_STYLE = { Icon: XCircle, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" } as const
+const ERROR_STYLE = { Icon: FailedIcon, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" } as const
 
 const STATUS_STYLES = {
-  completed: { Icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Completed" },
+  completed: { Icon: CompletedIcon, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Completed" },
   failed: { ...ERROR_STYLE, label: "Failed" },
   error: { ...ERROR_STYLE, label: "Error" },
-  running: { Icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20", label: "Running" },
+  running: { Icon: RunningIcon, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20", label: "Running" },
 } as const
 
 function getStatusStyle(status: string) {
@@ -158,7 +158,7 @@ function ExpandedCommandContent({ loading, content }: { loading: boolean; conten
   if (loading) {
     inner = (
       <span className="inline-flex items-center gap-1.5 text-muted-foreground/60 font-mono">
-        <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+        <ProcessingIcon className="w-3 h-3 text-muted-foreground/60" /> Loading...
       </span>
     )
   } else if (content) {
@@ -170,6 +170,84 @@ function ExpandedCommandContent({ loading, content }: { loading: boolean; conten
   return (
     <div className="mt-2 rounded-md border border-border/50 bg-elevation-2 p-3 text-xs text-muted-foreground overflow-auto max-h-80">
       {inner}
+    </div>
+  )
+}
+
+// ── Image Lightbox ───────────────────────────────────────────────────────
+
+function ImageLightbox({
+  images,
+  initialIndex,
+  onClose,
+}: {
+  images: string[]
+  initialIndex: number
+  onClose: () => void
+}) {
+  const [index, setIndex] = useState(initialIndex)
+  const hasMultiple = images.length > 1
+
+  const goPrev = useCallback(() => setIndex((i) => (i - 1 + images.length) % images.length), [images.length])
+  const goNext = useCallback(() => setIndex((i) => (i + 1) % images.length), [images.length])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose()
+      if (e.key === "ArrowLeft") goPrev()
+      if (e.key === "ArrowRight") goNext()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose, goPrev, goNext])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
+      >
+        <X className="w-5 h-5" />
+      </button>
+
+      {/* Counter */}
+      {hasMultiple && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 text-white/70 text-sm font-medium bg-black/40 rounded-full px-3 py-1">
+          {index + 1} / {images.length}
+        </div>
+      )}
+
+      {/* Left arrow */}
+      {hasMultiple && (
+        <button
+          onClick={(e) => { e.stopPropagation(); goPrev() }}
+          className="absolute left-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
+        >
+          <ChevronLeft className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Image */}
+      <img
+        src={images[index]}
+        alt={`Image ${index + 1}`}
+        className="relative z-[1] max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      {/* Right arrow */}
+      {hasMultiple && (
+        <button
+          onClick={(e) => { e.stopPropagation(); goNext() }}
+          className="absolute right-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
+        >
+          <ChevronRight className="w-6 h-6" />
+        </button>
+      )}
     </div>
   )
 }
@@ -189,7 +267,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const [commandExpanded, setCommandExpanded] = useState(false)
   const [commandContent, setCommandContent] = useState<string | null>(null)
   const [commandLoading, setCommandLoading] = useState(false)
-  const [modalImage, setModalImage] = useState<string | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
@@ -288,7 +366,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             {imageUrls.map((url, i) => (
               <button
                 key={i}
-                onClick={() => setModalImage(url)}
+                onClick={() => setLightboxIndex(i)}
                 className="rounded-lg overflow-hidden border border-border/50 hover:border-blue-500/50 transition-colors cursor-pointer"
               >
                 <img
@@ -347,18 +425,13 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
       </div>
 
-      <Dialog open={modalImage !== null} onOpenChange={(open) => !open && setModalImage(null)}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] p-2 bg-elevation-1 border-border/50">
-          <DialogTitle className="sr-only">Full size image</DialogTitle>
-          {modalImage && (
-            <img
-              src={modalImage}
-              alt="Full size"
-              className="max-w-full max-h-[85vh] object-contain mx-auto"
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={imageUrls}
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   )
 })

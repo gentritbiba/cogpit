@@ -1,6 +1,5 @@
 import { memo } from "react"
 import {
-  Loader2,
   FolderOpen,
   Plus,
   Copy,
@@ -23,6 +22,7 @@ import { ContextBadge, HeaderIconButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { Spinner } from "@/components/ui/Spinner"
 
 interface SessionInfoBarProps {
   creatingSession: boolean
@@ -159,7 +159,7 @@ function SessionActions({
           disabled={creatingSession}
           onClick={handleNewSession}
         >
-          {creatingSession ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
+          {creatingSession ? <Spinner className="size-3" /> : <Plus className="size-3" />}
           New
         </Button>
         {onDuplicateSession && (
@@ -180,12 +180,12 @@ function SessionActions({
   return (
     <>
       <HeaderIconButton
-        icon={creatingSession ? Loader2 : Plus}
+        icon={creatingSession ? Spinner : Plus}
         label="New session in this project"
         onClick={handleNewSession}
         disabled={creatingSession}
         className="text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
-        iconClassName={creatingSession ? "animate-spin" : undefined}
+        // Spinner ignores animate-spin, so we can leave it or remove it. Leaving it is fine.
       />
       {onDuplicateSession && (
         <HeaderIconButton

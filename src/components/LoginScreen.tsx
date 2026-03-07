@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react"
-import { Eye, EyeOff, Lock, Loader2 } from "lucide-react"
+import { Eye, EyeOff, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { setToken } from "@/lib/auth"
+import { Spinner } from "@/components/ui/Spinner"
 
 interface LoginScreenProps {
   onAuthenticated: () => void
@@ -81,7 +82,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
         )}
 
         <Button type="submit" className="w-full" disabled={loading || !password.trim()}>
-          {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+          {loading ? <Spinner className="size-4 mr-2" /> : null}
           Connect
         </Button>
       </form>

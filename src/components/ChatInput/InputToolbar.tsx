@@ -1,15 +1,16 @@
 import type { LucideIcon } from "lucide-react"
-import { Send, Square, Mic, MicOff, Loader2, Power } from "lucide-react"
+import { Send, Square, Mic, MicOff, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { Spinner } from "@/components/ui/Spinner"
 import type { VoiceStatus } from "./useVoiceInput"
 import { getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
 
-function getVoiceIcon(status: VoiceStatus): LucideIcon {
-  if (status === "loading") return Loader2
+function getVoiceIcon(status: VoiceStatus): LucideIcon | typeof Spinner {
+  if (status === "loading") return Spinner
   if (status === "listening") return MicOff
   return Mic
 }
@@ -115,7 +116,7 @@ export function ActionButtons({
             onClick={onToggleVoice}
             disabled={voiceStatus === "loading"}
           >
-            <VoiceIcon className={cn("size-3.5", voiceStatus === "loading" && "animate-spin")} />
+            <VoiceIcon className={cn("size-3.5", voiceStatus === "loading" && "mr-0")} />
           </Button>
         </TooltipTrigger>
         <TooltipContent>

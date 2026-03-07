@@ -1,4 +1,4 @@
-import { type RefObject, memo } from "react"
+import { type RefObject, memo, useRef, useEffect, useCallback } from "react"
 import {
   Search,
   ChevronsDownUp,
@@ -11,6 +11,7 @@ import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
+import { FindInSession, type FindInSessionHandle } from "@/components/FindInSession"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
@@ -31,6 +32,20 @@ export const ChatArea = memo(function ChatArea({
   const { searchQuery, expandAll } = state
   const { pendingMessages } = chat
   const { chatScrollRef, scrollEndRef, handleScroll } = scroll
+  const findRef = useRef<FindInSessionHandle>(null)
+
+  // Cmd/Ctrl+F → open find-in-session
+  const handleFindOpen = useCallback(() => findRef.current?.open(), [])
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey) {
+        e.preventDefault()
+        handleFindOpen()
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [handleFindOpen])
 
   // session is guaranteed non-null when ChatArea renders
   const currentSession = session!
@@ -69,6 +84,7 @@ export const ChatArea = memo(function ChatArea({
 
       {/* Scrollable chat area */}
       <div className={cn("relative", isMobile ? "flex-1 min-h-0" : "h-full")}>
+        <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
         <StickyPromptBanner
           session={currentSession}
           scrollContainerRef={chatScrollRef}

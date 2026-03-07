@@ -105,7 +105,7 @@
 }
 
 .dark {
-  --background: oklch(0.12 0.005 265);
+  --background: oklch(0.18 0.008 265);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.18 0.008 265);
   --card-foreground: oklch(0.985 0 0);
@@ -129,7 +129,7 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.11 0.006 265);
+  --sidebar: oklch(0.18 0.008 265);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -139,10 +139,9 @@
   --sidebar-ring: oklch(0.439 0 0);
 
   /* Malewicz Elevation: "Lightness for Proximity" (dark mode)
-     DRAMATIC jumps — like YouTube dark mode where cards
-     visibly float above the background */
-  --elevation-0: oklch(0.12 0.005 265);     /* Ground — dark gray, blue-tinted */
-  --elevation-1: oklch(0.18 0.008 265);     /* Surface — cards, panels (+0.09 jump) */
+     Ground level lifted to surface — consistent elevation-1 base */
+  --elevation-0: oklch(0.18 0.008 265);     /* Ground — now matches surface level */
+  --elevation-1: oklch(0.18 0.008 265);     /* Surface — cards, panels (same as ground) */
   --elevation-2: oklch(0.24 0.010 265);     /* Raised — interactive, inputs (+0.06) */
   --elevation-3: oklch(0.30 0.012 265);     /* Floating — dropdowns, popovers (+0.06) */
   --elevation-4: oklch(0.34 0.014 265);     /* Overlay — modals, dialogs (+0.04) */
@@ -163,9 +162,9 @@
    Pure black backgrounds, zero blue tint, maximum contrast.
    Great for OLED displays where true black saves power. */
 .dark.theme-oled {
-  --background: oklch(0 0 0);
+  --background: oklch(0.08 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.06 0 0);
+  --card: oklch(0.08 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.10 0 0);
   --popover-foreground: oklch(0.985 0 0);
@@ -182,7 +181,7 @@
   --border: oklch(0.18 0 0);
   --input: oklch(0.10 0 0);
   --ring: oklch(0.439 0 0);
-  --sidebar: oklch(0 0 0);
+  --sidebar: oklch(0.08 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -191,8 +190,8 @@
   --sidebar-border: oklch(0.18 0 0);
   --sidebar-ring: oklch(0.439 0 0);
 
-  /* OLED Elevation: pure black ground, sharp jumps */
-  --elevation-0: oklch(0 0 0);
+  /* OLED Elevation: ground lifted to surface level */
+  --elevation-0: oklch(0.08 0 0);
   --elevation-1: oklch(0.08 0 0);
   --elevation-2: oklch(0.14 0 0);
   --elevation-3: oklch(0.18 0 0);
@@ -472,5 +471,22 @@ html.electron .electron-drag {
     0 1px 3px rgba(0, 0, 0, 0.3),
     0 4px 16px rgba(0, 0, 0, 0.2),
     0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+/* ── Find-in-session highlight ── */
+mark.find-in-session-highlight {
+  background-color: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0;
+}
+mark.find-in-session-active {
+  background-color: rgba(250, 204, 21, 0.7);
+}
+.dark mark.find-in-session-highlight {
+  background-color: rgba(250, 204, 21, 0.2);
+}
+.dark mark.find-in-session-active {
+  background-color: rgba(250, 204, 21, 0.5);
 }
 

@@ -76,7 +76,7 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     const el = chatScrollRef.current
     if (!el) return
     chatIsAtBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 50
+      el.scrollHeight - el.scrollTop - el.clientHeight < 150
     updateScrollIndicators()
   }, [updateScrollIndicators])
 
@@ -134,14 +134,19 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     prevTurnCountRef.current = turnCount
   }, [turnCount, pendingCount, consumePending, smoothScrollToEnd])
 
-  // Live content -- auto-scroll (keyed on turn count to avoid running on every session object change)
-  const liveLastTurnToolCount = session?.turns.at(-1)?.toolCalls.length ?? 0
+  // Live content -- auto-scroll (keyed on turn count + tool count + content length to catch streaming)
+  const lastTurn = session?.turns.at(-1)
+  const liveLastTurnToolCount = lastTurn?.toolCalls.length ?? 0
+  const liveLastTurnContentLen = lastTurn?.assistantText.length ?? 0
   useEffect(() => {
     if (!session || !isLive) return
-    if (chatIsAtBottomRef.current) smoothScrollToEnd()
+    if (chatIsAtBottomRef.current) {
+      const el = chatScrollRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
     requestAnimationFrame(updateScrollIndicators)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
-  }, [turnCount, liveLastTurnToolCount, isLive, updateScrollIndicators, smoothScrollToEnd])
+  }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, isLive, updateScrollIndicators])
 
   return useMemo(() => ({
     chatScrollRef,

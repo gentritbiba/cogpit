@@ -11,7 +11,7 @@ import {
 import { getHighlighter, ensureLang, getLangFromPath, type ThemedToken } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 
-// ── Simple line-level diff (LCS-based) ─────────────────────────────────────
+// ── Simple line-level diff (LCS-based, optimized) ──────────────────────────
 
 interface DiffLine {
   type: "added" | "removed" | "unchanged"
@@ -19,6 +19,24 @@ interface DiffLine {
   oldIdx?: number
   newIdx?: number
 }
+
+// Module-level LRU cache — avoids recomputing identical diffs across re-renders
+const DIFF_CACHE_MAX = 24
+const diffCache: Array<{ oldStr: string; newStr: string; result: DiffLine[] }> = []
+
+function getCachedDiff(oldStr: string, newStr: string): DiffLine[] {
+  for (let i = 0; i < diffCache.length; i++) {
+    const e = diffCache[i]
+    if (e.oldStr === oldStr && e.newStr === newStr) return e.result
+  }
+  const result = computeDiff(oldStr, newStr)
+  if (diffCache.length >= DIFF_CACHE_MAX) diffCache.shift()
+  diffCache.push({ oldStr, newStr, result })
+  return result
+}
+
+/** Size threshold — beyond this, skip LCS and show simple removed/added blocks. */
+const LCS_MAX_PRODUCT = 250_000
 
 function computeDiff(oldStr: string, newStr: string): DiffLine[] {
   const oldLines = oldStr.split("\n")
@@ -57,16 +75,29 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
     for (let k = 0; k < om; k++) {
       result.push({ type: "removed", text: oldLines[prefix + k], oldIdx: prefix + k })
     }
+  } else if (om * on > LCS_MAX_PRODUCT) {
+    // Fast path for very large diffs — skip LCS, show removed then added.
+    for (let k = 0; k < om; k++) {
+      result.push({ type: "removed", text: oldLines[prefix + k], oldIdx: prefix + k })
+    }
+    for (let k = 0; k < on; k++) {
+      result.push({ type: "added", text: newLines[prefix + k], newIdx: prefix + k })
+    }
   } else {
-    // LCS only on the changed middle section
-    const dp: number[][] = Array.from({ length: om + 1 }, () => Array(on + 1).fill(0))
+    // LCS on changed middle section — flat Int32Array (single allocation, pre-zeroed)
+    const stride = on + 1
+    const dp = new Int32Array((om + 1) * stride)
     for (let i = 1; i <= om; i++) {
       const oldLine = oldLines[prefix + i - 1]
+      const rowOff = i * stride
+      const prevOff = rowOff - stride
       for (let j = 1; j <= on; j++) {
         if (oldLine === newLines[prefix + j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1
+          dp[rowOff + j] = dp[prevOff + j - 1] + 1
         } else {
-          dp[i][j] = dp[i - 1][j] > dp[i][j - 1] ? dp[i - 1][j] : dp[i][j - 1]
+          const up = dp[prevOff + j]
+          const left = dp[rowOff + j - 1]
+          dp[rowOff + j] = up > left ? up : left
         }
       }
     }
@@ -78,7 +109,7 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
       if (i > 0 && j > 0 && oldLines[prefix + i - 1] === newLines[prefix + j - 1]) {
         middle.push({ type: "unchanged", text: oldLines[prefix + i - 1], oldIdx: prefix + i - 1, newIdx: prefix + j - 1 })
         i--; j--
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      } else if (j > 0 && (i === 0 || dp[i * stride + j - 1] >= dp[(i - 1) * stride + j])) {
         middle.push({ type: "added", text: newLines[prefix + j - 1], newIdx: prefix + j - 1 })
         j--
       } else {
@@ -123,26 +154,35 @@ function useHighlightedTokens(
 
     const theme = isDark ? "github-dark" : "github-light"
     let cancelled = false
-    getHighlighter()
-      .then(async (hl) => {
-        if (cancelled) return
-        await ensureLang(hl, lang)
-        if (cancelled) return
-        const oldResult = hl.codeToTokens(oldStr, { lang, theme })
-        const newResult = hl.codeToTokens(newStr, { lang, theme })
-        setOldTokens(oldResult.tokens)
-        setNewTokens(newResult.tokens)
-      })
-      .catch((err) => {
-        console.warn("[EditDiffView] highlight failed:", err)
-        if (!cancelled) {
-          setOldTokens(null)
-          setNewTokens(null)
-        }
-      })
+
+    // Defer highlighting by one frame so the plain-text diff paints first.
+    // This prevents the heavy codeToTokens calls from blocking the initial render.
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return
+      getHighlighter()
+        .then(async (hl) => {
+          if (cancelled) return
+          await ensureLang(hl, lang)
+          if (cancelled) return
+          const oldResult = hl.codeToTokens(oldStr, { lang, theme })
+          if (cancelled) return
+          setOldTokens(oldResult.tokens)
+          const newResult = hl.codeToTokens(newStr, { lang, theme })
+          if (cancelled) return
+          setNewTokens(newResult.tokens)
+        })
+        .catch((err) => {
+          console.warn("[EditDiffView] highlight failed:", err)
+          if (!cancelled) {
+            setOldTokens(null)
+            setNewTokens(null)
+          }
+        })
+    })
 
     return () => {
       cancelled = true
+      cancelAnimationFrame(rafId)
     }
   }, [oldStr, newStr, filePath, isDark])
 
@@ -305,6 +345,11 @@ const DiffLineRow = memo(function DiffLineRow({
   )
 })
 
+/** Threshold for progressive rendering — render first batch immediately, rest via rAF. */
+const PROGRESSIVE_THRESHOLD = 120
+const INITIAL_BATCH = 60
+const BATCH_SIZE = 120
+
 function DiffLines({
   lines,
   oldTokens,
@@ -322,9 +367,31 @@ function DiffLines({
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(new Set())
   const collapsed = useMemo(() => collapseUnchangedLines(lines), [lines])
 
+  // Progressive rendering: for large diffs, render in batches
+  const needsProgressive = collapsed.length > PROGRESSIVE_THRESHOLD
+  const [renderedCount, setRenderedCount] = useState(
+    needsProgressive ? INITIAL_BATCH : collapsed.length
+  )
+
+  // Reset rendered count when collapsed items change
+  useEffect(() => {
+    setRenderedCount(collapsed.length > PROGRESSIVE_THRESHOLD ? INITIAL_BATCH : collapsed.length)
+  }, [collapsed])
+
+  // Progressively render remaining items via rAF
+  useEffect(() => {
+    if (renderedCount >= collapsed.length) return
+    const frame = requestAnimationFrame(() => {
+      setRenderedCount((prev) => Math.min(prev + BATCH_SIZE, collapsed.length))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [renderedCount, collapsed.length])
+
   const handleExpand = useCallback((fromIdx: number) => {
     setExpandedSeparators((prev) => new Set(prev).add(fromIdx))
   }, [])
+
+  const itemsToRender = needsProgressive ? collapsed.slice(0, renderedCount) : collapsed
 
   return (
     <div
@@ -333,7 +400,7 @@ function DiffLines({
         compact && "max-h-64 overflow-y-auto"
       )}
     >
-      {collapsed.map((item, idx) => {
+      {itemsToRender.map((item, idx) => {
         if (item.kind === "separator") {
           if (expandedSeparators.has(item.fromIdx)) {
             return lines.slice(item.fromIdx, item.toIdx + 1).map((line, j) => {
@@ -420,7 +487,7 @@ export function EditDiffView({
 }: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
   const isDark = useIsDarkMode()
-  const lines = useMemo(() => computeDiff(oldString, newString), [oldString, newString])
+  const lines = useMemo(() => getCachedDiff(oldString, newString), [oldString, newString])
   const { oldTokens, newTokens } = useHighlightedTokens(
     oldString,
     newString,

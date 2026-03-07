@@ -8,7 +8,7 @@ import type { ToolCall } from "@/lib/types"
 import type { ActivityItem } from "@/lib/timelineHelpers"
 import { cn } from "@/lib/utils"
 
-const THINKING_BADGE_STYLE = "border-violet-700/50 text-violet-400"
+const THINKING_BADGE_STYLE = "bg-violet-500/5 text-violet-400/40 border-violet-500/10"
 
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls,

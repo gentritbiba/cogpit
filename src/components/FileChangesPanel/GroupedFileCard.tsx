@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, memo } from "react"
+import { useState, useRef, useEffect, useLayoutEffect, memo, useCallback, startTransition } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { ChevronDown, ChevronRight, Code2, GitCompareArrows } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -55,19 +55,31 @@ interface GroupedFileCardProps {
 export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen, isHighlighted, diffMode }: GroupedFileCardProps) {
   const { ref: nearRef, isNear } = useNearViewport()
   const [open, setOpen] = useState(defaultOpen)
+  // Deferred open: the card header updates immediately, diff content renders
+  // as a lower-priority transition so the UI stays responsive.
+  const [deferredOpen, setDeferredOpen] = useState(defaultOpen)
   const prevDefaultRef = useRef(defaultOpen)
+
+  const setOpenWithTransition = useCallback((value: boolean) => {
+    setOpen(value)
+    if (value) {
+      startTransition(() => setDeferredOpen(true))
+    } else {
+      setDeferredOpen(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (prevDefaultRef.current !== defaultOpen) {
       prevDefaultRef.current = defaultOpen
-      setOpen(defaultOpen)
+      setOpenWithTransition(defaultOpen)
     }
-  }, [defaultOpen])
+  }, [defaultOpen, setOpenWithTransition])
 
   // Open the card when highlighted (clicked from file changes list)
   useEffect(() => {
-    if (isHighlighted) setOpen(true)
-  }, [isHighlighted])
+    if (isHighlighted) setOpenWithTransition(true)
+  }, [isHighlighted, setOpenWithTransition])
 
   // If region matching failed, force per-edit view regardless of panel setting
   const effectiveDiffMode = file.forcePerEdit ? "per-edit" : diffMode
@@ -81,7 +93,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
   const hasPerEditDiff = file.edits.some((e) => Boolean(e.oldString || e.newString))
   const hasDiff = effectiveDiffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
 
-  const showDiff = open && isNear && hasDiff
+  const showDiff = deferredOpen && isNear && hasDiff
   const diffRef = useRef<HTMLDivElement>(null)
   const lastDiffHeightRef = useRef(0)
 
@@ -108,7 +120,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
     >
       <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t hover:bg-elevation-3 transition-colors group">
         <button
-          onClick={() => setOpen(!open)}
+          onClick={() => setOpenWithTransition(!open)}
           className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1"
         >
           {open ? (
@@ -245,39 +257,60 @@ const DiffContent = memo(function DiffContent({
   return null
 })
 
+const PER_EDIT_INITIAL = 3
+const PER_EDIT_BATCH = 5
+
 const PerEditDiffs = memo(function PerEditDiffs({ edits, filePath }: { edits: IndividualEdit[]; filePath: string }) {
   const total = edits.length
+  const contentEdits = edits.filter((e) => Boolean(e.oldString || e.newString))
+  const needsProgressive = contentEdits.length > PER_EDIT_INITIAL
+  const [renderedCount, setRenderedCount] = useState(
+    needsProgressive ? PER_EDIT_INITIAL : contentEdits.length
+  )
+
+  // Progressive rendering: render first batch, rest via rAF
+  useEffect(() => {
+    if (renderedCount >= contentEdits.length) return
+    const frame = requestAnimationFrame(() => {
+      setRenderedCount((prev) => Math.min(prev + PER_EDIT_BATCH, contentEdits.length))
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [renderedCount, contentEdits.length])
+
+  const editsToRender = needsProgressive ? contentEdits.slice(0, renderedCount) : contentEdits
+
   return (
     <div className="divide-y divide-border/30">
-      {edits.map((edit, i) => {
-        const hasContent = Boolean(edit.oldString || edit.newString)
-        if (!hasContent) return null
-        return (
-          <div key={i}>
-            {total > 1 && (
-              <div className="flex items-center gap-2 px-2.5 py-1 bg-elevation-1/50">
-                <span className="text-[9px] font-mono text-muted-foreground/60">
-                  {edit.toolName} {i + 1}/{total}
-                </span>
-                <span className="text-[9px] text-muted-foreground/40">
-                  T{edit.turnIndex + 1}
-                </span>
-                {edit.agentId && (
-                  <span className="text-[9px] font-bold text-indigo-400/60">S</span>
-                )}
-              </div>
-            )}
-            <EditDiffView
-              oldString={edit.oldString}
-              newString={edit.newString}
-              filePath={filePath}
-              compact={false}
-              startLine={edit.startLine}
-              hideHeader
-            />
-          </div>
-        )
-      })}
+      {editsToRender.map((edit, i) => (
+        <div key={i}>
+          {total > 1 && (
+            <div className="flex items-center gap-2 px-2.5 py-1 bg-elevation-1/50">
+              <span className="text-[9px] font-mono text-muted-foreground/60">
+                {edit.toolName} {i + 1}/{total}
+              </span>
+              <span className="text-[9px] text-muted-foreground/40">
+                T{edit.turnIndex + 1}
+              </span>
+              {edit.agentId && (
+                <span className="text-[9px] font-bold text-indigo-400/60">S</span>
+              )}
+            </div>
+          )}
+          <EditDiffView
+            oldString={edit.oldString}
+            newString={edit.newString}
+            filePath={filePath}
+            compact={false}
+            startLine={edit.startLine}
+            hideHeader
+          />
+        </div>
+      ))}
+      {renderedCount < contentEdits.length && (
+        <div className="py-1.5 text-center text-[9px] text-muted-foreground/40">
+          Loading {contentEdits.length - renderedCount} more edits…
+        </div>
+      )}
     </div>
   )
 })
