@@ -220,8 +220,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
 
         {/* Scope toggle */}
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger render={<button
               onClick={handleScopeToggle}
               className={cn(
                 "p-1 transition-colors rounded",
@@ -230,9 +229,8 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   : "text-muted-foreground hover:text-foreground"
               )}
               aria-label={scope === "last" ? "Show all turns" : "Show last turn only"}
-            >
+            />}>
               {scope === "all" ? <Layers className="size-3.5" /> : <Clock className="size-3.5" />}
-            </button>
           </TooltipTrigger>
           <TooltipContent>
             {scope === "last"
@@ -243,8 +241,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
 
         {/* Diff mode toggle */}
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger render={<button
               onClick={() => setDiffMode(diffMode === "net" ? "per-edit" : "net")}
               className={cn(
                 "p-1 transition-colors rounded",
@@ -253,9 +250,8 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   : "text-muted-foreground hover:text-foreground"
               )}
               aria-label={diffMode === "net" ? "Show per-edit diffs" : "Show net diff"}
-            >
+            />}>
               {diffMode === "net" ? <Sigma className="size-3.5" /> : <List className="size-3.5" />}
-            </button>
           </TooltipTrigger>
           <TooltipContent>
             {diffMode === "net"
@@ -265,14 +261,12 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         </Tooltip>
 
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger render={<button
               onClick={() => setAllExpanded(!allExpanded)}
               className="p-1 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={allExpanded ? "Collapse all" : "Expand all"}
-            >
+            />}>
               {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
-            </button>
           </TooltipTrigger>
           <TooltipContent>{allExpanded ? "Collapse all" : "Expand all"}</TooltipContent>
         </Tooltip>

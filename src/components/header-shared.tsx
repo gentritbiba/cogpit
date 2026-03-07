@@ -58,17 +58,8 @@ export const HeaderIconButton = memo(function HeaderIconButton({
   const sizeClass = size === "sm" ? "h-6 w-6 p-0" : "h-7 w-7 p-0"
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn(sizeClass, className)}
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-        >
+      <TooltipTrigger render={<Button variant="ghost" size="sm" className={cn(sizeClass, className)} onClick={onClick} disabled={disabled} aria-label={label} />}>
           <Icon className={cn("size-3.5", iconClassName)} />
-        </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -136,7 +127,7 @@ export const ContextBadge = memo(function ContextBadge({
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipTrigger render={badge} />
       <TooltipContent className="text-xs space-y-1">
         <div className="font-medium">Context Left Until Auto-Compact</div>
         <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>

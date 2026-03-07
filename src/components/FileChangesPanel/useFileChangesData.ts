@@ -85,7 +85,7 @@ export function useFileChangesData(session: ParsedSession) {
             const tcs: ToolCall[] = []
             for (const msg of parsed) {
               for (const tc of msg.toolCalls) {
-                if (tc.name === "Edit" || tc.name === "Write") tcs.push(tc)
+                if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) tcs.push(tc)
               }
             }
             bgAgentCache.set(cacheKey, tcs)
@@ -109,22 +109,25 @@ export function useFileChangesData(session: ParsedSession) {
 
   const fileChanges = useMemo(() => {
     const changes: FileChange[] = []
+    const processedBgAgents = new Set<string>()
     for (let turnIndex = 0; turnIndex < session.turns.length; turnIndex++) {
       const turn = session.turns[turnIndex]
       for (const tc of turn.toolCalls) {
-        if (tc.name === "Edit" || tc.name === "Write") {
+        if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) {
           changes.push({ turnIndex, toolCall: tc })
         }
       }
       for (const msg of turn.subAgentActivity) {
         // For foreground sub-agents with inline tool calls
         for (const tc of msg.toolCalls) {
-          if (tc.name === "Edit" || tc.name === "Write") {
+          if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) {
             changes.push({ turnIndex, toolCall: tc, agentId: msg.agentId })
           }
         }
         // For background agents: use fetched tool calls from their JSONL files
-        if (msg.isBackground && msg.toolCalls.length === 0) {
+        // Only process each background agent once to avoid duplication across turns
+        if (msg.isBackground && msg.toolCalls.length === 0 && !processedBgAgents.has(msg.agentId)) {
+          processedBgAgents.add(msg.agentId)
           const fetched = bgToolCalls.get(msg.agentId)
           if (fetched) {
             for (const tc of fetched) {
@@ -225,9 +228,7 @@ export interface GroupedFile {
   subAgentId: string | null
   /** Individual edits in order, for per-edit diff view. */
   edits: IndividualEdit[]
-  /** True when region matching failed — UI should force per-edit view for this file. */
-  forcePerEdit: boolean
-  /** 1-based starting line for the net diff (from first edit's result). */
+/** 1-based starting line for the net diff (from first edit's result). */
   netStartLine: number
 }
 
@@ -332,7 +333,6 @@ export function buildGroupedFiles(
       delCount: net.delCount,
       subAgentId: lastSubAgentId ?? null,
       edits,
-      forcePerEdit: net.matchFailed,
       netStartLine: net.currentStr
         ? findLineInFile(rawContent, net.currentStr)
         : (edits.length > 0 ? edits[0].startLine : 1),

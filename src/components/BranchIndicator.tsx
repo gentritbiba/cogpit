@@ -11,14 +11,9 @@ export function BranchIndicator({ branchCount, onClick }: BranchIndicatorProps) 
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={(e) => { e.stopPropagation(); onClick() }}
-          className="inline-flex items-center gap-1 rounded-full border border-purple-800/50 bg-purple-500/10 px-1.5 py-0.5 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300 transition-colors"
-        >
+      <TooltipTrigger render={<button onClick={(e) => { e.stopPropagation(); onClick() }} className="inline-flex items-center gap-1 rounded-full border border-purple-800/50 bg-purple-500/10 px-1.5 py-0.5 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300 transition-colors" />}>
           <GitFork className="size-3" />
           <span className="text-[10px] font-mono">{branchCount}</span>
-        </button>
       </TooltipTrigger>
       <TooltipContent>
         {branchCount} branch{branchCount !== 1 ? "es" : ""} from this turn

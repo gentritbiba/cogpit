@@ -82,14 +82,12 @@ export const DesktopHeader = memo(function DesktopHeader({
     <header className="flex h-8 shrink-0 items-center border-b border-border/50 bg-elevation-2 px-2.5 electron-drag">
       <div className="flex items-center gap-2 min-w-0">
         <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+          <TooltipTrigger render={<button
               onClick={onGoHome}
               className="shrink-0 transition-opacity hover:opacity-70"
               aria-label={session ? "Back to Dashboard" : "Cogpit"}
-            >
+            />}>
               <Eye className="size-4 text-blue-400" />
-            </button>
           </TooltipTrigger>
           <TooltipContent>{session ? "Back to Dashboard" : "Cogpit"}</TooltipContent>
         </Tooltip>
@@ -99,11 +97,10 @@ export const DesktopHeader = memo(function DesktopHeader({
         {session ? (
           <>
             <Tooltip>
-              <TooltipTrigger asChild>
-                <button
+              <TooltipTrigger render={<button
                   className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
                   onClick={handleCopyResumeCmd}
-                >
+                />}>
                   {cmdCopied ? (
                     <span className="flex items-center gap-1.5 text-green-400">
                       <Check className="size-3" /> Copied
@@ -111,7 +108,6 @@ export const DesktopHeader = memo(function DesktopHeader({
                   ) : (
                     session.slug || session.sessionId.slice(0, 8)
                   )}
-                </button>
               </TooltipTrigger>
               <TooltipContent className="text-xs space-y-1">
                 <div>Click to copy resume command</div>
@@ -122,20 +118,18 @@ export const DesktopHeader = memo(function DesktopHeader({
             </Tooltip>
             {isLive && <LiveIndicator aria-label="Session is live" />}
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
+              <TooltipTrigger render={<Button
                   variant="ghost"
                   size="sm"
                   className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
                   onClick={handleCopyResumeCmd}
                   aria-label={cmdCopied ? "Copied!" : "Copy resume command"}
-                >
+                />}>
                   {cmdCopied ? (
                     <Check className="size-3 text-green-400" />
                   ) : (
                     <Copy className="size-3" />
                   )}
-                </Button>
               </TooltipTrigger>
               <TooltipContent>
                 {cmdCopied ? "Copied!" : "Copy resume command"}
@@ -230,18 +224,16 @@ function NetworkStatus({ networkUrl, networkAccessDisabled, urlCopied, onCopyUrl
   if (networkUrl) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>
-          <button
+        <TooltipTrigger render={<button
             onClick={onCopyUrl}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
-          >
+          />}>
             <Globe className="size-3 text-green-500" />
             {urlCopied ? (
               <span className="text-green-400">Copied!</span>
             ) : (
               networkUrl
             )}
-          </button>
         </TooltipTrigger>
         <TooltipContent>Click to copy connection URL</TooltipContent>
       </Tooltip>
@@ -251,11 +243,9 @@ function NetworkStatus({ networkUrl, networkAccessDisabled, urlCopied, onCopyUrl
   if (networkAccessDisabled) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1">
+        <TooltipTrigger render={<div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1" />}>
             <WifiOff className="size-3" />
             <span>Network off</span>
-          </div>
         </TooltipTrigger>
         <TooltipContent>Network access is disabled</TooltipContent>
       </Tooltip>

@@ -52,7 +52,7 @@ export function SidebarStatCard({
   if (tooltip) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>{card}</TooltipTrigger>
+        <TooltipTrigger render={card} />
         <TooltipContent side="right">{tooltip}</TooltipContent>
       </Tooltip>
     )

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import * as ContextMenu from "@radix-ui/react-context-menu"
+import { ContextMenu } from "@base-ui/react/context-menu"
 import { Copy, Trash2, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -10,6 +10,9 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+
+const MENU_ITEM_CLASS =
+  "flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
 
 interface SessionContextMenuProps {
   children: React.ReactNode
@@ -43,42 +46,44 @@ export function SessionContextMenu({
   return (
     <>
       <ContextMenu.Root>
-        <ContextMenu.Trigger asChild><div className="w-full">{children}</div></ContextMenu.Trigger>
+        <ContextMenu.Trigger render={<div className="w-full" />}>{children}</ContextMenu.Trigger>
         <ContextMenu.Portal>
-          <ContextMenu.Content className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1 z-50">
-            {onRename && (
-              <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
-                onSelect={() => setShowRename(true)}
-              >
-                <Pencil className="size-3.5" />
-                Rename session
-              </ContextMenu.Item>
-            )}
-            {onDuplicate && (
-              <ContextMenu.Item
-                className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
-                onSelect={onDuplicate}
-              >
-                <Copy className="size-3.5" />
-                Duplicate session
-              </ContextMenu.Item>
-            )}
-            {onDelete && (
-              <>
-                {(onDuplicate || onRename) && (
-                  <ContextMenu.Separator className="my-1 h-px bg-border" />
-                )}
+          <ContextMenu.Positioner>
+            <ContextMenu.Popup className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1 z-50">
+              {onRename && (
                 <ContextMenu.Item
-                  className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-red-400 outline-none cursor-pointer hover:bg-red-500/10 hover:text-red-300"
-                  onSelect={() => setShowDeleteConfirm(true)}
+                  className={MENU_ITEM_CLASS}
+                  onClick={() => setShowRename(true)}
                 >
-                  <Trash2 className="size-3.5" />
-                  Delete session
+                  <Pencil className="size-3.5" />
+                  Rename session
                 </ContextMenu.Item>
-              </>
-            )}
-          </ContextMenu.Content>
+              )}
+              {onDuplicate && (
+                <ContextMenu.Item
+                  className={MENU_ITEM_CLASS}
+                  onClick={onDuplicate}
+                >
+                  <Copy className="size-3.5" />
+                  Duplicate session
+                </ContextMenu.Item>
+              )}
+              {onDelete && (
+                <>
+                  {(onDuplicate || onRename) && (
+                    <ContextMenu.Separator className="my-1 h-px bg-border" />
+                  )}
+                  <ContextMenu.Item
+                    className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-red-400 outline-none cursor-pointer hover:bg-red-500/10 hover:text-red-300"
+                    onClick={() => setShowDeleteConfirm(true)}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete session
+                  </ContextMenu.Item>
+                </>
+              )}
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
         </ContextMenu.Portal>
       </ContextMenu.Root>
 

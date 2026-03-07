@@ -81,8 +81,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
     if (isHighlighted) setOpenWithTransition(true)
   }, [isHighlighted, setOpenWithTransition])
 
-  // If region matching failed, force per-edit view regardless of panel setting
-  const effectiveDiffMode = file.forcePerEdit ? "per-edit" : diffMode
+  const effectiveDiffMode = diffMode
 
   const ext = file.filePath.split(".").pop()?.toLowerCase() ?? ""
   const extColor = EXT_COLORS[ext] ?? "text-muted-foreground"
@@ -151,26 +150,22 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
         <div className="flex items-center gap-1.5 pr-2 shrink-0">
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <Tooltip>
-              <TooltipTrigger asChild>
-                <button
+              <TooltipTrigger render={<button
                   onClick={() => openInEditor(file.filePath, "file")}
                   className="p-1 text-muted-foreground hover:text-blue-400 transition-colors"
                   aria-label="Open file in editor"
-                >
+                />}>
                   <Code2 className="size-3" />
-                </button>
               </TooltipTrigger>
               <TooltipContent>Open in editor</TooltipContent>
             </Tooltip>
             <Tooltip>
-              <TooltipTrigger asChild>
-                <button
+              <TooltipTrigger render={<button
                   onClick={() => openInEditor(file.filePath, "diff")}
                   className="p-1 text-muted-foreground hover:text-amber-400 transition-colors"
                   aria-label="View git diff"
-                >
+                />}>
                   <GitCompareArrows className="size-3" />
-                </button>
               </TooltipTrigger>
               <TooltipContent>View git diff</TooltipContent>
             </Tooltip>

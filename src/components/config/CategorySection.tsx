@@ -63,13 +63,11 @@ export function CategorySection({
         <span className="text-[10px] text-muted-foreground/40">{items.length}</span>
         {onNewFile && (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <button
+            <TooltipTrigger render={<button
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
                 onClick={onNewFile}
-              >
+              />}>
                 <Plus className="size-3" />
-              </button>
             </TooltipTrigger>
             <TooltipContent>New {category.slice(0, -1)}</TooltipContent>
           </Tooltip>

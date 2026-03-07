@@ -83,17 +83,11 @@ export function TokenUsageIndicator() {
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
-        >
+      <TooltipTrigger render={<button onClick={refresh} disabled={loading} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1" />}>
           <span className={cn("inline-block size-1.5 rounded-full shrink-0", getDotColor(primary))} />
           <span className={cn("tabular-nums", getUtilColor(primary), loading && "animate-pulse")}>
             {primary.toFixed(0)}%
           </span>
-        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="p-3">
         <TooltipBody usage={usage} />

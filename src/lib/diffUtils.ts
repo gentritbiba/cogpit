@@ -61,8 +61,6 @@ export interface NetDiffResult {
   currentStr: string
   addCount: number
   delCount: number
-  /** True when region matching failed (old_string not found in any region). Force per-edit view. */
-  matchFailed: boolean
 }
 
 /**
@@ -86,7 +84,6 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
   }
 
   let regions: Region[] = []
-  let matchFailed = false
 
   for (const op of ops) {
     if (op.isWrite) {
@@ -125,9 +122,8 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
         (r) => r.original.includes(op.oldString) && !r.current.includes(op.oldString)
       )
       if (alreadyTransformed) {
-        // A prior edit already changed this region — possible conflict/drift.
-        // Flag it so the UI can fall back to per-edit view for this file.
-        matchFailed = true
+        // A prior edit already changed this region — this is a redundant/failed edit
+        // (old_string no longer exists in current content). Skip it silently.
       } else {
         // New region being edited for the first time.
         regions.push({ original: op.oldString, current: op.newString })
@@ -146,10 +142,10 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
       const content = regions.map((r) => r.current).join("\n")
       if (content) {
         const counts = diffLineCount("", content)
-        return { originalStr: "", currentStr: content, addCount: counts.add, delCount: counts.del, matchFailed }
+        return { originalStr: "", currentStr: content, addCount: counts.add, delCount: counts.del }
       }
     }
-    return { originalStr: "", currentStr: "", addCount: 0, delCount: 0, matchFailed }
+    return { originalStr: "", currentStr: "", addCount: 0, delCount: 0 }
   }
 
   // Build before/after strings. LCS in EditDiffView will find common lines
@@ -159,5 +155,5 @@ export function computeNetDiff(ops: EditOp[]): NetDiffResult {
 
   const counts = diffLineCount(originalStr, currentStr)
 
-  return { originalStr, currentStr, addCount: counts.add, delCount: counts.del, matchFailed }
+  return { originalStr, currentStr, addCount: counts.add, delCount: counts.del }
 }

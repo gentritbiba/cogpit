@@ -76,11 +76,9 @@ export const SessionInfoBar = memo(function SessionInfoBar({
       </Badge>
       {session.branchedFrom && (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-purple-400 border-purple-700/50 bg-purple-500/5 gap-1">
+          <TooltipTrigger render={<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-purple-400 border-purple-700/50 bg-purple-500/5 gap-1" />}>
               <Copy className="size-2.5" />
               Duplicated
-            </Badge>
           </TooltipTrigger>
           <TooltipContent>
             Duplicated from {session.branchedFrom.sessionId.slice(0, 8)}

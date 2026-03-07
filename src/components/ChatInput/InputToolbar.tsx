@@ -78,15 +78,13 @@ export function ActionButtons({
       {/* Interrupt button -- sends stop request to Claude */}
       {showAgentControls && (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
+          <TooltipTrigger render={<Button
               variant="ghost"
               size="sm"
               className="h-7 w-7 shrink-0 p-0 rounded-full text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
               onClick={onInterrupt}
-            >
+            />}>
               <Square className="size-3 fill-current" />
-            </Button>
           </TooltipTrigger>
           <TooltipContent>Interrupt agent (Esc)</TooltipContent>
         </Tooltip>
@@ -95,15 +93,13 @@ export function ActionButtons({
       {/* Stop session -- kills the server process */}
       {showAgentControls && (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
+          <TooltipTrigger render={<Button
               variant="ghost"
               size="sm"
               className="h-7 w-7 shrink-0 p-0 rounded-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
               onClick={onStopSession}
-            >
+            />}>
               <Power className="size-3.5" />
-            </Button>
           </TooltipTrigger>
           <TooltipContent>Stop session</TooltipContent>
         </Tooltip>
@@ -111,16 +107,14 @@ export function ActionButtons({
 
       {/* Voice input button */}
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
+        <TooltipTrigger render={<Button
             variant="ghost"
             size="sm"
             className={cn("h-7 w-7 shrink-0 p-0 rounded-full", getVoiceButtonClass(voiceStatus))}
             onClick={onToggleVoice}
             disabled={voiceStatus === "loading"}
-          >
+          />}>
             <VoiceIcon className={cn("size-3.5", voiceStatus === "loading" && "mr-0")} />
-          </Button>
         </TooltipTrigger>
         <TooltipContent>
           {getVoiceTooltip(voiceStatus, voiceProgress, voiceError)}

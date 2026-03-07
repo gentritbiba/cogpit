@@ -32,15 +32,13 @@ export function UserQuestionBar({ questions, onSend }: UserQuestionBarProps) {
       <div className="flex flex-wrap gap-1.5">
         {q.options.map((opt, i) => (
           <Tooltip key={i}>
-            <TooltipTrigger asChild>
-              <Button
+            <TooltipTrigger render={<Button
                 variant="outline"
                 size="sm"
                 className="h-7 px-2.5 text-xs border-pink-500/30 text-pink-300 hover:bg-pink-500/10 hover:text-pink-200 hover:border-pink-500/50"
                 onClick={() => onSend(opt.label)}
-              >
+              />}>
                 {opt.label}
-              </Button>
             </TooltipTrigger>
             {opt.description && (
               <TooltipContent className="max-w-[250px] text-xs">

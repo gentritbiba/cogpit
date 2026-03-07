@@ -75,18 +75,9 @@ export function SessionRow({
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const title = customName || truncate(s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
 
-  // Build tooltip details
-  const tooltipLines: string[] = []
-  if (statusLabel) tooltipLines.push(statusLabel)
-  if (s.gitBranch) tooltipLines.push(`${s.gitBranch}`)
-  tooltipLines.push(formatFileSize(s.size))
-  if (hasProcess) tooltipLines.push(`${proc.memMB} MB RAM`)
-  tooltipLines.push(formatRelativeTime(s.lastActivityAt || s.lastModified))
-
   const sessionRow = (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <div
+      <TooltipTrigger render={<div
           role="button"
           tabIndex={0}
           data-live-session
@@ -96,7 +87,7 @@ export function SessionRow({
             "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
             cardStyle(isActiveSession, hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
           )}
-        >
+        />}>
           {/* Title */}
           <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
@@ -137,7 +128,6 @@ export function SessionRow({
               <X className="size-2.5" />
             </button>
           )}
-        </div>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-[220px]">
         <div className="flex flex-col gap-0.5 text-[11px]">

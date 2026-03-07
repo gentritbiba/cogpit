@@ -117,18 +117,10 @@ function BrowseHeader({
       )}
       {view === "sessions" && selectedProject && onNewSession && (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={sizeClass}
-              disabled={creatingSession}
-              onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
-            >
+          <TooltipTrigger render={<Button variant="ghost" size="sm" className={sizeClass} disabled={creatingSession} onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)} />}>
               {creatingSession
                 ? <Loader2 className={cn(isMobile ? "size-4" : "size-3.5", "animate-spin")} />
                 : <Plus className={cn(isMobile ? "size-4" : "size-3.5")} />}
-            </Button>
           </TooltipTrigger>
           <TooltipContent>
             {creatingSession ? "Creating session..." : `New session in ${projectName(selectedProject.path)}`}

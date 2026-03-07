@@ -119,21 +119,19 @@ export function SessionsView({
             </div>
             {onNewSession && (
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
+                <TooltipTrigger render={<Button
                     variant="outline"
                     size="sm"
                     className="h-8 gap-1.5 text-xs border-border hover:border-border/80"
                     disabled={creatingSession}
                     onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
-                  >
+                  />}>
                     {creatingSession ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
                       <Plus className="size-3.5" />
                     )}
                     New Session
-                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>
                   {creatingSession ? "Creating session..." : `Start a new session in ${projectName(selectedProject.path)}`}

@@ -34,7 +34,6 @@ describe("computeNetDiff", () => {
       currentStr: "",
       addCount: 0,
       delCount: 0,
-      matchFailed: false,
     })
   })
 
@@ -45,7 +44,6 @@ describe("computeNetDiff", () => {
     const result = computeNetDiff(ops)
     expect(result.originalStr).toBe("foo")
     expect(result.currentStr).toBe("bar")
-    expect(result.matchFailed).toBe(false)
   })
 
   it("chains edits within the same region", () => {
@@ -70,7 +68,6 @@ describe("computeNetDiff", () => {
     expect(result.originalStr).toBe("")
     expect(result.addCount).toBe(3)
     expect(result.delCount).toBe(0)
-    expect(result.matchFailed).toBe(false)
   })
 
   it("Write followed by Edit: shows net change from Write content to edited content", () => {
@@ -82,7 +79,6 @@ describe("computeNetDiff", () => {
     const result = computeNetDiff(ops)
     // The edit modifies the Write region, so original stays as the write content
     expect(result.currentStr).toContain("BETA")
-    expect(result.matchFailed).toBe(false)
   })
 
   it("multiple Write ops: last Write wins as baseline", () => {
@@ -107,13 +103,15 @@ describe("computeNetDiff", () => {
     expect(result.addCount).toBeGreaterThan(0)
   })
 
-  it("sets matchFailed when old_string has already been transformed", () => {
-    // First edit removes "old", second edit tries to remove "old" again
+  it("silently skips redundant edits where old_string was already transformed", () => {
+    // First edit removes "old", second edit tries to remove "old" again — redundant
     const ops: EditOp[] = [
       { oldString: "old", newString: "new", isWrite: false },
       { oldString: "old", newString: "other", isWrite: false },
     ]
     const result = computeNetDiff(ops)
-    expect(result.matchFailed).toBe(true)
+    // Net result is just the first edit: old -> new
+    expect(result.originalStr).toBe("old")
+    expect(result.currentStr).toBe("new")
   })
 })

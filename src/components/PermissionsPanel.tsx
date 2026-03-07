@@ -27,6 +27,18 @@ interface PermissionsPanelProps {
   onReset: () => void
 }
 
+function toolButtonClass(state: ToolState): string {
+  if (state === "allowed") return "border-green-800 text-green-400 bg-green-500/10"
+  if (state === "blocked") return "border-red-800 text-red-400 bg-red-500/10"
+  return "border-border text-muted-foreground elevation-1 hover:border-border hover:text-foreground"
+}
+
+function toolCheckboxClass(state: ToolState): string {
+  if (state === "allowed") return "border-green-500 bg-green-500"
+  if (state === "blocked") return "border-red-500 bg-red-500"
+  return "border-border bg-transparent"
+}
+
 function ToolAccessGrid({
   allowedTools,
   disallowedTools,
@@ -78,21 +90,13 @@ function ToolAccessGrid({
               onContextMenu={(e) => handleRight(tool, e)}
               className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
-                state === "allowed"
-                  ? "border-green-800 text-green-400 bg-green-500/10"
-                  : state === "blocked"
-                    ? "border-red-800 text-red-400 bg-red-500/10"
-                    : "border-border text-muted-foreground elevation-1 hover:border-border hover:text-foreground"
+                toolButtonClass(state),
               )}
             >
               <span
                 className={cn(
                   "flex size-3 shrink-0 items-center justify-center rounded-[3px] border transition-colors",
-                  state === "allowed"
-                    ? "border-green-500 bg-green-500"
-                    : state === "blocked"
-                      ? "border-red-500 bg-red-500"
-                      : "border-border bg-transparent"
+                  toolCheckboxClass(state),
                 )}
               >
                 {state !== "none" && <Check className="size-2 text-white" strokeWidth={3} />}
@@ -122,14 +126,12 @@ export function PermissionsPanel({
         Permissions
         {hasPendingChanges && (
           <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="ml-auto flex items-center gap-1 text-[10px] font-normal normal-case text-amber-400 cursor-help">
+            <TooltipTrigger render={<span className="ml-auto flex items-center gap-1 text-[10px] font-normal normal-case text-amber-400 cursor-help" />}>
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
                 </span>
                 pending
-              </span>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-[200px] text-xs">
               Applies on next message send. The current session won't be interrupted.

@@ -20,10 +20,8 @@ function TokenUsageBadge({ usage }: { usage: TokenUsage }): React.ReactElement {
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="text-[10px] text-muted-foreground cursor-default">
+      <TooltipTrigger render={<span className="text-[10px] text-muted-foreground cursor-default" />}>
           {formatTokenCount(totalInput + usage.output_tokens)} tokens
-        </span>
       </TooltipTrigger>
       <TooltipContent className="text-xs space-y-1">
         <div>Context: {formatTokenCount(totalInput)}</div>

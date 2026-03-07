@@ -53,7 +53,7 @@ function InfoRow({
   if (tooltip) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>{content}</TooltipTrigger>
+        <TooltipTrigger render={content} />
         <TooltipContent side="right">{tooltip}</TooltipContent>
       </Tooltip>
     )

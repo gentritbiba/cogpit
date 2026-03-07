@@ -95,7 +95,7 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): JSX.
             return (
               <Collapsible key={name}>
                 <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">
-                  <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-state=open]>&]:rotate-90" />
+                  <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-open]>&]:rotate-90" />
                   <span className={cn("font-medium", colorClass)}>{name}</span>
                   <span className="ml-auto flex items-center gap-1.5">
                     {group.estimatedCost > 0 && (
