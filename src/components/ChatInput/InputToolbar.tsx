@@ -26,12 +26,14 @@ export function InputToolbar({
   isUserQuestion,
   elapsedSec,
 }: InputToolbarProps) {
+  const { isLive } = useSessionContext()
   const { chat: { isConnected } } = useSessionChatContext()
+  const showIndicator = isConnected || isLive
 
   return (
     <>
       {/* Active session indicator */}
-      {isConnected && !isPlanApproval && !isUserQuestion && (
+      {showIndicator && !isPlanApproval && !isUserQuestion && (
         <div className="flex items-center gap-1.5 mr-1">
           {elapsedSec > 0 && (
             <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
@@ -65,15 +67,16 @@ export function ActionButtons({
   onToggleVoice,
   onSubmit,
 }: ActionButtonsProps) {
-  const { actions: { handleStopSession: onStopSession } } = useSessionContext()
+  const { isLive, actions: { handleStopSession: onStopSession } } = useSessionContext()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
+  const showAgentControls = isConnected || isLive
 
   const VoiceIcon = getVoiceIcon(voiceStatus)
 
   return (
     <div className="flex items-center">
-      {/* Interrupt button -- sends Escape to Claude */}
-      {isConnected && (
+      {/* Interrupt button -- sends stop request to Claude */}
+      {showAgentControls && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -90,7 +93,7 @@ export function ActionButtons({
       )}
 
       {/* Stop session -- kills the server process */}
-      {isConnected && (
+      {showAgentControls && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

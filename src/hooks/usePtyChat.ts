@@ -178,7 +178,11 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   }, [sessionId])
 
   const interrupt = useCallback(() => {
+    activeAbortRef.current?.abort()
+    activeAbortRef.current = null
     sendStopRequest()
+    setStatus("idle")
+    setPendingMessages([])
   }, [sendStopRequest])
 
   const stopAgent = useCallback(() => {

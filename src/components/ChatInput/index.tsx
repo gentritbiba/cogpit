@@ -72,12 +72,14 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
 
 export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
   const {
+    isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
     slashSuggestions,
     slashSuggestionsLoading,
   } = useSessionContext()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
+  const canInterrupt = isConnected || isLive
 
   const [text, setText] = useState("")
   const [isMultiline, setIsMultiline] = useState(false)
@@ -144,9 +146,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = filteredSlashList[slashSelectedIndex]; if (selected) handleSlashSelect(selected); return }
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
-    if (e.key === "Escape" && isConnected && onInterrupt) { e.preventDefault(); onInterrupt(); return }
+    if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit, isConnected, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
+  }, [handleSubmit, canInterrupt, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 

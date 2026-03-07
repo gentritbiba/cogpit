@@ -180,8 +180,14 @@ describe("usePtyChat", () => {
     expect(result.current.pendingMessages).toEqual([])
   })
 
-  it("interrupt calls stop-session endpoint", () => {
-    mockedAuthFetch.mockResolvedValue({} as Response)
+  it("interrupt calls stop-session endpoint and resets state", async () => {
+    // Make send-message hang so we have an active request
+    mockedAuthFetch.mockImplementation((url) => {
+      if (typeof url === "string" && url.includes("stop-session")) {
+        return Promise.resolve({} as Response)
+      }
+      return new Promise(() => {})
+    })
 
     const { result } = renderHook(() =>
       usePtyChat({
@@ -189,10 +195,20 @@ describe("usePtyChat", () => {
       })
     )
 
+    // Start sending (don't await since it hangs)
     act(() => {
+      result.current.sendMessage("hello")
+    })
+    expect(result.current.status).toBe("connected")
+    expect(result.current.pendingMessages).toEqual(["hello"])
+
+    // Interrupt the agent
+    await act(async () => {
       result.current.interrupt()
     })
 
+    expect(result.current.status).toBe("idle")
+    expect(result.current.pendingMessages).toEqual([])
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/stop-session", expect.objectContaining({
       method: "POST",
     }))
