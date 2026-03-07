@@ -10,6 +10,7 @@ import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { ServerPanel } from "@/components/ServerPanel"
+import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
 import { DesktopHeader } from "@/components/DesktopHeader"
@@ -688,12 +689,25 @@ export default function App() {
     />
   ))
 
+  // Server discovery when StatsPanel is hidden — StatsPanel has its own BackgroundServers instance
+  const statsPanelVisible = isMobile ? state.mobileTab === "stats" : panels.showStats
+  const backgroundServers = state.session && !statsPanelVisible && (
+    <div className="hidden">
+      <BackgroundServers
+        cwd={state.session.cwd}
+        turns={state.session.turns}
+        onServersChanged={serverPanel.handleServersChanged}
+      />
+    </div>
+  )
+
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
+        {backgroundServers}
         <UpdateBanner />
         <main className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
@@ -840,6 +854,7 @@ export default function App() {
     <AppProvider value={appContextValue}>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
+      {backgroundServers}
       <UpdateBanner />
       <DesktopHeader
         showSidebar={panels.showSidebar}

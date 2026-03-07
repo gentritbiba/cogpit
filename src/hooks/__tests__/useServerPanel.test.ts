@@ -11,7 +11,7 @@ describe("useServerPanel", () => {
     const { result } = renderHook(() => useServerPanel(null))
     expect(result.current.serverMap.size).toBe(0)
     expect(result.current.visibleServerIds.size).toBe(0)
-    expect(result.current.serverPanelCollapsed).toBe(false)
+    expect(result.current.serverPanelCollapsed).toBe(true)
     expect(typeof result.current.handleToggleServerCollapse).toBe("function")
     expect(typeof result.current.handleServersChanged).toBe("function")
     expect(typeof result.current.handleToggleServer).toBe("function")
@@ -20,17 +20,17 @@ describe("useServerPanel", () => {
   it("handleToggleServerCollapse toggles collapsed state", () => {
     const { result } = renderHook(() => useServerPanel("session-1"))
 
-    expect(result.current.serverPanelCollapsed).toBe(false)
-
-    act(() => {
-      result.current.handleToggleServerCollapse()
-    })
     expect(result.current.serverPanelCollapsed).toBe(true)
 
     act(() => {
       result.current.handleToggleServerCollapse()
     })
     expect(result.current.serverPanelCollapsed).toBe(false)
+
+    act(() => {
+      result.current.handleToggleServerCollapse()
+    })
+    expect(result.current.serverPanelCollapsed).toBe(true)
   })
 
   it("handleServersChanged updates the server map", () => {
@@ -139,10 +139,7 @@ describe("useServerPanel", () => {
   it("handleToggleServer un-collapses panel when adding a server", () => {
     const { result } = renderHook(() => useServerPanel("session-1"))
 
-    // Collapse the panel
-    act(() => {
-      result.current.handleToggleServerCollapse()
-    })
+    // Panel starts collapsed by default
     expect(result.current.serverPanelCollapsed).toBe(true)
 
     // Toggle a server visible
@@ -179,23 +176,20 @@ describe("useServerPanel", () => {
       { initialProps: { sessionId: "session-A" } }
     )
 
-    // Set up some state for session A
+    // Set up some state for session A — expand from default collapsed, then toggle server visible
     act(() => {
       result.current.handleToggleServer("s1", "/out/s1", "Server 1")
     })
-    act(() => {
-      result.current.handleToggleServerCollapse()
-    })
-
+    // handleToggleServer un-collapses, so now it's false
     expect(result.current.visibleServerIds.has("s1")).toBe(true)
-    expect(result.current.serverPanelCollapsed).toBe(true)
+    expect(result.current.serverPanelCollapsed).toBe(false)
 
     // Switch to session B
     rerender({ sessionId: "session-B" })
 
-    // Session B should have clean state
+    // Session B should have clean/default state (collapsed)
     expect(result.current.visibleServerIds.size).toBe(0)
-    expect(result.current.serverPanelCollapsed).toBe(false)
+    expect(result.current.serverPanelCollapsed).toBe(true)
 
     // Set up state for session B
     act(() => {
@@ -205,9 +199,9 @@ describe("useServerPanel", () => {
     // Switch back to session A
     rerender({ sessionId: "session-A" })
 
-    // Session A state should be restored
+    // Session A state should be restored (was expanded with s1 visible)
     expect(result.current.visibleServerIds.has("s1")).toBe(true)
-    expect(result.current.serverPanelCollapsed).toBe(true)
+    expect(result.current.serverPanelCollapsed).toBe(false)
   })
 
   it("resets state when switching to null session", () => {
@@ -223,7 +217,7 @@ describe("useServerPanel", () => {
     rerender({ sessionId: null })
 
     expect(result.current.visibleServerIds.size).toBe(0)
-    expect(result.current.serverPanelCollapsed).toBe(false)
+    expect(result.current.serverPanelCollapsed).toBe(true)
   })
 
   it("does not save state if prevSessionId was null", () => {
@@ -235,9 +229,9 @@ describe("useServerPanel", () => {
     // Switch from null to a session
     rerender({ sessionId: "session-A" })
 
-    // Should start with clean state (no saved state from null)
+    // Should start with clean/default state (collapsed)
     expect(result.current.visibleServerIds.size).toBe(0)
-    expect(result.current.serverPanelCollapsed).toBe(false)
+    expect(result.current.serverPanelCollapsed).toBe(true)
   })
 
   it("handleServersChanged does not clean visibleIds when servers list is empty", () => {

@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 export function useServerPanel(sessionId: string | null | undefined) {
   const [serverMap, setServerMap] = useState<Map<string, { outputPath: string; title: string }>>(new Map())
   const [visibleServerIds, setVisibleServerIds] = useState<Set<string>>(new Set())
-  const [serverPanelCollapsed, setServerPanelCollapsed] = useState(false)
+  const [serverPanelCollapsed, setServerPanelCollapsed] = useState(true)
   const serverStateCacheRef = useRef<Map<string, { visibleIds: string[]; collapsed: boolean }>>(new Map())
   const prevSessionIdRef = useRef<string | null>(null)
 
@@ -24,7 +24,7 @@ export function useServerPanel(sessionId: string | null | undefined) {
         setServerPanelCollapsed(cached.collapsed)
       } else {
         setVisibleServerIds(new Set())
-        setServerPanelCollapsed(false)
+        setServerPanelCollapsed(true)
       }
     }
     prevSessionIdRef.current = currentId

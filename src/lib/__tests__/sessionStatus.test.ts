@@ -90,22 +90,24 @@ describe("deriveSessionStatus", () => {
     expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 
-  it("returns compacting when last meaningful message is a summary", () => {
+  it("skips summary markers to find real status behind them", () => {
     const msgs = [
       { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
       { type: "system", subtype: "turn_duration" },
       { type: "summary", summary: "compacted" },
     ]
-    expect(deriveSessionStatus(msgs).status).toBe("compacting")
+    // Finished-compaction markers are skipped — live compaction is detected via subagent file watcher
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 
-  it("returns compacting when last meaningful message is a compact_boundary", () => {
+  it("skips compact_boundary markers to find real status behind them", () => {
     const msgs = [
       { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
       { type: "system", subtype: "turn_duration" },
       { type: "system", subtype: "compact_boundary", content: "Conversation compacted", isMeta: false },
     ]
-    expect(deriveSessionStatus(msgs).status).toBe("compacting")
+    // Finished-compaction markers are skipped — live compaction is detected via subagent file watcher
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
   })
 
   it("skips file-history-snapshot messages to find real status", () => {

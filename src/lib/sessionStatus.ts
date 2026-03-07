@@ -75,13 +75,11 @@ export function deriveSessionStatus(
       return result("processing")
     }
 
-    // Compaction just happened — show "compacting" until the next real message arrives
-    if (msg.type === "summary") return result("compacting")
-
-    // compact_boundary system message (Claude Code v2.1.34+) — same signal as summary
-    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") {
-      return result("compacting")
-    }
+    // Compaction markers — skip past them to find the real session state.
+    // In-progress compaction is detected live via subagent file watcher (isCompacting),
+    // so these finished-compaction markers should not lock the status to "compacting".
+    if (msg.type === "summary") continue
+    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") continue
 
     // Skip progress, system, etc.
   }
