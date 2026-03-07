@@ -134,6 +134,8 @@ export const SessionBrowser = memo(function SessionBrowser({
             onSelectSession={browser.loadLiveSession}
             onDuplicateSession={onDuplicateSession}
             onDeleteSession={onDeleteSession}
+            onNewSession={onNewSession}
+            creatingSession={creatingSession}
             pendingSession={pendingSession}
             refreshRef={liveSessionsRefreshRef}
           />

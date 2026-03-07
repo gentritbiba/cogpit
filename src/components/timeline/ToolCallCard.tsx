@@ -14,21 +14,23 @@ import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 
 const TOOL_BADGE_STYLES: Record<string, string> = {
-  Read: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  // High saturation — primary action tools
   Write: "bg-green-500/20 text-green-400 border-green-500/30",
   Edit: "bg-amber-500/20 text-amber-400 border-amber-500/30",
   Bash: "bg-red-500/20 text-red-400 border-red-500/30",
-  Grep: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  Glob: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
-  Task: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
-  WebFetch: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  WebSearch: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  EnterPlanMode: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  ExitPlanMode: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  AskUserQuestion: "bg-pink-500/20 text-pink-400 border-pink-500/30",
+  // Low saturation — secondary tools
+  Read: "bg-blue-500/5 text-blue-400/40 border-blue-500/10",
+  Grep: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
+  Glob: "bg-cyan-500/5 text-cyan-400/40 border-cyan-500/10",
+  Task: "bg-indigo-500/5 text-indigo-400/40 border-indigo-500/10",
+  WebFetch: "bg-orange-500/5 text-orange-400/40 border-orange-500/10",
+  WebSearch: "bg-orange-500/5 text-orange-400/40 border-orange-500/10",
+  EnterPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
+  ExitPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
+  AskUserQuestion: "bg-pink-500/5 text-pink-400/40 border-pink-500/10",
 }
 
-const DEFAULT_BADGE_STYLE = "bg-muted/20 text-muted-foreground border-muted-foreground/30"
+const DEFAULT_BADGE_STYLE = "bg-muted/5 text-muted-foreground/40 border-muted-foreground/10"
 
 export function getToolBadgeStyle(name: string): string {
   return TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE

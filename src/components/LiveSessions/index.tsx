@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
-import { Loader2, RefreshCw, Activity, X, Search, AlertTriangle, FolderOpen, ChevronRight } from "lucide-react"
+import { Loader2, RefreshCw, Activity, X, Search, AlertTriangle, FolderOpen, ChevronRight, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -19,6 +19,8 @@ interface LiveSessionsProps {
   onSelectSession: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (dirName: string, fileName: string) => void
+  onNewSession?: (dirName: string, cwd?: string) => void
+  creatingSession?: boolean
   /** Info about a session being created — shows a placeholder row */
   pendingSession?: PendingSessionInfo | null
   /** Ref to expose an imperative refresh callback */
@@ -53,7 +55,7 @@ function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessio
   return groups
 }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, pendingSession, refreshRef }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
@@ -327,6 +329,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
               onRenameSession={renameSession}
+              onNewSession={onNewSession}
+              creatingSession={creatingSession}
               pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
             />
           ))}
@@ -347,6 +351,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
               onRenameSession={renameSession}
+              onNewSession={onNewSession}
+              creatingSession={creatingSession}
               pendingSession={pendingSession}
             />
           )}
@@ -374,6 +380,8 @@ function ProjectGroup({
   onDuplicateSession,
   onDeleteSession,
   onRenameSession,
+  onNewSession,
+  creatingSession,
   pendingSession,
 }: {
   projectPath: string
@@ -390,6 +398,8 @@ function ProjectGroup({
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
+  onNewSession?: (dirName: string, cwd?: string) => void
+  creatingSession?: boolean
   pendingSession?: PendingSessionInfo | null
 }) {
   const hasPending = !!pendingSession
@@ -405,22 +415,42 @@ function ProjectGroup({
   return (
     <div className="flex flex-col">
       {/* Collapsible group header */}
-      <button
-        onClick={() => setCollapsed((c) => !c)}
-        className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full text-left hover:bg-white/[0.02] rounded-sm transition-colors"
-      >
-        <ChevronRight className={cn(
-          "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
-          !isCollapsed && "rotate-90"
-        )} />
-        <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
-        <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
-          {projectPath}
-        </span>
-        <span className="text-[10px] text-muted-foreground/40 shrink-0">
-          {totalCount}
-        </span>
-      </button>
+      <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
+        >
+          <ChevronRight className={cn(
+            "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
+            !isCollapsed && "rotate-90"
+          )} />
+          <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
+          <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
+            {projectPath}
+          </span>
+          <span className="text-[10px] text-muted-foreground/40 shrink-0">
+            {totalCount}
+          </span>
+        </button>
+        {onNewSession && sessions.length > 0 && (
+          <button
+            className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
+            disabled={creatingSession}
+            onClick={(e) => {
+              e.stopPropagation()
+              const first = sessions[0]
+              onNewSession(first.dirName, first.cwd ?? undefined)
+            }}
+            aria-label={`New session in ${projectPath}`}
+          >
+            {creatingSession ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Plus className="size-3" />
+            )}
+          </button>
+        )}
+      </div>
 
       {/* Session rows — left border + scrollable when > 5 */}
       {!isCollapsed && (

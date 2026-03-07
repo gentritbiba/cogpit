@@ -118,7 +118,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
           activityItems.map((item, idx) => {
             if (item.kind === "thinking") {
               return (
-                <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll />
+                <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll={false} />
               )
             }
             const isLastGroup = idx === activityItems.length - 1
