@@ -194,7 +194,7 @@ export function registerEditorRoutes(use: UseFn) {
   })
 
   // POST /api/open-terminal — open the user's default terminal at a directory
-  // Body: { path?: string, dirName?: string }
+  // Body: { path?: string, dirName?: string, command?: string }
   use("/api/open-terminal", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -212,6 +212,11 @@ export function registerEditorRoutes(use: UseFn) {
           return
         }
 
+        // Optional command to run in the terminal (e.g. "claude /mcp")
+        // Sanitize: only allow alphanumeric, spaces, slashes, hyphens, dots, underscores, colons
+        const rawCommand = typeof parsed.command === "string" ? parsed.command : undefined
+        const command = rawCommand && /^[a-zA-Z0-9 /\-._:]+$/.test(rawCommand) ? rawCommand : undefined
+
         try {
           await stat(path)
         } catch {
@@ -222,24 +227,35 @@ export function registerEditorRoutes(use: UseFn) {
 
         const os = platform()
         try {
-          const configuredTerminal = getConfig()?.terminalApp
-          if (configuredTerminal) {
-            const { cmd, args } = terminalCommand(configuredTerminal, path)
-            await openWithEditor(cmd, args)
-          } else if (os === "darwin") {
-            const tp = process.env.TERM_PROGRAM?.toLowerCase()
-            const termApp = tp === "ghostty" ? "Ghostty"
-              : tp === "iterm.app" ? "iTerm"
-              : tp === "warpterminal" ? "Warp"
-              : tp === "alacritty" ? "Alacritty"
-              : tp === "kitty" ? "kitty"
-              : "Terminal"
-            const { cmd, args } = terminalCommand(termApp, path)
-            await openWithEditor(cmd, args)
-          } else if (os === "win32") {
-            await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
+          // If a command is provided on macOS, use osascript to open Terminal with the command
+          if (command && os === "darwin") {
+            const escapedPath = path.replace(/'/g, "'\\''")
+            const escapedCmd = command.replace(/'/g, "'\\''")
+            const script = `tell application "Terminal"
+  activate
+  do script "cd '${escapedPath}' && ${escapedCmd}"
+end tell`
+            await openWithEditor("osascript", ["-e", script])
           } else {
-            await openWithEditor("x-terminal-emulator", ["--working-directory", path])
+            const configuredTerminal = getConfig()?.terminalApp
+            if (configuredTerminal) {
+              const { cmd, args } = terminalCommand(configuredTerminal, path)
+              await openWithEditor(cmd, args)
+            } else if (os === "darwin") {
+              const tp = process.env.TERM_PROGRAM?.toLowerCase()
+              const termApp = tp === "ghostty" ? "Ghostty"
+                : tp === "iterm.app" ? "iTerm"
+                : tp === "warpterminal" ? "Warp"
+                : tp === "alacritty" ? "Alacritty"
+                : tp === "kitty" ? "kitty"
+                : "Terminal"
+              const { cmd, args } = terminalCommand(termApp, path)
+              await openWithEditor(cmd, args)
+            } else if (os === "win32") {
+              await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
+            } else {
+              await openWithEditor("x-terminal-emulator", ["--working-directory", path])
+            }
           }
           res.end(JSON.stringify({ success: true }))
         } catch {

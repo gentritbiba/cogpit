@@ -21,7 +21,7 @@ export function registerClaudeRoutes(use: UseFn) {
     })
     req.on("end", () => {
       try {
-        const { sessionId, message, images, cwd, permissions, model, effort } = JSON.parse(body)
+        const { sessionId, message, images, cwd, permissions, model, effort, disallowedMcpTools } = JSON.parse(body)
 
         if (!sessionId || (!message && (!images || images.length === 0))) {
           res.statusCode = 400
@@ -35,6 +35,15 @@ export function registerClaudeRoutes(use: UseFn) {
 
         const modelArgs = model ? ["--model", model] : []
         const effortArgs = effort ? ["--effort", effort] : []
+        const MCP_TOOL_RE = /^mcp__[\w.-]+__\*$/
+        const mcpArgs: string[] = []
+        if (Array.isArray(disallowedMcpTools)) {
+          for (const tool of disallowedMcpTools) {
+            if (typeof tool === "string" && MCP_TOOL_RE.test(tool)) {
+              mcpArgs.push("--disallowedTools", tool)
+            }
+          }
+        }
 
         const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
         const contentBlocks: unknown[] = []
@@ -103,6 +112,7 @@ export function registerClaudeRoutes(use: UseFn) {
             ...permArgs,
             ...modelArgs,
             ...effortArgs,
+            ...mcpArgs,
           ],
           {
             cwd: cwd || homedir(),

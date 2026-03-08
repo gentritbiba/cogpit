@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
 
 export interface McpServer {
@@ -72,16 +72,32 @@ export function useMcpServers(cwd: string | undefined, dirName: string | undefin
       .then(async (res) => {
         if (!res.ok) return
         const data = await res.json()
-        setServers(data.servers ?? [])
+        const fetched: McpServer[] = data.servers ?? []
+        setServers(fetched)
+
+        // Reconcile selection: drop servers no longer connected, auto-select newly connected
+        const connectedNames = new Set(fetched.filter(s => s.status === "connected").map(s => s.name))
+        setSelectedServers(prev => {
+          const kept = prev.filter(name => connectedNames.has(name))
+          const newlyConnected = fetched
+            .filter(s => s.status === "connected" && !prev.includes(s.name))
+            .map(s => s.name)
+          const next = [...kept, ...newlyConnected]
+          if (dirNameRef.current) saveSelection(dirNameRef.current, next)
+          return next
+        })
       })
       .catch(() => { /* ignore */ })
       .finally(() => setLoading(false))
   }, [cwd])
 
   // Compute disallowed tools for unselected connected servers
-  const disallowedMcpTools = servers
-    .filter(s => s.status === "connected" && !selectedServers.includes(s.name))
-    .map(s => `mcp__${s.name}__*`)
+  const disallowedMcpTools = useMemo(
+    () => servers
+      .filter(s => s.status === "connected" && !selectedServers.includes(s.name))
+      .map(s => `mcp__${s.name}__*`),
+    [servers, selectedServers]
+  )
 
   return {
     servers,

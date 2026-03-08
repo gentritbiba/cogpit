@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { isAbsolute } from "node:path"
 import type { UseFn } from "../helpers"
 
 export interface McpServer {
@@ -92,10 +93,10 @@ export function registerMcpRoutes(use: UseFn) {
     const cwd = url.searchParams.get("cwd")
     const refresh = url.searchParams.get("refresh") === "1"
 
-    if (!cwd) {
+    if (!cwd || !isAbsolute(cwd)) {
       res.statusCode = 400
       res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify({ error: "cwd query parameter required" }))
+      res.end(JSON.stringify({ error: "cwd must be an absolute path" }))
       return
     }
 
@@ -104,6 +105,10 @@ export function registerMcpRoutes(use: UseFn) {
     getMcpServers(cwd).then((servers) => {
       res.setHeader("Content-Type", "application/json")
       res.end(JSON.stringify({ servers }))
+    }).catch(() => {
+      res.statusCode = 500
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({ error: "Failed to fetch MCP servers" }))
     })
   })
 }

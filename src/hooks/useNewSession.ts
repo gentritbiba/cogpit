@@ -16,6 +16,7 @@ interface UseNewSessionOpts {
   onCreateStarted?: (message: string) => void
   model: string
   effort: string
+  disallowedMcpTools?: string[]
 }
 
 export function useNewSession({
@@ -26,6 +27,7 @@ export function useNewSession({
   onCreateStarted,
   model,
   effort,
+  disallowedMcpTools,
 }: UseNewSessionOpts) {
   const [creatingSession, setCreatingSession] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -79,6 +81,7 @@ export function useNewSession({
             model: model || undefined,
             effort: effort || undefined,
             worktreeName: worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
+            disallowedMcpTools: disallowedMcpTools || undefined,
           }),
           signal: controller.signal,
         })
@@ -144,7 +147,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted]
+    [permissionsConfig, model, effort, disallowedMcpTools, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

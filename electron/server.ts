@@ -34,6 +34,7 @@ import { registerFileContentRoutes } from "../server/routes/file-content"
 import { registerSearchIndexRoutes } from "../server/routes/search-index-stats"
 import { registerCogpitSearchRoutes } from "../server/routes/cogpit-search"
 import { registerMcpRoutes } from "../server/routes/mcp"
+import { registerNotifyRoutes } from "../server/routes/notify"
 import { SearchIndex } from "../server/search-index"
 
 // ── PTY types ───────────────────────────────────────────────────────
@@ -98,7 +99,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // ── Guard middleware ────────────────────────────────────────────
   app.use("/api", (req, res, next) => {
-    if (req.path.startsWith("/config")) return next()
+    if (req.path.startsWith("/config") || req.path.startsWith("/notify")) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
       return
@@ -134,6 +135,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerSearchIndexRoutes(use)
   registerCogpitSearchRoutes(use)
   registerMcpRoutes(use)
+  registerNotifyRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

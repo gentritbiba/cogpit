@@ -37,6 +37,7 @@ import { useServerPanel } from "@/hooks/useServerPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
+import { useMcpServers } from "@/hooks/useMcpServers"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
@@ -68,6 +69,26 @@ const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModa
 const TeamsDashboard = lazy(() => import("@/components/TeamsDashboard").then(m => ({ default: m.TeamsDashboard })))
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then(m => ({ default: m.ThemeSelectorModal })))
 const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then(m => ({ default: m.WorktreePanel })))
+
+/** Shared footer for the chat input — ensures consistent max-width in both new and active sessions. */
+function SessionInputFooter({ floating, children }: { floating?: boolean, children: React.ReactNode }) {
+  if (floating) {
+    return (
+      <div className="absolute bottom-0 left-0 right-0 z-20 flex justify-center pointer-events-none">
+        <div className="w-full max-w-3xl px-3 pt-6 bg-gradient-to-t from-elevation-1 from-80% to-transparent pointer-events-auto">
+          {children}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="w-full flex justify-center shrink-0">
+      <div className="w-full max-w-3xl px-3">
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const config = useAppConfig()
@@ -143,6 +164,17 @@ export default function App() {
     }).catch((err) => console.error("[open-terminal] fetch failed:", err))
   }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
 
+  const handleMcpAuth = useCallback((_serverName: string) => {
+    const projectPath = state.session?.cwd ?? pendingPath ?? undefined
+    const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
+    if (!projectPath && !dirName) return
+    authFetch("/api/open-terminal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, dirName, command: "claude /mcp" }),
+    }).catch(() => {})
+  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
+
   // Server panel state
   const serverPanel = useServerPanel(state.session?.sessionId)
 
@@ -214,6 +246,10 @@ export default function App() {
   // Thinking effort level
   const [selectedEffort, setSelectedEffort] = useState(DEFAULT_EFFORT)
 
+  // MCP server selection
+  const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
+  const mcpData = useMcpServers(currentCwd, currentDirName ?? undefined)
+
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
   const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
@@ -244,6 +280,7 @@ export default function App() {
     onCreateStarted: setPendingFirstMessage,
     model: selectedModel,
     effort: selectedEffort,
+    disallowedMcpTools: mcpData.disallowedMcpTools,
   })
 
   // Build the pending session info for the Live & Recent placeholder
@@ -272,6 +309,7 @@ export default function App() {
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
     effort: selectedEffort,
+    disallowedMcpTools: mcpData.disallowedMcpTools,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -376,6 +414,7 @@ export default function App() {
     setSelectedModel,
     selectedEffort,
     setSelectedEffort,
+    disallowedMcpTools: mcpData.disallowedMcpTools,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
   })
@@ -677,6 +716,12 @@ export default function App() {
         onWorktreeEnabledChange={isNewSession ? setWorktreeEnabled : undefined}
         onApplySettings={handlers.handleApplySettings}
         activeModelId={state.session?.model}
+        mcpServers={mcpData.servers}
+        selectedMcpServers={mcpData.selectedServers}
+        onToggleMcpServer={mcpData.toggleServer}
+        onRefreshMcpServers={mcpData.refresh}
+        mcpLoading={mcpData.loading}
+        onMcpAuth={handleMcpAuth}
       />
     </div>
   )
@@ -932,12 +977,10 @@ export default function App() {
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     />
                     <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} />
-                    <div className="absolute bottom-0 left-0 right-0 z-20 flex justify-center pointer-events-none">
-                      <div className="w-full max-w-3xl px-3 pt-6 bg-gradient-to-t from-elevation-1 from-80% to-transparent pointer-events-auto">
-                        {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
-                        {subAgentReadOnlyNode || chatInputNode}
-                      </div>
-                    </div>
+                    <SessionInputFooter floating>
+                      {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
+                      {subAgentReadOnlyNode || chatInputNode}
+                    </SessionInputFooter>
                   </div>
                 </ResizablePanel>
 
@@ -963,7 +1006,7 @@ export default function App() {
             <div className="flex flex-1 min-h-0 flex-col min-w-0">
               {pendingPreviewList.length > 0 ? (
                 <div className="flex-1 overflow-y-auto px-4 py-6">
-                  <div className="mx-auto max-w-4xl">
+                  <div className="mx-auto max-w-3xl">
                     {pendingPreviewList}
                   </div>
                 </div>
@@ -1002,7 +1045,7 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {chatInputNode}
+              <SessionInputFooter>{chatInputNode}</SessionInputFooter>
             </div>
           ) : (
             <Dashboard

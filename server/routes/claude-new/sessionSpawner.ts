@@ -209,7 +209,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model, effort, worktreeName } = JSON.parse(body)
+        const { dirName, message, images, permissions, model, effort, worktreeName, disallowedMcpTools } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           res.statusCode = 400
@@ -230,6 +230,15 @@ export function registerCreateAndSendRoute(use: UseFn) {
         const modelArgs = model ? ["--model", model] : []
         const effortArgs = effort ? ["--effort", effort] : []
         const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []
+        const MCP_TOOL_RE = /^mcp__[\w.-]+__\*$/
+        const mcpArgs: string[] = []
+        if (Array.isArray(disallowedMcpTools)) {
+          for (const tool of disallowedMcpTools) {
+            if (typeof tool === "string" && MCP_TOOL_RE.test(tool)) {
+              mcpArgs.push("--disallowedTools", tool)
+            }
+          }
+        }
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
 
@@ -250,6 +259,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
             ...modelArgs,
             ...effortArgs,
             ...worktreeArgs,
+            ...mcpArgs,
           ],
           {
             cwd: projectPath,

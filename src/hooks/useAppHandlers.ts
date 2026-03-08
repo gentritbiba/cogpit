@@ -25,6 +25,7 @@ interface AppHandlersDeps {
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>
   selectedEffort: string
   setSelectedEffort: React.Dispatch<React.SetStateAction<string>>
+  disallowedMcpTools: string[]
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
 }
@@ -32,6 +33,7 @@ interface AppHandlersDeps {
 interface AppliedSettings {
   model: string
   effort: string
+  disallowedMcpTools: string[]
 }
 
 interface AppHandlersResult {
@@ -70,6 +72,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     markPermissionsApplied, hasPermsPendingChanges,
     selectedModel, setSelectedModel,
     selectedEffort, setSelectedEffort,
+    disallowedMcpTools,
     scrollRequestScrollToTop, handleDashboardSelect,
   } = deps
 
@@ -183,6 +186,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   selectedModelRef.current = selectedModel
   const selectedEffortRef = useRef(selectedEffort)
   selectedEffortRef.current = selectedEffort
+  const disallowedMcpToolsRef = useRef(disallowedMcpTools)
+  disallowedMcpToolsRef.current = disallowedMcpTools
 
   const currentSessionId = state.session?.sessionId ?? null
   const prevSessionIdRef = useRef<string | null>(null)
@@ -201,16 +206,19 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         [currentSessionId]: {
           model: selectedModelRef.current,
           effort: selectedEffortRef.current,
+          disallowedMcpTools: disallowedMcpToolsRef.current,
         },
       }
     })
   }, [currentSessionId, setSelectedModel, setSelectedEffort])
 
   const applied = currentSessionId ? appliedSettings[currentSessionId] : undefined
+  const mcpChanged = JSON.stringify(disallowedMcpTools) !== JSON.stringify(applied?.disallowedMcpTools ?? [])
   const hasSettingsChanges = applied != null &&
     (selectedModel !== applied.model ||
      selectedEffort !== applied.effort ||
-     hasPermsPendingChanges)
+     hasPermsPendingChanges ||
+     mcpChanged)
 
   // ── Apply settings ─────────────────────────────────────────────────────────
   const handleApplySettings = useCallback(async () => {
@@ -222,10 +230,10 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     })
     setAppliedSettings(prev => ({
       ...prev,
-      [currentSessionId]: { model: selectedModel, effort: selectedEffort },
+      [currentSessionId]: { model: selectedModel, effort: selectedEffort, disallowedMcpTools },
     }))
     markPermissionsApplied()
-  }, [currentSessionId, selectedModel, selectedEffort, markPermissionsApplied])
+  }, [currentSessionId, selectedModel, selectedEffort, disallowedMcpTools, markPermissionsApplied])
 
   // ── Stop session ───────────────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {
