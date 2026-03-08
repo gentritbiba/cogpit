@@ -33,6 +33,7 @@ import { registerLocalFileRoutes } from "../server/routes/local-file"
 import { registerFileContentRoutes } from "../server/routes/file-content"
 import { registerSearchIndexRoutes } from "../server/routes/search-index-stats"
 import { registerCogpitSearchRoutes } from "../server/routes/cogpit-search"
+import { registerMcpRoutes } from "../server/routes/mcp"
 import { SearchIndex } from "../server/search-index"
 
 // ── PTY types ───────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerFileContentRoutes(use)
   registerSearchIndexRoutes(use)
   registerCogpitSearchRoutes(use)
+  registerMcpRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

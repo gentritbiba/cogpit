@@ -26,6 +26,7 @@ import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerSearchIndexRoutes } from "./routes/search-index-stats"
 import { registerCogpitSearchRoutes } from "./routes/cogpit-search"
+import { registerMcpRoutes } from "./routes/mcp"
 import { SearchIndex } from "./search-index"
 
 export function sessionApiPlugin(): Plugin {
@@ -107,6 +108,7 @@ export function sessionApiPlugin(): Plugin {
       registerFileContentRoutes(use)
       registerSearchIndexRoutes(use)
       registerCogpitSearchRoutes(use)
+      registerMcpRoutes(use)
     },
   }
 }
