@@ -163,6 +163,7 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/ports` | GET | List listening processes (scans lsof) |
 | `/api/worktrees` | GET/POST/DELETE | Manage git worktrees |
 | `/api/usage` | GET | Token usage tracking |
+| `/api/notify` | POST | Receive Claude Code hook payloads, display system notifications with click-to-navigate |
 
 ---
 

@@ -16,7 +16,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
-import { shortenModel, parseSubAgentPath } from "@/lib/format"
+import { parseSubAgentPath, projectName } from "@/lib/format"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { ContextBadge, HeaderIconButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
@@ -67,13 +67,6 @@ export const SessionInfoBar = memo(function SessionInfoBar({
         </>
       )}
 
-      {/* Session metadata badges */}
-      <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
-        {shortenModel(session.model)}
-      </Badge>
-      <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-muted-foreground border-border">
-        {session.turns.length} turns
-      </Badge>
       {session.branchedFrom && (
         <Tooltip>
           <TooltipTrigger render={<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-purple-400 border-purple-700/50 bg-purple-500/5 gap-1" />}>
@@ -92,6 +85,15 @@ export const SessionInfoBar = memo(function SessionInfoBar({
         showRemaining
         showTooltip={!isMobile}
       />
+
+      <div className="flex-1" />
+
+      {/* Project name */}
+      {session.cwd && (
+        <span className="text-[11px] font-medium text-muted-foreground">
+          {projectName(session.cwd)}
+        </span>
+      )}
 
       <div className="flex-1" />
 
