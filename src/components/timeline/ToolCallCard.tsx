@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo } from "react"
+import { useState, useEffect, useMemo, memo, useCallback } from "react"
 import {
   CheckCircle,
   XCircle,
@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
 import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
@@ -212,11 +213,18 @@ interface ToolCallCardProps {
   isAgentActive?: boolean
 }
 
+/** Low-signal tools that are collapsed to a single line on mobile by default. */
+const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode"])
+
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive }: ToolCallCardProps) {
+  const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
   const [resultExpanded, setResultExpanded] = useState(false)
   const [diffOpen, setDiffOpen] = useState(false)
+  // On mobile, low-signal tools are collapsed to a single line by default
+  const [mobileExpanded, setMobileExpanded] = useState(false)
+  const isCompactMobile = isMobile && COMPACT_MOBILE_TOOLS.has(toolCall.name) && !expandAll && !mobileExpanded
 
   const showInput = expandAll || inputOpen
   const showResult = expandAll || resultOpen
@@ -234,12 +242,18 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     typeof toolCall.input.new_string === "string" &&
     typeof toolCall.input.file_path === "string"
 
+  const handleCompactTap = useCallback(() => {
+    if (isCompactMobile) setMobileExpanded(true)
+  }, [isCompactMobile])
+
   return (
     <div
       className={cn(
         "py-1.5",
-        toolCall.isError && "bg-red-950/10 rounded-md px-2"
+        toolCall.isError && "bg-red-950/10 rounded-md px-2",
+        isCompactMobile && "cursor-pointer active:bg-white/[0.03] rounded-sm",
       )}
+      onClick={isCompactMobile ? handleCompactTap : undefined}
     >
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -259,7 +273,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {toolCall.timestamp && (
+          {/* Hide timestamp on mobile compact mode to save space */}
+          {toolCall.timestamp && !isCompactMobile && (
             <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
               {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
@@ -268,28 +283,30 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         </div>
       </div>
 
-      <div className="flex gap-3 mt-1">
-        {hasEditDiff && (
+      {!isCompactMobile && (
+        <div className="flex gap-3 mt-1">
+          {hasEditDiff && (
+            <ToggleButton
+              isOpen={showDiff}
+              onClick={() => setDiffOpen(!diffOpen)}
+              label="Diff"
+              activeClass="text-amber-400"
+            />
+          )}
           <ToggleButton
-            isOpen={showDiff}
-            onClick={() => setDiffOpen(!diffOpen)}
-            label="Diff"
-            activeClass="text-amber-400"
+            isOpen={showInput}
+            onClick={() => setInputOpen(!inputOpen)}
+            label="Input"
           />
-        )}
-        <ToggleButton
-          isOpen={showInput}
-          onClick={() => setInputOpen(!inputOpen)}
-          label="Input"
-        />
-        {toolCall.result !== null && (
-          <ToggleButton
-            isOpen={showResult}
-            onClick={() => setResultOpen(!resultOpen)}
-            label="Result"
-          />
-        )}
-      </div>
+          {toolCall.result !== null && (
+            <ToggleButton
+              isOpen={showResult}
+              onClick={() => setResultOpen(!resultOpen)}
+              label="Result"
+            />
+          )}
+        </div>
+      )}
 
       {showDiff && hasEditDiff && (
         <EditDiffView

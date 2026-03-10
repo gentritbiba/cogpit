@@ -1,9 +1,10 @@
 import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
-import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
+import { MessageSquare, FolderOpen, BarChart3, Users, FileCode2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { hapticLight } from "@/lib/haptics"
 
 export type MobileTab = "chat" | "sessions" | "stats" | "teams"
 
@@ -19,6 +20,8 @@ interface MobileNavProps {
   activeTab: MobileTab
   onTabChange: (tab: MobileTab) => void
   hasTeam: boolean
+  hasFileChanges?: boolean
+  onShowFileChanges?: () => void
 }
 
 const TAB_DEFINITIONS: TabDefinition[] = [
@@ -32,6 +35,8 @@ export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
   hasTeam,
+  hasFileChanges,
+  onShowFileChanges,
 }: MobileNavProps) {
   const { session, isLive } = useSessionContext()
   const hasSession = session !== null
@@ -52,7 +57,7 @@ export const MobileNav = memo(function MobileNav({
             role="tab"
             aria-selected={isActive}
             aria-label={tab.label}
-            onClick={() => onTabChange(tab.id)}
+            onClick={() => { hapticLight(); onTabChange(tab.id) }}
             className={cn(
               "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
               "active:scale-95 active:bg-elevation-2",
@@ -72,6 +77,20 @@ export const MobileNav = memo(function MobileNav({
           </button>
         )
       })}
+      {hasFileChanges && onShowFileChanges && (
+        <button
+          aria-label="File changes"
+          onClick={() => { hapticLight(); onShowFileChanges() }}
+          className={cn(
+            "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
+            "active:scale-95 active:bg-elevation-2",
+            "text-amber-400",
+          )}
+        >
+          <FileCode2 className="size-5" />
+          <span className="text-[10px] font-medium">Files</span>
+        </button>
+      )}
     </nav>
   )
 })

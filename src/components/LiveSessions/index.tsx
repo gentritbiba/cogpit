@@ -9,6 +9,8 @@ import { SessionRow } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
+import { useIsMobile } from "@/hooks/useIsMobile"
+import { hapticMedium } from "@/lib/haptics"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -132,6 +134,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   // Keep fetchDataRef in sync so the imperative refresh always calls the latest version
   fetchDataRef.current = fetchData
+
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     fetchData(debouncedSearch || undefined)
@@ -262,12 +266,12 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 p-0 shrink-0"
-          onClick={() => fetchData(debouncedSearch || undefined)}
+          className={cn("p-0 shrink-0", isMobile ? "h-8 w-8" : "h-6 w-6")}
+          onClick={() => { hapticMedium(); fetchData(debouncedSearch || undefined) }}
           aria-label="Refresh live sessions"
         >
           <RefreshCw
-            className={cn("size-3", loading && "animate-spin")}
+            className={cn(isMobile ? "size-4" : "size-3", loading && "animate-spin")}
           />
         </Button>
       </div>

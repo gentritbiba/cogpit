@@ -81,21 +81,21 @@ export function ProjectsView({
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto max-w-5xl px-6 py-8 fade-in">
+      <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-8 fade-in">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <Cog className="size-7 text-blue-400" />
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+        <div className="mb-4 sm:mb-8">
+          <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
+            <Cog className="size-5 sm:size-7 text-blue-400" />
+            <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-foreground">
               Cogpit
             </h1>
           </div>
-          <p className="text-sm text-muted-foreground">Session Viewer & Monitor</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Session Viewer & Monitor</p>
         </div>
 
         {/* Projects Section */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
+        <div className="mb-4 sm:mb-8">
+          <div className="flex items-center gap-3 mb-3 sm:mb-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
               Projects
             </h2>
@@ -191,8 +191,8 @@ export function ProjectsView({
           )}
         </div>
 
-        {/* Keyboard shortcuts */}
-        <div className="mt-6 rounded-lg bg-elevation-1 px-5 py-4">
+        {/* Keyboard shortcuts (hidden on mobile — not useful for touch) */}
+        <div className="mt-6 rounded-lg bg-elevation-1 px-5 py-4 hidden sm:block">
           <div className="flex items-center gap-2 mb-3">
             <Keyboard className="size-3.5 text-muted-foreground" />
             <span className="text-xs font-medium text-muted-foreground">Keyboard Shortcuts</span>

@@ -256,6 +256,40 @@
   }
 }
 
+/* ── Mobile: code block horizontal scroll containment ─── */
+@media (max-width: 767px) {
+  pre, code {
+    max-width: calc(100vw - 2rem);
+    overflow-x: auto;
+  }
+}
+
+/* ── Bottom sheet drag handle ─────────────────────────── */
+.bottom-sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(0.5 0 0 / 0.4);
+  margin: 8px auto;
+}
+
+/* ── Pull-to-refresh indicator ────────────────────────── */
+.pull-indicator {
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+/* ── Swipe action reveal ─────────────────────────────── */
+.swipe-action-container {
+  overflow: hidden;
+  position: relative;
+}
+
+.swipe-action-content {
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+
+
 /* ── Custom Utilities ─────────────────────────────────────── */
 
 /* CSS containment: isolate layout recalculation boundaries during resize */

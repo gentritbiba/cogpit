@@ -205,6 +205,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
+            onFocus={() => {
+              // On mobile, scroll textarea into view after virtual keyboard opens
+              setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
+            }}
             placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected)}
             rows={1}
             className={cn(

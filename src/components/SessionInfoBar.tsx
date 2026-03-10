@@ -8,6 +8,7 @@ import {
   TerminalSquare,
   Bot,
   ChevronRight,
+  FileCode2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +31,8 @@ interface SessionInfoBarProps {
   onDuplicateSession?: () => void
   onOpenTerminal?: () => void
   onBackToMain?: () => void
+  onShowFileChanges?: () => void
+  hasFileChanges?: boolean
 }
 
 export const SessionInfoBar = memo(function SessionInfoBar({
@@ -38,6 +41,8 @@ export const SessionInfoBar = memo(function SessionInfoBar({
   onDuplicateSession,
   onOpenTerminal,
   onBackToMain,
+  onShowFileChanges,
+  hasFileChanges,
 }: SessionInfoBarProps) {
   const { isMobile } = useAppContext()
   const { session: sessionOrNull, sessionSource } = useSessionContext()
@@ -96,6 +101,19 @@ export const SessionInfoBar = memo(function SessionInfoBar({
       )}
 
       <div className="flex-1" />
+
+      {/* File changes button (mobile only) */}
+      {isMobile && hasFileChanges && onShowFileChanges && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-amber-400 hover:bg-amber-500/20"
+          onClick={onShowFileChanges}
+        >
+          <FileCode2 className="size-3" />
+          Files
+        </Button>
+      )}
 
       {/* Action buttons */}
       {sessionSource && (

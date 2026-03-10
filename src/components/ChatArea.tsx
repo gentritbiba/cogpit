@@ -3,6 +3,7 @@ import {
   Search,
   ChevronsDownUp,
   ChevronsUpDown,
+  ArrowDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,7 +32,7 @@ export const ChatArea = memo(function ChatArea({
 
   const { searchQuery, expandAll } = state
   const { pendingMessages } = chat
-  const { chatScrollRef, scrollEndRef, handleScroll } = scroll
+  const { chatScrollRef, scrollEndRef, handleScroll, canScrollDown, scrollToBottomInstant } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
 
   // Cmd/Ctrl+F → open find-in-session
@@ -111,6 +112,22 @@ export const ChatArea = memo(function ChatArea({
             </ErrorBoundary>
           </div>
         </div>
+
+        {/* Scroll-to-bottom FAB (mobile only) */}
+        {isMobile && (
+          <button
+            className={cn(
+              "fixed right-4 bottom-20 z-40 size-10 rounded-full flex items-center justify-center",
+              "elevation-3 border border-border/50 text-muted-foreground",
+              "transition-[opacity,transform] duration-200 ease-out active:scale-90",
+              canScrollDown ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none",
+            )}
+            onClick={scrollToBottomInstant}
+            aria-label="Scroll to bottom"
+          >
+            <ArrowDown className="size-4" />
+          </button>
+        )}
       </div>
     </div>
   )

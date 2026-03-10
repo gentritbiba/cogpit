@@ -43,6 +43,8 @@ import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
+import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
+import { hapticLight } from "@/lib/haptics"
 import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
@@ -69,6 +71,9 @@ const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModa
 const TeamsDashboard = lazy(() => import("@/components/TeamsDashboard").then(m => ({ default: m.TeamsDashboard })))
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then(m => ({ default: m.ThemeSelectorModal })))
 const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then(m => ({ default: m.WorktreePanel })))
+const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then(m => ({ default: m.MobileFileChanges })))
+
+const MOBILE_TAB_ORDER = ["sessions", "chat", "stats", "teams"] as const
 
 /** Shared footer for the chat input — ensures consistent max-width in both new and active sessions. */
 function SessionInputFooter({ floating, children }: { floating?: boolean, children: React.ReactNode }) {
@@ -201,6 +206,9 @@ export default function App() {
   const handleFileChangesPanelCollapse = useCallback(() => setFileChangesCollapsed(true), [])
   const handleFileChangesPanelExpand = useCallback(() => setFileChangesCollapsed(false), [])
 
+  // Mobile file changes bottom sheet
+  const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
+
   // Whether to actually show the file changes panel (toggle on + has changes)
   const showFileChangesPanel = hasFileChanges && panels.showFileChanges
 
@@ -208,12 +216,16 @@ export default function App() {
   const setShowFileChanges = panels.setShowFileChanges
   useEffect(() => {
     const handler = () => {
-      setShowFileChanges(true)
-      setFileChangesCollapsed(false)
+      if (isMobile) {
+        setShowMobileFileChanges(true)
+      } else {
+        setShowFileChanges(true)
+        setFileChangesCollapsed(false)
+      }
     }
     window.addEventListener(FOCUS_FILE_EVENT, handler)
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
-  }, [setShowFileChanges])
+  }, [setShowFileChanges, isMobile])
 
   // Detect pending interactive prompts (plan approval, user questions)
   const pendingInteractionRef = useRef<ReturnType<typeof detectPendingInteraction>>(null)
@@ -611,6 +623,33 @@ export default function App() {
     scroll,
   ])
 
+  // ─── MOBILE: Swipe navigation between tabs ─────────────────────────────────
+  const mobileVisibleTabs = useMemo(() =>
+    MOBILE_TAB_ORDER.filter((t) => {
+      if (t === "stats" && !state.session && !state.pendingDirName) return false
+      if (t === "teams" && !teamContext) return false
+      return true
+    }),
+    [state.session, state.pendingDirName, teamContext],
+  )
+  const swipeRef = useSwipeNavigation<HTMLElement>({
+    enabled: isMobile,
+    onSwipeLeft: () => {
+      const idx = mobileVisibleTabs.indexOf(state.mobileTab as typeof mobileVisibleTabs[number])
+      if (idx < mobileVisibleTabs.length - 1) {
+        hapticLight()
+        actions.handleMobileTabChange(mobileVisibleTabs[idx + 1])
+      }
+    },
+    onSwipeRight: () => {
+      const idx = mobileVisibleTabs.indexOf(state.mobileTab as typeof mobileVisibleTabs[number])
+      if (idx > 0) {
+        hapticLight()
+        actions.handleMobileTabChange(mobileVisibleTabs[idx - 1])
+      }
+    },
+  })
+
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
   if (!networkAuth.authenticated) {
     return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
@@ -774,7 +813,7 @@ export default function App() {
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
         <UpdateBanner />
-        <main className="flex flex-1 min-h-0 overflow-hidden">
+        <main ref={swipeRef} className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
             <SessionBrowser
               sessionId={state.session?.sessionId ?? null}
@@ -813,6 +852,8 @@ export default function App() {
                     onDuplicateSession={handlers.handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
+                    onShowFileChanges={() => setShowMobileFileChanges(true)}
+                    hasFileChanges={hasFileChanges}
                   />
                   <ChatArea searchInputRef={searchInputRef} />
                 </div>
@@ -903,11 +944,23 @@ export default function App() {
           activeTab={state.mobileTab}
           onTabChange={actions.handleMobileTabChange}
           hasTeam={!!teamContext}
+          hasFileChanges={hasFileChanges}
+          onShowFileChanges={() => setShowMobileFileChanges(true)}
         />
 
         {undoConfirmDialog}
         {branchModal}
         {errorToast || sseIndicator}
+        {state.session && (
+          <Suspense fallback={null}>
+            <MobileFileChanges
+              open={showMobileFileChanges}
+              onClose={() => setShowMobileFileChanges(false)}
+              session={state.session}
+              sessionChangeKey={state.sessionChangeKey}
+            />
+          </Suspense>
+        )}
       </div>
       </SessionProvider>
       </AppProvider>
