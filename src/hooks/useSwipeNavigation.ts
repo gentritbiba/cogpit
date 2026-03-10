@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react"
+import { type RefObject, useRef, useEffect } from "react"
 
 interface SwipeNavigationOptions {
   onSwipeLeft?: () => void
@@ -14,7 +14,7 @@ export function useSwipeNavigation<T extends HTMLElement = HTMLElement>({
   onSwipeRight,
   threshold = 50,
   enabled = true,
-}: SwipeNavigationOptions) {
+}: SwipeNavigationOptions): RefObject<T | null> {
   const ref = useRef<T>(null)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
 

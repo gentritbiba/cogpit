@@ -28,22 +28,26 @@ export function BottomSheet({
   className,
 }: BottomSheetProps) {
   const [height, setHeight] = useState(initialHeight)
+  const heightRef = useRef(initialHeight)
   const sheetRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   // Reset height when opened
   useEffect(() => {
-    if (open) setHeight(initialHeight)
+    if (open) {
+      heightRef.current = initialHeight
+      setHeight(initialHeight)
+    }
   }, [open, initialHeight])
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     dragRef.current = {
       startY: e.touches[0].clientY,
-      startHeight: height,
+      startHeight: heightRef.current,
     }
     setIsDragging(true)
-  }, [height])
+  }, [])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (!dragRef.current) return
@@ -51,6 +55,7 @@ export function BottomSheet({
     const vh = window.innerHeight
     const deltaPercent = (dy / vh) * 100
     const newHeight = Math.min(maxHeight, Math.max(5, dragRef.current.startHeight + deltaPercent))
+    heightRef.current = newHeight
     setHeight(newHeight)
   }, [maxHeight])
 
@@ -58,11 +63,11 @@ export function BottomSheet({
     if (!dragRef.current) return
     setIsDragging(false)
     // Dismiss if dragged below 15% of viewport
-    if (height < 15) {
+    if (heightRef.current < 15) {
       onClose()
     }
     dragRef.current = null
-  }, [height, onClose])
+  }, [onClose])
 
   if (!open) return null
 

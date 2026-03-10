@@ -273,23 +273,6 @@
   margin: 8px auto;
 }
 
-/* ── Pull-to-refresh indicator ────────────────────────── */
-.pull-indicator {
-  transition: transform 200ms ease, opacity 200ms ease;
-}
-
-/* ── Swipe action reveal ─────────────────────────────── */
-.swipe-action-container {
-  overflow: hidden;
-  position: relative;
-}
-
-.swipe-action-content {
-  transition: transform 200ms ease;
-  will-change: transform;
-}
-
-
 /* ── Custom Utilities ─────────────────────────────────────── */
 
 /* CSS containment: isolate layout recalculation boundaries during resize */
