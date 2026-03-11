@@ -1,6 +1,5 @@
 # Cogpit
-<img width="1698" height="850" alt="image" src="https://github.com/user-attachments/assets/ebd16c91-b915-4717-a772-8eeb08e04754" />
-
+<img width="2098" height="1289" alt="Screenshot 2026-03-11 at 4 19 33 AM" src="https://github.com/user-attachments/assets/241e68b8-4feb-4b35-9acb-d34f4ff4e256" />
 
 
 **[cogpit.gentrit.dev](https://cogpit.gentrit.dev/)**
