@@ -4,6 +4,21 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-03-11 02:35 — MCP Selector Edge Case Fixes (cec5233)
+- **File:** `audit-history/audit-20260311T023500Z-cec5233-mcp-selector-fixes.md`
+- **Status:** PASS
+- **Changes:** 3 files modified, ~360 lines added, ~130 lines removed
+- **Key updates:**
+  - Fixed selection leak when switching sessions with no saved MCP selection
+  - Fixed stale data flash on project switch (immediate state reset + fetch guard)
+  - Eliminated double-initialization race between cwd and storageKey effects
+  - Stopped auto-selecting newly connected servers on refresh (user must opt in)
+  - Added config mismatch fallback (null when selected server has no config)
+  - Show MCP selector with loading spinner while fetching server status
+  - Added stale-response guard to refresh() matching the cwd effect's guard
+- **Risk:** LOW (internal fixes, no API changes, backward-compatible)
+- **Doc updates needed:** NONE (transparent fixes, no user-facing changes)
+
 ### 2026-03-09 03:15 — MCP Configuration Transition (--strict-mcp-config)
 - **File:** `audit-history/audit-20260309T031500Z-mcp-config-transition.md`
 - **Status:** DOCUMENTATION UPDATES REQUIRED
