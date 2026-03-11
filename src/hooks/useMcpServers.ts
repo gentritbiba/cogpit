@@ -8,6 +8,11 @@ export interface McpServer {
 
 type McpConfigs = Record<string, Record<string, unknown>>
 
+interface McpResponse {
+  servers: McpServer[]
+  configs: McpConfigs
+}
+
 const STORAGE_PREFIX = "cogpit:mcpSelection:"
 
 /** Extract the set of connected server names from a server list. */
@@ -27,6 +32,15 @@ function saveSelection(key: string, selected: string[]): void {
   try {
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(selected))
   } catch { /* ignore */ }
+}
+
+async function parseServerResponse(res: Response): Promise<McpResponse | null> {
+  if (!res.ok) return null
+  const data = await res.json()
+  return {
+    servers: data.servers ?? [],
+    configs: data.configs ?? {},
+  }
 }
 
 /**
@@ -104,16 +118,12 @@ export function useMcpServers(
         // Guard: if cwd changed while fetching, discard stale response
         if (fetchedCwdRef.current !== cwd) return
 
-        if (!res.ok) return
-        const data = await res.json()
-        const fetched: McpServer[] = data.servers ?? []
-        const fetchedConfigs: McpConfigs = data.configs ?? {}
-        setServers(fetched)
-        setConfigs(fetchedConfigs)
+        const parsed = await parseServerResponse(res)
+        if (!parsed) return
 
-        // Initialize selection using the unified resolver
-        const key = storageKeyRef.current
-        setSelectedServers(resolveSelection(key, dirNameRef.current, fetched))
+        setServers(parsed.servers)
+        setConfigs(parsed.configs)
+        setSelectedServers(resolveSelection(storageKeyRef.current, dirNameRef.current, parsed.servers))
       })
       .catch(() => { /* ignore */ })
       .finally(() => {
@@ -153,16 +163,16 @@ export function useMcpServers(
     authFetch(`/api/mcp-servers?cwd=${encodeURIComponent(cwd)}&refresh=1`)
       .then(async (res) => {
         if (fetchedCwdRef.current !== cwd) return
-        if (!res.ok) return
-        const data = await res.json()
-        const fetched: McpServer[] = data.servers ?? []
-        const fetchedConfigs: McpConfigs = data.configs ?? {}
-        setServers(fetched)
-        setConfigs(fetchedConfigs)
 
-        // Reconcile selection: keep previously selected servers that are still connected.
+        const parsed = await parseServerResponse(res)
+        if (!parsed) return
+
+        setServers(parsed.servers)
+        setConfigs(parsed.configs)
+
+        // Reconcile: keep previously selected servers that are still connected.
         // Do NOT auto-select newly connected servers — let the user opt in.
-        const connected = connectedNames(fetched)
+        const connected = connectedNames(parsed.servers)
         setSelectedServers(prev => {
           const next = prev.filter(name => connected.has(name))
           if (storageKeyRef.current) saveSelection(storageKeyRef.current, next)
@@ -189,10 +199,9 @@ export function useMcpServers(
     // accidentally excluding a server the user thinks is selected.
     if (!selectedServers.every(name => configs[name])) return null
 
-    const selectedConfigs: McpConfigs = {}
-    for (const name of selectedServers) {
-      selectedConfigs[name] = configs[name]
-    }
+    const selectedConfigs = Object.fromEntries(
+      selectedServers.map(name => [name, configs[name]])
+    )
     return JSON.stringify({ mcpServers: selectedConfigs })
   }, [selectedServers, configs, servers])
 

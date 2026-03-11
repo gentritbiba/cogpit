@@ -269,8 +269,6 @@ describe("useMcpServers", () => {
     expect(result.current.servers).toEqual([])
   })
 
-  // ── New tests for fixed edge cases ──────────────────────────────────────
-
   describe("session switch selection", () => {
     it("resets to auto-select-all when switching to a session with no saved selection", async () => {
       // Session A has custom selection
