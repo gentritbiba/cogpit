@@ -18,6 +18,16 @@ const MOCK_CONFIGS = {
   broken: { command: "npx", args: ["-y", "mcp-broken"] },
 }
 
+function mockServerResponse(
+  servers: Array<{ name: string; status: "connected" | "needs_auth" | "error" }>,
+  configs = MOCK_CONFIGS as Record<string, Record<string, unknown>>,
+) {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ servers, configs }),
+  })
+}
+
 describe("useMcpServers", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -25,16 +35,10 @@ describe("useMcpServers", () => {
   })
 
   it("fetches servers and auto-selects connected ones", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "gmail", status: "needs_auth" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "gmail", status: "needs_auth" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -46,16 +50,10 @@ describe("useMcpServers", () => {
   })
 
   it("persists selection to localStorage", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -73,16 +71,10 @@ describe("useMcpServers", () => {
   it("loads saved selection from localStorage", async () => {
     localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["figma"]))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -96,16 +88,10 @@ describe("useMcpServers", () => {
   it("returns mcpConfigJson with only selected server configs", async () => {
     localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -120,16 +106,10 @@ describe("useMcpServers", () => {
   })
 
   it("returns null mcpConfigJson when all connected servers are selected", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -144,16 +124,10 @@ describe("useMcpServers", () => {
   it("returns empty mcpServers config when 0 selected", async () => {
     localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify([]))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -178,13 +152,7 @@ describe("useMcpServers", () => {
   })
 
   it("sets loaded=true after fetch completes", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [{ name: "clickup", status: "connected" }],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([{ name: "clickup", status: "connected" }])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
     expect(result.current.loaded).toBe(false)
@@ -214,16 +182,10 @@ describe("useMcpServers", () => {
   it("toggleServer adds a server when not selected", async () => {
     localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "connected" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "connected" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -265,16 +227,10 @@ describe("useMcpServers", () => {
   it("filters out saved servers that are no longer connected", async () => {
     localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup", "figma"]))
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        servers: [
-          { name: "clickup", status: "connected" },
-          { name: "figma", status: "error" },
-        ],
-        configs: MOCK_CONFIGS,
-      }),
-    })
+    mockServerResponse([
+      { name: "clickup", status: "connected" },
+      { name: "figma", status: "error" },
+    ])
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -311,5 +267,231 @@ describe("useMcpServers", () => {
     })
 
     expect(result.current.servers).toEqual([])
+  })
+
+  // ── New tests for fixed edge cases ──────────────────────────────────────
+
+  describe("session switch selection", () => {
+    it("resets to auto-select-all when switching to a session with no saved selection", async () => {
+      // Session A has custom selection
+      localStorage.setItem("cogpit:mcpSelection:session-a.jsonl", JSON.stringify(["clickup"]))
+
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      // Start with session A
+      const { result, rerender } = renderHook(
+        ({ sessionFileName }) => useMcpServers("/test/path", "test-dir", sessionFileName),
+        { initialProps: { sessionFileName: "session-a.jsonl" as string | undefined } },
+      )
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+      expect(result.current.selectedServers).toEqual(["clickup"])
+
+      // Switch to session B (no saved selection)
+      rerender({ sessionFileName: "session-b.jsonl" })
+
+      // Should auto-select all connected servers, NOT keep session A's selection
+      await vi.waitFor(() => {
+        expect(result.current.selectedServers).toEqual(expect.arrayContaining(["clickup", "figma"]))
+      })
+      expect(result.current.selectedServers).toHaveLength(2)
+    })
+
+    it("inherits project-level selection when switching to session with no saved selection", async () => {
+      // Project-level default: only clickup
+      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      // Start with session A (has its own selection)
+      localStorage.setItem("cogpit:mcpSelection:session-a.jsonl", JSON.stringify(["figma"]))
+      const { result, rerender } = renderHook(
+        ({ sessionFileName }) => useMcpServers("/test/path", "test-dir", sessionFileName),
+        { initialProps: { sessionFileName: "session-a.jsonl" as string | undefined } },
+      )
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+      expect(result.current.selectedServers).toEqual(["figma"])
+
+      // Switch to session B (no saved selection → should inherit project default)
+      rerender({ sessionFileName: "session-b.jsonl" })
+
+      await vi.waitFor(() => {
+        expect(result.current.selectedServers).toEqual(["clickup"])
+      })
+    })
+  })
+
+  describe("project switch (cwd change)", () => {
+    it("resets servers and selection immediately when cwd changes", async () => {
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      const { result, rerender } = renderHook(
+        ({ cwd }) => useMcpServers(cwd, "test-dir", undefined),
+        { initialProps: { cwd: "/project-a" } },
+      )
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+      expect(result.current.selectedServers).toEqual(["clickup", "figma"])
+
+      // Switch project — mock new response (different servers)
+      mockServerResponse([
+        { name: "slack", status: "connected" },
+      ], { slack: { command: "npx", args: ["-y", "mcp-slack"] } })
+
+      rerender({ cwd: "/project-b" })
+
+      // Should immediately clear old data
+      expect(result.current.servers).toEqual([])
+      expect(result.current.selectedServers).toEqual([])
+
+      // Then load new data
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(1)
+      })
+      expect(result.current.servers[0].name).toBe("slack")
+      expect(result.current.selectedServers).toEqual(["slack"])
+    })
+  })
+
+  describe("refresh behavior", () => {
+    it("does NOT auto-select newly connected servers on refresh", async () => {
+      // Initial: only clickup connected
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "needs_auth" },
+      ])
+
+      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+      expect(result.current.selectedServers).toEqual(["clickup"])
+
+      // Refresh: figma is now connected
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      act(() => result.current.refresh())
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.filter(s => s.status === "connected")).toHaveLength(2)
+      })
+
+      // figma should NOT be auto-selected — user must opt in
+      expect(result.current.selectedServers).toEqual(["clickup"])
+    })
+
+    it("removes disconnected servers from selection on refresh", async () => {
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+      expect(result.current.selectedServers).toEqual(["clickup", "figma"])
+
+      // Refresh: figma disconnected
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "error" },
+      ])
+
+      act(() => result.current.refresh())
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.find(s => s.name === "figma")?.status).toBe("error")
+      })
+
+      expect(result.current.selectedServers).toEqual(["clickup"])
+    })
+  })
+
+  describe("mcpConfigJson edge cases", () => {
+    it("falls back to null when selected server has no matching config", async () => {
+
+      // Server "mystery" exists but has no config
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          servers: [
+            { name: "clickup", status: "connected" },
+            { name: "mystery", status: "connected" },
+          ],
+          configs: { clickup: MOCK_CONFIGS.clickup }, // no config for "mystery"
+        }),
+      })
+
+      // Save selection with only clickup (not mystery)
+      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+
+      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+
+      // Only clickup is selected and has config → should work normally
+      expect(result.current.mcpConfigJson).not.toBeNull()
+      const parsed = JSON.parse(result.current.mcpConfigJson!)
+      expect(parsed.mcpServers).toHaveProperty("clickup")
+
+      // Now select mystery too (no config)
+      act(() => result.current.toggleServer("mystery"))
+
+      // All connected selected → null (use defaults)
+      expect(result.current.mcpConfigJson).toBeNull()
+
+      // Deselect clickup — now only mystery selected (no config)
+      act(() => result.current.toggleServer("clickup"))
+
+      // Should fall back to null because mystery has no config
+      expect(result.current.mcpConfigJson).toBeNull()
+    })
+
+    it("validates all selected servers exist in connected set for allSelected check", async () => {
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+
+      // Both auto-selected → allSelected → null
+      expect(result.current.mcpConfigJson).toBeNull()
+
+      // Deselect one → not all selected → should have config
+      act(() => result.current.toggleServer("figma"))
+      expect(result.current.mcpConfigJson).not.toBeNull()
+      const parsed = JSON.parse(result.current.mcpConfigJson!)
+      expect(parsed.mcpServers).toHaveProperty("clickup")
+      expect(parsed.mcpServers).not.toHaveProperty("figma")
+    })
   })
 })

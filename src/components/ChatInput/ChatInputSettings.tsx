@@ -147,8 +147,13 @@ function McpDropdown({ servers, selected, onToggle, onRefresh, loading, onAuth }
         )}
       >
         <Plug className="size-3" />
-        <span className="truncate">MCPs {selectedCount}/{connectedCount}</span>
-        <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+        <span className="truncate">
+          {loading && servers.length === 0 ? "MCPs" : `MCPs ${selectedCount}/${connectedCount}`}
+        </span>
+        {loading && servers.length === 0
+          ? <RefreshCw className="size-3 opacity-50 animate-spin" />
+          : <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+        }
       </button>
 
       {open && menuPos && createPortal(
@@ -340,12 +345,13 @@ export const ChatInputSettings = memo(function ChatInputSettings({
           </>
         )}
 
-        {/* MCP server selector */}
-        {mcpServers && mcpServers.length > 0 && onToggleMcpServer && onRefreshMcpServers && onMcpAuth && (
+        {/* MCP server selector — show when servers exist or still loading */}
+        {onToggleMcpServer && onRefreshMcpServers && onMcpAuth &&
+         (mcpLoading || (mcpServers && mcpServers.length > 0)) && (
           <>
             <span className="text-border/60 text-[10px] select-none">/</span>
             <McpDropdown
-              servers={mcpServers}
+              servers={mcpServers ?? []}
               selected={selectedMcpServers ?? []}
               onToggle={(name) => changeAndApply(() => onToggleMcpServer(name))}
               onRefresh={onRefreshMcpServers}
