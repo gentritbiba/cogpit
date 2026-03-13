@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react"
-import { FileCode2, ChevronsDownUp, ChevronsUpDown, Layers, Clock, X, Sigma, List, ChevronLeft, ChevronRight } from "lucide-react"
+import { FileCode2, ChevronsDownUp, ChevronsUpDown, Layers, Clock, X, Sigma, List, ChevronLeft, ChevronRight, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { GroupedFileCard } from "./GroupedFileCard"
-import { useFileChangesData, buildGroupedFiles } from "./useFileChangesData"
+import { useFileChangesData, buildGroupedFiles, buildGroupedFilesByAgent, type AgentGroup } from "./useFileChangesData"
+import { OPEN_SUBAGENT_EVENT } from "./file-change-indicators"
 
 /** Custom event name for cross-panel file focus. */
 export const FOCUS_FILE_EVENT = "cogpit:focus-file"
@@ -41,6 +42,64 @@ interface FileChangesPanelProps {
   sessionChangeKey: number
 }
 
+function AgentGroupSection({
+  group,
+  allExpanded,
+  highlightPath,
+  diffMode,
+}: {
+  group: AgentGroup
+  allExpanded: boolean
+  highlightPath: string | null
+  diffMode: DiffMode
+}) {
+  const name = group.agentName || group.agentId.slice(0, 8)
+  const type = group.subagentType
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
+        <span
+          className="text-[10px] font-semibold text-indigo-400 truncate cursor-pointer hover:text-indigo-300 transition-colors"
+          title={`Open subagent ${group.agentId}`}
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent(OPEN_SUBAGENT_EVENT, { detail: { agentId: group.agentId } }))
+          }}
+        >
+          {name}
+        </span>
+        {type && (
+          <span className="text-[9px] text-muted-foreground/60 truncate">
+            {type}
+          </span>
+        )}
+        <Badge
+          variant="outline"
+          className="h-3.5 px-1 text-[9px] border-indigo-400/30 text-indigo-400/70"
+        >
+          {group.files.length}
+        </Badge>
+        <div className="flex-1" />
+        <span className="text-[9px] font-mono tabular-nums text-green-500/60">
+          +{group.totalAdd}
+        </span>
+        <span className="text-[9px] font-mono tabular-nums text-red-400/60">
+          -{group.totalDel}
+        </span>
+      </div>
+      {group.files.map((file) => (
+        <GroupedFileCard
+          key={file.filePath}
+          file={file}
+          defaultOpen={allExpanded}
+          isHighlighted={highlightPath === file.filePath}
+          diffMode={diffMode}
+        />
+      ))}
+    </div>
+  )
+}
+
 export const FileChangesPanel = memo(function FileChangesPanel({ session, sessionChangeKey }: FileChangesPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -68,12 +127,16 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const [highlightPath, setHighlightPath] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const [groupByAgent, setGroupByAgent] = useState(() => loadPref("groupByAgent", false))
+  useEffect(() => { savePref("groupByAgent", groupByAgent) }, [groupByAgent])
+
   const {
     fileChanges,
     fileContents,
     groupedByFile,
     groupedLastTurn,
     lastTurnIndex,
+    agentMap,
   } = useFileChangesData(session)
 
   // Compute grouped files for specific turn on demand
@@ -88,6 +151,13 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     return groupedLastTurn
   }
   const activeGrouped = getActiveGrouped()
+
+  // Agent-grouped view
+  const agentGroups = useMemo<AgentGroup[]>(() => {
+    if (!groupByAgent) return []
+    const effectiveScope = typeof scope === "number" ? scope : scope === "all" ? "all" : lastTurnIndex
+    return buildGroupedFilesByAgent(fileChanges, effectiveScope, agentMap, fileContents)
+  }, [groupByAgent, fileChanges, scope, lastTurnIndex, agentMap, fileContents])
 
   // Listen for focus-file events from TurnChangedFiles
   useEffect(() => {
@@ -181,9 +251,19 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
 
   let groupedAdd = 0
   let groupedDel = 0
-  for (const g of activeGrouped) {
-    groupedAdd += g.addCount
-    groupedDel += g.delCount
+  let totalFileCount = 0
+  if (groupByAgent) {
+    for (const ag of agentGroups) {
+      groupedAdd += ag.totalAdd
+      groupedDel += ag.totalDel
+      totalFileCount += ag.files.length
+    }
+  } else {
+    for (const g of activeGrouped) {
+      groupedAdd += g.addCount
+      groupedDel += g.delCount
+    }
+    totalFileCount = activeGrouped.length
   }
 
   function handleScopeToggle(): void {
@@ -208,7 +288,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           variant="outline"
           className="h-4 px-1.5 text-[10px] border-border/70 text-muted-foreground"
         >
-          {activeGrouped.length} file{activeGrouped.length !== 1 ? "s" : ""}
+          {totalFileCount} file{totalFileCount !== 1 ? "s" : ""}
         </Badge>
         <div className="flex-1" />
         <span className="text-[10px] font-mono tabular-nums text-green-500/70">
@@ -217,6 +297,27 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         <span className="text-[10px] font-mono tabular-nums text-red-400/70">
           -{groupedDel}
         </span>
+
+        {/* Group by agent toggle */}
+        <Tooltip>
+          <TooltipTrigger render={<button
+              onClick={() => setGroupByAgent(!groupByAgent)}
+              className={cn(
+                "p-1 transition-colors rounded",
+                groupByAgent
+                  ? "text-indigo-400 bg-indigo-400/10"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-label={groupByAgent ? "Show all changes" : "Group by subagent"}
+            />}>
+              <Users className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipContent>
+            {groupByAgent
+              ? "Show all changes"
+              : "Group by subagent"}
+          </TooltipContent>
+        </Tooltip>
 
         {/* Scope toggle */}
         <Tooltip>
@@ -337,7 +438,23 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           className="h-full overflow-y-auto"
         >
           <div className="p-1.5 space-y-1">
-            {activeGrouped.length > 0 ? (
+            {groupByAgent ? (
+              agentGroups.length > 0 ? (
+                agentGroups.map((ag) => (
+                  <AgentGroupSection
+                    key={ag.agentId}
+                    group={ag}
+                    allExpanded={allExpanded}
+                    highlightPath={highlightPath}
+                    diffMode={diffMode}
+                  />
+                ))
+              ) : (
+                <div className="text-[11px] text-muted-foreground/50 text-center py-4">
+                  No subagent changes in {scopeLabel.toLowerCase()}
+                </div>
+              )
+            ) : activeGrouped.length > 0 ? (
               activeGrouped.map((file) => (
                 <GroupedFileCard
                   key={file.filePath}
