@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback, memo } from "react"
-import { ChevronDown, ChevronRight, Search, Play, Square, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Search, Play, Square, Loader2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useScriptDiscovery, type ScriptEntry } from "@/hooks/useScriptDiscovery"
 import { useScriptRunner, type ManagedProcess } from "@/hooks/useScriptRunner"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
+import { usePty } from "@/contexts/PtyContext"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -33,7 +34,6 @@ function ScriptRow({
       onClick={isRunning ? onStop : onRun}
       title={isRunning ? `Stop ${script.name}` : `Run: ${script.command}`}
     >
-      {/* Status indicator */}
       {isRunning ? (
         <span className="inline-block size-1.5 rounded-full bg-green-400 shrink-0" />
       ) : status === "errored" ? (
@@ -42,7 +42,6 @@ function ScriptRow({
         <span className="inline-block size-1.5 shrink-0" />
       )}
 
-      {/* Script name */}
       <span className={cn(
         "flex-1 truncate",
         isRunning ? "text-foreground font-medium" : "text-muted-foreground"
@@ -50,7 +49,6 @@ function ScriptRow({
         {script.name}
       </span>
 
-      {/* Action icon — visible on hover or when running */}
       <span className={cn(
         "shrink-0 transition-opacity",
         isRunning ? "opacity-100" : "opacity-0 group-hover:opacity-100"
@@ -83,6 +81,8 @@ export const ScriptsDock = memo(function ScriptsDock({
   const [searchQuery, setSearchQuery] = useState("")
   const [showAll, setShowAll] = useState<Set<string>>(new Set())
 
+  const pty = usePty()
+
   const { scripts, loading } = useScriptDiscovery(projectDir)
   const { runningProcesses, runScript, stopScript } = useScriptRunner(onScriptStarted)
 
@@ -93,6 +93,19 @@ export const ScriptsDock = memo(function ScriptsDock({
       return next
     })
   }, [])
+
+  const handleNewTerminal = useCallback(() => {
+    const cwd = projectDir ?? undefined
+    const id = pty.spawnTerminal({ cwd })
+    const label = cwd?.replace(/\/+$/, "").split("/").pop() ?? "Terminal"
+    onScriptStarted?.({
+      id,
+      name: label,
+      type: "terminal",
+      status: "running",
+      source: cwd,
+    })
+  }, [pty, projectDir, onScriptStarted])
 
   const toggleShowAll = useCallback((dirLabel: string) => {
     setShowAll((prev) => {
@@ -119,7 +132,6 @@ export const ScriptsDock = memo(function ScriptsDock({
     return groups
   }, [scripts, searchQuery])
 
-  // Build a lookup: script key -> running process info
   const runningLookup = useMemo(() => {
     const lookup = new Map<string, { id: string; status: ManagedProcess["status"] }>()
     for (const [id, proc] of runningProcesses) {
@@ -154,16 +166,25 @@ export const ScriptsDock = memo(function ScriptsDock({
         <div className="flex-1" />
 
         {!collapsed && (
-          <button
-            className={cn(
-              "p-0.5 rounded transition-colors",
-              searchOpen ? "text-foreground bg-elevation-2" : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => { setSearchOpen((p) => !p); setSearchQuery("") }}
-            title="Search scripts"
-          >
-            <Search className="size-3" />
-          </button>
+          <>
+            <button
+              className="p-0.5 rounded transition-colors text-muted-foreground hover:text-foreground"
+              onClick={handleNewTerminal}
+              title="New terminal"
+            >
+              <Plus className="size-3" />
+            </button>
+            <button
+              className={cn(
+                "p-0.5 rounded transition-colors",
+                searchOpen ? "text-foreground bg-elevation-2" : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => { setSearchOpen((p) => !p); setSearchQuery("") }}
+              title="Search scripts"
+            >
+              <Search className="size-3" />
+            </button>
+          </>
         )}
       </div>
 

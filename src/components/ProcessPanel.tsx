@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef, memo } from "react"
+import { useState, useEffect, useRef, useCallback, memo } from "react"
 import { authUrl } from "@/lib/auth"
 import { ChevronDown, ChevronRight, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
+import { TerminalOutput } from "@/components/TerminalOutput"
+import { usePty } from "@/contexts/PtyContext"
 
 // ── ANSI stripping ───────────────────────────────────────────────────────────
 
@@ -31,8 +33,6 @@ const TYPE_STYLES: Record<ProcessEntry["type"], string> = {
   terminal: "bg-purple-500/15 text-purple-400 border-purple-500/30",
 }
 
-// ── ProcessOutput — SSE streaming display for a single process ───────────────
-
 function ProcessOutput({
   process,
 }: {
@@ -43,12 +43,9 @@ function ProcessOutput({
   const outputRef = useRef<HTMLPreElement>(null)
 
   useEffect(() => {
-    // Determine SSE URL based on process type
     let url: string
     if (process.type === "task" && process.outputPath) {
       url = authUrl(`/api/task-output?path=${encodeURIComponent(process.outputPath)}`)
-    } else if (process.type === "script") {
-      url = authUrl(`/api/scripts/output?id=${encodeURIComponent(process.id)}`)
     } else {
       return
     }
@@ -105,8 +102,6 @@ function ProcessOutput({
   )
 }
 
-// ── ProcessTab — a single tab in the tab bar ─────────────────────────────────
-
 function ProcessTab({
   process,
   isActive,
@@ -121,6 +116,7 @@ function ProcessTab({
   return (
     <button
       onClick={onClick}
+      title={process.source ?? process.name}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors shrink-0",
         isActive
@@ -128,7 +124,6 @@ function ProcessTab({
           : "text-muted-foreground hover:text-foreground hover:bg-elevation-2 border border-transparent"
       )}
     >
-      {/* Status dot */}
       {process.status === "running" && (
         <span className="inline-block size-1.5 rounded-full bg-green-400 shrink-0" />
       )}
@@ -136,10 +131,8 @@ function ProcessTab({
         <span className="inline-block size-1.5 rounded-full bg-red-400 shrink-0" />
       )}
 
-      {/* Name */}
       <span className="truncate max-w-[100px]">{process.name}</span>
 
-      {/* Type badge */}
       <span className={cn(
         "inline-flex items-center rounded px-1 py-px text-[9px] border",
         TYPE_STYLES[process.type]
@@ -147,7 +140,6 @@ function ProcessTab({
         {process.type}
       </span>
 
-      {/* Close button */}
       <span
         role="button"
         onClick={(e) => { e.stopPropagation(); onClose() }}
@@ -159,6 +151,21 @@ function ProcessTab({
   )
 }
 
+// ── Resize constants ────────────────────────────────────────────────────────
+
+const MIN_HEIGHT = 100
+const MAX_HEIGHT = 600
+const DEFAULT_HEIGHT = 200
+const HEIGHT_KEY = "process-panel-height"
+
+function loadHeight(): number {
+  try {
+    const v = localStorage.getItem(HEIGHT_KEY)
+    if (v) return Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Number(v)))
+  } catch { /* ignore */ }
+  return DEFAULT_HEIGHT
+}
+
 // ── ProcessPanel — unified bottom panel ──────────────────────────────────────
 
 interface ProcessPanelProps {
@@ -168,6 +175,7 @@ interface ProcessPanelProps {
   onSetActive: (id: string) => void
   onRemove: (id: string) => void
   onToggleCollapse: () => void
+  onUpdateStatus?: (id: string, status: ProcessEntry["status"]) => void
 }
 
 export const ProcessPanel = memo(function ProcessPanel({
@@ -177,7 +185,51 @@ export const ProcessPanel = memo(function ProcessPanel({
   onSetActive,
   onRemove,
   onToggleCollapse,
+  onUpdateStatus,
 }: ProcessPanelProps) {
+  const pty = usePty()
+  const [height, setHeight] = useState(loadHeight)
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null)
+
+  // Sync PTY session status → ProcessPanel entries
+  useEffect(() => {
+    for (const session of pty.sessions) {
+      if (session.status === "exited") {
+        onUpdateStatus?.(session.id, "stopped")
+      }
+    }
+  }, [pty.sessions, onUpdateStatus])
+
+  const handleClose = useCallback((proc: ProcessEntry) => {
+    if (proc.type !== "task") {
+      pty.killSession(proc.id)
+    }
+    onRemove(proc.id)
+  }, [pty, onRemove])
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    dragRef.current = { startY: e.clientY, startH: height }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }, [height])
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return
+    // Dragging up = smaller clientY = larger panel
+    const delta = dragRef.current.startY - e.clientY
+    const next = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, dragRef.current.startH + delta))
+    setHeight(next)
+  }, [])
+
+  const onPointerUp = useCallback(() => {
+    if (!dragRef.current) return
+    dragRef.current = null
+    setHeight((h) => {
+      try { localStorage.setItem(HEIGHT_KEY, String(h)) } catch { /* ignore */ }
+      return h
+    })
+  }, [])
+
   if (processes.size === 0) return null
 
   const activeProcess = activeProcessId ? processes.get(activeProcessId) : null
@@ -185,7 +237,16 @@ export const ProcessPanel = memo(function ProcessPanel({
 
   return (
     <div className="flex shrink-0 flex-col border-t border-border/70 bg-elevation-0">
-      {/* Header — always visible */}
+      {!collapsed && activeProcess && (
+        <div
+          className="h-1 cursor-row-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        />
+      )}
+
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-elevation-1 px-3">
         <button
           className="flex items-center gap-1.5 hover:text-foreground transition-colors"
@@ -201,7 +262,6 @@ export const ProcessPanel = memo(function ProcessPanel({
           <span className="text-[11px] font-medium text-muted-foreground">Processes</span>
         </button>
 
-        {/* Tab bar — scrollable */}
         <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar ml-2">
           {processList.map((proc) => (
             <ProcessTab
@@ -209,19 +269,26 @@ export const ProcessPanel = memo(function ProcessPanel({
               process={proc}
               isActive={proc.id === activeProcessId}
               onClick={() => onSetActive(proc.id)}
-              onClose={() => onRemove(proc.id)}
+              onClose={() => handleClose(proc)}
             />
           ))}
         </div>
       </div>
 
-      {/* Body — shown when expanded and there's an active process */}
       {!collapsed && activeProcess && (
-        <div className="h-[200px] flex flex-col">
-          <ProcessOutput
-            key={activeProcess.id}
-            process={activeProcess}
-          />
+        <div className="flex flex-col" style={{ height }}>
+          {activeProcess.type === "task" ? (
+            <ProcessOutput
+              key={activeProcess.id}
+              process={activeProcess}
+            />
+          ) : (
+            <TerminalOutput
+              key={activeProcess.id}
+              processId={activeProcess.id}
+              autoFocus
+            />
+          )}
         </div>
       )}
     </div>

@@ -62,6 +62,7 @@ import {
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { PtyProvider } from "@/contexts/PtyContext"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -747,6 +748,7 @@ export default function App() {
       onSetActive={processPanel.setActive}
       onRemove={processPanel.removeProcess}
       onToggleCollapse={processPanel.toggleCollapse}
+      onUpdateStatus={processPanel.updateProcessStatus}
     />
   )
 
@@ -810,6 +812,7 @@ export default function App() {
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
+      <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
@@ -964,6 +967,7 @@ export default function App() {
         )}
       </div>
       </SessionProvider>
+      </PtyProvider>
       </AppProvider>
     )
   }
@@ -971,6 +975,7 @@ export default function App() {
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
     <AppProvider value={appContextValue}>
+    <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {backgroundServers}
@@ -1207,6 +1212,7 @@ export default function App() {
       {errorToast || sseIndicator}
     </div>
     </SessionProvider>
+    </PtyProvider>
     </AppProvider>
   )
 }
