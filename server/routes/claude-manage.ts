@@ -107,60 +107,100 @@ export function registerClaudeManageRoutes(use: UseFn) {
     const pathParts = url.pathname.split("/").filter(Boolean)
     if (pathParts.length > 0) return next()
 
-      const child = spawn("ps", ["aux"])
-      let stdout = ""
-      child.stdout!.on("data", (data: Buffer) => { stdout += data.toString() })
-      child.on("close", () => {
-        const trackedByPid = new Map<number, string>()
-        for (const [sid, ps] of persistentSessions) {
-          if (ps.proc.pid) trackedByPid.set(ps.proc.pid, sid)
+    const isWin = process.platform === "win32"
+    const child = isWin
+      ? spawn("powershell", ["-NoProfile", "-Command",
+          "Get-CimInstance Win32_Process -Filter \"name like '%claude%' or name like '%codex%'\" | Select-Object ProcessId, WorkingSetSize, CommandLine | ConvertTo-Json -Compress"])
+      : spawn("ps", ["aux"])
+    let stdout = ""
+    let responded = false
+    child.stdout!.on("data", (data: Buffer) => { stdout += data.toString() })
+    child.on("close", () => {
+      if (responded) return
+      responded = true
+
+      const trackedByPid = new Map<number, string>()
+      for (const [sid, ps] of persistentSessions) {
+        if (ps.proc.pid) trackedByPid.set(ps.proc.pid, sid)
+      }
+      for (const [sid, proc] of activeProcesses) {
+        if (proc.pid && !trackedByPid.has(proc.pid)) trackedByPid.set(proc.pid, sid)
+      }
+
+      const processes: Array<{
+        pid: number
+        memMB: number
+        cpu: number
+        sessionId: string | null
+        agentKind: "claude" | "codex"
+        tty: string
+        args: string
+        startTime: string
+      }> = []
+
+      if (isWin) {
+        try {
+          const parsed = JSON.parse(stdout)
+          const items = Array.isArray(parsed) ? parsed : [parsed]
+          for (const item of items) {
+            const cmdLine = item.CommandLine || ""
+            if (!cmdLine.includes("claude") && !cmdLine.includes("codex")) continue
+            const pid = item.ProcessId
+            const memBytes = item.WorkingSetSize || 0
+            const agentKind = cmdLine.includes("codex") ? "codex" as const : "claude" as const
+
+            const resumeMatch = cmdLine.match(/--resume\s+([0-9a-f-]{36})/)
+            const sidMatch = cmdLine.match(/--session-id\s+([0-9a-f-]{36})/)
+            const codexResumeMatch = cmdLine.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
+            const sessionId = trackedByPid.get(pid) ?? resumeMatch?.[1] ?? sidMatch?.[1] ?? codexResumeMatch?.[1] ?? null
+
+            processes.push({
+              pid,
+              memMB: Math.round(memBytes / 1024 / 1024),
+              cpu: 0,
+              sessionId,
+              agentKind,
+              tty: "??",
+              args: cmdLine,
+              startTime: "",
+            })
+          }
+        } catch {
+          // PowerShell returned no results or invalid JSON — return empty list
         }
-        for (const [sid, proc] of activeProcesses) {
-          if (proc.pid && !trackedByPid.has(proc.pid)) trackedByPid.set(proc.pid, sid)
+      } else {
+        for (const line of stdout.split("\n")) {
+          if ((!line.includes("claude") && !line.includes("codex")) || line.includes("grep") ||
+              line.includes("node ") || line.includes("esbuild") ||
+              line.includes("/bin/zsh")) continue
+
+          const cols = line.trim().split(/\s+/)
+          if (cols.length < 11) continue
+
+          const pid = parseInt(cols[1], 10)
+          const cpu = parseFloat(cols[2]) || 0
+          const memKB = parseInt(cols[5], 10) || 0
+          const tty = cols[6] || "??"
+          const startTime = cols[8] || ""
+          const args = cols.slice(10).join(" ")
+          const agentKind = args.includes("codex") ? "codex" as const : "claude" as const
+
+          const resumeMatch = args.match(/--resume\s+([0-9a-f-]{36})/)
+          const sidMatch = args.match(/--session-id\s+([0-9a-f-]{36})/)
+          const codexResumeMatch = args.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
+          const sessionId = trackedByPid.get(pid) ?? resumeMatch?.[1] ?? sidMatch?.[1] ?? codexResumeMatch?.[1] ?? null
+
+          processes.push({
+            pid,
+            memMB: Math.round(memKB / 1024),
+            cpu,
+            sessionId,
+            agentKind,
+            tty,
+            args,
+            startTime,
+          })
         }
-
-        const processes: Array<{
-          pid: number
-          memMB: number
-          cpu: number
-          sessionId: string | null
-          agentKind: "claude" | "codex"
-          tty: string
-          args: string
-          startTime: string
-        }> = []
-
-      for (const line of stdout.split("\n")) {
-        if ((!line.includes("claude") && !line.includes("codex")) || line.includes("grep") ||
-            line.includes("node ") || line.includes("esbuild") ||
-            line.includes("/bin/zsh")) continue
-
-        const cols = line.trim().split(/\s+/)
-        if (cols.length < 11) continue
-
-        const pid = parseInt(cols[1], 10)
-        const cpu = parseFloat(cols[2]) || 0
-        const memKB = parseInt(cols[5], 10) || 0
-        const tty = cols[6] || "??"
-        const startTime = cols[8] || ""
-        const args = cols.slice(10).join(" ")
-        const agentKind = args.includes("codex") ? "codex" : "claude"
-
-        const resumeMatch = args.match(/--resume\s+([0-9a-f-]{36})/)
-        const sidMatch = args.match(/--session-id\s+([0-9a-f-]{36})/)
-        const codexResumeMatch = args.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
-        const sessionId = trackedByPid.get(pid) ?? resumeMatch?.[1] ?? sidMatch?.[1] ?? codexResumeMatch?.[1] ?? null
-
-        processes.push({
-          pid,
-          memMB: Math.round(memKB / 1024),
-          cpu,
-          sessionId,
-          agentKind,
-          tty,
-          args,
-          startTime,
-        })
       }
 
       processes.sort((a, b) => b.memMB - a.memMB)
@@ -169,6 +209,8 @@ export function registerClaudeManageRoutes(use: UseFn) {
       res.end(JSON.stringify(processes))
     })
     child.on("error", () => {
+      if (responded) return
+      responded = true
       res.statusCode = 500
       res.end(JSON.stringify({ error: "Failed to list processes" }))
     })

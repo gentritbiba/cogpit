@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process"
 import { readdir, open, stat, writeFile, unlink, mkdir, readFile } from "node:fs/promises"
 import { writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { join, resolve, sep } from "node:path"
 import { homedir, tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
@@ -169,7 +169,8 @@ export function refreshDirs(): boolean {
 
 export function isWithinDir(parent: string, child: string): boolean {
   const resolved = resolve(child)
-  return resolved.startsWith(resolve(parent) + "/") || resolved === resolve(parent)
+  const resolvedParent = resolve(parent)
+  return resolved.startsWith(resolvedParent + sep) || resolved === resolvedParent
 }
 
 // ── Rate limiting ────────────────────────────────────────────────────────
