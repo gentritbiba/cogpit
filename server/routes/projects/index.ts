@@ -1,6 +1,27 @@
 import type { UseFn } from "../../helpers"
-import { dirs, isWithinDir, projectDirToReadableName, getSessionMeta, readdir, readFile, stat, join } from "../../helpers"
+import {
+  dirs,
+  CODEX_SESSIONS_DIR,
+  decodeCodexDirName,
+  encodeCodexDirName,
+  findJsonlPath,
+  getSessionMeta,
+  isCodexDirName,
+  isWithinDir,
+  join,
+  listCodexSessionFiles,
+  projectDirToReadableName,
+  readFile,
+  readdir,
+  resolveSessionFilePath,
+  stat,
+} from "../../helpers"
 import { handleActiveSessions } from "./activeSessionsRoute"
+
+function shortNameFromPath(path: string): string {
+  const trimmed = path.replace(/\/+$/, "")
+  return trimmed.split("/").at(-1) || trimmed || path
+}
 
 export function registerProjectRoutes(use: UseFn) {
   // GET /api/projects - list all projects
@@ -54,6 +75,34 @@ export function registerProjectRoutes(use: UseFn) {
         })
       }
 
+      const codexFiles = await listCodexSessionFiles()
+      const codexProjects = new Map<string, { latestTime: number; sessionCount: number }>()
+      for (const file of codexFiles) {
+        try {
+          const meta = await getSessionMeta(file.filePath)
+          if (!meta.cwd) continue
+          const existing = codexProjects.get(meta.cwd)
+          if (existing) {
+            existing.latestTime = Math.max(existing.latestTime, file.mtimeMs)
+            existing.sessionCount += 1
+          } else {
+            codexProjects.set(meta.cwd, { latestTime: file.mtimeMs, sessionCount: 1 })
+          }
+        } catch {
+          continue
+        }
+      }
+
+      for (const [cwd, info] of codexProjects) {
+        projects.push({
+          dirName: encodeCodexDirName(cwd),
+          path: cwd,
+          shortName: `${shortNameFromPath(cwd)} (Codex)`,
+          sessionCount: info.sessionCount,
+          lastModified: info.latestTime ? new Date(info.latestTime).toISOString() : null,
+        })
+      }
+
       projects.sort((a, b) => {
         if (!a.lastModified) return 1
         if (!b.lastModified) return -1
@@ -77,9 +126,10 @@ export function registerProjectRoutes(use: UseFn) {
 
     if (parts.length === 1) {
       const dirName = decodeURIComponent(parts[0])
+      const codexCwd = decodeCodexDirName(dirName)
       const projectDir = join(dirs.PROJECTS_DIR, dirName)
 
-      if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
+      if (!codexCwd && !isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
         return
@@ -89,19 +139,37 @@ export function registerProjectRoutes(use: UseFn) {
         const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10))
         const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10)), 200)
 
-        const files = await readdir(projectDir)
-        const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"))
-
-        const fileStats = await Promise.all(
-          jsonlFiles.map(async (f) => {
-            try {
-              const fileStat = await stat(join(projectDir, f))
-              return { fileName: f, mtime: fileStat.mtime, size: fileStat.size }
-            } catch {
-              return { fileName: f, mtime: new Date(0), size: 0 }
-            }
-          })
-        )
+        const fileStats = codexCwd
+          ? (await Promise.all(
+            (await listCodexSessionFiles())
+              .map(async (file) => {
+                try {
+                  const meta = await getSessionMeta(file.filePath)
+                  if (meta.cwd !== codexCwd) return null
+                  return {
+                    fileName: file.fileName,
+                    filePath: file.filePath,
+                    mtime: new Date(file.mtimeMs),
+                    size: file.size,
+                  }
+                } catch {
+                  return null
+                }
+              })
+          )).filter((file): file is { fileName: string; filePath: string; mtime: Date; size: number } => file !== null)
+          : await Promise.all(
+            (await readdir(projectDir))
+              .filter((f) => f.endsWith(".jsonl"))
+              .map(async (f) => {
+                const filePath = join(projectDir, f)
+                try {
+                  const fileStat = await stat(filePath)
+                  return { fileName: f, filePath, mtime: fileStat.mtime, size: fileStat.size }
+                } catch {
+                  return { fileName: f, filePath, mtime: new Date(0), size: 0 }
+                }
+              })
+          )
 
         fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
@@ -111,9 +179,8 @@ export function registerProjectRoutes(use: UseFn) {
 
         const sessions = []
         for (const fs of paged) {
-          const filePath = join(projectDir, fs.fileName)
           try {
-            const meta = await getSessionMeta(filePath)
+            const meta = await getSessionMeta(fs.filePath)
             sessions.push({
               ...meta,
               fileName: fs.fileName,
@@ -140,6 +207,11 @@ export function registerProjectRoutes(use: UseFn) {
     } else if (parts.length === 3 && parts[2] === "subagents") {
       // GET /api/sessions/{dirName}/{sessionId}/subagents — list subagent files
       const dirName = decodeURIComponent(parts[0])
+      if (isCodexDirName(dirName)) {
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify([]))
+        return
+      }
       const sessionId = decodeURIComponent(parts[1])
       const subagentsDir = join(dirs.PROJECTS_DIR, dirName, sessionId, "subagents")
       if (!isWithinDir(dirs.PROJECTS_DIR, subagentsDir)) {
@@ -176,8 +248,8 @@ export function registerProjectRoutes(use: UseFn) {
         return
       }
 
-      const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-      if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+      const filePath = await resolveSessionFilePath(dirName, fileName)
+      if (!filePath) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
         return
@@ -207,28 +279,25 @@ export function registerProjectRoutes(use: UseFn) {
     if (parts.length !== 1) return next()
 
     const sessionId = decodeURIComponent(parts[0])
-    const targetFile = `${sessionId}.jsonl`
-
     try {
-      const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name === "memory") continue
-        const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-        try {
-          const files = await readdir(projectDir)
-          if (files.includes(targetFile)) {
-            res.setHeader("Content-Type", "application/json")
-            res.end(
-              JSON.stringify({
-                dirName: entry.name,
-                fileName: targetFile,
-              })
-            )
-            return
-          }
-        } catch {
-          continue
+      const filePath = await findJsonlPath(sessionId)
+      if (filePath) {
+        const isCodex = filePath.startsWith(CODEX_SESSIONS_DIR + "/")
+        if (isCodex) {
+          const meta = await getSessionMeta(filePath)
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({
+            dirName: encodeCodexDirName(meta.cwd || ""),
+            fileName: filePath.slice(CODEX_SESSIONS_DIR.length + 1),
+          }))
+          return
         }
+
+        const fileName = filePath.split("/").at(-1) || `${sessionId}.jsonl`
+        const dirName = filePath.slice(0, -fileName.length - 1).split("/").at(-1) || ""
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ dirName, fileName }))
+        return
       }
       res.statusCode = 404
       res.end(JSON.stringify({ error: "Session not found" }))

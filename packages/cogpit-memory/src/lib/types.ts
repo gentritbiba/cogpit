@@ -245,8 +245,18 @@ export interface ParsedSession {
   model: string
   turns: Turn[]
   stats: SessionStats
-  rawMessages: RawMessage[]
+  /**
+   * Raw JSONL message objects. Widened from `RawMessage[]` to support multiple
+   * provider formats (Claude Code and Codex) without a discriminated union at
+   * every call site. Use `agentKind` to distinguish formats when needed.
+   */
+  rawMessages: Array<{ type: string; [key: string]: unknown }>
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
+  /**
+   * The provider that produced this session. Set by the parser when the
+   * format is known. Consumers can use this instead of inspecting rawMessages.
+   */
+  agentKind?: "claude" | "codex"
 }
 
 // ── Undo/Redo & Branching ────────────────────────────────────────────────

@@ -2,9 +2,11 @@ import {
   activeProcesses,
   persistentSessions,
   dirs,
+  isCodexDirName,
   isWithinDir,
   unlink,
   join,
+  resolveSessionFilePath,
   spawn,
 } from "../helpers"
 import type { UseFn } from "../helpers"
@@ -105,22 +107,31 @@ export function registerClaudeManageRoutes(use: UseFn) {
     const pathParts = url.pathname.split("/").filter(Boolean)
     if (pathParts.length > 0) return next()
 
-    const child = spawn("ps", ["aux"])
-    let stdout = ""
-    child.stdout!.on("data", (data: Buffer) => { stdout += data.toString() })
-    child.on("close", () => {
-      const processes: Array<{
-        pid: number
-        memMB: number
-        cpu: number
-        sessionId: string | null
-        tty: string
-        args: string
-        startTime: string
-      }> = []
+      const child = spawn("ps", ["aux"])
+      let stdout = ""
+      child.stdout!.on("data", (data: Buffer) => { stdout += data.toString() })
+      child.on("close", () => {
+        const trackedByPid = new Map<number, string>()
+        for (const [sid, ps] of persistentSessions) {
+          if (ps.proc.pid) trackedByPid.set(ps.proc.pid, sid)
+        }
+        for (const [sid, proc] of activeProcesses) {
+          if (proc.pid && !trackedByPid.has(proc.pid)) trackedByPid.set(proc.pid, sid)
+        }
+
+        const processes: Array<{
+          pid: number
+          memMB: number
+          cpu: number
+          sessionId: string | null
+          agentKind: "claude" | "codex"
+          tty: string
+          args: string
+          startTime: string
+        }> = []
 
       for (const line of stdout.split("\n")) {
-        if (!line.includes("claude") || line.includes("grep") ||
+        if ((!line.includes("claude") && !line.includes("codex")) || line.includes("grep") ||
             line.includes("node ") || line.includes("esbuild") ||
             line.includes("/bin/zsh")) continue
 
@@ -133,16 +144,19 @@ export function registerClaudeManageRoutes(use: UseFn) {
         const tty = cols[6] || "??"
         const startTime = cols[8] || ""
         const args = cols.slice(10).join(" ")
+        const agentKind = args.includes("codex") ? "codex" : "claude"
 
         const resumeMatch = args.match(/--resume\s+([0-9a-f-]{36})/)
         const sidMatch = args.match(/--session-id\s+([0-9a-f-]{36})/)
-        const sessionId = resumeMatch?.[1] ?? sidMatch?.[1] ?? null
+        const codexResumeMatch = args.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
+        const sessionId = trackedByPid.get(pid) ?? resumeMatch?.[1] ?? sidMatch?.[1] ?? codexResumeMatch?.[1] ?? null
 
         processes.push({
           pid,
           memMB: Math.round(memKB / 1024),
           cpu,
           sessionId,
+          agentKind,
           tty,
           args,
           startTime,
@@ -197,7 +211,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         if (!isTracked) {
           res.statusCode = 403
           res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Can only kill tracked claude processes" }))
+          res.end(JSON.stringify({ error: "Can only kill tracked agent processes" }))
           return
         }
 
@@ -238,8 +252,8 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
-        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+        const filePath = await resolveSessionFilePath(dirName, fileName)
+        if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return

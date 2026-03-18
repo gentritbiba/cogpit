@@ -7,7 +7,7 @@ export type PtyChatStatus = "idle" | "connected" | "error"
 
 interface UsePtyChatOpts {
   sessionSource: SessionSource | null
-  /** The parsed session's UUID — used for `claude --resume`. Falls back to fileName-based derivation. */
+  /** The parsed session's UUID — used to resume the active agent session. Falls back to fileName-based derivation. */
   parsedSessionId?: string | null
   cwd?: string
   permissions?: PermissionsConfig

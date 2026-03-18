@@ -53,6 +53,7 @@ describe("useNewSession", () => {
     isMobile: false,
     onSessionFinalized,
     model: "claude-opus-4-6",
+    effort: "high",
   }
 
   beforeEach(() => {
@@ -436,5 +437,54 @@ describe("useNewSession", () => {
 
     const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     expect(body.worktreeName).toBeUndefined()
+  })
+
+  it("recovers Codex sessions from project listing when create returns the stale exit-0 error", async () => {
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+
+    act(() => {
+      result.current.handleNewSession("codex__L3RtcC9wcm9qZWN0", "/tmp/project")
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "codex exited with code 0" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          sessions: [
+            {
+              fileName: "2026/03/18/rollout-2026-03-18T16-48-59-session.jsonl",
+              sessionId: "codex-session-1",
+              firstUserMessage: "hello codex",
+              lastModified: new Date().toISOString(),
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve("{}"),
+      } as Response)
+
+    let sessionId: string | null = null
+    await act(async () => {
+      sessionId = await result.current.createAndSend("hello codex")
+    })
+
+    expect(sessionId).toBe("codex-session-1")
+    expect(result.current.createError).toBeNull()
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        source: expect.objectContaining({
+          dirName: "codex__L3RtcC9wcm9qZWN0",
+          fileName: "2026/03/18/rollout-2026-03-18T16-48-59-session.jsonl",
+        }),
+      })
+    )
   })
 })

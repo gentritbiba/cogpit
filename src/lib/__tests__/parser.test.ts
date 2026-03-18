@@ -103,6 +103,130 @@ not valid json
     ])
   })
 
+  it("parses a Codex session into the shared turn model", () => {
+    const codexJsonl = [
+      JSON.stringify({
+        timestamp: "2026-03-18T08:16:56.687Z",
+        type: "session_meta",
+        payload: {
+          id: "019d0004-3322-7b61-a208-4c7af4565667",
+          cli_version: "0.115.0",
+          cwd: "/Users/gentritbiba/.claude/agent-window",
+          git: { branch: "master" },
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:16:56.688Z",
+        type: "turn_context",
+        payload: {
+          turn_id: "turn-1",
+          cwd: "/Users/gentritbiba/.claude/agent-window",
+          model: "gpt-5.4",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:16:57.000Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "check the Codex session format",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:16:58.000Z",
+        type: "response_item",
+        payload: {
+          type: "reasoning",
+          summary: ["Inspecting the session structure"],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:16:59.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          phase: "commentary",
+          content: [{ type: "output_text", text: "I’m checking the session file." }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:17:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-1",
+          arguments: JSON.stringify({ cmd: "pwd", workdir: "/Users/gentritbiba/.claude/agent-window" }),
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:17:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-1",
+          output: "Command: pwd\nProcess exited with code 0\nOutput:\n/Users/gentritbiba/.claude/agent-window\n",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:17:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              output_tokens: 25,
+            },
+          },
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:17:03.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "The Codex session format is different, but usable." }],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-03-18T08:17:04.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+        },
+      }),
+    ].join("\n")
+
+    const session = parseSession(codexJsonl)
+
+    expect(session.sessionId).toBe("019d0004-3322-7b61-a208-4c7af4565667")
+    expect(session.version).toBe("0.115.0")
+    expect(session.gitBranch).toBe("master")
+    expect(session.cwd).toBe("/Users/gentritbiba/.claude/agent-window")
+    expect(session.model).toBe("gpt-5.4")
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toBe("check the Codex session format")
+    expect(session.turns[0].assistantText).toEqual([
+      "I’m checking the session file.",
+      "The Codex session format is different, but usable.",
+    ])
+    expect(session.turns[0].thinking[0].thinking).toBe("Inspecting the session structure")
+    expect(session.turns[0].toolCalls).toHaveLength(1)
+    expect(session.turns[0].toolCalls[0].name).toBe("exec_command")
+    expect(session.turns[0].toolCalls[0].input).toEqual({
+      cmd: "pwd",
+      workdir: "/Users/gentritbiba/.claude/agent-window",
+    })
+    expect(session.turns[0].toolCalls[0].result).toContain("Process exited with code 0")
+    expect(session.turns[0].tokenUsage?.input_tokens).toBe(100)
+    expect(session.turns[0].tokenUsage?.output_tokens).toBe(25)
+    expect(session.turns[0].durationMs).toBeGreaterThan(0)
+  })
+
   it("extracts session metadata", () => {
     const session = parseSession(metadataSession())
     expect(session.sessionId).toBe("session-abc-123")

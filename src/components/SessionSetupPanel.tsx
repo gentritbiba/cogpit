@@ -1,8 +1,10 @@
 import { Cpu, GitBranch, Gauge } from "lucide-react"
-import { MODEL_OPTIONS, EFFORT_OPTIONS, DEFAULT_EFFORT } from "@/lib/utils"
+import { EFFORT_OPTIONS, DEFAULT_EFFORT, getModelOptions } from "@/lib/utils"
 import { OptionGrid } from "@/components/OptionGrid"
+import type { AgentKind } from "@/lib/sessionSource"
 
 interface SessionSetupPanelProps {
+  agentKind?: AgentKind
   permissionsPanel?: React.ReactNode
   selectedModel?: string
   onModelChange?: (model: string) => void
@@ -15,6 +17,7 @@ interface SessionSetupPanelProps {
 }
 
 export function SessionSetupPanel({
+  agentKind = "claude",
   permissionsPanel,
   selectedModel,
   onModelChange,
@@ -25,6 +28,9 @@ export function SessionSetupPanel({
   worktreeName,
   onWorktreeNameChange,
 }: SessionSetupPanelProps) {
+  const showEffort = !!onEffortChange
+  const showWorktree = agentKind === "claude" && !!onWorktreeEnabledChange
+
   return (
     <aside className="shrink-0 w-[300px] border-l border-border bg-elevation-0 overflow-y-auto h-full panel-enter-right">
       <div className="flex flex-col gap-6 p-3">
@@ -45,7 +51,7 @@ export function SessionSetupPanel({
                 Model
               </h3>
               <OptionGrid
-                options={MODEL_OPTIONS}
+                options={getModelOptions(agentKind)}
                 selected={selectedModel || ""}
                 onChange={onModelChange}
                 accentColor="blue"
@@ -55,7 +61,7 @@ export function SessionSetupPanel({
         )}
 
         {/* Effort Selector */}
-        {onEffortChange && (
+        {showEffort && (
           <div className="rounded-lg p-3">
             <section>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -75,7 +81,7 @@ export function SessionSetupPanel({
         )}
 
         {/* Worktree */}
-        {onWorktreeEnabledChange && (
+        {showWorktree && (
           <div className="rounded-lg p-3">
             <section>
               <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">

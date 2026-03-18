@@ -212,3 +212,84 @@ describe("getStatusLabel", () => {
     expect(getStatusLabel("completed")).toBe("Done")
   })
 })
+
+// ── deriveCodexSessionStatus (via deriveSessionStatus dispatch) ───────────
+
+describe("deriveSessionStatus — Codex format", () => {
+  function codexMsgs(items: Array<{ type: string; payload?: Record<string, unknown> }>) {
+    // Start with a session_meta so the Codex dispatch is triggered
+    return [
+      { type: "session_meta", payload: { id: "test" } },
+      ...items,
+    ]
+  }
+
+  it("returns idle for empty Codex messages (only session_meta)", () => {
+    const result = deriveSessionStatus([{ type: "session_meta", payload: { id: "x" } }])
+    expect(result.status).toBe("idle")
+  })
+
+  it("returns completed on task_complete event", () => {
+    const msgs = codexMsgs([
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ])
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("returns processing on task_started event", () => {
+    const msgs = codexMsgs([
+      { type: "event_msg", payload: { type: "task_started" } },
+    ])
+    expect(deriveSessionStatus(msgs).status).toBe("processing")
+  })
+
+  it("returns thinking on agent_message event", () => {
+    const msgs = codexMsgs([
+      { type: "event_msg", payload: { type: "agent_message" } },
+    ])
+    expect(deriveSessionStatus(msgs).status).toBe("thinking")
+  })
+
+  it("skips token_count events to find real status", () => {
+    const msgs = codexMsgs([
+      { type: "event_msg", payload: { type: "task_complete" } },
+      { type: "event_msg", payload: { type: "token_count" } },
+    ])
+    // Walks backward — token_count is skipped, finds task_complete
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("returns tool_use with toolName on function_call", () => {
+    const msgs = codexMsgs([
+      { type: "response_item", payload: { type: "function_call", name: "bash" } },
+    ])
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("tool_use")
+    expect(result.toolName).toBe("bash")
+  })
+
+  it("returns thinking on assistant message response_item", () => {
+    const msgs = codexMsgs([
+      { type: "response_item", payload: { type: "message", role: "assistant" } },
+    ])
+    expect(deriveSessionStatus(msgs).status).toBe("thinking")
+  })
+
+  it("returns processing on user message response_item", () => {
+    const msgs = codexMsgs([
+      { type: "response_item", payload: { type: "message", role: "user" } },
+    ])
+    expect(deriveSessionStatus(msgs).status).toBe("processing")
+  })
+
+  it("walks backward — returns status from most recent meaningful event", () => {
+    const msgs = codexMsgs([
+      { type: "event_msg", payload: { type: "task_complete" } },
+      { type: "response_item", payload: { type: "function_call", name: "ls" } },
+    ])
+    // Most recent is function_call
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("tool_use")
+    expect(result.toolName).toBe("ls")
+  })
+})

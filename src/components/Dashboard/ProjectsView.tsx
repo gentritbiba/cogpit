@@ -137,7 +137,7 @@ export function ProjectsView({
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <Activity className="size-8 text-muted-foreground mb-3" />
               <p className="text-sm text-muted-foreground">
-                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code to see projects here."}
+                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code or Codex to see projects here."}
               </p>
             </div>
           ) : (

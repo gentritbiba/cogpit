@@ -26,6 +26,7 @@ import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { getResumeCommand } from "@/lib/sessionSource"
 import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
@@ -64,13 +65,13 @@ export const DesktopHeader = memo(function DesktopHeader({
   onToggleConfig,
 }: DesktopHeaderProps) {
   const { config: { networkUrl, networkAccessDisabled } } = useAppContext()
-  const { session, isLive } = useSessionContext()
+  const { session, sessionSource, isLive } = useSessionContext()
   const [cmdCopied, copyCmd] = useCopyWithFeedback()
   const [urlCopied, copyUrl] = useCopyWithFeedback()
 
   function handleCopyResumeCmd(): void {
     if (!session) return
-    copyCmd(`claude --resume ${session.sessionId}`)
+    copyCmd(getResumeCommand(sessionSource?.agentKind ?? "claude", session.sessionId))
   }
 
   function handleCopyNetworkUrl(): void {
@@ -170,7 +171,7 @@ export const DesktopHeader = memo(function DesktopHeader({
         />
         <HeaderIconButton
           icon={Skull}
-          label="Kill all Claude processes"
+          label="Kill all tracked agent processes"
           onClick={onKillAll}
           disabled={killing}
           className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10"

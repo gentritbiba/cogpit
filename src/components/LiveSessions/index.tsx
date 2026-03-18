@@ -317,7 +317,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 <>
                   <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
                   <p className="text-[13px] text-muted-foreground">No active sessions</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code to see sessions here</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code or Codex to see sessions here</p>
                 </>
               )}
             </div>

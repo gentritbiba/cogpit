@@ -19,11 +19,22 @@ export interface SessionStatusInfo {
 
 /**
  * Derive session status from raw JSONL message objects.
- * Walks backward through messages to find the most recent meaningful signal.
+ *
+ * **Provider dispatch:** The function auto-detects the session format by
+ * inspecting `rawMessages[0].type`. Codex sessions start with one of
+ * `session_meta | turn_context | event_msg | response_item` and are routed
+ * to `deriveCodexSessionStatus`. All other sessions are treated as Claude Code
+ * format. If a third provider is added, add a detection branch here and in
+ * `src/lib/providers/registry.ts`.
  */
 export function deriveSessionStatus(
   rawMessages: Array<{ type: string; [key: string]: unknown }>
 ): SessionStatusInfo {
+  const firstType = rawMessages[0]?.type
+  if (firstType === "session_meta" || firstType === "turn_context" || firstType === "event_msg" || firstType === "response_item") {
+    return deriveCodexSessionStatus(rawMessages)
+  }
+
   let pendingEnqueues = 0
 
   /** Build a status result with the current pending queue count. */
@@ -87,6 +98,43 @@ export function deriveSessionStatus(
   return { status: "idle" }
 }
 
+function deriveCodexSessionStatus(
+  rawMessages: Array<{ type: string; [key: string]: unknown }>
+): SessionStatusInfo {
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const msg = rawMessages[i]
+
+    if (msg.type === "event_msg") {
+      const payload = msg.payload as { type?: string; message?: string } | undefined
+      switch (payload?.type) {
+        case "task_complete":
+          return { status: "completed" }
+        case "task_started":
+          return { status: "processing" }
+        case "agent_message":
+          return { status: "thinking" }
+        case "token_count":
+          continue
+      }
+    }
+
+    if (msg.type === "response_item") {
+      const payload = msg.payload as { type?: string; name?: string; role?: string } | undefined
+      if (!payload) continue
+
+      if (payload.type === "function_call") {
+        return { status: "tool_use", toolName: payload.name }
+      }
+      if (payload.type === "message") {
+        if (payload.role === "assistant") return { status: "thinking" }
+        if (payload.role === "user") return { status: "processing" }
+      }
+    }
+  }
+
+  return { status: "idle" }
+}
+
 /** Tools that indicate the agent is waiting for sub-agents to finish. */
 const AGENT_TOOLS = new Set(["Agent", "TaskOutput"])
 
@@ -103,4 +151,3 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
     default: return null
   }
 }
-

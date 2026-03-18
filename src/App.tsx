@@ -19,6 +19,7 @@ import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { UpdateBanner } from "@/components/UpdateBanner"
+import { NewSessionAgentDialog } from "@/components/NewSessionAgentDialog"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { usePtyChat } from "@/hooks/usePtyChat"
@@ -52,6 +53,7 @@ import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
 import { DEFAULT_EFFORT } from "@/lib/utils"
+import { agentKindFromDirName, encodeCodexDirName, isCodexDirName } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
@@ -120,6 +122,10 @@ export default function App() {
   // Real filesystem path for the pending (pre-created) session.
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
+  const currentAgentKind = state.sessionSource?.agentKind
+    ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
+  const supportsWorktrees = currentAgentKind === "claude"
+  const supportsMcp = currentAgentKind === "claude"
 
   const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
   const suggestionsRef = useRef(slashSuggestions.suggestions)
@@ -192,7 +198,7 @@ export default function App() {
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
 
   // Worktree data — only fetched when panel is open
-  const worktreeData = useWorktrees(panels.showWorktrees ? currentDirName : null)
+  const worktreeData = useWorktrees(supportsWorktrees && panels.showWorktrees ? currentDirName : null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -263,7 +269,17 @@ export default function App() {
 
   // MCP server selection
   const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
-  const mcpData = useMcpServers(currentCwd, currentDirName ?? undefined, state.sessionSource?.fileName ?? undefined)
+  const mcpData = useMcpServers(
+    supportsMcp ? currentCwd : undefined,
+    supportsMcp ? (currentDirName ?? undefined) : undefined,
+    supportsMcp ? state.sessionSource?.fileName ?? undefined : undefined
+  )
+
+  useEffect(() => {
+    if (!supportsWorktrees && panels.showWorktrees) {
+      panels.setShowWorktrees(false)
+    }
+  }, [supportsWorktrees, panels.showWorktrees, panels.setShowWorktrees])
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -295,8 +311,32 @@ export default function App() {
     onCreateStarted: setPendingFirstMessage,
     model: selectedModel,
     effort: selectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
   })
+
+  const [newSessionChoice, setNewSessionChoice] = useState<{
+    dirName: string
+    cwd: string | null
+  } | null>(null)
+
+  const handleStartNewSession = useCallback((dirName: string, cwd?: string) => {
+    const normalizedCwd = cwd ?? null
+    if (!normalizedCwd || isCodexDirName(dirName)) {
+      handleNewSession(dirName, normalizedCwd ?? undefined)
+      return
+    }
+    setNewSessionChoice({ dirName, cwd: normalizedCwd })
+  }, [handleNewSession])
+
+  const handleSelectNewSessionAgent = useCallback((agentKind: "claude" | "codex") => {
+    const pending = newSessionChoice
+    if (!pending) return
+    const nextDirName = agentKind === "codex"
+      ? encodeCodexDirName(pending.cwd ?? "")
+      : pending.dirName
+    handleNewSession(nextDirName, pending.cwd ?? undefined)
+    setNewSessionChoice(null)
+  }, [newSessionChoice, handleNewSession])
 
   // Build the pending session info for the Live & Recent placeholder
   const pendingSessionInfo = useMemo(() => {
@@ -315,7 +355,7 @@ export default function App() {
     }
   }, [state.pendingDirName])
 
-  // Claude chat
+  // Active agent chat
   const claudeChat = usePtyChat({
     sessionSource: state.sessionSource,
     parsedSessionId: state.session?.sessionId ?? null,
@@ -324,7 +364,7 @@ export default function App() {
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
     effort: selectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -429,7 +469,7 @@ export default function App() {
     setSelectedModel,
     selectedEffort,
     setSelectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
   })
@@ -440,7 +480,7 @@ export default function App() {
   // We intentionally do NOT auto-apply when switching between sessions or when
   // the user changes MCP selection — those require explicit "Apply Settings".
   const { hasSettingsChanges, handleApplySettings } = handlers
-  const mcpHasRestrictions = mcpData.mcpConfigJson !== null
+  const mcpHasRestrictions = supportsMcp && mcpData.mcpConfigJson !== null
   const mcpPrevLoadedRef = useRef(false)
   useEffect(() => {
     const justLoaded = mcpData.loaded && !mcpPrevLoadedRef.current
@@ -769,21 +809,22 @@ export default function App() {
     <div className="shrink-0 bg-elevation-1">
       <ChatInput ref={chatInputRef} />
       <ChatInputSettings
+        agentKind={currentAgentKind}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
         selectedEffort={selectedEffort}
         onEffortChange={setSelectedEffort}
         isNewSession={isNewSession}
         worktreeEnabled={worktreeEnabled}
-        onWorktreeEnabledChange={isNewSession ? setWorktreeEnabled : undefined}
+        onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
         onApplySettings={handlers.handleApplySettings}
         activeModelId={state.session?.model}
-        mcpServers={mcpData.servers}
-        selectedMcpServers={mcpData.selectedServers}
-        onToggleMcpServer={mcpData.toggleServer}
-        onRefreshMcpServers={mcpData.refresh}
-        mcpLoading={mcpData.loading}
-        onMcpAuth={handleMcpAuth}
+        mcpServers={supportsMcp ? mcpData.servers : undefined}
+        selectedMcpServers={supportsMcp ? mcpData.selectedServers : undefined}
+        onToggleMcpServer={supportsMcp ? mcpData.toggleServer : undefined}
+        onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
+        mcpLoading={supportsMcp ? mcpData.loading : undefined}
+        onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
       />
     </div>
   )
@@ -826,7 +867,7 @@ export default function App() {
               sidebarTab={state.sidebarTab}
               onSidebarTabChange={handleSidebarTabChange}
               onSelectTeam={actions.handleSelectTeam}
-              onNewSession={handleNewSession}
+              onNewSession={handleStartNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingSessionInfo}
               onDuplicateSession={handlers.handleDuplicateSessionByPath}
@@ -852,7 +893,7 @@ export default function App() {
                   {teamMembersBar}
                   <SessionInfoBar
                     creatingSession={creatingSession}
-                    onNewSession={handleNewSession}
+                    onNewSession={handleStartNewSession}
                     onDuplicateSession={handlers.handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
@@ -888,7 +929,7 @@ export default function App() {
               ) : (
                 <Dashboard
                   onSelectSession={actions.handleDashboardSelect}
-                  onNewSession={handleNewSession}
+                  onNewSession={handleStartNewSession}
                   creatingSession={creatingSession}
                   selectedProjectDirName={state.dashboardProject}
                   onSelectProject={handleSelectProject}
@@ -983,14 +1024,14 @@ export default function App() {
       <DesktopHeader
         showSidebar={panels.showSidebar}
         showStats={panels.showStats}
-        showWorktrees={panels.showWorktrees}
+        showWorktrees={supportsWorktrees && panels.showWorktrees}
         showFileChanges={panels.showFileChanges}
         hasFileChanges={hasFileChanges}
         killing={killing}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={panels.handleToggleSidebar}
         onToggleStats={panels.handleToggleStats}
-        onToggleWorktrees={panels.handleToggleWorktrees}
+        onToggleWorktrees={supportsWorktrees ? panels.handleToggleWorktrees : undefined}
         onToggleFileChanges={panels.handleToggleFileChanges}
         showConfig={state.mainView === "config"}
         onToggleConfig={panels.handleToggleConfig}
@@ -1011,7 +1052,7 @@ export default function App() {
             sidebarTab={state.sidebarTab}
             onSidebarTabChange={handleSidebarTabChange}
             onSelectTeam={actions.handleSelectTeam}
-            onNewSession={handleNewSession}
+            onNewSession={handleStartNewSession}
             creatingSession={creatingSession}
             pendingSession={pendingSessionInfo}
             onDuplicateSession={handlers.handleDuplicateSessionByPath}
@@ -1052,7 +1093,7 @@ export default function App() {
                     {teamMembersBar}
                     <SessionInfoBar
                       creatingSession={creatingSession}
-                      onNewSession={handleNewSession}
+                      onNewSession={handleStartNewSession}
                       onDuplicateSession={handlers.handleDuplicateSession}
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
@@ -1131,7 +1172,7 @@ export default function App() {
           ) : (
             <Dashboard
               onSelectSession={actions.handleDashboardSelect}
-              onNewSession={handleNewSession}
+              onNewSession={handleStartNewSession}
               creatingSession={creatingSession}
               selectedProjectDirName={state.dashboardProject}
               onSelectProject={handleSelectProject}
@@ -1160,7 +1201,7 @@ export default function App() {
 
       <Suspense fallback={null}>
         <WorktreePanel
-          open={panels.showWorktrees}
+          open={supportsWorktrees && panels.showWorktrees}
           onOpenChange={panels.setShowWorktrees}
           worktrees={worktreeData.worktrees}
           loading={worktreeData.loading}
@@ -1193,11 +1234,18 @@ export default function App() {
         <ProjectSwitcherModal
           open={panels.showProjectSwitcher}
           onClose={panels.handleCloseProjectSwitcher}
-          onNewSession={handleNewSession}
+          onNewSession={handleStartNewSession}
           currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
           currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
         />
       </Suspense>
+
+      <NewSessionAgentDialog
+        open={newSessionChoice !== null}
+        cwd={newSessionChoice?.cwd ?? null}
+        onClose={() => setNewSessionChoice(null)}
+        onSelect={handleSelectNewSessionAgent}
+      />
 
       <Suspense fallback={null}>
         <ThemeSelectorModal

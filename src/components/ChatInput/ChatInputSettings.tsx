@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
 import { ChevronDown, GitBranch, Plug, RefreshCw, Check } from "lucide-react"
-import { cn, MODEL_OPTIONS, EFFORT_OPTIONS, DEFAULT_EFFORT } from "@/lib/utils"
+import { cn, EFFORT_OPTIONS, DEFAULT_EFFORT, getModelOptions } from "@/lib/utils"
+import type { AgentKind } from "@/lib/sessionSource"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,10 @@ function friendlyModelName(modelId: string): string {
   if (lower.includes("opus")) return "Opus"
   if (lower.includes("sonnet")) return "Sonnet"
   if (lower.includes("haiku")) return "Haiku"
+  if (lower.startsWith("gpt-5.4-mini")) return "GPT-5.4 Mini"
+  if (lower.startsWith("gpt-5.4")) return "GPT-5.4"
+  if (lower.startsWith("gpt-5.3-codex")) return "GPT-5.3 Codex"
+  if (lower.startsWith("gpt-5.2-codex")) return "GPT-5.2 Codex"
   return modelId
 }
 
@@ -234,6 +239,7 @@ function McpDropdown({ servers, selected, onToggle, onRefresh, loading, onAuth }
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export interface ChatInputSettingsProps {
+  agentKind?: AgentKind
   selectedModel: string
   onModelChange: (model: string) => void
   selectedEffort: string
@@ -259,6 +265,7 @@ export interface ChatInputSettingsProps {
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
+  agentKind = "claude",
   selectedModel,
   onModelChange,
   selectedEffort,
@@ -298,12 +305,16 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   )
 
   // Build model options with resolved "Default" label
-  const resolvedDefaultName = activeModelId ? friendlyModelName(activeModelId) : "Opus"
-  const modelOptions: readonly DropdownOption[] = MODEL_OPTIONS.map((opt) =>
+  const resolvedDefaultName = activeModelId
+    ? friendlyModelName(activeModelId)
+    : (agentKind === "codex" ? "GPT-5.4" : "Opus")
+  const modelOptions: readonly DropdownOption[] = getModelOptions(agentKind).map((opt) =>
     opt.value === ""
       ? { value: "", label: resolvedDefaultName, menuLabel: `${resolvedDefaultName} (default)` }
       : opt
   )
+  const showEffort = true
+  const showWorktree = agentKind === "claude"
 
   return (
     <div className="flex items-center pb-2">
@@ -316,18 +327,20 @@ export const ChatInputSettings = memo(function ChatInputSettings({
           onChange={handleModelChange}
         />
 
-        <span className="text-border/60 text-[10px] select-none">/</span>
-
-        {/* Thinking Effort */}
-        <MiniDropdown
-          value={selectedEffort || DEFAULT_EFFORT}
-          fallbackLabel="Effort"
-          options={EFFORT_OPTIONS}
-          onChange={handleEffortChange}
-        />
+        {showEffort && (
+          <>
+            <span className="text-border/60 text-[10px] select-none">/</span>
+            <MiniDropdown
+              value={selectedEffort || DEFAULT_EFFORT}
+              fallbackLabel="Effort"
+              options={EFFORT_OPTIONS}
+              onChange={handleEffortChange}
+            />
+          </>
+        )}
 
         {/* Worktree toggle — new session only */}
-        {isNewSession && onWorktreeEnabledChange && (
+        {showWorktree && isNewSession && onWorktreeEnabledChange && (
           <>
             <span className="text-border/60 text-[10px] select-none">/</span>
             <button

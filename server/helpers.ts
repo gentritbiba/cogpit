@@ -1,11 +1,22 @@
 import type { ChildProcess } from "node:child_process"
-import { readdir, open } from "node:fs/promises"
+import { readdir, open, stat, writeFile, unlink, mkdir, readFile } from "node:fs/promises"
 import { writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { homedir, tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
 import { getConfig, getDirs } from "./config"
+import {
+  buildClaudePermArgs,
+  buildCodexPermArgs as _buildCodexPermArgs,
+  buildCodexEffortArgs as _buildCodexEffortArgs,
+  buildCodexModelArgs as _buildCodexModelArgs,
+  isCodexDirName as _isCodexDirName,
+  encodeCodexDirName as _encodeCodexDirName,
+  decodeCodexDirName as _decodeCodexDirName,
+  CODEX_PREFIX,
+} from "../src/lib/providers/index"
+export type { AgentKind } from "../src/lib/providers/types"
 
 // ── Shared types ────────────────────────────────────────────────────────
 
@@ -17,9 +28,11 @@ export type UseFn = (path: string, handler: Middleware) => void
 
 // ── Friendly error formatter ────────────────────────────────────────────
 
-export function friendlySpawnError(err: NodeJS.ErrnoException): string {
+export function friendlySpawnError(err: NodeJS.ErrnoException, cli: "claude" | "codex" = "claude"): string {
   if (err.code === "ENOENT") {
-    return "Claude CLI is not installed or not found in PATH. Install it with: npm install -g @anthropic-ai/claude-code"
+    return cli === "codex"
+      ? "Codex CLI is not installed or not found in PATH."
+      : "Claude CLI is not installed or not found in PATH. Install it with: npm install -g @anthropic-ai/claude-code"
   }
   return err.message
 }
@@ -50,30 +63,55 @@ export function buildMcpArgs(mcpConfig: unknown): string[] {
 
 // ── Permission args builder ─────────────────────────────────────────────
 
-/**
- * Build CLI permission args from a parsed permissions config object.
- * Auto-approves ExitPlanMode and AskUserQuestion for non-bypass modes
- * since these interactive tools can't receive stdin approval through
- * stream-json user messages (causes an infinite retry loop in -p mode).
- */
+/** Build Claude CLI permission args (delegates to providers/claude) */
 export function buildPermArgs(permissions?: { mode?: string; allowedTools?: string[]; disallowedTools?: string[] }): string[] {
-  if (permissions && typeof permissions.mode === "string" && permissions.mode !== "bypassPermissions") {
-    const args = ["--permission-mode", permissions.mode]
-    if (Array.isArray(permissions.allowedTools)) {
-      for (const tool of permissions.allowedTools) {
-        args.push("--allowedTools", tool)
-      }
-    }
-    if (Array.isArray(permissions.disallowedTools)) {
-      for (const tool of permissions.disallowedTools) {
-        args.push("--disallowedTools", tool)
-      }
-    }
-    args.push("--allowedTools", "ExitPlanMode")
-    args.push("--allowedTools", "AskUserQuestion")
-    return args
+  return buildClaudePermArgs(permissions)
+}
+
+/** Build Codex CLI permission args (delegates to providers/codex) */
+export function buildCodexPermArgs(permissions?: { mode?: string; allowedTools?: string[]; disallowedTools?: string[] }): string[] {
+  return _buildCodexPermArgs(permissions)
+}
+
+/** Build Codex effort args (delegates to providers/codex) */
+export function buildCodexEffortArgs(effort?: string): string[] {
+  return _buildCodexEffortArgs(effort)
+}
+
+/** Build Codex model args (delegates to providers/codex) */
+export function buildCodexModelArgs(model?: string): string[] {
+  return _buildCodexModelArgs(model)
+}
+
+const IMAGE_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+}
+
+export async function writeTempImageFiles(
+  images?: Array<{ data: string; mediaType: string }>
+): Promise<string[]> {
+  if (!Array.isArray(images) || images.length === 0) return []
+
+  const files: string[] = []
+  for (const [index, image] of images.entries()) {
+    const ext = IMAGE_EXT[image.mediaType] ?? "png"
+    const filePath = join(tmpdir(), `cogpit-codex-image-${Date.now()}-${index}.${ext}`)
+    await writeFile(filePath, Buffer.from(image.data, "base64"))
+    files.push(filePath)
   }
-  return ["--dangerously-skip-permissions"]
+  return files
+}
+
+export async function cleanupTempFiles(paths: string[]): Promise<void> {
+  await Promise.all(paths.map(async (filePath) => {
+    try {
+      await unlink(filePath)
+    } catch {
+      // ignore cleanup failures
+    }
+  }))
 }
 
 // ── Mutable directory references ────────────────────────────────────
@@ -83,6 +121,42 @@ export const dirs = {
   TEAMS_DIR: "",
   TASKS_DIR: "",
   UNDO_DIR: "",
+}
+
+/** @deprecated Use CODEX_PREFIX from src/lib/providers/codex */
+export const CODEX_PROJECT_PREFIX = CODEX_PREFIX
+export const CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions")
+
+/** Delegates to providers/codex.isCodexDirName */
+export function isCodexDirName(dirName: string): boolean {
+  return _isCodexDirName(dirName)
+}
+
+/**
+ * Encode a cwd path as a Codex dirName.
+ * Server-side uses Buffer for Node.js native base64url encoding.
+ */
+export function encodeCodexDirName(cwd: string): string {
+  return `${CODEX_PREFIX}${Buffer.from(cwd).toString("base64url")}`
+}
+
+/** Delegates to providers/codex.decodeCodexDirName */
+export function decodeCodexDirName(dirName: string): string | null {
+  return _decodeCodexDirName(dirName)
+}
+
+export function isCodexFilePath(filePath: string): boolean {
+  return filePath.startsWith(CODEX_SESSIONS_DIR + "/")
+}
+
+export function formatCodexRolloutFileName(sessionId: string, now = new Date()): string {
+  const year = String(now.getFullYear())
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  const hour = String(now.getHours()).padStart(2, "0")
+  const minute = String(now.getMinutes()).padStart(2, "0")
+  const second = String(now.getSeconds()).padStart(2, "0")
+  return `${year}/${month}/${day}/rollout-${year}-${month}-${day}T${hour}-${minute}-${second}-${sessionId}.jsonl`
 }
 
 export function refreshDirs(): boolean {
@@ -231,6 +305,92 @@ export function projectDirToReadableName(dirName: string): { path: string; short
   }
 }
 
+export interface SessionFileInfo {
+  filePath: string
+  fileName: string
+  mtimeMs: number
+  size: number
+}
+
+export async function listCodexSessionFiles(): Promise<SessionFileInfo[]> {
+  const walk = async (dir: string, depth: number): Promise<SessionFileInfo[]> => {
+    let entries: import("node:fs").Dirent[] | string[] | undefined
+    try {
+      entries = await readdir(dir, { withFileTypes: true }) as import("node:fs").Dirent[]
+    } catch {
+      return []
+    }
+    if (!Array.isArray(entries)) return []
+
+    const results: SessionFileInfo[] = []
+    for (const entry of entries) {
+      if (!("name" in entry)) continue
+      const filePath = join(dir, entry.name)
+      if ("isDirectory" in entry && typeof entry.isDirectory === "function" && entry.isDirectory()) {
+        if (depth < 4) results.push(...await walk(filePath, depth + 1))
+        continue
+      }
+      if (!entry.name.endsWith(".jsonl")) continue
+      try {
+        const s = await stat(filePath)
+        results.push({
+          filePath,
+          fileName: filePath.slice(CODEX_SESSIONS_DIR.length + 1),
+          mtimeMs: s.mtimeMs,
+          size: s.size,
+        })
+      } catch {
+        continue
+      }
+    }
+    return results
+  }
+
+  return walk(CODEX_SESSIONS_DIR, 0)
+}
+
+export async function resolveSessionFilePath(dirName: string, fileName: string): Promise<string | null> {
+  if (isCodexDirName(dirName)) {
+    const filePath = join(CODEX_SESSIONS_DIR, fileName)
+    return isWithinDir(CODEX_SESSIONS_DIR, filePath) ? filePath : null
+  }
+
+  const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
+  return isWithinDir(dirs.PROJECTS_DIR, filePath) ? filePath : null
+}
+
+export function getAgentKindFromSessionPath(filePath: string | null | undefined): AgentKind {
+  return typeof filePath === "string" && isCodexFilePath(filePath) ? "codex" : "claude"
+}
+
+export async function findNewestCodexSessionForCwd(
+  cwd: string,
+  knownPaths: Set<string>,
+  startedAt: number,
+): Promise<{ filePath: string; fileName: string; sessionId: string } | null> {
+  const files = await listCodexSessionFiles()
+  const candidates = files
+    .filter((file) => !knownPaths.has(file.filePath) && file.mtimeMs >= startedAt - 1_000)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+
+  for (const file of candidates) {
+    try {
+      const meta = await getSessionMeta(file.filePath)
+      if (meta.cwd !== cwd || !meta.sessionId) continue
+      return {
+        filePath: file.filePath,
+        fileName: file.fileName,
+        sessionId: meta.sessionId,
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return null
+}
+
+
 // ── Active process tracking ─────────────────────────────────────────────
 
 export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()
@@ -240,6 +400,7 @@ export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()
 import type { SubagentWatcher } from "./subagentWatcher"
 
 export interface PersistentSession {
+  agentKind: AgentKind
   proc: ChildProcess
   /** Resolves when the current turn's `result` message arrives */
   onResult: ((msg: { type: string; subtype?: string; is_error?: boolean; result?: string }) => void) | null
@@ -257,6 +418,8 @@ export interface PersistentSession {
   subagentWatcher: SubagentWatcher | null
   /** Worktree name if session was created with --worktree */
   worktreeName: string | null
+  /** Temporary files created for a request, such as Codex image attachments */
+  tempFiles?: string[]
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 
@@ -296,6 +459,14 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
       } catch { continue }
     }
   } catch { /* dirs.PROJECTS_DIR might not exist */ }
+
+  try {
+    const codexFiles = await listCodexSessionFiles()
+    const match = codexFiles.find((file) => file.fileName.endsWith(`${sessionId}.jsonl`))
+    if (match) return match.filePath
+  } catch {
+    // ignore codex lookup errors
+  }
   return null
 }
 

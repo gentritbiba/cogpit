@@ -87,7 +87,7 @@ function mergeTokenUsage(
 
 // ── Compaction Summary ───────────────────────────────────────────────────────
 
-export function buildCompactionSummary(turns: Turn[], title: string): string {
+function buildCompactionSummary(turns: Turn[], title: string): string {
   if (turns.length === 0) return title
 
   const toolCounts: Record<string, number> = {}

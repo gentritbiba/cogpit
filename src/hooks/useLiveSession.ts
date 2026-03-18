@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { parseSession, parseSessionAppend } from "@/lib/parser"
 import { authUrl } from "@/lib/auth"
 import type { ParsedSession } from "@/lib/types"
+import type { AgentKind } from "@/lib/sessionSource"
 
 export interface SessionSource {
   dirName: string
   fileName: string
   rawText: string
+  agentKind?: AgentKind
 }
 
 export type SseConnectionState = "connecting" | "connected" | "disconnected"

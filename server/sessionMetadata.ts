@@ -1,5 +1,6 @@
 import { readFile, stat, open } from "node:fs/promises"
 import { deriveSessionStatus, type SessionStatusInfo } from "../src/lib/sessionStatus"
+import { extractCodexMetadataFromLines } from "../src/lib/codex"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -48,6 +49,38 @@ export async function getSessionMeta(filePath: string) {
   } else {
     const content = await readFile(filePath, "utf-8")
     lines = content.split("\n").filter(Boolean)
+  }
+
+  let firstParsed: { type?: string; payload?: unknown } | null = null
+  if (lines.length > 0) {
+    try {
+      firstParsed = JSON.parse(lines[0]) as { type?: string; payload?: unknown }
+    } catch {
+      firstParsed = null
+    }
+  }
+  const isCodex = firstParsed?.type === "session_meta" || firstParsed?.type === "turn_context"
+  if (isCodex) {
+    if (isPartialRead) {
+      const content = await readFile(filePath, "utf-8")
+      lines = content.split("\n").filter(Boolean)
+    }
+    const meta = extractCodexMetadataFromLines(lines)
+    return {
+      sessionId: meta.sessionId,
+      version: meta.version,
+      gitBranch: meta.gitBranch,
+      model: meta.model,
+      slug: meta.slug,
+      cwd: meta.cwd,
+      firstUserMessage: meta.firstUserMessage,
+      lastUserMessage: meta.lastUserMessage,
+      timestamp: meta.timestamp,
+      lastTimestamp: meta.lastTimestamp,
+      turnCount: meta.turnCount,
+      lineCount: lines.length,
+      branchedFrom: meta.branchedFrom,
+    }
   }
 
   let sessionId = ""
@@ -200,6 +233,32 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
           let obj: { type: string; [key: string]: unknown }
           try { obj = JSON.parse(line) } catch { continue }
 
+          if (obj.type === "event_msg") {
+            const payload = obj.payload as { type?: string } | undefined
+            switch (payload?.type) {
+              case "task_complete":
+                return { status: "completed" }
+              case "task_started":
+                return { status: "processing" }
+              case "agent_message":
+                return { status: "thinking" }
+              case "token_count":
+                continue
+            }
+          }
+
+          if (obj.type === "response_item") {
+            const payload = obj.payload as { type?: string; name?: string } | undefined
+            if (payload?.type === "function_call") {
+              return { status: "tool_use", toolName: payload.name }
+            }
+            if (payload?.type === "message") {
+              const role = (payload as { role?: string }).role
+              if (role === "assistant") return { status: "thinking" }
+              if (role === "user") return { status: "processing" }
+            }
+          }
+
           if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {
             // Prepend so array stays in file order (oldest first)
             meaningful.unshift(obj)
@@ -244,6 +303,25 @@ export async function searchSessionMessages(
 
   const lines = content.split("\n")
   for (const line of lines) {
+    if (line.includes('"event_msg"') || line.includes('"response_item"')) {
+      try {
+        const obj = JSON.parse(line)
+        if (obj.type === "event_msg" && obj.payload?.type === "user_message" && typeof obj.payload.message === "string") {
+          const text = obj.payload.message.trim()
+          const lower = text.toLowerCase()
+          if (lower.includes(q)) {
+            const idx = lower.indexOf(q)
+            const start = Math.max(0, idx - 30)
+            const end = Math.min(text.length, idx + query.length + 70)
+            const snippet = (start > 0 ? "..." : "") + text.slice(start, end).trim() + (end < text.length ? "..." : "")
+            return snippet.slice(0, 150)
+          }
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+
     // Fast pre-check: skip lines that can't be user messages
     if (!line || !line.includes('"user"')) continue
     try {

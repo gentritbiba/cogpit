@@ -168,6 +168,14 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
             cwdCache.set(filePath, obj.cwd)
             return obj.cwd
           }
+          if (obj.type === "session_meta" && obj.payload?.cwd) {
+            cwdCache.set(filePath, obj.payload.cwd)
+            return obj.payload.cwd
+          }
+          if (obj.type === "turn_context" && obj.payload?.cwd) {
+            cwdCache.set(filePath, obj.payload.cwd)
+            return obj.payload.cwd
+          }
         } catch {}
       }
     } finally {

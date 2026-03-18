@@ -8,6 +8,7 @@ import type { MobileTab } from "@/components/MobileNav"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
+import { agentKindFromDirName } from "@/lib/sessionSource"
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -31,7 +32,10 @@ async function fetchAndParse(
   )
   if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
   const text = await res.text()
-  return { parsed: parseSession(text), source: { dirName, fileName, rawText: text } }
+  return {
+    parsed: parseSession(text),
+    source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+  }
 }
 
 export function useSessionActions({
@@ -111,7 +115,12 @@ export function useSessionActions({
         const text = await contentRes.text()
         const parsed = parseSession(text)
 
-        dispatch({ type: "SWITCH_TEAM_MEMBER", session: parsed, source: { dirName, fileName, rawText: text }, memberName: member.name })
+        dispatch({
+          type: "SWITCH_TEAM_MEMBER",
+          session: parsed,
+          source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+          memberName: member.name,
+        })
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()
       } catch (err) {

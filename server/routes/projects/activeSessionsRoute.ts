@@ -1,5 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { dirs, projectDirToReadableName, getSessionMeta, getSessionStatus, searchSessionMessages, readdir, stat, join } from "../../helpers"
+import {
+  dirs,
+  encodeCodexDirName,
+  getSessionMeta,
+  getSessionStatus,
+  join,
+  listCodexSessionFiles,
+  projectDirToReadableName,
+  readdir,
+  searchSessionMessages,
+  stat,
+} from "../../helpers"
 import type { NextFn } from "../../helpers"
 
 const DEFAULT_PER_PROJECT = 10
@@ -60,6 +71,23 @@ export async function handleActiveSessions(
       }
     }
 
+    const codexFiles = await listCodexSessionFiles()
+    for (const file of codexFiles) {
+      try {
+        const meta = await getSessionMeta(file.filePath)
+        if (!meta.cwd) continue
+        candidates.push({
+          dirName: encodeCodexDirName(meta.cwd),
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mtimeMs: file.mtimeMs,
+          size: file.size,
+        })
+      } catch {
+        continue
+      }
+    }
+
     // Sort by mtime descending within each project, then pick top N per project
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
 
@@ -99,7 +127,9 @@ export async function handleActiveSessions(
             getSessionMeta(c.filePath),
             getSessionStatus(c.filePath),
           ])
-          const { shortName } = projectDirToReadableName(c.dirName)
+          const shortName = c.dirName.startsWith("codex__")
+            ? `${(meta.cwd || "").replace(/\/+$/, "").split("/").at(-1) || "Codex"} (Codex)`
+            : projectDirToReadableName(c.dirName).shortName
           const lastModified = new Date(c.mtimeMs).toISOString()
 
           let matchedMessage: string | undefined

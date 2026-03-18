@@ -19,11 +19,22 @@ export interface SessionStatusInfo {
 
 /**
  * Derive session status from raw JSONL message objects.
- * Walks backward through messages to find the most recent meaningful signal.
+ *
+ * **Provider dispatch:** The function auto-detects the session format by
+ * inspecting `rawMessages[0].type`. Codex sessions start with one of
+ * `session_meta | turn_context | event_msg | response_item` and are routed
+ * to `deriveCodexSessionStatus`. All other sessions are treated as Claude Code
+ * format. If a third provider is added, add a detection branch here and in
+ * `src/lib/providers/registry.ts`.
  */
 export function deriveSessionStatus(
   rawMessages: Array<{ type: string; [key: string]: unknown }>
 ): SessionStatusInfo {
+  const firstType = rawMessages[0]?.type
+  if (firstType === "session_meta" || firstType === "turn_context" || firstType === "event_msg" || firstType === "response_item") {
+    return deriveCodexSessionStatus(rawMessages)
+  }
+
   let pendingEnqueues = 0
 
   /** Build a status result with the current pending queue count. */
@@ -75,15 +86,50 @@ export function deriveSessionStatus(
       return result("processing")
     }
 
-    // Compaction just happened — show "compacting" until the next real message arrives
-    if (msg.type === "summary") return result("compacting")
-
-    // compact_boundary system message (Claude Code v2.1.34+) — same signal as summary
-    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") {
-      return result("compacting")
-    }
+    // Compaction markers — skip past them to find the real session state.
+    // In-progress compaction is detected live via subagent file watcher (isCompacting),
+    // so these finished-compaction markers should not lock the status to "compacting".
+    if (msg.type === "summary") continue
+    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "compact_boundary") continue
 
     // Skip progress, system, etc.
+  }
+
+  return { status: "idle" }
+}
+
+function deriveCodexSessionStatus(
+  rawMessages: Array<{ type: string; [key: string]: unknown }>
+): SessionStatusInfo {
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const msg = rawMessages[i]
+
+    if (msg.type === "event_msg") {
+      const payload = msg.payload as { type?: string; message?: string } | undefined
+      switch (payload?.type) {
+        case "task_complete":
+          return { status: "completed" }
+        case "task_started":
+          return { status: "processing" }
+        case "agent_message":
+          return { status: "thinking" }
+        case "token_count":
+          continue
+      }
+    }
+
+    if (msg.type === "response_item") {
+      const payload = msg.payload as { type?: string; name?: string; role?: string } | undefined
+      if (!payload) continue
+
+      if (payload.type === "function_call") {
+        return { status: "tool_use", toolName: payload.name }
+      }
+      if (payload.type === "message") {
+        if (payload.role === "assistant") return { status: "thinking" }
+        if (payload.role === "user") return { status: "processing" }
+      }
+    }
   }
 
   return { status: "idle" }

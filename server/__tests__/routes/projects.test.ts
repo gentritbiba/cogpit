@@ -6,32 +6,45 @@ vi.mock("../../helpers", () => ({
   dirs: {
     PROJECTS_DIR: "/tmp/test-projects",
   },
+  CODEX_SESSIONS_DIR: "/tmp/codex-sessions",
+  decodeCodexDirName: vi.fn(() => null),
+  encodeCodexDirName: vi.fn((cwd: string) => `codex__${cwd}`),
+  findJsonlPath: vi.fn(),
+  isCodexDirName: vi.fn((dirName: string) => dirName.startsWith("codex__")),
   isWithinDir: vi.fn(),
   projectDirToReadableName: vi.fn(),
   getSessionMeta: vi.fn(),
   getSessionStatus: vi.fn().mockResolvedValue({ status: "idle" }),
+  listCodexSessionFiles: vi.fn().mockResolvedValue([]),
   readdir: vi.fn(),
   readFile: vi.fn(),
+  resolveSessionFilePath: vi.fn((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`),
   stat: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
 
 import {
+  findJsonlPath,
   isWithinDir,
   projectDirToReadableName,
   getSessionMeta,
   getSessionStatus,
+  listCodexSessionFiles,
   readdir,
   readFile,
+  resolveSessionFilePath,
   stat,
 } from "../../helpers"
 
+const mockedFindJsonlPath = vi.mocked(findJsonlPath)
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedProjectDirToReadableName = vi.mocked(projectDirToReadableName)
 const mockedGetSessionMeta = vi.mocked(getSessionMeta)
 const mockedGetSessionStatus = vi.mocked(getSessionStatus)
+const mockedListCodexSessionFiles = vi.mocked(listCodexSessionFiles)
 const mockedReaddir = vi.mocked(readdir)
 const mockedReadFile = vi.mocked(readFile)
+const mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
 const mockedStat = vi.mocked(stat)
 
 import type { UseFn, Middleware } from "../../helpers"
@@ -67,6 +80,9 @@ describe("project routes", () => {
     vi.resetAllMocks()
     // getSessionStatus always returns idle by default
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
+    mockedListCodexSessionFiles.mockResolvedValue([])
+    mockedResolveSessionFilePath.mockImplementation((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
+    mockedFindJsonlPath.mockResolvedValue(null)
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
@@ -265,7 +281,7 @@ describe("project routes", () => {
     it("returns 403 for paths outside PROJECTS_DIR", async () => {
       const handler = handlers.get("/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "../../etc/session.jsonl")
-      mockedIsWithinDir.mockReturnValueOnce(false)
+      mockedResolveSessionFilePath.mockResolvedValueOnce(null)
 
       await handler(req, res, next)
 
@@ -393,15 +409,7 @@ describe("project routes", () => {
     it("finds session by ID across projects", async () => {
       const handler = handlers.get("/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-        { name: "proj-b", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      // proj-a doesn't have it
-      mockedReaddir.mockResolvedValueOnce(["other.jsonl"] as unknown as Dirent[])
-      // proj-b has it
-      mockedReaddir.mockResolvedValueOnce(["abc-123.jsonl", "other.jsonl"] as unknown as Dirent[])
+      mockedFindJsonlPath.mockResolvedValueOnce("/tmp/test-projects/proj-b/abc-123.jsonl")
 
       await handler(req, res, next)
 
@@ -413,11 +421,7 @@ describe("project routes", () => {
     it("returns 404 when session not found", async () => {
       const handler = handlers.get("/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "nonexistent")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "proj-a", isDirectory: () => true },
-      ] as unknown as Dirent[])
-      mockedReaddir.mockResolvedValueOnce(["other.jsonl"] as unknown as Dirent[])
+      mockedFindJsonlPath.mockResolvedValueOnce(null)
 
       await handler(req, res, next)
 
@@ -427,8 +431,7 @@ describe("project routes", () => {
     it("returns 500 on readdir error", async () => {
       const handler = handlers.get("/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
-
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedFindJsonlPath.mockRejectedValueOnce(new Error("ENOENT"))
 
       await handler(req, res, next)
 
@@ -438,10 +441,7 @@ describe("project routes", () => {
     it("skips memory directory", async () => {
       const handler = handlers.get("/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
-
-      mockedReaddir.mockResolvedValueOnce([
-        { name: "memory", isDirectory: () => true },
-      ] as unknown as Dirent[])
+      mockedFindJsonlPath.mockResolvedValueOnce(null)
 
       await handler(req, res, next)
 

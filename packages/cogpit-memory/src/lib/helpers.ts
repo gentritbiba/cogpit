@@ -21,6 +21,31 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
       } catch { continue }
     }
   } catch { /* dirs.PROJECTS_DIR might not exist */ }
+
+  const codexRoot = join(homedir(), ".codex", "sessions")
+  const walk = async (dir: string, depth: number): Promise<string | null> => {
+    if (depth > 4) return null
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true }) as import("node:fs").Dirent[]
+    } catch {
+      return null
+    }
+    for (const entry of entries) {
+      const filePath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        const match = await walk(filePath, depth + 1)
+        if (match) return match
+        continue
+      }
+      if (!entry.name.endsWith(".jsonl")) continue
+      if (entry.name.endsWith(`${sessionId}.jsonl`)) return filePath
+    }
+    return null
+  }
+
+  const codexMatch = await walk(codexRoot, 0)
+  if (codexMatch) return codexMatch
   return null
 }
 

@@ -9,6 +9,10 @@ vi.mock("../../helpers", () => ({
     PROJECTS_DIR: "/tmp/test-projects",
   },
   isWithinDir: vi.fn(),
+  isCodexDirName: vi.fn(() => false),
+  resolveSessionFilePath: vi.fn((_dirName: string, fileName: string) =>
+    Promise.resolve(`/tmp/test-projects/proj/${fileName}`)
+  ),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   mkdir: vi.fn(),
@@ -28,6 +32,8 @@ vi.mock("node:fs/promises", () => ({
 
 import {
   isWithinDir,
+  isCodexDirName,
+  resolveSessionFilePath,
   readFile,
   writeFile,
   mkdir,
@@ -36,6 +42,8 @@ import {
 import { appendFile } from "node:fs/promises"
 
 const mockedIsWithinDir = vi.mocked(isWithinDir)
+const _mockedIsCodexDirName = vi.mocked(isCodexDirName)
+const _mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedMkdir = vi.mocked(mkdir)
