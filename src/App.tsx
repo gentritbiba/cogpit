@@ -19,7 +19,6 @@ import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { UpdateBanner } from "@/components/UpdateBanner"
-import { NewSessionAgentDialog } from "@/components/NewSessionAgentDialog"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { usePtyChat } from "@/hooks/usePtyChat"
@@ -264,6 +263,14 @@ export default function App() {
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
 
+  // Pending agent kind for new sessions (before session is created)
+  const [pendingAgentKind, setRawPendingAgentKind] = useState<AgentKind>("claude")
+
+  const handlePendingAgentKindChange = useCallback((kind: AgentKind) => {
+    setRawPendingAgentKind(kind)
+    setSelectedModel("")
+  }, [])
+
   // Thinking effort level
   const [selectedEffort, setSelectedEffort] = useState(DEFAULT_EFFORT)
 
@@ -314,29 +321,17 @@ export default function App() {
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
   })
 
-  const [newSessionChoice, setNewSessionChoice] = useState<{
-    dirName: string
-    cwd: string | null
-  } | null>(null)
-
   const handleStartNewSession = useCallback((dirName: string, cwd?: string) => {
     const normalizedCwd = cwd ?? null
     if (!normalizedCwd || isCodexDirName(dirName)) {
       handleNewSession(dirName, normalizedCwd ?? undefined)
       return
     }
-    setNewSessionChoice({ dirName, cwd: normalizedCwd })
-  }, [handleNewSession])
-
-  const handleSelectNewSessionAgent = useCallback((agentKind: "claude" | "codex") => {
-    const pending = newSessionChoice
-    if (!pending) return
-    const nextDirName = agentKind === "codex"
-      ? encodeCodexDirName(pending.cwd ?? "")
-      : pending.dirName
-    handleNewSession(nextDirName, pending.cwd ?? undefined)
-    setNewSessionChoice(null)
-  }, [newSessionChoice, handleNewSession])
+    const nextDirName = pendingAgentKind === "codex"
+      ? encodeCodexDirName(normalizedCwd)
+      : dirName
+    handleNewSession(nextDirName, normalizedCwd ?? undefined)
+  }, [handleNewSession, pendingAgentKind])
 
   // Build the pending session info for the Live & Recent placeholder
   const pendingSessionInfo = useMemo(() => {
@@ -809,7 +804,7 @@ export default function App() {
     <div className="shrink-0 bg-elevation-1">
       <ChatInput ref={chatInputRef} />
       <ChatInputSettings
-        agentKind={currentAgentKind}
+        agentKind={isNewSession ? pendingAgentKind : (currentAgentKind ?? "claude")}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
         selectedEffort={selectedEffort}
@@ -825,6 +820,7 @@ export default function App() {
         onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
         mcpLoading={supportsMcp ? mcpData.loading : undefined}
         onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
+        onAgentKindChange={isNewSession ? handlePendingAgentKindChange : undefined}
       />
     </div>
   )
@@ -1239,13 +1235,6 @@ export default function App() {
           currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
         />
       </Suspense>
-
-      <NewSessionAgentDialog
-        open={newSessionChoice !== null}
-        cwd={newSessionChoice?.cwd ?? null}
-        onClose={() => setNewSessionChoice(null)}
-        onSelect={handleSelectNewSessionAgent}
-      />
 
       <Suspense fallback={null}>
         <ThemeSelectorModal

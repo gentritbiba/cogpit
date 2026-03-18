@@ -216,7 +216,7 @@ not valid json
     ])
     expect(session.turns[0].thinking[0].thinking).toBe("Inspecting the session structure")
     expect(session.turns[0].toolCalls).toHaveLength(1)
-    expect(session.turns[0].toolCalls[0].name).toBe("exec_command")
+    expect(session.turns[0].toolCalls[0].name).toBe("Bash")
     expect(session.turns[0].toolCalls[0].input).toEqual({
       cmd: "pwd",
       workdir: "/Users/gentritbiba/.claude/agent-window",

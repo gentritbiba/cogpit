@@ -370,6 +370,9 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
         if (block.type === "thinking") {
           flushToolCalls()
           const tb = block as ThinkingBlock
+          // Skip thinking blocks with empty content (redacted extended thinking
+          // where only the signature is persisted)
+          if (!tb.thinking) continue
           current.thinking.push(tb)
           msgThinking.push(tb)
         } else if (block.type === "text") {

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, GitBranch, Plug, RefreshCw, Check } from "lucide-react"
-import { cn, EFFORT_OPTIONS, DEFAULT_EFFORT, getModelOptions } from "@/lib/utils"
+import { ChevronDown, GitBranch, Plug, RefreshCw, Check, Bot, Code2 } from "lucide-react"
+import { cn, EFFORT_OPTIONS, DEFAULT_EFFORT, getModelOptions, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@/lib/utils"
 import type { AgentKind } from "@/lib/sessionSource"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -117,6 +117,104 @@ function MiniDropdown({ value, fallbackLabel, options, onChange }: MiniDropdownP
               )}
             </button>
           ))}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// ── Provider + Model combined dropdown (new sessions only) ─────────────────────
+
+interface ProviderModelDropdownProps {
+  agentKind: AgentKind
+  model: string
+  activeModelId?: string
+  onChange: (agentKind: AgentKind, model: string) => void
+}
+
+function ProviderModelDropdown({ agentKind, model, activeModelId, onChange }: ProviderModelDropdownProps) {
+  const { open, setOpen, triggerRef, menuRef, menuPos } = useDropdownState()
+
+  // Resolve display label for current selection
+  const allOptions = agentKind === "claude" ? CLAUDE_MODEL_OPTIONS : CODEX_MODEL_OPTIONS
+  const selectedOption = allOptions.find((o) => o.value === model)
+  const resolvedDefault = agentKind === "claude"
+    ? (activeModelId ? friendlyModelName(activeModelId) : "Opus")
+    : "GPT-5.4"
+  const triggerLabel = model === "" ? resolvedDefault : (selectedOption?.label ?? model)
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          "text-muted-foreground hover:text-foreground hover:bg-white/5",
+        )}
+      >
+        {agentKind === "claude"
+          ? <Bot className="size-3 text-blue-400" />
+          : <Code2 className="size-3 text-emerald-400" />
+        }
+        <span className="truncate">{triggerLabel}</span>
+        <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[160px] rounded-lg border border-border/50 bg-elevation-3 py-1 depth-high animate-in fade-in-0 zoom-in-95 duration-100"
+          style={{ top: menuPos.top, left: menuPos.left, ...MENU_OFFSET_STYLE }}
+        >
+          {/* Claude Code section */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5">
+            <Bot className="size-3 text-blue-400" />
+            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Claude Code</span>
+          </div>
+          {CLAUDE_MODEL_OPTIONS.map((opt) => {
+            const isActive = agentKind === "claude" && model === opt.value
+            const label = opt.value === "" ? `${resolvedDefault} (default)` : opt.label
+            return (
+              <button
+                key={`claude:${opt.value}`}
+                onClick={() => { onChange("claude", opt.value); setOpen(false) }}
+                className={cn(
+                  "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-[11px] transition-colors",
+                  isActive ? "text-foreground bg-white/5" : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                )}
+              >
+                <span>{label}</span>
+                {isActive && <span className="text-[9px] text-muted-foreground">active</span>}
+              </button>
+            )
+          })}
+
+          <div className="my-1 border-t border-border/30" />
+
+          {/* Codex section */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5">
+            <Code2 className="size-3 text-emerald-400" />
+            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Codex</span>
+          </div>
+          {CODEX_MODEL_OPTIONS.map((opt) => {
+            const isActive = agentKind === "codex" && model === opt.value
+            const label = opt.value === "" ? "GPT-5.4 (default)" : opt.label
+            return (
+              <button
+                key={`codex:${opt.value}`}
+                onClick={() => { onChange("codex", opt.value); setOpen(false) }}
+                className={cn(
+                  "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-[11px] transition-colors",
+                  isActive ? "text-foreground bg-white/5" : "text-muted-foreground hover:text-foreground hover:bg-white/5"
+                )}
+              >
+                <span>{label}</span>
+                {isActive && <span className="text-[9px] text-muted-foreground">active</span>}
+              </button>
+            )
+          })}
         </div>,
         document.body
       )}
@@ -262,6 +360,8 @@ export interface ChatInputSettingsProps {
   mcpLoading?: boolean
   /** Called when a needs-auth server is clicked */
   onMcpAuth?: (serverName: string) => void
+  /** Called when user switches provider (new session only) */
+  onAgentKindChange?: (kind: AgentKind) => void
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
@@ -281,6 +381,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   onRefreshMcpServers,
   mcpLoading,
   onMcpAuth,
+  onAgentKindChange,
 }: ChatInputSettingsProps) {
   // Use a ref to always have the latest onApplySettings without stale closures
   const applyRef = useRef(onApplySettings)
@@ -304,10 +405,11 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     [onEffortChange, changeAndApply],
   )
 
-  // Build model options with resolved "Default" label
-  const resolvedDefaultName = activeModelId
-    ? friendlyModelName(activeModelId)
-    : (agentKind === "codex" ? "GPT-5.4" : "Opus")
+  // Build model options with resolved "Default" label — scoped to current agentKind
+  // so Codex sessions never show a Claude model name and vice versa
+  const resolvedDefaultName = agentKind === "codex"
+    ? (activeModelId?.toLowerCase().startsWith("gpt-") ? friendlyModelName(activeModelId) : "GPT-5.4")
+    : (activeModelId ? friendlyModelName(activeModelId) : "Opus")
   const modelOptions: readonly DropdownOption[] = getModelOptions(agentKind).map((opt) =>
     opt.value === ""
       ? { value: "", label: resolvedDefaultName, menuLabel: `${resolvedDefaultName} (default)` }
@@ -318,13 +420,25 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   return (
     <div className="flex items-center pb-2">
       <div className="w-full flex items-center gap-0.5 flex-wrap">
-        {/* Model */}
-        <MiniDropdown
-          value={selectedModel}
-          fallbackLabel="Model"
-          options={modelOptions}
-          onChange={handleModelChange}
-        />
+        {/* Model / Provider+Model */}
+        {isNewSession && onAgentKindChange ? (
+          <ProviderModelDropdown
+            agentKind={agentKind}
+            model={selectedModel}
+            activeModelId={activeModelId}
+            onChange={(kind, mdl) => {
+              onAgentKindChange(kind)
+              handleModelChange(mdl)
+            }}
+          />
+        ) : (
+          <MiniDropdown
+            value={selectedModel}
+            fallbackLabel="Model"
+            options={modelOptions}
+            onChange={handleModelChange}
+          />
+        )}
 
         <span className="text-border/60 text-[10px] select-none">/</span>
         <MiniDropdown

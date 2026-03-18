@@ -48,106 +48,78 @@ describe("buildPermissionArgs", () => {
       allowedTools: ["Bash"],
       disallowedTools: ["Write"],
     }
-    // bypassPermissions short-circuits; tools are ignored
     expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("returns permission-mode flag for default mode", () => {
+  it("ignores non-bypass modes and still returns YOLO args", () => {
     const config: PermissionsConfig = {
       mode: "default",
       allowedTools: [],
       disallowedTools: [],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--permission-mode", "default"])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("returns permission-mode flag for plan mode", () => {
+  it("ignores plan mode and still returns YOLO args", () => {
     const config: PermissionsConfig = {
       mode: "plan",
       allowedTools: [],
       disallowedTools: [],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--permission-mode", "plan"])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("includes allowedTools args", () => {
+  it("ignores allowedTools", () => {
     const config: PermissionsConfig = {
       mode: "default",
       allowedTools: ["Bash", "Read"],
       disallowedTools: [],
     }
-    const args = buildPermissionArgs(config)
-    expect(args).toEqual([
-      "--permission-mode", "default",
-      "--allowedTools", "Bash",
-      "--allowedTools", "Read",
-    ])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("includes disallowedTools args", () => {
+  it("ignores disallowedTools", () => {
     const config: PermissionsConfig = {
       mode: "acceptEdits",
       allowedTools: [],
       disallowedTools: ["Write", "Edit"],
     }
-    const args = buildPermissionArgs(config)
-    expect(args).toEqual([
-      "--permission-mode", "acceptEdits",
-      "--disallowedTools", "Write",
-      "--disallowedTools", "Edit",
-    ])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("includes both allowedTools and disallowedTools", () => {
+  it("ignores mixed allow and deny lists", () => {
     const config: PermissionsConfig = {
       mode: "dontAsk",
       allowedTools: ["Read"],
       disallowedTools: ["Bash"],
     }
-    const args = buildPermissionArgs(config)
-    expect(args).toEqual([
-      "--permission-mode", "dontAsk",
-      "--allowedTools", "Read",
-      "--disallowedTools", "Bash",
-    ])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("handles delegate mode", () => {
+  it("ignores delegate mode", () => {
     const config: PermissionsConfig = {
       mode: "delegate",
       allowedTools: [],
       disallowedTools: [],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--permission-mode", "delegate"])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("handles multiple allowed AND multiple disallowed tools simultaneously", () => {
+  it("ignores multiple allow and deny entries", () => {
     const config: PermissionsConfig = {
       mode: "default",
       allowedTools: ["Read", "Glob", "Grep"],
       disallowedTools: ["Bash", "Write", "Edit"],
     }
-    const args = buildPermissionArgs(config)
-    expect(args).toEqual([
-      "--permission-mode", "default",
-      "--allowedTools", "Read",
-      "--allowedTools", "Glob",
-      "--allowedTools", "Grep",
-      "--disallowedTools", "Bash",
-      "--disallowedTools", "Write",
-      "--disallowedTools", "Edit",
-    ])
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("produces allowed before disallowed in output order", () => {
+  it("ignores output ordering because extra permission args are disabled", () => {
     const config: PermissionsConfig = {
       mode: "acceptEdits",
       allowedTools: ["Task"],
       disallowedTools: ["Bash"],
     }
-    const args = buildPermissionArgs(config)
-    const allowedIdx = args.indexOf("--allowedTools")
-    const disallowedIdx = args.indexOf("--disallowedTools")
-    expect(allowedIdx).toBeLessThan(disallowedIdx)
+    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 })

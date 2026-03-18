@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { parseCodexSession, isCodexSessionText, extractCodexMetadataFromLines } from "@/lib/codex"
+import { parseCodexSession, isCodexSessionText, extractCodexMetadataFromLines, parseApplyPatch } from "@/lib/codex"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -326,5 +326,361 @@ describe("parseCodexSession", () => {
     // System prompt turn should be skipped or filtered
     const userMessages = session.turns.map((t) => t.userMessage).filter(Boolean)
     expect(userMessages).not.toContain(expect.stringContaining("<environment_context>"))
+  })
+
+  it("parses custom_tool_call (apply_patch) into per-file Edit tool calls", () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: /home/user/project/src/app.ts",
+      "@@",
+      " import { foo } from './foo'",
+      "-const x = 1",
+      "+const x = 2",
+      "@@",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Fix the constant"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-patch-1",
+          name: "apply_patch",
+          input: patchInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-patch-1",
+          output: JSON.stringify({
+            output: "Success. Updated the following files:\nM /home/user/project/src/app.ts\n",
+            metadata: { exit_code: 0, duration_seconds: 0.1 },
+          }),
+        },
+      }),
+      assistantMessage("Fixed."),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns).toHaveLength(1)
+    const turn = session.turns[0]
+    // apply_patch with one file → one Edit tool call
+    expect(turn.toolCalls).toHaveLength(1)
+    expect(turn.toolCalls[0].name).toBe("Edit")
+    expect(turn.toolCalls[0].input.file_path).toBe("/home/user/project/src/app.ts")
+    expect(turn.toolCalls[0].input.old_string).toContain("const x = 1")
+    expect(turn.toolCalls[0].input.new_string).toContain("const x = 2")
+    expect(turn.toolCalls[0].isError).toBe(false)
+  })
+
+  it("parses multi-file apply_patch into separate tool calls", () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: /home/user/project/a.ts",
+      "@@",
+      "-old a",
+      "+new a",
+      "@@",
+      "*** Update File: /home/user/project/b.ts",
+      "@@",
+      "-old b",
+      "+new b",
+      "@@",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Update both files"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-multi",
+          name: "apply_patch",
+          input: patchInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-multi",
+          output: JSON.stringify({ output: "Success.", metadata: { exit_code: 0 } }),
+        },
+      }),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const turn = session.turns[0]
+    expect(turn.toolCalls).toHaveLength(2)
+    expect(turn.toolCalls[0].name).toBe("Edit")
+    expect(turn.toolCalls[0].input.file_path).toBe("/home/user/project/a.ts")
+    expect(turn.toolCalls[1].name).toBe("Edit")
+    expect(turn.toolCalls[1].input.file_path).toBe("/home/user/project/b.ts")
+  })
+
+  it("parses Add File in apply_patch as Write tool call", () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Add File: /home/user/project/new.ts",
+      "@@",
+      "+export const hello = 'world'",
+      "@@",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Create file"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-add",
+          name: "apply_patch",
+          input: patchInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-add",
+          output: JSON.stringify({ output: "Success.", metadata: { exit_code: 0 } }),
+        },
+      }),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const turn = session.turns[0]
+    expect(turn.toolCalls).toHaveLength(1)
+    expect(turn.toolCalls[0].name).toBe("Write")
+    expect(turn.toolCalls[0].input.file_path).toBe("/home/user/project/new.ts")
+    expect(turn.toolCalls[0].input.content).toContain("hello")
+  })
+
+  it("parses custom_tool_call exec_command as Bash", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Run ls"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-exec-1",
+          name: "exec_command",
+          input: JSON.stringify({ command: "ls -la" }),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-exec-1",
+          output: JSON.stringify({ output: "file1.ts\nfile2.ts", metadata: { exit_code: 0 } }),
+        },
+      }),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const turn = session.turns[0]
+    expect(turn.toolCalls).toHaveLength(1)
+    expect(turn.toolCalls[0].name).toBe("Bash")
+    expect(turn.toolCalls[0].input.command).toBe("ls -la")
+    expect(turn.toolCalls[0].result).toContain("file1.ts")
+    expect(turn.toolCalls[0].isError).toBe(false)
+  })
+
+  it("marks custom_tool_call as error when exit_code != 0", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Run failing command"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-err",
+          name: "exec_command",
+          input: JSON.stringify({ command: "false" }),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-err",
+          output: JSON.stringify({ output: "command failed", metadata: { exit_code: 1 } }),
+        },
+      }),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].toolCalls[0].isError).toBe(true)
+  })
+
+  it("normalizes update_plan to TodoWrite with todos format", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Plan the work"),
+      functionCall(
+        "call-plan-1",
+        "update_plan",
+        JSON.stringify({
+          plan: [
+            { step: "Read the code", status: "completed" },
+            { step: "Write the fix", status: "in_progress" },
+            { step: "Run tests", status: "pending" },
+          ],
+        }),
+      ),
+      functionCallOutput("call-plan-1", "ok"),
+      assistantMessage("Working on it."),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const turn = session.turns[0]
+    const planCall = turn.toolCalls.find((tc) => tc.name === "TodoWrite")
+    expect(planCall).toBeDefined()
+    const todos = (planCall!.input as { todos: Array<{ content: string; status: string; activeForm: string }> }).todos
+    expect(todos).toHaveLength(3)
+    expect(todos[0]).toEqual({ content: "Read the code", status: "completed", activeForm: "Read the code" })
+    expect(todos[1]).toEqual({ content: "Write the fix", status: "in_progress", activeForm: "Write the fix" })
+    expect(todos[2]).toEqual({ content: "Run tests", status: "pending", activeForm: "Run tests" })
+  })
+
+  it("parses spawn_agent/wait_agent into subAgentActivity", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Spawn a sub agent"),
+      functionCall(
+        "call-spawn-1",
+        "spawn_agent",
+        JSON.stringify({ agent_type: "default", model: "gpt-4o-mini", message: "Do something" }),
+        "2024-01-01T00:00:03.000Z",
+      ),
+      functionCallOutput(
+        "call-spawn-1",
+        JSON.stringify({ agent_id: "agent-abc-123", nickname: "Plato" }),
+        "2024-01-01T00:00:04.000Z",
+      ),
+      functionCall(
+        "call-wait-1",
+        "wait_agent",
+        JSON.stringify({ ids: ["agent-abc-123"], timeout_ms: 15000 }),
+        "2024-01-01T00:00:05.000Z",
+      ),
+      functionCallOutput(
+        "call-wait-1",
+        JSON.stringify({ status: { "agent-abc-123": { completed: "Task done." } }, timed_out: false }),
+        "2024-01-01T00:00:10.000Z",
+      ),
+      assistantMessage("The sub-agent finished.", "2024-01-01T00:00:11.000Z"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns).toHaveLength(1)
+    const turn = session.turns[0]
+
+    // Sub-agent activity should be populated
+    expect(turn.subAgentActivity).toHaveLength(1)
+    expect(turn.subAgentActivity[0].agentId).toBe("agent-abc-123")
+    expect(turn.subAgentActivity[0].agentName).toBe("Plato")
+    expect(turn.subAgentActivity[0].subagentType).toBe("default")
+    expect(turn.subAgentActivity[0].text).toEqual(["Task done."])
+    expect(turn.subAgentActivity[0].model).toBe("gpt-4o-mini")
+    expect(turn.subAgentActivity[0].prompt).toBe("Do something")
+  })
+})
+
+// ── parseApplyPatch ──────────────────────────────────────────────────────
+
+describe("parseApplyPatch", () => {
+  it("parses single-file Update patch", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: /src/app.ts",
+      "@@",
+      " import { bar }",
+      "-const x = 1",
+      "+const x = 2",
+      "@@",
+    ].join("\n")
+
+    const calls = parseApplyPatch(patch, "call-1", "ts")
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe("Edit")
+    expect(calls[0].input.file_path).toBe("/src/app.ts")
+    expect(calls[0].input.old_string).toContain("const x = 1")
+    expect(calls[0].input.new_string).toContain("const x = 2")
+    // Context lines should appear in both
+    expect(calls[0].input.old_string).toContain("import { bar }")
+    expect(calls[0].input.new_string).toContain("import { bar }")
+  })
+
+  it("parses Add File as Write", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: /src/new.ts",
+      "@@",
+      "+export const x = 1",
+      "+export const y = 2",
+      "@@",
+    ].join("\n")
+
+    const calls = parseApplyPatch(patch, "call-2", "ts")
+    expect(calls).toHaveLength(1)
+    expect(calls[0].name).toBe("Write")
+    expect(calls[0].input.file_path).toBe("/src/new.ts")
+    expect(calls[0].input.content).toContain("export const x = 1")
+  })
+
+  it("parses multi-file patch into separate calls with unique IDs", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: /a.ts",
+      "@@",
+      "-old",
+      "+new",
+      "@@",
+      "*** Update File: /b.ts",
+      "@@",
+      "-foo",
+      "+bar",
+      "@@",
+    ].join("\n")
+
+    const calls = parseApplyPatch(patch, "call-3", "ts")
+    expect(calls).toHaveLength(2)
+    expect(calls[0].id).toBe("call-3:file-0")
+    expect(calls[1].id).toBe("call-3:file-1")
+    expect(calls[0].input.file_path).toBe("/a.ts")
+    expect(calls[1].input.file_path).toBe("/b.ts")
+  })
+
+  it("returns empty array for empty patch", () => {
+    const calls = parseApplyPatch("", "call-4", "ts")
+    expect(calls).toHaveLength(0)
   })
 })

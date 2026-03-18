@@ -1,6 +1,7 @@
 import { computeStats } from "./sessionStats"
 import type {
   ParsedSession,
+  SubAgentMessage,
   ThinkingBlock,
   TokenUsage,
   ToolCall,
@@ -173,6 +174,115 @@ function inferToolError(output: string | null): boolean {
   return /\b(error|failed|exception)\b/i.test(output)
 }
 
+/** Parse a Codex apply_patch string into per-file Edit/Write tool calls. */
+export function parseApplyPatch(
+  patchText: string,
+  callId: string,
+  timestamp: string,
+): ToolCall[] {
+  const toolCalls: ToolCall[] = []
+  // Split into per-file sections
+  const filePattern = /\*\*\*\s+(Update File|Add File|Delete File):\s*(.+)/g
+  const sections: Array<{ action: string; filePath: string; startIdx: number }> = []
+  let match: RegExpExecArray | null
+  while ((match = filePattern.exec(patchText)) !== null) {
+    sections.push({
+      action: match[1],
+      filePath: match[2].trim(),
+      startIdx: match.index + match[0].length,
+    })
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i]
+    const endIdx = i + 1 < sections.length ? sections[i + 1].startIdx - sections[i + 1].filePath.length - 20 : patchText.length
+    const body = patchText.slice(section.startIdx, endIdx)
+
+    // Parse hunks between @@ markers
+    const hunkBodies = body.split(/^@@.*$/m).filter((s) => s.trim())
+    const oldLines: string[] = []
+    const newLines: string[] = []
+
+    for (const hunk of hunkBodies) {
+      for (const line of hunk.split("\n")) {
+        if (line.startsWith("-")) {
+          oldLines.push(line.slice(1))
+        } else if (line.startsWith("+")) {
+          newLines.push(line.slice(1))
+        } else if (line.startsWith(" ")) {
+          oldLines.push(line.slice(1))
+          newLines.push(line.slice(1))
+        }
+      }
+    }
+
+    const fileId = sections.length > 1 ? `${callId}:file-${i}` : callId
+
+    if (section.action === "Add File") {
+      toolCalls.push({
+        id: fileId,
+        name: "Write",
+        input: { file_path: section.filePath, content: newLines.join("\n") },
+        result: null,
+        isError: false,
+        timestamp,
+      })
+    } else if (section.action === "Delete File") {
+      toolCalls.push({
+        id: fileId,
+        name: "Edit",
+        input: { file_path: section.filePath, old_string: oldLines.join("\n"), new_string: "" },
+        result: null,
+        isError: false,
+        timestamp,
+      })
+    } else {
+      // Update File → Edit
+      toolCalls.push({
+        id: fileId,
+        name: "Edit",
+        input: {
+          file_path: section.filePath,
+          old_string: oldLines.join("\n"),
+          new_string: newLines.join("\n"),
+        },
+        result: null,
+        isError: false,
+        timestamp,
+      })
+    }
+  }
+
+  return toolCalls
+}
+
+/** Normalize Codex update_plan input to TodoWrite format. */
+function normalizePlanToTodos(input: Record<string, unknown>): Record<string, unknown> {
+  const plan = Array.isArray(input.plan) ? input.plan : []
+  const todos = plan
+    .filter((item): item is Record<string, unknown> => isObject(item))
+    .map((item) => ({
+      content: typeof item.step === "string" ? item.step : "",
+      status: typeof item.status === "string" ? item.status : "pending",
+      activeForm: typeof item.step === "string" ? item.step : "",
+    }))
+  return { todos }
+}
+
+/** Parse Codex custom_tool_call output JSON. */
+function parseCustomToolOutput(output: string | null): { text: string; isError: boolean } {
+  if (!output) return { text: "", isError: false }
+  try {
+    const parsed = JSON.parse(output) as Record<string, unknown>
+    const text = typeof parsed.output === "string" ? parsed.output : output
+    const meta = isObject(parsed.metadata) ? parsed.metadata : null
+    const isError = meta ? (meta.exit_code !== 0 && meta.exit_code !== undefined) : inferToolError(text)
+    return { text, isError }
+  } catch {
+    return { text: output, isError: inferToolError(output) }
+  }
+}
+
 function createTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
   return {
     id: turnId || randomTurnId("codex-turn"),
@@ -296,6 +406,26 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
   const metadata = extractMetadataFromRecords(records)
   const turns: Turn[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
+  // apply_patch parent callId → per-file synthetic tool call IDs
+  const patchCallIds = new Map<string, string[]>()
+  // spawn_agent call tracking
+  const spawnAgentCalls = new Map<string, {
+    callId: string
+    message: string
+    model: string | null
+    agentType: string | null
+    timestamp: string
+  }>()
+  // agentId → resolved agent info (from spawn_agent results)
+  const agentRegistry = new Map<string, {
+    agentId: string
+    nickname: string | null
+    message: string
+    model: string | null
+    agentType: string | null
+    timestamp: string
+    parentToolCallId: string
+  }>()
 
   let current: Turn | null = null
   let currentTurnId: string | null = null
@@ -361,10 +491,34 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
     }
 
     if (payload.type === "function_call" && typeof payload.call_id === "string") {
+      const rawName = typeof payload.name === "string" ? payload.name : "tool"
+      const parsedInput = parseToolInput(payload.arguments)
+
+      // Normalize Codex tool names + inputs to Claude Code equivalents
+      let name = rawName
+      let input = parsedInput
+      if (rawName === "exec_command") {
+        name = "Bash"
+      } else if (rawName === "update_plan") {
+        name = "TodoWrite"
+        input = normalizePlanToTodos(parsedInput)
+      }
+
+      // Detect spawn_agent → synthesize sub-agent activity
+      if (rawName === "spawn_agent") {
+        spawnAgentCalls.set(payload.call_id as string, {
+          callId: payload.call_id as string,
+          message: typeof parsedInput.message === "string" ? parsedInput.message : "",
+          model: typeof parsedInput.model === "string" ? parsedInput.model : null,
+          agentType: typeof parsedInput.agent_type === "string" ? parsedInput.agent_type : null,
+          timestamp,
+        })
+      }
+
       const toolCall: ToolCall = {
         id: payload.call_id,
-        name: typeof payload.name === "string" ? payload.name : "tool",
-        input: parseToolInput(payload.arguments),
+        name,
+        input,
         result: null,
         isError: false,
         timestamp,
@@ -381,6 +535,117 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       toolCall.result = output
       toolCall.isError = inferToolError(output)
       pendingToolCalls.delete(payload.call_id)
+
+      // Resolve spawn_agent result → create sub-agent entry
+      if (toolCall.name === "spawn_agent" && output) {
+        try {
+          const result = JSON.parse(output) as Record<string, unknown>
+          const agentId = typeof result.agent_id === "string" ? result.agent_id : ""
+          const nickname = typeof result.nickname === "string" ? result.nickname : null
+          if (agentId) {
+            const spawnInfo = spawnAgentCalls.get(toolCall.id)
+            agentRegistry.set(agentId, {
+              agentId,
+              nickname,
+              message: spawnInfo?.message ?? "",
+              model: spawnInfo?.model ?? null,
+              agentType: spawnInfo?.agentType ?? null,
+              timestamp: spawnInfo?.timestamp ?? timestamp,
+              parentToolCallId: toolCall.id,
+            })
+          }
+        } catch { /* skip */ }
+      }
+
+      // Resolve wait_agent result → attach sub-agent messages to turn
+      if (toolCall.name === "wait_agent" && output && current) {
+        try {
+          const result = JSON.parse(output) as Record<string, unknown>
+          const statusMap = isObject(result.status) ? result.status : {}
+          for (const [agentId, status] of Object.entries(statusMap)) {
+            const info = agentRegistry.get(agentId)
+            const completedText = isObject(status) && typeof (status as Record<string, unknown>).completed === "string"
+              ? (status as Record<string, unknown>).completed as string
+              : null
+            const agentMsg: SubAgentMessage = {
+              agentId,
+              agentName: info?.nickname ?? null,
+              subagentType: info?.agentType ?? null,
+              type: "assistant",
+              content: completedText,
+              toolCalls: [],
+              thinking: [],
+              text: completedText ? [completedText] : [],
+              timestamp: info?.timestamp ?? timestamp,
+              tokenUsage: null,
+              model: info?.model ?? null,
+              isBackground: false,
+              prompt: info?.message ?? undefined,
+              status: completedText ? "completed" : "running",
+            }
+            current.subAgentActivity.push(agentMsg)
+          }
+        } catch { /* skip */ }
+      }
+
+      continue
+    }
+
+    // Handle custom_tool_call (apply_patch, exec_command)
+    if (payload.type === "custom_tool_call" && typeof payload.call_id === "string") {
+      const name = typeof payload.name === "string" ? payload.name : "tool"
+      const rawInput = typeof payload.input === "string" ? payload.input : ""
+
+      if (name === "apply_patch" && rawInput) {
+        // Split into per-file Edit/Write tool calls
+        const perFileCalls = parseApplyPatch(rawInput, payload.call_id as string, timestamp)
+        for (const tc of perFileCalls) {
+          pendingToolCalls.set(tc.id, tc)
+          appendToolCall(current, tc, timestamp)
+        }
+        // Track the parent call_id to apply results later
+        patchCallIds.set(payload.call_id as string, perFileCalls.map((tc) => tc.id))
+      } else {
+        // exec_command or other custom tools
+        const toolCall: ToolCall = {
+          id: payload.call_id,
+          name: name === "exec_command" ? "Bash" : name,
+          input: parseToolInput(rawInput),
+          result: null,
+          isError: false,
+          timestamp,
+        }
+        pendingToolCalls.set(toolCall.id, toolCall)
+        appendToolCall(current, toolCall, timestamp)
+      }
+      continue
+    }
+
+    if (payload.type === "custom_tool_call_output" && typeof payload.call_id === "string") {
+      const callId = payload.call_id as string
+      const output = typeof payload.output === "string" ? payload.output : null
+      const { text, isError } = parseCustomToolOutput(output)
+
+      // Check if this is an apply_patch result (maps to multiple per-file calls)
+      const fileCallIds = patchCallIds.get(callId)
+      if (fileCallIds) {
+        for (const id of fileCallIds) {
+          const tc = pendingToolCalls.get(id)
+          if (tc) {
+            tc.result = text
+            tc.isError = isError
+            pendingToolCalls.delete(id)
+          }
+        }
+        patchCallIds.delete(callId)
+      } else {
+        const toolCall = pendingToolCalls.get(callId)
+        if (toolCall) {
+          toolCall.result = text
+          toolCall.isError = isError
+          pendingToolCalls.delete(callId)
+        }
+      }
       continue
     }
   }

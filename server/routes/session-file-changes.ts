@@ -2,6 +2,7 @@ import type { UseFn } from "../helpers"
 import { findJsonlPath, readFile, sendJson, stat } from "../helpers"
 import type { ToolUseBlock } from "../../src/lib/types"
 import { computeNetDiff, type EditOp } from "../../src/lib/diffUtils"
+import { parseApplyPatch } from "../../src/lib/codex"
 
 export interface ComputedFileChange {
   filePath: string
@@ -48,6 +49,11 @@ export async function parseSessionFileChanges(
   // Bash rm paths: { path, turnIndex, isDir }
   const rmPaths: Array<{ path: string; turnIndex: number; isDir: boolean }> = []
 
+  // Detect Codex vs Claude Code format from first record
+  let firstObj: Record<string, unknown> | null = null
+  try { firstObj = JSON.parse(lines[0]) as Record<string, unknown> } catch { /* skip */ }
+  const isCodex = firstObj?.type === "session_meta" || firstObj?.type === "turn_context" || firstObj?.type === "event_msg"
+
   for (const line of lines) {
     let obj: Record<string, unknown>
     try {
@@ -56,6 +62,97 @@ export async function parseSessionFileChanges(
       continue
     }
 
+    if (isCodex) {
+      // ── Codex format ──
+      const payload = typeof obj.payload === "object" && obj.payload !== null
+        ? obj.payload as Record<string, unknown>
+        : undefined
+      if (!payload) continue
+
+      // Extract cwd from session_meta or turn_context
+      if (obj.type === "session_meta" || obj.type === "turn_context") {
+        if (typeof payload.cwd === "string" && !cwd) cwd = payload.cwd
+      }
+
+      // Track turns from user messages
+      if (obj.type === "event_msg" && payload.type === "user_message") {
+        lastHumanTurnIndex = humanMessageCount
+        humanMessageCount++
+      }
+
+      if (obj.type !== "response_item") continue
+
+      // Handle apply_patch (custom_tool_call)
+      if (payload.type === "custom_tool_call" && payload.name === "apply_patch") {
+        const callId = typeof payload.call_id === "string" ? payload.call_id : ""
+        const rawInput = typeof payload.input === "string" ? payload.input : ""
+        if (!callId || !rawInput) continue
+
+        const perFileCalls = parseApplyPatch(rawInput, callId, "")
+        for (const tc of perFileCalls) {
+          const filePath = String(tc.input.file_path ?? "")
+          if (!filePath) continue
+
+          const isEdit = tc.name === "Edit"
+          const oldString = isEdit ? String(tc.input.old_string ?? "") : ""
+          const newString = isEdit ? String(tc.input.new_string ?? "") : String(tc.input.content ?? "")
+
+          toolCallDetails.set(tc.id, { filePath, isEdit, oldString, newString })
+
+          let accum = fileMap.get(filePath)
+          if (!accum) {
+            accum = { toolCallIds: [], hasEdit: false, hasWrite: false, isError: false, firstTurnIndex: lastHumanTurnIndex, ops: [] }
+            fileMap.set(filePath, accum)
+          }
+          accum.toolCallIds.push(tc.id)
+          if (isEdit) accum.hasEdit = true
+          else accum.hasWrite = true
+          accum.ops.push({ oldString, newString, isWrite: !isEdit })
+        }
+      }
+
+      // Handle custom_tool_call_output — check for errors
+      if (payload.type === "custom_tool_call_output" && typeof payload.call_id === "string") {
+        const output = typeof payload.output === "string" ? payload.output : null
+        if (output) {
+          try {
+            const parsed = JSON.parse(output) as Record<string, unknown>
+            const meta = typeof parsed.metadata === "object" && parsed.metadata !== null
+              ? parsed.metadata as Record<string, unknown>
+              : null
+            if (meta && meta.exit_code !== 0 && meta.exit_code !== undefined) {
+              resultMap.set(payload.call_id, true)
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      // Handle exec_command rm calls (custom_tool_call with exec_command name)
+      if (payload.type === "custom_tool_call" && payload.name === "exec_command") {
+        const callId = typeof payload.call_id === "string" ? payload.call_id : ""
+        let args: Record<string, unknown> = {}
+        if (typeof payload.input === "string") {
+          try { args = JSON.parse(payload.input) as Record<string, unknown> } catch { /* skip */ }
+        }
+        const cmd = typeof args.command === "string" ? args.command : (typeof args.cmd === "string" ? args.cmd : "")
+        if (cmd && /^(?:rm|git\s+rm)\s/.test(cmd) && callId) {
+          const isDir = /-r\b/.test(cmd)
+          for (const m of cmd.matchAll(/"(\/[^"]+)"/g)) {
+            rmPaths.push({ path: m[1], turnIndex: lastHumanTurnIndex, isDir })
+          }
+          const afterFlags = cmd.replace(/^(?:rm|git\s+rm)\s+(?:-[a-z]+\s+)*/i, "")
+          for (const token of afterFlags.split(/\s+/)) {
+            if (token.startsWith("/")) {
+              rmPaths.push({ path: token, turnIndex: lastHumanTurnIndex, isDir })
+            }
+          }
+        }
+      }
+
+      continue
+    }
+
+    // ── Claude Code format ──
     if (obj.cwd && !cwd) cwd = obj.cwd as string
 
     if (obj.type === "user") {

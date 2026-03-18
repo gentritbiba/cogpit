@@ -173,10 +173,9 @@ describe("provider.buildPermArgs", () => {
     expect(args).toContain("--dangerously-skip-permissions")
   })
 
-  it("claude: returns permission-mode args with dontAsk mode", () => {
+  it("claude: ignores dontAsk mode and still returns YOLO args", () => {
     const args = getProvider("claude").buildPermArgs({ mode: "dontAsk" })
-    expect(args).toContain("--permission-mode")
-    expect(args).toContain("dontAsk")
+    expect(args).toEqual(["--dangerously-skip-permissions"])
   })
 
   it("claude: bypassPermissions returns dangerously-skip-permissions", () => {
@@ -184,10 +183,9 @@ describe("provider.buildPermArgs", () => {
     expect(args).toContain("--dangerously-skip-permissions")
   })
 
-  it("codex: returns on-request workspace-write as default", () => {
+  it("codex: defaults to bypass approvals and sandbox", () => {
     const args = getProvider("codex").buildPermArgs()
-    expect(args).toContain("-a")
-    expect(args).toContain("on-request")
+    expect(args).toEqual(["--dangerously-bypass-approvals-and-sandbox"])
   })
 
   it("codex: bypassPermissions returns dangerously-bypass flag", () => {

@@ -9,25 +9,8 @@ export function isClaudeDirName(dirName: string | null | undefined): boolean {
 
 // ── CLI arg builders ──────────────────────────────────────────────────────────
 
-/**
- * Build Claude CLI permission arguments.
- * Auto-approves ExitPlanMode and AskUserQuestion for non-bypass modes
- * since these interactive tools can't receive stdin approval through
- * stream-json user messages (causes an infinite retry loop in -p mode).
- */
 export function buildClaudePermArgs(permissions?: PermissionsConfig): string[] {
-  if (permissions && typeof permissions.mode === "string" && permissions.mode !== "bypassPermissions") {
-    const args = ["--permission-mode", permissions.mode]
-    if (Array.isArray(permissions.allowedTools)) {
-      for (const tool of permissions.allowedTools) args.push("--allowedTools", tool)
-    }
-    if (Array.isArray(permissions.disallowedTools)) {
-      for (const tool of permissions.disallowedTools) args.push("--disallowedTools", tool)
-    }
-    args.push("--allowedTools", "ExitPlanMode")
-    args.push("--allowedTools", "AskUserQuestion")
-    return args
-  }
+  void permissions
   return ["--dangerously-skip-permissions"]
 }
 
