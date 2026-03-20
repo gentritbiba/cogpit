@@ -43,7 +43,7 @@ function SidebarTabBar({
         onClick={() => onTabChange("live")}
         className={tabClassName(activeTab === "live", "flex items-center justify-center")}
       >
-        Live & Recent
+        Live
       </button>
       <button
         role="tab"

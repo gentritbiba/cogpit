@@ -115,7 +115,7 @@ export const DesktopHeader = memo(function DesktopHeader({
                       <Check className="size-3" /> Copied
                     </span>
                   ) : (
-                    session.slug || session.sessionId.slice(0, 8)
+                    session.cwd?.split("/").pop() || session.slug || session.sessionId.slice(0, 8)
                   )}
               </TooltipTrigger>
               <TooltipContent className="text-xs space-y-1">
@@ -146,7 +146,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             </Tooltip>
           </>
         ) : (
-          <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
+          <h1 className="text-sm font-semibold tracking-tight">ClaudeView</h1>
         )}
       </div>
 
