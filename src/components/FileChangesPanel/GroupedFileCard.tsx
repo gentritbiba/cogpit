@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useLayoutEffect, memo, useCallback, startTransition } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
-import { ChevronDown, ChevronRight, Code2, GitCompareArrows } from "lucide-react"
+import { ChevronDown, ChevronRight, Code2, GitCompareArrows, Columns2, AlignJustify } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { EditDiffView } from "../timeline/EditDiffView"
+import { FullDiffView } from "../diff/FullDiffView"
+import { useFileSnapshots } from "@/hooks/useFileSnapshots"
 import { cn } from "@/lib/utils"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
@@ -50,9 +52,10 @@ interface GroupedFileCardProps {
   defaultOpen: boolean
   isHighlighted?: boolean
   diffMode: DiffMode
+  sessionId?: string
 }
 
-export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen, isHighlighted, diffMode }: GroupedFileCardProps) {
+export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen, isHighlighted, diffMode, sessionId }: GroupedFileCardProps) {
   const { ref: nearRef, isNear } = useNearViewport()
   const [open, setOpen] = useState(defaultOpen)
   // Deferred open: the card header updates immediately, diff content renders
@@ -191,6 +194,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
         diffMode={effectiveDiffMode}
         edits={file.edits}
         netStartLine={file.netStartLine}
+        sessionId={sessionId}
       />
     </div>
   )
@@ -208,6 +212,7 @@ const DiffContent = memo(function DiffContent({
   diffMode,
   edits,
   netStartLine,
+  sessionId,
 }: {
   showDiff: boolean
   open: boolean
@@ -220,12 +225,43 @@ const DiffContent = memo(function DiffContent({
   diffMode: DiffMode
   edits: IndividualEdit[]
   netStartLine: number
+  sessionId?: string
 }): React.ReactElement | null {
+  const { before, after, hasSnapshots, loading: snapshotsLoading } = useFileSnapshots(
+    showDiff && diffMode !== "per-edit" ? (sessionId ?? "") : "",
+    showDiff && diffMode !== "per-edit" ? filePath : "",
+  )
+  const [viewMode, setViewMode] = useState<"side-by-side" | "inline">("side-by-side")
+
   if (showDiff) {
+    const useFullDiff = hasSnapshots && before !== null && after !== null && diffMode !== "per-edit"
     return (
       <div ref={diffRef} className="overflow-hidden rounded-b">
         {diffMode === "per-edit" ? (
           <PerEditDiffs edits={edits} filePath={filePath} />
+        ) : useFullDiff ? (
+          <>
+            <div className="flex items-center gap-1 px-2 py-0.5 bg-elevation-1/50 border-t border-border/30">
+              <button
+                onClick={() => setViewMode(viewMode === "side-by-side" ? "inline" : "side-by-side")}
+                className="flex items-center gap-1 text-[9px] text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {viewMode === "side-by-side" ? (
+                  <><AlignJustify className="size-3" /> Inline</>
+                ) : (
+                  <><Columns2 className="size-3" /> Side-by-side</>
+                )}
+              </button>
+            </div>
+            <FullDiffView
+              oldContent={before}
+              newContent={after}
+              filePath={filePath}
+              mode={viewMode === "side-by-side" ? "split" : "unified"}
+            />
+          </>
+        ) : snapshotsLoading ? (
+          <div className="px-3 py-2 text-[10px] text-muted-foreground/50">Loading snapshots...</div>
         ) : (
           <EditDiffView
             oldString={oldString}

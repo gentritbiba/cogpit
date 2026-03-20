@@ -29,6 +29,7 @@ import { registerCogpitSearchRoutes } from "./routes/cogpit-search"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerNotifyRoutes } from "./routes/notify"
 import { registerScriptRoutes } from "./routes/scripts"
+import { registerFileSnapshotRoutes } from "./routes/file-snapshots"
 import { SearchIndex } from "./search-index"
 
 export function sessionApiPlugin(): Plugin {
@@ -113,6 +114,7 @@ export function sessionApiPlugin(): Plugin {
       registerMcpRoutes(use)
       registerNotifyRoutes(use)
       registerScriptRoutes(use)
+      registerFileSnapshotRoutes(use)
     },
   }
 }

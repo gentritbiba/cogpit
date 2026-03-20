@@ -47,11 +47,13 @@ function AgentGroupSection({
   allExpanded,
   highlightPath,
   diffMode,
+  sessionId,
 }: {
   group: AgentGroup
   allExpanded: boolean
   highlightPath: string | null
   diffMode: DiffMode
+  sessionId?: string
 }) {
   const name = group.agentName || group.agentId.slice(0, 8)
   const type = group.subagentType
@@ -94,6 +96,7 @@ function AgentGroupSection({
           defaultOpen={allExpanded}
           isHighlighted={highlightPath === file.filePath}
           diffMode={diffMode}
+          sessionId={sessionId}
         />
       ))}
     </div>
@@ -447,6 +450,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                     allExpanded={allExpanded}
                     highlightPath={highlightPath}
                     diffMode={diffMode}
+                    sessionId={session.sessionId}
                   />
                 ))
               ) : (
@@ -462,6 +466,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   defaultOpen={allExpanded}
                   isHighlighted={highlightPath === file.filePath}
                   diffMode={diffMode}
+                  sessionId={session.sessionId}
                 />
               ))
             ) : (

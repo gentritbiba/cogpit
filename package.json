@@ -1,8 +1,8 @@
 {
-  "name": "cogpit",
+  "name": "claudeview",
   "private": true,
-  "version": "0.5.0",
-  "description": "Dashboard for browsing and inspecting Claude Code agent sessions",
+  "version": "0.1.0",
+  "description": "Session viewer for Claude Code with side-by-side diffs and session timeline",
   "license": "MIT",
   "author": {
     "name": "Gentrit Biba",
@@ -31,6 +31,9 @@
   "dependencies": {
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
+    "@git-diff-view/file": "^0.1.3",
+    "@git-diff-view/react": "^0.1.3",
+    "@git-diff-view/shiki": "^0.1.3",
     "@tanstack/react-virtual": "^3.13.18",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",

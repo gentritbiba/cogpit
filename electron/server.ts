@@ -33,6 +33,7 @@ import { registerCogpitSearchRoutes } from "../server/routes/cogpit-search"
 import { registerMcpRoutes } from "../server/routes/mcp"
 import { registerNotifyRoutes } from "../server/routes/notify"
 import { registerScriptRoutes } from "../server/routes/scripts"
+import { registerFileSnapshotRoutes } from "../server/routes/file-snapshots"
 import { SearchIndex } from "../server/search-index"
 import { PtySessionManager } from "../server/pty-server"
 
@@ -106,6 +107,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerMcpRoutes(use)
   registerNotifyRoutes(use)
   registerScriptRoutes(use)
+  registerFileSnapshotRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL
