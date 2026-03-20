@@ -224,6 +224,9 @@ export interface IndividualEdit {
   startLine: number
 }
 
+/** Git-style file status derived from tool operations. */
+export type GitFileStatus = "A" | "M" | "D" | "R"
+
 export interface GroupedFile {
   filePath: string
   /** Short display path (last 3 segments). */
@@ -242,8 +245,10 @@ export interface GroupedFile {
   subAgentId: string | null
   /** Individual edits in order, for per-edit diff view. */
   edits: IndividualEdit[]
-/** 1-based starting line for the net diff (from first edit's result). */
+  /** 1-based starting line for the net diff (from first edit's result). */
   netStartLine: number
+  /** Git-style status: A (added), M (modified), D (deleted). */
+  gitStatus: GitFileStatus
 }
 
 /**
@@ -335,6 +340,10 @@ export function buildGroupedFiles(
     if (hasEdit) opTypes.push("Edit")
     if (hasWrite) opTypes.push("Write")
 
+    // Derive git-style status: Write-only (no edits) = Added, has edits = Modified
+    let gitStatus: GitFileStatus = "M"
+    if (hasWrite && !hasEdit) gitStatus = "A"
+
     result.push({
       filePath,
       shortPath: filePath.split("/").slice(-3).join("/"),
@@ -350,6 +359,7 @@ export function buildGroupedFiles(
       netStartLine: net.currentStr
         ? findLineInFile(rawContent, net.currentStr)
         : (edits.length > 0 ? edits[0].startLine : 1),
+      gitStatus,
     })
   }
 

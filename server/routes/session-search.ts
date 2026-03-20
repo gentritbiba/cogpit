@@ -28,6 +28,7 @@ interface SearchHit {
 
 interface SessionSearchResult {
   sessionId: string
+  dirName?: string
   hits: SearchHit[]
 }
 
@@ -324,9 +325,17 @@ export function registerSessionSearchRoutes(use: UseFn) {
         })
 
         const grouped = new Map<string, SearchHit[]>()
+        const dirNameMap = new Map<string, string>()
         for (const hit of indexHits) {
           const sessionHits = grouped.get(hit.sessionId) ?? []
-          if (!grouped.has(hit.sessionId)) grouped.set(hit.sessionId, sessionHits)
+          if (!grouped.has(hit.sessionId)) {
+            grouped.set(hit.sessionId, sessionHits)
+            // Extract dirName from source_file path (first segment before /)
+            if (hit.sourceFile) {
+              const firstSlash = hit.sourceFile.indexOf("/")
+              if (firstSlash > 0) dirNameMap.set(hit.sessionId, hit.sourceFile.slice(0, firstSlash))
+            }
+          }
           sessionHits.push({
             location: hit.location,
             snippet: hit.snippet,
@@ -335,7 +344,7 @@ export function registerSessionSearchRoutes(use: UseFn) {
         }
 
         const results: SessionSearchResult[] = [...grouped].map(
-          ([sessionId, hits]) => ({ sessionId, hits }),
+          ([sessionId, hits]) => ({ sessionId, dirName: dirNameMap.get(sessionId), hits }),
         )
 
         // Only run the expensive COUNT query when hits were capped by LIMIT.
@@ -391,8 +400,15 @@ export function registerSessionSearchRoutes(use: UseFn) {
 
         totalHits += allHits.length
 
+        // Extract dirName from path: <PROJECTS_DIR>/<dirName>/<sessionId>.jsonl
+        const relPath = file.path.startsWith(dirs.PROJECTS_DIR)
+          ? file.path.slice(dirs.PROJECTS_DIR.length + 1)
+          : file.path
+        const dirName = relPath.split("/")[0] || undefined
+
         const sessionResult: SessionSearchResult = {
           sessionId: session.sessionId || basename(file.path, ".jsonl"),
+          dirName,
           hits: [],
         }
 

@@ -20,7 +20,7 @@ export interface SessionState {
   mainView: "sessions" | "teams" | "config"
   configFilePath: string | null
   selectedTeam: string | null
-  sidebarTab: "live" | "browse" | "teams" | "timeline"
+  sidebarTab: "live" | "browse" | "teams" | "timeline" | "search"
   mobileTab: MobileTab
   dashboardProject: string | null
 }
@@ -42,7 +42,7 @@ export type SessionAction =
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
   | { type: "GUARD_MOBILE_TAB"; hasSession: boolean; hasTeam: boolean }
   | { type: "SET_LOADING_MEMBER"; name: string | null }
-  | { type: "SET_SIDEBAR_TAB"; tab: "live" | "browse" | "teams" | "timeline" }
+  | { type: "SET_SIDEBAR_TAB"; tab: "live" | "browse" | "teams" | "timeline" | "search" }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }

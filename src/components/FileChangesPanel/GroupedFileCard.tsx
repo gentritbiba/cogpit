@@ -7,7 +7,7 @@ import { EditDiffView } from "../timeline/EditDiffView"
 import { FullDiffView } from "../diff/FullDiffView"
 import { useFileSnapshots } from "@/hooks/useFileSnapshots"
 import { cn } from "@/lib/utils"
-import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
+import { GitStatusBadge, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
 import type { DiffMode } from "."
@@ -133,7 +133,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
           <span className={cn("text-[10px] font-mono font-bold shrink-0", extColor)}>
             {ext}
           </span>
-          <OpIndicator hasEdit={file.opTypes.includes("Edit")} hasWrite={file.opTypes.includes("Write")} />
+          <GitStatusBadge status={file.gitStatus} />
           {file.subAgentId && <SubAgentIndicator agentId={file.subAgentId} />}
           <span className="text-[10px] text-muted-foreground font-mono truncate">
             {file.shortPath}

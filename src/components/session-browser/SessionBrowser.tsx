@@ -4,13 +4,14 @@ import { LiveSessions } from "@/components/LiveSessions"
 import { TeamsList } from "@/components/TeamsList"
 import { ScriptsDock } from "@/components/ScriptsDock"
 import { SessionTimeline } from "@/components/SessionTimeline"
+import { CrossSessionSearch } from "@/components/search/CrossSessionSearch"
 import type { SessionBrowserProps } from "./types"
 import { BrowseTab } from "./BrowseTab"
 import { useSessionBrowser } from "./useSessionBrowser"
 
 // ── Tab type ───────────────────────────────────────────────────────────────
 
-type SidebarTab = "live" | "browse" | "teams" | "timeline"
+type SidebarTab = "live" | "browse" | "teams" | "timeline" | "search"
 
 // ── Tab Bar ────────────────────────────────────────────────────────────────
 
@@ -68,6 +69,14 @@ function SidebarTabBar({
         className={tabClassName(activeTab === "timeline", "flex items-center justify-center")}
       >
         Timeline
+      </button>
+      <button
+        role="tab"
+        aria-selected={activeTab === "search"}
+        onClick={() => onTabChange("search")}
+        className={tabClassName(activeTab === "search", "flex items-center justify-center")}
+      >
+        Search
       </button>
     </div>
   )
@@ -187,6 +196,16 @@ export const SessionBrowser = memo(function SessionBrowser({
         {sidebarTab === "timeline" && (
           <div className="flex-1 min-h-0">
             <SessionTimeline />
+          </div>
+        )}
+
+        {sidebarTab === "search" && (
+          <div className="flex-1 min-h-0">
+            <CrossSessionSearch
+              onOpenSession={(dirName, sessionId) => {
+                browser.loadLiveSession(dirName, `${sessionId}.jsonl`)
+              }}
+            />
           </div>
         )}
       </div>
