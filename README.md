@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://cogpit.gentrit.dev">Website</a> · <a href="https://github.com/gentritbiba/cogpit/releases">Download</a>
+  <a href="https://cogpit.dev">Website</a> · <a href="https://github.com/gentritbiba/cogpit/releases">Download</a>
 </p>
 
 ---
