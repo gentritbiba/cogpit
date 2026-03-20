@@ -10,6 +10,9 @@ import {
 } from "@/components/ui/dialog"
 import { getHighlighter, ensureLang, getLangFromPath, type ThemedToken } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { useFileSnapshots } from "@/hooks/useFileSnapshots"
+import { DiffViewModal } from "@/components/diff/DiffViewModal"
+import { useSessionContext } from "@/contexts/SessionContext"
 
 // ── Simple line-level diff (LCS-based, optimized) ──────────────────────────
 
@@ -486,6 +489,7 @@ export function EditDiffView({
   hideHeader = false,
 }: EditDiffViewProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
+  const [fullDiffModalOpen, setFullDiffModalOpen] = useState(false)
   const isDark = useIsDarkMode()
   const lines = useMemo(() => getCachedDiff(oldString, newString), [oldString, newString])
   const { oldTokens, newTokens } = useHighlightedTokens(
@@ -495,7 +499,31 @@ export function EditDiffView({
     isDark
   )
 
+  const sessionId = useSessionContext().session?.sessionId ?? ""
+  const { before, after, hasSnapshots } = useFileSnapshots(
+    isCompact ? sessionId : "",
+    isCompact ? filePath : "",
+  )
+
   const shortPath = filePath.split("/").slice(-3).join("/")
+
+  const handleExpand = useCallback(() => {
+    if (hasSnapshots && before !== null && after !== null) {
+      setFullDiffModalOpen(true)
+    } else {
+      setModalOpen(true)
+    }
+  }, [hasSnapshots, before, after])
+
+  const { added, removed } = useMemo(() => {
+    let added = 0
+    let removed = 0
+    for (const l of lines) {
+      if (l.type === "added") added++
+      else if (l.type === "removed") removed++
+    }
+    return { added, removed }
+  }, [lines])
 
   return (
     <>
@@ -513,9 +541,9 @@ export function EditDiffView({
               <DiffStats lines={lines} />
               {isCompact && (
                 <button
-                  onClick={() => setModalOpen(true)}
+                  onClick={handleExpand}
                   className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded hover:bg-elevation-2"
-                  title="Expand diff"
+                  title={hasSnapshots ? "Expand to full diff" : "Expand diff"}
                 >
                   <Maximize2 className="w-3 h-3" />
                 </button>
@@ -554,6 +582,17 @@ export function EditDiffView({
             </div>
           </DialogContent>
         </Dialog>
+      )}
+
+      {fullDiffModalOpen && before !== null && after !== null && (
+        <DiffViewModal
+          oldContent={before}
+          newContent={after}
+          filePath={filePath}
+          additions={added}
+          deletions={removed}
+          onClose={() => setFullDiffModalOpen(false)}
+        />
       )}
     </>
   )

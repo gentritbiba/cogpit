@@ -53,12 +53,16 @@ export function FullDiffView({ oldContent, newContent, filePath, mode = "split" 
         file.initTheme(isDark ? "dark" : "light")
         file.initRaw()
 
-        try {
-          const highlighter = await getDiffHighlighter()
-          if (cancelled) return
-          file.initSyntax({ registerHighlighter: highlighter })
-        } catch {
-          // Syntax highlighting failed — diff still works without it
+        // Skip syntax highlighting for very large files (> 10K lines)
+        const totalLines = oldContent.split("\n").length + newContent.split("\n").length
+        if (totalLines <= 20_000) {
+          try {
+            const highlighter = await getDiffHighlighter()
+            if (cancelled) return
+            file.initSyntax({ registerHighlighter: highlighter })
+          } catch {
+            // Syntax highlighting failed — diff still works without it
+          }
         }
 
         file.buildSplitDiffLines()
