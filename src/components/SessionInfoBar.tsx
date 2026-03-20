@@ -87,13 +87,6 @@ export const SessionInfoBar = memo(function SessionInfoBar({
 
       <div className="flex-1" />
 
-      {/* Project name */}
-      {session.cwd && (
-        <span className="text-[11px] font-medium text-muted-foreground">
-          {projectName(session.cwd)}
-        </span>
-      )}
-
       <div className="flex-1" />
 
       {/* File changes button (mobile only) */}
