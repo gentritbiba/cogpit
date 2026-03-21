@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { sortSessionsByRecency } from "../../../src/lib/sessionOrdering"
 import {
   dirs,
   encodeCodexDirName,
@@ -178,7 +179,7 @@ export async function handleActiveSessions(
       })
     )
 
-    const activeSessions = results.filter(Boolean)
+    const activeSessions = sortSessionsByRecency(results.flatMap((session) => session ? [session] : []))
 
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify(activeSessions))

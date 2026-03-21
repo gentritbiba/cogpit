@@ -347,6 +347,61 @@ describe("project routes", () => {
       expect(response[0].projectShortName).toBe("a")
     })
 
+    it("sorts active sessions by displayed activity time when it differs from file mtime", async () => {
+      const handler = handlers.get("/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "?limit=10")
+
+      mockedReaddir.mockResolvedValueOnce([
+        { name: "proj-a", isDirectory: () => true },
+      ] as unknown as Dirent[])
+      mockedReaddir.mockResolvedValueOnce([
+        "mtime-newer.jsonl",
+        "activity-newer.jsonl",
+      ] as unknown as Dirent[])
+
+      mockedStat.mockResolvedValueOnce({ mtimeMs: Date.parse("2026-03-21T12:00:00.000Z"), size: 200 } as unknown as Stats)
+      mockedStat.mockResolvedValueOnce({ mtimeMs: Date.parse("2026-03-21T11:00:00.000Z"), size: 200 } as unknown as Stats)
+
+      mockedGetSessionMeta
+        .mockResolvedValueOnce({
+          sessionId: "mtime-newer",
+          version: "",
+          gitBranch: "main",
+          model: "claude",
+          slug: "",
+          cwd: "/code",
+          firstUserMessage: "older visible activity",
+          lastUserMessage: "older visible activity",
+          timestamp: "",
+          lastTimestamp: "2026-03-20T12:00:00.000Z",
+          turnCount: 3,
+          lineCount: 10,
+        })
+        .mockResolvedValueOnce({
+          sessionId: "activity-newer",
+          version: "",
+          gitBranch: "main",
+          model: "claude",
+          slug: "",
+          cwd: "/code",
+          firstUserMessage: "newer visible activity",
+          lastUserMessage: "newer visible activity",
+          timestamp: "",
+          lastTimestamp: "2026-03-21T11:30:00.000Z",
+          turnCount: 4,
+          lineCount: 12,
+        })
+
+      mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
+
+      await handler(req, res, next)
+
+      const response = JSON.parse(res._getData())
+      expect(response).toHaveLength(2)
+      expect(response[0].sessionId).toBe("activity-newer")
+      expect(response[1].sessionId).toBe("mtime-newer")
+    })
+
     it("skips memory directory", async () => {
       const handler = handlers.get("/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")

@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import { shortPath, dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { SessionRow } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
@@ -57,9 +58,7 @@ function sessionGroupKey(s: ActiveSessionInfo): string {
 
 /** Group sessions by project path for compact display, sorted newest-first. */
 function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessionInfo[]> {
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
-  )
+  const sorted = sortSessionsByRecency(sessions)
   const groups = new Map<string, ActiveSessionInfo[]>()
   for (const s of sorted) {
     const key = sessionGroupKey(s)
