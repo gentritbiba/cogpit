@@ -66,21 +66,7 @@ export async function getSessionMeta(filePath: string) {
       lines = content.split("\n").filter(Boolean)
     }
     const meta = extractCodexMetadataFromLines(lines)
-    return {
-      sessionId: meta.sessionId,
-      version: meta.version,
-      gitBranch: meta.gitBranch,
-      model: meta.model,
-      slug: meta.slug,
-      cwd: meta.cwd,
-      firstUserMessage: meta.firstUserMessage,
-      lastUserMessage: meta.lastUserMessage,
-      timestamp: meta.timestamp,
-      lastTimestamp: meta.lastTimestamp,
-      turnCount: meta.turnCount,
-      lineCount: lines.length,
-      branchedFrom: meta.branchedFrom,
-    }
+    return { ...meta, lineCount: lines.length }
   }
 
   let sessionId = ""
@@ -191,6 +177,8 @@ export async function getSessionMeta(filePath: string) {
     turnCount,
     lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
     branchedFrom,
+    isSubagent: false,
+    parentSessionId: null,
   }
 }
 

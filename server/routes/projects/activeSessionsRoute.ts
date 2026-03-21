@@ -76,6 +76,8 @@ export async function handleActiveSessions(
       try {
         const meta = await getSessionMeta(file.filePath)
         if (!meta.cwd) continue
+        // Skip Codex sub-agent sessions — they're shown inline in their parent
+        if (meta.isSubagent) continue
         candidates.push({
           dirName: encodeCodexDirName(meta.cwd),
           fileName: file.fileName,

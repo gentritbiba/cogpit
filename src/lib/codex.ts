@@ -27,6 +27,10 @@ interface CodexMetadata {
   timestamp: string
   lastTimestamp: string
   turnCount: number
+  /** True when this session is a Codex sub-agent (spawned by spawn_agent) */
+  isSubagent: boolean
+  /** Parent session ID for sub-agent sessions */
+  parentSessionId: string | null
 }
 
 const SKIP_PROMPT_PREFIXES = [
@@ -321,6 +325,8 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
   let timestamp = ""
   let lastTimestamp = ""
   let turnCount = 0
+  let isSubagent = false
+  let parentSessionId: string | null = null
 
   let previousPrompt = ""
 
@@ -342,6 +348,14 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
               : null,
           }
         }
+      }
+      // Detect sub-agent sessions via source.subagent
+      const source = isObject(record.payload.source) ? record.payload.source : null
+      if (source && isObject(source.subagent)) {
+        isSubagent = true
+      }
+      if (typeof record.payload.forked_from_id === "string" && record.payload.forked_from_id) {
+        parentSessionId = record.payload.forked_from_id
       }
       const git = isObject(record.payload.git) ? record.payload.git : null
       gitBranch ||= git && typeof git.branch === "string" ? git.branch : ""
@@ -378,6 +392,8 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
     timestamp,
     lastTimestamp,
     turnCount,
+    isSubagent,
+    parentSessionId,
   }
 }
 
@@ -562,6 +578,7 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
         try {
           const result = JSON.parse(output) as Record<string, unknown>
           const statusMap = isObject(result.status) ? result.status : {}
+          const batchMessages: SubAgentMessage[] = []
           for (const [agentId, status] of Object.entries(statusMap)) {
             const info = agentRegistry.get(agentId)
             const completedText = isObject(status) && typeof (status as Record<string, unknown>).completed === "string"
@@ -584,6 +601,11 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
               status: completedText ? "completed" : "running",
             }
             current.subAgentActivity.push(agentMsg)
+            batchMessages.push(agentMsg)
+          }
+          // Create a sub_agent content block so they render inline and in the sidebar
+          if (batchMessages.length > 0) {
+            current.contentBlocks.push({ kind: "sub_agent", messages: batchMessages })
           }
         } catch { /* skip */ }
       }

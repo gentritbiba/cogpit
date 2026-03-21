@@ -202,6 +202,40 @@ describe("extractCodexMetadataFromLines", () => {
     const meta = extractCodexMetadataFromLines([])
     expect(meta.sessionId).toBe("")
     expect(meta.firstUserMessage).toBe("")
+    expect(meta.isSubagent).toBe(false)
+    expect(meta.parentSessionId).toBeNull()
+  })
+
+  it("detects sub-agent sessions via source.subagent", () => {
+    const subagentMeta = JSON.stringify({
+      type: "session_meta",
+      timestamp: "2024-01-01T00:00:00.000Z",
+      payload: {
+        id: "sub-agent-id",
+        forked_from_id: "parent-session-id",
+        cwd: "/home/user/project",
+        source: {
+          subagent: {
+            thread_spawn: {
+              parent_thread_id: "parent-session-id",
+              depth: 1,
+              agent_nickname: "Explorer",
+              agent_role: "explorer",
+            },
+          },
+        },
+      },
+    })
+    const meta = extractCodexMetadataFromLines([subagentMeta])
+    expect(meta.isSubagent).toBe(true)
+    expect(meta.parentSessionId).toBe("parent-session-id")
+    expect(meta.sessionId).toBe("sub-agent-id")
+  })
+
+  it("marks regular sessions as not sub-agent", () => {
+    const meta = extractCodexMetadataFromLines(SIMPLE_SESSION.split("\n"))
+    expect(meta.isSubagent).toBe(false)
+    expect(meta.parentSessionId).toBeNull()
   })
 })
 
@@ -611,6 +645,12 @@ describe("parseCodexSession", () => {
     expect(turn.subAgentActivity[0].text).toEqual(["Task done."])
     expect(turn.subAgentActivity[0].model).toBe("gpt-4o-mini")
     expect(turn.subAgentActivity[0].prompt).toBe("Do something")
+
+    // Content blocks should include a sub_agent block for inline rendering
+    const subBlocks = turn.contentBlocks.filter((b) => b.kind === "sub_agent")
+    expect(subBlocks).toHaveLength(1)
+    expect(subBlocks[0].messages).toHaveLength(1)
+    expect(subBlocks[0].messages[0].agentId).toBe("agent-abc-123")
   })
 })
 

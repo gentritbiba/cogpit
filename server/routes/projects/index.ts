@@ -81,6 +81,8 @@ export function registerProjectRoutes(use: UseFn) {
         try {
           const meta = await getSessionMeta(file.filePath)
           if (!meta.cwd) continue
+          // Skip Codex sub-agent sessions — they're shown inline in their parent
+          if (meta.isSubagent) continue
           const existing = codexProjects.get(meta.cwd)
           if (existing) {
             existing.latestTime = Math.max(existing.latestTime, file.mtimeMs)
@@ -139,13 +141,16 @@ export function registerProjectRoutes(use: UseFn) {
         const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10))
         const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10)), 200)
 
-        const fileStats = codexCwd
+        type FileStat = { fileName: string; filePath: string; mtime: Date; size: number }
+
+        const fileStats: FileStat[] = codexCwd
           ? (await Promise.all(
             (await listCodexSessionFiles())
               .map(async (file) => {
                 try {
                   const meta = await getSessionMeta(file.filePath)
                   if (meta.cwd !== codexCwd) return null
+                  if (meta.isSubagent) return null
                   return {
                     fileName: file.fileName,
                     filePath: file.filePath,
@@ -156,7 +161,7 @@ export function registerProjectRoutes(use: UseFn) {
                   return null
                 }
               })
-          )).filter((file): file is { fileName: string; filePath: string; mtime: Date; size: number } => file !== null)
+          )).filter((file): file is FileStat => file !== null)
           : await Promise.all(
             (await readdir(projectDir))
               .filter((f) => f.endsWith(".jsonl"))
@@ -208,8 +213,29 @@ export function registerProjectRoutes(use: UseFn) {
       // GET /api/sessions/{dirName}/{sessionId}/subagents — list subagent files
       const dirName = decodeURIComponent(parts[0])
       if (isCodexDirName(dirName)) {
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify([]))
+        // For Codex sessions, find sub-agent files by checking forked_from_id
+        const parentSessionId = decodeURIComponent(parts[1])
+        try {
+          const codexFiles = await listCodexSessionFiles()
+          const listing: Array<{ agentId: string; fileName: string; size: number; modifiedAt: number }> = []
+          for (const file of codexFiles) {
+            try {
+              const meta = await getSessionMeta(file.filePath)
+              if (!meta.isSubagent || meta.parentSessionId !== parentSessionId) continue
+              listing.push({
+                agentId: meta.sessionId,
+                fileName: file.fileName,
+                size: file.size,
+                modifiedAt: file.mtimeMs,
+              })
+            } catch { continue }
+          }
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify(listing))
+        } catch {
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify([]))
+        }
         return
       }
       const sessionId = decodeURIComponent(parts[1])
@@ -248,7 +274,22 @@ export function registerProjectRoutes(use: UseFn) {
         return
       }
 
-      const filePath = await resolveSessionFilePath(dirName, fileName)
+      let filePath = await resolveSessionFilePath(dirName, fileName)
+
+      // For Codex sessions, resolve virtual paths by session ID lookup.
+      // Matches sub-agent paths ({parentId}/subagents/agent-{id}.jsonl)
+      // and simple session ID paths ({sessionId}.jsonl).
+      if (!filePath && isCodexDirName(dirName)) {
+        const idMatch = fileName.match(/\/subagents\/agent-([^.]+)\.jsonl$/)
+          ?? fileName.match(/^([^/]+)\.jsonl$/)
+        if (idMatch) {
+          const resolved = await findJsonlPath(idMatch[1])
+          if (resolved && resolved.startsWith(CODEX_SESSIONS_DIR + "/")) {
+            filePath = resolved
+          }
+        }
+      }
+
       if (!filePath) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
