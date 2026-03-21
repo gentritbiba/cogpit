@@ -465,7 +465,11 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
         current = finalizeTurn(turns, current, lastTurnTimestamp)
       }
       current ??= createTurn(currentTurnId, timestamp, currentModel)
-      current.userMessage = payload.message
+      const localImages = (Array.isArray(payload.local_images) ? payload.local_images : []).filter(
+        (p): p is string => typeof p === "string" && p.length > 0,
+      )
+      const imageSuffix = localImages.map((p) => `\n![image](<${p}>)`).join("")
+      current.userMessage = payload.message + imageSuffix
       current.timestamp = current.timestamp || timestamp
       lastTurnTimestamp = timestamp
       continue

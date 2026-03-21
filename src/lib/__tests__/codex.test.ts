@@ -30,11 +30,15 @@ function turnContext(overrides: Record<string, unknown> = {}): string {
   })
 }
 
-function userMessage(text: string, timestamp = "2024-01-01T00:00:02.000Z"): string {
+function userMessage(text: string, timestamp = "2024-01-01T00:00:02.000Z", localImages?: string[]): string {
   return JSON.stringify({
     type: "event_msg",
     timestamp,
-    payload: { type: "user_message", message: text },
+    payload: {
+      type: "user_message",
+      message: text,
+      ...(localImages && { local_images: localImages }),
+    },
   })
 }
 
@@ -651,6 +655,28 @@ describe("parseCodexSession", () => {
     expect(subBlocks).toHaveLength(1)
     expect(subBlocks[0].messages).toHaveLength(1)
     expect(subBlocks[0].messages[0].agentId).toBe("agent-abc-123")
+  })
+
+  it("appends local_images as markdown image references in userMessage", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("check this screenshot", undefined, ["/tmp/screenshot1.png", "/var/folders/abc/image2.jpg"]),
+      assistantMessage("Got it"),
+    ].join("\n")
+    const session = parseCodexSession(text)
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toBe(
+      "check this screenshot\n![image](</tmp/screenshot1.png>)\n![image](</var/folders/abc/image2.jpg>)",
+    )
+  })
+
+  it("handles empty local_images gracefully", () => {
+    const text = [sessionMeta(), turnContext(), userMessage("just text", undefined, []), assistantMessage("ok")].join(
+      "\n",
+    )
+    const session = parseCodexSession(text)
+    expect(session.turns[0].userMessage).toBe("just text")
   })
 })
 
