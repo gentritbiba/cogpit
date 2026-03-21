@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { readFileSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs"
+import { type Dirent, type FSWatcher, readFileSync, readdirSync, statSync, unlinkSync, watch } from "node:fs"
 import { join, basename } from "node:path"
 import { parseSession, getUserMessageText } from "./parser"
 
@@ -22,6 +22,26 @@ export interface SearchHit {
   location: string
   snippet: string
   matchCount: number
+}
+
+/** A discovered JSONL file awaiting indexing. */
+interface FileDescriptor {
+  path: string
+  sessionId: string
+  mtimeMs: number
+  isSubagent: boolean
+  parentSessionId: string | null
+}
+
+/**
+ * Max characters of content stored per FTS5 row. Capping at 4K chars keeps
+ * the index manageable. Tool call results (file reads, grep dumps) are often
+ * 50-200KB but the interesting search content is almost always near the start.
+ */
+const MAX_CONTENT_LEN = 4096
+
+function truncContent(text: string): string {
+  return text.length > MAX_CONTENT_LEN ? text.slice(0, MAX_CONTENT_LEN) : text
 }
 
 export class SearchIndex {
@@ -62,7 +82,7 @@ export class SearchIndex {
         source_file,
         location,
         content,
-        tokenize = 'trigram'
+        tokenize = 'unicode61'
       )`)
     }
   }
@@ -92,6 +112,82 @@ export class SearchIndex {
     }
   }
 
+  /** Index tool call inputs and results under the given location prefix. */
+  private insertToolCalls(
+    insert: ReturnType<Database["prepare"]>,
+    sessionId: string,
+    filePath: string,
+    prefix: string,
+    toolCalls: ReturnType<typeof parseSession>["turns"][0]["toolCalls"],
+  ): void {
+    for (const tc of toolCalls) {
+      const inputStr = JSON.stringify(tc.input)
+      if (inputStr && inputStr !== "{}") {
+        insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/input`, truncContent(inputStr))
+      }
+      if (tc.result) {
+        insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/result`, truncContent(tc.result))
+      }
+    }
+  }
+
+  /**
+   * Insert all searchable content from a parsed session into the FTS5 index.
+   * Shared by both `indexFile` (single-file) and `buildFull` (batch).
+   */
+  private insertSessionContent(
+    insert: ReturnType<Database["prepare"]>,
+    sessionId: string,
+    filePath: string,
+    session: ReturnType<typeof parseSession>,
+  ): void {
+    for (let i = 0; i < session.turns.length; i++) {
+      const turn = session.turns[i]
+      const prefix = `turn/${i}`
+
+      const userText = getUserMessageText(turn.userMessage)
+      if (userText.trim()) {
+        insert.run(sessionId, filePath, `${prefix}/userMessage`, truncContent(userText))
+      }
+
+      const assistantJoined = turn.assistantText.join("\n\n").trim()
+      if (assistantJoined) {
+        insert.run(sessionId, filePath, `${prefix}/assistantMessage`, truncContent(assistantJoined))
+      }
+
+      const thinkingText = turn.thinking
+        .filter((t) => t.thinking && t.thinking.length > 0)
+        .map((t) => t.thinking)
+        .join("\n\n")
+        .trim()
+      if (thinkingText) {
+        insert.run(sessionId, filePath, `${prefix}/thinking`, truncContent(thinkingText))
+      }
+
+      this.insertToolCalls(insert, sessionId, filePath, prefix, turn.toolCalls)
+
+      for (const sa of turn.subAgentActivity) {
+        const saPrefix = `agent/${sa.agentId}`
+        const saText = sa.text.join("\n\n").trim()
+        if (saText) {
+          insert.run(sessionId, filePath, `${saPrefix}/assistantMessage`, truncContent(saText))
+        }
+        const saThinking = sa.thinking
+          .filter((t) => t.length > 0)
+          .join("\n\n")
+          .trim()
+        if (saThinking) {
+          insert.run(sessionId, filePath, `${saPrefix}/thinking`, truncContent(saThinking))
+        }
+        this.insertToolCalls(insert, sessionId, filePath, saPrefix, sa.toolCalls)
+      }
+
+      if (turn.compactionSummary) {
+        insert.run(sessionId, filePath, `${prefix}/compactionSummary`, truncContent(turn.compactionSummary))
+      }
+    }
+  }
+
   /**
    * Parse a JSONL file and insert all searchable content into the FTS5 index.
    * Idempotent: deletes old data for the file before re-indexing.
@@ -103,17 +199,15 @@ export class SearchIndex {
     mtimeMs?: number,
     opts?: { isSubagent?: boolean; parentSessionId?: string | null }
   ): void {
-    // Derive sessionId from filename if not provided
     if (!sessionId) {
       sessionId = basename(filePath, ".jsonl")
     }
-    // Derive mtimeMs from file stat if not provided
     if (mtimeMs == null) {
       mtimeMs = statSync(filePath).mtimeMs
     }
 
     const content = readFileSync(filePath, "utf-8")
-    const session = parseSession(content)
+    const session = parseSession(content, { skipStats: true })
 
     const isSubagent = opts?.isSubagent ? 1 : 0
     const parentSessionId = opts?.parentSessionId ?? null
@@ -121,7 +215,6 @@ export class SearchIndex {
     const insert = this.db.prepare(
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
-
     const deleteContent = this.db.prepare(
       "DELETE FROM search_content WHERE source_file = ?"
     )
@@ -133,81 +226,9 @@ export class SearchIndex {
     )
 
     const txn = this.db.transaction(() => {
-      // Delete old data for this specific file (idempotent re-index)
-      // Scoped by source_file, not session_id, to avoid deleting content from
-      // other files that share the same session_id (e.g. parent + subagent)
       deleteContent.run(filePath)
       deleteFile.run(filePath)
-
-      for (let i = 0; i < session.turns.length; i++) {
-        const turn = session.turns[i]
-        const prefix = `turn/${i}`
-
-        // User message
-        const userText = getUserMessageText(turn.userMessage)
-        if (userText.trim()) {
-          insert.run(sessionId, filePath, `${prefix}/userMessage`, userText)
-        }
-
-        // Assistant text
-        const assistantJoined = turn.assistantText.join("\n\n").trim()
-        if (assistantJoined) {
-          insert.run(sessionId, filePath, `${prefix}/assistantMessage`, assistantJoined)
-        }
-
-        // Thinking blocks
-        const thinkingText = turn.thinking
-          .filter((t) => t.thinking && t.thinking.length > 0)
-          .map((t) => t.thinking)
-          .join("\n\n")
-          .trim()
-        if (thinkingText) {
-          insert.run(sessionId, filePath, `${prefix}/thinking`, thinkingText)
-        }
-
-        // Tool calls — inputs and results
-        for (const tc of turn.toolCalls) {
-          const inputStr = JSON.stringify(tc.input)
-          if (inputStr && inputStr !== "{}") {
-            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/input`, inputStr)
-          }
-          if (tc.result) {
-            insert.run(sessionId, filePath, `${prefix}/toolCall/${tc.id}/result`, tc.result)
-          }
-        }
-
-        // Sub-agent inline activity
-        for (const sa of turn.subAgentActivity) {
-          const saPrefix = `agent/${sa.agentId}`
-          const saText = sa.text.join("\n\n").trim()
-          if (saText) {
-            insert.run(sessionId, filePath, `${saPrefix}/assistantMessage`, saText)
-          }
-          const saThinking = sa.thinking
-            .filter((t) => t.length > 0)
-            .join("\n\n")
-            .trim()
-          if (saThinking) {
-            insert.run(sessionId, filePath, `${saPrefix}/thinking`, saThinking)
-          }
-          for (const tc of sa.toolCalls) {
-            const inputStr = JSON.stringify(tc.input)
-            if (inputStr && inputStr !== "{}") {
-              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/input`, inputStr)
-            }
-            if (tc.result) {
-              insert.run(sessionId, filePath, `${saPrefix}/toolCall/${tc.id}/result`, tc.result)
-            }
-          }
-        }
-
-        // Compaction summary
-        if (turn.compactionSummary) {
-          insert.run(sessionId, filePath, `${prefix}/compactionSummary`, turn.compactionSummary)
-        }
-      }
-
-      // Track the file
+      this.insertSessionContent(insert, sessionId!, filePath, session)
       insertFile.run(filePath, mtimeMs, sessionId, isSubagent, parentSessionId)
     })
 
@@ -218,7 +239,7 @@ export class SearchIndex {
   /**
    * Query the FTS5 index and return structured search results.
    *
-   * - FTS5 trigram tokenizer is case-insensitive by default.
+   * - FTS5 unicode61 tokenizer is case-insensitive by default.
    * - When `caseSensitive` is true, a post-filter checks the original query
    *   against the snippet text (exact case match).
    * - When `maxAgeMs` is provided, only files whose mtime in `indexed_files`
@@ -240,7 +261,7 @@ export class SearchIndex {
     const maxAgeMs = opts?.maxAgeMs
     const caseSensitive = opts?.caseSensitive ?? false
 
-    // FTS5 trigram requires the query wrapped in double quotes for phrase matching.
+    // FTS5 unicode61: wrap multi-word queries in double quotes for phrase matching.
     // Escape any internal double quotes by doubling them.
     const ftsQuery = `"${query.replace(/"/g, '""')}"`
 
@@ -282,10 +303,10 @@ export class SearchIndex {
       filePath: row.source_file,
       location: row.location,
       snippet: row.snippet,
-      matchCount: 1, // FTS5 trigram doesn't expose per-row match count; 1 = "at least one match"
+      matchCount: 1, // FTS5 doesn't expose per-row match count; 1 = "at least one match"
     }))
 
-    // Post-filter for case sensitivity — FTS5 trigram is always case-insensitive,
+    // Post-filter for case sensitivity — FTS5 unicode61 is case-insensitive by default,
     // so we apply an exact-case check on the snippet text when requested.
     if (caseSensitive) {
       hits = hits.filter((h) => h.snippet.includes(query))
@@ -338,16 +359,61 @@ export class SearchIndex {
    * Structure: projectsDir/{projectName}/{sessionId}.jsonl
    * Subagents:  projectsDir/{projectName}/{sessionId}/subagents/agent-{id}.jsonl
    *
+   * Optimized: discovers all files first, then processes them in a single
+   * SQLite transaction with pre-prepared statements. This avoids the overhead
+   * of 3000+ individual transactions (each forcing a disk sync).
+   *
    * Stores `projectsDir` as a class field so `rebuild()` can reuse it.
    */
   buildFull(projectsDir: string): void {
     this.projectsDir = projectsDir
 
-    // Clear everything
-    this.db.exec("DELETE FROM search_content")
-    this.db.exec("DELETE FROM indexed_files")
+    // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
+    // so reusing a bloated DB file makes rebuilds slower than starting fresh.
+    this.db.close()
+    try { unlinkSync(this.dbPath) } catch {}
+    try { unlinkSync(this.dbPath + "-wal") } catch {}
+    try { unlinkSync(this.dbPath + "-shm") } catch {}
+    this.db = new Database(this.dbPath)
+    this.db.exec("PRAGMA journal_mode = WAL")
+    this.db.exec("PRAGMA synchronous = OFF")
+    this.db.exec("PRAGMA cache_size = -64000")
+    this.db.exec("PRAGMA temp_store = MEMORY")
+    this.db.exec("PRAGMA mmap_size = 268435456")
+    this.initSchema()
 
-    this.indexProjectsDir(projectsDir)
+    // Discover all files first (fast — just readdir + stat)
+    const files: FileDescriptor[] = []
+
+    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+      files.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
+    })
+
+    // Prepare statements once, run all inserts in a single transaction
+    const insert = this.db.prepare(
+      "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
+    )
+    const insertFile = this.db.prepare(
+      "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
+    )
+
+    const txn = this.db.transaction(() => {
+      for (const file of files) {
+        try {
+          const content = readFileSync(file.path, "utf-8")
+          const session = parseSession(content, { skipStats: true })
+          this.insertSessionContent(insert, file.sessionId, file.path, session)
+          insertFile.run(file.path, file.mtimeMs, file.sessionId, file.isSubagent ? 1 : 0, file.parentSessionId)
+        } catch {
+          // Skip files that fail to parse
+        }
+      }
+    })
+
+    txn()
+
+    // Restore safe sync mode for subsequent incremental operations
+    this.db.exec("PRAGMA synchronous = NORMAL")
     this._lastFullBuild = new Date().toISOString()
     this._lastUpdate = new Date().toISOString()
   }
@@ -355,6 +421,10 @@ export class SearchIndex {
   /**
    * Incrementally re-index only files whose mtime has changed since last index.
    * New files (not in indexed_files) are always indexed.
+   *
+   * WARNING: This walks ALL files under projectsDir and stats each one.
+   * On large session stores (3000+ files) this can take minutes.
+   * Prefer `updateRecent()` for CLI search paths.
    */
   updateStale(projectsDir: string): void {
     this.projectsDir = projectsDir
@@ -363,13 +433,7 @@ export class SearchIndex {
       "SELECT mtime_ms FROM indexed_files WHERE file_path = ?"
     )
 
-    const filesToIndex: Array<{
-      path: string
-      sessionId: string
-      mtimeMs: number
-      isSubagent: boolean
-      parentSessionId: string | null
-    }> = []
+    const filesToIndex: FileDescriptor[] = []
 
     this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
       const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
@@ -395,26 +459,64 @@ export class SearchIndex {
   }
 
   /**
+   * Lightweight incremental update for CLI search paths.
+   *
+   * Still walks and stats all files via `discoverFiles`, but skips DB lookups
+   * for files with mtime <= the high-water mark that are already indexed.
+   * Caps re-indexing to `maxFiles` to prevent blocking on large backlogs
+   * (run `index rebuild` for a full catch-up).
+   */
+  updateRecent(projectsDir: string, maxFiles: number = 50): void {
+    this.projectsDir = projectsDir
+
+    // Find the high-water mark — newest indexed file mtime
+    const row = this.db.prepare(
+      "SELECT MAX(mtime_ms) as max_mtime FROM indexed_files"
+    ).get() as { max_mtime: number | null } | undefined
+    const highWater = row?.max_mtime ?? 0
+
+    const getIndexed = this.db.prepare(
+      "SELECT mtime_ms FROM indexed_files WHERE file_path = ?"
+    )
+
+    const filesToIndex: FileDescriptor[] = []
+
+    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+      // Skip files that are already indexed with a current mtime
+      if (mtimeMs <= highWater) {
+        const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
+        if (existing && existing.mtime_ms >= mtimeMs) return // already indexed and unchanged
+      }
+      filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
+    })
+
+    // Sort newest first so the most relevant files get indexed within the cap
+    filesToIndex.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    const batch = filesToIndex.slice(0, maxFiles)
+
+    for (const file of batch) {
+      try {
+        this.indexFile(file.path, file.sessionId, file.mtimeMs, {
+          isSubagent: file.isSubagent,
+          parentSessionId: file.parentSessionId,
+        })
+      } catch {
+        // Skip files that fail to parse
+      }
+    }
+
+    if (batch.length > 0) {
+      this._lastUpdate = new Date().toISOString()
+    }
+  }
+
+  /**
    * Re-run buildFull using the previously stored projectsDir.
    * No-op if projectsDir was never set.
    */
   rebuild(): void {
     if (!this.projectsDir) return
     this.buildFull(this.projectsDir)
-  }
-
-  /**
-   * Walk all project directories under `projectsDir` and index every discovered
-   * JSONL file (both sessions and subagents).
-   */
-  private indexProjectsDir(projectsDir: string): void {
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
-      try {
-        this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
-      } catch {
-        // Skip files that fail to parse
-      }
-    })
   }
 
   /**
@@ -439,34 +541,26 @@ export class SearchIndex {
       parentSessionId: string | null
     ) => void
   ): void {
-    let entries: string[]
+    let entries: Dirent[]
     try {
-      entries = readdirSync(projectsDir)
-    } catch {
+      entries = readdirSync(projectsDir, { withFileTypes: true })    } catch {
       return
     }
 
-    for (const projectName of entries) {
-      if (projectName === "memory") continue
-      const projectDir = join(projectsDir, projectName)
-      try {
-        const s = statSync(projectDir)
-        if (!s.isDirectory()) continue
-      } catch {
-        continue
-      }
+    for (const entry of entries) {
+      if (entry.name === "memory" || !entry.isDirectory()) continue
+      const projectDir = join(projectsDir, entry.name)
 
-      let files: string[]
+      let files: Dirent[]
       try {
-        files = readdirSync(projectDir)
-      } catch {
+        files = readdirSync(projectDir, { withFileTypes: true })      } catch {
         continue
       }
 
       for (const file of files) {
-        if (!file.endsWith(".jsonl")) continue
-        const filePath = join(projectDir, file)
-        const sessionId = basename(file, ".jsonl")
+        if (!file.name.endsWith(".jsonl") || !file.isFile()) continue
+        const filePath = join(projectDir, file.name)
+        const sessionId = basename(file.name, ".jsonl")
         try {
           const s = statSync(filePath)
           callback(filePath, sessionId, s.mtimeMs, false, null)

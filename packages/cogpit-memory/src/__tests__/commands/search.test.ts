@@ -257,7 +257,7 @@ describe("search command", () => {
         toolInput: { file_path: "/src/authentication.ts" },
       })
 
-      const result = await searchSessions("authentication.ts", { maxAge: "1d" })
+      const result = await searchSessions("authentication.ts", { maxAge: "1d" }, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ location: string; toolName?: string }> }> }
       expect(resp.results.length).toBe(1)
@@ -356,7 +356,7 @@ describe("search command", () => {
       const longMessage = "A".repeat(200) + " NEEDLE " + "B".repeat(200)
       writeSession(projDir, "s1.jsonl", { userMessage: longMessage })
 
-      const result = await searchSessions("NEEDLE", { maxAge: "1d" })
+      const result = await searchSessions("NEEDLE", { maxAge: "1d" }, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ snippet: string }> }> }
       expect(resp.results.length).toBe(1)
@@ -374,7 +374,7 @@ describe("search command", () => {
         userMessage: "alpha beta alpha gamma alpha",
       })
 
-      const result = await searchSessions("alpha", { maxAge: "1d" })
+      const result = await searchSessions("alpha", { maxAge: "1d" }, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ matchCount: number }> }> }
       expect(resp.results.length).toBe(1)
@@ -507,7 +507,7 @@ describe("search command", () => {
         userMessage: "subagent-keyword used deeper in the agent",
       })
 
-      const result = await searchSessions("subagent-keyword", { maxAge: "1d", depth: 2 })
+      const result = await searchSessions("subagent-keyword", { maxAge: "1d", depth: 2 }, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ hits: Array<{ location: string }> }> }
       // The parent session should match, plus subagent hits should be included
@@ -531,7 +531,7 @@ describe("search command", () => {
       })
 
       // Raw-scan pre-filters on the parent file, so this should not match
-      const result = await searchSessions("orphaned-subagent-term", { maxAge: "1d", depth: 2 })
+      const result = await searchSessions("orphaned-subagent-term", { maxAge: "1d", depth: 2 }, null)
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: unknown[] }
       expect(resp.results.length).toBe(0)

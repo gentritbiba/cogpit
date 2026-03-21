@@ -4,6 +4,7 @@ import type {
   ContentBlock,
   ImageBlock,
   AssistantMessage,
+  SessionStats,
   UserContent,
 } from "./types"
 import { buildTurns } from "./turnBuilder"
@@ -78,20 +79,34 @@ function extractSessionMetadata(messages: RawMessage[]) {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-export function parseSession(jsonlText: string): ParsedSession {
+function emptyStats(turnCount: number): SessionStats {
+  return {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheCreationTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCostUSD: 0,
+    toolCallCounts: {},
+    errorCount: 0,
+    totalDurationMs: 0,
+    turnCount,
+  }
+}
+
+export function parseSession(jsonlText: string, opts?: { skipStats?: boolean }): ParsedSession {
   if (isCodexSessionText(jsonlText)) {
     return parseCodexSession(jsonlText)
   }
   const rawMessages = parseLines(jsonlText)
   const metadata = extractSessionMetadata(rawMessages)
   const turns = buildTurns(rawMessages)
-  const stats = computeStats(turns)
+  const stats = opts?.skipStats ? emptyStats(turns.length) : computeStats(turns)
 
   return {
     ...metadata,
     turns,
     stats,
-    rawMessages,
+    rawMessages: opts?.skipStats ? [] : rawMessages,
     agentKind: "claude" as const,
   }
 }
