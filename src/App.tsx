@@ -68,6 +68,7 @@ import {
 } from "@/components/ui/resizable"
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
+import { DiffFontSizeProvider } from "@/contexts/DiffFontSizeContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 import { PtyProvider } from "@/contexts/PtyContext"
 
@@ -913,6 +914,7 @@ export default function App() {
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
+      <DiffFontSizeProvider>
       <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
@@ -1069,6 +1071,7 @@ export default function App() {
       </div>
       </SessionProvider>
       </PtyProvider>
+      </DiffFontSizeProvider>
       </AppProvider>
     )
   }
@@ -1076,6 +1079,7 @@ export default function App() {
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
     <AppProvider value={appContextValue}>
+    <DiffFontSizeProvider>
     <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
@@ -1323,6 +1327,7 @@ export default function App() {
     </div>
     </SessionProvider>
     </PtyProvider>
+    </DiffFontSizeProvider>
     </AppProvider>
   )
 }

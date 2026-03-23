@@ -13,6 +13,7 @@ import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { useFileSnapshots } from "@/hooks/useFileSnapshots"
 import { DiffViewModal } from "@/components/diff/DiffViewModal"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { useDiffFontSize } from "@/contexts/DiffFontSizeContext"
 
 // ── Simple line-level diff (LCS-based, optimized) ──────────────────────────
 
@@ -367,6 +368,7 @@ function DiffLines({
   /** 1-based starting line offset for real file line numbers. */
   startLine?: number
 }): React.ReactElement {
+  const { fontSize } = useDiffFontSize()
   const [expandedSeparators, setExpandedSeparators] = useState<Set<number>>(new Set())
   const collapsed = useMemo(() => collapseUnchangedLines(lines), [lines])
 
@@ -399,9 +401,10 @@ function DiffLines({
   return (
     <div
       className={cn(
-        "font-mono text-[11px] leading-[1.6] overflow-x-auto",
+        "font-mono leading-[1.6] overflow-x-auto",
         compact && "max-h-64 overflow-y-auto"
       )}
+      style={{ fontSize: `${fontSize}px` }}
     >
       {itemsToRender.map((item, idx) => {
         if (item.kind === "separator") {

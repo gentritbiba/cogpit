@@ -4,6 +4,7 @@ import { generateDiffFile } from "@git-diff-view/file"
 import type { DiffFile } from "@git-diff-view/core"
 import { getDiffHighlighter } from "@/lib/diffHighlighter"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { useDiffFontSize } from "@/contexts/DiffFontSizeContext"
 import { getLangFromPath } from "@/lib/shiki"
 import "@git-diff-view/react/styles/diff-view.css"
 
@@ -26,6 +27,7 @@ function getCacheKey(oldContent: string, newContent: string, filePath: string, i
 
 export function FullDiffView({ oldContent, newContent, filePath, mode = "split" }: FullDiffViewProps) {
   const isDark = useIsDarkMode()
+  const { fontSize } = useDiffFontSize()
   const [diffFile, setDiffFile] = useState<DiffFile | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -102,7 +104,7 @@ export function FullDiffView({ oldContent, newContent, filePath, mode = "split" 
       diffViewTheme={isDark ? "dark" : "light"}
       diffViewHighlight
       diffViewWrap
-      diffViewFontSize={13}
+      diffViewFontSize={fontSize}
     />
   )
 }
