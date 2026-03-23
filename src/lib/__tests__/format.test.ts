@@ -374,12 +374,20 @@ describe("formatCost", () => {
 // ── getContextLimit ───────────────────────────────────────────────────────
 
 describe("getContextLimit", () => {
-  it("returns 200k for opus models", () => {
-    expect(getContextLimit("claude-opus-4-6")).toBe(200_000)
+  it("returns 1M for opus-4-6 (supports extended context)", () => {
+    expect(getContextLimit("claude-opus-4-6")).toBe(1_000_000)
   })
 
-  it("returns 200k for sonnet models", () => {
-    expect(getContextLimit("claude-sonnet-4-5")).toBe(200_000)
+  it("returns 1M for sonnet-4-6 (supports extended context)", () => {
+    expect(getContextLimit("claude-sonnet-4-6")).toBe(1_000_000)
+  })
+
+  it("returns 1M for opus-4-5 (supports extended context)", () => {
+    expect(getContextLimit("claude-opus-4-5-20251101")).toBe(1_000_000)
+  })
+
+  it("returns 1M for sonnet-4-5 (supports extended context)", () => {
+    expect(getContextLimit("claude-sonnet-4-5-20250929")).toBe(1_000_000)
   })
 
   it("returns 200k for haiku models", () => {
@@ -390,12 +398,8 @@ describe("getContextLimit", () => {
     expect(getContextLimit("gpt-4")).toBe(200_000)
   })
 
-  it("returns 1M for opus[1m] models", () => {
+  it("returns 1M for explicit [1m] suffix", () => {
     expect(getContextLimit("claude-opus-4-6[1m]")).toBe(1_000_000)
-  })
-
-  it("returns 1M for sonnet[1m] models", () => {
-    expect(getContextLimit("claude-sonnet-4-6[1m]")).toBe(1_000_000)
   })
 })
 
@@ -416,7 +420,7 @@ describe("getContextUsage", () => {
   it("computes usage from the last assistant message", () => {
     const msg = assistantMsg([{ type: "text", text: "ok" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_1",
         role: "assistant",
         content: [{ type: "text", text: "ok" }],
@@ -444,7 +448,7 @@ describe("getContextUsage", () => {
   it("uses the last assistant message when multiple exist", () => {
     const msg1 = assistantMsg([{ type: "text", text: "first" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_1",
         role: "assistant",
         content: [{ type: "text", text: "first" }],
@@ -454,7 +458,7 @@ describe("getContextUsage", () => {
     })
     const msg2 = assistantMsg([{ type: "text", text: "second" }], {
       message: {
-        model: "claude-sonnet-4-5-20250101",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_2",
         role: "assistant",
         content: [{ type: "text", text: "second" }],
@@ -470,7 +474,7 @@ describe("getContextUsage", () => {
   it("caps percent at 100", () => {
     const msg = assistantMsg([{ type: "text", text: "big" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_1",
         role: "assistant",
         content: [{ type: "text", text: "big" }],
@@ -487,7 +491,7 @@ describe("getContextUsage", () => {
   it("handles missing optional cache fields", () => {
     const msg = assistantMsg([{ type: "text", text: "ok" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_1",
         role: "assistant",
         content: [{ type: "text", text: "ok" }],
@@ -503,7 +507,7 @@ describe("getContextUsage", () => {
     // compactAt = 200000 - 33000 = 167000
     const msg = assistantMsg([{ type: "text", text: "boundary" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_boundary",
         role: "assistant",
         content: [{ type: "text", text: "boundary" }],
@@ -520,7 +524,7 @@ describe("getContextUsage", () => {
   it("returns 0 percent when used is 0", () => {
     const msg = assistantMsg([{ type: "text", text: "empty" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_zero",
         role: "assistant",
         content: [{ type: "text", text: "empty" }],
@@ -537,7 +541,7 @@ describe("getContextUsage", () => {
   it("skips non-assistant messages when searching backwards", () => {
     const assistantRaw = assistantMsg([{ type: "text", text: "data" }], {
       message: {
-        model: "claude-opus-4-6-20250115",
+        model: "claude-haiku-4-5-20251001",
         id: "msg_mixed",
         role: "assistant",
         content: [{ type: "text", text: "data" }],
@@ -551,6 +555,52 @@ describe("getContextUsage", () => {
     const result = getContextUsage([assistantRaw, userRaw, systemRaw])
     // Should find the assistant message
     expect(result!.used).toBe(40_000)
+  })
+
+  it("detects 1M context for opus-4-6 model", () => {
+    const msg = assistantMsg([{ type: "text", text: "ok" }], {
+      message: {
+        model: "claude-opus-4-6",
+        id: "msg_opus",
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 50_000, output_tokens: 1_000 },
+      },
+    })
+    const result = getContextUsage([msg])
+    expect(result!.limit).toBe(1_000_000)
+    expect(result!.compactAt).toBe(1_000_000 - 33_000)
+  })
+
+  it("detects 1M context via usage fallback for unknown models exceeding 200k", () => {
+    const msg = assistantMsg([{ type: "text", text: "big" }], {
+      message: {
+        model: "unknown-model",
+        id: "msg_big",
+        role: "assistant",
+        content: [{ type: "text", text: "big" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 250_000, output_tokens: 2_000 },
+      },
+    })
+    const result = getContextUsage([msg])
+    expect(result!.limit).toBe(1_000_000)
+  })
+
+  it("uses 200k for haiku model", () => {
+    const msg = assistantMsg([{ type: "text", text: "ok" }], {
+      message: {
+        model: "claude-haiku-4-5-20251001",
+        id: "msg_haiku",
+        role: "assistant",
+        content: [{ type: "text", text: "ok" }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 50_000, output_tokens: 1_000 },
+      },
+    })
+    const result = getContextUsage([msg])
+    expect(result!.limit).toBe(200_000)
   })
 })
 

@@ -135,8 +135,56 @@ const AUTO_COMPACT_BUFFER = 33_000
 const DEFAULT_CONTEXT_LIMIT = 200_000
 const EXTENDED_CONTEXT_LIMIT = 1_000_000
 
+/**
+ * Models that support 1M extended context in Claude Code.
+ * The API model field never includes "[1m]", and the system prompt hint is not
+ * stored in session JSONL — so we cannot distinguish 200k from 1M sessions.
+ * Default to 1M for models that support it, since most Claude Code users use
+ * extended context and a 200k default produces misleading context percentages.
+ */
+const EXTENDED_CONTEXT_MODELS = ["opus-4-6", "sonnet-4-6", "opus-4-5", "sonnet-4-5"]
+
 export function getContextLimit(model: string): number {
   if (model.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
+  for (const m of EXTENDED_CONTEXT_MODELS) {
+    if (model.includes(m)) return EXTENDED_CONTEXT_LIMIT
+  }
+  return DEFAULT_CONTEXT_LIMIT
+}
+
+/**
+ * Detect the effective context limit for a session by scanning raw messages.
+ *
+ * Uses model-based detection (models that support 1M context default to 1M)
+ * plus usage-based fallback (if any turn exceeds 200k tokens, it must be 1M).
+ */
+function detectContextLimit(rawMessages: readonly RawMessage[]): number {
+  let maxUsed = 0
+  let detectedModel = ""
+
+  for (const msg of rawMessages) {
+    if (msg.type === "assistant") {
+      if (!detectedModel && msg.message.model) {
+        detectedModel = msg.message.model
+      }
+      const u = msg.message.usage
+      const input = typeof u.input_tokens === "number" ? u.input_tokens : 0
+      const cacheCreate = typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : 0
+      const cacheRead = typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : 0
+      const total = input + cacheCreate + cacheRead
+      if (total > maxUsed) maxUsed = total
+    }
+  }
+
+  // Model-based detection
+  if (detectedModel) {
+    const modelLimit = getContextLimit(detectedModel)
+    if (modelLimit === EXTENDED_CONTEXT_LIMIT) return EXTENDED_CONTEXT_LIMIT
+  }
+
+  // Usage-based fallback: if any turn exceeded 200k, must be 1M
+  if (maxUsed > DEFAULT_CONTEXT_LIMIT) return EXTENDED_CONTEXT_LIMIT
+
   return DEFAULT_CONTEXT_LIMIT
 }
 
@@ -172,7 +220,7 @@ export function getContextUsage(
       const cacheCreate = typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : 0
       const cacheRead = typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : 0
       const used = input + cacheCreate + cacheRead
-      const limit = getContextLimit(msg.message.model ?? "")
+      const limit = detectContextLimit(rawMessages)
       const compactAt = limit - AUTO_COMPACT_BUFFER
       return {
         used,
