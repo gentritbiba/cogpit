@@ -11,7 +11,7 @@
   "type": "module",
   "main": "out/main/main.js",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "rm -rf node_modules/.vite-temp && vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
