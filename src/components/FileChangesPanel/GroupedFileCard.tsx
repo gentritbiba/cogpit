@@ -1,8 +1,7 @@
-import { useState, memo, useCallback } from "react"
+import { memo, useCallback } from "react"
 import { Code2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import { authFetch } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import { GitStatusBadge, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
@@ -51,23 +50,9 @@ interface GroupedFileCardProps {
 }
 
 export const GroupedFileCard = memo(function GroupedFileCard({ file, isHighlighted, onDiffLoaded }: GroupedFileCardProps) {
-  const [loading, setLoading] = useState(false)
-
-  const handleClick = useCallback(async () => {
-    if (loading) return
-    setLoading(true)
-    try {
-      const res = await authFetch(`/api/git-file-diff?path=${encodeURIComponent(file.filePath)}`)
-      const data = await res.json()
-      if (data.head !== undefined && data.working !== undefined) {
-        onDiffLoaded?.({ head: data.head, working: data.working, filePath: file.filePath })
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false)
-    }
-  }, [file.filePath, loading, onDiffLoaded])
+  const handleClick = useCallback(() => {
+    onDiffLoaded?.({ head: file.netOriginal, working: file.netCurrent, filePath: file.filePath })
+  }, [file.filePath, file.netOriginal, file.netCurrent, onDiffLoaded])
 
   const ext = file.filePath.split(".").pop()?.toLowerCase() ?? ""
   const extColor = EXT_COLORS[ext] ?? "text-muted-foreground"
@@ -89,7 +74,6 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, isHighlight
       <div className="flex items-center w-full bg-elevation-2 rounded hover:bg-elevation-3 transition-colors group">
         <button
           onClick={handleClick}
-          disabled={loading}
           className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1 cursor-pointer"
         >
           <span className={cn("text-[10px] font-mono font-bold shrink-0", extColor)}>
@@ -97,10 +81,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, isHighlight
           </span>
           <GitStatusBadge status={file.gitStatus} />
           {file.subAgentId && <SubAgentIndicator agentId={file.subAgentId} />}
-          <span className={cn(
-            "text-[10px] text-muted-foreground font-mono truncate",
-            loading && "opacity-50",
-          )}>
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
             {file.shortPath}
           </span>
           <span className="text-[10px] text-muted-foreground/50 shrink-0">
