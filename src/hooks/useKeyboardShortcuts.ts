@@ -21,6 +21,10 @@ interface UseKeyboardShortcutsOpts {
   onHistoryForward: () => HistoryEntry | null
   onNavigateToSession: (dirName: string, fileName: string) => void
   onCommitNavigation?: () => void
+  /** Tab cycling callbacks — when present, Ctrl+Tab cycles tabs instead of MRU history */
+  onNextTab?: () => void
+  onPrevTab?: () => void
+  onCloseTab?: () => void
 }
 
 /** Query all live-session buttons in DOM order */
@@ -68,6 +72,9 @@ export function useKeyboardShortcuts({
   onHistoryForward,
   onNavigateToSession,
   onCommitNavigation,
+  onNextTab,
+  onPrevTab,
+  onCloseTab,
 }: UseKeyboardShortcutsOpts) {
   useEffect(() => {
     if (isMobile) return
@@ -134,14 +141,26 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Ctrl+Tab / Ctrl+Shift+Tab — MRU session switching (like Firefox tabs)
+      // Ctrl+Tab / Ctrl+Shift+Tab — cycle through open tabs (if tabs exist) or MRU history
       // Only Ctrl (not Cmd) since Cmd+Tab is macOS app switcher.
       // In browsers, Ctrl+Tab switches browser tabs so this naturally only works in Electron.
       if (e.ctrlKey && !e.metaKey && e.key === "Tab") {
         e.preventDefault()
-        const entry = e.shiftKey ? onHistoryForward() : onHistoryBack()
-        if (entry) {
-          onNavigateToSession(entry.dirName, entry.fileName)
+        if (onNextTab && onPrevTab) {
+          e.shiftKey ? onPrevTab() : onNextTab()
+        } else {
+          const entry = e.shiftKey ? onHistoryForward() : onHistoryBack()
+          if (entry) {
+            onNavigateToSession(entry.dirName, entry.fileName)
+          }
+        }
+      }
+
+      // Ctrl+W — close current tab
+      if (e.ctrlKey && !e.metaKey && e.key === "w" && !e.shiftKey) {
+        if (onCloseTab) {
+          e.preventDefault()
+          onCloseTab()
         }
       }
 
@@ -192,5 +211,5 @@ export function useKeyboardShortcuts({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation, onNextTab, onPrevTab, onCloseTab])
 }

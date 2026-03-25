@@ -65,6 +65,8 @@ export interface SessionBrowserProps {
   onDuplicateSession?: (dirName: string, fileName: string) => void
   /** Delete a session file */
   onDeleteSession?: (dirName: string, fileName: string) => void
+  /** Open a session in a new tab (Ctrl+click / middle-click) */
+  onOpenInNewTab?: (dirName: string, fileName: string, label: string) => void
   /** Called before fetching a new session to free connections held by the current session */
   onBeforeSessionSwitch?: () => void
   /** Ref callback to imperatively trigger a refresh of the live sessions list */

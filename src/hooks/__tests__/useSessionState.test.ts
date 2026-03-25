@@ -837,6 +837,113 @@ describe("useSessionState", () => {
     })
   })
 
+  // ── RESTORE_TAB_SNAPSHOT ─────────────────────────────────────────
+
+  describe("RESTORE_TAB_SNAPSHOT", () => {
+    it("restores session, source, and UI state from a tab snapshot", () => {
+      const hook = renderState()
+      const session = makeSession({ sessionId: "restored" })
+      const source = makeSource({ dirName: "restored-dir" })
+
+      dispatch(hook, {
+        type: "RESTORE_TAB_SNAPSHOT",
+        session,
+        source,
+        activeTurnIndex: 3,
+        activeToolCallId: "tool-42",
+        searchQuery: "find me",
+        expandAll: true,
+        isMobile: false,
+      })
+
+      const s = getState(hook)
+      expect(s.session).toBe(session)
+      expect(s.sessionSource).toBe(source)
+      expect(s.activeTurnIndex).toBe(3)
+      expect(s.activeToolCallId).toBe("tool-42")
+      expect(s.searchQuery).toBe("find me")
+      expect(s.expandAll).toBe(true)
+    })
+
+    it("does NOT increment sessionChangeKey", () => {
+      const hook = renderState()
+      const before = getState(hook).sessionChangeKey
+
+      dispatch(hook, {
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: makeSession(),
+        source: makeSource(),
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        isMobile: false,
+      })
+
+      expect(getState(hook).sessionChangeKey).toBe(before)
+    })
+
+    it("clears pendingDirName and pendingCwd", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "INIT_PENDING_SESSION", dirName: "pending", isMobile: false })
+
+      dispatch(hook, {
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: makeSession(),
+        source: makeSource(),
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        isMobile: false,
+      })
+
+      const s = getState(hook)
+      expect(s.pendingDirName).toBeNull()
+      expect(s.pendingCwd).toBeNull()
+    })
+
+    it("restores pending tab state when session is null", () => {
+      const hook = renderState()
+
+      dispatch(hook, {
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: null,
+        source: null,
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        isMobile: false,
+        pendingDirName: "my-project",
+        pendingCwd: "/home/user/my-project",
+      })
+
+      const s = getState(hook)
+      expect(s.session).toBeNull()
+      expect(s.sessionSource).toBeNull()
+      expect(s.pendingDirName).toBe("my-project")
+      expect(s.pendingCwd).toBe("/home/user/my-project")
+    })
+
+    it("sets mobileTab to chat on mobile", () => {
+      const hook = renderState()
+
+      dispatch(hook, {
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: makeSession(),
+        source: makeSource(),
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        isMobile: true,
+      })
+
+      expect(getState(hook).mobileTab).toBe("chat")
+    })
+  })
+
   // ── Complex flows ─────────────────────────────────────────────────
 
   describe("complex state flows", () => {

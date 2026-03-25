@@ -48,6 +48,18 @@ export type SessionAction =
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
   | { type: "OPEN_CONFIG"; filePath?: string }
   | { type: "CLOSE_CONFIG" }
+  | {
+      type: "RESTORE_TAB_SNAPSHOT"
+      session: ParsedSession | null
+      source: SessionSource | null
+      activeTurnIndex: number | null
+      activeToolCallId: string | null
+      searchQuery: string
+      expandAll: boolean
+      isMobile: boolean
+      pendingDirName?: string | null
+      pendingCwd?: string | null
+    }
 
 const initialState: SessionState = {
   session: null,
@@ -258,6 +270,25 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "CLOSE_CONFIG":
       return { ...state, mainView: "sessions", configFilePath: null }
+
+    case "RESTORE_TAB_SNAPSHOT":
+      return {
+        ...state,
+        session: action.session,
+        sessionSource: action.source,
+        pendingDirName: action.pendingDirName ?? null,
+        pendingCwd: action.pendingCwd ?? null,
+        activeTurnIndex: action.activeTurnIndex,
+        activeToolCallId: action.activeToolCallId,
+        searchQuery: action.searchQuery,
+        expandAll: action.expandAll,
+        mainView: "sessions",
+        selectedTeam: null,
+        currentMemberName: null,
+        dashboardProject: null,
+        mobileTab: action.isMobile ? "chat" : state.mobileTab,
+        // sessionChangeKey intentionally NOT incremented — avoids re-scroll
+      }
 
     default:
       return state

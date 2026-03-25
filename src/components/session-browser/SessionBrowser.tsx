@@ -88,6 +88,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   teamsOnly,
   onDuplicateSession,
   onDeleteSession,
+  onOpenInNewTab,
   onBeforeSessionSwitch,
   pendingSession,
   liveSessionsRefreshRef,
@@ -143,6 +144,7 @@ export const SessionBrowser = memo(function SessionBrowser({
           <LiveSessions
             activeSessionKey={activeSessionKey}
             onSelectSession={browser.loadLiveSession}
+            onOpenInNewTab={onOpenInNewTab}
             onDuplicateSession={onDuplicateSession}
             onDeleteSession={onDeleteSession}
             onNewSession={onNewSession}

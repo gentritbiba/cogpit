@@ -21,6 +21,7 @@ export type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
 interface LiveSessionsProps {
   activeSessionKey: string | null
   onSelectSession: (dirName: string, fileName: string) => void
+  onOpenInNewTab?: (dirName: string, fileName: string, label: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (dirName: string, fileName: string) => void
   onNewSession?: (dirName: string, cwd?: string) => void
@@ -70,7 +71,7 @@ function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessio
   return groups
 }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onOpenInNewTab, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
@@ -355,6 +356,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               sessionNames={sessionNames}
               projectNames={projectNames}
               onSelectSession={handleSelectSession}
+              onOpenInNewTab={onOpenInNewTab}
               onKill={handleKill}
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
@@ -379,6 +381,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               sessionNames={sessionNames}
               projectNames={projectNames}
               onSelectSession={handleSelectSession}
+              onOpenInNewTab={onOpenInNewTab}
               onKill={handleKill}
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
@@ -410,6 +413,7 @@ function ProjectGroup({
   defaultCollapsed = false,
   forceExpand = false,
   onSelectSession,
+  onOpenInNewTab,
   onKill,
   onDuplicateSession,
   onDeleteSession,
@@ -431,6 +435,7 @@ function ProjectGroup({
   defaultCollapsed?: boolean
   forceExpand?: boolean
   onSelectSession: (dirName: string, fileName: string) => void
+  onOpenInNewTab?: (dirName: string, fileName: string, label: string) => void
   onKill: (pid: number, e: React.MouseEvent) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
@@ -539,6 +544,7 @@ function ProjectGroup({
                 customName={sessionNames[s.sessionId]}
                 worktreeName={wt?.worktreeName}
                 onSelectSession={onSelectSession}
+                onOpenInNewTab={onOpenInNewTab}
                 onKill={onKill}
                 onDuplicateSession={onDuplicateSession}
                 onDeleteSession={onDeleteSession}

@@ -19,6 +19,7 @@ import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { UpdateBanner } from "@/components/UpdateBanner"
+import { TabBar } from "@/components/TabBar"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { usePtyChat } from "@/hooks/usePtyChat"
@@ -44,9 +45,12 @@ import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
+import { useTabState } from "@/hooks/useTabState"
+import { useBackgroundTabWatcher } from "@/hooks/useBackgroundTabWatcher"
+import { TabProvider, type TabContextValue } from "@/contexts/TabContext"
 import { hapticLight } from "@/lib/haptics"
-import { detectPendingInteraction } from "@/lib/parser"
-import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
+import { detectPendingInteraction, parseSession } from "@/lib/parser"
+import { dirNameToPath, shortPath, parseSubAgentPath, projectName } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession } from "@/lib/types"
@@ -517,6 +521,167 @@ export default function App() {
     }
   }, [state.sessionSource, pushHistory])
 
+  // ─── Tab State ────────────────────────────────────────────────────────
+  const [tabState, tabDispatch] = useTabState()
+  useBackgroundTabWatcher(tabState.tabs, tabState.activeTabId, tabDispatch)
+
+  // Snapshot current tab state before switching away
+  const snapshotCurrentTab = useCallback(() => {
+    if (!tabState.activeTabId) return
+    tabDispatch({
+      type: "SNAPSHOT_ACTIVE",
+      activeTurnIndex: state.activeTurnIndex,
+      activeToolCallId: state.activeToolCallId,
+      searchQuery: state.searchQuery,
+      expandAll: state.expandAll,
+      scrollTop: scroll.chatScrollRef.current?.scrollTop ?? 0,
+      session: state.session,
+      source: state.sessionSource,
+    })
+  }, [
+    tabState.activeTabId, tabDispatch,
+    state.activeTurnIndex, state.activeToolCallId,
+    state.searchQuery, state.expandAll,
+    state.session, state.sessionSource,
+    scroll.chatScrollRef,
+  ])
+
+  // Restore a tab snapshot into the session state
+  const restoreTabSnapshot = useCallback((tab: typeof tabState.tabs[0]) => {
+    handlePreSessionSwitch()
+    if (tab.cachedSession && tab.cachedSource) {
+      dispatch({
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: tab.cachedSession,
+        source: tab.cachedSource,
+        activeTurnIndex: tab.activeTurnIndex,
+        activeToolCallId: tab.activeToolCallId,
+        searchQuery: tab.searchQuery,
+        expandAll: tab.expandAll,
+        isMobile,
+      })
+      scroll.resetTurnCount(tab.cachedSession.turns.length)
+      // Restore scroll position after render
+      const savedScrollTop = tab.scrollTop
+      requestAnimationFrame(() => {
+        const el = scroll.chatScrollRef.current
+        if (el) el.scrollTop = savedScrollTop
+      })
+    } else if (tab.pendingDirName) {
+      dispatch({
+        type: "RESTORE_TAB_SNAPSHOT",
+        session: null,
+        source: null,
+        activeTurnIndex: null,
+        activeToolCallId: null,
+        searchQuery: "",
+        expandAll: false,
+        isMobile,
+        pendingDirName: tab.pendingDirName,
+        pendingCwd: tab.pendingCwd,
+      })
+    } else if (tab.dirName && tab.fileName) {
+      // No cached data — fetch from API
+      actions.handleDashboardSelect(tab.dirName, tab.fileName)
+    }
+  }, [dispatch, isMobile, scroll, handlePreSessionSwitch, actions])
+
+  // Tab switch handler: snapshot current → switch → restore target
+  const handleSwitchTab = useCallback((tabId: string) => {
+    if (tabId === tabState.activeTabId) return
+    const target = tabState.tabs.find(t => t.id === tabId)
+    if (!target) return
+    snapshotCurrentTab()
+    tabDispatch({ type: "SWITCH_TAB", tabId })
+    tabDispatch({ type: "CLEAR_ACTIVITY", tabId })
+    restoreTabSnapshot(target)
+  }, [tabState.activeTabId, tabState.tabs, snapshotCurrentTab, tabDispatch, restoreTabSnapshot])
+
+  // Open session in a new tab
+  const handleOpenInNewTabSimple = useCallback(async (dirName: string, fileName: string, label: string) => {
+    snapshotCurrentTab()
+    const tabId = `${dirName}/${fileName}`
+    const existingTab = tabState.tabs.find(t => t.id === tabId)
+    if (existingTab) {
+      tabDispatch({ type: "SWITCH_TAB", tabId })
+      tabDispatch({ type: "CLEAR_ACTIVITY", tabId })
+      restoreTabSnapshot(existingTab)
+      return
+    }
+    // Fetch the session first, then open tab with cached data
+    handlePreSessionSwitch()
+    try {
+      const res = await authFetch(
+        `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
+      )
+      if (!res.ok) return
+      const text = await res.text()
+      const parsed = parseSession(text)
+      const source = { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) } as const
+      const tabLabel = projectName(parsed.cwd || dirNameToPath(dirName))
+      tabDispatch({ type: "OPEN_TAB", session: parsed, source: { ...source }, label: tabLabel })
+      dispatch({ type: "LOAD_SESSION", session: parsed, source: { ...source }, isMobile })
+      scroll.resetTurnCount(parsed.turns.length)
+      scroll.scrollToBottomInstant()
+    } catch {
+      // silently fail
+    }
+  }, [snapshotCurrentTab, tabState.tabs, tabDispatch, handlePreSessionSwitch, dispatch, isMobile, scroll, restoreTabSnapshot])
+
+  // Close tab handler
+  const handleCloseTab = useCallback((tabId: string) => {
+    const isActive = tabId === tabState.activeTabId
+    const tab = tabState.tabs.find(t => t.id === tabId)
+    if (!tab) return
+
+    tabDispatch({ type: "CLOSE_TAB", tabId })
+
+    if (isActive) {
+      const idx = tabState.tabs.findIndex(t => t.id === tabId)
+      const remaining = tabState.tabs.filter(t => t.id !== tabId)
+      if (remaining.length > 0) {
+        const nextIdx = Math.min(idx, remaining.length - 1)
+        const nextTab = remaining[nextIdx]
+        restoreTabSnapshot(nextTab)
+      } else {
+        dispatch({ type: "GO_HOME", isMobile })
+      }
+    }
+  }, [tabState.activeTabId, tabState.tabs, tabDispatch, restoreTabSnapshot, dispatch, isMobile])
+
+  // Sync: when a session is loaded via normal flow, ensure it has a tab
+  // Also update the label if the slug becomes available (e.g. after session loads)
+  useEffect(() => {
+    if (!state.sessionSource) return
+    const tabId = `${state.sessionSource.dirName}/${state.sessionSource.fileName}`
+    const label = projectName(state.session?.cwd ?? dirNameToPath(state.sessionSource.dirName))
+    const existingTab = tabState.tabs.find(t => t.id === tabId)
+    if (!existingTab) {
+      tabDispatch({
+        type: "OPEN_TAB",
+        session: state.session,
+        source: state.sessionSource,
+        label,
+      })
+    } else if (existingTab.label !== label) {
+      tabDispatch({
+        type: "UPDATE_TAB_META",
+        tabId,
+        updates: { label },
+      })
+    }
+  }, [state.sessionSource, state.session, tabState.tabs, tabDispatch])
+
+  // Tab context value
+  const tabContextValue = useMemo<TabContextValue>(() => ({
+    tabs: tabState.tabs,
+    activeTabId: tabState.activeTabId,
+    dispatch: tabDispatch,
+    switchTab: handleSwitchTab,
+    openInNewTab: handleOpenInNewTabSimple,
+    closeTab: handleCloseTab,
+  }), [tabState.tabs, tabState.activeTabId, tabDispatch, handleSwitchTab, handleOpenInNewTabSimple, handleCloseTab])
+
   // App-level handlers (extracted from App.tsx)
   const handlers = useAppHandlers({
     state: { session: state.session, sessionSource: state.sessionSource },
@@ -571,6 +736,25 @@ export default function App() {
   }, [requestBranchSwitch, setBranchModalTurn])
 
   // Keyboard shortcuts
+  // Tab cycling for keyboard shortcuts
+  const handleNextTab = useCallback(() => {
+    if (tabState.tabs.length < 2 || !tabState.activeTabId) return
+    const idx = tabState.tabs.findIndex(t => t.id === tabState.activeTabId)
+    const nextIdx = (idx + 1) % tabState.tabs.length
+    handleSwitchTab(tabState.tabs[nextIdx].id)
+  }, [tabState.tabs, tabState.activeTabId, handleSwitchTab])
+
+  const handlePrevTab = useCallback(() => {
+    if (tabState.tabs.length < 2 || !tabState.activeTabId) return
+    const idx = tabState.tabs.findIndex(t => t.id === tabState.activeTabId)
+    const prevIdx = (idx - 1 + tabState.tabs.length) % tabState.tabs.length
+    handleSwitchTab(tabState.tabs[prevIdx].id)
+  }, [tabState.tabs, tabState.activeTabId, handleSwitchTab])
+
+  const handleCloseCurrentTab = useCallback(() => {
+    if (tabState.activeTabId) handleCloseTab(tabState.activeTabId)
+  }, [tabState.activeTabId, handleCloseTab])
+
   useKeyboardShortcuts({
     isMobile,
     searchInputRef,
@@ -585,6 +769,9 @@ export default function App() {
     onHistoryForward: sessionHistory.goForward,
     onNavigateToSession: actions.handleDashboardSelect,
     onCommitNavigation: sessionHistory.commitNavigation,
+    onNextTab: tabState.tabs.length > 0 ? handleNextTab : undefined,
+    onPrevTab: tabState.tabs.length > 0 ? handlePrevTab : undefined,
+    onCloseTab: tabState.tabs.length > 0 ? handleCloseCurrentTab : undefined,
   })
 
   // Kill-all handler
@@ -1081,6 +1268,7 @@ export default function App() {
     <AppProvider value={appContextValue}>
     <DiffFontSizeProvider>
     <PtyProvider>
+    <TabProvider value={tabContextValue}>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {backgroundServers}
@@ -1105,6 +1293,17 @@ export default function App() {
         onSetLayoutMode={handleSetLayoutMode}
       />
 
+      <TabBar
+        tabs={tabState.tabs}
+        activeTabId={tabState.activeTabId}
+        onSwitchTab={handleSwitchTab}
+        onCloseTab={handleCloseTab}
+        onNewTab={() => {
+          snapshotCurrentTab()
+          dispatch({ type: "GO_HOME", isMobile })
+        }}
+      />
+
       <div className="relative flex flex-1 min-h-0 overflow-hidden">
         <HoverRevealPanel
           side="left"
@@ -1115,6 +1314,7 @@ export default function App() {
             sessionId={state.session?.sessionId ?? null}
             activeSessionKey={activeSessionKey}
             onLoadSession={actions.handleLoadSession}
+            onOpenInNewTab={handleOpenInNewTabSimple}
             sidebarTab={state.sidebarTab}
             onSidebarTabChange={handleSidebarTabChange}
             onSelectTeam={actions.handleSelectTeam}
@@ -1326,6 +1526,7 @@ export default function App() {
       {errorToast || sseIndicator}
     </div>
     </SessionProvider>
+    </TabProvider>
     </PtyProvider>
     </DiffFontSizeProvider>
     </AppProvider>

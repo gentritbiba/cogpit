@@ -47,6 +47,7 @@ interface SessionRowProps {
   proc: RunningProcess | undefined
   killingPids: Set<number>
   onSelectSession: (dirName: string, fileName: string) => void
+  onOpenInNewTab?: (dirName: string, fileName: string, label: string) => void
   onKill: (pid: number, e: React.MouseEvent) => void
   isNewlyCompleted?: boolean
   customName?: string
@@ -66,6 +67,7 @@ export function SessionRow({
   customName,
   worktreeName,
   onSelectSession,
+  onOpenInNewTab,
   onKill,
   onDuplicateSession,
   onDeleteSession,
@@ -84,7 +86,19 @@ export function SessionRow({
           role="button"
           tabIndex={0}
           data-live-session
-          onClick={() => onSelectSession(s.dirName, s.fileName)}
+          onClick={(e) => {
+            if (onOpenInNewTab && (e.ctrlKey || e.metaKey)) {
+              onOpenInNewTab(s.dirName, s.fileName, title)
+            } else {
+              onSelectSession(s.dirName, s.fileName)
+            }
+          }}
+          onMouseDown={(e) => {
+            if (e.button === 1 && onOpenInNewTab) {
+              e.preventDefault()
+              onOpenInNewTab(s.dirName, s.fileName, title)
+            }
+          }}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
           className={cn(
             "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
