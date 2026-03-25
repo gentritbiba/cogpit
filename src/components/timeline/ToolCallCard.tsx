@@ -75,6 +75,69 @@ function getToolSummary(tc: ToolCall): string {
   }
 }
 
+/** Build a CLI-like command string from a tool call's input parameters. */
+function getToolCommand(tc: ToolCall): string | null {
+  const input = tc.input
+  const q = (v: unknown) => `"${String(v)}"`
+  const flag = (name: string, val: unknown) => {
+    if (val === undefined || val === null) return ""
+    if (val === true) return ` ${name}`
+    if (val === false) return ""
+    return ` ${name} ${q(val)}`
+  }
+
+  switch (tc.name) {
+    case "Grep": {
+      let cmd = `rg ${q(input.pattern)}`
+      cmd += flag("--type", input.type)
+      cmd += flag("--glob", input.glob)
+      cmd += flag("-i", input["-i"])
+      if (input.output_mode && input.output_mode !== "files_with_matches")
+        cmd += flag("-l", input.output_mode === "files_with_matches" ? true : undefined)
+      if (input.output_mode === "content") cmd += ""  // default
+      if (input.output_mode === "count") cmd += " --count"
+      cmd += flag("-A", input["-A"])
+      cmd += flag("-B", input["-B"])
+      cmd += flag("-C", input["-C"] ?? input.context)
+      cmd += flag("--multiline", input.multiline)
+      if (input.head_limit) cmd += ` | head -${input.head_limit}`
+      if (input.path) cmd += ` ${String(input.path)}`
+      return cmd
+    }
+    case "Glob": {
+      let cmd = `glob ${q(input.pattern)}`
+      if (input.path) cmd += ` ${String(input.path)}`
+      return cmd
+    }
+    case "Read": {
+      let cmd = `cat -n ${String(input.file_path ?? input.path ?? "")}`
+      if (input.offset) cmd += ` +${input.offset}`
+      if (input.limit) cmd += ` | head -${input.limit}`
+      if (input.pages) cmd += ` --pages ${input.pages}`
+      return cmd
+    }
+    case "Write":
+      return `write ${String(input.file_path ?? "")}`
+    case "Edit": {
+      const fp = String(input.file_path ?? "")
+      const replaceAll = input.replace_all ? " --replace-all" : ""
+      return `edit ${fp}${replaceAll}`
+    }
+    case "Bash":
+      return String(input.command ?? "")
+    case "WebFetch":
+      return `curl ${String(input.url ?? "")}`
+    case "WebSearch":
+      return `search ${q(input.query)}`
+    case "Agent": {
+      const type = input.subagent_type ? `[${input.subagent_type}]` : ""
+      return `agent${type} ${q(input.description ?? input.prompt ?? "")}`
+    }
+    default:
+      return null
+  }
+}
+
 // ── Reusable toggle button for expand/collapse sections ──────────────────
 
 function ToggleButton({
@@ -275,6 +338,7 @@ const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSe
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive }: ToolCallCardProps) {
   const isMobile = useIsMobile()
+  const [commandOpen, setCommandOpen] = useState(false)
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
   const [resultExpanded, setResultExpanded] = useState(false)
@@ -283,11 +347,13 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const [mobileExpanded, setMobileExpanded] = useState(false)
   const isCompactMobile = isMobile && COMPACT_MOBILE_TOOLS.has(toolCall.name) && !expandAll && !mobileExpanded
 
+  const showCommand = expandAll || commandOpen
   const showInput = expandAll || inputOpen
   const showResult = expandAll || resultOpen
   const showDiff = expandAll || diffOpen
 
   const summary = getToolSummary(toolCall)
+  const command = getToolCommand(toolCall)
   const resultText = toolCall.result ?? ""
   const isLongResult = resultText.length > 1000
   const visibleResult =
@@ -345,6 +411,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
                   activeClass="text-amber-400"
                 />
               )}
+              {command && (
+                <ToggleButton
+                  isOpen={showCommand}
+                  onClick={() => setCommandOpen(!commandOpen)}
+                  label="Command"
+                  activeClass="text-cyan-400"
+                />
+              )}
               <ToggleButton
                 isOpen={showInput}
                 onClick={() => setInputOpen(!inputOpen)}
@@ -364,6 +438,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
       </div>
+
+      {showCommand && command && (
+        <pre className={cn(CODE_BLOCK_CLASS, "mt-1.5 text-cyan-300/80")}>
+          <code>{command}</code>
+        </pre>
+      )}
 
       {showDiff && hasEditDiff && (
         <EditDiffView
