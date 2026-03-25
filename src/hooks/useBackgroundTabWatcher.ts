@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { authUrl } from "@/lib/auth"
 import type { TabSnapshot, TabAction } from "@/hooks/useTabState"
 
@@ -15,24 +15,35 @@ export function useBackgroundTabWatcher(
   const dispatchRef = useRef(dispatch)
   dispatchRef.current = dispatch
 
-  useEffect(() => {
-    const backgroundTabs = tabs.filter(
-      (t) => t.id !== activeTabId && t.dirName && t.fileName
-    )
+  // Derive a stable list of background tab identifiers so the effect only
+  // re-runs when the actual set of background tabs changes — not on every
+  // MARK_ACTIVITY dispatch (which produces a new `tabs` array reference).
+  const backgroundTabKeys = useMemo(() => {
+    return tabs
+      .filter((t) => t.id !== activeTabId && t.dirName && t.fileName)
+      .map((t) => ({ id: t.id, dirName: t.dirName, fileName: t.fileName! }))
+  }, [tabs, activeTabId])
 
-    if (backgroundTabs.length === 0) return
+  // Serialize to a string for stable effect dependency
+  const backgroundKey = useMemo(
+    () => backgroundTabKeys.map((t) => t.id).join("|"),
+    [backgroundTabKeys]
+  )
+
+  useEffect(() => {
+    if (backgroundTabKeys.length === 0) return
 
     const sources: EventSource[] = []
 
-    for (const tab of backgroundTabs) {
-      const url = `/api/watch/${encodeURIComponent(tab.dirName)}/${encodeURIComponent(tab.fileName!)}`
+    for (const tab of backgroundTabKeys) {
+      const url = `/api/watch/${encodeURIComponent(tab.dirName)}/${encodeURIComponent(tab.fileName)}`
       const es = new EventSource(authUrl(url))
 
       es.addEventListener("lines", () => {
         dispatchRef.current({
           type: "MARK_ACTIVITY",
           tabId: tab.id,
-          turnCount: tab.lastKnownTurnCount + 1,
+          turnCount: 0, // We only need the boolean flag; exact count isn't critical
         })
       })
 
@@ -48,5 +59,6 @@ export function useBackgroundTabWatcher(
         es.close()
       }
     }
-  }, [tabs, activeTabId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reconnect only when background tab set changes
+  }, [backgroundKey])
 }

@@ -39,7 +39,10 @@ export const TabBar = memo(function TabBar({
 
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
     e.preventDefault()
-    setContextMenu({ tabId, x: e.clientX, y: e.clientY })
+    // Clamp position to keep menu within viewport (menu is ~180px wide, ~80px tall)
+    const x = Math.min(e.clientX, window.innerWidth - 200)
+    const y = Math.min(e.clientY, window.innerHeight - 100)
+    setContextMenu({ tabId, x, y })
   }, [])
 
   // Close context menu on click outside or Escape
@@ -126,6 +129,7 @@ export const TabBar = memo(function TabBar({
             className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-foreground hover:bg-elevation-3 transition-colors"
             onClick={() => {
               openInNewWindow(contextTab)
+              onCloseTab(contextTab.id)
               setContextMenu(null)
             }}
           >

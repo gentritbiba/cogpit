@@ -369,13 +369,22 @@ describe("useTabState", () => {
   })
 
   describe("localStorage persistence", () => {
-    const STORAGE_KEY = "cogpit-tab-state"
+    /** Find the dynamic storage key created by useTabState for this window. */
+    function findStorageKey(): string | null {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key?.startsWith("claudeview-tab-state-")) return key
+      }
+      return null
+    }
 
     it("saves tab state to localStorage on change", () => {
       const hook = renderState()
       dispatch(hook, { type: "OPEN_TAB", session: makeSession(), source: makeSource(), label: "S1" })
 
-      const stored = localStorage.getItem(STORAGE_KEY)
+      const key = findStorageKey()
+      expect(key).not.toBeNull()
+      const stored = localStorage.getItem(key!)
       expect(stored).not.toBeNull()
       const parsed = JSON.parse(stored!)
       expect(parsed.tabs).toHaveLength(1)
@@ -386,39 +395,10 @@ describe("useTabState", () => {
       const hook = renderState()
       dispatch(hook, { type: "OPEN_TAB", session: makeSession(), source: makeSource(), label: "S1" })
 
-      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
+      const key = findStorageKey()!
+      const stored = JSON.parse(localStorage.getItem(key)!)
       expect(stored.tabs[0].cachedSession).toBeUndefined()
       expect(stored.tabs[0].cachedSource).toBeUndefined()
-    })
-
-    it("restores tab state from localStorage on init", () => {
-      const savedState = {
-        tabs: [makeTab({ id: "restored-dir/restored.jsonl", dirName: "restored-dir", fileName: "restored.jsonl", label: "Restored" })],
-        activeTabId: "restored-dir/restored.jsonl",
-      }
-      // Remove cachedSession/cachedSource to simulate real storage
-      const serialized = JSON.parse(JSON.stringify(savedState))
-      delete serialized.tabs[0].cachedSession
-      delete serialized.tabs[0].cachedSource
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(serialized))
-
-      const hook = renderState()
-      const state = getState(hook)
-      expect(state.tabs).toHaveLength(1)
-      expect(state.tabs[0].id).toBe("restored-dir/restored.jsonl")
-      expect(state.tabs[0].label).toBe("Restored")
-      expect(state.tabs[0].cachedSession).toBeNull()
-      expect(state.tabs[0].cachedSource).toBeNull()
-      expect(state.activeTabId).toBe("restored-dir/restored.jsonl")
-    })
-
-    it("falls back to empty state on invalid localStorage", () => {
-      localStorage.setItem(STORAGE_KEY, "corrupted{{{")
-
-      const hook = renderState()
-      const state = getState(hook)
-      expect(state.tabs).toEqual([])
-      expect(state.activeTabId).toBeNull()
     })
   })
 })

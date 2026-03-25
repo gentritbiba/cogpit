@@ -623,8 +623,8 @@ export default function App() {
       dispatch({ type: "LOAD_SESSION", session: parsed, source: { ...source }, isMobile })
       scroll.resetTurnCount(parsed.turns.length)
       scroll.scrollToBottomInstant()
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error("[open-in-new-tab] failed to load session:", err)
     }
   }, [snapshotCurrentTab, tabState.tabs, tabDispatch, handlePreSessionSwitch, dispatch, isMobile, scroll, restoreTabSnapshot])
 
@@ -649,13 +649,17 @@ export default function App() {
     }
   }, [tabState.activeTabId, tabState.tabs, tabDispatch, restoreTabSnapshot, dispatch, isMobile])
 
-  // Sync: when a session is loaded via normal flow, ensure it has a tab
-  // Also update the label if the slug becomes available (e.g. after session loads)
+  // Sync: when a session is loaded via normal flow, ensure it has a tab.
+  // Uses a ref to read current tabs without adding tabState.tabs as a
+  // dependency — avoids a dispatch→re-render→dispatch loop.
+  const tabsRef = useRef(tabState.tabs)
+  tabsRef.current = tabState.tabs
+
   useEffect(() => {
     if (!state.sessionSource) return
     const tabId = `${state.sessionSource.dirName}/${state.sessionSource.fileName}`
     const label = projectName(state.session?.cwd ?? dirNameToPath(state.sessionSource.dirName))
-    const existingTab = tabState.tabs.find(t => t.id === tabId)
+    const existingTab = tabsRef.current.find(t => t.id === tabId)
     if (!existingTab) {
       tabDispatch({
         type: "OPEN_TAB",
@@ -670,7 +674,8 @@ export default function App() {
         updates: { label },
       })
     }
-  }, [state.sessionSource, state.session, tabState.tabs, tabDispatch])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tabsRef avoids loop; only react to session changes
+  }, [state.sessionSource, state.session, tabDispatch])
 
   // Tab context value
   const tabContextValue = useMemo<TabContextValue>(() => ({

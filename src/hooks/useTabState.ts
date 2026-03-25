@@ -59,7 +59,19 @@ export type TabAction =
 
 // ── Constants ───────────────────────────────────────────────────────────
 
-const STORAGE_KEY = "cogpit-tab-state"
+// Each window gets its own tab state keyed by a unique window ID stored
+// in sessionStorage (per-window, survives reloads, not shared across windows).
+const WINDOW_ID_KEY = "claudeview-window-id"
+function getStorageKey(): string {
+  let windowId = sessionStorage.getItem(WINDOW_ID_KEY)
+  if (!windowId) {
+    windowId = Math.random().toString(36).slice(2, 8)
+    sessionStorage.setItem(WINDOW_ID_KEY, windowId)
+  }
+  return `claudeview-tab-state-${windowId}`
+}
+
+const STORAGE_KEY = getStorageKey()
 
 let pendingCounter = 0
 
