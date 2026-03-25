@@ -29,12 +29,43 @@ const TOOL_BADGE_STYLES: Record<string, string> = {
   EnterPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
   ExitPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
   AskUserQuestion: "bg-pink-500/5 text-pink-400/40 border-pink-500/10",
+  query: "bg-teal-500/15 text-teal-400 border-teal-500/25",
 }
 
 const DEFAULT_BADGE_STYLE = "bg-muted/5 text-muted-foreground/40 border-muted-foreground/10"
 
+/** Shorten MCP tool names like `mcp__plugin_odoo_sequential-thinking__sequentialthinking` → `sequentialthinking` */
+export function shortenToolName(name: string): string {
+  // MCP pattern: mcp__<plugin>_<server>__<tool> or mcp__<server>__<tool>
+  const mcpMatch = name.match(/^mcp__(?:plugin_)?(?:[^_]+_)*?([^_]+)__(.+)$/)
+  if (mcpMatch) return mcpMatch[2]
+  return name
+}
+
 export function getToolBadgeStyle(name: string): string {
-  return TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
+  return TOOL_BADGE_STYLES[name] ?? TOOL_BADGE_STYLES[shortenToolName(name)] ?? DEFAULT_BADGE_STYLE
+}
+
+/** Shorten an absolute file path to module-relative (e.g. `module/models/foo.py`). */
+function shortenFilePath(fp: string): string {
+  const segments = fp.split("/")
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === "dev" && i + 2 < segments.length) {
+      const next = segments[i + 1]
+      // dev/client_projects/Client/project/module/... → module/...
+      if (next === "client_projects" && i + 4 < segments.length) {
+        return segments.slice(i + 4).join("/")
+      }
+      // dev/internal/project/module/... → module/...
+      if (next === "internal" && i + 3 < segments.length) {
+        return segments.slice(i + 3).join("/")
+      }
+      // dev/project/src/... → src/...
+      return segments.slice(i + 2).join("/")
+    }
+  }
+  if (segments.length > 4) return segments.slice(-4).join("/")
+  return fp
 }
 
 function getToolSummary(tc: ToolCall): string {
@@ -43,9 +74,37 @@ function getToolSummary(tc: ToolCall): string {
     case "Read":
     case "Write":
     case "Edit":
-      return String(input.file_path ?? input.path ?? "")
-    case "Bash":
-      return String(input.command ?? "")
+      return shortenFilePath(String(input.file_path ?? input.path ?? ""))
+    case "Bash": {
+      // Prefer the description field if available
+      if (input.description) return String(input.description)
+      const cmd = String(input.command ?? "").trim()
+      // Strip env setup prefixes (source, cd && ...)
+      const stripped = cmd
+        .replace(/^(?:source\s+\S+\s*(?:2>\S*)?\s*;?\s*)+/, "")
+        .replace(/^(?:cd\s+"[^"]*"\s*&&\s*)+/, "")
+        .replace(/^(?:cd\s+\S+\s*&&\s*)+/, "")
+        .trim()
+      // Take the command name + subcommand (e.g. "git status", "gh pr create", "bun run test")
+      // Stop at flags (--), pipes (|), output redirects (>), or path-like arguments (containing /)
+      // But capture input redirect targets: "odoo-shell project < script.py" → include the filename
+      const words = stripped.split(/\s+/)
+      const parts: string[] = []
+      for (let wi = 0; wi < words.length; wi++) {
+        const w = words[wi]
+        if (w === "<" && wi + 1 < words.length) {
+          // Input redirect — show the target filename
+          const target = words[wi + 1]
+          const basename = target.split("/").pop() ?? target
+          parts.push("< " + basename)
+          break
+        }
+        if (w.startsWith("-") || w.includes("/") || w.includes("|") || w.includes(">") || w.includes("2>&1")) break
+        parts.push(w)
+        if (parts.length >= 3) break
+      }
+      return parts.join(" ") || words[0] || cmd.slice(0, 40)
+    }
     case "Grep":
     case "Glob":
       return String(input.pattern ?? "")
@@ -56,7 +115,7 @@ function getToolSummary(tc: ToolCall): string {
     case "WebSearch":
       return String(input.query ?? "")
     case "NotebookEdit":
-      return String(input.notebook_path ?? "")
+      return shortenFilePath(String(input.notebook_path ?? ""))
     case "EnterPlanMode":
       return "Entered plan mode"
     case "ExitPlanMode":
@@ -70,7 +129,14 @@ function getToolSummary(tc: ToolCall): string {
       if (keys.length === 0) return ""
       const first = input[keys[0]]
       if (typeof first !== "string") return ""
-      return first.length > 80 ? first.slice(0, 80) + "..." : first
+      // SQL: extract statement type + table (e.g. "SELECT ... FROM product_template")
+      const sqlMatch = first.match(/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i)
+      if (sqlMatch) {
+        const fromMatch = first.match(/\bFROM\s+(\w+)/i) || first.match(/\bINTO\s+(\w+)/i) || first.match(/\bUPDATE\s+(\w+)/i)
+        const table = fromMatch ? fromMatch[1] : ""
+        return `${sqlMatch[1].toUpperCase()}${table ? ` ... ${table}` : ""}`
+      }
+      return first.length > 60 ? first.slice(0, 57) + "..." : first
     }
   }
 }
@@ -391,8 +457,9 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               "text-[11px] px-1.5 py-0 h-5 font-mono shrink-0",
               getToolBadgeStyle(toolCall.name)
             )}
+            title={toolCall.name}
           >
-            {toolCall.name}
+            {shortenToolName(toolCall.name)}
           </Badge>
           {summary && (
             <span className="text-xs text-muted-foreground truncate font-mono">

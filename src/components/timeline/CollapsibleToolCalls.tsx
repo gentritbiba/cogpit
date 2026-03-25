@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo } from "react"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { ToolCallCard, getToolBadgeStyle } from "./ToolCallCard"
+import { ToolCallCard, getToolBadgeStyle, shortenToolName } from "./ToolCallCard"
 import { ThinkingBlock } from "./ThinkingBlock"
 import { toolCallCountLabel, activityCountLabel } from "@/lib/timelineHelpers"
 import type { ToolCall } from "@/lib/types"
@@ -164,7 +164,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
               getToolBadgeStyle(name)
             )}
           >
-            {name}
+            {shortenToolName(name)}
             {count > 1 ? ` ×${count}` : ""}
           </Badge>
         ))}
