@@ -132,7 +132,7 @@ export function parseSubAgentPath(fileName: string): {
 // Compaction fires at roughly (limit - buffer), not at the absolute limit.
 const AUTO_COMPACT_BUFFER = 33_000
 
-const DEFAULT_CONTEXT_LIMIT = 200_000
+const DEFAULT_CONTEXT_LIMIT = 1_000_000
 const EXTENDED_CONTEXT_LIMIT = 1_000_000
 
 export function getContextLimit(model: string): number {

@@ -110,7 +110,7 @@ describe("useNewSession", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
-  it("createAndSend creates session and fetches JSONL on success", async () => {
+  it("createAndSend promotes immediately and hydrates content in the background", async () => {
     const { result } = renderHook(() => useNewSession(defaultOpts))
 
     // Set up the pending dirName
@@ -142,12 +142,23 @@ describe("useNewSession", () => {
     expect(sessionId).toBe("session-123")
     expect(result.current.creatingSession).toBe(false)
     expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "FINALIZE_SESSION" })
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        session: expect.objectContaining({ sessionId: "session-123", turns: [] }),
+      })
     )
     expect(onSessionFinalized).toHaveBeenCalledWith(
-      mockParsedSession,
+      expect.objectContaining({ sessionId: "session-123", turns: [] }),
       expect.objectContaining({ dirName: "project-dir", fileName: "session.jsonl" })
     )
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "RELOAD_SESSION_CONTENT",
+          session: mockParsedSession,
+        })
+      )
+    })
   })
 
   it("createAndSend sets error on failed create response", async () => {

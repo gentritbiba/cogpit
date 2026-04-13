@@ -10,6 +10,7 @@ import {
   isWithinDir,
   join,
   listCodexSessionFiles,
+  open,
   projectDirToReadableName,
   readFile,
   readdir,
@@ -17,6 +18,118 @@ import {
   stat,
 } from "../../helpers"
 import { handleActiveSessions } from "./activeSessionsRoute"
+
+// ── Bottom-first loading helpers ────────────────────────────────────────────
+
+const HEADER_BYTES = 4096
+
+interface TailResult {
+  lines: string[]
+  byteOffset: number
+  totalSize: number
+}
+
+interface RangeResult {
+  lines: string[]
+  byteOffset: number
+  hasMore: boolean
+}
+
+interface HeaderResult {
+  lines: string[]
+  bytesRead: number
+}
+
+/**
+ * Reads the last `byteCount` bytes of a file and returns complete JSONL lines.
+ * When reading from the middle of the file, the first partial line is discarded.
+ */
+async function readTail(filePath: string, byteCount: number): Promise<TailResult> {
+  const fh = await open(filePath, "r")
+  try {
+    const fileStat = await fh.stat()
+    const totalSize = fileStat.size
+
+    const readStart = Math.max(0, totalSize - byteCount)
+    const readLength = totalSize - readStart
+    const buf = Buffer.allocUnsafe(readLength)
+    const { bytesRead } = await fh.read(buf, 0, readLength, readStart)
+    const text = buf.subarray(0, bytesRead).toString("utf-8")
+
+    let lines = text.split("\n").filter((l) => l.trim().length > 0)
+
+    // Discard potentially partial first line when reading from the middle
+    // and compute the correct byte offset of the first complete line.
+    let adjustedOffset = readStart
+    if (readStart > 0 && lines.length > 0) {
+      lines = lines.slice(1)
+      const firstNewline = text.indexOf("\n")
+      if (firstNewline >= 0) {
+        adjustedOffset = readStart + firstNewline + 1
+      }
+    }
+
+    return { lines, byteOffset: adjustedOffset, totalSize }
+  } finally {
+    await fh.close()
+  }
+}
+
+/**
+ * Reads JSONL lines between `startOffset` and `endOffset` (exclusive).
+ * Returns the lines plus whether there is more content before `startOffset`.
+ */
+async function readRange(filePath: string, startOffset: number, endOffset: number): Promise<RangeResult> {
+  const fh = await open(filePath, "r")
+  try {
+    const fileStat = await fh.stat()
+    const totalSize = fileStat.size
+
+    const readStart = Math.max(0, startOffset)
+    const readEnd = Math.min(endOffset, totalSize)
+    const readLength = readEnd - readStart
+    if (readLength <= 0) {
+      return { lines: [], byteOffset: readStart, hasMore: readStart > 0 }
+    }
+
+    const buf = Buffer.allocUnsafe(readLength)
+    const { bytesRead } = await fh.read(buf, 0, readLength, readStart)
+    const text = buf.subarray(0, bytesRead).toString("utf-8")
+
+    let lines = text.split("\n").filter((l) => l.trim().length > 0)
+
+    // Discard potentially partial first line when reading from the middle
+    if (readStart > 0 && lines.length > 0) {
+      lines = lines.slice(1)
+    }
+
+    return { lines, byteOffset: readStart, hasMore: readStart > 0 }
+  } finally {
+    await fh.close()
+  }
+}
+
+/**
+ * Reads the first `HEADER_BYTES` bytes of a file for metadata extraction.
+ */
+async function readSessionHeader(filePath: string): Promise<HeaderResult> {
+  const fh = await open(filePath, "r")
+  try {
+    const fileStat = await fh.stat()
+    const readLen = Math.min(HEADER_BYTES, fileStat.size)
+    const buf = Buffer.allocUnsafe(readLen)
+    const { bytesRead } = await fh.read(buf, 0, readLen, 0)
+    const text = buf.subarray(0, bytesRead).toString("utf-8")
+    const parts = text.split("\n").filter((l) => l.trim().length > 0)
+    // Drop the last element if we didn't read the whole file — it's likely truncated
+    if (bytesRead < fileStat.size && parts.length > 0) {
+      parts.pop()
+    }
+    return { lines: parts, bytesRead }
+  } finally {
+    await fh.close()
+  }
+}
 
 function shortNameFromPath(path: string): string {
   const trimmed = path.replace(/\/+$/, "")
@@ -295,10 +408,57 @@ export function registerProjectRoutes(use: UseFn) {
         res.end(JSON.stringify({ error: "Access denied" }))
         return
       }
+
+      const tailParam = url.searchParams.get("tail")
+      const beforeParam = url.searchParams.get("before")
+      const countParam = url.searchParams.get("count")
+
       try {
-        const content = await readFile(filePath, "utf-8")
-        res.setHeader("Content-Type", "text/plain")
-        res.end(content)
+        if (tailParam !== null) {
+          // ?tail=N — return last N turns worth of lines plus header lines
+          const requestedTurns = Math.max(1, Math.min(parseInt(tailParam) || 30, 200))
+          const bytesToRead = requestedTurns * 65536
+
+          const [header, tail] = await Promise.all([
+            readSessionHeader(filePath),
+            readTail(filePath, bytesToRead),
+          ])
+
+          const hasMore = tail.byteOffset > header.bytesRead
+
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({
+            headerLines: header.lines,
+            tailLines: tail.lines,
+            byteOffset: tail.byteOffset,
+            totalSize: tail.totalSize,
+            hasMore,
+          }))
+        } else if (beforeParam !== null) {
+          // ?before=offset&count=N — return lines before the given byte offset
+          const endOffset = Math.max(0, parseInt(beforeParam) || 0)
+          const requestedTurns = Math.max(1, Math.min(parseInt(countParam || "") || 30, 200))
+          const bytesToRead = requestedTurns * 65536
+          const startOffset = Math.max(0, endOffset - bytesToRead)
+
+          const [header, range] = await Promise.all([
+            readSessionHeader(filePath),
+            readRange(filePath, startOffset, endOffset),
+          ])
+
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({
+            headerLines: header.lines,
+            lines: range.lines,
+            byteOffset: range.byteOffset,
+            hasMore: range.byteOffset > header.bytesRead,
+          }))
+        } else {
+          // Default: return full file as text/plain (original behavior)
+          const content = await readFile(filePath, "utf-8")
+          res.setHeader("Content-Type", "text/plain")
+          res.end(content)
+        }
       } catch {
         res.statusCode = 404
         res.end(JSON.stringify({ error: "File not found" }))

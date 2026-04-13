@@ -1,4 +1,5 @@
 import {
+  CODEX_SESSIONS_DIR,
   dirs,
   isWithinDir,
   friendlySpawnError,
@@ -25,8 +26,10 @@ import {
   decodeCodexDirName,
   listCodexSessionFiles,
   findNewestCodexSessionForCwd,
+  formatCodexRolloutFileName,
 } from "../../helpers"
 import type { PersistentSession, UseFn } from "../../helpers"
+import { appendFile } from "node:fs/promises"
 import { buildStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 export { buildStreamMessage } from "../../lib/streamMessage"
 
@@ -82,6 +85,32 @@ async function waitForCodexSession(
   return null
 }
 
+function extractCodexSessionIdentity(line: string): { sessionId: string; fileName: string; filePath: string } | null {
+  try {
+    const parsed = JSON.parse(line) as { type?: string; timestamp?: string; payload?: unknown }
+    if (parsed.type !== "session_meta" || !parsed.payload || typeof parsed.payload !== "object") return null
+
+    const payload = parsed.payload as { id?: unknown; timestamp?: unknown }
+    const sessionId = typeof payload.id === "string" ? payload.id : ""
+    const timestampText = typeof payload.timestamp === "string"
+      ? payload.timestamp
+      : (typeof parsed.timestamp === "string" ? parsed.timestamp : "")
+    if (!sessionId || !timestampText) return null
+
+    const timestamp = new Date(timestampText)
+    if (Number.isNaN(timestamp.getTime())) return null
+
+    const fileName = formatCodexRolloutFileName(sessionId, timestamp)
+    return {
+      sessionId,
+      fileName,
+      filePath: join(CODEX_SESSIONS_DIR, fileName),
+    }
+  } catch {
+    return null
+  }
+}
+
 function registerTrackedSession(sessionId: string, ps: PersistentSession): void {
   persistentSessions.set(sessionId, ps)
   activeProcesses.set(sessionId, ps.proc)
@@ -92,8 +121,14 @@ function attachClaudeStdout(ps: PersistentSession, sessionId: string): void {
   rl.on("line", (line) => {
     try {
       const parsed = JSON.parse(line)
-      if (parsed.type === "result" && ps.onResult) {
-        ps.onResult(parsed)
+      if (parsed.type === "result") {
+        if (ps.onResult) ps.onResult(parsed)
+        // Persist terminal_reason into the JSONL so the client can display it
+        const reason = parsed.terminal_reason
+        if (reason && reason !== "completed" && ps.jsonlPath) {
+          const entry = JSON.stringify({ type: "system", subtype: "terminal_reason", reason, timestamp: new Date().toISOString() })
+          appendFile(ps.jsonlPath, entry + "\n").catch(() => {})
+        }
       }
       if (parsed.type === "assistant") {
         const content = parsed.message?.content
@@ -128,7 +163,7 @@ export function registerNewSessionRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, permissions, model, effort } = JSON.parse(body)
+        const { dirName, message, permissions, model, effort, name } = JSON.parse(body)
 
         if (!dirName || !message) {
           res.statusCode = 400
@@ -159,22 +194,41 @@ export function registerNewSessionRoute(use: UseFn) {
             }
           )
 
-          child.stdout?.on("data", () => {})
+          let responded = false
+          let createdSessionId: string | null = null
+          const sessionMatchPromise = waitForCodexSession(cwd, knownPaths, startedAt, 60_000)
+          const stdoutLines: string[] = []
+          const rl = createInterface({ input: child.stdout! })
+          rl.on("line", (line) => {
+            if (stdoutLines.length < 64) stdoutLines.push(line)
+            if (responded) return
+            const identity = extractCodexSessionIdentity(line)
+            if (!identity) return
+
+            responded = true
+            createdSessionId = identity.sessionId
+            activeProcesses.set(identity.sessionId, child)
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({
+              success: true,
+              dirName,
+              fileName: identity.fileName,
+              sessionId: identity.sessionId,
+              initialContent: stdoutLines.join("\n"),
+            }))
+          })
 
           let stderr = ""
           child.stderr?.on("data", (data: Buffer) => {
             stderr += data.toString()
           })
 
-          let responded = false
-          let createdSessionId: string | null = null
-          const sessionMatchPromise = waitForCodexSession(cwd, knownPaths, startedAt, 60_000)
-
           ;(async () => {
             const match = await sessionMatchPromise
-            if (!match || responded) return
+            if (!match) return
+            createdSessionId ??= match.sessionId
+            if (responded) return
             responded = true
-            createdSessionId = match.sessionId
             activeProcesses.set(match.sessionId, child)
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({
@@ -230,6 +284,7 @@ export function registerNewSessionRoute(use: UseFn) {
         const permArgs = buildPermArgs(permissions)
         const modelArgs = model ? ["--model", model] : []
         const effortArgs = effort ? ["--effort", effort] : []
+        const nameArgs = name ? ["--name", name] : []
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
 
@@ -238,7 +293,7 @@ export function registerNewSessionRoute(use: UseFn) {
 
         const child = spawn(
           "claude",
-          ["-p", message, "--session-id", sessionId, ...permArgs, ...modelArgs, ...effortArgs],
+          ["-p", message, "--session-id", sessionId, ...permArgs, ...modelArgs, ...effortArgs, ...nameArgs],
           {
             cwd: projectPath,
             env: cleanEnv,
@@ -309,7 +364,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model, effort, worktreeName, mcpConfig } = JSON.parse(body)
+        const { dirName, message, images, permissions, model, effort, worktreeName, mcpConfig, name } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           res.statusCode = 400
@@ -352,8 +407,6 @@ export function registerCreateAndSendRoute(use: UseFn) {
             }
           )
 
-          child.stdout?.on("data", () => {})
-
           let persistentStderr = ""
           child.stderr?.on("data", (data: Buffer) => {
             persistentStderr += data.toString()
@@ -378,7 +431,12 @@ export function registerCreateAndSendRoute(use: UseFn) {
             worktreeName: null,
           }
 
-          const respondSuccess = async (fileName: string, filePath: string, discoveredSessionId: string) => {
+          const respondSuccess = async (
+            fileName: string,
+            filePath: string,
+            discoveredSessionId: string,
+            initialContent?: string,
+          ) => {
             if (responded) return
             responded = true
             sessionId = discoveredSessionId
@@ -386,11 +444,13 @@ export function registerCreateAndSendRoute(use: UseFn) {
             if (!ps.dead) {
               registerTrackedSession(discoveredSessionId, ps)
             }
-            let initialContent: string | undefined
-            try {
-              initialContent = await readFile(filePath, "utf-8")
-            } catch {
-              // let client poll if needed
+            let responseInitialContent = initialContent?.trim() ? initialContent : undefined
+            if (!responseInitialContent) {
+              try {
+                responseInitialContent = await readFile(filePath, "utf-8")
+              } catch {
+                // let client poll if needed
+              }
             }
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({
@@ -398,7 +458,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
               dirName,
               fileName,
               sessionId: discoveredSessionId,
-              initialContent,
+              initialContent: responseInitialContent,
             }))
           }
 
@@ -410,11 +470,29 @@ export function registerCreateAndSendRoute(use: UseFn) {
             res.end(JSON.stringify({ error }))
           }
 
+          const stdoutLines: string[] = []
+          const rl = createInterface({ input: child.stdout! })
+          rl.on("line", (line) => {
+            if (stdoutLines.length < 128) stdoutLines.push(line)
+            if (responded) return
+            const identity = extractCodexSessionIdentity(line)
+            if (!identity) return
+            void respondSuccess(
+              identity.fileName,
+              identity.filePath,
+              identity.sessionId,
+              stdoutLines.join("\n"),
+            )
+          })
+
           ;(async () => {
             const match = await sessionMatchPromise
-            if (match) {
-              await respondSuccess(match.fileName, match.filePath, match.sessionId)
+            if (!match) return
+            if (sessionId === match.sessionId) {
+              ps.jsonlPath = match.filePath
             }
+            if (responded) return
+            await respondSuccess(match.fileName, match.filePath, match.sessionId)
           })()
 
           child.on("close", async (code) => {
@@ -455,6 +533,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
         const permArgs = buildPermArgs(permissions)
         const modelArgs = model ? ["--model", model] : []
         const effortArgs = effort ? ["--effort", effort] : []
+        const nameArgs = name ? ["--name", name] : []
         const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []
         const mcpArgs = buildMcpArgs(mcpConfig)
         const sessionId = randomUUID()
@@ -475,6 +554,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
             ...permArgs,
             ...modelArgs,
             ...effortArgs,
+            ...nameArgs,
             ...worktreeArgs,
             ...mcpArgs,
           ],
@@ -566,13 +646,11 @@ export function registerCreateAndSendRoute(use: UseFn) {
           for (let i = 0; i < maxAttempts; i++) {
             if (responded) return
             try {
-              const s = await stat(expectedPath)
-              if (s.size > 0) {
-                respondSuccess()
-                ps.jsonlPath = expectedPath
-                ps.subagentWatcher = watchSubagents(expectedPath, sessionId, ps.pendingTaskCalls)
-                return
-              }
+              await stat(expectedPath)
+              respondSuccess()
+              ps.jsonlPath = expectedPath
+              ps.subagentWatcher = watchSubagents(expectedPath, sessionId, ps.pendingTaskCalls)
+              return
             } catch {
               // keep polling
             }

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { parseSession, parseSessionAppend } from "@/lib/parser"
+import { useEffect, useRef, useState } from "react"
 import { authUrl } from "@/lib/auth"
 import type { ParsedSession } from "@/lib/types"
 import type { AgentKind } from "@/lib/sessionSource"
+import { sessionCache } from "@/lib/sessionCache"
 
 export interface SessionSource {
   dirName: string
@@ -16,6 +16,8 @@ export type SseConnectionState = "connecting" | "connected" | "disconnected"
 export function useLiveSession(
   source: SessionSource | null,
   onUpdate: (session: ParsedSession) => void,
+  workerParse: (text: string) => Promise<ParsedSession>,
+  workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
   onReconnect?: () => void
 ) {
   const [isLive, setIsLive] = useState(false)
@@ -28,6 +30,10 @@ export function useLiveSession(
   onUpdateRef.current = onUpdate
   const onReconnectRef = useRef(onReconnect)
   onReconnectRef.current = onReconnect
+  const workerParseRef = useRef(workerParse)
+  workerParseRef.current = workerParse
+  const workerAppendRef = useRef(workerAppend)
+  workerAppendRef.current = workerAppend
   const wasDisconnectedRef = useRef(false)
 
   const dirName = source?.dirName ?? null
@@ -37,8 +43,12 @@ export function useLiveSession(
   // Reset accumulated text and cached session when source changes
   useEffect(() => {
     textRef.current = rawText
-    sessionRef.current = rawText ? parseSession(rawText) : null
-    if (!rawText) {
+    if (rawText) {
+      workerParseRef.current(rawText).then((parsed) => {
+        sessionRef.current = parsed
+      })
+    } else {
+      sessionRef.current = null
       setIsLive(false)
     }
   }, [rawText])
@@ -67,6 +77,10 @@ export function useLiveSession(
     // but only trigger a React rerender at most every 100ms to avoid jank.
     let pendingUpdate = false
     let rafId: number | null = null
+    // Chain parse promises to prevent race conditions: each parse starts
+    // from the result of the previous one, so rapid SSE messages don't
+    // overwrite each other's results.
+    let parseChain: Promise<ParsedSession | null> = Promise.resolve(null)
 
     const flushUpdate = () => {
       pendingUpdate = false
@@ -115,17 +129,30 @@ export function useLiveSession(
 
           const newText = data.lines.join("\n") + "\n"
           textRef.current += newText
-          if (sessionRef.current) {
-            sessionRef.current = parseSessionAppend(sessionRef.current, newText)
-          } else {
-            sessionRef.current = parseSession(textRef.current)
-          }
 
-          // Coalesce rapid SSE updates into a single React render
-          if (!pendingUpdate) {
-            pendingUpdate = true
-            rafId = requestAnimationFrame(flushUpdate)
-          }
+          // Chain parses: each starts from the previous result to prevent
+          // race conditions when rapid SSE messages arrive before prior
+          // parses complete. Use sessionRef.current as fallback for the
+          // first call (the initial session was parsed by the rawText effect).
+          parseChain = parseChain.then((chainedSession) => {
+            const currentSession = chainedSession ?? sessionRef.current
+            return currentSession
+              ? workerAppendRef.current(currentSession, newText)
+              : workerParseRef.current(textRef.current)
+          }).then((result) => {
+            sessionRef.current = result
+            // Update cache
+            if (dirName && fileName) {
+              sessionCache.update(dirName, fileName, { parsed: result })
+              sessionCache.updateRawText(dirName, fileName, textRef.current)
+            }
+            // Coalesce rapid updates into a single React render
+            if (!pendingUpdate) {
+              pendingUpdate = true
+              rafId = requestAnimationFrame(flushUpdate)
+            }
+            return result
+          })
         }
       } catch (err) {
         console.error("[useLiveSession] Error processing SSE message:", err)

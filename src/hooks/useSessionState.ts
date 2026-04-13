@@ -1,5 +1,5 @@
 import { useReducer } from "react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { MobileTab } from "@/components/MobileNav"
 
@@ -38,6 +38,7 @@ export type SessionAction =
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
   | { type: "UPDATE_SESSION"; session: ParsedSession }
+  | { type: "PREPEND_TURNS"; turns: Turn[] }
   | { type: "RELOAD_SESSION_CONTENT"; session: ParsedSession; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
   | { type: "GUARD_MOBILE_TAB"; hasSession: boolean; hasTeam: boolean }
@@ -179,6 +180,21 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "UPDATE_SESSION":
       return { ...state, session: action.session }
+
+    case "PREPEND_TURNS": {
+      if (!state.session) return state
+      // Deduplicate: older turns may overlap with existing turns from tail load
+      const existingIds = new Set(state.session.turns.map((t) => t.id))
+      const unique = action.turns.filter((t) => !existingIds.has(t.id))
+      if (unique.length === 0) return state
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          turns: [...unique, ...state.session.turns],
+        },
+      }
+    }
 
     case "RELOAD_SESSION_CONTENT":
       return {

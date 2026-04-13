@@ -242,6 +242,8 @@ export interface ParsedSession {
   gitBranch: string
   cwd: string
   slug: string
+  /** Session display name set via `--name` CLI flag. */
+  name: string
   model: string
   turns: Turn[]
   stats: SessionStats

@@ -57,7 +57,7 @@ function serializeRawMessages(rawMessages: Array<{ type: string; [key: string]: 
 }
 
 function extractSessionMetadata(messages: RawMessage[]) {
-  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
+  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", name: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
 
   for (const msg of messages) {
     if (msg.sessionId && !meta.sessionId) meta.sessionId = msg.sessionId
@@ -65,6 +65,7 @@ function extractSessionMetadata(messages: RawMessage[]) {
     if (msg.gitBranch && !meta.gitBranch) meta.gitBranch = msg.gitBranch
     if (msg.cwd && !meta.cwd) meta.cwd = msg.cwd
     if (msg.slug && !meta.slug) meta.slug = msg.slug
+    if ((msg as Record<string, unknown>).name && !meta.name) meta.name = (msg as Record<string, unknown>).name as string
     if ((msg as Record<string, unknown>).branchedFrom && !meta.branchedFrom) {
       meta.branchedFrom = (msg as Record<string, unknown>).branchedFrom as typeof meta.branchedFrom
     }

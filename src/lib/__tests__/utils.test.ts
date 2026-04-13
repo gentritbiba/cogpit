@@ -33,13 +33,17 @@ describe("cn", () => {
 })
 
 describe("getEffortOptions", () => {
-  it("exposes xhigh only for codex", () => {
-    expect(getEffortOptions("claude").map((option) => option.value)).toEqual(["low", "medium", "high"])
-    expect(getEffortOptions("codex").map((option) => option.value)).toEqual(["low", "medium", "high", "xhigh"])
+  it("exposes max for claude and xhigh only for codex", () => {
+    expect(getEffortOptions("claude").map((option) => option.value)).toEqual(["low", "medium", "high", "max"])
+    expect(getEffortOptions("codex").map((option) => option.value)).toEqual(["low", "medium", "high", "max", "xhigh"])
   })
 })
 
 describe("normalizeEffortForAgent", () => {
+  it("keeps max for claude", () => {
+    expect(normalizeEffortForAgent("claude", "max")).toBe("max")
+  })
+
   it("keeps xhigh for codex", () => {
     expect(normalizeEffortForAgent("codex", "xhigh")).toBe("xhigh")
   })

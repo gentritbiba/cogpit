@@ -45,7 +45,7 @@ function getToolSummary(tc: ToolCall): string {
     case "Edit":
       return String(input.file_path ?? input.path ?? "")
     case "Bash":
-      return String(input.command ?? "")
+      return String(input.command ?? input.cmd ?? "")
     case "Grep":
     case "Glob":
       return String(input.pattern ?? "")

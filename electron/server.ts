@@ -67,14 +67,13 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   app.use(authMiddleware)
 
   // ── Guard middleware ────────────────────────────────────────────
+  // Note: refreshDirs() and dirs.UNDO_DIR are set once at startup above (not per-request)
   app.use("/api", (req, res, next) => {
     if (req.path.startsWith("/config") || req.path.startsWith("/notify")) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
       return
     }
-    refreshDirs()
-    dirs.UNDO_DIR = join(userDataDir, "undo-history")
     next()
   })
 

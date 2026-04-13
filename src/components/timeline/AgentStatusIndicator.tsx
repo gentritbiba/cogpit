@@ -104,7 +104,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
   }, [isCompleted, lastTurn])
 
   const showStatus = agentStatus && agentStatus.status !== "idle" && fadePhase !== "hidden"
-  const label = showStatus ? getStatusLabel(agentStatus.status, agentStatus.toolName) : null
+  const label = showStatus ? getStatusLabel(agentStatus.status, agentStatus.toolName, agentStatus.terminalReason) : null
 
   // Show duration standalone after status fades, hide only when a new turn starts
   if (!label && !durationLabel) return null
@@ -123,7 +123,9 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
           <span
             className={cn(
               "text-xs font-medium",
-              isCompleted ? "text-green-400" : "text-muted-foreground",
+              !isCompleted && "text-muted-foreground",
+              isCompleted && agentStatus.terminalReason && "text-amber-400",
+              isCompleted && !agentStatus.terminalReason && "text-green-400",
             )}
           >
             {label}

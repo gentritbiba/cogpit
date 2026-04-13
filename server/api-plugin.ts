@@ -81,8 +81,6 @@ export function sessionApiPlugin(): Plugin {
           res.end(JSON.stringify({ error: "Not configured", code: "NOT_CONFIGURED" }))
           return
         }
-        // Refresh dirs from current config
-        refreshDirs()
         next()
       })
 

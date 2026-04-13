@@ -15,6 +15,8 @@ export interface SessionStatusInfo {
   toolName?: string
   /** Number of pending queue items (user messages waiting to be processed) */
   pendingQueue?: number
+  /** Why the session terminated (from Claude Code's terminal_reason). Only set for non-normal endings. */
+  terminalReason?: string
 }
 
 /**
@@ -86,6 +88,15 @@ export function deriveSessionStatus(
       return result("processing")
     }
 
+    // terminal_reason system messages — the session ended for a non-normal reason
+    if (msg.type === "system" && (msg as { subtype?: string }).subtype === "terminal_reason") {
+      const reason = (msg as { reason?: string }).reason
+      if (reason) {
+        return { status: "completed", terminalReason: reason, pendingQueue: Math.max(0, pendingEnqueues) }
+      }
+      continue
+    }
+
     // Compaction markers — skip past them to find the real session state.
     // In-progress compaction is detected live via subagent file watcher (isCompacting),
     // so these finished-compaction markers should not lock the status to "compacting".
@@ -138,8 +149,18 @@ function deriveCodexSessionStatus(
 /** Tools that indicate the agent is waiting for sub-agents to finish. */
 const AGENT_TOOLS = new Set(["Agent", "TaskOutput"])
 
+/** Human-readable label for terminal_reason values from Claude Code. */
+export function getTerminalReasonLabel(reason: string): string {
+  switch (reason) {
+    case "max_turns": return "Stopped — turn limit reached"
+    case "aborted_tools": return "Stopped — tools aborted"
+    case "blocking_limit": return "Stopped — blocked"
+    default: return `Stopped — ${reason.replace(/_/g, " ")}`
+  }
+}
+
 /** Human-readable label for a session status. Returns null for "idle". */
-export function getStatusLabel(status: SessionStatus | undefined, toolName?: string): string | null {
+export function getStatusLabel(status: SessionStatus | undefined, toolName?: string, terminalReason?: string): string | null {
   switch (status) {
     case "thinking": return "Thinking..."
     case "tool_use":
@@ -147,7 +168,9 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
       return toolName ? `Using ${toolName}` : "Using tool..."
     case "processing": return "Processing..."
     case "compacting": return "Compressing context..."
-    case "completed": return "Done"
+    case "completed":
+      if (terminalReason) return getTerminalReasonLabel(terminalReason)
+      return "Done"
     default: return null
   }
 }

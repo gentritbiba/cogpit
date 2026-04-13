@@ -74,6 +74,7 @@ export async function getSessionMeta(filePath: string) {
   let gitBranch = ""
   let model = ""
   let slug = ""
+  let name = ""
   let cwd = ""
   let firstUserMessage = ""
   let lastUserMessage = ""
@@ -89,6 +90,7 @@ export async function getSessionMeta(filePath: string) {
       if (obj.version && !version) version = obj.version
       if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
       if (obj.slug && !slug) slug = obj.slug
+      if (obj.name && !name) name = obj.name
       if (obj.cwd && !cwd) cwd = obj.cwd
       if (obj.branchedFrom && !branchedFrom) branchedFrom = obj.branchedFrom
       if (obj.type === "assistant" && obj.message?.model && !model) {
@@ -169,6 +171,7 @@ export async function getSessionMeta(filePath: string) {
     gitBranch,
     model,
     slug,
+    name,
     cwd,
     firstUserMessage,
     lastUserMessage,
@@ -220,6 +223,12 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
           if (!line) continue
           let obj: { type: string; [key: string]: unknown }
           try { obj = JSON.parse(line) } catch { continue }
+
+          // terminal_reason system message — session ended abnormally
+          if (obj.type === "system" && (obj as { subtype?: string }).subtype === "terminal_reason") {
+            const reason = (obj as { reason?: string }).reason
+            if (reason) return { status: "completed", terminalReason: reason }
+          }
 
           if (obj.type === "event_msg") {
             const payload = obj.payload as { type?: string } | undefined

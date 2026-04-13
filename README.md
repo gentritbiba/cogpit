@@ -44,7 +44,7 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 ## Features
 
 ### Multi-Provider Support
-Start sessions with Claude Code or Codex from the same interface. A provider dialog lets you pick your agent when creating a new session. Model and effort settings adapt per provider — Codex sessions expose xhigh effort and GPT models, while Claude sessions show Opus/Sonnet/Haiku. If a Codex model is unavailable, Cogpit automatically retries with the default.
+Start sessions with Claude Code or Codex from the same interface. A provider dialog lets you pick your agent when creating a new session. Model and effort settings adapt per provider — Codex sessions expose `xhigh` effort and GPT models, while Claude sessions show Opus/Sonnet/Haiku with `low` through `max` effort. If a Codex model is unavailable, Cogpit automatically retries with the default.
 
 ### Live Session Monitoring
 Stream active sessions via SSE. Watch Claude or Codex think, call tools, and edit files in real-time. Status indicators show running, thinking, tool use, and idle states. Process monitor tracks all agent CLI processes with PID, memory, and CPU.

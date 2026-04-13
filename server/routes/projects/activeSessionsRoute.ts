@@ -159,6 +159,7 @@ export async function handleActiveSessions(
             fileName: c.fileName,
             sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
             slug: meta.slug,
+            name: meta.name,
             model: meta.model,
             firstUserMessage: meta.firstUserMessage,
             lastUserMessage: meta.lastUserMessage,
@@ -171,6 +172,7 @@ export async function handleActiveSessions(
             isActive: now - c.mtimeMs < 5 * 60 * 1000,
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
+            agentTerminalReason: statusInfo.terminalReason,
             ...(matchedMessage !== undefined && { matchedMessage }),
           }
         } catch {

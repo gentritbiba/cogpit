@@ -374,20 +374,20 @@ describe("formatCost", () => {
 // ── getContextLimit ───────────────────────────────────────────────────────
 
 describe("getContextLimit", () => {
-  it("returns 200k for opus models", () => {
-    expect(getContextLimit("claude-opus-4-6")).toBe(200_000)
+  it("defaults to 1M for opus models", () => {
+    expect(getContextLimit("claude-opus-4-6")).toBe(1_000_000)
   })
 
-  it("returns 200k for sonnet models", () => {
-    expect(getContextLimit("claude-sonnet-4-5")).toBe(200_000)
+  it("defaults to 1M for sonnet models", () => {
+    expect(getContextLimit("claude-sonnet-4-5")).toBe(1_000_000)
   })
 
-  it("returns 200k for haiku models", () => {
-    expect(getContextLimit("claude-haiku-4-5")).toBe(200_000)
+  it("defaults to 1M for haiku models", () => {
+    expect(getContextLimit("claude-haiku-4-5")).toBe(1_000_000)
   })
 
-  it("returns 200k for unknown models (default)", () => {
-    expect(getContextLimit("gpt-4")).toBe(200_000)
+  it("defaults to 1M for unknown models", () => {
+    expect(getContextLimit("gpt-4")).toBe(1_000_000)
   })
 
   it("returns 1M for opus[1m] models", () => {
@@ -433,12 +433,12 @@ describe("getContextUsage", () => {
     expect(result).not.toBeNull()
     // used = 50000 + 10000 + 5000 = 65000
     expect(result!.used).toBe(65_000)
-    expect(result!.limit).toBe(200_000)
-    // compactAt = 200000 - 33000 = 167000
-    expect(result!.compactAt).toBe(167_000)
-    // percent = (65000 / 167000) * 100
-    expect(result!.percent).toBeCloseTo((65_000 / 167_000) * 100, 1)
-    expect(result!.percentAbsolute).toBeCloseTo((65_000 / 200_000) * 100, 1)
+    expect(result!.limit).toBe(1_000_000)
+    // compactAt = 1000000 - 33000 = 967000
+    expect(result!.compactAt).toBe(967_000)
+    // percent = (65000 / 967000) * 100
+    expect(result!.percent).toBeCloseTo((65_000 / 967_000) * 100, 1)
+    expect(result!.percentAbsolute).toBeCloseTo((65_000 / 1_000_000) * 100, 1)
   })
 
   it("uses the last assistant message when multiple exist", () => {
@@ -475,13 +475,13 @@ describe("getContextUsage", () => {
         role: "assistant",
         content: [{ type: "text", text: "big" }],
         stop_reason: "end_turn",
-        usage: { input_tokens: 199_000, output_tokens: 0 },
+        usage: { input_tokens: 990_000, output_tokens: 0 },
       },
     })
     const result = getContextUsage([msg])
-    // used=199000, compactAt=167000 => percent > 100, should cap
+    // used=990000, compactAt=967000 => percent > 100, should cap
     expect(result!.percent).toBe(100)
-    expect(result!.percentAbsolute).toBeCloseTo((199_000 / 200_000) * 100, 1)
+    expect(result!.percentAbsolute).toBeCloseTo((990_000 / 1_000_000) * 100, 1)
   })
 
   it("handles missing optional cache fields", () => {
@@ -500,7 +500,7 @@ describe("getContextUsage", () => {
   })
 
   it("computes exact percent at compactAt boundary", () => {
-    // compactAt = 200000 - 33000 = 167000
+    // compactAt = 1000000 - 33000 = 967000
     const msg = assistantMsg([{ type: "text", text: "boundary" }], {
       message: {
         model: "claude-opus-4-6-20250115",
@@ -508,13 +508,13 @@ describe("getContextUsage", () => {
         role: "assistant",
         content: [{ type: "text", text: "boundary" }],
         stop_reason: "end_turn",
-        usage: { input_tokens: 167_000, output_tokens: 0 },
+        usage: { input_tokens: 967_000, output_tokens: 0 },
       },
     })
     const result = getContextUsage([msg])
-    // used = 167000, compactAt = 167000 => exactly 100%
+    // used = 967000, compactAt = 967000 => exactly 100%
     expect(result!.percent).toBe(100)
-    expect(result!.percentAbsolute).toBeCloseTo((167_000 / 200_000) * 100, 1)
+    expect(result!.percentAbsolute).toBeCloseTo((967_000 / 1_000_000) * 100, 1)
   })
 
   it("returns 0 percent when used is 0", () => {

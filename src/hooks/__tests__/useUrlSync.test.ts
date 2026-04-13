@@ -213,6 +213,27 @@ describe("useUrlSync", () => {
     pushStateSpy.mockRestore()
   })
 
+  it("pushes project URL for a pending session before it is finalized", () => {
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+
+    const state = makeState({
+      pendingDirName: "pending-project",
+    })
+
+    renderHook(() =>
+      useUrlSync({
+        state,
+        dispatch,
+        isMobile: false,
+        resetTurnCount,
+        scrollToBottomInstant,
+      })
+    )
+
+    expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/pending-project")
+    pushStateSpy.mockRestore()
+  })
+
   it("handles popstate event (browser back/forward)", async () => {
     window.history.replaceState(null, "", "/")
 

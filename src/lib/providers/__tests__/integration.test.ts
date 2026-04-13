@@ -215,6 +215,10 @@ describe("provider.buildEffortArgs", () => {
     expect(getProvider("claude").buildEffortArgs("high")).toEqual(["--effort", "high"])
   })
 
+  it("claude: passes through max effort", () => {
+    expect(getProvider("claude").buildEffortArgs("max")).toEqual(["--effort", "max"])
+  })
+
   it("codex: returns model_reasoning_effort config for xhigh", () => {
     expect(getProvider("codex").buildEffortArgs("xhigh")).toEqual(["-c", "model_reasoning_effort=\"xhigh\""])
   })

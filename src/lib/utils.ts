@@ -31,6 +31,7 @@ const BASE_EFFORT_OPTIONS: readonly EffortOption[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
+  { value: "max", label: "Max" },
 ]
 
 const CODEX_EFFORT_OPTIONS: readonly EffortOption[] = [

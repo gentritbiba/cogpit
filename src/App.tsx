@@ -44,12 +44,14 @@ import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
+import { useParserWorker } from "@/hooks/useParserWorker"
+import { useChunkedSession } from "@/hooks/useChunkedSession"
 import { hapticLight } from "@/lib/haptics"
 import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
 import { DEFAULT_EFFORT, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
 import {
@@ -109,6 +111,18 @@ export default function App() {
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
+  const { parse: workerParse, append: workerAppend } = useParserWorker()
+
+  const handlePrependTurns = useCallback((olderTurns: Turn[], _hasMore: boolean, _nextByteOffset: number) => {
+    dispatch({ type: "PREPEND_TURNS", turns: olderTurns })
+  }, [dispatch])
+
+  const chunkedSession = useChunkedSession({
+    dirName: state.sessionSource?.dirName ?? null,
+    fileName: state.sessionSource?.fileName ?? null,
+    workerParse,
+    onPrependTurns: handlePrependTurns,
+  })
 
   // Panel/sidebar toggle state
   const panels = usePanelState(state, dispatch)
@@ -254,11 +268,17 @@ export default function App() {
   // interrupt these low-priority renders to process user interactions (clicks).
   // On reconnect after disconnect, reload the full session to catch missed messages.
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting } = useLiveSession(state.sessionSource, (updated) => {
-    startTransition(() => {
-      dispatch({ type: "UPDATE_SESSION", session: updated })
-    })
-  }, () => reconnectHandlerRef.current?.())
+  const { isLive, sseState, isCompacting } = useLiveSession(
+    state.sessionSource,
+    (updated) => {
+      startTransition(() => {
+        dispatch({ type: "UPDATE_SESSION", session: updated })
+      })
+    },
+    workerParse,
+    workerAppend,
+    () => reconnectHandlerRef.current?.(),
+  )
 
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
@@ -483,6 +503,7 @@ export default function App() {
     teamContext,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
     resetTurnCount: scroll.resetTurnCount,
+    workerParse,
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
@@ -950,7 +971,7 @@ export default function App() {
                     onShowFileChanges={() => setShowMobileFileChanges(true)}
                     hasFileChanges={hasFileChanges}
                   />
-                  <ChatArea searchInputRef={searchInputRef} />
+                  <ChatArea searchInputRef={searchInputRef} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                 </div>
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
@@ -1148,7 +1169,7 @@ export default function App() {
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     />
-                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} />
+                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                     <SessionInputFooter floating>
                       {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
                       {subAgentReadOnlyNode || chatInputNode}

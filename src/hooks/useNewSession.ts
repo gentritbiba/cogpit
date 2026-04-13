@@ -8,6 +8,7 @@ import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
 import { agentKindFromDirName } from "@/lib/sessionSource"
 import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
+import { rename as renameSession } from "@/hooks/useSessionNames"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
@@ -39,6 +40,28 @@ interface SessionsListResponse {
   }>
 }
 
+/** Derive a short session name from the first user message. */
+function deriveSessionName(message: string): string {
+  const cleaned = message.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
+  if (!cleaned) return ""
+  // Take first line, truncate to 60 chars
+  const firstLine = cleaned.split("\n")[0].trim()
+  if (firstLine.length <= 60) return firstLine
+  return firstLine.slice(0, 57) + "..."
+}
+
+const EMPTY_SESSION_STATS = {
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  totalCacheCreationTokens: 0,
+  totalCacheReadTokens: 0,
+  totalCostUSD: 0,
+  toolCallCounts: {},
+  errorCount: 0,
+  totalDurationMs: 0,
+  turnCount: 0,
+} as const
+
 function buildSessionSource(response: CreateSessionResponse, rawText: string): SessionSource {
   return {
     dirName: response.dirName,
@@ -48,20 +71,45 @@ function buildSessionSource(response: CreateSessionResponse, rawText: string): S
   }
 }
 
+function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession {
+  return {
+    sessionId: response.sessionId,
+    version: "",
+    gitBranch: "",
+    cwd: "",
+    slug: "",
+    name: "",
+    model: "",
+    turns: [],
+    stats: { ...EMPTY_SESSION_STATS },
+    rawMessages: [],
+    agentKind: agentKindFromDirName(response.dirName),
+  }
+}
+
+function parseInitialSessionContent(rawText: string | undefined): { rawText: string; parsed: ParsedSession } | null {
+  if (!rawText?.trim()) return null
+  try {
+    return {
+      rawText,
+      parsed: parseSession(rawText),
+    }
+  } catch {
+    return null
+  }
+}
+
 async function tryLoadSessionContent(
   response: CreateSessionResponse,
   controller: AbortController,
   maxAttempts = 3,
-  delayMs = 100
+  delayMs = 100,
+  allowInitialContent = true,
 ): Promise<{ rawText: string; parsed: ParsedSession } | null> {
-  if (response.initialContent?.trim()) {
-    try {
-      return {
-        rawText: response.initialContent,
-        parsed: parseSession(response.initialContent),
-      }
-    } catch {
-      // Fall through to fetch retries
+  if (allowInitialContent) {
+    const initialContent = parseInitialSessionContent(response.initialContent)
+    if (initialContent) {
+      return initialContent
     }
   }
 
@@ -102,7 +150,7 @@ async function hydrateSessionContent(
 
   for (let attempt = 0; attempt < 30; attempt++) {
     if (controller.signal.aborted) return
-    const loaded = await tryLoadSessionContent(response, controller, 1, 0)
+    const loaded = await tryLoadSessionContent(response, controller, 1, 0, false)
     if (loaded && loaded.rawText !== lastRawText) {
       dispatch({
         type: "RELOAD_SESSION_CONTENT",
@@ -123,23 +171,18 @@ async function finalizeDiscoveredSession(
   isMobile: boolean,
   onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
 ): Promise<string> {
-  const loaded = await tryLoadSessionContent(response, controller)
+  const loaded = parseInitialSessionContent(response.initialContent)
   const rawText = loaded?.rawText ?? ""
-  const parsed = loaded?.parsed ?? {
-    sessionId: response.sessionId,
-    turns: [],
-    cwd: undefined,
-    model: undefined,
-    totalCost: 0,
-  }
+  const parsed = loaded?.parsed ?? buildEmptyParsedSession(response)
   const source = buildSessionSource(response, rawText)
 
   dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
   onSessionFinalized(parsed, source)
 
-  if (!loaded) {
-    void hydrateSessionContent(response, controller, dispatch, rawText)
-  }
+  // Always reconcile against the on-disk JSONL after promotion. This closes
+  // the gap where the create response is missing lines that were flushed just
+  // before the SSE watcher connects.
+  void hydrateSessionContent(response, controller, dispatch, rawText)
 
   return response.sessionId
 }
@@ -231,12 +274,14 @@ export function useNewSession({
       const startedAt = Date.now()
 
       try {
+        const sessionName = deriveSessionName(message)
         const requestBody = {
           dirName,
           message,
           images,
           permissions: permissionsConfig,
           effort: effort || undefined,
+          name: agentKind === "claude" ? (sessionName || undefined) : undefined,
           worktreeName: agentKind === "claude" && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           mcpConfig: agentKind === "claude" ? (mcpConfig || undefined) : undefined,
         }
@@ -260,7 +305,9 @@ export function useNewSession({
           if (agentKind === "codex") {
             const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
             if (recovered) {
-              return await finalizeDiscoveredSession(recovered, controller, dispatch, isMobile, onSessionFinalized)
+              const recoveredId = await finalizeDiscoveredSession(recovered, controller, dispatch, isMobile, onSessionFinalized)
+              if (sessionName && recoveredId) renameSession(recoveredId, sessionName)
+              return recoveredId
             }
           }
           setCreateError(errorMessage || `Failed to create session (${res.status})`)
@@ -269,7 +316,12 @@ export function useNewSession({
 
         const response = await res.json() as CreateSessionResponse
         pendingDirNameRef.current = null
-        return await finalizeDiscoveredSession(response, controller, dispatch, isMobile, onSessionFinalized)
+        const newSessionId = await finalizeDiscoveredSession(response, controller, dispatch, isMobile, onSessionFinalized)
+        // Auto-store the derived session name so it appears in sidebar/lists
+        if (sessionName && newSessionId) {
+          renameSession(newSessionId, sessionName)
+        }
+        return newSessionId
       } catch (err) {
         if (controller.signal.aborted) return null
         setCreateError(err instanceof Error ? err.message : "Failed to create session")

@@ -29,6 +29,7 @@ export interface ActiveSessionInfo {
   matchedMessage?: string
   agentStatus?: SessionStatus
   agentToolName?: string
+  agentTerminalReason?: string
 }
 
 export interface RunningProcess {
@@ -73,7 +74,7 @@ export function SessionRow({
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
   const statusLabel = hasProcess
-    ? (getStatusLabel(s.agentStatus, s.agentToolName) ?? "Idle")
+    ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const title = customName || truncate(s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)

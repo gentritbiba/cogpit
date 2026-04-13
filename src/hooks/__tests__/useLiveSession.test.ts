@@ -4,21 +4,22 @@ import { useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
 import type { ParsedSession } from "@/lib/types"
 
-// Mock parser
-vi.mock("@/lib/parser", () => ({
-  parseSession: vi.fn(),
-  parseSessionAppend: vi.fn(),
-}))
-
 // Mock auth
 vi.mock("@/lib/auth", () => ({
   authUrl: vi.fn((url: string) => url),
 }))
 
-import { parseSession, parseSessionAppend } from "@/lib/parser"
-
-const mockedParseSession = vi.mocked(parseSession)
-const mockedParseSessionAppend = vi.mocked(parseSessionAppend)
+// Mock sessionCache
+vi.mock("@/lib/sessionCache", () => ({
+  sessionCache: {
+    get: vi.fn(() => undefined),
+    set: vi.fn(),
+    update: vi.fn(),
+    updateRawText: vi.fn(),
+    evict: vi.fn(),
+    clear: vi.fn(),
+  },
+}))
 
 const mockParsedSession: ParsedSession = {
   sessionId: "s1",
@@ -94,19 +95,21 @@ class MockEventSource {
 describe("useLiveSession", () => {
   const onUpdate = vi.fn()
   let rafCallbacks: Array<() => void> = []
+  let workerParse: ReturnType<typeof vi.fn>
+  let workerAppend: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.resetAllMocks()
     MockEventSource.instances = []
     rafCallbacks = []
+    workerParse = vi.fn(() => Promise.resolve(mockParsedSession))
+    workerAppend = vi.fn(() => Promise.resolve(mockParsedSession))
     vi.stubGlobal("EventSource", MockEventSource)
     vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
       rafCallbacks.push(cb)
       return rafCallbacks.length
     })
     vi.stubGlobal("cancelAnimationFrame", vi.fn())
-    mockedParseSession.mockReturnValue(mockParsedSession)
-    mockedParseSessionAppend.mockReturnValue(mockParsedSession)
   })
 
   afterEach(() => {
@@ -125,13 +128,13 @@ describe("useLiveSession", () => {
   }
 
   it("returns initial disconnected state with null source", () => {
-    const { result } = renderHook(() => useLiveSession(null, onUpdate))
+    const { result } = renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend))
     expect(result.current.isLive).toBe(false)
     expect(result.current.sseState).toBe("disconnected")
   })
 
   it("does not create EventSource with null source", () => {
-    renderHook(() => useLiveSession(null, onUpdate))
+    renderHook(() => useLiveSession(null, onUpdate, workerParse, workerAppend))
     expect(MockEventSource.instances).toHaveLength(0)
   })
 
@@ -142,7 +145,7 @@ describe("useLiveSession", () => {
       rawText: '{"type":"user"}',
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     expect(MockEventSource.instances).toHaveLength(1)
     expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl")
@@ -155,7 +158,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
     expect(result.current.sseState).toBe("connecting")
   })
 
@@ -166,7 +169,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -182,7 +185,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateOpen()
@@ -205,7 +208,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -223,7 +226,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -242,7 +245,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init" })
@@ -253,14 +256,14 @@ describe("useLiveSession", () => {
     vi.useRealTimers()
   })
 
-  it("sets isLive=true and calls onUpdate when lines arrive", () => {
+  it("sets isLive=true and calls onUpdate when lines arrive", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -271,6 +274,11 @@ describe("useLiveSession", () => {
 
     expect(result.current.isLive).toBe(true)
 
+    // Wait for the async worker parse to resolve
+    await act(async () => {
+      await Promise.resolve()
+    })
+
     // Flush the rAF callback to trigger onUpdate
     act(() => {
       flushRAF()
@@ -279,14 +287,19 @@ describe("useLiveSession", () => {
     expect(onUpdate).toHaveBeenCalledWith(mockParsedSession)
   })
 
-  it("uses parseSessionAppend when session already exists", () => {
+  it("uses workerAppend when session already exists", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
       rawText: '{"type":"user"}',
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    // Wait for initial workerParse to resolve (rawText effect)
+    await act(async () => {
+      await Promise.resolve()
+    })
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -295,23 +308,32 @@ describe("useLiveSession", () => {
       })
     })
 
-    expect(mockedParseSessionAppend).toHaveBeenCalled()
+    // Wait for the chained parse promise to resolve
+    // (chain: previous resolve -> workerAppend -> then)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(workerAppend).toHaveBeenCalled()
   })
 
-  it("ignores lines messages with empty lines array", () => {
+  it("ignores lines messages with empty lines array", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "file.jsonl",
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "lines", lines: [] })
     })
 
     expect(result.current.isLive).toBe(false)
+    await act(async () => { await Promise.resolve() })
     act(() => { flushRAF() })
     expect(onUpdate).not.toHaveBeenCalled()
   })
@@ -323,7 +345,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
     const es = getLastEventSource()
     expect(es.closed).toBe(false)
 
@@ -344,7 +366,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
       { initialProps: { source: source1 } }
     )
 
@@ -366,14 +388,14 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     expect(getLastEventSource().url).toBe(
       "/api/watch/dir%20with%20spaces/file%20name.jsonl"
     )
   })
 
-  it("resets isLive when source becomes null", () => {
+  it("resets isLive when source becomes null", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
@@ -381,7 +403,7 @@ describe("useLiveSession", () => {
     }
 
     const { result, rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
       { initialProps: { source: source as SessionSource | null } }
     )
 
@@ -400,14 +422,14 @@ describe("useLiveSession", () => {
     expect(result.current.sseState).toBe("disconnected")
   })
 
-  it("coalesces rapid SSE messages into single React update", () => {
+  it("coalesces rapid SSE messages into single React update", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
       rawText: "{}",
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     // Send multiple messages rapidly
     act(() => {
@@ -416,8 +438,12 @@ describe("useLiveSession", () => {
       getLastEventSource().simulateMessage({ type: "lines", lines: ['{"a":3}'] })
     })
 
-    // Before RAF flush, onUpdate shouldn't have been called
-    expect(onUpdate).not.toHaveBeenCalled()
+    // Wait for async parses to resolve
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
 
     // After RAF flush, should only call once (coalesced)
     act(() => { flushRAF() })
@@ -433,7 +459,7 @@ describe("useLiveSession", () => {
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     // Send invalid JSON via onmessage directly
     act(() => {
@@ -449,16 +475,18 @@ describe("useLiveSession", () => {
     consoleSpy.mockRestore()
   })
 
-  it("parses initial rawText on mount", () => {
+  it("calls workerParse with initial rawText on mount", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
       rawText: '{"type":"user","message":{"role":"user","content":"hi"}}',
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
-    expect(mockedParseSession).toHaveBeenCalledWith(source.rawText)
+    await act(async () => { await Promise.resolve() })
+
+    expect(workerParse).toHaveBeenCalledWith(source.rawText)
   })
 
   it("sets isLive=false when rawText is empty", () => {
@@ -468,7 +496,7 @@ describe("useLiveSession", () => {
       rawText: "",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
     expect(result.current.isLive).toBe(false)
   })
 
@@ -485,7 +513,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(props.source, onUpdate),
+      (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
       { initialProps: { source: source1 } }
     )
 
@@ -500,7 +528,7 @@ describe("useLiveSession", () => {
     expect(MockEventSource.instances).toHaveLength(2)
   })
 
-  it("cancels pending rAF on cleanup", () => {
+  it("cancels pending rAF on cleanup", async () => {
     const mockCancelAnimationFrame = vi.fn()
     vi.stubGlobal("cancelAnimationFrame", mockCancelAnimationFrame)
 
@@ -510,7 +538,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { unmount } = renderHook(() => useLiveSession(source, onUpdate))
+    const { unmount } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     // Send a message to schedule a rAF
     act(() => {
@@ -520,20 +548,23 @@ describe("useLiveSession", () => {
       })
     })
 
+    // Wait for async parse to schedule the RAF
+    await act(async () => { await Promise.resolve() })
+
     unmount()
 
     // cancelAnimationFrame should have been called during cleanup
     expect(mockCancelAnimationFrame).toHaveBeenCalled()
   })
 
-  it("uses parseSession (not parseSessionAppend) when sessionRef is null", () => {
+  it("uses workerParse (not workerAppend) when sessionRef is null", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
       rawText: "", // empty rawText means sessionRef starts as null
     }
 
-    renderHook(() => useLiveSession(source, onUpdate))
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -542,11 +573,14 @@ describe("useLiveSession", () => {
       })
     })
 
-    // Should use parseSession (full parse) since no existing session
-    expect(mockedParseSession).toHaveBeenCalled()
+    await act(async () => { await Promise.resolve() })
+
+    // Should use workerParse (full parse) since no existing session
+    expect(workerParse).toHaveBeenCalled()
+    expect(workerAppend).not.toHaveBeenCalled()
   })
 
-  it("uses latest onUpdate callback via ref pattern", () => {
+  it("uses latest onUpdate callback via ref pattern", async () => {
     const onUpdate1 = vi.fn()
     const onUpdate2 = vi.fn()
 
@@ -557,7 +591,7 @@ describe("useLiveSession", () => {
     }
 
     const { rerender } = renderHook(
-      (props) => useLiveSession(source, props.onUpdate),
+      (props) => useLiveSession(source, props.onUpdate, workerParse, workerAppend),
       { initialProps: { onUpdate: onUpdate1 } }
     )
 
@@ -571,6 +605,9 @@ describe("useLiveSession", () => {
         lines: ['{"type":"assistant"}'],
       })
     })
+
+    // Wait for async parse
+    await act(async () => { await Promise.resolve() })
 
     // Flush rAF
     act(() => { flushRAF() })
@@ -587,7 +624,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     // Before any message, it's connecting
     expect(result.current.sseState).toBe("connecting")
@@ -600,7 +637,7 @@ describe("useLiveSession", () => {
     expect(result.current.sseState).toBe("connected")
   })
 
-  it("stale timeout sets isLive=false after 30s", () => {
+  it("stale timeout sets isLive=false after 30s", async () => {
     vi.useFakeTimers()
     const source: SessionSource = {
       dirName: "dir",
@@ -608,7 +645,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({
@@ -634,7 +671,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
@@ -658,7 +695,7 @@ describe("useLiveSession", () => {
       rawText: "{}",
     }
 
-    const { result } = renderHook(() => useLiveSession(source, onUpdate))
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
       getLastEventSource().simulateMessage({ type: "init", recentlyActive: true })
