@@ -5,6 +5,7 @@ import type { UseUndoRedoResult } from "@/hooks/useUndoRedo"
 import type { PtyChatStatus } from "@/hooks/usePtyChat"
 import type { PendingInteraction } from "@/lib/parser"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
+import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 
 // ── Chat (pty) ──────────────────────────────────────────────────────────────
 
@@ -52,6 +53,11 @@ export interface SessionContextValue {
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */
   pendingInteraction: PendingInteraction | null
+  /** Pending permission requests from the CLI */
+  permissionRequests: PermissionRequest[]
+  permissionResponding: Set<string>
+  respondPermission: (requestId: string, behavior: PermissionDecision) => void
+  respondAllPermissions: (behavior: PermissionDecision) => void
   /** Whether the current view is a sub-agent (read-only) */
   isSubAgentView: boolean
   /** Slash command suggestions */

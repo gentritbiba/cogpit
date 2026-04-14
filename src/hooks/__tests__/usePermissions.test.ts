@@ -20,7 +20,7 @@ describe("usePermissions", () => {
       expect(result.current.hasPendingChanges).toBe(false)
     })
 
-    it("ignores config from localStorage on mount", () => {
+    it("loads config from localStorage on mount", () => {
       const stored = {
         mode: "plan",
         allowedTools: ["Read"],
@@ -29,8 +29,9 @@ describe("usePermissions", () => {
       localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(stored))
 
       const { result } = renderHook(() => usePermissions())
-      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
-      expect(result.current.appliedConfig).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.config.mode).toBe("plan")
+      expect(result.current.config.allowedTools).toEqual(["Read"])
+      expect(result.current.config.disallowedTools).toEqual(["Bash"])
     })
 
     it("falls back to DEFAULT_PERMISSIONS for malformed JSON", () => {
@@ -47,10 +48,10 @@ describe("usePermissions", () => {
       )
 
       const { result } = renderHook(() => usePermissions())
-      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.config.mode).toBe(DEFAULT_PERMISSIONS.mode)
     })
 
-    it("always returns default empty tool lists", () => {
+    it("defaults to empty arrays for invalid tool lists", () => {
       localStorage.setItem(
         PERMISSIONS_STORAGE_KEY,
         JSON.stringify({ mode: "plan", allowedTools: "bad", disallowedTools: null })
@@ -63,78 +64,60 @@ describe("usePermissions", () => {
   })
 
   describe("setMode", () => {
-    it("does not change the permission mode", () => {
+    it("changes the permission mode", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.setMode("plan"))
-      expect(result.current.config.mode).toBe("bypassPermissions")
+      expect(result.current.config.mode).toBe("plan")
     })
 
-    it("does not persist mode changes to localStorage", () => {
+    it("marks pending changes when mode differs from applied", () => {
+      const { result } = renderHook(() => usePermissions())
+
+      act(() => result.current.setMode("plan"))
+      expect(result.current.hasPendingChanges).toBe(true)
+    })
+
+    it("persists mode changes to localStorage", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.setMode("acceptEdits"))
 
-      expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).toBeNull()
-    })
-
-    it("never marks pending changes", () => {
-      const { result } = renderHook(() => usePermissions())
-
-      expect(result.current.hasPendingChanges).toBe(false)
-      act(() => result.current.setMode("plan"))
-      expect(result.current.hasPendingChanges).toBe(false)
+      const stored = JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!)
+      expect(stored.mode).toBe("acceptEdits")
     })
   })
 
   describe("toggleAllowedTool", () => {
-    it("does not add a tool to allowedTools", () => {
+    it("adds a tool to allowedTools", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.toggleAllowedTool("Read"))
-      expect(result.current.config.allowedTools).toEqual([])
+      expect(result.current.config.allowedTools).toEqual(["Read"])
     })
 
-    it("keeps allowedTools empty when toggled repeatedly", () => {
+    it("removes a tool when toggled again", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.toggleAllowedTool("Read"))
       act(() => result.current.toggleAllowedTool("Read"))
       expect(result.current.config.allowedTools).toEqual([])
-    })
-
-    it("does not move tools between lists", () => {
-      const { result } = renderHook(() => usePermissions())
-
-      act(() => result.current.toggleDisallowedTool("Bash"))
-      act(() => result.current.toggleAllowedTool("Bash"))
-      expect(result.current.config.allowedTools).toEqual([])
-      expect(result.current.config.disallowedTools).toEqual([])
     })
   })
 
   describe("toggleDisallowedTool", () => {
-    it("does not add a tool to disallowedTools", () => {
+    it("adds a tool to disallowedTools", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.toggleDisallowedTool("Write"))
-      expect(result.current.config.disallowedTools).toEqual([])
+      expect(result.current.config.disallowedTools).toEqual(["Write"])
     })
 
-    it("keeps disallowedTools empty when toggled repeatedly", () => {
+    it("removes a tool when toggled again", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.toggleDisallowedTool("Write"))
       act(() => result.current.toggleDisallowedTool("Write"))
-      expect(result.current.config.disallowedTools).toEqual([])
-    })
-
-    it("does not move tools from allowed to disallowed", () => {
-      const { result } = renderHook(() => usePermissions())
-
-      act(() => result.current.toggleAllowedTool("Edit"))
-      act(() => result.current.toggleDisallowedTool("Edit"))
-      expect(result.current.config.allowedTools).toEqual([])
       expect(result.current.config.disallowedTools).toEqual([])
     })
   })
@@ -144,11 +127,11 @@ describe("usePermissions", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.setMode("plan"))
-      expect(result.current.hasPendingChanges).toBe(false)
+      expect(result.current.hasPendingChanges).toBe(true)
 
       act(() => result.current.markApplied())
       expect(result.current.hasPendingChanges).toBe(false)
-      expect(result.current.appliedConfig).toEqual(DEFAULT_PERMISSIONS)
+      expect(result.current.appliedConfig.mode).toBe("plan")
     })
   })
 
@@ -164,12 +147,11 @@ describe("usePermissions", () => {
       expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
     })
 
-    it("keeps pending changes false after reset", () => {
+    it("clears pending changes after reset when applied was default", () => {
       const { result } = renderHook(() => usePermissions())
 
       act(() => result.current.setMode("plan"))
-      act(() => result.current.markApplied())
-      expect(result.current.hasPendingChanges).toBe(false)
+      expect(result.current.hasPendingChanges).toBe(true)
 
       act(() => result.current.resetToDefault())
       expect(result.current.hasPendingChanges).toBe(false)
@@ -177,15 +159,15 @@ describe("usePermissions", () => {
   })
 
   describe("localStorage persistence", () => {
-    it("clears any stored permission config on mount", () => {
-      const stored = {
-        mode: "plan",
-        allowedTools: [],
-        disallowedTools: [],
-      }
-      localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(stored))
-      renderHook(() => usePermissions())
-      expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).toBeNull()
+    it("persists config changes to localStorage", () => {
+      const { result } = renderHook(() => usePermissions())
+
+      act(() => result.current.setMode("plan"))
+      act(() => result.current.toggleAllowedTool("Read"))
+
+      const stored = JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!)
+      expect(stored.mode).toBe("plan")
+      expect(stored.allowedTools).toEqual(["Read"])
     })
   })
 })

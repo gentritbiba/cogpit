@@ -2,12 +2,8 @@ import {
   activeProcesses,
   persistentSessions,
   findJsonlPath,
-  watchSubagents,
   spawn,
-  createInterface,
   homedir,
-  buildPermArgs,
-  buildMcpArgs,
   buildCodexPermArgs,
   buildCodexModelArgs,
   buildCodexEffortArgs,
@@ -19,6 +15,7 @@ import {
 } from "../helpers"
 import type { PersistentSession, UseFn } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
+import { sdkSessions, sendSDKMessage, resumeSDKSession } from "../sdk-session"
 
 export function registerClaudeRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -90,6 +87,7 @@ export function registerClaudeRoutes(use: UseFn) {
             pendingTaskCalls: new Map(),
             subagentWatcher: null,
             worktreeName: null,
+            pendingPermissions: new Map(),
           }
           persistentSessions.set(sessionId, ps)
           activeProcesses.set(sessionId, child)
@@ -147,20 +145,45 @@ export function registerClaudeRoutes(use: UseFn) {
           return
         }
 
-        const permArgs = buildPermArgs(permissions)
-        const modelArgs = model ? ["--model", model] : []
-        const effortArgs = effort ? ["--effort", effort] : []
-        const mcpArgs = buildMcpArgs(mcpConfig)
-        const streamMsg = buildClaudeStreamMessage(message, images)
+        // Check for an existing SDK session first
+        const existingSDK = sdkSessions.get(sessionId)
 
-        if (existing && !existing.dead) {
-          activeProcesses.set(sessionId, existing.proc)
+        if (existingSDK && existingSDK.running) {
+          // SDK session is alive — push message through the channel
+          const state = sendSDKMessage(sessionId, message, images)
+          if (!state) {
+            res.statusCode = 500
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ error: "Failed to send message to running session" }))
+            return
+          }
           let responded = false
-          existing.onResult = (result) => {
+          state.onResult = (result) => {
+            if (responded) return
+            responded = true
+            state.onResult = null
+            res.setHeader("Content-Type", "application/json")
+            if ((result as Record<string, unknown>).is_error) {
+              res.statusCode = 500
+              res.end(JSON.stringify({ error: String((result as Record<string, unknown>).result) || "Claude returned an error" }))
+            } else {
+              res.end(JSON.stringify({ success: true }))
+            }
+          }
+          return
+        }
+
+        // Fallback: check for old-style persistent session (CLI-spawned)
+        const legacyPs = persistentSessions.get(sessionId)
+        if (legacyPs && !legacyPs.dead) {
+          const streamMsg = buildClaudeStreamMessage(message, images)
+          activeProcesses.set(sessionId, legacyPs.proc)
+          let responded = false
+          legacyPs.onResult = (result) => {
             if (responded) return
             responded = true
             activeProcesses.delete(sessionId)
-            existing.onResult = null
+            legacyPs.onResult = null
             res.setHeader("Content-Type", "application/json")
             if (result.is_error) {
               res.statusCode = 500
@@ -169,140 +192,48 @@ export function registerClaudeRoutes(use: UseFn) {
               res.end(JSON.stringify({ success: true }))
             }
           }
-
           const onDeath = () => {
             if (responded) return
             responded = true
             activeProcesses.delete(sessionId)
-            existing.onResult = null
+            legacyPs.onResult = null
             res.statusCode = 500
             res.end(JSON.stringify({ error: "Claude process died unexpectedly" }))
           }
-          existing.proc.once("close", onDeath)
-          existing.proc.stdin?.write(streamMsg + "\n")
+          legacyPs.proc.once("close", onDeath)
+          legacyPs.proc.stdin?.write(streamMsg + "\n")
           return
         }
 
-        if (existing) persistentSessions.delete(sessionId)
+        if (legacyPs) persistentSessions.delete(sessionId)
 
-        const cleanEnv = { ...process.env }
-        delete cleanEnv.CLAUDECODE
-
-        const child = spawn(
-          "claude",
-          [
-            "-p",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--resume", sessionId,
-            ...permArgs,
-            ...modelArgs,
-            ...effortArgs,
-            ...mcpArgs,
-          ],
-          {
-            cwd: cwd || homedir(),
-            env: cleanEnv,
-            stdio: ["pipe", "pipe", "pipe"],
-          }
-        )
-
-        const ps: PersistentSession = {
-          agentKind: "claude",
-          proc: child,
-          onResult: null,
-          dead: false,
+        // Resume via Agent SDK — start a new query with resume
+        const sdkState = resumeSDKSession({
+          sessionId,
           cwd: cwd || homedir(),
-          permArgs,
-          modelArgs,
-          effortArgs,
-          jsonlPath: null,
-          pendingTaskCalls: new Map(),
-          subagentWatcher: null,
-          worktreeName: null,
-        }
-        persistentSessions.set(sessionId, ps)
-        activeProcesses.set(sessionId, child)
-
-        findJsonlPath(sessionId).then((p) => {
-          ps.jsonlPath = p
-          if (p) {
-            ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
-          }
-        })
-
-        const rl = createInterface({ input: child.stdout! })
-        rl.on("line", (line) => {
-          try {
-            const parsed = JSON.parse(line)
-            if (parsed.type === "result" && ps.onResult) {
-              ps.onResult(parsed)
-            }
-            if (parsed.type === "assistant") {
-              const content = parsed.message?.content
-              if (Array.isArray(content)) {
-                for (const block of content) {
-                  if (block.type === "tool_use" && (block.name === "Task" || block.name === "Agent")) {
-                    ps.pendingTaskCalls.set(block.id, block.input?.prompt ?? "")
-                  }
-                }
-              }
-            }
-          } catch {
-            // ignore non-JSON lines
-          }
-        })
-
-        let persistentStderr = ""
-        child.stderr?.on("data", (data: Buffer) => {
-          persistentStderr += data.toString()
-        })
-
-        child.on("close", (code) => {
-          ps.dead = true
-          ps.subagentWatcher?.close()
-          activeProcesses.delete(sessionId)
-          persistentSessions.delete(sessionId)
-          if (ps.onResult) {
-            const wasKilled = code === null || code === 143 || code === 137
-            ps.onResult({
-              type: "result",
-              subtype: wasKilled ? "success" : "error",
-              is_error: !wasKilled,
-              result: wasKilled
-                ? undefined
-                : persistentStderr.trim() || `claude exited with code ${code}`,
-            })
-          }
-        })
-
-        child.on("error", (err: NodeJS.ErrnoException) => {
-          ps.dead = true
-          ps.subagentWatcher?.close()
-          activeProcesses.delete(sessionId)
-          persistentSessions.delete(sessionId)
-          if (ps.onResult) {
-            ps.onResult({ type: "result", is_error: true, result: friendlySpawnError(err) })
-          }
+          message,
+          images,
+          permissionMode: permissions?.mode,
+          allowedTools: permissions?.allowedTools,
+          disallowedTools: permissions?.disallowedTools,
+          model,
+          effort,
+          mcpConfig,
         })
 
         let responded = false
-        ps.onResult = (result) => {
+        sdkState.onResult = (result) => {
           if (responded) return
           responded = true
-          activeProcesses.delete(sessionId)
-          ps.onResult = null
+          sdkState.onResult = null
           res.setHeader("Content-Type", "application/json")
-          if (result.is_error) {
+          if ((result as Record<string, unknown>).is_error) {
             res.statusCode = 500
-            res.end(JSON.stringify({ error: result.result || "Claude returned an error" }))
+            res.end(JSON.stringify({ error: String((result as Record<string, unknown>).result) || "Claude returned an error" }))
           } else {
             res.end(JSON.stringify({ success: true }))
           }
         }
-
-        child.stdin?.write(streamMsg + "\n")
       } catch {
         res.statusCode = 400
         res.end(JSON.stringify({ error: "Invalid JSON body" }))

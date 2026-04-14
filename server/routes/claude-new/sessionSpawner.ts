@@ -6,7 +6,6 @@ import {
   activeProcesses,
   persistentSessions,
   findJsonlPath,
-  watchSubagents,
   spawn,
   createInterface,
   readdir,
@@ -16,7 +15,6 @@ import {
   randomUUID,
   stat,
   buildPermArgs,
-  buildMcpArgs,
   buildCodexPermArgs,
   buildCodexModelArgs,
   buildCodexEffortArgs,
@@ -29,8 +27,8 @@ import {
   formatCodexRolloutFileName,
 } from "../../helpers"
 import type { PersistentSession, UseFn } from "../../helpers"
-import { appendFile } from "node:fs/promises"
-import { buildStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
+import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
+import { createSDKSession } from "../../sdk-session"
 export { buildStreamMessage } from "../../lib/streamMessage"
 
 export async function resolveProjectPath(
@@ -114,43 +112,6 @@ function extractCodexSessionIdentity(line: string): { sessionId: string; fileNam
 function registerTrackedSession(sessionId: string, ps: PersistentSession): void {
   persistentSessions.set(sessionId, ps)
   activeProcesses.set(sessionId, ps.proc)
-}
-
-function attachClaudeStdout(ps: PersistentSession, sessionId: string): void {
-  const rl = createInterface({ input: ps.proc.stdout! })
-  rl.on("line", (line) => {
-    try {
-      const parsed = JSON.parse(line)
-      if (parsed.type === "result") {
-        if (ps.onResult) ps.onResult(parsed)
-        // Persist terminal_reason into the JSONL so the client can display it
-        const reason = parsed.terminal_reason
-        if (reason && reason !== "completed" && ps.jsonlPath) {
-          const entry = JSON.stringify({ type: "system", subtype: "terminal_reason", reason, timestamp: new Date().toISOString() })
-          appendFile(ps.jsonlPath, entry + "\n").catch(() => {})
-        }
-      }
-      if (parsed.type === "assistant") {
-        const content = parsed.message?.content
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (block.type === "tool_use" && (block.name === "Task" || block.name === "Agent")) {
-              ps.pendingTaskCalls.set(block.id, block.input?.prompt ?? "")
-            }
-          }
-        }
-      }
-    } catch {
-      // ignore non-JSON lines
-    }
-  })
-
-  findJsonlPath(sessionId).then((p) => {
-    ps.jsonlPath = p
-    if (p) {
-      ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
-    }
-  })
 }
 
 export function registerNewSessionRoute(use: UseFn) {
@@ -429,6 +390,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
             pendingTaskCalls: new Map(),
             subagentWatcher: null,
             worktreeName: null,
+            pendingPermissions: new Map(),
           }
 
           const respondSuccess = async (
@@ -530,92 +492,24 @@ export function registerCreateAndSendRoute(use: UseFn) {
         }
 
         const projectPath = await resolveProjectPath(projectDir, dirName)
-        const permArgs = buildPermArgs(permissions)
-        const modelArgs = model ? ["--model", model] : []
-        const effortArgs = effort ? ["--effort", effort] : []
-        const nameArgs = name ? ["--name", name] : []
-        const worktreeArgs = worktreeName ? ["--worktree", worktreeName] : []
-        const mcpArgs = buildMcpArgs(mcpConfig)
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
-        const streamMsg = buildStreamMessage(message, images)
 
-        const cleanEnv = { ...process.env }
-        delete cleanEnv.CLAUDECODE
-
-        const child = spawn(
-          "claude",
-          [
-            "-p",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose",
-            "--session-id", sessionId,
-            ...permArgs,
-            ...modelArgs,
-            ...effortArgs,
-            ...nameArgs,
-            ...worktreeArgs,
-            ...mcpArgs,
-          ],
-          {
-            cwd: projectPath,
-            env: cleanEnv,
-            stdio: ["pipe", "pipe", "pipe"],
-          }
-        )
-
-        const ps: PersistentSession = {
-          agentKind: "claude",
-          proc: child,
-          onResult: null,
-          dead: false,
+        // Use the Agent SDK for Claude sessions
+        const sdkState = createSDKSession({
+          sessionId,
           cwd: projectPath,
-          permArgs,
-          modelArgs,
-          effortArgs,
-          jsonlPath: null,
-          pendingTaskCalls: new Map(),
-          subagentWatcher: null,
-          worktreeName: worktreeName || null,
-        }
-        registerTrackedSession(sessionId, ps)
-        attachClaudeStdout(ps, sessionId)
-
-        let persistentStderr = ""
-        child.stderr?.on("data", (data: Buffer) => {
-          persistentStderr += data.toString()
+          message,
+          images,
+          permissionMode: permissions?.mode,
+          allowedTools: permissions?.allowedTools,
+          disallowedTools: permissions?.disallowedTools,
+          model,
+          effort,
+          name,
+          worktreeName,
+          mcpConfig,
         })
-
-        child.on("close", (code) => {
-          ps.dead = true
-          ps.subagentWatcher?.close()
-          activeProcesses.delete(sessionId)
-          persistentSessions.delete(sessionId)
-          if (ps.onResult) {
-            const wasKilled = code === null || code === 143 || code === 137
-            ps.onResult({
-              type: "result",
-              subtype: wasKilled ? "success" : "error",
-              is_error: !wasKilled,
-              result: wasKilled
-                ? undefined
-                : persistentStderr.trim() || `claude exited with code ${code}`,
-            })
-          }
-        })
-
-        child.on("error", (err: NodeJS.ErrnoException) => {
-          ps.dead = true
-          ps.subagentWatcher?.close()
-          activeProcesses.delete(sessionId)
-          persistentSessions.delete(sessionId)
-          if (ps.onResult) {
-            ps.onResult({ type: "result", is_error: true, result: friendlySpawnError(err) })
-          }
-        })
-
-        child.stdin?.write(streamMsg + "\n")
 
         let responded = false
         const expectedPath = join(projectDir, fileName)
@@ -641,6 +535,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
           res.end(JSON.stringify({ error }))
         }
 
+        // Poll for the JSONL file to appear (SDK writes it automatically)
         const pollForFile = async () => {
           const maxAttempts = 150
           for (let i = 0; i < maxAttempts; i++) {
@@ -648,8 +543,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
             try {
               await stat(expectedPath)
               respondSuccess()
-              ps.jsonlPath = expectedPath
-              ps.subagentWatcher = watchSubagents(expectedPath, sessionId, ps.pendingTaskCalls)
+              sdkState.jsonlPath = expectedPath
               return
             } catch {
               // keep polling
@@ -660,20 +554,17 @@ export function registerCreateAndSendRoute(use: UseFn) {
 
         pollForFile()
 
-        ps.onResult = (result) => {
-          ps.onResult = null
-          if (result.is_error) {
-            respondError(result.result || "Claude returned an error")
+        sdkState.onResult = (result) => {
+          sdkState.onResult = null
+          if ((result as Record<string, unknown>).is_error) {
+            respondError(String((result as Record<string, unknown>).result) || "Claude returned an error")
           } else {
             respondSuccess()
           }
 
-          if (!ps.jsonlPath) {
+          if (!sdkState.jsonlPath) {
             findJsonlPath(sessionId).then((p) => {
-              if (p) {
-                ps.jsonlPath = p
-                ps.subagentWatcher = watchSubagents(p, sessionId, ps.pendingTaskCalls)
-              }
+              if (p) sdkState.jsonlPath = p
             })
           }
         }

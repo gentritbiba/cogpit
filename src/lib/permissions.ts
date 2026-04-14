@@ -34,6 +34,30 @@ export const KNOWN_TOOLS = [
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"
 
 export function buildPermissionArgs(config: PermissionsConfig): string[] {
-  void config
-  return ["--dangerously-skip-permissions"]
+  if (!config.mode || config.mode === "bypassPermissions") {
+    return ["--dangerously-skip-permissions"]
+  }
+
+  const args: string[] = []
+
+  const modeMap: Record<string, string> = {
+    default: "default",
+    plan: "plan",
+    acceptEdits: "acceptEdits",
+    dontAsk: "dontAsk",
+  }
+  const mapped = modeMap[config.mode]
+  if (mapped) {
+    args.push("--permission-mode", mapped)
+  }
+
+  for (const tool of config.allowedTools) {
+    args.push("--allowedTools", tool)
+  }
+
+  for (const tool of config.disallowedTools) {
+    args.push("--disallowedTools", tool)
+  }
+
+  return args
 }

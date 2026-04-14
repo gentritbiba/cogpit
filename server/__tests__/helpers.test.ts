@@ -578,19 +578,28 @@ describe("buildPermArgs", () => {
     expect(buildPermArgs({ mode: "bypassPermissions" })).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("builds args for a non-bypass mode with allowed/disallowed tools", () => {
+  it("builds args for non-bypass mode with allowed/disallowed tools", () => {
     expect(buildPermArgs({
       mode: "plan",
       allowedTools: ["Bash", "Read"],
       disallowedTools: ["Write"],
-    })).toEqual(["--dangerously-skip-permissions"])
+    })).toEqual([
+      "--permission-mode", "plan",
+      "--allowedTools", "Bash",
+      "--allowedTools", "Read",
+      "--disallowedTools", "Write",
+    ])
   })
 
-  it("ignores non-bypass modes", () => {
-    expect(buildPermArgs({ mode: "default" })).toEqual(["--dangerously-skip-permissions"])
+  it("returns --permission-mode for default mode", () => {
+    expect(buildPermArgs({ mode: "default" })).toEqual(["--permission-mode", "default"])
   })
 
   it("handles missing allowedTools/disallowedTools arrays", () => {
-    expect(buildPermArgs({ mode: "plan" })).toEqual(["--dangerously-skip-permissions"])
+    expect(buildPermArgs({ mode: "plan" })).toEqual(["--permission-mode", "plan"])
+  })
+
+  it("returns bypass flag when mode is empty string", () => {
+    expect(buildPermArgs({ mode: "" })).toEqual(["--dangerously-skip-permissions"])
   })
 })

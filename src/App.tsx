@@ -31,6 +31,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useTheme } from "@/hooks/useTheme"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { usePermissions } from "@/hooks/usePermissions"
+import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
 import { useProcessPanel } from "@/hooks/useProcessPanel"
@@ -285,6 +286,9 @@ export default function App() {
 
   // Permissions management
   const perms = usePermissions()
+
+  // Permission requests — SDK resolves canUseTool in-place, no retry needed
+  const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
 
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
@@ -693,6 +697,10 @@ export default function App() {
     isCompacting,
     undoRedo,
     pendingInteraction,
+    permissionRequests: permReqs.requests,
+    permissionResponding: permReqs.responding,
+    respondPermission: permReqs.respond,
+    respondAllPermissions: permReqs.respondAll,
     isSubAgentView,
     slashSuggestions: slashSuggestions.suggestions,
     slashSuggestionsLoading: slashSuggestions.loading,
@@ -709,6 +717,7 @@ export default function App() {
     state.session, state.sessionSource,
     isLive, sseState, isCompacting,
     undoRedo, pendingInteraction, isSubAgentView,
+    permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
@@ -896,6 +905,8 @@ export default function App() {
         onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
         mcpLoading={supportsMcp ? mcpData.loading : undefined}
         onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
+        permissionMode={perms.config.mode}
+        onPermissionModeChange={perms.setMode}
       />
     </div>
   )

@@ -7,6 +7,7 @@ import { SlashSuggestions } from "@/components/SlashSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { UserQuestionBar } from "./UserQuestionBar"
+import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useVoiceInput } from "./useVoiceInput"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
@@ -57,14 +58,16 @@ function autoResize(el: HTMLTextAreaElement | null, currentlyMultiline: boolean)
   return needsMultiline
 }
 
-function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean): string {
+function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean, hasPermissionRequests?: boolean): string {
+  if (hasPermissionRequests) return "Resolve approval to continue..."
   if (isPlanApproval) return "Provide feedback to request changes..."
   if (isUserQuestion) return "Type a custom response..."
   if (isConnected) return "Message... (Enter to send)"
   return "Send a message... (Enter to send)"
 }
 
-function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean): string {
+function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean, hasPermissionRequests?: boolean): string {
+  if (hasPermissionRequests) return "border-amber-700/50 focus-within:border-amber-500/30 focus-within:ring-amber-500/20"
   if (isPlanApproval) return "border-purple-700/50 focus-within:border-purple-500/30 focus-within:ring-purple-500/20"
   if (isUserQuestion) return "border-pink-700/50 focus-within:border-pink-500/30 focus-within:ring-pink-500/20"
   return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
@@ -75,6 +78,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
     isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
+    permissionRequests,
+    permissionResponding,
+    respondPermission,
+    respondAllPermissions,
     slashSuggestions,
     slashSuggestionsLoading,
   } = useSessionContext()
@@ -157,6 +164,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
 
   const isPlanApproval = pendingInteraction?.type === "plan"
   const isUserQuestion = pendingInteraction?.type === "question"
+  const hasPermissions = permissionRequests.length > 0
   const hasContent = text.trim().length > 0 || images.length > 0
 
   return (
@@ -177,7 +185,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
       )}
 
       <div>
-        {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
+          {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
         {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={onSend} />}
 
         {images.length > 0 && (
@@ -194,11 +202,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
         )}
 
         <div className={cn(
-          "relative bg-elevation-2 border rounded-3xl chat-input-3d",
-          getTextareaBorderClass(isPlanApproval, isUserQuestion),
+          "relative bg-elevation-2 border rounded-3xl chat-input-3d overflow-hidden",
+          getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
           "focus-within:ring-2",
-          isMultiline ? "flex flex-col" : "flex items-end"
+          isMultiline || hasPermissions ? "flex flex-col" : "flex items-end"
         )}>
+          {hasPermissions && (
+            <PermissionRequestBar
+              requests={permissionRequests}
+              responding={permissionResponding}
+              onRespond={respondPermission}
+              onRespondAll={respondAllPermissions}
+            />
+          )}
           <textarea
             ref={textareaRef}
             value={text}
@@ -209,7 +225,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
               // On mobile, scroll textarea into view after virtual keyboard opens
               setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
             }}
-            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected)}
+            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions)}
             rows={1}
             className={cn(
               "w-full resize-none bg-transparent pl-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none",

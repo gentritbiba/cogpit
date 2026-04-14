@@ -7,7 +7,24 @@ import {
 } from "@/lib/permissions"
 
 function loadFromStorage(): PermissionsConfig {
+  try {
+    const raw = localStorage.getItem(PERMISSIONS_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
+      return {
+        mode: (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode,
+        allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
+        disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
+      }
+    }
+  } catch {
+    // corrupted storage
+  }
   return DEFAULT_PERMISSIONS
+}
+
+function saveToStorage(config: PermissionsConfig): void {
+  localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(config))
 }
 
 export function usePermissions() {
@@ -15,32 +32,50 @@ export function usePermissions() {
   const [appliedConfig, setAppliedConfig] = useState<PermissionsConfig>(loadFromStorage)
   const isInitial = useRef(true)
 
-  // Persist to localStorage on every config change
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false
-      localStorage.removeItem(PERMISSIONS_STORAGE_KEY)
       return
     }
+    saveToStorage(config)
   }, [config])
 
-  const hasPendingChanges = false
+  const hasPendingChanges =
+    config.mode !== appliedConfig.mode ||
+    JSON.stringify(config.allowedTools) !== JSON.stringify(appliedConfig.allowedTools) ||
+    JSON.stringify(config.disallowedTools) !== JSON.stringify(appliedConfig.disallowedTools)
 
   const setMode = useCallback((mode: PermissionMode) => {
-    void mode
+    setConfig((prev) => ({ ...prev, mode }))
   }, [])
 
   const toggleAllowedTool = useCallback((tool: string) => {
-    void tool
+    setConfig((prev) => {
+      const has = prev.allowedTools.includes(tool)
+      return {
+        ...prev,
+        allowedTools: has
+          ? prev.allowedTools.filter((t) => t !== tool)
+          : [...prev.allowedTools, tool],
+      }
+    })
   }, [])
 
   const toggleDisallowedTool = useCallback((tool: string) => {
-    void tool
+    setConfig((prev) => {
+      const has = prev.disallowedTools.includes(tool)
+      return {
+        ...prev,
+        disallowedTools: has
+          ? prev.disallowedTools.filter((t) => t !== tool)
+          : [...prev.disallowedTools, tool],
+      }
+    })
   }, [])
 
   const markApplied = useCallback(() => {
-    setAppliedConfig(DEFAULT_PERMISSIONS)
-  }, [])
+    setAppliedConfig(config)
+  }, [config])
 
   const resetToDefault = useCallback(() => {
     setConfig(DEFAULT_PERMISSIONS)

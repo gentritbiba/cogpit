@@ -5,11 +5,11 @@ import {
   isCodexDirName,
   isWithinDir,
   unlink,
-  join,
   resolveSessionFilePath,
   spawn,
 } from "../helpers"
 import type { UseFn } from "../helpers"
+import { stopSDKSession, cleanupAllSDKSessions } from "../sdk-session"
 
 export function registerClaudeManageRoutes(use: UseFn) {
   use("/api/stop-session", (req, res, next) => {
@@ -29,6 +29,9 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
+        // Stop SDK session if present
+        const stoppedSDK = stopSDKSession(sessionId)
+
         const ps = persistentSessions.get(sessionId)
         if (ps && !ps.dead) {
           ps.dead = true
@@ -41,7 +44,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         }
 
         const child = activeProcesses.get(sessionId)
-        if (!child && !ps) {
+        if (!child && !ps && !stoppedSDK) {
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ success: false, error: "No active process for this session" }))
           return
@@ -70,6 +73,9 @@ export function registerClaudeManageRoutes(use: UseFn) {
     if (req.method !== "POST") return next()
 
     let killed = 0
+
+    // Kill SDK sessions first
+    killed += cleanupAllSDKSessions()
 
     for (const [sid, ps] of persistentSessions) {
       if (!ps.dead) {

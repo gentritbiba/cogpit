@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Dashboard for browsing and inspecting Claude Code agent sessions",
   "license": "MIT",
   "author": {
@@ -29,6 +29,7 @@
     "sync-cogpit-memory": "bun scripts/sync-cogpit-memory.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.107",
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@tanstack/react-virtual": "^3.13.18",

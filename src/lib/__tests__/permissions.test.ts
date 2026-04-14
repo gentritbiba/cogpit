@@ -33,7 +33,7 @@ describe("KNOWN_TOOLS", () => {
 })
 
 describe("buildPermissionArgs", () => {
-  it("returns --dangerously-skip-permissions for bypassPermissions mode", () => {
+  it("returns bypass for bypassPermissions mode", () => {
     const config: PermissionsConfig = {
       mode: "bypassPermissions",
       allowedTools: [],
@@ -42,84 +42,35 @@ describe("buildPermissionArgs", () => {
     expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("returns --dangerously-skip-permissions even with tools specified", () => {
-    const config: PermissionsConfig = {
-      mode: "bypassPermissions",
-      allowedTools: ["Bash"],
-      disallowedTools: ["Write"],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores non-bypass modes and still returns YOLO args", () => {
+  it("returns --permission-mode default for default mode", () => {
     const config: PermissionsConfig = {
       mode: "default",
       allowedTools: [],
       disallowedTools: [],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
+    expect(buildPermissionArgs(config)).toEqual(["--permission-mode", "default"])
   })
 
-  it("ignores plan mode and still returns YOLO args", () => {
+  it("includes allowedTools and disallowedTools", () => {
     const config: PermissionsConfig = {
       mode: "plan",
-      allowedTools: [],
-      disallowedTools: [],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores allowedTools", () => {
-    const config: PermissionsConfig = {
-      mode: "default",
       allowedTools: ["Bash", "Read"],
-      disallowedTools: [],
+      disallowedTools: ["Write"],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
+    expect(buildPermissionArgs(config)).toEqual([
+      "--permission-mode", "plan",
+      "--allowedTools", "Bash",
+      "--allowedTools", "Read",
+      "--disallowedTools", "Write",
+    ])
   })
 
-  it("ignores disallowedTools", () => {
-    const config: PermissionsConfig = {
-      mode: "acceptEdits",
-      allowedTools: [],
-      disallowedTools: ["Write", "Edit"],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores mixed allow and deny lists", () => {
-    const config: PermissionsConfig = {
-      mode: "dontAsk",
-      allowedTools: ["Read"],
-      disallowedTools: ["Bash"],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores delegate mode", () => {
+  it("returns empty for unmapped mode with no tools", () => {
     const config: PermissionsConfig = {
       mode: "delegate",
       allowedTools: [],
       disallowedTools: [],
     }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores multiple allow and deny entries", () => {
-    const config: PermissionsConfig = {
-      mode: "default",
-      allowedTools: ["Read", "Glob", "Grep"],
-      disallowedTools: ["Bash", "Write", "Edit"],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
-  })
-
-  it("ignores output ordering because extra permission args are disabled", () => {
-    const config: PermissionsConfig = {
-      mode: "acceptEdits",
-      allowedTools: ["Task"],
-      disallowedTools: ["Bash"],
-    }
-    expect(buildPermissionArgs(config)).toEqual(["--dangerously-skip-permissions"])
+    expect(buildPermissionArgs(config)).toEqual([])
   })
 })

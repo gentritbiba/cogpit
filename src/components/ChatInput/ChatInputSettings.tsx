@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
-import { Bot, Check, ChevronDown, Code2, GitBranch, Plug, RefreshCw } from "lucide-react"
+import { Bot, Check, ChevronDown, Code2, GitBranch, Plug, RefreshCw, Shield } from "lucide-react"
 import { cn, DEFAULT_EFFORT, getEffortOptions, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
 import type { AgentKind } from "@/lib/sessionSource"
+import type { PermissionMode } from "@/lib/permissions"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -339,6 +340,76 @@ function McpDropdown({ servers, selected, onToggle, onRefresh, loading, onAuth }
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+// ── Permission mode dropdown ─────────────────────────────────────────────────
+
+const PERMISSION_MODES: Array<{ value: PermissionMode; label: string; color: string }> = [
+  { value: "bypassPermissions", label: "YOLO", color: "text-red-400" },
+  { value: "default", label: "Default", color: "text-blue-400" },
+  { value: "plan", label: "Plan", color: "text-purple-400" },
+  { value: "acceptEdits", label: "Accept Edits", color: "text-green-400" },
+  { value: "dontAsk", label: "Don't Ask", color: "text-amber-400" },
+]
+
+interface PermissionDropdownProps {
+  mode: PermissionMode
+  onChange: (mode: PermissionMode) => void
+}
+
+function PermissionDropdown({ mode, onChange }: PermissionDropdownProps) {
+  const { open, setOpen, triggerRef, menuRef, menuPos } = useDropdownState()
+
+  const current = PERMISSION_MODES.find((m) => m.value === mode) ?? PERMISSION_MODES[0]
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          mode === "bypassPermissions"
+            ? "text-muted-foreground hover:text-foreground hover:bg-white/5"
+            : cn(current.color, "hover:bg-white/5"),
+        )}
+      >
+        <Shield className="size-3" />
+        <span className="truncate">{current.label}</span>
+        <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[150px] rounded-lg border border-border/50 bg-elevation-3 py-1 depth-high animate-in fade-in-0 zoom-in-95 duration-100"
+          style={{ top: menuPos.top, left: menuPos.left, ...MENU_OFFSET_STYLE }}
+        >
+          <div className="px-3 py-1.5 border-b border-border/30">
+            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Permissions</span>
+          </div>
+          {PERMISSION_MODES.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { onChange(opt.value); setOpen(false) }}
+              className={cn(
+                "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-[11px] transition-colors",
+                opt.value === mode
+                  ? cn("bg-white/5", opt.color)
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
+              )}
+            >
+              <span>{opt.label}</span>
+              {opt.value === mode && (
+                <span className="text-[9px] text-muted-foreground">active</span>
+              )}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 export interface ChatInputSettingsProps {
   agentKind?: AgentKind
   onAgentKindChange?: (agentKind: AgentKind) => void
@@ -364,6 +435,10 @@ export interface ChatInputSettingsProps {
   mcpLoading?: boolean
   /** Called when a needs-auth server is clicked */
   onMcpAuth?: (serverName: string) => void
+  /** Current permission mode */
+  permissionMode?: PermissionMode
+  /** Called when permission mode changes */
+  onPermissionModeChange?: (mode: PermissionMode) => void
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
@@ -384,6 +459,8 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   onRefreshMcpServers,
   mcpLoading,
   onMcpAuth,
+  permissionMode,
+  onPermissionModeChange,
 }: ChatInputSettingsProps) {
   // Use a ref to always have the latest onApplySettings without stale closures
   const applyRef = useRef(onApplySettings)
@@ -451,6 +528,14 @@ export const ChatInputSettings = memo(function ChatInputSettings({
           options={effortOptions}
           onChange={handleEffortChange}
         />
+
+        {/* Permission mode — claude only */}
+        {agentKind === "claude" && onPermissionModeChange && permissionMode && (
+          <>
+            <span className="text-border/60 text-[10px] select-none">/</span>
+            <PermissionDropdown mode={permissionMode} onChange={onPermissionModeChange} />
+          </>
+        )}
 
         {/* Worktree toggle — new session only */}
         {showWorktree && isNewSession && onWorktreeEnabledChange && (

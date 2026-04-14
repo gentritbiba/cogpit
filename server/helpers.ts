@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process"
-import { readdir, open, stat, writeFile, unlink, mkdir, readFile } from "node:fs/promises"
+import { readdir, open, stat, writeFile, unlink } from "node:fs/promises"
 import { writeFileSync } from "node:fs"
 import { join, resolve, sep } from "node:path"
 import { homedir, tmpdir } from "node:os"
@@ -14,7 +14,6 @@ import {
   isCodexDirName as _isCodexDirName,
   encodeCodexDirName as _encodeCodexDirName,
   decodeCodexDirName as _decodeCodexDirName,
-  CODEX_PREFIX,
 } from "../src/lib/providers/index"
 export type { AgentKind } from "../src/lib/providers/types"
 
@@ -395,6 +394,21 @@ export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()
 
 import type { SubagentWatcher } from "./subagentWatcher"
 
+export interface PermissionRequest {
+  requestId: string
+  toolName: string
+  input: Record<string, unknown>
+  toolUseId: string
+  description?: string
+  permissionSuggestions?: Array<{ type: string; [key: string]: unknown }>
+  title?: string
+  displayName?: string
+  blockedPath?: string
+  decisionReason?: string
+  agentId?: string
+  timestamp: number
+}
+
 export interface PersistentSession {
   agentKind: AgentKind
   proc: ChildProcess
@@ -416,6 +430,8 @@ export interface PersistentSession {
   worktreeName: string | null
   /** Temporary files created for a request, such as Codex image attachments */
   tempFiles?: string[]
+  /** Pending permission requests awaiting user approval */
+  pendingPermissions: Map<string, PermissionRequest>
 }
 export const persistentSessions = new Map<string, PersistentSession>()
 

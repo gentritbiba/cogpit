@@ -173,9 +173,9 @@ describe("provider.buildPermArgs", () => {
     expect(args).toContain("--dangerously-skip-permissions")
   })
 
-  it("claude: ignores dontAsk mode and still returns YOLO args", () => {
+  it("claude: dontAsk mode returns --permission-mode dontAsk", () => {
     const args = getProvider("claude").buildPermArgs({ mode: "dontAsk" })
-    expect(args).toEqual(["--dangerously-skip-permissions"])
+    expect(args).toEqual(["--permission-mode", "dontAsk"])
   })
 
   it("claude: bypassPermissions returns dangerously-skip-permissions", () => {
