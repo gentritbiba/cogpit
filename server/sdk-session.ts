@@ -7,6 +7,26 @@ import type {
   PermissionMode,
   PermissionUpdate,
 } from "@anthropic-ai/claude-agent-sdk"
+import { createRequire } from "node:module"
+import { dirname, join } from "node:path"
+
+// In a packaged Electron app the SDK's sdk.mjs lives inside app.asar. When it
+// resolves `./cli.js` via import.meta.url it hands back an asar path, which the
+// real `node` subprocess the SDK spawns cannot read (asar is only virtualized
+// inside Electron). Resolve the SDK main entry (cli.js isn't in package.exports)
+// and rewrite to the unpacked copy.
+const CLAUDE_CLI_PATH: string | undefined = (() => {
+  try {
+    const req = createRequire(import.meta.url)
+    const sdkMain = req.resolve("@anthropic-ai/claude-agent-sdk")
+    const cliPath = join(dirname(sdkMain), "cli.js")
+    return cliPath.includes("/app.asar/")
+      ? cliPath.replace("/app.asar/", "/app.asar.unpacked/")
+      : cliPath
+  } catch {
+    return undefined
+  }
+})()
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -114,6 +134,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     canUseTool: isBypass ? undefined : makeCanUseTool(state),
     effort: state.effort as Options["effort"],
     persistSession: true,
+    pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
   }
 
   if (isBypass) {
