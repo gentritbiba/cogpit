@@ -149,7 +149,7 @@ export function registerClaudeRoutes(use: UseFn) {
         const existingSDK = sdkSessions.get(sessionId)
 
         if (existingSDK && existingSDK.running) {
-          // SDK session is alive — push message through the channel
+          // SDK session is alive — inject the message via streamInput()
           const state = sendSDKMessage(sessionId, message, images)
           if (!state) {
             res.statusCode = 500
@@ -157,19 +157,10 @@ export function registerClaudeRoutes(use: UseFn) {
             res.end(JSON.stringify({ error: "Failed to send message to running session" }))
             return
           }
-          let responded = false
-          state.onResult = (result) => {
-            if (responded) return
-            responded = true
-            state.onResult = null
-            res.setHeader("Content-Type", "application/json")
-            if ((result as Record<string, unknown>).is_error) {
-              res.statusCode = 500
-              res.end(JSON.stringify({ error: String((result as Record<string, unknown>).result) || "Claude returned an error" }))
-            } else {
-              res.end(JSON.stringify({ success: true }))
-            }
-          }
+          // The message was injected into the live stream — respond immediately.
+          // The frontend watches the JSONL for real-time progress.
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ success: true }))
           return
         }
 

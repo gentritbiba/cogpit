@@ -2,11 +2,14 @@ import { query } from "@anthropic-ai/claude-agent-sdk"
 import type {
   Options,
   SDKMessage,
+  SDKUserMessage,
   CanUseTool,
   PermissionResult,
   PermissionMode,
   PermissionUpdate,
+  Query,
 } from "@anthropic-ai/claude-agent-sdk"
+import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 
@@ -59,6 +62,8 @@ export interface SDKSessionState {
   sessionAllowedTools: Set<string>
   running: boolean
   abort: AbortController | null
+  /** The live SDK Query handle — kept alive so we can call streamInput() mid-turn */
+  activeQuery: Query | null
   onResult: ((msg: Record<string, unknown>) => void) | null
   jsonlPath: string | null
   pendingTaskCalls: Map<string, string>
@@ -74,13 +79,9 @@ export interface SDKSessionState {
 export const sdkSessions = new Map<string, SDKSessionState>()
 
 // ── canUseTool: block until the user resolves the request ───────────────
-// The SDK awaits this callback, so we can simply return a Promise that
-// resolves once the UI (via resolvePermission / resolveAllPermissions)
-// decides. No deny+interrupt+resume dance, no process kill, no retries.
 
 function makeCanUseTool(state: SDKSessionState): CanUseTool {
   return (toolName, input, options) => {
-    // Session-scoped always-allow: short-circuit without queueing the UI
     if (state.sessionAllowedTools.has(toolName)) {
       return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
     }
@@ -169,6 +170,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "result") {
     state.running = false
+    state.activeQuery = null
     state.onResult?.(msg as unknown as Record<string, unknown>)
     state.onResult = null
   }
@@ -198,6 +200,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 
   const queryOpts = buildQueryOptions(state, opts)
   const q = query({ prompt, options: queryOpts })
+  state.activeQuery = q
 
   ;(async () => {
     try {
@@ -211,6 +214,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       }
     } finally {
       state.running = false
+      state.activeQuery = null
       state.abort = null
       rejectAllPending(state, "Session ended")
     }
@@ -222,6 +226,35 @@ function rejectAllPending(state: SDKSessionState, reason: string): void {
     pending.resolve({ behavior: "deny", message: reason })
   }
   state.pendingPermissions.clear()
+}
+
+// ── Helper: build an SDKUserMessage from text + optional images ──────
+
+function buildUserMessage(
+  message: string,
+  images?: Array<{ data: string; mediaType: string }>,
+): SDKUserMessage {
+  const content: MessageParam["content"] = []
+  if (images?.length) {
+    for (const img of images) {
+      content.push({
+        type: "image" as const,
+        source: {
+          type: "base64" as const,
+          media_type: img.mediaType as "image/png" | "image/jpeg" | "image/gif" | "image/webp",
+          data: img.data,
+        },
+      })
+    }
+  }
+  if (message) {
+    content.push({ type: "text" as const, text: message })
+  }
+  return {
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+  }
 }
 
 // ── Create a new SDK session ─────────────────────────────────────────
@@ -249,6 +282,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     sessionAllowedTools: new Set(),
     running: false,
     abort: null,
+    activeQuery: null,
     onResult: null,
     jsonlPath: null,
     pendingTaskCalls: new Map(),
@@ -273,16 +307,29 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
   return state
 }
 
-// ── Send a follow-up message (resumes with current allowedTools) ─────
+// ── Send a follow-up message ────────────────────────────────────────
+// If the query is still running, use streamInput() to inject the message
+// mid-turn. Otherwise start a new resume query.
 
 export function sendSDKMessage(
   sessionId: string,
   message: string,
-  _images?: Array<{ data: string; mediaType: string }>,
+  images?: Array<{ data: string; mediaType: string }>,
 ): SDKSessionState | null {
   const state = sdkSessions.get(sessionId)
-  if (!state || state.running) return null
+  if (!state) return null
 
+  if (state.running && state.activeQuery) {
+    // Session is live — push the message via streamInput()
+    const userMsg = buildUserMessage(message, images)
+    const oneShot = (async function* () { yield userMsg })()
+    state.activeQuery.streamInput(oneShot).catch(() => {
+      // streamInput can fail if the query finished between our check and the call
+    })
+    return state
+  }
+
+  // Session idle — start a new resume query
   runQuery(state, message, { isResume: true, mcpConfig: state.mcpConfig })
   return state
 }
@@ -362,6 +409,10 @@ export function stopSDKSession(sessionId: string): boolean {
   if (!state) return false
 
   rejectAllPending(state, "Session stopped")
+  if (state.activeQuery) {
+    state.activeQuery.close()
+    state.activeQuery = null
+  }
   state.abort?.abort()
   state.running = false
   sdkSessions.delete(sessionId)
@@ -372,6 +423,10 @@ export function cleanupAllSDKSessions(): number {
   let killed = 0
   for (const state of sdkSessions.values()) {
     rejectAllPending(state, "Session stopped")
+    if (state.activeQuery) {
+      state.activeQuery.close()
+      state.activeQuery = null
+    }
     if (state.abort) {
       state.abort.abort()
       killed++
