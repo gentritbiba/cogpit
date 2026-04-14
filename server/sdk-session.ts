@@ -12,6 +12,7 @@ import type {
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
+import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 
 // In a packaged Electron app the SDK's sdk.mjs lives inside app.asar. When it
 // resolves `./cli.js` via import.meta.url it hands back an asar path, which the
@@ -67,6 +68,8 @@ export interface SDKSessionState {
   onResult: ((msg: Record<string, unknown>) => void) | null
   jsonlPath: string | null
   pendingTaskCalls: Map<string, string>
+  /** Watches sub-agent JSONL files and synthesizes progress into parent JSONL */
+  subagentWatcher: SubagentWatcher | null
   worktreeName: string | null
   permissionMode: string
   allowedTools: string[]
@@ -77,6 +80,17 @@ export interface SDKSessionState {
 }
 
 export const sdkSessions = new Map<string, SDKSessionState>()
+
+// ── Attach the sub-agent file watcher once the JSONL path is known ──
+
+export function attachSubagentWatcher(state: SDKSessionState): void {
+  if (state.subagentWatcher || !state.jsonlPath) return
+  state.subagentWatcher = watchSubagents(
+    state.jsonlPath,
+    state.sessionId,
+    state.pendingTaskCalls,
+  )
+}
 
 // ── canUseTool: block until the user resolves the request ───────────────
 
@@ -286,6 +300,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     onResult: null,
     jsonlPath: null,
     pendingTaskCalls: new Map(),
+    subagentWatcher: null,
     worktreeName: opts.worktreeName || null,
     permissionMode: opts.permissionMode || "default",
     allowedTools: opts.allowedTools ? [...opts.allowedTools] : [],
@@ -404,17 +419,22 @@ export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
 
 // ── Stop / cleanup ───────────────────────────────────────────────────
 
-export function stopSDKSession(sessionId: string): boolean {
-  const state = sdkSessions.get(sessionId)
-  if (!state) return false
-
+function teardownState(state: SDKSessionState): void {
   rejectAllPending(state, "Session stopped")
+  state.subagentWatcher?.close()
+  state.subagentWatcher = null
   if (state.activeQuery) {
     state.activeQuery.close()
     state.activeQuery = null
   }
   state.abort?.abort()
   state.running = false
+}
+
+export function stopSDKSession(sessionId: string): boolean {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return false
+  teardownState(state)
   sdkSessions.delete(sessionId)
   return true
 }
@@ -422,16 +442,8 @@ export function stopSDKSession(sessionId: string): boolean {
 export function cleanupAllSDKSessions(): number {
   let killed = 0
   for (const state of sdkSessions.values()) {
-    rejectAllPending(state, "Session stopped")
-    if (state.activeQuery) {
-      state.activeQuery.close()
-      state.activeQuery = null
-    }
-    if (state.abort) {
-      state.abort.abort()
-      killed++
-    }
-    state.running = false
+    teardownState(state)
+    if (state.abort) killed++
   }
   sdkSessions.clear()
   return killed

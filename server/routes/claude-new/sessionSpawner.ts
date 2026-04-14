@@ -28,7 +28,7 @@ import {
 } from "../../helpers"
 import type { PersistentSession, UseFn } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
-import { createSDKSession } from "../../sdk-session"
+import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
 export { buildStreamMessage } from "../../lib/streamMessage"
 
 export async function resolveProjectPath(
@@ -544,6 +544,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
               await stat(expectedPath)
               respondSuccess()
               sdkState.jsonlPath = expectedPath
+              attachSubagentWatcher(sdkState)
               return
             } catch {
               // keep polling
@@ -564,7 +565,10 @@ export function registerCreateAndSendRoute(use: UseFn) {
 
           if (!sdkState.jsonlPath) {
             findJsonlPath(sessionId).then((p) => {
-              if (p) sdkState.jsonlPath = p
+              if (p) {
+                sdkState.jsonlPath = p
+                attachSubagentWatcher(sdkState)
+              }
             })
           }
         }

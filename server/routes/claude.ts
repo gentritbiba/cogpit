@@ -15,7 +15,7 @@ import {
 } from "../helpers"
 import type { PersistentSession, UseFn } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
-import { sdkSessions, sendSDKMessage, resumeSDKSession } from "../sdk-session"
+import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher } from "../sdk-session"
 
 export function registerClaudeRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -211,6 +211,19 @@ export function registerClaudeRoutes(use: UseFn) {
           effort,
           mcpConfig,
         })
+
+        // Attach the sub-agent watcher so progress streams in real-time
+        if (sessionPath) {
+          sdkState.jsonlPath = sessionPath
+          attachSubagentWatcher(sdkState)
+        } else {
+          findJsonlPath(sessionId).then((p) => {
+            if (p) {
+              sdkState.jsonlPath = p
+              attachSubagentWatcher(sdkState)
+            }
+          })
+        }
 
         let responded = false
         sdkState.onResult = (result) => {
