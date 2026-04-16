@@ -33,9 +33,10 @@ describe("cn", () => {
 })
 
 describe("getEffortOptions", () => {
-  it("exposes max for claude and xhigh only for codex", () => {
-    expect(getEffortOptions("claude").map((option) => option.value)).toEqual(["low", "medium", "high", "max"])
-    expect(getEffortOptions("codex").map((option) => option.value)).toEqual(["low", "medium", "high", "max", "xhigh"])
+  it("exposes the same effort options for every agent kind", () => {
+    const expected = ["low", "medium", "high", "xhigh", "max"]
+    expect(getEffortOptions("claude").map((option) => option.value)).toEqual(expected)
+    expect(getEffortOptions("codex").map((option) => option.value)).toEqual(expected)
   })
 })
 
@@ -48,7 +49,11 @@ describe("normalizeEffortForAgent", () => {
     expect(normalizeEffortForAgent("codex", "xhigh")).toBe("xhigh")
   })
 
-  it("falls back to high for unsupported claude effort", () => {
-    expect(normalizeEffortForAgent("claude", "xhigh")).toBe("high")
+  it("keeps xhigh for claude now that the CLI supports it", () => {
+    expect(normalizeEffortForAgent("claude", "xhigh")).toBe("xhigh")
+  })
+
+  it("falls back to high for unsupported efforts", () => {
+    expect(normalizeEffortForAgent("claude", "bogus")).toBe("high")
   })
 })

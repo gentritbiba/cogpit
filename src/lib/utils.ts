@@ -27,24 +27,21 @@ export const CODEX_MODEL_OPTIONS = [
 
 export const DEFAULT_EFFORT = "high"
 
-const BASE_EFFORT_OPTIONS: readonly EffortOption[] = [
+// Claude Code CLI (v2.1.111+) and Codex both support xhigh effort.
+const EFFORT_OPTIONS: readonly EffortOption[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
-  { value: "max", label: "Max" },
-]
-
-const CODEX_EFFORT_OPTIONS: readonly EffortOption[] = [
-  ...BASE_EFFORT_OPTIONS,
   { value: "xhigh", label: "XHigh" },
+  { value: "max", label: "Max" },
 ]
 
 export function getModelOptions(agentKind: AgentKind) {
   return agentKind === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS
 }
 
-export function getEffortOptions(agentKind: AgentKind): readonly EffortOption[] {
-  return agentKind === "codex" ? CODEX_EFFORT_OPTIONS : BASE_EFFORT_OPTIONS
+export function getEffortOptions(_agentKind: AgentKind): readonly EffortOption[] {
+  return EFFORT_OPTIONS
 }
 
 export function normalizeEffortForAgent(agentKind: AgentKind, effort?: string | null): string {

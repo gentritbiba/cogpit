@@ -4,8 +4,10 @@ export { calculateTurnCost, formatCost, computeAgentBreakdown, computeModelBreak
 
 export function shortenModel(model: string): string {
   if (!model) return "unknown"
+  if (model.includes("opus-4-7")) return "opus 4.7"
   if (model.includes("opus-4-6")) return "opus 4.6"
   if (model.includes("opus-4-5")) return "opus 4.5"
+  if (model.includes("sonnet-4-7")) return "sonnet 4.7"
   if (model.includes("sonnet-4-6")) return "sonnet 4.6"
   if (model.includes("sonnet-4-5")) return "sonnet 4.5"
   if (model.includes("haiku-4-5")) return "haiku 4.5"

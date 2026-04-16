@@ -39,6 +39,7 @@ const MODEL_TIERS: Array<{ match: string; tier: PricingTier; extendedTier?: Pric
   { match: "haiku-4-0",      tier: TIER_HAIKU_35 },
   { match: "3-5-haiku",      tier: TIER_HAIKU_35 },
   // Sonnet latest (4.5+)
+  { match: "sonnet-4-7",     tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   { match: "sonnet-4-6",     tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   { match: "sonnet-4-5",     tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   // Sonnet legacy (3.5, 3.7, 4.0)
@@ -46,6 +47,7 @@ const MODEL_TIERS: Array<{ match: string; tier: PricingTier; extendedTier?: Pric
   { match: "3-7-sonnet",     tier: TIER_SONNET_LEGACY, extendedTier: TIER_SONNET_LEGACY_EXT },
   { match: "3-5-sonnet",     tier: TIER_SONNET_LEGACY, extendedTier: TIER_SONNET_LEGACY_EXT },
   // Opus latest (4.5+) — same tier as sonnet latest
+  { match: "opus-4-7",       tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   { match: "opus-4-6",       tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   { match: "opus-4-5",       tier: TIER_SONNET_LATEST, extendedTier: TIER_EXTENDED },
   // Opus legacy (4.0, 4.1)
