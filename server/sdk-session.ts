@@ -54,6 +54,8 @@ interface PendingPermission extends PermissionRequestData {
 
 export type PermissionDecision = "allow" | "allow_always" | "deny"
 
+export type ImageAttachment = { data: string; mediaType: string }
+
 export interface SDKSessionState {
   sessionId: string
   cwd: string
@@ -201,6 +203,13 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   }
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Wrap a single SDKUserMessage into an AsyncIterable the SDK accepts as a prompt. */
+async function* singleMessageIterable(msg: SDKUserMessage): AsyncIterable<SDKUserMessage> {
+  yield msg
+}
+
 // ── Run a query and iterate in background ────────────────────────────
 
 function runQuery(state: SDKSessionState, prompt: string, opts: {
@@ -208,12 +217,20 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   name?: string
   worktreeName?: string
   mcpConfig?: string | null
+  images?: ImageAttachment[]
 }): void {
   state.abort = new AbortController()
   state.running = true
 
   const queryOpts = buildQueryOptions(state, opts)
-  const q = query({ prompt, options: queryOpts })
+
+  // Use an AsyncIterable<SDKUserMessage> prompt when images are present
+  // so multimodal content reaches the API instead of being dropped.
+  const queryPrompt = opts.images?.length
+    ? singleMessageIterable(buildUserMessage(prompt, opts.images))
+    : prompt
+
+  const q = query({ prompt: queryPrompt, options: queryOpts })
   state.activeQuery = q
 
   ;(async () => {
@@ -246,7 +263,7 @@ function rejectAllPending(state: SDKSessionState, reason: string): void {
 
 function buildUserMessage(
   message: string,
-  images?: Array<{ data: string; mediaType: string }>,
+  images?: ImageAttachment[],
 ): SDKUserMessage {
   const content: MessageParam["content"] = []
   if (images?.length) {
@@ -261,9 +278,12 @@ function buildUserMessage(
       })
     }
   }
-  if (message) {
-    content.push({ type: "text" as const, text: message })
-  }
+  // Always include a text block — the API rejects empty content with
+  // cache_control, which the SDK may add automatically.
+  content.push({
+    type: "text" as const,
+    text: message || "See the attached image(s).",
+  })
   return {
     type: "user",
     message: { role: "user", content },
@@ -277,7 +297,7 @@ interface SDKSessionInitOpts {
   sessionId: string
   cwd: string
   message: string
-  images?: Array<{ data: string; mediaType: string }>
+  images?: ImageAttachment[]
   permissionMode?: string
   allowedTools?: string[]
   disallowedTools?: string[]
@@ -318,6 +338,7 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
     name: opts.name,
     worktreeName: opts.worktreeName,
     mcpConfig: opts.mcpConfig,
+    images: opts.images,
   })
   return state
 }
@@ -329,23 +350,22 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
 export function sendSDKMessage(
   sessionId: string,
   message: string,
-  images?: Array<{ data: string; mediaType: string }>,
+  images?: ImageAttachment[],
 ): SDKSessionState | null {
   const state = sdkSessions.get(sessionId)
   if (!state) return null
 
   if (state.running && state.activeQuery) {
     // Session is live — push the message via streamInput()
-    const userMsg = buildUserMessage(message, images)
-    const oneShot = (async function* () { yield userMsg })()
-    state.activeQuery.streamInput(oneShot).catch(() => {
+    const input = singleMessageIterable(buildUserMessage(message, images))
+    state.activeQuery.streamInput(input).catch(() => {
       // streamInput can fail if the query finished between our check and the call
     })
     return state
   }
 
   // Session idle — start a new resume query
-  runQuery(state, message, { isResume: true, mcpConfig: state.mcpConfig })
+  runQuery(state, message, { isResume: true, mcpConfig: state.mcpConfig, images })
   return state
 }
 
@@ -354,7 +374,7 @@ export function sendSDKMessage(
 export function resumeSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
   const state = initSDKSessionState({ ...opts, worktreeName: undefined })
   sdkSessions.set(opts.sessionId, state)
-  runQuery(state, opts.message, { isResume: true, mcpConfig: opts.mcpConfig })
+  runQuery(state, opts.message, { isResume: true, mcpConfig: opts.mcpConfig, images: opts.images })
   return state
 }
 
