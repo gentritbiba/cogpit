@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react"
 import { X, MessageSquare, Cpu, GitBranch } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
@@ -10,6 +11,9 @@ import {
 import { getStatusLabel } from "@/lib/sessionStatus"
 import type { SessionStatus } from "@/lib/sessionStatus"
 import { resolveTurnCount, turnCountColor } from "@/lib/turnCountCache"
+
+/** Hover dwell before we warm the session cache — long enough to ignore casual mouse passes. */
+const HOVER_PREFETCH_MS = 120
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -56,6 +60,12 @@ interface SessionRowProps {
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
+  /**
+   * Called after the user hovers or focuses the row for ~120ms. Should warm the
+   * session cache so the subsequent click dispatches synchronously. Optional
+   * — rows without this prop behave exactly as before.
+   */
+  onPrefetchSession?: (dirName: string, fileName: string) => void
 }
 
 export function SessionRow({
@@ -71,6 +81,7 @@ export function SessionRow({
   onDuplicateSession,
   onDeleteSession,
   onRenameSession,
+  onPrefetchSession,
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
   const statusLabel = hasProcess
@@ -78,6 +89,29 @@ export function SessionRow({
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const title = customName || truncate(s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
+
+  // Hover-intent prefetch: warm the session cache if the cursor dwells on the
+  // row for HOVER_PREFETCH_MS. Fires on focus too so keyboard users benefit.
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleHoverStart = () => {
+    if (!onPrefetchSession) return
+    if (isActiveSession) return
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = setTimeout(() => {
+      onPrefetchSession(s.dirName, s.fileName)
+    }, HOVER_PREFETCH_MS)
+  }
+  const handleHoverEnd = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }
+  // Cancel any in-flight hover timer if the row unmounts mid-dwell so we don't
+  // fire prefetches against a no-longer-visible sidebar.
+  useEffect(() => () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+  }, [])
 
   const sessionRow = (
     <Tooltip>
@@ -87,6 +121,10 @@ export function SessionRow({
           data-live-session
           onClick={() => onSelectSession(s.dirName, s.fileName)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
+          onMouseEnter={handleHoverStart}
+          onMouseLeave={handleHoverEnd}
+          onFocus={handleHoverStart}
+          onBlur={handleHoverEnd}
           className={cn(
             "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
             cardStyle(isActiveSession, hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),

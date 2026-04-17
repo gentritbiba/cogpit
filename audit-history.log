@@ -4,6 +4,21 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-04-17 18:31 — Session Switching Performance + Sub-Agent UI Redesign + SDK Live Updates (PLACEHOLDER)
+- **File:** `audit-history/audit-20260417-1831-PLACEHOLDER.txt`
+- **Status:** DOCUMENTATION UPDATED
+- **Changes:** 13 modified files, 1 new module (sessionPrefetch.ts), 1 new test suite (sdk-session.test.ts), net ~621 lines added
+- **Key updates:**
+  - Sub-Agent Panel redesign: collapsed by default, shows only final return message + "Open chat" button
+  - Session prefetch (hover-intent cache warming): background fetch on hover, LRU cache (max 5 sessions), idle warm-up on boot
+  - SDK live model/effort updates: sendSDKMessage now accepts updates; propagates to running query via setModel/applyFlagSettings
+  - Test coverage: useLiveSession.test.ts and useSessionActions.test.ts updated; new sdk-session.test.ts for SDK updates
+  - Routes: no new routes (uses existing ?tail=30 endpoint)
+- **Risk:** LOW (all backward-compatible, no breaking API changes, prefetch is transparent)
+- **Doc updates made:**
+  - ARCHITECTURE.md: Sub-Agent Panel description updated (lines 268–280), new "Session Caching & Prefetch" section added
+  - README.md: Sub-Agent Viewer feature description enhanced (lines 58–59)
+
 ### 2026-04-14 13:40 — Permission Flow Refactor: Promise-Based Blocking (PENDING)
 - **File:** `audit-history/audit-20260414T134000Z-PENDING-permission-flow-refactor.md`
 - **Status:** DOCUMENTATION UPDATES REQUIRED

@@ -47,6 +47,7 @@ import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useChunkedSession } from "@/hooks/useChunkedSession"
+import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
 import { hapticLight } from "@/lib/haptics"
 import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
@@ -117,6 +118,15 @@ export default function App() {
   const handlePrependTurns = useCallback((olderTurns: Turn[], _hasMore: boolean, _nextByteOffset: number) => {
     dispatch({ type: "PREPEND_TURNS", turns: olderTurns })
   }, [dispatch])
+
+  // Stable prefetch callback bound to the current worker. Used by sidebar rows
+  // to warm the LRU cache on hover-intent so a subsequent click is synchronous.
+  const prefetchSession = useCallback(
+    (dirName: string, fileName: string) => {
+      void prefetchSessionFn(dirName, fileName, workerParse)
+    },
+    [workerParse],
+  )
 
   const chunkedSession = useChunkedSession({
     dirName: state.sessionSource?.dirName ?? null,
@@ -268,6 +278,9 @@ export default function App() {
   // Live session streaming — wrapped in startTransition so React can
   // interrupt these low-priority renders to process user interactions (clicks).
   // On reconnect after disconnect, reload the full session to catch missed messages.
+  // state.session is passed as `initialSession` so the hook can skip the
+  // duplicate worker parse on every source change (the session was already
+  // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
   const { isLive, sseState, isCompacting } = useLiveSession(
     state.sessionSource,
@@ -279,6 +292,7 @@ export default function App() {
     workerParse,
     workerAppend,
     () => reconnectHandlerRef.current?.(),
+    state.session,
   )
 
   // Background agents (shared between notifications + StatsPanel)
@@ -712,6 +726,7 @@ export default function App() {
       handleOpenBranches: handlers.handleOpenBranches,
       handleBranchFromHere: handlers.handleBranchFromHere,
       handleToggleExpandAll,
+      handleLoadSession: handlers.handleLoadSessionScrollAware,
     },
   }), [
     state.session, state.sessionSource,
@@ -721,6 +736,7 @@ export default function App() {
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
+    handlers.handleLoadSessionScrollAware,
   ])
 
   // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
@@ -956,6 +972,7 @@ export default function App() {
               onDeleteSession={handlers.handleDeleteSession}
               onBeforeSessionSwitch={handlePreSessionSwitch}
               liveSessionsRefreshRef={liveSessionsRefreshRef}
+              onPrefetchSession={prefetchSession}
               isMobile
             />
           )}
@@ -1143,6 +1160,7 @@ export default function App() {
             liveSessionsRefreshRef={liveSessionsRefreshRef}
             projectDir={state.session?.cwd ?? state.pendingCwd ?? null}
             onScriptStarted={processPanel.addProcess}
+            onPrefetchSession={prefetchSession}
           />
         </HoverRevealPanel>
 

@@ -30,6 +30,8 @@ interface LiveSessionsProps {
   pendingSession?: PendingSessionInfo | null
   /** Ref to expose an imperative refresh callback */
   refreshRef?: React.MutableRefObject<(() => void) | null>
+  /** Warm the session cache for a row on hover-intent so a subsequent click is instant. */
+  onPrefetchSession?: (dirName: string, fileName: string) => void
 }
 
 /** Map processes to sessions by sessionId (keep highest-mem per session). */
@@ -69,7 +71,7 @@ function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessio
   return groups
 }
 
-export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef }: LiveSessionsProps) {
+export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
@@ -172,6 +174,41 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     if (!pendingSession) return null
     return projectGroupKey(pendingSession.cwd || dirNameToPath(pendingSession.dirName))
   }, [pendingSession])
+
+  // Idle-warm the LRU cache for the top few recent sessions after the sidebar
+  // first loads. Subsequent clicks on any of them become cache hits and the
+  // load dispatches synchronously. Bounded to a handful — more would just
+  // push recently-viewed sessions out of the LRU (MAX_ENTRIES=5).
+  const didWarmUpRef = useRef(false)
+  useEffect(() => {
+    if (didWarmUpRef.current) return
+    if (!onPrefetchSession) return
+    if (sessions.length === 0) return
+    didWarmUpRef.current = true
+    // Schedule on idle so the main thread is free during the post-boot render.
+    const topThree = sortSessionsByRecency(sessions).slice(0, 3)
+    const glob = globalThis as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+    const run = () => {
+      for (const s of topThree) onPrefetchSession(s.dirName, s.fileName)
+    }
+    let idleHandle: number | null = null
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    if (typeof glob.requestIdleCallback === "function") {
+      idleHandle = glob.requestIdleCallback(run, { timeout: 1500 })
+    } else {
+      timeoutHandle = setTimeout(run, 300)
+    }
+    // Cancel the pending callback if the sidebar unmounts before it fires.
+    return () => {
+      if (idleHandle != null && typeof glob.cancelIdleCallback === "function") {
+        glob.cancelIdleCallback(idleHandle)
+      }
+      if (timeoutHandle != null) clearTimeout(timeoutHandle)
+    }
+  }, [sessions, onPrefetchSession])
 
   // Detect status transitions to "completed" — only highlight newly completed sessions.
   useEffect(() => {
@@ -351,6 +388,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               onNewSession={onNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
+              onPrefetchSession={onPrefetchSession}
             />
           ))}
 
@@ -375,6 +413,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               onNewSession={onNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingSession}
+              onPrefetchSession={onPrefetchSession}
             />
           )}
 
@@ -406,6 +445,7 @@ function ProjectGroup({
   onNewSession,
   creatingSession,
   pendingSession,
+  onPrefetchSession,
 }: {
   projectPath: string
   sessions: ActiveSessionInfo[]
@@ -426,6 +466,7 @@ function ProjectGroup({
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   pendingSession?: PendingSessionInfo | null
+  onPrefetchSession?: (dirName: string, fileName: string) => void
 }) {
   const hasPending = !!pendingSession
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
@@ -523,6 +564,7 @@ function ProjectGroup({
                 onDuplicateSession={onDuplicateSession}
                 onDeleteSession={onDeleteSession}
                 onRenameSession={onRenameSession}
+                onPrefetchSession={onPrefetchSession}
               />
             )
           })}

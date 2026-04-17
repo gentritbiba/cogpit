@@ -56,7 +56,7 @@ Send messages to running sessions with model override (Opus, Sonnet, Haiku for C
 Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling. Full-text search across all content.
 
 ### Sub-Agent Viewer
-When Claude spawns sub-agents via the Task tool, Cogpit tracks them automatically. Color-coded panels show each sub-agent's thinking, text, and tool calls inline within the parent session. Background agents get their own distinct panels. Click through to view any sub-agent's full session.
+When Claude spawns sub-agents via the Task tool, Cogpit tracks them automatically. Color-coded panels (green for sub-agents, violet for background agents) show the final return message from each agent within the parent session. Click "Open chat" to view the full sub-agent session inline. Background agents get their own distinct panels.
 
 ### Token Analytics & Cost Tracking
 Per-turn token usage (input, output, cache creation, cache read). Model-aware pricing. SVG bar charts. Context window percentage with color coding. Tool call breakdown, error tracking, duration metrics, agent/model breakdowns, cache efficiency, and API rate limit widget.

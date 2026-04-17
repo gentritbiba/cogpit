@@ -253,11 +253,11 @@ describe("useSessionActions", () => {
   })
 
   describe("handleOpenSessionFromTeam", () => {
-    it("dispatches LOAD_SESSION_FROM_TEAM with memberName", async () => {
+    it("dispatches LOAD_SESSION_FROM_TEAM with memberName (uses tail endpoint)", async () => {
       const session = makeParsedSession()
       const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
-        new Response("jsonl-text", { status: 200 })
+        new Response(makeTailResponse(), { status: 200 })
       )
 
       const { result } = renderHook(() => useSessionActions(opts))
@@ -266,6 +266,9 @@ describe("useSessionActions", () => {
         await result.current.handleOpenSessionFromTeam("dir", "file.jsonl", "Alice")
       })
 
+      expect(mockAuthFetch).toHaveBeenCalledWith(
+        "/api/sessions/dir/file.jsonl?tail=30"
+      )
       expect(opts.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "LOAD_SESSION_FROM_TEAM",
@@ -274,6 +277,30 @@ describe("useSessionActions", () => {
       )
       expect(opts.resetTurnCount).toHaveBeenCalled()
       expect(opts.scrollToBottomInstant).toHaveBeenCalled()
+    })
+
+    it("uses cache hit for instant team-session switch", async () => {
+      const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
+      const cachedSource = { dirName: "dir", fileName: "file.jsonl", rawText: "cached" }
+      vi.mocked(sessionCache.get).mockReturnValue({
+        parsed: session,
+        source: cachedSource,
+        nextByteOffset: 100,
+        hasMore: false,
+        lastAccessed: Date.now(),
+      })
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      await act(async () => {
+        await result.current.handleOpenSessionFromTeam("dir", "file.jsonl", "Alice")
+      })
+
+      expect(mockAuthFetch).not.toHaveBeenCalled()
+      expect(opts.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOAD_SESSION_FROM_TEAM", memberName: "Alice" })
+      )
     })
 
     it("sets loadError on non-ok response", async () => {
@@ -324,7 +351,7 @@ describe("useSessionActions", () => {
       expect(opts.dispatch).not.toHaveBeenCalled()
     })
 
-    it("fetches team member session and dispatches SWITCH_TEAM_MEMBER", async () => {
+    it("fetches team member session via tail endpoint and dispatches SWITCH_TEAM_MEMBER", async () => {
       const opts = makeDefaultOpts()
       opts.teamContext = {
         teamName: "my-team",
@@ -340,7 +367,7 @@ describe("useSessionActions", () => {
           )
         )
         .mockResolvedValueOnce(
-          new Response("raw-session-text", { status: 200 })
+          new Response(makeTailResponse(), { status: 200 })
         )
 
       const { result } = renderHook(() => useSessionActions(opts))
@@ -359,6 +386,10 @@ describe("useSessionActions", () => {
       })
       expect(mockAuthFetch).toHaveBeenCalledWith(
         `/api/team-member-session/${encodeURIComponent("my-team")}/${encodeURIComponent("Bob")}`
+      )
+      // Second call goes to the tail endpoint — not the full-file endpoint.
+      expect(mockAuthFetch).toHaveBeenCalledWith(
+        "/api/sessions/member-dir/session.jsonl?tail=30"
       )
       expect(opts.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -423,7 +454,53 @@ describe("useSessionActions", () => {
         })
       })
 
+      // Error label from loadSessionTailCached — mentions the member session being loaded.
       expect(result.current.loadError).toBe("Failed to load session for Alice (500)")
+    })
+
+    it("second team-member switch to same session is a cache hit (no network)", async () => {
+      const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
+      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+
+      // First switch: lookup + tail fetch.
+      mockAuthFetch
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ dirName: "d", fileName: "f.jsonl" }), { status: 200 })
+        )
+        .mockResolvedValueOnce(
+          new Response(makeTailResponse(), { status: 200 })
+        )
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      await act(async () => {
+        await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
+      })
+
+      // After the first switch, simulate a cache hit on the same session.
+      vi.mocked(sessionCache.get).mockReturnValue({
+        parsed: session,
+        source: { dirName: "d", fileName: "f.jsonl", rawText: "cached" },
+        nextByteOffset: 100,
+        hasMore: false,
+        lastAccessed: Date.now(),
+      })
+      // Only the member lookup should happen on the second switch.
+      mockAuthFetch.mockClear()
+      mockAuthFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ dirName: "d", fileName: "f.jsonl" }), { status: 200 })
+      )
+
+      await act(async () => {
+        await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
+      })
+
+      // Exactly one fetch (the member lookup) — no tail fetch for the cached session.
+      expect(mockAuthFetch).toHaveBeenCalledTimes(1)
+      expect(mockAuthFetch).toHaveBeenCalledWith(
+        `/api/team-member-session/${encodeURIComponent("team")}/${encodeURIComponent("Alice")}`
+      )
     })
 
     it("sets loadError on network exception and still clears loading", async () => {
@@ -604,13 +681,14 @@ describe("useSessionActions", () => {
       })
       expect(result.current.loadError).not.toBeNull()
 
-      // Second call succeeds
+      // Second call succeeds — team switches go through the tail endpoint now,
+      // so the second response must be a valid TailResponse JSON payload.
       mockAuthFetch
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ dirName: "d", fileName: "f.jsonl" }), { status: 200 })
         )
         .mockResolvedValueOnce(
-          new Response("raw-text", { status: 200 })
+          new Response(makeTailResponse(), { status: 200 })
         )
 
       await act(async () => {

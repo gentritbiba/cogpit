@@ -422,6 +422,49 @@ describe("useLiveSession", () => {
     expect(result.current.sseState).toBe("disconnected")
   })
 
+  it("coalesces rapid SSE messages into ≤ 2 worker calls (burst compression)", async () => {
+    // Regression guard for the bash-output lag: without burst compression the
+    // hook used to chain one workerAppend per SSE message, which scaled with
+    // structured-clone cost of the whole ParsedSession per message. The
+    // current design flushes to the worker only when it's idle, so N rapid
+    // arrivals collapse to at most ~2 worker calls (one in-flight, one
+    // drain pass).
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "f.jsonl",
+      rawText: "{}",
+    }
+
+    // Provide an initialSession so the mount-time parse is skipped — this
+    // isolates the burst test to only count appends triggered by SSE.
+    renderHook(() =>
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+    )
+
+    // Fire a burst of 20 SSE messages synchronously; the worker promise from
+    // the first flush is still pending when messages 2–20 arrive.
+    act(() => {
+      for (let i = 0; i < 20; i++) {
+        getLastEventSource().simulateMessage({
+          type: "lines",
+          lines: [`{"type":"assistant","i":${i}}`],
+        })
+      }
+    })
+
+    // Let the worker microtasks drain — a few turns of the microtask queue
+    // is enough because the second flush runs in the .finally of the first.
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+    })
+
+    // One call kicked off on arrival of message #0, one drain pass picks up
+    // the batched remainder (messages 1–19). More than two would mean the
+    // burst compression regressed back to per-message parse chains.
+    expect(workerAppend.mock.calls.length).toBeGreaterThanOrEqual(1)
+    expect(workerAppend.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
   it("coalesces rapid SSE messages into single React update", async () => {
     const source: SessionSource = {
       dirName: "dir",
@@ -475,7 +518,7 @@ describe("useLiveSession", () => {
     consoleSpy.mockRestore()
   })
 
-  it("calls workerParse with initial rawText on mount", async () => {
+  it("calls workerParse with initial rawText on mount when no initialSession provided", async () => {
     const source: SessionSource = {
       dirName: "dir",
       fileName: "f.jsonl",
@@ -487,6 +530,55 @@ describe("useLiveSession", () => {
     await act(async () => { await Promise.resolve() })
 
     expect(workerParse).toHaveBeenCalledWith(source.rawText)
+  })
+
+  it("skips the mount-time worker parse when initialSession is provided (fast path)", async () => {
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "f.jsonl",
+      rawText: '{"type":"user","message":{"role":"user","content":"hi"}}',
+    }
+
+    renderHook(() =>
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+    )
+
+    await act(async () => { await Promise.resolve() })
+
+    // When the caller already provides the parsed session, no re-parse happens.
+    expect(workerParse).not.toHaveBeenCalled()
+  })
+
+  it("uses the provided initialSession as the base for SSE append (no mount parse)", async () => {
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "f.jsonl",
+      rawText: '{"type":"user"}',
+    }
+
+    renderHook(() =>
+      useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession)
+    )
+
+    // No initial parse work.
+    await act(async () => { await Promise.resolve() })
+    expect(workerParse).not.toHaveBeenCalled()
+
+    // SSE line arrives — should go through workerAppend using mockParsedSession as base.
+    act(() => {
+      getLastEventSource().simulateMessage({
+        type: "lines",
+        lines: ['{"type":"assistant"}'],
+      })
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(workerAppend).toHaveBeenCalledWith(mockParsedSession, expect.any(String))
+    expect(workerParse).not.toHaveBeenCalled()
   })
 
   it("sets isLive=false when rawText is empty", () => {

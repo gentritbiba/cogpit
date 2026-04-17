@@ -18,7 +18,15 @@ export function useLiveSession(
   onUpdate: (session: ParsedSession) => void,
   workerParse: (text: string) => Promise<ParsedSession>,
   workerAppend: (existing: ParsedSession, newText: string) => Promise<ParsedSession>,
-  onReconnect?: () => void
+  onReconnect?: () => void,
+  /**
+   * Optional already-parsed session matching `source.rawText`. When provided,
+   * `useLiveSession` seeds its internal `sessionRef` synchronously instead of
+   * re-parsing `rawText` on the main thread / in the worker. This eliminates
+   * a duplicate parse on every session switch (the caller typically already
+   * parsed rawText once to build `source`).
+   */
+  initialSession?: ParsedSession | null,
 ) {
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
@@ -34,6 +42,10 @@ export function useLiveSession(
   workerParseRef.current = workerParse
   const workerAppendRef = useRef(workerAppend)
   workerAppendRef.current = workerAppend
+  // Track the most recently provided initialSession so the rawText-reset
+  // effect can use it without re-running on every state.session change.
+  const initialSessionRef = useRef(initialSession ?? null)
+  initialSessionRef.current = initialSession ?? null
   const wasDisconnectedRef = useRef(false)
 
   const dirName = source?.dirName ?? null
@@ -43,14 +55,22 @@ export function useLiveSession(
   // Reset accumulated text and cached session when source changes
   useEffect(() => {
     textRef.current = rawText
-    if (rawText) {
-      workerParseRef.current(rawText).then((parsed) => {
-        sessionRef.current = parsed
-      })
-    } else {
+    if (!rawText) {
       sessionRef.current = null
       setIsLive(false)
+      return
     }
+    // Fast path: caller already parsed rawText and handed us the result.
+    // Avoid a duplicate worker parse on every session switch.
+    const seeded = initialSessionRef.current
+    if (seeded) {
+      sessionRef.current = seeded
+      return
+    }
+    // Fallback: no pre-parsed session available — parse rawText ourselves.
+    workerParseRef.current(rawText).then((parsed) => {
+      sessionRef.current = parsed
+    })
   }, [rawText])
 
   // SSE reconnects when rawText changes (e.g. after JSONL truncation from undo).
@@ -73,14 +93,22 @@ export function useLiveSession(
       staleTimer = setTimeout(() => setIsLive(false), ms)
     }
 
-    // Throttle React updates: parse every SSE message eagerly (data stays fresh)
-    // but only trigger a React rerender at most every 100ms to avoid jank.
+    // ── SSE burst coalescing ────────────────────────────────────────────
+    // Heavy bash output produces many SSE messages per second. If we send
+    // each one to the parser worker individually, every postMessage pays the
+    // cost of a structured-clone of the entire ParsedSession on BOTH ends —
+    // ~O(session size) per message. For a 5 MB session that burst can starve
+    // the renderer for seconds.
+    //
+    // Instead, accumulate incoming text in `pendingText` while the worker is
+    // busy and flush it as a single batch when the worker becomes idle.
+    // Ordering is preserved because text fragments are appended in arrival
+    // order and only one worker call is in flight at a time.
+    let pendingText = ""
+    let workerBusy = false
+    let closed = false
     let pendingUpdate = false
     let rafId: number | null = null
-    // Chain parse promises to prevent race conditions: each parse starts
-    // from the result of the previous one, so rapid SSE messages don't
-    // overwrite each other's results.
-    let parseChain: Promise<ParsedSession | null> = Promise.resolve(null)
 
     const flushUpdate = () => {
       pendingUpdate = false
@@ -88,6 +116,44 @@ export function useLiveSession(
       if (sessionRef.current) {
         onUpdateRef.current(sessionRef.current)
       }
+    }
+
+    const scheduleUpdate = () => {
+      if (pendingUpdate) return
+      pendingUpdate = true
+      rafId = requestAnimationFrame(flushUpdate)
+    }
+
+    const flushToWorker = () => {
+      if (closed || workerBusy || !pendingText) return
+      const toFlush = pendingText
+      pendingText = ""
+      workerBusy = true
+
+      const base = sessionRef.current
+      const parsePromise = base
+        ? workerAppendRef.current(base, toFlush)
+        : workerParseRef.current(textRef.current)
+
+      parsePromise
+        .then((result) => {
+          if (closed) return
+          sessionRef.current = result
+          if (dirName && fileName) {
+            sessionCache.update(dirName, fileName, { parsed: result })
+            sessionCache.updateRawText(dirName, fileName, textRef.current)
+          }
+          scheduleUpdate()
+        })
+        .catch((err) => {
+          console.error("[useLiveSession] worker parse failed:", err)
+        })
+        .finally(() => {
+          workerBusy = false
+          // Drain anything that accumulated while the worker was busy — this
+          // is where the O(1) burst compression happens.
+          if (!closed && pendingText) flushToWorker()
+        })
     }
 
     es.onopen = () => {
@@ -129,30 +195,8 @@ export function useLiveSession(
 
           const newText = data.lines.join("\n") + "\n"
           textRef.current += newText
-
-          // Chain parses: each starts from the previous result to prevent
-          // race conditions when rapid SSE messages arrive before prior
-          // parses complete. Use sessionRef.current as fallback for the
-          // first call (the initial session was parsed by the rawText effect).
-          parseChain = parseChain.then((chainedSession) => {
-            const currentSession = chainedSession ?? sessionRef.current
-            return currentSession
-              ? workerAppendRef.current(currentSession, newText)
-              : workerParseRef.current(textRef.current)
-          }).then((result) => {
-            sessionRef.current = result
-            // Update cache
-            if (dirName && fileName) {
-              sessionCache.update(dirName, fileName, { parsed: result })
-              sessionCache.updateRawText(dirName, fileName, textRef.current)
-            }
-            // Coalesce rapid updates into a single React render
-            if (!pendingUpdate) {
-              pendingUpdate = true
-              rafId = requestAnimationFrame(flushUpdate)
-            }
-            return result
-          })
+          pendingText += newText
+          flushToWorker()
         }
       } catch (err) {
         console.error("[useLiveSession] Error processing SSE message:", err)
@@ -167,6 +211,9 @@ export function useLiveSession(
     }
 
     return () => {
+      // Drop any in-flight worker result so a stale parse from this source
+      // can't stomp sessionRef.current after the next source is mounted.
+      closed = true
       es.close()
       setIsLive(false)
       sseStateRef.current = "disconnected"

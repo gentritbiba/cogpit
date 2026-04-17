@@ -346,25 +346,65 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
 // ── Send a follow-up message ────────────────────────────────────────
 // If the query is still running, use streamInput() to inject the message
 // mid-turn. Otherwise start a new resume query.
+//
+// `updates` carries the latest UI-side settings for effort/model/mcpConfig.
+// We record them on `state` unconditionally so that any subsequent query
+// restart picks up the newest values. When the query is still live we also
+// push model/effort changes into the running SDK Query via setModel() and
+// applyFlagSettings() — the SDK has no setEffort, but effortLevel in the
+// settings layer is the documented way to change reasoning effort
+// mid-session.
+
+export interface SDKSessionUpdates {
+  model?: string
+  effort?: string
+  mcpConfig?: string | null
+}
 
 export function sendSDKMessage(
   sessionId: string,
   message: string,
   images?: ImageAttachment[],
+  updates?: SDKSessionUpdates,
 ): SDKSessionState | null {
   const state = sdkSessions.get(sessionId)
   if (!state) return null
 
+  const modelChanged = updates?.model !== undefined && updates.model !== state.model
+  const effortChanged = updates?.effort !== undefined && updates.effort !== state.effort
+
+  if (updates) {
+    if (updates.model !== undefined) state.model = updates.model
+    if (updates.effort !== undefined) state.effort = updates.effort
+    if (updates.mcpConfig !== undefined) state.mcpConfig = updates.mcpConfig
+  }
+
   if (state.running && state.activeQuery) {
-    // Session is live — push the message via streamInput()
+    const q = state.activeQuery
+    // Fire the message plus any setting updates as three independent control
+    // requests. The SDK delivers them over its own queue; we don't await
+    // ordering guarantees here, so in practice the model/effort change may
+    // apply to the turn this message kicks off *or* the turn after —
+    // whichever the SDK schedules first. Either outcome is acceptable: the
+    // setting is persisted on `state` (above) so any subsequent resume also
+    // sees the new value. All three are best-effort; we swallow failures so
+    // a single failing control request doesn't break the in-flight turn.
     const input = singleMessageIterable(buildUserMessage(message, images))
-    state.activeQuery.streamInput(input).catch(() => {
+    q.streamInput(input).catch(() => {
       // streamInput can fail if the query finished between our check and the call
     })
+    if (modelChanged && state.model !== undefined) {
+      q.setModel(state.model).catch(() => {})
+    }
+    if (effortChanged && state.effort !== undefined) {
+      q.applyFlagSettings({
+        effortLevel: state.effort as "low" | "medium" | "high" | "xhigh",
+      }).catch(() => {})
+    }
     return state
   }
 
-  // Session idle — start a new resume query
+  // Session idle — start a new resume query with the freshly-updated state
   runQuery(state, message, { isResume: true, mcpConfig: state.mcpConfig, images })
   return state
 }

@@ -150,7 +150,13 @@ export function registerClaudeRoutes(use: UseFn) {
 
         if (existingSDK && existingSDK.running) {
           // SDK session is alive — inject the message via streamInput()
-          const state = sendSDKMessage(sessionId, message, images)
+          // and forward the latest model/effort/mcpConfig so both the
+          // running Query and any subsequent restart see fresh values.
+          const state = sendSDKMessage(sessionId, message, images, {
+            model,
+            effort,
+            mcpConfig,
+          })
           if (!state) {
             res.statusCode = 500
             res.setHeader("Content-Type", "application/json")

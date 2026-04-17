@@ -227,6 +227,52 @@ if (input.run_in_background === true) {
 
 ---
 
+## Session Caching & Prefetch
+
+### Problem
+Switching between sessions requires HTTP fetch + worker parse, introducing 200–500ms latency
+in Electron (main-process contention). Users experience lag when switching to recently viewed sessions.
+
+### Solution: LRU Session Cache + Hover-Intent Prefetch
+
+**LRU Cache** (`src/lib/sessionCache.ts`)
+- Stores last 5 parsed sessions in memory (evicts oldest on overflow)
+- Keyed by `(dirName, fileName)` pair
+- Stores: `ParsedSession`, raw text, byte offset (for incremental appends), and `hasMore` flag
+
+**Prefetch Strategy** (`src/lib/sessionPrefetch.ts`)
+- Called on `onMouseEnter` (120ms debounce) or `onFocus` of session rows
+- Issues HTTP `?tail=30` request (last 30 lines of JSONL file) — ~50ms typical latency
+- Parses tail via worker in background (non-blocking)
+- Stores in LRU cache immediately; returns early if already cached or fetch in flight
+- Swallows errors (best-effort; real fetch on click surfaces errors to user)
+
+**Idle Warm-Up**
+- On app boot, after dashboard loads, `requestIdleCallback` (fallback: `setTimeout(...,0)`)
+  triggers prefetch of top 5 "Live & Recent" sessions
+- Fills cache before user interacts, making initial switches instant
+
+**Endpoints:**
+- `GET /api/sessions/{dirName}/{fileName}?tail=30` — Returns tail (last 30 lines) + metadata
+  (used by prefetch; 10–50× faster than full-file read for large sessions)
+- `GET /api/sessions/{dirName}/{fileName}` — Full session (used on click; hits cache first if available)
+
+**Integration Points:**
+- `src/components/LiveSessions/SessionRow.tsx` — onMouseEnter prefetch trigger
+- `src/components/session-browser/SessionBrowser.tsx` — hover prefetch on session rows
+- `src/hooks/useSessionActions.ts` — dispatch checks cache before HTTP; cache hit skips network
+- `src/App.tsx` — boot-time idle prefetch populates cache with top 5 sessions
+
+**Behavior:**
+- Repeated switches between two cached sessions dispatch `LOAD_SESSION` synchronously (no HTTP, no parse)
+- First visit to a hovered session feels instant (prefetch tail delivered cache miss in 50–100ms)
+- User sees no difference between cache hits and cold starts if hover duration ≥120ms
+- Unhovered sessions still pay full HTTP + parse latency on click
+
+**Files:** `src/lib/sessionPrefetch.ts`, `src/lib/sessionCache.ts`
+
+---
+
 ## UI Component Structure
 
 ### Main Layout (`src/App.tsx`)
@@ -272,12 +318,16 @@ if (block.kind === "background_agent") {
 }
 ```
 
-#### Background Agent Panel (`src/components/timeline/BackgroundAgentPanel.tsx`)
+#### Sub-Agent & Background Agent Panels
 
-- **Violet theme** — Border, text, icons use violet color scheme
-- **Structured messages** — Each agent message shows turns, tool calls, tokens
-- **Expandable** — Defaults to collapsed; expands with "Expand all turns"
-- **Same structure as SubAgentPanel** — Just different color
+- **Color scheme:** Green for sub-agents (foreground); violet for background agents
+- **Display:** Collapsed by default. When expanded, shows only the **final return message**
+  (what the sub-agent handed back to its parent) plus an "Open chat" button
+- **Markdown rendering:** Final message includes syntax highlighting, links, and image support
+- **Navigation:** "Open chat" button navigates to the full sub-agent session (same as clicking
+  the sub-agent badge in the sidebar); click app header "Back" button to return to parent session
+
+**Files:** `src/components/timeline/SubAgentPanel.tsx`, `src/components/timeline/BackgroundAgentPanel.tsx`
 
 ### Process Management (`ProcessPanel.tsx`)
 

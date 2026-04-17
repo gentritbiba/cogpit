@@ -73,4 +73,10 @@ export interface SessionBrowserProps {
   projectDir?: string | null
   /** Called when a script process is started from the sidebar dock */
   onScriptStarted?: (entry: ProcessEntry) => void
+  /**
+   * Warm the LRU session cache on hover-intent so clicking a row dispatches
+   * LOAD_SESSION synchronously. Provided by App.tsx using `prefetchSession`
+   * from `@/lib/sessionPrefetch` bound to the current `workerParse`.
+   */
+  onPrefetchSession?: (dirName: string, fileName: string) => void
 }

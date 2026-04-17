@@ -1,4 +1,4 @@
-import { useState, useCallback, type Dispatch } from "react"
+import { useState, useCallback, startTransition, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
 import type { ParsedSession } from "@/lib/types"
@@ -63,23 +63,37 @@ async function fetchTailAndParse(
   }
 }
 
-/** Fetch the full session file and parse it via worker. Used for team switches. */
-async function fetchFullAndParse(
+/**
+ * Resolve a session via the cache or the tail endpoint and populate the cache.
+ * Use this for every load path (dashboard, team, team-member) so switches are
+ * always bottom-first and cached — the biggest win for session-switch latency.
+ */
+async function loadSessionTailCached(
   dirName: string,
   fileName: string,
   workerParse: (text: string) => Promise<ParsedSession>,
   errorLabel: string,
 ): Promise<{ parsed: ParsedSession; source: SessionSource }> {
-  const res = await authFetch(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
-  )
-  if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
-  const text = await res.text()
-  const parsed = await workerParse(text)
-  return {
-    parsed,
-    source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+  const cached = sessionCache.get(dirName, fileName)
+  if (cached) {
+    return { parsed: cached.parsed, source: cached.source }
   }
+  const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
+    dirName,
+    fileName,
+    workerParse,
+    errorLabel,
+  )
+  sessionCache.set(
+    dirName,
+    fileName,
+    parsed,
+    source.rawText,
+    byteOffset,
+    hasMore,
+    agentKindFromDirName(dirName),
+  )
+  return { parsed, source }
 }
 
 export function useSessionActions({
@@ -96,7 +110,14 @@ export function useSessionActions({
   const handleLoadSession = useCallback(
     (parsed: ParsedSession, source: SessionSource) => {
       setLoadError(null)
-      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
+      // Wrap the heavy re-render (new session timeline, virtualizer re-measure,
+      // undo graph rebuild) in a transition so React can keep interaction input
+      // responsive — the user's click has just landed, and the view flipping a
+      // frame later feels instantaneous compared to a synchronous commit that
+      // blocks for 100+ ms on large sessions.
+      startTransition(() => {
+        dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
+      })
       resetTurnCount(parsed.turns.length)
       cacheTurnCount(parsed.sessionId, parsed.turns.length)
       scrollToBottomInstant()
@@ -109,27 +130,11 @@ export function useSessionActions({
       onBeforeSwitch?.()
       setLoadError(null)
       try {
-        // Check cache first for instant switch
-        const cached = sessionCache.get(dirName, fileName)
-        if (cached) {
-          handleLoadSession(cached.parsed, cached.source)
-          return
-        }
-
-        const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
+        const { parsed, source } = await loadSessionTailCached(
           dirName,
           fileName,
           workerParse,
           "session",
-        )
-        sessionCache.set(
-          dirName,
-          fileName,
-          parsed,
-          source.rawText,
-          byteOffset,
-          hasMore,
-          agentKindFromDirName(dirName),
         )
         handleLoadSession(parsed, source)
       } catch (err) {
@@ -144,13 +149,20 @@ export function useSessionActions({
       onBeforeSwitch?.()
       setLoadError(null)
       try {
-        const { parsed, source } = await fetchFullAndParse(dirName, fileName, workerParse, "team session")
-        dispatch({
-          type: "LOAD_SESSION_FROM_TEAM",
-          session: parsed,
-          source,
-          memberName,
-          isMobile,
+        const { parsed, source } = await loadSessionTailCached(
+          dirName,
+          fileName,
+          workerParse,
+          "team session",
+        )
+        startTransition(() => {
+          dispatch({
+            type: "LOAD_SESSION_FROM_TEAM",
+            session: parsed,
+            source,
+            memberName,
+            isMobile,
+          })
         })
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()
@@ -174,18 +186,20 @@ export function useSessionActions({
         if (!lookupRes.ok) throw new Error(`Failed to find session for ${member.name}`)
         const { dirName, fileName } = await lookupRes.json()
 
-        const { parsed, source } = await fetchFullAndParse(
+        const { parsed, source } = await loadSessionTailCached(
           dirName,
           fileName,
           workerParse,
           `session for ${member.name}`,
         )
 
-        dispatch({
-          type: "SWITCH_TEAM_MEMBER",
-          session: parsed,
-          source,
-          memberName: member.name,
+        startTransition(() => {
+          dispatch({
+            type: "SWITCH_TEAM_MEMBER",
+            session: parsed,
+            source,
+            memberName: member.name,
+          })
         })
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()

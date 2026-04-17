@@ -84,6 +84,7 @@ export const SessionBrowser = memo(function SessionBrowser({
   liveSessionsRefreshRef,
   projectDir,
   onScriptStarted,
+  onPrefetchSession,
 }: SessionBrowserProps): React.ReactElement {
   const browser = useSessionBrowser({
     sessionId,
@@ -140,6 +141,7 @@ export const SessionBrowser = memo(function SessionBrowser({
             creatingSession={creatingSession}
             pendingSession={pendingSession}
             refreshRef={liveSessionsRefreshRef}
+            onPrefetchSession={onPrefetchSession}
           />
         )}
 
