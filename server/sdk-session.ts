@@ -33,6 +33,16 @@ const CLAUDE_CLI_PATH: string | undefined = (() => {
   }
 })()
 
+/** Parse COGPIT_STREAM_PARTIAL as a boolean kill-switch.
+ *  Streaming is ON unless the var matches "0", "false", "off", or "no"
+ *  (case-insensitive, whitespace-trimmed). Unset/empty → ON. */
+function streamingEnabled(): boolean {
+  const raw = process.env.COGPIT_STREAM_PARTIAL
+  if (raw === undefined) return true
+  const normalized = raw.trim().toLowerCase()
+  return !["0", "false", "off", "no"].includes(normalized)
+}
+
 // ── Types ────────────────────────────────────────────────────────────────
 
 export interface PermissionRequestData {
@@ -183,9 +193,10 @@ function buildQueryOptions(state: SDKSessionState, opts: {
   delete queryOpts.env.CLAUDECODE
 
   // Feature flag: opt into partial-message streaming by default. Users can
-  // opt out by setting COGPIT_STREAM_PARTIAL=0 to restore wholesale-message
-  // behavior. Read at call time so the flag can be flipped per session.
-  const streamPartial = process.env.COGPIT_STREAM_PARTIAL !== "0"
+  // opt out by setting COGPIT_STREAM_PARTIAL to 0/false/off/no to restore
+  // wholesale-message behavior. Read at call time so the flag can be
+  // flipped per session.
+  const streamPartial = streamingEnabled()
   queryOpts.includePartialMessages = streamPartial
 
   return queryOpts
