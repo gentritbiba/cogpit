@@ -336,7 +336,11 @@ export interface StreamEventSSE {
     message?: { id: string }
     content_block?: { type: string; id?: string; name?: string }
     delta?: {
-      type: "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta"
+      /** Discriminant from the Anthropic API. Common values: "text_delta",
+       *  "input_json_delta", "thinking_delta", "signature_delta",
+       *  "citations_delta", "compaction_delta". The reducer in
+       *  src/lib/partialMessages.ts treats unknown types as no-ops. */
+      type: string
       text?: string
       partial_json?: string
       thinking?: string
