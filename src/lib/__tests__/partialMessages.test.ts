@@ -130,6 +130,59 @@ describe("applyStreamEvent", () => {
     )
     expect(next).toBe(m)
   })
+
+  it("returns same reference when delta arrives before its block_start", () => {
+    let m = new Map<string, PartialAssistantMessage>()
+    m = applyStreamEvent(m, evt({ type: "message_start", message: { id: "m6" } }))
+    const before = m
+    const next = applyStreamEvent(
+      m,
+      evt({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "oops" },
+      }),
+    )
+    expect(next).toBe(before)
+  })
+
+  it("returns same reference on block/delta type mismatch", () => {
+    let m = new Map<string, PartialAssistantMessage>()
+    m = applyStreamEvent(m, evt({ type: "message_start", message: { id: "m7" } }))
+    m = applyStreamEvent(
+      m,
+      evt({ type: "content_block_start", index: 0, content_block: { type: "text" } }),
+    )
+    const before = m
+    const next = applyStreamEvent(
+      m,
+      evt({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "wat" },
+      }),
+    )
+    expect(next).toBe(before)
+  })
+
+  it("returns same reference when text_delta is empty", () => {
+    let m = new Map<string, PartialAssistantMessage>()
+    m = applyStreamEvent(m, evt({ type: "message_start", message: { id: "m8" } }))
+    m = applyStreamEvent(
+      m,
+      evt({ type: "content_block_start", index: 0, content_block: { type: "text" } }),
+    )
+    const before = m
+    const next = applyStreamEvent(
+      m,
+      evt({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "" },
+      }),
+    )
+    expect(next).toBe(before)
+  })
 })
 
 describe("dropByMessageIds", () => {

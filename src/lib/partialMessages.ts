@@ -87,6 +87,16 @@ export function dropByMessageIds(
 
 // ── Internals ────────────────────────────────────────────────────────────
 
+/**
+ * Return the id of the most recently started partial, or null if none.
+ *
+ * Assumes the Anthropic SSE stream is non-interleaved — i.e. `message_start`
+ * / `message_stop` bracket each message and block-level events for different
+ * messages are never interleaved on the same channel. This invariant holds
+ * for the current SDK behavior (one stream per assistant turn). If subagent
+ * streams ever land on the same emitter alongside parent streams, revisit
+ * this (use `parent_tool_use_id` as a secondary key to route correctly).
+ */
 function mostRecentId(map: Map<string, PartialAssistantMessage>): string | null {
   let last: string | null = null
   for (const id of map.keys()) last = id // Map preserves insertion order
@@ -120,20 +130,16 @@ function applyDelta(
   delta: NonNullable<StreamEventSSE["event"]["delta"]>,
 ): PartialContentBlock | null {
   if (!block) return null
-  if (delta.type === "text_delta" && block.type === "text" && delta.text !== undefined) {
+  if (delta.type === "text_delta" && block.type === "text" && delta.text) {
     return { ...block, text: block.text + delta.text }
   }
-  if (
-    delta.type === "thinking_delta" &&
-    block.type === "thinking" &&
-    delta.thinking !== undefined
-  ) {
+  if (delta.type === "thinking_delta" && block.type === "thinking" && delta.thinking) {
     return { ...block, text: block.text + delta.thinking }
   }
   if (
     delta.type === "input_json_delta" &&
     block.type === "tool_use" &&
-    delta.partial_json !== undefined
+    delta.partial_json
   ) {
     return { ...block, partialInputJson: block.partialInputJson + delta.partial_json }
   }
