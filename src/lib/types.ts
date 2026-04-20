@@ -300,3 +300,48 @@ export interface UndoState {
   branches: Branch[]
   activeBranchId: string | null
 }
+
+// ── Live streaming (partial messages) ───────────────────────────────────────
+// These types model the real-time token-by-token stream delivered via SSE.
+// Partials live only in-memory on the client; they are discarded as soon as
+// the canonical assistant message arrives via the JSONL tail.
+
+/** A single partial content block being accumulated from stream deltas. */
+export type PartialContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
+  | { type: "tool_use"; id: string; name: string; partialInputJson: string }
+
+export interface PartialAssistantMessage {
+  messageId: string
+  /** Blocks keyed by Anthropic API content_block index. */
+  blocks: Map<number, PartialContentBlock>
+  /** Set to true once the API sends message_stop for this message. */
+  stopped: boolean
+}
+
+/** Payload the SSE channel emits for each SDK partial message. */
+export interface StreamEventSSE {
+  type: "stream_event"
+  /** Raw Anthropic BetaRawMessageStreamEvent — shape varies by event type. */
+  event: {
+    type:
+      | "message_start"
+      | "content_block_start"
+      | "content_block_delta"
+      | "content_block_stop"
+      | "message_delta"
+      | "message_stop"
+    index?: number
+    message?: { id: string }
+    content_block?: { type: string; id?: string; name?: string }
+    delta?: {
+      type: "text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta"
+      text?: string
+      partial_json?: string
+      thinking?: string
+    }
+  }
+  parent_tool_use_id: string | null
+  ttft_ms?: number
+}
