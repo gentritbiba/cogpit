@@ -542,9 +542,9 @@ export function registerCreateAndSendRoute(use: UseFn) {
             if (responded) return
             try {
               await stat(expectedPath)
-              respondSuccess()
               sdkState.jsonlPath = expectedPath
               attachSubagentWatcher(sdkState)
+              respondSuccess()
               return
             } catch {
               // keep polling

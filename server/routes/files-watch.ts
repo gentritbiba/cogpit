@@ -214,6 +214,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     let onStreamEvent:
       | ((payload: { event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }) => void)
       | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
 
     function cleanup() {
       closed = true
@@ -223,10 +224,16 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (trailingTimer) clearTimeout(trailingTimer)
       if (pollTimer) clearInterval(pollTimer)
       if (heartbeat) clearInterval(heartbeat)
+      if (retryTimer) clearTimeout(retryTimer)
       if (streamSession && onStreamEvent) {
         streamSession.streamEmitter.off("stream_event", onStreamEvent)
       }
     }
+
+    // Attach cleanup on low-level socket errors / half-closed pipes that
+    // req.on("close") may miss (TCP resets, backpressure drops, etc.).
+    res.on("error", cleanup)
+    res.on("close", cleanup)
 
     // Get initial file size, then start watching
     stat(filePath)
@@ -236,16 +243,25 @@ export function registerFileWatchRoutes(use: UseFn) {
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
 
         // ── Stream events: forward SDK partial messages via SSE ──────────
-        streamSession = findSessionByJsonlPath(filePath)
-        onStreamEvent = streamSession
-          ? (payload: { event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }) => {
+        // Bounded retry: if the session isn't registered yet (e.g. the
+        // spawner's async findJsonlPath fallback hasn't resolved), retry
+        // up to 5 times at 200ms intervals before giving up.
+        const attemptSubscription = (attemptsLeft: number) => {
+          if (closed) return
+          const found = findSessionByJsonlPath(filePath)
+          if (found) {
+            streamSession = found
+            onStreamEvent = (payload: { event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }) => {
               if (closed) return
               res.write(`data: ${JSON.stringify({ type: "stream_event", ...payload })}\n\n`)
             }
-          : null
-        if (streamSession && onStreamEvent) {
-          streamSession.streamEmitter.on("stream_event", onStreamEvent)
+            streamSession.streamEmitter.on("stream_event", onStreamEvent)
+            return
+          }
+          if (attemptsLeft <= 0) return
+          retryTimer = setTimeout(() => attemptSubscription(attemptsLeft - 1), 200)
         }
+        attemptSubscription(5)
       })
       .catch(() => {
         res.write(
