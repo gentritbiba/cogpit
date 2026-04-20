@@ -208,6 +208,20 @@ export const buildQueryOptionsForTest = buildQueryOptions
 // ── Process SDK events ───────────────────────────────────────────────
 
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
+  if (msg.type === "stream_event") {
+    const partial = msg as unknown as {
+      event: unknown
+      parent_tool_use_id: string | null
+      ttft_ms?: number
+    }
+    state.streamEmitter.emit("stream_event", {
+      event: partial.event,
+      parent_tool_use_id: partial.parent_tool_use_id,
+      ttft_ms: partial.ttft_ms,
+    })
+    return // do not persist, do not fall through
+  }
+
   if (msg.type === "result") {
     state.running = false
     state.activeQuery = null
@@ -226,6 +240,9 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     }
   }
 }
+
+/** @internal test-only alias */
+export const processSDKEventForTest = processSDKEvent
 
 // ── Helpers ─────────────────────────────────────────────────────────
 

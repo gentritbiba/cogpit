@@ -86,3 +86,41 @@ describe("buildQueryOptions with partial messages", () => {
     expect(opts.includePartialMessages).toBe(true)
   })
 })
+
+describe("processSDKEvent — stream_event handling", () => {
+  it("emits stream_event payloads on state.streamEmitter", async () => {
+    const { processSDKEventForTest } = await import("../sdk-session")
+    const state = initSDKSessionState({ sessionId: "s3", cwd: "/tmp", message: "hi" })
+
+    const received: Array<{ event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }> = []
+    state.streamEmitter.on("stream_event", (payload) => received.push(payload))
+
+    processSDKEventForTest(state, {
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+      parent_tool_use_id: null,
+      uuid: "u1",
+      session_id: "s3",
+      ttft_ms: 321,
+    } as unknown as Parameters<typeof processSDKEventForTest>[1])
+
+    expect(received).toHaveLength(1)
+    expect(received[0]).toMatchObject({
+      event: { type: "content_block_delta" },
+      parent_tool_use_id: null,
+      ttft_ms: 321,
+    })
+  })
+
+  it("ignores non-stream_event messages (does not emit)", async () => {
+    const { processSDKEventForTest } = await import("../sdk-session")
+    const state = initSDKSessionState({ sessionId: "s4", cwd: "/tmp", message: "hi" })
+
+    const received: unknown[] = []
+    state.streamEmitter.on("stream_event", (p) => received.push(p))
+
+    processSDKEventForTest(state, { type: "assistant", message: { content: [] } } as unknown as Parameters<typeof processSDKEventForTest>[1])
+
+    expect(received).toHaveLength(0)
+  })
+})
