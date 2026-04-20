@@ -182,8 +182,17 @@ function buildQueryOptions(state: SDKSessionState, opts: {
   queryOpts.env = { ...process.env }
   delete queryOpts.env.CLAUDECODE
 
+  // Feature flag: opt into partial-message streaming by default. Users can
+  // opt out by setting COGPIT_STREAM_PARTIAL=0 to restore wholesale-message
+  // behavior. Read at call time so the flag can be flipped per session.
+  const streamPartial = process.env.COGPIT_STREAM_PARTIAL !== "0"
+  queryOpts.includePartialMessages = streamPartial
+
   return queryOpts
 }
+
+/** @internal test-only alias */
+export const buildQueryOptionsForTest = buildQueryOptions
 
 // ── Process SDK events ───────────────────────────────────────────────
 
