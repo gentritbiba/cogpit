@@ -10,6 +10,7 @@ import type {
   Query,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
+import { EventEmitter } from "node:events"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
@@ -79,6 +80,9 @@ export interface SDKSessionState {
   model?: string
   effort?: string
   mcpConfig?: string | null
+  /** Per-session emitter for ephemeral stream_event messages. Broadcasts
+   *  {event, parent_tool_use_id, ttft_ms} to SSE subscribers. */
+  streamEmitter: EventEmitter
 }
 
 export const sdkSessions = new Map<string, SDKSessionState>()
@@ -308,7 +312,10 @@ interface SDKSessionInitOpts {
   mcpConfig?: string | null
 }
 
-function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
+export function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
+  const streamEmitter = new EventEmitter()
+  // SSE subscribers + potential diagnostics; silence MaxListenersExceededWarning.
+  streamEmitter.setMaxListeners(0)
   return {
     sessionId: opts.sessionId,
     cwd: opts.cwd,
@@ -328,6 +335,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     model: opts.model,
     effort: opts.effort,
     mcpConfig: opts.mcpConfig,
+    streamEmitter,
   }
 }
 
