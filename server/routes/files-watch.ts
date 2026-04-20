@@ -10,6 +10,8 @@ import {
 } from "../helpers"
 import { readdir } from "node:fs/promises"
 import type { UseFn } from "../helpers"
+import { findSessionByJsonlPath } from "../sdk-session"
+import type { SDKSessionState } from "../sdk-session"
 
 export function registerFileWatchRoutes(use: UseFn) {
   // GET /api/task-output?path=<outputFile> - SSE stream of background task output
@@ -205,6 +207,14 @@ export function registerFileWatchRoutes(use: UseFn) {
     let heartbeat: ReturnType<typeof setInterval> | null = null
     let closed = false
 
+    // Stream-event forwarding: declared here so cleanup() can reach them.
+    // Actual assignment happens inside the stat().then() below, once we've
+    // confirmed the file exists and resolved the canonical path.
+    let streamSession: SDKSessionState | null = null
+    let onStreamEvent:
+      | ((payload: { event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }) => void)
+      | null = null
+
     function cleanup() {
       closed = true
       watcher?.close()
@@ -213,6 +223,9 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (trailingTimer) clearTimeout(trailingTimer)
       if (pollTimer) clearInterval(pollTimer)
       if (heartbeat) clearInterval(heartbeat)
+      if (streamSession && onStreamEvent) {
+        streamSession.streamEmitter.off("stream_event", onStreamEvent)
+      }
     }
 
     // Get initial file size, then start watching
@@ -221,6 +234,18 @@ export function registerFileWatchRoutes(use: UseFn) {
         offset = s.size
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
+
+        // ── Stream events: forward SDK partial messages via SSE ──────────
+        streamSession = findSessionByJsonlPath(filePath)
+        onStreamEvent = streamSession
+          ? (payload: { event: unknown; parent_tool_use_id: string | null; ttft_ms?: number }) => {
+              if (closed) return
+              res.write(`data: ${JSON.stringify({ type: "stream_event", ...payload })}\n\n`)
+            }
+          : null
+        if (streamSession && onStreamEvent) {
+          streamSession.streamEmitter.on("stream_event", onStreamEvent)
+        }
       })
       .catch(() => {
         res.write(

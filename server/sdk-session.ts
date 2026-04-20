@@ -549,3 +549,11 @@ export function cleanupAllSDKSessions(): number {
   sdkSessions.clear()
   return killed
 }
+
+/** Find the SDK session currently writing to a given JSONL path, or null. */
+export function findSessionByJsonlPath(jsonlPath: string): SDKSessionState | null {
+  for (const state of sdkSessions.values()) {
+    if (state.jsonlPath === jsonlPath) return state
+  }
+  return null
+}
