@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
-// NOTE: initSDKSessionState is not exported today — Task 1 will export it.
 import { initSDKSessionState } from "../sdk-session"
 
 describe("SDKSessionState streaming", () => {

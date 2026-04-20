@@ -315,7 +315,7 @@ interface SDKSessionInitOpts {
 export function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
   const streamEmitter = new EventEmitter()
   // SSE subscribers + potential diagnostics; silence MaxListenersExceededWarning.
-  streamEmitter.setMaxListeners(0)
+  streamEmitter.setMaxListeners(50)
   return {
     sessionId: opts.sessionId,
     cwd: opts.cwd,
@@ -496,6 +496,7 @@ function teardownState(state: SDKSessionState): void {
     state.activeQuery = null
   }
   state.abort?.abort()
+  state.streamEmitter.removeAllListeners()
   state.running = false
 }
 
