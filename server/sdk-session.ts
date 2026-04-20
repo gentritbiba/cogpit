@@ -209,15 +209,10 @@ export const buildQueryOptionsForTest = buildQueryOptions
 
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "stream_event") {
-    const partial = msg as unknown as {
-      event: unknown
-      parent_tool_use_id: string | null
-      ttft_ms?: number
-    }
     state.streamEmitter.emit("stream_event", {
-      event: partial.event,
-      parent_tool_use_id: partial.parent_tool_use_id,
-      ttft_ms: partial.ttft_ms,
+      event: msg.event,
+      parent_tool_use_id: msg.parent_tool_use_id,
+      ttft_ms: msg.ttft_ms,
     })
     return // do not persist, do not fall through
   }
