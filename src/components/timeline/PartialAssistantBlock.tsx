@@ -22,7 +22,7 @@ interface PartialAssistantBlockProps {
 export const PartialAssistantBlock = memo(function PartialAssistantBlock({
   partial,
 }: PartialAssistantBlockProps) {
-  if (partial.textBlocks.length === 0 && partial.thinkingBlocks.length === 0) {
+  if (partial.blocks.length === 0) {
     return null
   }
 
@@ -31,27 +31,29 @@ export const PartialAssistantBlock = memo(function PartialAssistantBlock({
       className="group relative py-5 px-4 space-y-3"
       data-partial-message-id={partial.messageId}
     >
-      {partial.thinkingBlocks.length > 0 && (
-        <div className="border-l-2 border-border/40 pl-3 ml-1 space-y-2">
-          {partial.thinkingBlocks.map((text, i) => (
-            <pre
-              key={`thinking-${i}`}
-              className="text-xs text-muted-foreground/70 font-mono whitespace-pre-wrap break-words"
+      {partial.blocks.map((block, i) => {
+        if (block.kind === "thinking") {
+          return (
+            <div
+              key={`${i}-thinking`}
+              className="border-l-2 border-border/40 pl-3 ml-1"
             >
-              {text}
-            </pre>
-          ))}
-        </div>
-      )}
-      {partial.textBlocks.map((text, i) => (
-        <div key={`text-${i}`}>
-          <AssistantText
-            text={text}
-            model={null}
-            tokenUsage={null}
-          />
-        </div>
-      ))}
+              <pre className="text-xs text-muted-foreground/70 font-mono whitespace-pre-wrap break-words">
+                {block.text}
+              </pre>
+            </div>
+          )
+        }
+        return (
+          <div key={`${i}-text`}>
+            <AssistantText
+              text={block.text}
+              model={null}
+              tokenUsage={null}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 })

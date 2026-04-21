@@ -1,5 +1,5 @@
 import { createContext, useContext, type RefObject, type ReactNode } from "react"
-import type { ParsedSession, PartialAssistantMessage } from "@/lib/types"
+import type { ParsedSession } from "@/lib/types"
 import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
 import type { UseUndoRedoResult } from "@/hooks/useUndoRedo"
 import type { PtyChatStatus } from "@/hooks/usePtyChat"
@@ -49,12 +49,6 @@ export interface SessionContextValue {
   sseState: SseConnectionState
   /** Whether the session is currently compacting (in progress) */
   isCompacting: boolean
-  /**
-   * In-flight partial assistant messages keyed by Anthropic message id. These
-   * stream character-by-character from the SDK via SSE and are dropped
-   * automatically once the canonical assistant message arrives via JSONL.
-   */
-  partialMessages: Map<string, PartialAssistantMessage>
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

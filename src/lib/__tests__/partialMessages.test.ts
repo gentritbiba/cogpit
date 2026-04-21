@@ -195,6 +195,13 @@ describe("synthesizePartialTurns", () => {
     expect(out).toEqual([])
   })
 
+  it("skips partials with no content blocks yet (message_start only)", () => {
+    const partials = new Map<string, PartialAssistantMessage>([
+      ["m1", { messageId: "m1", blocks: new Map(), stopped: false }],
+    ])
+    expect(synthesizePartialTurns(partials, new Set())).toEqual([])
+  })
+
   it("skips partials whose messageId is already in existingAssistantIds", () => {
     const partials = new Map<string, PartialAssistantMessage>([
       [
@@ -239,11 +246,12 @@ describe("synthesizePartialTurns", () => {
     const out = synthesizePartialTurns(partials, new Set())
     expect(out).toHaveLength(2)
     expect(out[0].messageId).toBe("msg_1")
-    expect(out[0].textBlocks).toEqual(["first"])
-    expect(out[0].thinkingBlocks).toEqual([])
+    expect(out[0].blocks).toEqual([{ kind: "text", text: "first" }])
     expect(out[1].messageId).toBe("msg_2")
-    expect(out[1].textBlocks).toEqual(["second"])
-    expect(out[1].thinkingBlocks).toEqual(["reasoning"])
+    expect(out[1].blocks).toEqual([
+      { kind: "thinking", text: "reasoning" },
+      { kind: "text", text: "second" },
+    ])
   })
 
   it("preserves block order from the Map (index order)", () => {
@@ -262,7 +270,37 @@ describe("synthesizePartialTurns", () => {
     ])
     const out = synthesizePartialTurns(partials, new Set())
     expect(out).toHaveLength(1)
-    expect(out[0].textBlocks).toEqual(["alpha", "beta"])
+    expect(out[0].blocks).toEqual([
+      { kind: "text", text: "alpha" },
+      { kind: "text", text: "beta" },
+    ])
+  })
+
+  it("preserves interleaved text+thinking block order", () => {
+    // Blocks arrive as 0=text, 1=thinking, 2=text. The old bucketed shape
+    // rendered [thinking_1, text_0, text_2]; the ordered shape must emit
+    // [text_0, thinking_1, text_2] so the UI matches what the model produced.
+    const partials = new Map<string, PartialAssistantMessage>([
+      [
+        "msg_interleaved",
+        {
+          messageId: "msg_interleaved",
+          blocks: new Map<number, { type: "text"; text: string } | { type: "thinking"; text: string } | { type: "tool_use"; id: string; name: string; partialInputJson: string }>([
+            [0, { type: "text", text: "intro" }],
+            [1, { type: "thinking", text: "reasoning step" }],
+            [2, { type: "text", text: "conclusion" }],
+          ]),
+          stopped: false,
+        },
+      ],
+    ])
+    const out = synthesizePartialTurns(partials, new Set())
+    expect(out).toHaveLength(1)
+    expect(out[0].blocks).toEqual([
+      { kind: "text", text: "intro" },
+      { kind: "thinking", text: "reasoning step" },
+      { kind: "text", text: "conclusion" },
+    ])
   })
 
   it("skips tool_use blocks (v1 non-goal)", () => {
@@ -281,8 +319,9 @@ describe("synthesizePartialTurns", () => {
     ])
     const out = synthesizePartialTurns(partials, new Set())
     expect(out).toHaveLength(1)
-    expect(out[0].textBlocks).toEqual(["thinking about it..."])
-    expect(out[0].thinkingBlocks).toEqual([])
+    expect(out[0].blocks).toEqual([
+      { kind: "text", text: "thinking about it..." },
+    ])
   })
 })
 

@@ -67,6 +67,17 @@ export function applyStreamEvent(
 // ── Rendering helpers ────────────────────────────────────────────────────
 
 /**
+ * One renderable block inside a partial assistant message. Preserves the
+ * original block-index order so interleaved sequences like
+ * `[text_0, thinking_1, text_2]` render in API order (rather than with all
+ * thinking bucketed above all text).
+ */
+export interface PartialRenderBlock {
+  kind: "text" | "thinking"
+  text: string
+}
+
+/**
  * Lightweight render shape for in-flight partial assistant messages. The
  * timeline appends one of these to the end of the turn list until the
  * canonical assistant message arrives via JSONL (at which point the partial
@@ -74,20 +85,22 @@ export function applyStreamEvent(
  *
  * tool_use partials are intentionally omitted from v1 rendering — only text
  * and thinking blocks stream character-by-character.
+ *
+ * `blocks` preserves the content_block index order so the UI renders
+ * interleaved text/thinking chunks the same order the model produced them.
  */
 export interface PartialRenderTurn {
   messageId: string
-  /** Text block contents in content-block index order. */
-  textBlocks: string[]
-  /** Thinking block contents in content-block index order. */
-  thinkingBlocks: string[]
+  blocks: PartialRenderBlock[]
 }
 
 /**
  * Convert the in-memory `partialMessages` map into a lightweight, render-ready
  * shape. Partials whose `messageId` already appears in `existingAssistantIds`
  * (because the canonical JSONL line has landed) are skipped so we never
- * double-render while reconciliation is in flight.
+ * double-render while reconciliation is in flight. Partials with no content
+ * yet (e.g. only `message_start` has landed, no deltas) are also skipped so
+ * we don't render a blank placeholder and hide the "no turns" empty state.
  *
  * Insertion order of the incoming Map is preserved; block order within each
  * partial follows the content_block `index` (i.e. the Map key) numerically.
@@ -100,22 +113,24 @@ export function synthesizePartialTurns(
   const out: PartialRenderTurn[] = []
   for (const partial of partials.values()) {
     if (existingAssistantIds.has(partial.messageId)) continue
-    const textBlocks: string[] = []
-    const thinkingBlocks: string[] = []
+    const blocks: PartialRenderBlock[] = []
     // Iterate in ascending index order so text/thinking render in the order
-    // the API produced them.
+    // the API produced them (interleaved order is preserved).
     const indices = [...partial.blocks.keys()].sort((a, b) => a - b)
     for (const idx of indices) {
       const block = partial.blocks.get(idx)
       if (!block) continue
       if (block.type === "text") {
-        if (block.text.length > 0) textBlocks.push(block.text)
+        if (block.text.length > 0) blocks.push({ kind: "text", text: block.text })
       } else if (block.type === "thinking") {
-        if (block.text.length > 0) thinkingBlocks.push(block.text)
+        if (block.text.length > 0) blocks.push({ kind: "thinking", text: block.text })
       }
       // tool_use blocks are intentionally skipped in v1.
     }
-    out.push({ messageId: partial.messageId, textBlocks, thinkingBlocks })
+    // Skip partials with no renderable content — this avoids a brief blank
+    // render window between `message_start` and the first delta (100–500ms).
+    if (blocks.length === 0) continue
+    out.push({ messageId: partial.messageId, blocks })
   }
   return out
 }

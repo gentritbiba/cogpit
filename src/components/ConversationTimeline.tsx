@@ -5,6 +5,7 @@ import { matchesSearch } from "@/lib/timelineHelpers"
 import { synthesizePartialTurns } from "@/lib/partialMessages"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { usePartials } from "@/contexts/PartialsContext"
 
 // Threshold: only virtualize when we have enough turns to benefit
 const VIRTUALIZE_THRESHOLD = 15
@@ -23,7 +24,8 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   onLoadMore,
 }: ConversationTimelineProps) {
   const { state: { searchQuery } } = useAppContext()
-  const { session, partialMessages } = useSessionContext()
+  const { session } = useSessionContext()
+  const { partialMessages } = usePartials()
 
   const turns = session?.turns
   const allTurns = useMemo(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, startTransition } from "react"
 import { authUrl } from "@/lib/auth"
 import type {
   ParsedSession,
@@ -148,14 +148,23 @@ export function useLiveSession(
     const flushUpdate = () => {
       pendingUpdate = false
       rafId = null
-      if (pendingPartialsFlush) {
-        pendingPartialsFlush = false
-        setPartialMessages(partialsRef.current)
-      }
-      if (pendingSessionUpdate && sessionRef.current) {
-        pendingSessionUpdate = false
-        onUpdateRef.current(sessionRef.current)
-      }
+      if (!pendingPartialsFlush && !pendingSessionUpdate) return
+      // Batch partial + canonical commits into a single transition so React 18
+      // renders them atomically. Critical for the reconciliation tick: if
+      // setPartialMessages fires urgently while the parent-level
+      // UPDATE_SESSION dispatch is deferred via startTransition, React splits
+      // the commits — the partial disappears first (empty frame), then the
+      // canonical message appears on the next tick (visible flicker).
+      startTransition(() => {
+        if (pendingPartialsFlush) {
+          pendingPartialsFlush = false
+          setPartialMessages(partialsRef.current)
+        }
+        if (pendingSessionUpdate && sessionRef.current) {
+          pendingSessionUpdate = false
+          onUpdateRef.current(sessionRef.current)
+        }
+      })
     }
 
     const scheduleUpdate = () => {

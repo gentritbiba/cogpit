@@ -11,29 +11,29 @@ describe("PartialAssistantBlock", () => {
   it("renders text blocks via AssistantText", () => {
     const partial: PartialRenderTurn = {
       messageId: "msg_1",
-      textBlocks: ["Hello, world"],
-      thinkingBlocks: [],
+      blocks: [{ kind: "text", text: "Hello, world" }],
     }
     render(<PartialAssistantBlock partial={partial} />)
     expect(screen.getByText("Hello, world")).toBeDefined()
   })
 
-  it("renders thinking blocks above text blocks", () => {
+  it("renders thinking and text blocks in the order provided", () => {
     const partial: PartialRenderTurn = {
       messageId: "msg_2",
-      textBlocks: ["Answer body"],
-      thinkingBlocks: ["Reasoning step 1"],
+      blocks: [
+        { kind: "thinking", text: "Reasoning step 1" },
+        { kind: "text", text: "Answer body" },
+      ],
     }
     render(<PartialAssistantBlock partial={partial} />)
     expect(screen.getByText("Reasoning step 1")).toBeDefined()
     expect(screen.getByText("Answer body")).toBeDefined()
   })
 
-  it("returns null when the partial has no text or thinking content", () => {
+  it("returns null when the partial has no blocks", () => {
     const partial: PartialRenderTurn = {
       messageId: "msg_empty",
-      textBlocks: [],
-      thinkingBlocks: [],
+      blocks: [],
     }
     const { container } = render(<PartialAssistantBlock partial={partial} />)
     expect(container.firstChild).toBeNull()
@@ -42,8 +42,7 @@ describe("PartialAssistantBlock", () => {
   it("tags the rendered element with the partial message id", () => {
     const partial: PartialRenderTurn = {
       messageId: "msg_tag",
-      textBlocks: ["x"],
-      thinkingBlocks: [],
+      blocks: [{ kind: "text", text: "x" }],
     }
     const { container } = render(<PartialAssistantBlock partial={partial} />)
     const el = container.querySelector("[data-partial-message-id]")

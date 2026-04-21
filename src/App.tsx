@@ -73,6 +73,7 @@ import {
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { PartialsProvider, type PartialsContextValue } from "@/contexts/PartialsContext"
 import { PtyProvider } from "@/contexts/PtyContext"
 
 // Lazy-loaded components (only rendered when user opens them)
@@ -477,6 +478,23 @@ export default function App() {
     })
   }, [state.session, state.pendingDirName, teamContext, state.mobileTab, isMobile, dispatch])
 
+  // Cheap scalar signal so the scroll hook can react to streaming tokens
+  // without having to walk the partials Map on every render. Summing text
+  // lengths is O(blocks) — tiny, and recomputed only when `partialMessages`
+  // identity changes (once per rAF flush).
+  const partialContentLen = useMemo(() => {
+    if (!partialMessages || partialMessages.size === 0) return 0
+    let total = 0
+    for (const partial of partialMessages.values()) {
+      for (const block of partial.blocks.values()) {
+        if (block.type === "text" || block.type === "thinking") {
+          total += block.text.length
+        }
+      }
+    }
+    return total
+  }, [partialMessages])
+
   // Scroll management
   const scroll = useChatScroll({
     session: state.session,
@@ -484,6 +502,7 @@ export default function App() {
     pendingMessages: claudeChat.pendingMessages,
     consumePending: claudeChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
+    partialContentLen,
   })
 
   const chatScrollRef = scroll.chatScrollRef
@@ -703,13 +722,15 @@ export default function App() {
 
   // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll
   // so timeline components don't re-render when chat status or scroll indicators change.
+  // Deliberately excludes `partialMessages` — those live in `PartialsContext`
+  // so tokens streaming at ~60 Hz don't re-render the 16+ consumers that only
+  // need session data.
   const sessionContextValue = useMemo<SessionContextValue>(() => ({
     session: state.session,
     sessionSource: state.sessionSource,
     isLive,
     sseState,
     isCompacting,
-    partialMessages,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -731,7 +752,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState, isCompacting, partialMessages,
+    isLive, sseState, isCompacting,
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
@@ -739,6 +760,13 @@ export default function App() {
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
     handlers.handleLoadSessionScrollAware,
   ])
+
+  // Dedicated high-frequency channel for partial assistant messages. Mounted
+  // inside SessionProvider so only ConversationTimeline re-renders on token
+  // arrivals — everyone else reads from SessionContext and is unaffected.
+  const partialsContextValue = useMemo<PartialsContextValue>(() => ({
+    partialMessages,
+  }), [partialMessages])
 
   // Volatile context — chat status + scroll indicators. Only consumed by ChatArea,
   // ChatInput, and InputToolbar. Changes here don't touch TurnSection or the timeline.
@@ -954,6 +982,7 @@ export default function App() {
       <AppProvider value={appContextValue}>
       <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
+      <PartialsProvider value={partialsContextValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
         <UpdateBanner />
@@ -1107,6 +1136,7 @@ export default function App() {
           </Suspense>
         )}
       </div>
+      </PartialsProvider>
       </SessionProvider>
       </PtyProvider>
       </AppProvider>
@@ -1118,6 +1148,7 @@ export default function App() {
     <AppProvider value={appContextValue}>
     <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
+    <PartialsProvider value={partialsContextValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {backgroundServers}
       <UpdateBanner />
@@ -1353,6 +1384,7 @@ export default function App() {
 
       {errorToast || sseIndicator}
     </div>
+    </PartialsProvider>
     </SessionProvider>
     </PtyProvider>
     </AppProvider>

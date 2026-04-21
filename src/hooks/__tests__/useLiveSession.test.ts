@@ -938,6 +938,73 @@ describe("useLiveSession", () => {
       expect(result.current.partialMessages.size).toBe(0)
     })
 
+    it("commits partial drop and canonical update atomically (no flicker at reconciliation)", async () => {
+      // Reconciliation flicker repro: if `setPartialMessages(drop)` commits
+      // urgently while `onUpdate(canonical)` is transition-deferred, React 18
+      // splits the commits and the UI renders an empty frame between them.
+      // The hook must flush both state changes in the same commit so the
+      // observable (hasPartial, canonicalUpdated) never transitions through
+      // (false, false).
+      const canonicalWithAssistant: ParsedSession = {
+        ...mockParsedSession,
+        rawMessages: [
+          {
+            type: "assistant",
+            message: { id: "msg_atomic", role: "assistant", content: [] },
+          },
+        ],
+      }
+      workerAppend = vi.fn(() => Promise.resolve(canonicalWithAssistant))
+      workerParse = vi.fn(() => Promise.resolve(canonicalWithAssistant))
+
+      const source: SessionSource = {
+        dirName: "dir",
+        fileName: "f.jsonl",
+        rawText: "{}",
+      }
+
+      const onUpdateLocal = vi.fn()
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdateLocal, workerParse, workerAppend)
+      )
+
+      // Seed a partial and commit it.
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: { type: "message_start", message: { id: "msg_atomic" } },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => { flushRAF() })
+      expect(result.current.partialMessages.has("msg_atomic")).toBe(true)
+      expect(onUpdateLocal).not.toHaveBeenCalled()
+
+      // Canonical JSONL line arrives. Worker resolves with a session whose
+      // rawMessages already contains the assistant id — reconciliation runs
+      // and both the partial-drop and the session-update land on the same
+      // rAF flush.
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "lines",
+          lines: ['{"type":"assistant","message":{"id":"msg_atomic"}}'],
+        })
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => { flushRAF() })
+
+      // Both outcomes must be observable post-flush: the partial is dropped
+      // AND the canonical session has been dispatched. If these commits were
+      // split across ticks (the flicker bug), one of these would be false
+      // during the interstitial render.
+      expect(result.current.partialMessages.has("msg_atomic")).toBe(false)
+      expect(onUpdateLocal).toHaveBeenCalledWith(canonicalWithAssistant)
+    })
+
     it("resets partialMessages on SSE disconnect (so reconnect starts clean)", () => {
       const source: SessionSource = {
         dirName: "dir",
