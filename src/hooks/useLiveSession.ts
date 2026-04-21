@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from "react"
 import { authUrl } from "@/lib/auth"
-import type { ParsedSession } from "@/lib/types"
+import type {
+  ParsedSession,
+  PartialAssistantMessage,
+  StreamEventSSE,
+} from "@/lib/types"
 import type { AgentKind } from "@/lib/sessionSource"
 import { sessionCache } from "@/lib/sessionCache"
+import { applyStreamEvent, dropByMessageIds } from "@/lib/partialMessages"
 
 export interface SessionSource {
   dirName: string
@@ -31,8 +36,13 @@ export function useLiveSession(
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
   const [isCompacting, setIsCompacting] = useState(false)
+  const [partialMessages, setPartialMessages] = useState<
+    Map<string, PartialAssistantMessage>
+  >(new Map())
   const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
+  // Mirror of `partialMessages` for synchronous reads inside SSE handlers.
+  const partialsRef = useRef<Map<string, PartialAssistantMessage>>(new Map())
   const sseStateRef = useRef<SseConnectionState>("disconnected")
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
@@ -55,6 +65,11 @@ export function useLiveSession(
   // Reset accumulated text and cached session when source changes
   useEffect(() => {
     textRef.current = rawText
+    // Dump any in-flight partials — they belong to the previous source.
+    if (partialsRef.current.size > 0) {
+      partialsRef.current = new Map()
+      setPartialMessages(partialsRef.current)
+    }
     if (!rawText) {
       sessionRef.current = null
       setIsLive(false)
@@ -80,6 +95,15 @@ export function useLiveSession(
       setIsLive(false)
       setSseState("disconnected")
       return
+    }
+
+    // Clear in-flight partials from the previous SSE channel — they belong to
+    // a different session and must not bleed into the new one. Separate from
+    // the rawText-reset effect above because source-switch can keep rawText
+    // constant (e.g. two empty-but-distinct sessions).
+    if (partialsRef.current.size > 0) {
+      partialsRef.current = new Map()
+      setPartialMessages(partialsRef.current)
     }
 
     setSseState("connecting")
@@ -108,11 +132,16 @@ export function useLiveSession(
     let workerBusy = false
     let closed = false
     let pendingUpdate = false
+    let pendingPartialsFlush = false
     let rafId: number | null = null
 
     const flushUpdate = () => {
       pendingUpdate = false
       rafId = null
+      if (pendingPartialsFlush) {
+        pendingPartialsFlush = false
+        setPartialMessages(partialsRef.current)
+      }
       if (sessionRef.current) {
         onUpdateRef.current(sessionRef.current)
       }
@@ -142,6 +171,24 @@ export function useLiveSession(
           if (dirName && fileName) {
             sessionCache.update(dirName, fileName, { parsed: result })
             sessionCache.updateRawText(dirName, fileName, textRef.current)
+          }
+          // Reconcile: drop any partial whose message.id now appears in the
+          // canonical JSONL stream. We scan `rawMessages` (the raw JSONL
+          // entries) rather than `turns` because `Turn.contentBlocks` doesn't
+          // carry the assistant message id — only the raw message does.
+          if (partialsRef.current.size > 0) {
+            const idsInSession = new Set<string>()
+            for (const raw of result.rawMessages) {
+              if (raw.type === "assistant") {
+                const msg = (raw as { message?: { id?: string } }).message
+                if (msg?.id) idsInSession.add(msg.id)
+              }
+            }
+            const trimmed = dropByMessageIds(partialsRef.current, idsInSession)
+            if (trimmed !== partialsRef.current) {
+              partialsRef.current = trimmed
+              pendingPartialsFlush = true
+            }
           }
           scheduleUpdate()
         })
@@ -197,6 +244,16 @@ export function useLiveSession(
           textRef.current += newText
           pendingText += newText
           flushToWorker()
+        } else if (data.type === "stream_event") {
+          const next = applyStreamEvent(
+            partialsRef.current,
+            data as StreamEventSSE,
+          )
+          if (next !== partialsRef.current) {
+            partialsRef.current = next
+            pendingPartialsFlush = true
+            scheduleUpdate()
+          }
         }
       } catch (err) {
         console.error("[useLiveSession] Error processing SSE message:", err)
@@ -208,6 +265,13 @@ export function useLiveSession(
       wasDisconnectedRef.current = sseStateRef.current === "connected"
       sseStateRef.current = "disconnected"
       setSseState("disconnected")
+      // Drop in-flight partials — they belong to a stream that was cut off.
+      // A reconnect will replay canonical JSONL; partials for the interrupted
+      // turn will never complete and would otherwise linger forever.
+      if (partialsRef.current.size > 0) {
+        partialsRef.current = new Map()
+        setPartialMessages(partialsRef.current)
+      }
     }
 
     return () => {
@@ -223,5 +287,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, rawText])
 
-  return { isLive, sseState, isCompacting }
+  return { isLive, sseState, isCompacting, partialMessages }
 }

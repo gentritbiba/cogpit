@@ -779,6 +779,202 @@ describe("useLiveSession", () => {
     vi.useRealTimers()
   })
 
+  describe("stream_event SSE handling", () => {
+    it("exposes partialMessages that grow with stream_event deltas", async () => {
+      const source: SessionSource = {
+        dirName: "dir",
+        fileName: "f.jsonl",
+        rawText: "{}",
+      }
+
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend)
+      )
+
+      // Fire message_start + content_block_start + text_delta
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: { type: "message_start", message: { id: "msg_live_1" } },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "text" },
+          },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "Hel" },
+          },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "lo" },
+          },
+          parent_tool_use_id: null,
+        })
+      })
+
+      // Flush the rAF coalescer so setPartialMessages commits.
+      act(() => {
+        flushRAF()
+      })
+
+      const partials = result.current.partialMessages
+      expect(partials.has("msg_live_1")).toBe(true)
+      const partial = partials.get("msg_live_1")!
+      expect(partial.blocks.get(0)).toEqual({ type: "text", text: "Hello" })
+    })
+
+    it("discards partial for message.id when canonical assistant line arrives", async () => {
+      const canonicalWithAssistant: ParsedSession = {
+        ...mockParsedSession,
+        rawMessages: [
+          {
+            type: "assistant",
+            message: { id: "msg_live_1", role: "assistant", content: [] },
+          },
+        ],
+      }
+      // After the burst arrives, the worker resolves with the canonical session
+      // containing the just-streamed assistant id — reconciliation must drop it.
+      workerAppend = vi.fn(() => Promise.resolve(canonicalWithAssistant))
+      workerParse = vi.fn(() => Promise.resolve(canonicalWithAssistant))
+
+      const source: SessionSource = {
+        dirName: "dir",
+        fileName: "f.jsonl",
+        rawText: "{}",
+      }
+
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend)
+      )
+
+      // Seed a partial via stream_event.
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: { type: "message_start", message: { id: "msg_live_1" } },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        flushRAF()
+      })
+      expect(result.current.partialMessages.has("msg_live_1")).toBe(true)
+
+      // Canonical JSONL line arrives → worker returns a session whose
+      // rawMessages contains the assistant with matching id → partial dropped.
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "lines",
+          lines: ['{"type":"assistant","message":{"id":"msg_live_1"}}'],
+        })
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      act(() => {
+        flushRAF()
+      })
+
+      expect(result.current.partialMessages.has("msg_live_1")).toBe(false)
+    })
+
+    it("resets partialMessages when source changes", () => {
+      const source1: SessionSource = {
+        dirName: "dir1",
+        fileName: "a.jsonl",
+        rawText: "{}",
+      }
+      const source2: SessionSource = {
+        dirName: "dir2",
+        fileName: "b.jsonl",
+        rawText: "{}",
+      }
+
+      const { result, rerender } = renderHook(
+        (props) => useLiveSession(props.source, onUpdate, workerParse, workerAppend),
+        { initialProps: { source: source1 } }
+      )
+
+      // Seed a partial on source1.
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: { type: "message_start", message: { id: "msg_a" } },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        flushRAF()
+      })
+      expect(result.current.partialMessages.has("msg_a")).toBe(true)
+
+      // Switch source — partials must be cleared.
+      rerender({ source: source2 })
+
+      expect(result.current.partialMessages.size).toBe(0)
+    })
+
+    it("resets partialMessages on SSE disconnect (so reconnect starts clean)", () => {
+      const source: SessionSource = {
+        dirName: "dir",
+        fileName: "f.jsonl",
+        rawText: "{}",
+      }
+
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend)
+      )
+
+      // Connect + seed a partial.
+      act(() => {
+        getLastEventSource().simulateOpen()
+      })
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "stream_event",
+          event: { type: "message_start", message: { id: "msg_b" } },
+          parent_tool_use_id: null,
+        })
+      })
+      act(() => {
+        flushRAF()
+      })
+      expect(result.current.partialMessages.has("msg_b")).toBe(true)
+
+      // Disconnect — partials must be dropped so a reconnect doesn't replay
+      // stale in-flight deltas that were never completed.
+      act(() => {
+        getLastEventSource().simulateError()
+      })
+
+      expect(result.current.partialMessages.size).toBe(0)
+    })
+  })
+
   it("recentlyActive confirmation timer is replaced by 30s timer when lines arrive", () => {
     vi.useFakeTimers()
     const source: SessionSource = {
