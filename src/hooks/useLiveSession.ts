@@ -66,6 +66,9 @@ export function useLiveSession(
   useEffect(() => {
     textRef.current = rawText
     // Dump any in-flight partials — they belong to the previous source.
+    // Reset synchronously — rAF-coalescing is for high-frequency partial
+    // updates; resets are rare, must not race with pending flushes, and
+    // must take effect before any new stream_events are handled.
     if (partialsRef.current.size > 0) {
       partialsRef.current = new Map()
       setPartialMessages(partialsRef.current)
@@ -101,6 +104,7 @@ export function useLiveSession(
     // a different session and must not bleed into the new one. Separate from
     // the rawText-reset effect above because source-switch can keep rawText
     // constant (e.g. two empty-but-distinct sessions).
+    // Reset: see comment above.
     if (partialsRef.current.size > 0) {
       partialsRef.current = new Map()
       setPartialMessages(partialsRef.current)
@@ -133,6 +137,12 @@ export function useLiveSession(
     let closed = false
     let pendingUpdate = false
     let pendingPartialsFlush = false
+    // `pendingSessionUpdate` is only set when the worker produces a *new*
+    // canonical ParsedSession. Partial-only stream frames leave this flag
+    // false so `flushUpdate` can skip dispatching UPDATE_SESSION — otherwise
+    // every text_delta would rebuild the root SessionState object and trigger
+    // an App-level re-render even though the canonical session is unchanged.
+    let pendingSessionUpdate = false
     let rafId: number | null = null
 
     const flushUpdate = () => {
@@ -142,7 +152,8 @@ export function useLiveSession(
         pendingPartialsFlush = false
         setPartialMessages(partialsRef.current)
       }
-      if (sessionRef.current) {
+      if (pendingSessionUpdate && sessionRef.current) {
+        pendingSessionUpdate = false
         onUpdateRef.current(sessionRef.current)
       }
     }
@@ -168,6 +179,10 @@ export function useLiveSession(
         .then((result) => {
           if (closed) return
           sessionRef.current = result
+          // Canonical session changed — dispatch UPDATE_SESSION on the next
+          // rAF flush. This is the ONLY place that sets pendingSessionUpdate;
+          // the stream_event branch updates partials only.
+          pendingSessionUpdate = true
           if (dirName && fileName) {
             sessionCache.update(dirName, fileName, { parsed: result })
             sessionCache.updateRawText(dirName, fileName, textRef.current)
