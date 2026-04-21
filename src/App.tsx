@@ -282,7 +282,7 @@ export default function App() {
   // duplicate worker parse on every source change (the session was already
   // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting } = useLiveSession(
+  const { isLive, sseState, isCompacting, partialMessages } = useLiveSession(
     state.sessionSource,
     (updated) => {
       startTransition(() => {
@@ -709,6 +709,7 @@ export default function App() {
     isLive,
     sseState,
     isCompacting,
+    partialMessages,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -730,7 +731,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState, isCompacting,
+    isLive, sseState, isCompacting, partialMessages,
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,

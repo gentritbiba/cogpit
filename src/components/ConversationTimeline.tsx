@@ -1,6 +1,8 @@
 import { useMemo, memo, type RefObject } from "react"
 import { VirtualizedTimeline, NonVirtualTimeline } from "./timeline/VirtualizedTimeline"
+import { PartialAssistantBlock } from "./timeline/PartialAssistantBlock"
 import { matchesSearch } from "@/lib/timelineHelpers"
+import { synthesizePartialTurns } from "@/lib/partialMessages"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 
@@ -21,7 +23,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   onLoadMore,
 }: ConversationTimelineProps) {
   const { state: { searchQuery } } = useAppContext()
-  const { session } = useSessionContext()
+  const { session, partialMessages } = useSessionContext()
 
   const turns = session?.turns
   const allTurns = useMemo(
@@ -35,9 +37,33 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [allTurns, searchQuery]
   )
 
+  // In-flight partial assistant messages — render as synthetic blocks below
+  // the last canonical turn. When the canonical assistant message lands in
+  // JSONL, `useLiveSession` drops the partial and the real `TurnSection`
+  // takes its place with no flicker.
+  //
+  // `rawMessages` is the correct source for existing assistant ids because
+  // `Turn.contentBlocks` doesn't carry the Anthropic message id — only the
+  // raw JSONL entries do. We skip the scan entirely when there are no
+  // partials, so cost is zero in the common case (feature flag off, or no
+  // turn in flight).
+  const partialTurns = useMemo(() => {
+    if (!partialMessages || partialMessages.size === 0) return []
+    const existingIds = new Set<string>()
+    if (session) {
+      for (const raw of session.rawMessages) {
+        if (raw.type === "assistant") {
+          const msg = (raw as { message?: { id?: string } }).message
+          if (msg?.id) existingIds.add(msg.id)
+        }
+      }
+    }
+    return synthesizePartialTurns(partialMessages, existingIds)
+  }, [partialMessages, session])
+
   const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && chatScrollRef?.current != null
 
-  if (filteredTurns.length === 0) {
+  if (filteredTurns.length === 0 && partialTurns.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
         {searchQuery ? "No turns match your search." : "No turns in this session."}
@@ -45,16 +71,32 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     )
   }
 
+  const partialsNode = partialTurns.length > 0 ? (
+    <div className="space-y-3">
+      {partialTurns.map((p) => (
+        <PartialAssistantBlock key={p.messageId} partial={p} />
+      ))}
+    </div>
+  ) : null
+
   if (shouldVirtualize) {
     return (
-      <VirtualizedTimeline
-        filteredTurns={filteredTurns}
-        scrollContainerRef={chatScrollRef}
-        hasMore={hasMore}
-        onLoadMore={onLoadMore}
-      />
+      <>
+        <VirtualizedTimeline
+          filteredTurns={filteredTurns}
+          scrollContainerRef={chatScrollRef}
+          hasMore={hasMore}
+          onLoadMore={onLoadMore}
+        />
+        {partialsNode}
+      </>
     )
   }
 
-  return <NonVirtualTimeline filteredTurns={filteredTurns} />
+  return (
+    <>
+      <NonVirtualTimeline filteredTurns={filteredTurns} />
+      {partialsNode}
+    </>
+  )
 })

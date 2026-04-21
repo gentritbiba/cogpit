@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { applyStreamEvent, dropByMessageIds } from "@/lib/partialMessages"
+import {
+  applyStreamEvent,
+  dropByMessageIds,
+  synthesizePartialTurns,
+} from "@/lib/partialMessages"
 import type { PartialAssistantMessage, StreamEventSSE } from "@/lib/types"
 
 const evt = (event: StreamEventSSE["event"]): StreamEventSSE => ({
@@ -182,6 +186,103 @@ describe("applyStreamEvent", () => {
       }),
     )
     expect(next).toBe(before)
+  })
+})
+
+describe("synthesizePartialTurns", () => {
+  it("returns an empty array when the partials map is empty", () => {
+    const out = synthesizePartialTurns(new Map(), new Set())
+    expect(out).toEqual([])
+  })
+
+  it("skips partials whose messageId is already in existingAssistantIds", () => {
+    const partials = new Map<string, PartialAssistantMessage>([
+      [
+        "msg_a",
+        {
+          messageId: "msg_a",
+          blocks: new Map([[0, { type: "text", text: "hello" }]]),
+          stopped: false,
+        },
+      ],
+      [
+        "msg_b",
+        {
+          messageId: "msg_b",
+          blocks: new Map([[0, { type: "text", text: "world" }]]),
+          stopped: false,
+        },
+      ],
+    ])
+    const out = synthesizePartialTurns(partials, new Set(["msg_a"]))
+    expect(out).toHaveLength(1)
+    expect(out[0].messageId).toBe("msg_b")
+  })
+
+  it("emits a renderable turn for new partial messageIds in insertion order", () => {
+    const partials = new Map<string, PartialAssistantMessage>()
+    partials.set("msg_1", {
+      messageId: "msg_1",
+      blocks: new Map<number, { type: "text"; text: string } | { type: "thinking"; text: string } | { type: "tool_use"; id: string; name: string; partialInputJson: string }>([
+        [0, { type: "text", text: "first" }],
+      ]),
+      stopped: false,
+    })
+    partials.set("msg_2", {
+      messageId: "msg_2",
+      blocks: new Map<number, { type: "text"; text: string } | { type: "thinking"; text: string } | { type: "tool_use"; id: string; name: string; partialInputJson: string }>([
+        [0, { type: "thinking", text: "reasoning" }],
+        [1, { type: "text", text: "second" }],
+      ]),
+      stopped: false,
+    })
+    const out = synthesizePartialTurns(partials, new Set())
+    expect(out).toHaveLength(2)
+    expect(out[0].messageId).toBe("msg_1")
+    expect(out[0].textBlocks).toEqual(["first"])
+    expect(out[0].thinkingBlocks).toEqual([])
+    expect(out[1].messageId).toBe("msg_2")
+    expect(out[1].textBlocks).toEqual(["second"])
+    expect(out[1].thinkingBlocks).toEqual(["reasoning"])
+  })
+
+  it("preserves block order from the Map (index order)", () => {
+    const partials = new Map<string, PartialAssistantMessage>([
+      [
+        "msg_x",
+        {
+          messageId: "msg_x",
+          blocks: new Map<number, { type: "text"; text: string } | { type: "thinking"; text: string } | { type: "tool_use"; id: string; name: string; partialInputJson: string }>([
+            [0, { type: "text", text: "alpha" }],
+            [1, { type: "text", text: "beta" }],
+          ]),
+          stopped: false,
+        },
+      ],
+    ])
+    const out = synthesizePartialTurns(partials, new Set())
+    expect(out).toHaveLength(1)
+    expect(out[0].textBlocks).toEqual(["alpha", "beta"])
+  })
+
+  it("skips tool_use blocks (v1 non-goal)", () => {
+    const partials = new Map<string, PartialAssistantMessage>([
+      [
+        "msg_tool",
+        {
+          messageId: "msg_tool",
+          blocks: new Map<number, { type: "text"; text: string } | { type: "thinking"; text: string } | { type: "tool_use"; id: string; name: string; partialInputJson: string }>([
+            [0, { type: "text", text: "thinking about it..." }],
+            [1, { type: "tool_use", id: "t1", name: "Read", partialInputJson: '{"path":' }],
+          ]),
+          stopped: false,
+        },
+      ],
+    ])
+    const out = synthesizePartialTurns(partials, new Set())
+    expect(out).toHaveLength(1)
+    expect(out[0].textBlocks).toEqual(["thinking about it..."])
+    expect(out[0].thinkingBlocks).toEqual([])
   })
 })
 

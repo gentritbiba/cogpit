@@ -64,6 +64,62 @@ export function applyStreamEvent(
   return map
 }
 
+// ── Rendering helpers ────────────────────────────────────────────────────
+
+/**
+ * Lightweight render shape for in-flight partial assistant messages. The
+ * timeline appends one of these to the end of the turn list until the
+ * canonical assistant message arrives via JSONL (at which point the partial
+ * is dropped by `dropByMessageIds` — see Task 7 reconciliation).
+ *
+ * tool_use partials are intentionally omitted from v1 rendering — only text
+ * and thinking blocks stream character-by-character.
+ */
+export interface PartialRenderTurn {
+  messageId: string
+  /** Text block contents in content-block index order. */
+  textBlocks: string[]
+  /** Thinking block contents in content-block index order. */
+  thinkingBlocks: string[]
+}
+
+/**
+ * Convert the in-memory `partialMessages` map into a lightweight, render-ready
+ * shape. Partials whose `messageId` already appears in `existingAssistantIds`
+ * (because the canonical JSONL line has landed) are skipped so we never
+ * double-render while reconciliation is in flight.
+ *
+ * Insertion order of the incoming Map is preserved; block order within each
+ * partial follows the content_block `index` (i.e. the Map key) numerically.
+ */
+export function synthesizePartialTurns(
+  partials: Map<string, PartialAssistantMessage>,
+  existingAssistantIds: Set<string>,
+): PartialRenderTurn[] {
+  if (partials.size === 0) return []
+  const out: PartialRenderTurn[] = []
+  for (const partial of partials.values()) {
+    if (existingAssistantIds.has(partial.messageId)) continue
+    const textBlocks: string[] = []
+    const thinkingBlocks: string[] = []
+    // Iterate in ascending index order so text/thinking render in the order
+    // the API produced them.
+    const indices = [...partial.blocks.keys()].sort((a, b) => a - b)
+    for (const idx of indices) {
+      const block = partial.blocks.get(idx)
+      if (!block) continue
+      if (block.type === "text") {
+        if (block.text.length > 0) textBlocks.push(block.text)
+      } else if (block.type === "thinking") {
+        if (block.text.length > 0) thinkingBlocks.push(block.text)
+      }
+      // tool_use blocks are intentionally skipped in v1.
+    }
+    out.push({ messageId: partial.messageId, textBlocks, thinkingBlocks })
+  }
+  return out
+}
+
 /**
  * Drop the given message ids from the map. Used to discard partials once the
  * canonical assistant message arrives via JSONL tail.
