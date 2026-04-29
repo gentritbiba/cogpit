@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process"
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { UseFn } from "../helpers"
 
 interface UsageResponse {
@@ -24,16 +27,42 @@ interface OAuthCredentials {
 const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 const BETA_HEADER = "oauth-2025-04-20"
 
-/**
- * Read Claude Code OAuth credentials from macOS keychain.
- * Returns null if not on macOS or credentials not found.
- */
-async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
-  // Only available on macOS
-  if (process.platform !== "darwin") {
-    return null
+/** Parse a raw credential object into OAuthCredentials, or return null. */
+function parseCredentialObject(raw: Record<string, unknown>): OAuthCredentials | null {
+  const creds = (raw.claudeAiOauth as Record<string, unknown> | undefined) || raw
+  if (!creds.accessToken || !creds.refreshToken) return null
+
+  let expiresAt = creds.expiresAt as number
+  if (typeof expiresAt === "number" && expiresAt > 1_000_000_000_000) {
+    expiresAt = Math.floor(expiresAt / 1000)
   }
 
+  return {
+    accessToken: creds.accessToken as string,
+    refreshToken: creds.refreshToken as string,
+    expiresAt,
+    subscriptionType: creds.subscriptionType as string | undefined,
+  }
+}
+
+/**
+ * Read Claude Code OAuth credentials from ~/.claude/.credentials.json.
+ * Used on Windows and Linux.
+ */
+async function readFileCredentials(): Promise<OAuthCredentials | null> {
+  try {
+    const credPath = join(homedir(), ".claude", ".credentials.json")
+    const content = await readFile(credPath, "utf-8")
+    return parseCredentialObject(JSON.parse(content) as Record<string, unknown>)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read Claude Code OAuth credentials from macOS keychain.
+ */
+async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
   return new Promise((resolve) => {
     let resolved = false
     const done = (value: OAuthCredentials | null) => {
@@ -60,32 +89,8 @@ async function readKeychainCredentials(): Promise<OAuthCredentials | null> {
         done(null)
         return
       }
-
       try {
-        const jsonString = stdout.trim()
-        const jsonData = JSON.parse(jsonString)
-
-        // Handle wrapped format: { "claudeAiOauth": { ... } }
-        const creds = jsonData.claudeAiOauth || jsonData
-
-        // Validate required fields
-        if (!creds.accessToken || !creds.refreshToken) {
-          done(null)
-          return
-        }
-
-        // Handle both millisecond and second timestamps
-        let expiresAt = creds.expiresAt
-        if (typeof expiresAt === "number" && expiresAt > 1_000_000_000_000) {
-          expiresAt = Math.floor(expiresAt / 1000)
-        }
-
-        done({
-          accessToken: creds.accessToken,
-          refreshToken: creds.refreshToken,
-          expiresAt: expiresAt,
-          subscriptionType: creds.subscriptionType,
-        })
+        done(parseCredentialObject(JSON.parse(stdout.trim()) as Record<string, unknown>))
       } catch {
         done(null)
       }
@@ -175,22 +180,19 @@ async function fetchUsageFromAPI(token: string): Promise<UsageResponse | null> {
   }
 }
 
+/** Read credentials from keychain (macOS) or credential file (Windows/Linux). */
+async function readCredentials(): Promise<OAuthCredentials | null> {
+  if (process.platform === "darwin") return readKeychainCredentials()
+  return readFileCredentials()
+}
+
 export function registerUsageRoutes(use: UseFn) {
-  // GET /api/usage - fetch Claude usage stats (macOS only)
+  // GET /api/usage - fetch Claude usage stats
   use("/api/usage", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
     try {
-      // Only available on macOS
-      if (process.platform !== "darwin") {
-        res.statusCode = 501
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: "Not available on this platform" }))
-        return
-      }
-
-      // Read credentials from keychain
-      const creds = await readKeychainCredentials()
+      const creds = await readCredentials()
       if (!creds) {
         res.statusCode = 404
         res.setHeader("Content-Type", "application/json")
@@ -198,7 +200,6 @@ export function registerUsageRoutes(use: UseFn) {
         return
       }
 
-      // Refresh token if needed
       const refreshedCreds = await refreshTokenIfNeeded(creds)
       if (!refreshedCreds) {
         res.statusCode = 401
