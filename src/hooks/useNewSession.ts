@@ -6,6 +6,9 @@ import type { ParsedSession } from "@/lib/types"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
+import { agentKindFromDirName } from "@/lib/sessionSource"
+import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
+import { rename as renameSession } from "@/hooks/useSessionNames"
 
 interface UseNewSessionOpts {
   permissionsConfig: PermissionsConfig
@@ -14,9 +17,207 @@ interface UseNewSessionOpts {
   onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
   /** Called when the user sends the first message and session creation begins */
   onCreateStarted?: (message: string) => void
+  onCodexModelRejected?: (model: string) => void
   model: string
   effort: string
   mcpConfig?: string | null
+}
+
+interface CreateSessionResponse {
+  dirName: string
+  fileName: string
+  sessionId: string
+  initialContent?: string
+}
+
+interface SessionsListResponse {
+  sessions?: Array<{
+    fileName: string
+    sessionId: string
+    firstUserMessage?: string
+    lastUserMessage?: string
+    lastModified?: string
+  }>
+}
+
+/** Derive a short session name from the first user message. */
+function deriveSessionName(message: string): string {
+  const cleaned = message.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, "").trim()
+  if (!cleaned) return ""
+  // Take first line, truncate to 60 chars
+  const firstLine = cleaned.split("\n")[0].trim()
+  if (firstLine.length <= 60) return firstLine
+  return firstLine.slice(0, 57) + "..."
+}
+
+const EMPTY_SESSION_STATS = {
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  totalCacheCreationTokens: 0,
+  totalCacheReadTokens: 0,
+  totalCostUSD: 0,
+  toolCallCounts: {},
+  errorCount: 0,
+  totalDurationMs: 0,
+  turnCount: 0,
+} as const
+
+function buildSessionSource(response: CreateSessionResponse, rawText: string): SessionSource {
+  return {
+    dirName: response.dirName,
+    fileName: response.fileName,
+    rawText,
+    agentKind: agentKindFromDirName(response.dirName),
+  }
+}
+
+function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession {
+  return {
+    sessionId: response.sessionId,
+    version: "",
+    gitBranch: "",
+    cwd: "",
+    slug: "",
+    name: "",
+    model: "",
+    turns: [],
+    stats: { ...EMPTY_SESSION_STATS },
+    rawMessages: [],
+    agentKind: agentKindFromDirName(response.dirName),
+  }
+}
+
+function parseInitialSessionContent(rawText: string | undefined): { rawText: string; parsed: ParsedSession } | null {
+  if (!rawText?.trim()) return null
+  try {
+    return {
+      rawText,
+      parsed: parseSession(rawText),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function tryLoadSessionContent(
+  response: CreateSessionResponse,
+  controller: AbortController,
+  maxAttempts = 3,
+  delayMs = 100,
+  allowInitialContent = true,
+): Promise<{ rawText: string; parsed: ParsedSession } | null> {
+  if (allowInitialContent) {
+    const initialContent = parseInitialSessionContent(response.initialContent)
+    if (initialContent) {
+      return initialContent
+    }
+  }
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError")
+    const contentRes = await authFetch(
+      `/api/sessions/${encodeURIComponent(response.dirName)}/${encodeURIComponent(response.fileName)}`,
+      { signal: controller.signal }
+    )
+    if (contentRes.ok) {
+      const rawText = await contentRes.text()
+      if (rawText.trim()) {
+        try {
+          return {
+            rawText,
+            parsed: parseSession(rawText),
+          }
+        } catch {
+          // Try again if the file is still mid-write
+        }
+      }
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
+
+  return null
+}
+
+async function hydrateSessionContent(
+  response: CreateSessionResponse,
+  controller: AbortController,
+  dispatch: Dispatch<SessionAction>,
+  initialRawText: string
+): Promise<void> {
+  let lastRawText = initialRawText
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (controller.signal.aborted) return
+    const loaded = await tryLoadSessionContent(response, controller, 1, 0, false)
+    if (loaded && loaded.rawText !== lastRawText) {
+      dispatch({
+        type: "RELOAD_SESSION_CONTENT",
+        session: loaded.parsed,
+        source: buildSessionSource(response, loaded.rawText),
+      })
+      return
+    }
+    lastRawText = loaded?.rawText ?? lastRawText
+    await new Promise(r => setTimeout(r, 200))
+  }
+}
+
+async function finalizeDiscoveredSession(
+  response: CreateSessionResponse,
+  controller: AbortController,
+  dispatch: Dispatch<SessionAction>,
+  isMobile: boolean,
+  onSessionFinalized: (parsed: ParsedSession, source: SessionSource) => void
+): Promise<string> {
+  const loaded = parseInitialSessionContent(response.initialContent)
+  const rawText = loaded?.rawText ?? ""
+  const parsed = loaded?.parsed ?? buildEmptyParsedSession(response)
+  const source = buildSessionSource(response, rawText)
+
+  dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
+  onSessionFinalized(parsed, source)
+
+  // Always reconcile against the on-disk JSONL after promotion. This closes
+  // the gap where the create response is missing lines that were flushed just
+  // before the SSE watcher connects.
+  void hydrateSessionContent(response, controller, dispatch, rawText)
+
+  return response.sessionId
+}
+
+async function recoverCodexSession(
+  dirName: string,
+  message: string,
+  startedAt: number,
+  controller: AbortController
+): Promise<CreateSessionResponse | null> {
+  const listRes = await authFetch(
+    `/api/sessions/${encodeURIComponent(dirName)}?page=1&limit=10`,
+    { signal: controller.signal }
+  )
+  if (!listRes.ok) return null
+
+  const data = await listRes.json() as SessionsListResponse
+  const recentCutoff = startedAt - 30_000
+  const normalizedMessage = message.trim()
+  const candidates = (data.sessions ?? []).filter((session) => {
+    const modified = session.lastModified ? new Date(session.lastModified).getTime() : 0
+    return Number.isFinite(modified) && modified >= recentCutoff
+  })
+
+  const preferred = candidates.find((session) =>
+    session.firstUserMessage?.trim() === normalizedMessage ||
+    session.lastUserMessage?.trim() === normalizedMessage
+  ) ?? candidates[0]
+
+  if (!preferred) return null
+  return {
+    dirName,
+    fileName: preferred.fileName,
+    sessionId: preferred.sessionId,
+  }
 }
 
 export function useNewSession({
@@ -25,6 +226,7 @@ export function useNewSession({
   isMobile,
   onSessionFinalized,
   onCreateStarted,
+  onCodexModelRejected,
   model,
   effort,
   mcpConfig,
@@ -60,6 +262,7 @@ export function useNewSession({
     ): Promise<string | null> => {
       const dirName = pendingDirNameRef.current
       if (!dirName) return null
+      const agentKind = agentKindFromDirName(dirName)
 
       abortRef.current?.abort()
       const controller = new AbortController()
@@ -68,75 +271,57 @@ export function useNewSession({
       setCreatingSession(true)
       setCreateError(null)
       onCreateStarted?.(message)
+      const startedAt = Date.now()
 
       try {
-        const res = await authFetch("/api/create-and-send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dirName,
-            message,
-            images,
-            permissions: permissionsConfig,
-            model: model || undefined,
-            effort: effort || undefined,
-            worktreeName: worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
-            mcpConfig: mcpConfig || undefined,
+        const sessionName = deriveSessionName(message)
+        const requestBody = {
+          dirName,
+          message,
+          images,
+          permissions: permissionsConfig,
+          effort: effort || undefined,
+          name: agentKind === "claude" ? (sessionName || undefined) : undefined,
+          worktreeName: agentKind === "claude" && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
+          mcpConfig: agentKind === "claude" ? (mcpConfig || undefined) : undefined,
+        }
+
+        const { res, errorMessage } = await fetchWithCodexModelFallback(
+          (modelOverride) => authFetch("/api/create-and-send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...requestBody, model: modelOverride }),
+            signal: controller.signal,
           }),
-          signal: controller.signal,
-        })
+          {
+            model,
+            agentKind,
+            errorFallback: "Unknown error",
+            onModelRejected: onCodexModelRejected,
+          },
+        )
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Unknown error" }))
-          setCreateError(err.error || `Failed to create session (${res.status})`)
+          if (agentKind === "codex") {
+            const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
+            if (recovered) {
+              const recoveredId = await finalizeDiscoveredSession(recovered, controller, dispatch, isMobile, onSessionFinalized)
+              if (sessionName && recoveredId) renameSession(recoveredId, sessionName)
+              return recoveredId
+            }
+          }
+          setCreateError(errorMessage || `Failed to create session (${res.status})`)
           return null
         }
 
-        const { dirName: resDirName, fileName, sessionId, initialContent } = await res.json()
+        const response = await res.json() as CreateSessionResponse
         pendingDirNameRef.current = null
-
-        // Server includes file content when available — skip polling entirely
-        let rawText = ""
-        let parsed: ParsedSession | null = null
-
-        if (initialContent?.trim()) {
-          rawText = initialContent
-          parsed = parseSession(rawText)
+        const newSessionId = await finalizeDiscoveredSession(response, controller, dispatch, isMobile, onSessionFinalized)
+        // Auto-store the derived session name so it appears in sidebar/lists
+        if (sessionName && newSessionId) {
+          renameSession(newSessionId, sessionName)
         }
-
-        // Fall back to polling only if server didn't include content
-        if (!parsed) {
-          const maxAttempts = 30
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            if (controller.signal.aborted) return null
-            const contentRes = await authFetch(
-              `/api/sessions/${encodeURIComponent(resDirName)}/${encodeURIComponent(fileName)}`,
-              { signal: controller.signal }
-            )
-            if (contentRes.ok) {
-              rawText = await contentRes.text()
-              if (rawText.trim()) {
-                parsed = parseSession(rawText)
-                break
-              }
-            }
-            await new Promise(r => setTimeout(r, 200))
-          }
-        }
-
-        // Even if we couldn't read content yet, finalize with a minimal session
-        // so the user transitions to the ChatArea. SSE streaming will populate
-        // the real content once the JSONL file has data.
-        if (!parsed) {
-          rawText = ""
-          parsed = { sessionId, turns: [], cwd: undefined, model: undefined, totalCost: 0 }
-        }
-
-        const source: SessionSource = { dirName: resDirName, fileName, rawText }
-        dispatch({ type: "FINALIZE_SESSION", session: parsed, source, isMobile })
-        onSessionFinalized(parsed, source)
-
-        return sessionId
+        return newSessionId
       } catch (err) {
         if (controller.signal.aborted) return null
         setCreateError(err instanceof Error ? err.message : "Failed to create session")
@@ -147,7 +332,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted]
+    [permissionsConfig, model, effort, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onCodexModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

@@ -9,7 +9,7 @@ import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
-import { ServerPanel } from "@/components/ServerPanel"
+import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
@@ -31,9 +31,10 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { useTheme } from "@/hooks/useTheme"
 import { useSessionHistory } from "@/hooks/useSessionHistory"
 import { usePermissions } from "@/hooks/usePermissions"
+import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
-import { useServerPanel } from "@/hooks/useServerPanel"
+import { useProcessPanel } from "@/hooks/useProcessPanel"
 import { useNewSession } from "@/hooks/useNewSession"
 import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
@@ -44,14 +45,23 @@ import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
+import { useParserWorker } from "@/hooks/useParserWorker"
+import { useChunkedSession } from "@/hooks/useChunkedSession"
 import { hapticLight } from "@/lib/haptics"
 import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
-import { DEFAULT_EFFORT } from "@/lib/utils"
+import { DEFAULT_EFFORT, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
+import {
+  agentKindFromDirName,
+  findClaudeProjectDirNameForCwd,
+  isCodexDirName,
+  projectDirNameForAgent,
+} from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import {
@@ -62,6 +72,7 @@ import {
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { PtyProvider } from "@/contexts/PtyContext"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -101,6 +112,18 @@ export default function App() {
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
+  const { parse: workerParse, append: workerAppend } = useParserWorker()
+
+  const handlePrependTurns = useCallback((olderTurns: Turn[], _hasMore: boolean, _nextByteOffset: number) => {
+    dispatch({ type: "PREPEND_TURNS", turns: olderTurns })
+  }, [dispatch])
+
+  const chunkedSession = useChunkedSession({
+    dirName: state.sessionSource?.dirName ?? null,
+    fileName: state.sessionSource?.fileName ?? null,
+    workerParse,
+    onPrependTurns: handlePrependTurns,
+  })
 
   // Panel/sidebar toggle state
   const panels = usePanelState(state, dispatch)
@@ -119,6 +142,10 @@ export default function App() {
   // Real filesystem path for the pending (pre-created) session.
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
+  const currentAgentKind = state.sessionSource?.agentKind
+    ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
+  const supportsWorktrees = currentAgentKind === "claude"
+  const supportsMcp = currentAgentKind === "claude"
 
   const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
   const suggestionsRef = useRef(slashSuggestions.suggestions)
@@ -180,8 +207,8 @@ export default function App() {
     }).catch((err) => console.error("[mcp-auth] open-terminal failed:", err))
   }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
 
-  // Server panel state
-  const serverPanel = useServerPanel(state.session?.sessionId)
+  // Process panel state (unified: scripts + tasks + terminals)
+  const processPanel = useProcessPanel(state.session?.sessionId)
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
@@ -191,7 +218,7 @@ export default function App() {
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
 
   // Worktree data — only fetched when panel is open
-  const worktreeData = useWorktrees(panels.showWorktrees ? currentDirName : null)
+  const worktreeData = useWorktrees(supportsWorktrees && panels.showWorktrees ? currentDirName : null)
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -242,11 +269,17 @@ export default function App() {
   // interrupt these low-priority renders to process user interactions (clicks).
   // On reconnect after disconnect, reload the full session to catch missed messages.
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting } = useLiveSession(state.sessionSource, (updated) => {
-    startTransition(() => {
-      dispatch({ type: "UPDATE_SESSION", session: updated })
-    })
-  }, () => reconnectHandlerRef.current?.())
+  const { isLive, sseState, isCompacting } = useLiveSession(
+    state.sessionSource,
+    (updated) => {
+      startTransition(() => {
+        dispatch({ type: "UPDATE_SESSION", session: updated })
+      })
+    },
+    workerParse,
+    workerAppend,
+    () => reconnectHandlerRef.current?.(),
+  )
 
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
@@ -254,15 +287,33 @@ export default function App() {
   // Permissions management
   const perms = usePermissions()
 
+  // Permission requests — SDK resolves canUseTool in-place, no retry needed
+  const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
+
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
 
+  const handleCodexModelRejected = useCallback((rejectedModel: string) => {
+    setSelectedModel((current) => current === rejectedModel ? "" : current)
+  }, [])
+
   // Thinking effort level
   const [selectedEffort, setSelectedEffort] = useState(DEFAULT_EFFORT)
+  const effectiveEffort = normalizeEffortForAgent(currentAgentKind ?? "claude", selectedEffort)
 
   // MCP server selection
   const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
-  const mcpData = useMcpServers(currentCwd, currentDirName ?? undefined, state.sessionSource?.fileName ?? undefined)
+  const mcpData = useMcpServers(
+    supportsMcp ? currentCwd : undefined,
+    supportsMcp ? (currentDirName ?? undefined) : undefined,
+    supportsMcp ? state.sessionSource?.fileName ?? undefined : undefined
+  )
+
+  useEffect(() => {
+    if (!supportsWorktrees && panels.showWorktrees) {
+      panels.setShowWorktrees(false)
+    }
+  }, [supportsWorktrees, panels.showWorktrees, panels.setShowWorktrees])
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -292,10 +343,62 @@ export default function App() {
       setTimeout(() => liveSessionsRefreshRef.current?.(), 2000)
     },
     onCreateStarted: setPendingFirstMessage,
+    onCodexModelRejected: handleCodexModelRejected,
     model: selectedModel,
-    effort: selectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    effort: effectiveEffort,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
   })
+
+  const [pendingAgentSource, setPendingAgentSource] = useState<{
+    claudeDirName: string
+    cwd: string | null
+  } | null>(null)
+  const claudeProjectDirCacheRef = useRef(new Map<string, string | null>())
+
+  const resolveClaudeProjectDirName = useCallback(async (cwd: string): Promise<string | null> => {
+    const cache = claudeProjectDirCacheRef.current
+    if (cache.has(cwd)) {
+      return cache.get(cwd) ?? null
+    }
+
+    try {
+      const res = await authFetch("/api/projects")
+      if (!res.ok) {
+        cache.set(cwd, null)
+        return null
+      }
+      const projects = await res.json() as Array<{ dirName: string; path: string }>
+      const match = findClaudeProjectDirNameForCwd(projects, cwd)
+      cache.set(cwd, match)
+      return match
+    } catch {
+      cache.set(cwd, null)
+      return null
+    }
+  }, [])
+
+  const handleStartNewSession = useCallback(async (dirName: string, cwd?: string) => {
+    const normalizedCwd = cwd ?? null
+    if (!normalizedCwd) {
+      setPendingAgentSource(null)
+      handleNewSession(dirName)
+      return
+    }
+
+    const claudeDirName = isCodexDirName(dirName)
+      ? await resolveClaudeProjectDirName(normalizedCwd)
+      : dirName
+
+    setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
+    handleNewSession(dirName, normalizedCwd)
+  }, [handleNewSession, resolveClaudeProjectDirName])
+
+  const handlePendingSessionAgentChange = useCallback((agentKind: AgentKind) => {
+    const pending = pendingAgentSource
+    if (!pending?.cwd) return
+    const nextDirName = projectDirNameForAgent(pending.claudeDirName, pending.cwd, agentKind)
+    handleNewSession(nextDirName, pending.cwd)
+  }, [pendingAgentSource, handleNewSession])
 
   // Build the pending session info for the Live & Recent placeholder
   const pendingSessionInfo = useMemo(() => {
@@ -311,10 +414,20 @@ export default function App() {
   useEffect(() => {
     if (!state.pendingDirName) {
       setPendingFirstMessage(null)
+      setPendingAgentSource(null)
     }
   }, [state.pendingDirName])
 
-  // Claude chat
+  useEffect(() => {
+    if (!selectedModel) return
+    if (!state.sessionSource && !state.pendingDirName) return
+    const options = getModelOptions(currentAgentKind ?? "claude")
+    if (!options.some((option) => option.value === selectedModel)) {
+      setSelectedModel("")
+    }
+  }, [currentAgentKind, selectedModel, state.sessionSource, state.pendingDirName])
+
+  // Active agent chat
   const claudeChat = usePtyChat({
     sessionSource: state.sessionSource,
     parsedSessionId: state.session?.sessionId ?? null,
@@ -322,8 +435,9 @@ export default function App() {
     permissions: perms.config,
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
-    effort: selectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    effort: effectiveEffort,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
+    onCodexModelRejected: handleCodexModelRejected,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -393,6 +507,7 @@ export default function App() {
     teamContext,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
     resetTurnCount: scroll.resetTurnCount,
+    workerParse,
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
@@ -426,9 +541,9 @@ export default function App() {
     hasPermsPendingChanges: perms.hasPendingChanges,
     selectedModel,
     setSelectedModel,
-    selectedEffort,
+    selectedEffort: effectiveEffort,
     setSelectedEffort,
-    mcpConfig: mcpData.mcpConfigJson,
+    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
   })
@@ -439,7 +554,7 @@ export default function App() {
   // We intentionally do NOT auto-apply when switching between sessions or when
   // the user changes MCP selection — those require explicit "Apply Settings".
   const { hasSettingsChanges, handleApplySettings } = handlers
-  const mcpHasRestrictions = mcpData.mcpConfigJson !== null
+  const mcpHasRestrictions = supportsMcp && mcpData.mcpConfigJson !== null
   const mcpPrevLoadedRef = useRef(false)
   useEffect(() => {
     const justLoaded = mcpData.loaded && !mcpPrevLoadedRef.current
@@ -582,6 +697,10 @@ export default function App() {
     isCompacting,
     undoRedo,
     pendingInteraction,
+    permissionRequests: permReqs.requests,
+    permissionResponding: permReqs.responding,
+    respondPermission: permReqs.respond,
+    respondAllPermissions: permReqs.respondAll,
     isSubAgentView,
     slashSuggestions: slashSuggestions.suggestions,
     slashSuggestionsLoading: slashSuggestions.loading,
@@ -598,6 +717,7 @@ export default function App() {
     state.session, state.sessionSource,
     isLive, sseState, isCompacting,
     undoRedo, pendingInteraction, isSubAgentView,
+    permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
     handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
@@ -739,13 +859,15 @@ export default function App() {
     </Suspense>
   )
 
-  const serverPanelNode = serverPanel.serverMap.size > 0 && (
-    <ServerPanel
-      servers={serverPanel.serverMap}
-      visibleIds={serverPanel.visibleServerIds}
-      collapsed={serverPanel.serverPanelCollapsed}
-      onToggleServer={serverPanel.handleToggleServer}
-      onToggleCollapse={serverPanel.handleToggleServerCollapse}
+  const processPanelNode = processPanel.processes.size > 0 && (
+    <ProcessPanel
+      processes={processPanel.processes}
+      activeProcessId={processPanel.activeProcessId}
+      collapsed={processPanel.collapsed}
+      onSetActive={processPanel.setActive}
+      onRemove={processPanel.removeProcess}
+      onToggleCollapse={processPanel.toggleCollapse}
+      onUpdateStatus={processPanel.updateProcessStatus}
     />
   )
 
@@ -766,21 +888,25 @@ export default function App() {
     <div className="shrink-0 bg-elevation-1">
       <ChatInput ref={chatInputRef} />
       <ChatInputSettings
+        agentKind={currentAgentKind ?? "claude"}
+        onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
         selectedModel={selectedModel}
         onModelChange={setSelectedModel}
-        selectedEffort={selectedEffort}
+        selectedEffort={effectiveEffort}
         onEffortChange={setSelectedEffort}
         isNewSession={isNewSession}
         worktreeEnabled={worktreeEnabled}
-        onWorktreeEnabledChange={isNewSession ? setWorktreeEnabled : undefined}
+        onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
         onApplySettings={handlers.handleApplySettings}
         activeModelId={state.session?.model}
-        mcpServers={mcpData.servers}
-        selectedMcpServers={mcpData.selectedServers}
-        onToggleMcpServer={mcpData.toggleServer}
-        onRefreshMcpServers={mcpData.refresh}
-        mcpLoading={mcpData.loading}
-        onMcpAuth={handleMcpAuth}
+        mcpServers={supportsMcp ? mcpData.servers : undefined}
+        selectedMcpServers={supportsMcp ? mcpData.selectedServers : undefined}
+        onToggleMcpServer={supportsMcp ? mcpData.toggleServer : undefined}
+        onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
+        mcpLoading={supportsMcp ? mcpData.loading : undefined}
+        onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
+        permissionMode={perms.config.mode}
+        onPermissionModeChange={perms.setMode}
       />
     </div>
   )
@@ -800,7 +926,7 @@ export default function App() {
       <BackgroundServers
         cwd={state.session.cwd}
         turns={state.session.turns}
-        onServersChanged={serverPanel.handleServersChanged}
+        onServersChanged={processPanel.handleServersChanged}
       />
     </div>
   )
@@ -809,6 +935,7 @@ export default function App() {
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
+      <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
@@ -822,7 +949,7 @@ export default function App() {
               sidebarTab={state.sidebarTab}
               onSidebarTabChange={handleSidebarTabChange}
               onSelectTeam={actions.handleSelectTeam}
-              onNewSession={handleNewSession}
+              onNewSession={handleStartNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingSessionInfo}
               onDuplicateSession={handlers.handleDuplicateSessionByPath}
@@ -848,14 +975,14 @@ export default function App() {
                   {teamMembersBar}
                   <SessionInfoBar
                     creatingSession={creatingSession}
-                    onNewSession={handleNewSession}
+                    onNewSession={handleStartNewSession}
                     onDuplicateSession={handlers.handleDuplicateSession}
                     onOpenTerminal={handleOpenTerminal}
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     onShowFileChanges={() => setShowMobileFileChanges(true)}
                     hasFileChanges={hasFileChanges}
                   />
-                  <ChatArea searchInputRef={searchInputRef} />
+                  <ChatArea searchInputRef={searchInputRef} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                 </div>
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
@@ -884,7 +1011,7 @@ export default function App() {
               ) : (
                 <Dashboard
                   onSelectSession={actions.handleDashboardSelect}
-                  onNewSession={handleNewSession}
+                  onNewSession={handleStartNewSession}
                   creatingSession={creatingSession}
                   selectedProjectDirName={state.dashboardProject}
                   onSelectProject={handleSelectProject}
@@ -898,8 +1025,8 @@ export default function App() {
           {state.mobileTab === "stats" && state.session && (
             <StatsPanel
               onJumpToTurn={handlers.handleMobileJumpToTurn}
-              onToggleServer={serverPanel.handleToggleServer}
-              onServersChanged={serverPanel.handleServersChanged}
+              onToggleServer={processPanel.handleToggleServer}
+              onServersChanged={processPanel.handleServersChanged}
               onLoadSession={handlers.handleLoadSessionScrollAware}
               backgroundAgents={backgroundAgents}
             />
@@ -932,7 +1059,7 @@ export default function App() {
           )}
         </main>
 
-        {serverPanelNode}
+        {processPanelNode}
         {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && (
           <>
             {todoProgress && <TodoProgressPanel progress={todoProgress} />}
@@ -963,6 +1090,7 @@ export default function App() {
         )}
       </div>
       </SessionProvider>
+      </PtyProvider>
       </AppProvider>
     )
   }
@@ -970,6 +1098,7 @@ export default function App() {
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
     <AppProvider value={appContextValue}>
+    <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {backgroundServers}
@@ -977,14 +1106,14 @@ export default function App() {
       <DesktopHeader
         showSidebar={panels.showSidebar}
         showStats={panels.showStats}
-        showWorktrees={panels.showWorktrees}
+        showWorktrees={supportsWorktrees && panels.showWorktrees}
         showFileChanges={panels.showFileChanges}
         hasFileChanges={hasFileChanges}
         killing={killing}
         onGoHome={actions.handleGoHome}
         onToggleSidebar={panels.handleToggleSidebar}
         onToggleStats={panels.handleToggleStats}
-        onToggleWorktrees={panels.handleToggleWorktrees}
+        onToggleWorktrees={supportsWorktrees ? panels.handleToggleWorktrees : undefined}
         onToggleFileChanges={panels.handleToggleFileChanges}
         showConfig={state.mainView === "config"}
         onToggleConfig={panels.handleToggleConfig}
@@ -1005,13 +1134,15 @@ export default function App() {
             sidebarTab={state.sidebarTab}
             onSidebarTabChange={handleSidebarTabChange}
             onSelectTeam={actions.handleSelectTeam}
-            onNewSession={handleNewSession}
+            onNewSession={handleStartNewSession}
             creatingSession={creatingSession}
             pendingSession={pendingSessionInfo}
             onDuplicateSession={handlers.handleDuplicateSessionByPath}
             onDeleteSession={handlers.handleDeleteSession}
             onBeforeSessionSwitch={handlePreSessionSwitch}
             liveSessionsRefreshRef={liveSessionsRefreshRef}
+            projectDir={state.session?.cwd ?? state.pendingCwd ?? null}
+            onScriptStarted={processPanel.addProcess}
           />
         </HoverRevealPanel>
 
@@ -1044,12 +1175,12 @@ export default function App() {
                     {teamMembersBar}
                     <SessionInfoBar
                       creatingSession={creatingSession}
-                      onNewSession={handleNewSession}
+                      onNewSession={handleStartNewSession}
                       onDuplicateSession={handlers.handleDuplicateSession}
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     />
-                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} />
+                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                     <SessionInputFooter floating>
                       {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
                       {subAgentReadOnlyNode || chatInputNode}
@@ -1123,7 +1254,7 @@ export default function App() {
           ) : (
             <Dashboard
               onSelectSession={actions.handleDashboardSelect}
-              onNewSession={handleNewSession}
+              onNewSession={handleStartNewSession}
               creatingSession={creatingSession}
               selectedProjectDirName={state.dashboardProject}
               onSelectProject={handleSelectProject}
@@ -1140,8 +1271,8 @@ export default function App() {
         >
           <StatsPanel
             onJumpToTurn={actions.handleJumpToTurn}
-            onToggleServer={serverPanel.handleToggleServer}
-            onServersChanged={serverPanel.handleServersChanged}
+            onToggleServer={processPanel.handleToggleServer}
+            onServersChanged={processPanel.handleServersChanged}
             searchInputRef={searchInputRef}
             onLoadSession={handlers.handleLoadSessionScrollAware}
             backgroundAgents={backgroundAgents}
@@ -1152,7 +1283,7 @@ export default function App() {
 
       <Suspense fallback={null}>
         <WorktreePanel
-          open={panels.showWorktrees}
+          open={supportsWorktrees && panels.showWorktrees}
           onOpenChange={panels.setShowWorktrees}
           worktrees={worktreeData.worktrees}
           loading={worktreeData.loading}
@@ -1168,7 +1299,7 @@ export default function App() {
         />
       </Suspense>
 
-      {serverPanelNode}
+      {processPanelNode}
       {undoConfirmDialog}
       {branchModal}
 
@@ -1185,7 +1316,7 @@ export default function App() {
         <ProjectSwitcherModal
           open={panels.showProjectSwitcher}
           onClose={panels.handleCloseProjectSwitcher}
-          onNewSession={handleNewSession}
+          onNewSession={handleStartNewSession}
           currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
           currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
         />
@@ -1204,6 +1335,7 @@ export default function App() {
       {errorToast || sseIndicator}
     </div>
     </SessionProvider>
+    </PtyProvider>
     </AppProvider>
   )
 }

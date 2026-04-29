@@ -83,6 +83,42 @@ describe("usePtyChat", () => {
     expect(result.current.error).toBe("Server error")
   })
 
+  it("retries Codex send-message without a rejected model override", async () => {
+    const onCodexModelRejected = vi.fn()
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          error: "There's an issue with the selected model (gpt-5.4-mini). It may not exist or you may not have access to it. Run --model to pick a different model.",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      } as Response)
+
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: { dirName: "codex__proj", fileName: "sess.jsonl", rawText: "" },
+        model: "gpt-5.4-mini",
+        onCodexModelRejected,
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+
+    expect(onCodexModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
+
+    const firstBody = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    const secondBody = JSON.parse((mockedAuthFetch.mock.calls[1][1] as RequestInit).body as string)
+    expect(firstBody.model).toBe("gpt-5.4-mini")
+    expect(secondBody.model).toBeUndefined()
+    expect(result.current.status).toBe("idle")
+  })
+
   it("sets error status on network error", async () => {
     mockedAuthFetch.mockRejectedValueOnce(new Error("Network failure"))
 

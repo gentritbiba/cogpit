@@ -13,4 +13,5 @@ test-results/
 search-index.db
 search-index.db-shm
 search-index.db-wal
+process-state.json
 packages/cogpit-memory/cogpit-memory

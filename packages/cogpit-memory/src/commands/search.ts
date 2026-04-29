@@ -8,9 +8,9 @@
  * .worktrees/session-context-server/packages/cogpit-memory/src/routes/session-search.ts (raw-scan).
  */
 
-import { existsSync } from "node:fs"
+import { type Dirent, existsSync, mkdirSync } from "node:fs"
 import { open, readFile, readdir, stat } from "node:fs/promises"
-import { join, basename } from "node:path"
+import { join, basename, dirname } from "node:path"
 import { SearchIndex } from "../lib/search-index"
 import { DEFAULT_DB_PATH, dirs } from "../lib/dirs"
 import { parseMaxAge } from "../lib/response"
@@ -66,15 +66,27 @@ export async function searchSessions(
   const maxAgeMs = parseMaxAge(opts.maxAge ?? "5d")
   const depth = Math.min(Math.max(1, opts.depth ?? 4), 4)
 
-  // ── FTS5 fast path ───────────────────────────────────────────────────────
+  // ── FTS5 path (auto-build if no DB, incremental update otherwise) ────────
+  // When searchIndex is explicitly null, skip FTS5 (used by tests for raw-scan).
+  // When undefined (not provided), auto-build/update the index.
   let index = searchIndex ?? null
   let ownedIndex = false
-  if (!index && existsSync(DEFAULT_DB_PATH)) {
+  if (!index && searchIndex === undefined) {
     try {
+      const dbExists = existsSync(DEFAULT_DB_PATH)
+      if (!dbExists) {
+        mkdirSync(dirname(DEFAULT_DB_PATH), { recursive: true })
+      }
       index = new SearchIndex(DEFAULT_DB_PATH)
       ownedIndex = true
-      // Incrementally index any new/changed files before querying
-      index.updateStale(dirs.PROJECTS_DIR)
+
+      if (!dbExists) {
+        // First run — build the full index
+        index.buildFull(dirs.PROJECTS_DIR)
+      } else {
+        // Incremental — only index files newer than the high-water mark
+        index.updateRecent(dirs.PROJECTS_DIR)
+      }
     } catch { /* DB corrupt or locked — fall through to raw scan */ }
   }
 
@@ -168,6 +180,14 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
             cwdCache.set(filePath, obj.cwd)
             return obj.cwd
           }
+          if (obj.type === "session_meta" && obj.payload?.cwd) {
+            cwdCache.set(filePath, obj.payload.cwd)
+            return obj.payload.cwd
+          }
+          if (obj.type === "turn_context" && obj.payload?.cwd) {
+            cwdCache.set(filePath, obj.payload.cwd)
+            return obj.payload.cwd
+          }
         } catch {}
       }
     } finally {
@@ -241,9 +261,9 @@ async function discoverSingleSession(sessionId: string): Promise<Array<{ path: s
 async function discoverAllSessions(maxAgeMs: number): Promise<Array<{ path: string; mtimeMs: number }>> {
   const cutoff = Date.now() - maxAgeMs
 
-  let entries: import("node:fs").Dirent[]
+  let entries: Dirent[]
   try {
-    entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true }) as import("node:fs").Dirent[]
+    entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
   } catch {
     return []
   }

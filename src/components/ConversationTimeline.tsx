@@ -11,10 +11,14 @@ const VIRTUALIZE_THRESHOLD = 15
 
 interface ConversationTimelineProps {
   chatScrollRef: RefObject<HTMLDivElement | null>
+  hasMore?: boolean
+  onLoadMore?: () => void
 }
 
 export const ConversationTimeline = memo(function ConversationTimeline({
   chatScrollRef,
+  hasMore,
+  onLoadMore,
 }: ConversationTimelineProps) {
   const { state: { searchQuery } } = useAppContext()
   const { session } = useSessionContext()
@@ -42,7 +46,14 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   }
 
   if (shouldVirtualize) {
-    return <VirtualizedTimeline filteredTurns={filteredTurns} scrollContainerRef={chatScrollRef} />
+    return (
+      <VirtualizedTimeline
+        filteredTurns={filteredTurns}
+        scrollContainerRef={chatScrollRef}
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+      />
+    )
   }
 
   return <NonVirtualTimeline filteredTurns={filteredTurns} />

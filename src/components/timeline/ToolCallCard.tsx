@@ -45,7 +45,7 @@ function getToolSummary(tc: ToolCall): string {
     case "Edit":
       return String(input.file_path ?? input.path ?? "")
     case "Bash":
-      return String(input.command ?? "")
+      return String(input.command ?? input.cmd ?? "")
     case "Grep":
     case "Glob":
       return String(input.pattern ?? "")
@@ -124,9 +124,71 @@ function StatusIcon({
   return null
 }
 
-// ── Syntax-highlighted Read result ─────────────────────────────────────
+// ── Shared highlighted code block ─────────────────────────────────────
 
 type TokenLine = Array<{ content: string; color?: string }>
+
+const CODE_BLOCK_CLASS =
+  "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]"
+
+/** Shared hook: highlight code and return tokens, cancelling stale requests. */
+function useHighlightedTokens(code: string, lang: string | null, isDark: boolean): TokenLine[] | null {
+  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
+
+  useEffect(() => {
+    if (!lang) {
+      setTokens(null)
+      return
+    }
+    let cancelled = false
+    highlightCode(code, lang, isDark).then((r) => {
+      if (!cancelled) setTokens(r)
+    })
+    return () => { cancelled = true }
+  }, [code, lang, isDark])
+
+  return tokens
+}
+
+/** Renders a list of lines with optional token-based syntax highlighting. */
+function HighlightedCodeBlock({
+  lines,
+  tokens,
+  lineNums,
+}: {
+  lines: string[]
+  tokens: TokenLine[] | null
+  lineNums?: string[]
+}): React.ReactElement {
+  return (
+    <pre className={CODE_BLOCK_CLASS}>
+      <code className="block">
+        {lines.map((line, i) => {
+          const tokenLine = tokens?.[i]
+          return (
+            <span key={i} className="block">
+              {lineNums?.[i] && (
+                <span className="inline-block w-10 text-right mr-2 text-muted-foreground/30 select-none">
+                  {lineNums[i]}
+                </span>
+              )}
+              {tokenLine
+                ? tokenLine.map((token, j) => (
+                    <span key={j} style={{ color: token.color }}>
+                      {token.content}
+                    </span>
+                  ))
+                : line || "\u00A0"
+              }
+            </span>
+          )
+        })}
+      </code>
+    </pre>
+  )
+}
+
+// ── Syntax-highlighted Read result ─────────────────────────────────────
 
 /** Regex to match the `cat -n` line-number prefix: spaces + number + arrow */
 const LINE_PREFIX_RE = /^(\s*\d+)→(.*)$/
@@ -156,53 +218,48 @@ function ReadResultHighlighted({
   result: string
   filePath: string
   expanded: boolean
-}) {
+}): React.ReactElement {
   const isDark = useIsDarkMode()
-  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
   const lang = getLangFromPath(filePath)
 
   const slicedResult = expanded ? result : result.slice(0, 500)
   const { lineNums, codeLines } = useMemo(() => parseReadResult(slicedResult), [slicedResult])
   const code = useMemo(() => codeLines.join("\n"), [codeLines])
+  const tokens = useHighlightedTokens(code, lang, isDark)
 
-  useEffect(() => {
-    if (!lang) {
-      setTokens(null)
-      return
-    }
-    let cancelled = false
-    highlightCode(code, lang, isDark).then((r) => {
-      if (!cancelled) setTokens(r)
-    })
-    return () => { cancelled = true }
-  }, [code, lang, isDark])
+  return <HighlightedCodeBlock lines={codeLines} tokens={tokens} lineNums={lineNums} />
+}
 
-  return (
-    <pre className="text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]">
-      <code className="block">
-        {codeLines.map((line, i) => {
-          const tokenLine = tokens?.[i]
-          return (
-            <span key={i} className="block">
-              {lineNums[i] && (
-                <span className="inline-block w-10 text-right mr-2 text-muted-foreground/30 select-none">
-                  {lineNums[i]}
-                </span>
-              )}
-              {tokenLine
-                ? tokenLine.map((token, j) => (
-                    <span key={j} style={{ color: token.color }}>
-                      {token.content}
-                    </span>
-                  ))
-                : line || "\u00A0"
-              }
-            </span>
-          )
-        })}
-      </code>
-    </pre>
-  )
+// ── JSON result with syntax highlighting ─────────────────────────────────
+
+/** Try to parse a string as JSON. Returns the pretty-printed string or null. */
+function tryPrettyJson(text: string): string | null {
+  const trimmed = text.trim()
+  if (trimmed[0] !== "{" && trimmed[0] !== "[") return null
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return null
+  }
+}
+
+function JsonResultHighlighted({
+  result,
+  expanded,
+  alreadyPretty,
+}: {
+  result: string
+  expanded: boolean
+  alreadyPretty?: boolean
+}): React.ReactElement {
+  const isDark = useIsDarkMode()
+
+  const pretty = useMemo(() => alreadyPretty ? result : (tryPrettyJson(result) ?? result), [result, alreadyPretty])
+  const sliced = expanded ? pretty : pretty.slice(0, 2000)
+  const lines = useMemo(() => sliced.split("\n"), [sliced])
+  const tokens = useHighlightedTokens(sliced, "json", isDark)
+
+  return <HighlightedCodeBlock lines={lines} tokens={tokens} />
 }
 
 // ── Main component ───────────────────────────────────────────────────────
@@ -235,6 +292,11 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const isLongResult = resultText.length > 1000
   const visibleResult =
     isLongResult && !resultExpanded ? resultText.slice(0, 500) + "..." : resultText
+  const prettyJson = useMemo(
+    () => (!toolCall.isError && toolCall.name !== "Read") ? tryPrettyJson(resultText) : null,
+    [toolCall.isError, toolCall.name, resultText],
+  )
+  const isJsonResult = prettyJson !== null
 
   const hasEditDiff =
     toolCall.name === "Edit" &&
@@ -317,9 +379,10 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       )}
 
       {showInput && (
-        <pre className="mt-1.5 text-[11px] text-muted-foreground font-mono whitespace-pre-wrap break-all bg-elevation-0 rounded p-2 max-h-64 overflow-y-auto border border-border/30">
-          {JSON.stringify(toolCall.input, null, 2)}
-        </pre>
+        <JsonResultHighlighted
+          result={JSON.stringify(toolCall.input)}
+          expanded={true}
+        />
       )}
 
       {showResult && toolCall.result !== null && (
@@ -329,6 +392,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               result={resultText}
               filePath={toolCall.input.file_path as string}
               expanded={!isLongResult || resultExpanded}
+            />
+          ) : isJsonResult ? (
+            <JsonResultHighlighted
+              result={prettyJson!}
+              expanded={!isLongResult || resultExpanded}
+              alreadyPretty
             />
           ) : (
             <pre

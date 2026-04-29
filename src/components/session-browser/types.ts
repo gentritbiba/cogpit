@@ -1,4 +1,5 @@
 import type { ParsedSession } from "@/lib/types"
+import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
 // ── API types ──────────────────────────────────────────────────────────────
 
@@ -68,4 +69,8 @@ export interface SessionBrowserProps {
   onBeforeSessionSwitch?: () => void
   /** Ref callback to imperatively trigger a refresh of the live sessions list */
   liveSessionsRefreshRef?: React.MutableRefObject<(() => void) | null>
+  /** Project working directory — used for script discovery */
+  projectDir?: string | null
+  /** Called when a script process is started from the sidebar dock */
+  onScriptStarted?: (entry: ProcessEntry) => void
 }

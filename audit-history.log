@@ -4,6 +4,25 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-04-14 13:40 — Permission Flow Refactor: Promise-Based Blocking (PENDING)
+- **File:** `audit-history/audit-20260414T134000Z-PENDING-permission-flow-refactor.md`
+- **Status:** DOCUMENTATION UPDATES REQUIRED
+- **Changes:** 4 new files, 15 modified files, ~446 net lines added
+- **Key updates:**
+  - Permission system: deny+kill+retry → blocking Promise via SDK's canUseTool callback
+  - New `server/sdk-session.ts`: SDKSessionState with pendingPermissions Map + sessionAllowedTools Set
+  - New `server/routes/permissions.ts`: HTTP API (GET/POST /api/permissions/:sessionId)
+  - New UI: PermissionRequestBar component with A/S/D keyboard shortcuts
+  - New PermissionDropdown in ChatInputSettings (YOLO/Default/Plan/Accept Edits/Don't Ask modes)
+  - Permission config now persisted to localStorage (was stubbed)
+  - usePermissions hook now functional (was returning stubs)
+  - Routes registered in both api-plugin.ts and electron/server.ts
+- **Risk:** LOW (all changes backward-compatible, no breaking API changes)
+- **Doc updates needed:** YES
+  - README.md: 1 line clarification (permissions bullet, line 77)
+  - ARCHITECTURE.md: 1 new section + permission modes table
+  - cogpit-sessions SKILL.md: clarify blocking Promise behavior in Permissions section
+
 ### 2026-03-11 02:35 — MCP Selector Edge Case Fixes (cec5233)
 - **File:** `audit-history/audit-20260311T023500Z-cec5233-mcp-selector-fixes.md`
 - **Status:** PASS

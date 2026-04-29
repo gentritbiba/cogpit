@@ -277,6 +277,99 @@ describe("parseSessionFileChanges", () => {
     const { changes } = await parseSessionFileChanges(jsonl, false)
     expect(changes[0].turnIndex).toBeLessThanOrEqual(changes[1].turnIndex)
   })
+
+  // ── Codex format support ──────────────────────────────────────────────────
+
+  it("parses Codex apply_patch into file changes", async () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: /home/user/project/src/app.ts",
+      "@@",
+      "-const x = 1",
+      "+const x = 2",
+      "@@",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        payload: { id: "codex-session", cwd: "/home/user/project" },
+      }),
+      JSON.stringify({
+        type: "turn_context",
+        timestamp: "2024-01-01T00:00:01.000Z",
+        payload: { turn_id: "turn-1", model: "gpt-4o", cwd: "/home/user/project" },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: { type: "user_message", message: "Fix it" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "call-patch-1",
+          name: "apply_patch",
+          input: patchInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-patch-1",
+          output: JSON.stringify({ output: "Success.", metadata: { exit_code: 0 } }),
+        },
+      }),
+    )
+    const { changes, cwd } = await parseSessionFileChanges(jsonl, true)
+    expect(cwd).toBe("/home/user/project")
+    expect(changes).toHaveLength(1)
+    expect(changes[0].filePath).toBe("/home/user/project/src/app.ts")
+    expect(changes[0].hasEdit).toBe(true)
+    expect(changes[0].content?.originalStr).toContain("const x = 1")
+    expect(changes[0].content?.currentStr).toContain("const x = 2")
+  })
+
+  it("parses Codex multi-file apply_patch", async () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: /a.ts",
+      "@@",
+      "-old a",
+      "+new a",
+      "@@",
+      "*** Add File: /b.ts",
+      "@@",
+      "+export const b = 1",
+      "@@",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      JSON.stringify({ type: "session_meta", timestamp: "2024-01-01T00:00:00.000Z", payload: { id: "s1", cwd: "/proj" } }),
+      JSON.stringify({ type: "turn_context", timestamp: "2024-01-01T00:00:01.000Z", payload: { turn_id: "t1", model: "gpt-4o" } }),
+      JSON.stringify({ type: "event_msg", timestamp: "2024-01-01T00:00:02.000Z", payload: { type: "user_message", message: "fix" } }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: { type: "custom_tool_call", call_id: "cp1", name: "apply_patch", input: patchInput },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: { type: "custom_tool_call_output", call_id: "cp1", output: JSON.stringify({ output: "ok", metadata: { exit_code: 0 } }) },
+      }),
+    )
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes).toHaveLength(2)
+    const aChange = changes.find((c) => c.filePath === "/a.ts")
+    const bChange = changes.find((c) => c.filePath === "/b.ts")
+    expect(aChange?.hasEdit).toBe(true)
+    expect(bChange?.hasWrite).toBe(true)
+  })
 })
 
 // ── HTTP route tests ──────────────────────────────────────────────────────────

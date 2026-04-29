@@ -5,9 +5,18 @@ import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "./useLiveSession"
 import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
-import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
+import { agentKindFromDirName } from "@/lib/sessionSource"
+import { sessionCache } from "@/lib/sessionCache"
+
+interface TailResponse {
+  headerLines: string[]
+  tailLines: string[]
+  byteOffset: number
+  totalSize: number
+  hasMore: boolean
+}
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -15,15 +24,50 @@ interface UseSessionActionsOpts {
   teamContext: SessionTeamContext | null
   scrollToBottomInstant: () => void
   resetTurnCount: (count: number) => void
+  workerParse: (text: string) => Promise<ParsedSession>
   /** Called before fetching a new session to free connections held by the
    *  current session (e.g. long-lived send-message POST, session creation). */
   onBeforeSwitch?: () => void
 }
 
-/** Fetch a session file and parse it. The `errorLabel` is used in the error message on failure. */
-async function fetchAndParse(
+/** Fetch the tail of a session file and parse it via worker. Uses the ?tail=30 endpoint. */
+async function fetchTailAndParse(
   dirName: string,
   fileName: string,
+  workerParse: (text: string) => Promise<ParsedSession>,
+  errorLabel: string,
+): Promise<{
+  parsed: ParsedSession
+  source: SessionSource
+  byteOffset: number
+  hasMore: boolean
+}> {
+  const res = await authFetch(
+    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`
+  )
+  if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
+  const data: TailResponse = await res.json()
+
+  // Combine header + tail lines, deduplicating overlap for small files
+  const headerSet = new Set(data.headerLines)
+  const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
+  const text = [...data.headerLines, ...uniqueTail].join("\n")
+
+  const parsed = await workerParse(text)
+
+  return {
+    parsed,
+    source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+    byteOffset: data.byteOffset,
+    hasMore: data.hasMore,
+  }
+}
+
+/** Fetch the full session file and parse it via worker. Used for team switches. */
+async function fetchFullAndParse(
+  dirName: string,
+  fileName: string,
+  workerParse: (text: string) => Promise<ParsedSession>,
   errorLabel: string,
 ): Promise<{ parsed: ParsedSession; source: SessionSource }> {
   const res = await authFetch(
@@ -31,7 +75,11 @@ async function fetchAndParse(
   )
   if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
   const text = await res.text()
-  return { parsed: parseSession(text), source: { dirName, fileName, rawText: text } }
+  const parsed = await workerParse(text)
+  return {
+    parsed,
+    source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+  }
 }
 
 export function useSessionActions({
@@ -40,6 +88,7 @@ export function useSessionActions({
   teamContext,
   scrollToBottomInstant,
   resetTurnCount,
+  workerParse,
   onBeforeSwitch,
 }: UseSessionActionsOpts) {
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -60,13 +109,34 @@ export function useSessionActions({
       onBeforeSwitch?.()
       setLoadError(null)
       try {
-        const { parsed, source } = await fetchAndParse(dirName, fileName, "session")
+        // Check cache first for instant switch
+        const cached = sessionCache.get(dirName, fileName)
+        if (cached) {
+          handleLoadSession(cached.parsed, cached.source)
+          return
+        }
+
+        const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
+          dirName,
+          fileName,
+          workerParse,
+          "session",
+        )
+        sessionCache.set(
+          dirName,
+          fileName,
+          parsed,
+          source.rawText,
+          byteOffset,
+          hasMore,
+          agentKindFromDirName(dirName),
+        )
         handleLoadSession(parsed, source)
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Failed to load session")
       }
     },
-    [handleLoadSession, onBeforeSwitch]
+    [handleLoadSession, workerParse, onBeforeSwitch]
   )
 
   const handleOpenSessionFromTeam = useCallback(
@@ -74,7 +144,7 @@ export function useSessionActions({
       onBeforeSwitch?.()
       setLoadError(null)
       try {
-        const { parsed, source } = await fetchAndParse(dirName, fileName, "team session")
+        const { parsed, source } = await fetchFullAndParse(dirName, fileName, workerParse, "team session")
         dispatch({
           type: "LOAD_SESSION_FROM_TEAM",
           session: parsed,
@@ -88,7 +158,7 @@ export function useSessionActions({
         setLoadError(err instanceof Error ? err.message : "Failed to load team session")
       }
     },
-    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, onBeforeSwitch]
+    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse, onBeforeSwitch]
   )
 
   const handleTeamMemberSwitch = useCallback(
@@ -104,14 +174,19 @@ export function useSessionActions({
         if (!lookupRes.ok) throw new Error(`Failed to find session for ${member.name}`)
         const { dirName, fileName } = await lookupRes.json()
 
-        const contentRes = await authFetch(
-          `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
+        const { parsed, source } = await fetchFullAndParse(
+          dirName,
+          fileName,
+          workerParse,
+          `session for ${member.name}`,
         )
-        if (!contentRes.ok) throw new Error(`Failed to load session for ${member.name}`)
-        const text = await contentRes.text()
-        const parsed = parseSession(text)
 
-        dispatch({ type: "SWITCH_TEAM_MEMBER", session: parsed, source: { dirName, fileName, rawText: text }, memberName: member.name })
+        dispatch({
+          type: "SWITCH_TEAM_MEMBER",
+          session: parsed,
+          source,
+          memberName: member.name,
+        })
         resetTurnCount(parsed.turns.length)
         scrollToBottomInstant()
       } catch (err) {
@@ -120,7 +195,7 @@ export function useSessionActions({
         dispatch({ type: "SET_LOADING_MEMBER", name: null })
       }
     },
-    [dispatch, teamContext, resetTurnCount, scrollToBottomInstant, onBeforeSwitch]
+    [dispatch, teamContext, resetTurnCount, scrollToBottomInstant, workerParse, onBeforeSwitch]
   )
 
   const clearLoadError = useCallback(() => setLoadError(null), [])

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare, Code2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -63,6 +63,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [terminalApp, setTerminalApp] = useState("")
   const [initialTerminalApp, setInitialTerminalApp] = useState("")
 
+  // Editor app
+  const [editorApp, setEditorApp] = useState("")
+  const [initialEditorApp, setInitialEditorApp] = useState("")
+
   // Track whether network settings changed (to enable save without path change)
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
@@ -87,6 +91,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           const term = data?.terminalApp || ""
           setTerminalApp(term)
           setInitialTerminalApp(term)
+          const editor = data?.editorApp || ""
+          setEditorApp(editor)
+          setInitialEditorApp(editor)
           // Fetch connected devices if network is active
           if (access && data?.networkPassword) {
             authFetch("/api/connected-devices")
@@ -117,12 +124,13 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       // Only send password if user typed one (blank = keep existing)
       networkPassword: networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
       terminalApp: terminalApp.trim() || undefined,
+      editorApp: editorApp.trim() || undefined,
     })
     if (result.success && result.claudeDir) {
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, terminalApp, save, onSaved])
+  }, [path, networkAccess, networkPassword, terminalApp, editorApp, save, onSaved])
 
   const MIN_PASSWORD_LENGTH = 12
 
@@ -134,7 +142,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     const pathChanged = status === "valid"
     const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
     const terminalChanged = terminalApp !== initialTerminalApp
-    if (!pathChanged && !networkChanged && !terminalChanged) return false
+    const editorChanged = editorApp !== initialEditorApp
+    if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged) return false
 
     // Validate password requirements when network is enabled
     if (networkAccess) {
@@ -187,6 +196,23 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               value={terminalApp}
               onChange={(e) => setTerminalApp(e.target.value)}
               placeholder="Ghostty, iTerm, or /path/to/binary"
+              className="bg-elevation-0 border-border/70 focus:border-border text-sm"
+            />
+          </div>
+
+          {/* Editor App */}
+          <div className="space-y-2 pt-3 border-t border-border">
+            <div className="flex items-center gap-2">
+              <Code2 className="size-4 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium text-foreground">Editor Application</p>
+                <p className="text-xs text-muted-foreground">Override editor for "Open in Editor" (blank = $VISUAL or auto-detect)</p>
+              </div>
+            </div>
+            <Input
+              value={editorApp}
+              onChange={(e) => setEditorApp(e.target.value)}
+              placeholder="cursor, code, zed, or /path/to/binary"
               className="bg-elevation-0 border-border/70 focus:border-border text-sm"
             />
           </div>

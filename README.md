@@ -5,16 +5,16 @@
 <h1 align="center">Cogpit</h1>
 
 <p align="center">
-  <em>A real-time control center for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> sessions.</em>
+  <em>A real-time control center for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> and <a href="https://github.com/openai/codex">Codex</a> sessions.</em>
 </p>
 
 <p align="center">
-  <a href="https://cogpit.gentrit.dev">Website</a> · <a href="https://github.com/gentritbiba/cogpit/releases">Download</a>
+  <a href="https://cogpit.dev">Website</a> · <a href="https://github.com/gentritbiba/cogpit/releases">Download</a>
 </p>
 
 ---
 
-Cogpit reads the JSONL session files that Claude Code writes to `~/.claude/projects/` and turns them into a live, interactive dashboard — so you can watch, control, and debug your AI agents without leaving your workflow.
+Cogpit reads the JSONL session files that Claude Code and Codex write to disk and turns them into a live, interactive dashboard — so you can watch, control, and debug your AI agents without leaving your workflow. Start sessions with either provider, switch between them, and manage everything from one place.
 
 Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
 
@@ -28,11 +28,11 @@ Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
 | Linux (Debian/Ubuntu) | `Cogpit-x.x.x.deb` |
 | Linux (Arch) | `Cogpit-x.x.x.pacman` |
 
-> **Prerequisite:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) must be installed. Cogpit uses your existing CLI — no API keys or separate login needed.
+> **Prerequisite:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) must be installed. Cogpit uses your existing CLIs — no API keys or separate login needed.
 
 ## Why Cogpit
 
-Claude Code is powerful, but the terminal gives you a narrow view. Cogpit gives you the full picture:
+Claude Code and Codex are powerful, but the terminal gives you a narrow view. Cogpit gives you the full picture:
 
 - **See everything at once** — live sessions, token costs, file changes, and agent activity in one screen
 - **Talk to your agents** — send messages, approve plans, answer questions, interrupt or branch at any point
@@ -43,11 +43,14 @@ Claude Code is powerful, but the terminal gives you a narrow view. Cogpit gives 
 
 ## Features
 
+### Multi-Provider Support
+Start sessions with Claude Code or Codex from the same interface. A provider dialog lets you pick your agent when creating a new session. Model and effort settings adapt per provider — Codex sessions expose `xhigh` effort and GPT models, while Claude sessions show Opus/Sonnet/Haiku with `low` through `max` effort. If a Codex model is unavailable, Cogpit automatically retries with the default.
+
 ### Live Session Monitoring
-Stream active sessions via SSE. Watch Claude think, call tools, and edit files in real-time. Status indicators show running, thinking, tool use, and idle states. Process monitor tracks all `claude` CLI processes with PID, memory, and CPU.
+Stream active sessions via SSE. Watch Claude or Codex think, call tools, and edit files in real-time. Status indicators show running, thinking, tool use, and idle states. Process monitor tracks all agent CLI processes with PID, memory, and CPU.
 
 ### Interactive Chat
-Send messages to running sessions with model override (Opus, Sonnet, Haiku). Voice input via Whisper WASM. Slash command autocomplete from project skills and commands. Image support with drag-and-drop, paste, and format conversion.
+Send messages to running sessions with model override (Opus, Sonnet, Haiku for Claude; GPT-5.4 and variants for Codex). Voice input via Whisper WASM. Slash command autocomplete from project skills and commands. Image support with drag-and-drop, paste, and format conversion.
 
 ### Conversation Timeline
 Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling. Full-text search across all content.

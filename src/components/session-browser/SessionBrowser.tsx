@@ -2,6 +2,7 @@ import { useCallback, memo } from "react"
 import { cn } from "@/lib/utils"
 import { LiveSessions } from "@/components/LiveSessions"
 import { TeamsList } from "@/components/TeamsList"
+import { ScriptsDock } from "@/components/ScriptsDock"
 import type { SessionBrowserProps } from "./types"
 import { BrowseTab } from "./BrowseTab"
 import { useSessionBrowser } from "./useSessionBrowser"
@@ -81,6 +82,8 @@ export const SessionBrowser = memo(function SessionBrowser({
   onBeforeSessionSwitch,
   pendingSession,
   liveSessionsRefreshRef,
+  projectDir,
+  onScriptStarted,
 }: SessionBrowserProps): React.ReactElement {
   const browser = useSessionBrowser({
     sessionId,
@@ -172,6 +175,14 @@ export const SessionBrowser = memo(function SessionBrowser({
           </div>
         )}
       </div>
+
+      {/* Scripts dock — always visible at bottom */}
+      {!isMobile && (
+        <ScriptsDock
+          projectDir={projectDir}
+          onScriptStarted={onScriptStarted}
+        />
+      )}
     </aside>
   )
 })

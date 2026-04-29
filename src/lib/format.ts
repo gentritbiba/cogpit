@@ -96,6 +96,16 @@ export function shortPath(fullPath: string, segments = 2): string {
   return parts.slice(-segments).join("/")
 }
 
+/** If a path is inside a .worktrees directory, return the parent project path and worktree name. */
+export function parseWorktreePath(fullPath: string): { parentPath: string; worktreeName: string } | null {
+  const marker = "/.worktrees/"
+  const idx = fullPath.indexOf(marker)
+  if (idx === -1) return null
+  const worktreeName = fullPath.slice(idx + marker.length).split("/")[0]
+  if (!worktreeName) return null
+  return { parentPath: fullPath.slice(0, idx), worktreeName }
+}
+
 /** Return just the final folder name from a filesystem path. */
 export function projectName(path: string): string {
   return path.replace(/\/+$/, "").split("/").at(-1) ?? path
@@ -122,10 +132,11 @@ export function parseSubAgentPath(fileName: string): {
 // Compaction fires at roughly (limit - buffer), not at the absolute limit.
 const AUTO_COMPACT_BUFFER = 33_000
 
-/** All current Claude models share a 200k context window. */
-const DEFAULT_CONTEXT_LIMIT = 200_000
+const DEFAULT_CONTEXT_LIMIT = 1_000_000
+const EXTENDED_CONTEXT_LIMIT = 1_000_000
 
-export function getContextLimit(_model: string): number {
+export function getContextLimit(model: string): number {
+  if (model.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
   return DEFAULT_CONTEXT_LIMIT
 }
 

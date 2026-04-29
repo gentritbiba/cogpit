@@ -9,6 +9,10 @@ vi.mock("../../helpers", () => ({
     PROJECTS_DIR: "/tmp/test-projects",
   },
   isWithinDir: vi.fn(),
+  isCodexDirName: vi.fn(() => false),
+  resolveSessionFilePath: vi.fn((_dirName: string, fileName: string) =>
+    Promise.resolve(`/tmp/test-projects/proj/${fileName}`)
+  ),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   mkdir: vi.fn(),

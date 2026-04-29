@@ -8,19 +8,26 @@ vi.mock("@/lib/auth", () => ({
   getToken: vi.fn(() => null),
 }))
 
-// Mock parser module
-vi.mock("@/lib/parser", () => ({
-  parseSession: vi.fn(),
+// Mock sessionCache module
+vi.mock("@/lib/sessionCache", () => ({
+  sessionCache: {
+    get: vi.fn(() => undefined),
+    set: vi.fn(),
+    update: vi.fn(),
+    updateRawText: vi.fn(),
+    evict: vi.fn(),
+    clear: vi.fn(),
+  },
 }))
 
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { authFetch } from "@/lib/auth"
-import { parseSession } from "@/lib/parser"
+import { sessionCache } from "@/lib/sessionCache"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 
 const mockAuthFetch = vi.mocked(authFetch)
-const mockParseSession = vi.mocked(parseSession)
+const mockSessionCache = vi.mocked(sessionCache)
 
 function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
   return {
@@ -47,18 +54,35 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
   }
 }
 
-function makeDefaultOpts() {
+function makeDefaultOpts(session?: ParsedSession) {
+  const parsedSession = session ?? makeParsedSession()
+  const workerParse = vi.fn(() => Promise.resolve(parsedSession))
   return {
     dispatch: vi.fn(),
     isMobile: false,
     teamContext: null,
     scrollToBottomInstant: vi.fn(),
     resetTurnCount: vi.fn(),
+    workerParse,
   }
+}
+
+/** Build a mock tail response */
+function makeTailResponse(overrides?: object) {
+  return JSON.stringify({
+    headerLines: ["{}"],
+    tailLines: ["{}"],
+    byteOffset: 100,
+    totalSize: 200,
+    hasMore: false,
+    ...overrides,
+  })
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Default: cache miss
+  vi.mocked(sessionCache.get).mockReturnValue(undefined)
 })
 
 describe("useSessionActions", () => {
@@ -97,13 +121,12 @@ describe("useSessionActions", () => {
   })
 
   describe("handleDashboardSelect", () => {
-    it("fetches session, parses it, and calls handleLoadSession", async () => {
-      const opts = makeDefaultOpts()
+    it("fetches session via tail endpoint, parses it, and calls handleLoadSession", async () => {
       const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
-        new Response("jsonl-content", { status: 200 })
+        new Response(makeTailResponse(), { status: 200 })
       )
-      mockParseSession.mockReturnValue(session)
 
       const { result } = renderHook(() => useSessionActions(opts))
 
@@ -112,9 +135,34 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        "/api/sessions/my-dir/session.jsonl"
+        "/api/sessions/my-dir/session.jsonl?tail=30"
       )
-      expect(mockParseSession).toHaveBeenCalledWith("jsonl-content")
+      expect(opts.workerParse).toHaveBeenCalled()
+      expect(opts.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOAD_SESSION" })
+      )
+    })
+
+    it("uses cache hit for instant switch without fetching", async () => {
+      const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
+      const cachedSource = { dirName: "my-dir", fileName: "session.jsonl", rawText: "cached" }
+      vi.mocked(sessionCache.get).mockReturnValue({
+        parsed: session,
+        source: cachedSource,
+        nextByteOffset: 100,
+        hasMore: false,
+        lastAccessed: Date.now(),
+      })
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      await act(async () => {
+        await result.current.handleDashboardSelect("my-dir", "session.jsonl")
+      })
+
+      // Should not fetch when cache hit
+      expect(mockAuthFetch).not.toHaveBeenCalled()
       expect(opts.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({ type: "LOAD_SESSION" })
       )
@@ -123,9 +171,8 @@ describe("useSessionActions", () => {
     it("encodes dirName and fileName in the URL", async () => {
       const opts = makeDefaultOpts()
       mockAuthFetch.mockResolvedValue(
-        new Response("data", { status: 200 })
+        new Response(makeTailResponse(), { status: 200 })
       )
-      mockParseSession.mockReturnValue(makeParsedSession())
 
       const { result } = renderHook(() => useSessionActions(opts))
 
@@ -134,7 +181,7 @@ describe("useSessionActions", () => {
       })
 
       expect(mockAuthFetch).toHaveBeenCalledWith(
-        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}`
+        `/api/sessions/${encodeURIComponent("dir with spaces")}/${encodeURIComponent("file&name.jsonl")}?tail=30`
       )
     })
 
@@ -179,16 +226,39 @@ describe("useSessionActions", () => {
 
       expect(result.current.loadError).toBe("Failed to load session")
     })
+
+    it("stores parsed session in cache after successful fetch", async () => {
+      const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
+      mockAuthFetch.mockResolvedValue(
+        new Response(makeTailResponse({ byteOffset: 150, hasMore: false }), { status: 200 })
+      )
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      await act(async () => {
+        await result.current.handleDashboardSelect("my-dir", "session.jsonl")
+      })
+
+      expect(mockSessionCache.set).toHaveBeenCalledWith(
+        "my-dir",
+        "session.jsonl",
+        session,
+        expect.any(String),
+        150,
+        false,
+        expect.anything(),
+      )
+    })
   })
 
   describe("handleOpenSessionFromTeam", () => {
     it("dispatches LOAD_SESSION_FROM_TEAM with memberName", async () => {
-      const opts = makeDefaultOpts()
       const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
       mockAuthFetch.mockResolvedValue(
         new Response("jsonl-text", { status: 200 })
       )
-      mockParseSession.mockReturnValue(session)
 
       const { result } = renderHook(() => useSessionActions(opts))
 
@@ -262,7 +332,6 @@ describe("useSessionActions", () => {
         activeMember: null,
       } as unknown as SessionTeamContext
 
-      const session = makeParsedSession()
       mockAuthFetch
         .mockResolvedValueOnce(
           new Response(
@@ -273,7 +342,6 @@ describe("useSessionActions", () => {
         .mockResolvedValueOnce(
           new Response("raw-session-text", { status: 200 })
         )
-      mockParseSession.mockReturnValue(session)
 
       const { result } = renderHook(() => useSessionActions(opts))
 
@@ -355,7 +423,7 @@ describe("useSessionActions", () => {
         })
       })
 
-      expect(result.current.loadError).toBe("Failed to load session for Alice")
+      expect(result.current.loadError).toBe("Failed to load session for Alice (500)")
     })
 
     it("sets loadError on network exception and still clears loading", async () => {
@@ -537,7 +605,6 @@ describe("useSessionActions", () => {
       expect(result.current.loadError).not.toBeNull()
 
       // Second call succeeds
-      const session = makeParsedSession()
       mockAuthFetch
         .mockResolvedValueOnce(
           new Response(JSON.stringify({ dirName: "d", fileName: "f.jsonl" }), { status: 200 })
@@ -545,7 +612,6 @@ describe("useSessionActions", () => {
         .mockResolvedValueOnce(
           new Response("raw-text", { status: 200 })
         )
-      mockParseSession.mockReturnValue(session)
 
       await act(async () => {
         await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
@@ -606,11 +672,9 @@ describe("useSessionActions", () => {
       expect(result.current.loadError).not.toBeNull()
 
       // Second call succeeds
-      const session = makeParsedSession()
       mockAuthFetch.mockResolvedValueOnce(
-        new Response("data", { status: 200 })
+        new Response(makeTailResponse(), { status: 200 })
       )
-      mockParseSession.mockReturnValue(session)
 
       await act(async () => {
         await result.current.handleDashboardSelect("dir2", "file2.jsonl")

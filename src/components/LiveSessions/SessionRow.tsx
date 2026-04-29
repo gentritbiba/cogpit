@@ -29,6 +29,7 @@ export interface ActiveSessionInfo {
   matchedMessage?: string
   agentStatus?: SessionStatus
   agentToolName?: string
+  agentTerminalReason?: string
 }
 
 export interface RunningProcess {
@@ -50,6 +51,8 @@ interface SessionRowProps {
   onKill: (pid: number, e: React.MouseEvent) => void
   isNewlyCompleted?: boolean
   customName?: string
+  /** When set, this session belongs to a git worktree — shows an indicator badge. */
+  worktreeName?: string
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
@@ -62,6 +65,7 @@ export function SessionRow({
   killingPids,
   isNewlyCompleted,
   customName,
+  worktreeName,
   onSelectSession,
   onKill,
   onDuplicateSession,
@@ -70,7 +74,7 @@ export function SessionRow({
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
   const statusLabel = hasProcess
-    ? (getStatusLabel(s.agentStatus, s.agentToolName) ?? "Idle")
+    ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const title = customName || truncate(s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
@@ -92,6 +96,14 @@ export function SessionRow({
           <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
           </span>
+
+          {/* Worktree badge */}
+          {worktreeName && (
+            <span className="flex items-center gap-0.5 rounded bg-emerald-500/10 text-emerald-400 px-1 py-px text-[9px] font-medium shrink-0">
+              <GitBranch className="size-2" />
+              {worktreeName}
+            </span>
+          )}
 
           {/* Matched search snippet */}
           {s.matchedMessage && (

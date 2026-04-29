@@ -1,6 +1,8 @@
 import {
   dirs,
+  isCodexDirName,
   isWithinDir,
+  resolveSessionFilePath,
   stat,
   open,
   watch,
@@ -104,7 +106,7 @@ export function registerFileWatchRoutes(use: UseFn) {
   })
 
   // GET /api/watch/:dirName/:fileName - SSE stream of new JSONL lines
-  use("/api/watch/", (req, res, next) => {
+  use("/api/watch/", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
     const url = new URL(req.url || "/", "http://localhost")
@@ -121,8 +123,8 @@ export function registerFileWatchRoutes(use: UseFn) {
       return
     }
 
-    const filePath = dirs.PROJECTS_DIR + "/" + dirName + "/" + fileName
-    if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+    const filePath = await resolveSessionFilePath(dirName, fileName)
+    if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied" }))
       return
@@ -263,29 +265,31 @@ export function registerFileWatchRoutes(use: UseFn) {
     const subagentsDir = sessionDir + "/subagents"
     let compactingSignalSent = false
 
-    const compactionPoller = setInterval(async () => {
-      if (closed) return
-      try {
-        const files = await readdir(subagentsDir)
-        const compactFile = files.find(
-          (f) => f.startsWith("agent-acompact") && f.endsWith(".jsonl")
-        )
-        if (compactFile) {
-          const s = await stat(subagentsDir + "/" + compactFile)
-          const recentlyActive = Date.now() - s.mtimeMs < 30_000
-          if (recentlyActive && !compactingSignalSent) {
-            compactingSignalSent = true
-            res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
-          } else if (!recentlyActive) {
+    const compactionPoller = isCodexDirName(dirName)
+      ? null
+      : setInterval(async () => {
+        if (closed) return
+        try {
+          const files = await readdir(subagentsDir)
+          const compactFile = files.find(
+            (f) => f.startsWith("agent-acompact") && f.endsWith(".jsonl")
+          )
+          if (compactFile) {
+            const s = await stat(subagentsDir + "/" + compactFile)
+            const recentlyActive = Date.now() - s.mtimeMs < 30_000
+            if (recentlyActive && !compactingSignalSent) {
+              compactingSignalSent = true
+              res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
+            } else if (!recentlyActive) {
+              compactingSignalSent = false
+            }
+          } else {
             compactingSignalSent = false
           }
-        } else {
-          compactingSignalSent = false
+        } catch {
+          // subagents dir may not exist — that's fine
         }
-      } catch {
-        // subagents dir may not exist — that's fine
-      }
-    }, 1000)
+      }, 1000)
 
     // Heartbeat to keep connection alive
     heartbeat = setInterval(() => {
@@ -295,7 +299,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // Cleanup on disconnect
     req.on("close", () => {
       cleanup()
-      clearInterval(compactionPoller)
+      if (compactionPoller) clearInterval(compactionPoller)
     })
   })
 }

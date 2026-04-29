@@ -10,19 +10,21 @@ function loadFromStorage(): PermissionsConfig {
   try {
     const raw = localStorage.getItem(PERMISSIONS_STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw)
-      if (parsed && typeof parsed.mode === "string") {
-        return {
-          mode: parsed.mode,
-          allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
-          disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
-        }
+      const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
+      return {
+        mode: (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode,
+        allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
+        disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
       }
     }
   } catch {
-    // ignore
+    // corrupted storage
   }
   return DEFAULT_PERMISSIONS
+}
+
+function saveToStorage(config: PermissionsConfig): void {
+  localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(config))
 }
 
 export function usePermissions() {
@@ -30,16 +32,18 @@ export function usePermissions() {
   const [appliedConfig, setAppliedConfig] = useState<PermissionsConfig>(loadFromStorage)
   const isInitial = useRef(true)
 
-  // Persist to localStorage on every config change
   useEffect(() => {
     if (isInitial.current) {
       isInitial.current = false
       return
     }
-    localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(config))
+    saveToStorage(config)
   }, [config])
 
-  const hasPendingChanges = JSON.stringify(config) !== JSON.stringify(appliedConfig)
+  const hasPendingChanges =
+    config.mode !== appliedConfig.mode ||
+    JSON.stringify(config.allowedTools) !== JSON.stringify(appliedConfig.allowedTools) ||
+    JSON.stringify(config.disallowedTools) !== JSON.stringify(appliedConfig.disallowedTools)
 
   const setMode = useCallback((mode: PermissionMode) => {
     setConfig((prev) => ({ ...prev, mode }))
@@ -47,28 +51,24 @@ export function usePermissions() {
 
   const toggleAllowedTool = useCallback((tool: string) => {
     setConfig((prev) => {
-      const isAllowed = prev.allowedTools.includes(tool)
-      if (isAllowed) {
-        return { ...prev, allowedTools: prev.allowedTools.filter((t) => t !== tool) }
-      }
+      const has = prev.allowedTools.includes(tool)
       return {
         ...prev,
-        allowedTools: [...prev.allowedTools, tool],
-        disallowedTools: prev.disallowedTools.filter((t) => t !== tool),
+        allowedTools: has
+          ? prev.allowedTools.filter((t) => t !== tool)
+          : [...prev.allowedTools, tool],
       }
     })
   }, [])
 
   const toggleDisallowedTool = useCallback((tool: string) => {
     setConfig((prev) => {
-      const isDisallowed = prev.disallowedTools.includes(tool)
-      if (isDisallowed) {
-        return { ...prev, disallowedTools: prev.disallowedTools.filter((t) => t !== tool) }
-      }
+      const has = prev.disallowedTools.includes(tool)
       return {
         ...prev,
-        disallowedTools: [...prev.disallowedTools, tool],
-        allowedTools: prev.allowedTools.filter((t) => t !== tool),
+        disallowedTools: has
+          ? prev.disallowedTools.filter((t) => t !== tool)
+          : [...prev.disallowedTools, tool],
       }
     })
   }, [])

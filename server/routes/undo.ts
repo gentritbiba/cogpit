@@ -1,11 +1,13 @@
 import {
   dirs,
+  isCodexDirName,
   isWithinDir,
   readFile,
   writeFile,
   mkdir,
   unlink,
   join,
+  resolveSessionFilePath,
   resolve,
   homedir,
 } from "../helpers"
@@ -237,8 +239,8 @@ export function registerUndoRoutes(use: UseFn) {
           keepLines: number
         }
 
-        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+        const filePath = await resolveSessionFilePath(dirName, fileName)
+        if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -280,8 +282,8 @@ export function registerUndoRoutes(use: UseFn) {
           lines: string[]
         }
 
-        const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-        if (!isWithinDir(dirs.PROJECTS_DIR, filePath)) {
+        const filePath = await resolveSessionFilePath(dirName, fileName)
+        if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return

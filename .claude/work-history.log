@@ -6,3 +6,9 @@
 2026-03-03 split-pane-sessions Section 7 (Fullscreen Modal) complete: grid overlay in SplitPaneContainer, Ctrl+1-6 fullscreen guard. Report: .claude/work_report/split-pane-sessions_7.md
 2026-03-03 split-pane-sessions Section 8 (FileChangesPanel Constraints) complete: width-capped sidebar in split mode, focusedPane.session context. Report: .claude/work_report/split-pane-sessions_8.md
 2026-03-03 split-pane-sessions Section 11 (Testing Strategy) complete: 162 tests across reducer/grid/navigation. Report: .claude/work_report/split-pane-sessions_12.md
+2026-03-13 pty-terminal-integration Phase 1 (1.1-1.3) complete: PtySessionManager extracted to server/pty-server.ts, both wrappers refactored. Report: .claude/work_report/pty-terminal-integration_1.md
+2026-03-13 pty-terminal-integration Phase 3 (3.1-3.3) complete: usePtySocket hook, PtyContext, useScriptRunner refactored to PTY. Report: .claude/work_report/pty-terminal-integration_3.md
+2026-03-13 pty-terminal-integration Phase 4 (4.1-4.3) complete: TerminalOutput.tsx created, ProcessPanel updated for xterm. Report: .claude/work_report/pty-terminal-integration_4.md
+2026-03-13 pty-terminal-integration Phase 5 (5.1-5.3) complete: New Terminal + button added to ScriptsDock header. Report: .claude/work_report/pty-terminal-integration_5.md
+2026-03-13 pty-terminal-integration Phase 6 (6.1-6.4) complete: SSE infrastructure removed, scripts/index.ts trimmed to discovery only, processManager cleanup removed from both servers. Report: .claude/work_report/pty-terminal-integration_6.md
+2026-04-07 session-performance-redesign Task 4 complete: wired useParserWorker into useLiveSession/useSessionActions/App.tsx, added tail endpoint + cache support. Report: .claude/work_report/session-performance-redesign_4.md

@@ -14,6 +14,8 @@ import type { Turn } from "@/lib/types"
 
 interface TimelineInnerProps {
   filteredTurns: { turn: Turn; index: number }[]
+  hasMore?: boolean
+  onLoadMore?: () => void
 }
 
 // ── Context menu wrapper ─────────────────────────────────────────────────────
@@ -142,6 +144,8 @@ export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
 export function VirtualizedTimeline({
   filteredTurns,
   scrollContainerRef,
+  hasMore,
+  onLoadMore,
 }: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }) {
   const { state: { activeTurnIndex } } = useAppContext()
   const { undoRedo } = useSessionContext()
@@ -175,6 +179,17 @@ export function VirtualizedTimeline({
     }
   }, [activeTurnIndex, turnIndexToVirtualIdx, virtualizer])
 
+  // Scroll-up lazy loading: when first visible item is near the top, load more
+  const virtualItems = virtualizer.getVirtualItems()
+  useEffect(() => {
+    if (!hasMore || !onLoadMore) return
+    if (virtualItems.length === 0) return
+    const firstVisible = virtualItems[0]
+    if (firstVisible && firstVisible.index < 5) {
+      onLoadMore()
+    }
+  }, [virtualItems, hasMore, onLoadMore])
+
   return (
     <div
       style={{
@@ -183,6 +198,11 @@ export function VirtualizedTimeline({
         position: "relative",
       }}
     >
+      {hasMore && (
+        <div className="flex items-center justify-center py-3 text-muted-foreground text-xs">
+          Loading older turns...
+        </div>
+      )}
       {virtualizer.getVirtualItems().map((virtualRow) => {
         const { turn, index } = filteredTurns[virtualRow.index]
         const isLastVirtualRow = virtualRow.index === filteredTurns.length - 1

@@ -44,6 +44,9 @@ function stateToPath(state: SessionState): string {
     const sessionId = sessionIdFromFileName(fileName)
     return `/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`
   }
+  if (state.pendingDirName) {
+    return `/${encodeURIComponent(state.pendingDirName)}`
+  }
   if (state.dashboardProject) {
     return `/${encodeURIComponent(state.dashboardProject)}`
   }
@@ -154,7 +157,7 @@ export function useUrlSync({
       lastPushedRef.current = newPath
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync URL-relevant state fields
-  }, [state.sessionSource, state.mainView, state.selectedTeam, state.dashboardProject])
+  }, [state.sessionSource, state.pendingDirName, state.mainView, state.selectedTeam, state.dashboardProject])
 
   // Handle browser back/forward
   useEffect(() => {

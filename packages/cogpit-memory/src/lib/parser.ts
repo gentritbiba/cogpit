@@ -4,10 +4,12 @@ import type {
   ContentBlock,
   ImageBlock,
   AssistantMessage,
+  SessionStats,
   UserContent,
 } from "./types"
 import { buildTurns } from "./turnBuilder"
 import { computeStats } from "./sessionStats"
+import { isCodexSessionText, parseCodexSession } from "./codex"
 
 export type { PendingInteraction } from "./interactiveState"
 export { detectPendingInteraction } from "./interactiveState"
@@ -42,8 +44,20 @@ function parseLines(jsonlText: string): RawMessage[] {
   return messages
 }
 
+function isCodexRawMessages(rawMessages: Array<{ type: string; [key: string]: unknown }>): boolean {
+  const firstType = rawMessages[0]?.type
+  return firstType === "session_meta"
+    || firstType === "turn_context"
+    || firstType === "event_msg"
+    || firstType === "response_item"
+}
+
+function serializeRawMessages(rawMessages: Array<{ type: string; [key: string]: unknown }>): string {
+  return rawMessages.map((msg) => JSON.stringify(msg)).join("\n")
+}
+
 function extractSessionMetadata(messages: RawMessage[]) {
-  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
+  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", name: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
 
   for (const msg of messages) {
     if (msg.sessionId && !meta.sessionId) meta.sessionId = msg.sessionId
@@ -51,6 +65,7 @@ function extractSessionMetadata(messages: RawMessage[]) {
     if (msg.gitBranch && !meta.gitBranch) meta.gitBranch = msg.gitBranch
     if (msg.cwd && !meta.cwd) meta.cwd = msg.cwd
     if (msg.slug && !meta.slug) meta.slug = msg.slug
+    if ((msg as Record<string, unknown>).name && !meta.name) meta.name = (msg as Record<string, unknown>).name as string
     if ((msg as Record<string, unknown>).branchedFrom && !meta.branchedFrom) {
       meta.branchedFrom = (msg as Record<string, unknown>).branchedFrom as typeof meta.branchedFrom
     }
@@ -65,17 +80,35 @@ function extractSessionMetadata(messages: RawMessage[]) {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-export function parseSession(jsonlText: string): ParsedSession {
+function emptyStats(turnCount: number): SessionStats {
+  return {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheCreationTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCostUSD: 0,
+    toolCallCounts: {},
+    errorCount: 0,
+    totalDurationMs: 0,
+    turnCount,
+  }
+}
+
+export function parseSession(jsonlText: string, opts?: { skipStats?: boolean }): ParsedSession {
+  if (isCodexSessionText(jsonlText)) {
+    return parseCodexSession(jsonlText)
+  }
   const rawMessages = parseLines(jsonlText)
   const metadata = extractSessionMetadata(rawMessages)
   const turns = buildTurns(rawMessages)
-  const stats = computeStats(turns)
+  const stats = opts?.skipStats ? emptyStats(turns.length) : computeStats(turns)
 
   return {
     ...metadata,
     turns,
     stats,
-    rawMessages,
+    rawMessages: opts?.skipStats ? [] : rawMessages,
+    agentKind: "claude" as const,
   }
 }
 
@@ -88,6 +121,11 @@ export function parseSessionAppend(
   existing: ParsedSession,
   newJsonlText: string
 ): ParsedSession {
+  if (isCodexRawMessages(existing.rawMessages) || isCodexSessionText(newJsonlText)) {
+    const prefix = serializeRawMessages(existing.rawMessages)
+    return parseCodexSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
+  }
+
   const newMessages = parseLines(newJsonlText)
   if (newMessages.length === 0) return existing
 

@@ -162,6 +162,12 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/pty` | WS | WebSocket PTY session |
 | `/api/ports` | GET | List listening processes (scans lsof) |
 | `/api/worktrees` | GET/POST/DELETE | Manage git worktrees |
+| `/api/scripts` | GET | Discover scripts from package.json (query: `dir=/path`) |
+| `/api/scripts/run` | POST | Start a script (body: `{scriptName, packageDir, source}`) |
+| `/api/scripts/stop` | POST | Stop a running script (body: `{processId}`) |
+| `/api/scripts/remove` | POST | Remove a process from registry (body: `{processId}`) |
+| `/api/scripts/processes` | GET | List all managed processes |
+| `/api/scripts/output` | GET | SSE stream for process output (query: `id=processId`) |
 | `/api/usage` | GET | Token usage tracking |
 | `/api/notify` | POST | Receive Claude Code hook payloads, display system notifications with click-to-navigate |
 
@@ -273,13 +279,23 @@ if (block.kind === "background_agent") {
 - **Expandable** — Defaults to collapsed; expands with "Expand all turns"
 - **Same structure as SubAgentPanel** — Just different color
 
+### Process Management (`ProcessPanel.tsx`)
+
+Unified panel for monitoring running processes (scripts, background tasks, terminals):
+- **Scripts:** Spawned via `ScriptsDock`, streamed via `/api/scripts/output` SSE
+- **Background Tasks:** Spawned by Claude's Task tool, output from task output file
+- **Terminal Sessions:** Interactive PTY sessions via WebSocket
+- Tab bar shows active processes with status indicators (green = running, red = errored)
+- Click tab to view process output, close button to remove from list
+- Auto-collapses when empty; expandable on demand
+
 ### Server Monitoring (`StatsPanel.tsx` lines 381-600)
 
 Displays running background servers (dev servers, API servers):
 - Scans Claude's task directory for `.output` files with detected ports
 - Shows port status (green = listening, gray = stopped)
 - Provides "Stop" button to kill on port (via `/api/kill-port`)
-- Shows output file link (click to stream in ServerPanel)
+- Shows output file link (click to stream in ProcessPanel)
 
 #### File Changes Panel (`src/components/FileChangesPanel/`)
 
@@ -440,11 +456,12 @@ cogpit/
 │   │   ├── StatsPanel.tsx           # Token chart, ports, agents
 │   │   ├── ConversationTimeline.tsx # Turn renderer, dispatcher
 │   │   ├── SessionBrowser.tsx       # Project/session navigator
+│   │   │   └── ScriptsDock.tsx      # Script discovery & execution dock
 │   │   ├── ChatArea.tsx             # Message display
 │   │   ├── ChatInput.tsx            # Message composer
 │   │   ├── FileChangesPanel.tsx     # Edit/Write tracker
+│   │   ├── ProcessPanel.tsx         # Unified process output (scripts/tasks)
 │   │   ├── TeamsDashboard.tsx       # Team overview
-│   │   ├── ServerPanel.tsx          # Server output streaming
 │   │   ├── WorktreePanel.tsx        # Git worktree manager
 │   │   │
 │   │   └── timeline/
@@ -460,6 +477,9 @@ cogpit/
 │   │   ├── usePtyChat.ts            # PTY chat
 │   │   ├── useUndoRedo.ts           # Undo/redo logic
 │   │   ├── useWorktrees.ts          # Worktree management
+│   │   ├── useProcessPanel.ts       # Process panel state & lifecycle
+│   │   ├── useScriptDiscovery.ts    # Script detection from package.json
+│   │   ├── useScriptRunner.ts       # Script execution & process polling
 │   │   └── [20+ other hooks]
 │   │
 │   └── lib/
@@ -491,6 +511,11 @@ cogpit/
 │       ├── session-file-changes.ts  # Edit/Write tracking
 │       ├── editor.ts            # Editor operations
 │       ├── worktrees.ts         # Git worktree API
+│       ├── scripts/             # Script discovery & execution
+│       │   ├── index.ts         # Route registration
+│       │   ├── discovery.ts     # Script discovery from package.json
+│       │   ├── process-manager.ts  # Process state & lifecycle
+│       │   └── state.ts         # Shared types
 │       └── usage.ts             # Token usage tracking
 │
 ├── public/                  # Static assets
@@ -618,6 +643,17 @@ Watch for:
 - Query `/api/background-agents?cwd={projectPath}` for active agents
 - Subscribe to SSE `/api/watch-team/{teamName}` for team-spawned agents
 - Display in `StatsPanel` → `BackgroundAgents` component
+
+### Running Scripts
+
+Discover and execute scripts from project package.json files:
+- Use `useScriptDiscovery` hook to scan project for `package.json` scripts
+- Organize by directory with collapsible groups in `ScriptsDock` sidebar
+- Click "play" button to execute via `runScript()` from `useScriptRunner`
+- Process spawned on server, managed by `processManager` in `/api/scripts`
+- Output streamed via SSE `/api/scripts/output?id={processId}` to `ProcessPanel`
+- Display in unified process output panel alongside background tasks and terminals
+- Stop button in `ScriptsDock` or `ProcessPanel` sends `POST /api/scripts/stop`
 
 ---
 

@@ -7,7 +7,7 @@ import { calculateCost, estimateTotalOutputTokens, estimateSubAgentOutput } from
 
 // ── Bucket helpers ───────────────────────────────────────────────────────────
 
-export interface UsageBucket {
+interface UsageBucket {
   input: number
   output: number
   cacheRead: number
@@ -37,7 +37,7 @@ function addToBucket(bucket: UsageBucket, usage: TokenUsage, model: string | nul
 
 // ── Agent Breakdown ──────────────────────────────────────────────────────────
 
-export interface AgentBreakdown {
+interface AgentBreakdown {
   mainAgent: UsageBucket
   subAgents: UsageBucket
 }
@@ -58,7 +58,7 @@ export function computeAgentBreakdown(turns: Turn[]): AgentBreakdown {
 
 // ── Model Breakdown ──────────────────────────────────────────────────────────
 
-export interface ModelBreakdown {
+interface ModelBreakdown {
   model: string
   shortName: string
   input: number
@@ -99,7 +99,7 @@ export function computeModelBreakdown(turns: Turn[], shortenModel: (m: string) =
 
 // ── Cache Breakdown ──────────────────────────────────────────────────────────
 
-export interface CacheBreakdown {
+interface CacheBreakdown {
   cacheRead: number
   cacheWrite: number
   newInput: number

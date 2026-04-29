@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { cn } from "../utils"
+import { cn, getEffortOptions, normalizeEffortForAgent } from "../utils"
 
 describe("cn", () => {
   it("merges simple class names", () => {
@@ -29,5 +29,26 @@ describe("cn", () => {
 
   it("merges conflicting tailwind color classes", () => {
     expect(cn("text-red-500", "text-blue-500")).toBe("text-blue-500")
+  })
+})
+
+describe("getEffortOptions", () => {
+  it("exposes max for claude and xhigh only for codex", () => {
+    expect(getEffortOptions("claude").map((option) => option.value)).toEqual(["low", "medium", "high", "max"])
+    expect(getEffortOptions("codex").map((option) => option.value)).toEqual(["low", "medium", "high", "max", "xhigh"])
+  })
+})
+
+describe("normalizeEffortForAgent", () => {
+  it("keeps max for claude", () => {
+    expect(normalizeEffortForAgent("claude", "max")).toBe("max")
+  })
+
+  it("keeps xhigh for codex", () => {
+    expect(normalizeEffortForAgent("codex", "xhigh")).toBe("xhigh")
+  })
+
+  it("falls back to high for unsupported claude effort", () => {
+    expect(normalizeEffortForAgent("claude", "xhigh")).toBe("high")
   })
 })

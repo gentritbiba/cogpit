@@ -578,32 +578,28 @@ describe("buildPermArgs", () => {
     expect(buildPermArgs({ mode: "bypassPermissions" })).toEqual(["--dangerously-skip-permissions"])
   })
 
-  it("builds args for a non-bypass mode with allowed/disallowed tools", () => {
-    const result = buildPermArgs({
+  it("builds args for non-bypass mode with allowed/disallowed tools", () => {
+    expect(buildPermArgs({
       mode: "plan",
       allowedTools: ["Bash", "Read"],
       disallowedTools: ["Write"],
-    })
-    expect(result).toContain("--permission-mode")
-    expect(result).toContain("plan")
-    expect(result).toContain("Bash")
-    expect(result).toContain("Read")
-    expect(result).toContain("Write")
+    })).toEqual([
+      "--permission-mode", "plan",
+      "--allowedTools", "Bash",
+      "--allowedTools", "Read",
+      "--disallowedTools", "Write",
+    ])
   })
 
-  it("auto-appends ExitPlanMode and AskUserQuestion for non-bypass modes", () => {
-    const result = buildPermArgs({ mode: "default" })
-    expect(result).toContain("ExitPlanMode")
-    expect(result).toContain("AskUserQuestion")
+  it("returns --permission-mode for default mode", () => {
+    expect(buildPermArgs({ mode: "default" })).toEqual(["--permission-mode", "default"])
   })
 
   it("handles missing allowedTools/disallowedTools arrays", () => {
-    const result = buildPermArgs({ mode: "plan" })
-    expect(result[0]).toBe("--permission-mode")
-    expect(result[1]).toBe("plan")
-    expect(result).toContain("ExitPlanMode")
-    expect(result).toContain("AskUserQuestion")
-    expect(result).toHaveLength(6) // --permission-mode, plan, --allowedTools, ExitPlanMode, --allowedTools, AskUserQuestion
+    expect(buildPermArgs({ mode: "plan" })).toEqual(["--permission-mode", "plan"])
+  })
+
+  it("returns bypass flag when mode is empty string", () => {
+    expect(buildPermArgs({ mode: "" })).toEqual(["--dangerously-skip-permissions"])
   })
 })
-

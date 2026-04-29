@@ -4,11 +4,14 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
-import { shortPath, dirNameToPath } from "@/lib/format"
+import { shortPath, dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { SessionRow } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
+import { useProjectNames } from "@/hooks/useProjectNames"
+import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { hapticMedium } from "@/lib/haptics"
 
@@ -42,14 +45,23 @@ function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> 
   return map
 }
 
+/** Resolve a project grouping key from a raw filesystem path — worktree paths map to their parent. */
+function projectGroupKey(rawPath: string): string {
+  const wt = parseWorktreePath(rawPath)
+  return shortPath(wt ? wt.parentPath : rawPath, 2)
+}
+
+/** Resolve the grouping key for a session. */
+function sessionGroupKey(s: ActiveSessionInfo): string {
+  return projectGroupKey(s.cwd ?? dirNameToPath(s.dirName))
+}
+
 /** Group sessions by project path for compact display, sorted newest-first. */
 function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessionInfo[]> {
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
-  )
+  const sorted = sortSessionsByRecency(sessions)
   const groups = new Map<string, ActiveSessionInfo[]>()
   for (const s of sorted) {
-    const key = shortPath(s.cwd ?? dirNameToPath(s.dirName), 2)
+    const key = sessionGroupKey(s)
     const list = groups.get(key)
     if (list) list.push(s)
     else groups.set(key, [s])
@@ -59,6 +71,7 @@ function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessio
 
 export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
+  const { names: projectNames, rename: renameProject } = useProjectNames()
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
@@ -155,10 +168,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const grouped = useMemo(() => groupByProject(sessions), [sessions])
 
   // Derive pending session's project path once (used for group matching)
-  const pendingProjectPath = useMemo(
-    () => pendingSession ? shortPath(pendingSession.cwd || dirNameToPath(pendingSession.dirName), 2) : null,
-    [pendingSession],
-  )
+  const pendingProjectPath = useMemo(() => {
+    if (!pendingSession) return null
+    return projectGroupKey(pendingSession.cwd || dirNameToPath(pendingSession.dirName))
+  }, [pendingSession])
 
   // Detect status transitions to "completed" — only highlight newly completed sessions.
   useEffect(() => {
@@ -233,7 +246,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [onDeleteSession])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Search bar + proc count */}
       <div className="shrink-0 flex items-center gap-1.5 px-2 py-2">
         <div className="relative flex-1">
@@ -303,7 +316,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 <>
                   <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
                   <p className="text-[13px] text-muted-foreground">No active sessions</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code to see sessions here</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code or Codex to see sessions here</p>
                 </>
               )}
             </div>
@@ -328,11 +341,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               killingPids={killingPids}
               newlyCompleted={newlyCompleted}
               sessionNames={sessionNames}
+              projectNames={projectNames}
               onSelectSession={handleSelectSession}
               onKill={handleKill}
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
               onRenameSession={renameSession}
+              onRenameProject={renameProject}
               onNewSession={onNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
@@ -350,11 +365,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               killingPids={killingPids}
               newlyCompleted={newlyCompleted}
               sessionNames={sessionNames}
+              projectNames={projectNames}
               onSelectSession={handleSelectSession}
               onKill={handleKill}
               onDuplicateSession={onDuplicateSession}
               onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
               onRenameSession={renameSession}
+              onRenameProject={renameProject}
               onNewSession={onNewSession}
               creatingSession={creatingSession}
               pendingSession={pendingSession}
@@ -377,6 +394,7 @@ function ProjectGroup({
   killingPids,
   newlyCompleted,
   sessionNames,
+  projectNames,
   defaultCollapsed = false,
   forceExpand = false,
   onSelectSession,
@@ -384,6 +402,7 @@ function ProjectGroup({
   onDuplicateSession,
   onDeleteSession,
   onRenameSession,
+  onRenameProject,
   onNewSession,
   creatingSession,
   pendingSession,
@@ -395,6 +414,7 @@ function ProjectGroup({
   killingPids: Set<number>
   newlyCompleted: Set<string>
   sessionNames: Record<string, string>
+  projectNames: Record<string, string>
   defaultCollapsed?: boolean
   forceExpand?: boolean
   onSelectSession: (dirName: string, fileName: string) => void
@@ -402,6 +422,7 @@ function ProjectGroup({
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
+  onRenameProject?: (dirName: string, name: string) => void
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   pendingSession?: PendingSessionInfo | null
@@ -416,45 +437,61 @@ function ProjectGroup({
   const totalCount = sessions.length + (hasPending ? 1 : 0)
   const needsScroll = totalCount > VISIBLE_COUNT
 
+  // Resolve dirName — prefer a non-worktree session so custom name lookup works
+  const dirName = (sessions.find(s => !parseWorktreePath(s.cwd ?? dirNameToPath(s.dirName)))?.dirName
+    ?? sessions[0]?.dirName ?? pendingSession?.dirName)
+  const customProjectName = dirName ? projectNames[dirName] : undefined
+
   return (
     <div className="flex flex-col">
       {/* Collapsible group header */}
-      <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
-        >
-          <ChevronRight className={cn(
-            "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
-            !isCollapsed && "rotate-90"
-          )} />
-          <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
-          <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
-            {projectPath}
-          </span>
-          <span className="text-[10px] text-muted-foreground/40 shrink-0">
-            {totalCount}
-          </span>
-        </button>
-        {onNewSession && sessions.length > 0 && (
+      <ProjectContextMenu
+        projectLabel={projectPath}
+        customName={customProjectName}
+        onRename={(name) => { if (dirName && onRenameProject) onRenameProject(dirName, name) }}
+      >
+        <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
           <button
-            className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
-            disabled={creatingSession}
-            onClick={(e) => {
-              e.stopPropagation()
-              const first = sessions[0]
-              onNewSession(first.dirName, first.cwd ?? undefined)
-            }}
-            aria-label={`New session in ${projectPath}`}
+            onClick={() => setCollapsed((c) => !c)}
+            className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
           >
-            {creatingSession ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Plus className="size-3" />
+            <ChevronRight className={cn(
+              "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
+              !isCollapsed && "rotate-90"
+            )} />
+            <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
+            <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
+              {customProjectName || projectPath}
+            </span>
+            {customProjectName && (
+              <span className="text-[10px] text-muted-foreground/40 truncate">
+                {projectPath}
+              </span>
             )}
+            <span className="text-[10px] text-muted-foreground/40 shrink-0">
+              {totalCount}
+            </span>
           </button>
-        )}
-      </div>
+          {onNewSession && sessions.length > 0 && (
+            <button
+              className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
+              disabled={creatingSession}
+              onClick={(e) => {
+                e.stopPropagation()
+                const first = sessions[0]
+                onNewSession(first.dirName, first.cwd ?? undefined)
+              }}
+              aria-label={`New session in ${projectPath}`}
+            >
+              {creatingSession ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Plus className="size-3" />
+              )}
+            </button>
+          )}
+        </div>
+      </ProjectContextMenu>
 
       {/* Session rows — left border + scrollable when > 5 */}
       {!isCollapsed && (
@@ -468,22 +505,27 @@ function ProjectGroup({
           {hasPending && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
           )}
-          {sessions.map((s) => (
-            <SessionRow
-              key={`${s.dirName}/${s.fileName}`}
-              session={s}
-              isActiveSession={activeSessionKey === `${s.dirName}/${s.fileName}`}
-              proc={procBySession.get(s.sessionId)}
-              killingPids={killingPids}
-              isNewlyCompleted={newlyCompleted.has(s.sessionId)}
-              customName={sessionNames[s.sessionId]}
-              onSelectSession={onSelectSession}
-              onKill={onKill}
-              onDuplicateSession={onDuplicateSession}
-              onDeleteSession={onDeleteSession}
-              onRenameSession={onRenameSession}
-            />
-          ))}
+          {sessions.map((s) => {
+            const rawPath = s.cwd ?? dirNameToPath(s.dirName)
+            const wt = parseWorktreePath(rawPath)
+            return (
+              <SessionRow
+                key={`${s.dirName}/${s.fileName}`}
+                session={s}
+                isActiveSession={activeSessionKey === `${s.dirName}/${s.fileName}`}
+                proc={procBySession.get(s.sessionId)}
+                killingPids={killingPids}
+                isNewlyCompleted={newlyCompleted.has(s.sessionId)}
+                customName={sessionNames[s.sessionId]}
+                worktreeName={wt?.worktreeName}
+                onSelectSession={onSelectSession}
+                onKill={onKill}
+                onDuplicateSession={onDuplicateSession}
+                onDeleteSession={onDeleteSession}
+                onRenameSession={onRenameSession}
+              />
+            )
+          })}
         </div>
       )}
     </div>

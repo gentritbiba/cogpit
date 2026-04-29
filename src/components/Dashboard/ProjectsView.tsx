@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, shortPath, projectName } from "@/lib/format"
+import { useProjectNames } from "@/hooks/useProjectNames"
+import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { SearchInput, ErrorBanner, SkeletonCards, LiveDot, Shortcut, isMac } from "./DashboardWidgets"
 
 interface ProjectInfo {
@@ -71,13 +73,18 @@ export function ProjectsView({
     return map
   }, [activeSessions])
 
+  const { names: projectNames, rename: renameProject } = useProjectNames()
+
   const filteredProjects = useMemo(() => {
     if (!searchFilter) return projects
     const q = searchFilter.toLowerCase()
     return projects.filter(
-      (p) => p.path.toLowerCase().includes(q) || p.shortName.toLowerCase().includes(q)
+      (p) =>
+        p.path.toLowerCase().includes(q) ||
+        p.shortName.toLowerCase().includes(q) ||
+        (projectNames[p.dirName]?.toLowerCase().includes(q))
     )
-  }, [projects, searchFilter])
+  }, [projects, searchFilter, projectNames])
 
   return (
     <ScrollArea className="h-full">
@@ -130,61 +137,68 @@ export function ProjectsView({
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
               <Activity className="size-8 text-muted-foreground mb-3" />
               <p className="text-sm text-muted-foreground">
-                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code to see projects here."}
+                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code or Codex to see projects here."}
               </p>
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filteredProjects.map((project) => {
                 const activeCount = activeCountByProject[project.dirName] || 0
+                const custom = projectNames[project.dirName]
 
                 return (
-                  <button
+                  <ProjectContextMenu
                     key={project.dirName}
-                    onClick={() => onSelectProject?.(project.dirName)}
-                    className={cn(
-                      "card-glow group relative rounded-lg elevation-1 p-4 text-left transition-smooth",
-                      "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
-                      activeCount > 0 && "border-l-[3px] border-l-green-500"
-                    )}
+                    projectLabel={projectName(project.path)}
+                    customName={custom}
+                    onRename={(name) => renameProject(project.dirName, name)}
                   >
-                    <div className="flex items-center gap-2.5 mb-2">
-                      <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-                      <span className="text-sm font-medium text-foreground truncate flex-1">
-                        {projectName(project.path)}
-                      </span>
-                      <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
-                    </div>
+                    <button
+                      onClick={() => onSelectProject?.(project.dirName)}
+                      className={cn(
+                        "card-glow group relative rounded-lg elevation-1 p-4 text-left transition-smooth",
+                        "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
+                        activeCount > 0 && "border-l-[3px] border-l-green-500"
+                      )}
+                    >
+                      <div className="flex items-center gap-2.5 mb-2">
+                        <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
+                        <span className="text-sm font-medium text-foreground truncate flex-1">
+                          {custom || projectName(project.path)}
+                        </span>
+                        <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
+                      </div>
 
-                    <p className="text-[11px] text-muted-foreground mb-3 truncate font-mono">
-                      {shortPath(project.path)}
-                    </p>
+                      <p className="text-[11px] text-muted-foreground mb-3 truncate font-mono">
+                        {shortPath(project.path)}
+                      </p>
 
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <FileText className="size-3" />
-                        {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
-                      </span>
+                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <FileText className="size-3" />
+                          {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
+                        </span>
+                        {activeCount > 0 && (
+                          <span className="flex items-center gap-1 text-green-400">
+                            <LiveDot size="sm" />
+                            {activeCount} active
+                          </span>
+                        )}
+                        {project.lastModified && (
+                          <span className="flex items-center gap-1 ml-auto shrink-0">
+                            <Clock className="size-3" />
+                            {formatRelativeTime(project.lastModified)}
+                          </span>
+                        )}
+                      </div>
+
                       {activeCount > 0 && (
-                        <span className="flex items-center gap-1 text-green-400">
-                          <LiveDot size="sm" />
-                          {activeCount} active
+                        <span className="absolute top-3 right-3">
+                          <LiveDot />
                         </span>
                       )}
-                      {project.lastModified && (
-                        <span className="flex items-center gap-1 ml-auto shrink-0">
-                          <Clock className="size-3" />
-                          {formatRelativeTime(project.lastModified)}
-                        </span>
-                      )}
-                    </div>
-
-                    {activeCount > 0 && (
-                      <span className="absolute top-3 right-3">
-                        <LiveDot />
-                      </span>
-                    )}
-                  </button>
+                    </button>
+                  </ProjectContextMenu>
                 )
               })}
             </div>

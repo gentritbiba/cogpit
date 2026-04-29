@@ -10,7 +10,10 @@ export default defineConfig({
     build: {
       outDir: "out/main",
       lib: {
-        entry: "electron/main.ts",
+        entry: {
+          main: "electron/main.ts",
+          "server-worker": "electron/server-worker.ts",
+        },
       },
       rollupOptions: {
         external: ["node-pty"],

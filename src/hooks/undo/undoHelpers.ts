@@ -34,18 +34,37 @@ function isTurnStartingUserMessage(obj: Record<string, unknown>): boolean {
   return true
 }
 
+function isCodexTurnStartingMessage(obj: Record<string, unknown>): boolean {
+  return obj.type === "event_msg"
+    && typeof obj.payload === "object"
+    && obj.payload !== null
+    && (obj.payload as { type?: unknown }).type === "user_message"
+    && typeof (obj.payload as { message?: unknown }).message === "string"
+}
+
 /**
  * Find the JSONL line index where turn `keepTurnCount` ends.
  * Parses JSONL lines directly (robust against skipped lines in rawMessages).
  */
 export function findCutoffLine(allLines: string[], keepTurnCount: number): number {
   let userMsgCount = 0
+  let pendingCodexTurnContextIndex: number | null = null
   for (let i = 0; i < allLines.length; i++) {
     try {
-      const obj = JSON.parse(allLines[i])
+      const obj = JSON.parse(allLines[i]) as Record<string, unknown>
+      if (obj.type === "turn_context") {
+        pendingCodexTurnContextIndex = i
+        continue
+      }
       if (isTurnStartingUserMessage(obj)) {
         userMsgCount++
         if (userMsgCount > keepTurnCount) return i
+        continue
+      }
+      if (isCodexTurnStartingMessage(obj)) {
+        userMsgCount++
+        if (userMsgCount > keepTurnCount) return pendingCodexTurnContextIndex ?? i
+        pendingCodexTurnContextIndex = null
       }
     } catch { /* skip malformed */ }
   }

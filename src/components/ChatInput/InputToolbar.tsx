@@ -75,7 +75,7 @@ export function ActionButtons({
 
   return (
     <div className="flex items-center">
-      {/* Interrupt button -- sends stop request to Claude */}
+      {/* Interrupt button -- sends a stop request to the active agent */}
       {showAgentControls && (
         <Tooltip>
           <TooltipTrigger render={<Button

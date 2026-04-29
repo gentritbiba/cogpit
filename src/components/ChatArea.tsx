@@ -20,11 +20,15 @@ import { cn } from "@/lib/utils"
 interface ChatAreaProps {
   searchInputRef: RefObject<HTMLInputElement | null>
   hasTodos?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
 }
 
 export const ChatArea = memo(function ChatArea({
   searchInputRef,
   hasTodos,
+  hasMore,
+  onLoadMore,
 }: ChatAreaProps) {
   const { state, dispatch, isMobile } = useAppContext()
   const { session, actions } = useSessionContext()
@@ -98,7 +102,11 @@ export const ChatArea = memo(function ChatArea({
           <div className={isMobile ? "py-3 px-1 pb-24" : cn("mx-auto max-w-3xl pt-4", hasTodos ? "pb-48" : "pb-32")}>
             <ErrorBoundary fallbackMessage="Failed to render conversation timeline">
               {showTimeline && (
-                <ConversationTimeline chatScrollRef={chatScrollRef} />
+                <ConversationTimeline
+                  chatScrollRef={chatScrollRef}
+                  hasMore={hasMore}
+                  onLoadMore={onLoadMore}
+                />
               )}
               {pendingMessages.map((msg, i) => (
                 <PendingTurnPreview

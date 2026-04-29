@@ -1,9 +1,7 @@
-import { app, BrowserWindow, Menu, session, shell, systemPreferences } from "electron"
+import { app, BrowserWindow, Menu, session, shell, systemPreferences, utilityProcess } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
-import { createAppServer } from "./server.ts"
 import { initUpdater } from "./updater.ts"
-import { getConfig } from "../server/config"
 
 // GUI apps don't inherit the user's shell PATH.
 // Spawn their shell to get the real PATH so `claude` CLI is found.
@@ -16,6 +14,7 @@ try {
 }
 
 let mainWindow: BrowserWindow | null = null
+let serverProcess: Electron.UtilityProcess | null = null
 
 async function createWindow(port: number) {
   mainWindow = new BrowserWindow({
@@ -31,6 +30,7 @@ async function createWindow(port: number) {
       preload: join(__dirname, "../preload/preload.js"),
       sandbox: true,
       contextIsolation: true,
+      backgroundThrottling: false,
     },
   })
 
@@ -58,36 +58,60 @@ async function createWindow(port: number) {
   })
 }
 
+/**
+ * Fork the API server into a utilityProcess so that heavy work
+ * (child processes, PTY I/O, SQLite queries) never blocks the
+ * main process event loop or freezes the renderer.
+ */
+function startServerWorker(staticDir: string, userDataDir: string, isDev: boolean): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const workerPath = join(__dirname, "server-worker.js")
+    serverProcess = utilityProcess.fork(workerPath)
+
+    const timeout = setTimeout(() => {
+      reject(new Error("Server worker timed out after 15s"))
+    }, 15_000)
+
+    serverProcess.on("message", (msg: { type: string; port?: number; error?: string }) => {
+      if (msg.type === "ready" && msg.port) {
+        clearTimeout(timeout)
+        resolve(msg.port)
+      } else if (msg.type === "error") {
+        clearTimeout(timeout)
+        reject(new Error(msg.error || "Server worker failed"))
+      }
+    })
+
+    serverProcess.on("exit", (code) => {
+      clearTimeout(timeout)
+      if (code !== 0 && code !== null) {
+        console.error(`[main] Server worker exited with code ${code}`)
+      }
+      serverProcess = null
+    })
+
+    // Send configuration to the worker
+    serverProcess.postMessage({ staticDir, userDataDir, isDev })
+  })
+}
+
 app.whenReady().then(async () => {
   // Determine static directory for production builds
   const staticDir = join(__dirname, "../renderer")
   const userDataDir = app.getPath("userData")
-
-  // Start embedded server
-  const { httpServer } = await createAppServer(staticDir, userDataDir)
-
-  // Bind to 0.0.0.0 when network access is enabled, otherwise localhost only
   const isDev = !!process.env.ELECTRON_RENDERER_URL
-  const config = getConfig()
-  const networkEnabled = config?.networkAccess && config?.networkPassword
 
-  const listenHost = networkEnabled ? "0.0.0.0" : "127.0.0.1"
-  const listenPort = (isDev || networkEnabled) ? 19384 : 0
-
-  await new Promise<void>((resolve) => {
-    httpServer.listen(listenPort, listenHost, () => resolve())
-  })
-
-  const address = httpServer.address()
-  const port = typeof address === "object" && address ? address.port : 0
-
-  if (!port) {
-    console.error("Failed to start embedded server")
+  // Start server in a separate utility process
+  let port: number
+  try {
+    port = await startServerWorker(staticDir, userDataDir, isDev)
+  } catch (err) {
+    console.error("Failed to start server worker:", err)
     app.quit()
     return
   }
 
-  console.log(`Cogpit server listening on http://${listenHost}:${port}`)
+  console.log(`Cogpit server ready on port ${port} (utility process)`)
 
   // Grant microphone permission for voice input (Whisper WASM)
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
@@ -150,5 +174,13 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit()
+  }
+})
+
+// Clean up the server worker when the app quits
+app.on("before-quit", () => {
+  if (serverProcess) {
+    serverProcess.kill()
+    serverProcess = null
   }
 })

@@ -1,5 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { dirs, projectDirToReadableName, getSessionMeta, getSessionStatus, searchSessionMessages, readdir, stat, join } from "../../helpers"
+import { sortSessionsByRecency } from "../../../src/lib/sessionOrdering"
+import {
+  dirs,
+  encodeCodexDirName,
+  getSessionMeta,
+  getSessionStatus,
+  join,
+  listCodexSessionFiles,
+  projectDirToReadableName,
+  readdir,
+  searchSessionMessages,
+  stat,
+} from "../../helpers"
 import type { NextFn } from "../../helpers"
 
 const DEFAULT_PER_PROJECT = 10
@@ -60,6 +72,25 @@ export async function handleActiveSessions(
       }
     }
 
+    const codexFiles = await listCodexSessionFiles()
+    for (const file of codexFiles) {
+      try {
+        const meta = await getSessionMeta(file.filePath)
+        if (!meta.cwd) continue
+        // Skip Codex sub-agent sessions — they're shown inline in their parent
+        if (meta.isSubagent) continue
+        candidates.push({
+          dirName: encodeCodexDirName(meta.cwd),
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mtimeMs: file.mtimeMs,
+          size: file.size,
+        })
+      } catch {
+        continue
+      }
+    }
+
     // Sort by mtime descending within each project, then pick top N per project
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
 
@@ -99,7 +130,9 @@ export async function handleActiveSessions(
             getSessionMeta(c.filePath),
             getSessionStatus(c.filePath),
           ])
-          const { shortName } = projectDirToReadableName(c.dirName)
+          const shortName = c.dirName.startsWith("codex__")
+            ? `${(meta.cwd || "").replace(/\/+$/, "").split("/").at(-1) || "Codex"} (Codex)`
+            : projectDirToReadableName(c.dirName).shortName
           const lastModified = new Date(c.mtimeMs).toISOString()
 
           let matchedMessage: string | undefined
@@ -126,6 +159,7 @@ export async function handleActiveSessions(
             fileName: c.fileName,
             sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
             slug: meta.slug,
+            name: meta.name,
             model: meta.model,
             firstUserMessage: meta.firstUserMessage,
             lastUserMessage: meta.lastUserMessage,
@@ -138,6 +172,7 @@ export async function handleActiveSessions(
             isActive: now - c.mtimeMs < 5 * 60 * 1000,
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
+            agentTerminalReason: statusInfo.terminalReason,
             ...(matchedMessage !== undefined && { matchedMessage }),
           }
         } catch {
@@ -146,7 +181,7 @@ export async function handleActiveSessions(
       })
     )
 
-    const activeSessions = results.filter(Boolean)
+    const activeSessions = sortSessionsByRecency(results.flatMap((session) => session ? [session] : []))
 
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify(activeSessions))

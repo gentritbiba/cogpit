@@ -188,12 +188,26 @@ export function useFileChangesData(session: ParsedSession) {
     return buildGroupedFiles(fileChanges, lastTurnIndex, fileContents)
   }, [fileChanges, lastTurnIndex, fileContents])
 
+  // Build agent metadata map (agentId → { name, type })
+  const agentMap = useMemo(() => {
+    const map = new Map<string, { name: string | null; type: string | null }>()
+    for (const turn of session.turns) {
+      for (const msg of turn.subAgentActivity) {
+        if (!map.has(msg.agentId)) {
+          map.set(msg.agentId, { name: msg.agentName, type: msg.subagentType })
+        }
+      }
+    }
+    return map
+  }, [session.turns])
+
   return {
     fileChanges,
     fileContents,
     groupedByFile,
     groupedLastTurn,
     lastTurnIndex,
+    agentMap,
   }
 }
 
@@ -341,4 +355,73 @@ export function buildGroupedFiles(
 
   result.sort((a, b) => a.turnRange[1] - b.turnRange[1] || a.turnRange[0] - b.turnRange[0] || a.filePath.localeCompare(b.filePath))
   return result
+}
+
+// ── Agent-grouped view ────────────────────────────────────────────────────
+
+export interface AgentGroup {
+  agentId: string
+  agentName: string | null
+  subagentType: string | null
+  files: GroupedFile[]
+  totalAdd: number
+  totalDel: number
+}
+
+/**
+ * Group file changes by subagent, then by file within each agent.
+ * Only includes changes with an agentId (excludes main agent).
+ * If a file was changed by two agents, it appears under each.
+ */
+export function buildGroupedFilesByAgent(
+  changes: FileChange[],
+  scope: "all" | number,
+  agentMap: Map<string, { name: string | null; type: string | null }>,
+  fileContents?: Map<string, string>,
+): AgentGroup[] {
+  // First, bucket changes by agentId (skip main-agent changes)
+  const byAgent = new Map<string, FileChange[]>()
+  for (const fc of changes) {
+    if (!fc.agentId) continue
+    if (scope !== "all" && fc.turnIndex !== scope) continue
+    let arr = byAgent.get(fc.agentId)
+    if (!arr) {
+      arr = []
+      byAgent.set(fc.agentId, arr)
+    }
+    arr.push(fc)
+  }
+
+  const groups: AgentGroup[] = []
+  for (const [agentId, agentChanges] of byAgent) {
+    // Reuse buildGroupedFiles with a filtered change list (all turns within the agent)
+    const files = buildGroupedFiles(agentChanges, "all", fileContents)
+    if (files.length === 0) continue
+
+    let totalAdd = 0
+    let totalDel = 0
+    for (const f of files) {
+      totalAdd += f.addCount
+      totalDel += f.delCount
+    }
+
+    const meta = agentMap.get(agentId)
+    groups.push({
+      agentId,
+      agentName: meta?.name ?? null,
+      subagentType: meta?.type ?? null,
+      files,
+      totalAdd,
+      totalDel,
+    })
+  }
+
+  // Sort by first file's turn range (earliest activity first)
+  groups.sort((a, b) => {
+    const aMin = a.files[0]?.turnRange[0] ?? 0
+    const bMin = b.files[0]?.turnRange[0] ?? 0
+    return aMin - bMin
+  })
+
+  return groups
 }

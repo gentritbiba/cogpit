@@ -34,11 +34,22 @@ export const KNOWN_TOOLS = [
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"
 
 export function buildPermissionArgs(config: PermissionsConfig): string[] {
-  if (config.mode === "bypassPermissions") {
+  if (!config.mode || config.mode === "bypassPermissions") {
     return ["--dangerously-skip-permissions"]
   }
 
-  const args = ["--permission-mode", config.mode]
+  const args: string[] = []
+
+  const modeMap: Record<string, string> = {
+    default: "default",
+    plan: "plan",
+    acceptEdits: "acceptEdits",
+    dontAsk: "dontAsk",
+  }
+  const mapped = modeMap[config.mode]
+  if (mapped) {
+    args.push("--permission-mode", mapped)
+  }
 
   for (const tool of config.allowedTools) {
     args.push("--allowedTools", tool)

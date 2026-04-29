@@ -100,23 +100,38 @@ export function terminalCommand(terminal: string, dirPath: string): { cmd: strin
   return { cmd: terminal, args: ["--working-directory", dirPath] }
 }
 
-const EDITORS = ["cursor", "code", "zed", "windsurf"] as const
+/** Editors that support the --diff flag */
+const DIFF_CAPABLE = new Set(["cursor", "code", "windsurf"])
 
-function findEditor(): Promise<string | null> {
+/** Fallback detection order when no config or $VISUAL is set */
+const DETECT_EDITORS = ["cursor", "code", "zed", "windsurf"] as const
+
+function whichEditor(name: string): Promise<string | null> {
   return new Promise((resolve) => {
     const cmd = platform() === "win32" ? "where" : "which"
-    const results: (string | null)[] = new Array(EDITORS.length).fill(null)
-    let remaining = EDITORS.length
-
-    for (let i = 0; i < EDITORS.length; i++) {
-      const idx = i
-      execFile(cmd, [EDITORS[idx]], (err) => {
-        if (!err) results[idx] = EDITORS[idx]
-        remaining--
-        if (remaining === 0) resolve(results.find((r) => r !== null) ?? null)
-      })
-    }
+    execFile(cmd, [name], (err) => resolve(err ? null : name))
   })
+}
+
+/**
+ * Resolve the editor to use, in priority order:
+ * 1. Explicit config setting (editorApp)
+ * 2. $VISUAL environment variable
+ * 3. Auto-detect from known editors (in order: cursor, code, zed, windsurf)
+ * 4. Returns null → caller falls back to OS default
+ */
+async function resolveEditor(configuredEditor?: string): Promise<string | null> {
+  if (configuredEditor) return configuredEditor
+
+  const visual = process.env.VISUAL
+  if (visual) return visual
+
+  for (const e of DETECT_EDITORS) {
+    const found = await whichEditor(e)
+    if (found) return found
+  }
+
+  return null
 }
 
 function openWithEditor(editor: string, args: string[]): Promise<void> {
@@ -309,11 +324,12 @@ end tell`
           return
         }
 
-        const editor = await findEditor()
+        const editor = await resolveEditor(getConfig()?.editorApp)
 
         if (mode === "diff") {
-          // diff mode: only supported for editors with --diff flag (cursor, code)
-          const diffEditor = editor === "cursor" || editor === "code" ? editor : null
+          // diff mode: only supported for editors with --diff flag (cursor, code, windsurf)
+          const editorName = editor ? basename(editor).toLowerCase() : ""
+          const diffEditor = editor && DIFF_CAPABLE.has(editorName) ? editor : null
           if (!diffEditor) {
             res.statusCode = 422
             res.end(JSON.stringify({ error: "Diff view requires Cursor or VS Code" }))

@@ -53,6 +53,7 @@ describe("useNewSession", () => {
     isMobile: false,
     onSessionFinalized,
     model: "claude-opus-4-6",
+    effort: "high",
   }
 
   beforeEach(() => {
@@ -109,7 +110,7 @@ describe("useNewSession", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
-  it("createAndSend creates session and fetches JSONL on success", async () => {
+  it("createAndSend promotes immediately and hydrates content in the background", async () => {
     const { result } = renderHook(() => useNewSession(defaultOpts))
 
     // Set up the pending dirName
@@ -141,12 +142,23 @@ describe("useNewSession", () => {
     expect(sessionId).toBe("session-123")
     expect(result.current.creatingSession).toBe(false)
     expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "FINALIZE_SESSION" })
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        session: expect.objectContaining({ sessionId: "session-123", turns: [] }),
+      })
     )
     expect(onSessionFinalized).toHaveBeenCalledWith(
-      mockParsedSession,
+      expect.objectContaining({ sessionId: "session-123", turns: [] }),
       expect.objectContaining({ dirName: "project-dir", fileName: "session.jsonl" })
     )
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "RELOAD_SESSION_CONTENT",
+          session: mockParsedSession,
+        })
+      )
+    })
   })
 
   it("createAndSend sets error on failed create response", async () => {
@@ -170,6 +182,54 @@ describe("useNewSession", () => {
     expect(sessionId).toBeNull()
     expect(result.current.createError).toBe("Internal server error")
     expect(result.current.creatingSession).toBe(false)
+  })
+
+  it("retries Codex session creation without a rejected model override", async () => {
+    const onCodexModelRejected = vi.fn()
+    const { result } = renderHook(() =>
+      useNewSession({
+        ...defaultOpts,
+        model: "gpt-5.4-mini",
+        onCodexModelRejected,
+      })
+    )
+
+    act(() => {
+      result.current.handleNewSession("codex__test")
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({
+          error: "There's an issue with the selected model (gpt-5.4-mini). It may not exist or you may not have access to it. Run --model to pick a different model.",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          dirName: "codex__test",
+          fileName: "session.jsonl",
+          sessionId: "session-123",
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('{"type":"user","message":{"role":"user","content":"hello"}}'),
+      } as Response)
+
+    await act(async () => {
+      await result.current.createAndSend("hello")
+    })
+
+    expect(onCodexModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
+
+    const firstBody = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    const secondBody = JSON.parse((mockedAuthFetch.mock.calls[1][1] as RequestInit).body as string)
+    expect(firstBody.model).toBe("gpt-5.4-mini")
+    expect(secondBody.model).toBeUndefined()
+    expect(result.current.createError).toBeNull()
   })
 
   it("createAndSend handles non-JSON error responses", async () => {
@@ -223,16 +283,18 @@ describe("useNewSession", () => {
       })
 
       let done = false
-      const promise = act(async () => {
-        await result.current.createAndSend("hello")
-        done = true
-      })
+      await act(async () => {
+        const promise = result.current.createAndSend("hello").then(() => {
+          done = true
+        })
 
-      // Fast-forward through all polling delays until the promise resolves
-      while (!done) {
-        await vi.advanceTimersByTimeAsync(200)
-      }
-      await promise
+        // Fast-forward through all polling delays until the promise resolves
+        while (!done) {
+          await vi.advanceTimersByTimeAsync(200)
+        }
+
+        await promise
+      })
 
       // Should finalize with a minimal session instead of erroring,
       // so the user transitions to ChatArea and SSE picks up real content
@@ -436,5 +498,54 @@ describe("useNewSession", () => {
 
     const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     expect(body.worktreeName).toBeUndefined()
+  })
+
+  it("recovers Codex sessions from project listing when create returns the stale exit-0 error", async () => {
+    const { result } = renderHook(() => useNewSession(defaultOpts))
+
+    act(() => {
+      result.current.handleNewSession("codex__L3RtcC9wcm9qZWN0", "/tmp/project")
+    })
+
+    mockedAuthFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "codex exited with code 0" }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          sessions: [
+            {
+              fileName: "2026/03/18/rollout-2026-03-18T16-48-59-session.jsonl",
+              sessionId: "codex-session-1",
+              firstUserMessage: "hello codex",
+              lastModified: new Date().toISOString(),
+            },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve("{}"),
+      } as Response)
+
+    let sessionId: string | null = null
+    await act(async () => {
+      sessionId = await result.current.createAndSend("hello codex")
+    })
+
+    expect(sessionId).toBe("codex-session-1")
+    expect(result.current.createError).toBeNull()
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "FINALIZE_SESSION",
+        source: expect.objectContaining({
+          dirName: "codex__L3RtcC9wcm9qZWN0",
+          fileName: "2026/03/18/rollout-2026-03-18T16-48-59-session.jsonl",
+        }),
+      })
+    )
   })
 })

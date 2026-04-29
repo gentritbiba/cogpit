@@ -5,6 +5,7 @@
 
 import { readdir, stat } from "node:fs/promises"
 import { join, basename } from "node:path"
+import { homedir } from "node:os"
 import { dirs } from "../lib/dirs"
 import { parseMaxAge } from "../lib/response"
 import { getSessionMeta, getSessionStatus } from "../lib/metadata"
@@ -24,12 +25,46 @@ export interface SessionSummary {
   turnCount: number
   status: string
   mtime: number
+  source?: "claude" | "codex"
 }
 
 export interface SessionsOptions {
   cwd?: string
   limit?: number
   maxAge?: string
+}
+
+const CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions")
+
+async function listCodexSessionFiles(cutoff: number): Promise<Array<{ path: string; mtimeMs: number }>> {
+  const walk = async (dir: string, depth: number): Promise<Array<{ path: string; mtimeMs: number }>> => {
+    if (depth > 4) return []
+    let entries: import("node:fs").Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true }) as import("node:fs").Dirent[]
+    } catch {
+      return []
+    }
+
+    const results: Array<{ path: string; mtimeMs: number }> = []
+    for (const entry of entries) {
+      const filePath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        results.push(...await walk(filePath, depth + 1))
+        continue
+      }
+      if (!entry.name.endsWith(".jsonl")) continue
+      try {
+        const s = await stat(filePath)
+        if (s.mtimeMs >= cutoff) results.push({ path: filePath, mtimeMs: s.mtimeMs })
+      } catch {
+        continue
+      }
+    }
+    return results
+  }
+
+  return walk(CODEX_SESSIONS_DIR, 0)
 }
 
 // ── listSessions ─────────────────────────────────────────────────────────────
@@ -79,8 +114,10 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
     }),
   )
 
+  const codexFiles = await listCodexSessionFiles(cutoff)
+
   // 3. Sort by mtime descending
-  const allFiles = nested.flat()
+  const allFiles = [...nested.flat(), ...codexFiles]
   allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs)
 
   // 4. For each file, get metadata + status (up to limit)
@@ -111,6 +148,7 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
         turnCount: meta.turnCount,
         status: statusInfo.status,
         mtime: file.mtimeMs,
+        source: file.path.startsWith(CODEX_SESSIONS_DIR + "/") ? "codex" : "claude",
       })
     } catch {
       // Skip files that can't be read
@@ -138,13 +176,10 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
   try {
     files = (await readdir(projectDir)) as string[]
   } catch {
-    return null
+    files = []
   }
 
   const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-  if (jsonlFiles.length === 0) return null
-
-  // Find the most recently modified .jsonl file
   const statResults = await Promise.all(
     jsonlFiles.map(async (f) => {
       const filePath = join(projectDir, f)
@@ -157,7 +192,22 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
     }),
   )
 
-  const valid = statResults.filter((r): r is { path: string; mtimeMs: number } => r !== null)
+  const codexCandidates = await listCodexSessionFiles(0)
+  const codexMatches: Array<{ path: string; mtimeMs: number }> = []
+  for (const file of codexCandidates) {
+    try {
+      const meta = await getSessionMeta(file.path)
+      if (meta.cwd === cwd) codexMatches.push(file)
+    } catch {
+      continue
+    }
+  }
+
+  const valid = [
+    ...statResults.filter((r): r is { path: string; mtimeMs: number } => r !== null),
+    ...codexMatches,
+  ]
+  if (valid.length === 0) return null
   valid.sort((a, b) => b.mtimeMs - a.mtimeMs)
   const latest = valid[0]
 
@@ -181,5 +231,6 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
     turnCount: meta.turnCount,
     status: statusInfo.status,
     mtime: latest.mtimeMs,
+    source: latest.path.startsWith(CODEX_SESSIONS_DIR + "/") ? "codex" : "claude",
   }
 }

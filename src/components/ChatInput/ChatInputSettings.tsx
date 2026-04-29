@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, GitBranch, Plug, RefreshCw, Check } from "lucide-react"
-import { cn, MODEL_OPTIONS, EFFORT_OPTIONS, DEFAULT_EFFORT } from "@/lib/utils"
+import { Bot, Check, ChevronDown, Code2, GitBranch, Plug, RefreshCw, Shield } from "lucide-react"
+import { cn, DEFAULT_EFFORT, getEffortOptions, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
+import type { AgentKind } from "@/lib/sessionSource"
+import type { PermissionMode } from "@/lib/permissions"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,6 +20,10 @@ function friendlyModelName(modelId: string): string {
   if (lower.includes("opus")) return "Opus"
   if (lower.includes("sonnet")) return "Sonnet"
   if (lower.includes("haiku")) return "Haiku"
+  if (lower.startsWith("gpt-5.4-mini")) return "GPT-5.4 Mini"
+  if (lower.startsWith("gpt-5.4")) return "GPT-5.4"
+  if (lower.startsWith("gpt-5.3-codex")) return "GPT-5.3 Codex"
+  if (lower.startsWith("gpt-5.2-codex")) return "GPT-5.2 Codex"
   return modelId
 }
 
@@ -114,6 +120,107 @@ function MiniDropdown({ value, fallbackLabel, options, onChange }: MiniDropdownP
           ))}
         </div>,
         document.body
+      )}
+    </>
+  )
+}
+
+// ── Provider + Model combined dropdown (new sessions only) ─────────────────────
+
+const AGENT_OPTIONS: Array<{ value: AgentKind; label: string; Icon: typeof Bot }> = [
+  { value: "claude", label: "Claude", Icon: Bot },
+  { value: "codex", label: "Codex", Icon: Code2 },
+]
+
+interface AgentModelDropdownProps {
+  agentKind: AgentKind
+  onAgentKindChange: (agentKind: AgentKind) => void
+  value: string
+  fallbackLabel: string
+  options: readonly DropdownOption[]
+  onChange: (value: string) => void
+}
+
+function AgentModelDropdown({
+  agentKind,
+  onAgentKindChange,
+  value,
+  fallbackLabel,
+  options,
+  onChange,
+}: AgentModelDropdownProps) {
+  const { open, setOpen, triggerRef, menuRef, menuPos } = useDropdownState()
+
+  const agentLabel = agentKind === "codex" ? "Codex" : "Claude"
+  const selectedLabel = options.find((o) => o.value === value)?.label ?? fallbackLabel
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          "text-muted-foreground hover:text-foreground hover:bg-white/5",
+        )}
+      >
+        <span className="truncate">{`${agentLabel} / ${selectedLabel}`}</span>
+        <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[220px] rounded-lg border border-border/50 bg-elevation-3 py-1 depth-high animate-in fade-in-0 zoom-in-95 duration-100"
+          style={{ top: menuPos.top, left: menuPos.left, ...MENU_OFFSET_STYLE }}
+        >
+          <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Agent
+          </div>
+          {AGENT_OPTIONS.map((option) => {
+            const Icon = option.Icon
+            const isActive = option.value === agentKind
+            return (
+              <button
+                key={option.value}
+                onClick={() => onAgentKindChange(option.value)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-[11px] transition-colors",
+                  isActive
+                    ? "bg-white/5 text-foreground"
+                    : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5 shrink-0" />
+                <span>{option.label}</span>
+                {isActive && <Check className="ml-auto size-3 text-emerald-500" />}
+              </button>
+            )
+          })}
+
+          <div className="my-1 border-t border-border/30" />
+          <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Model
+          </div>
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { onChange(opt.value); setOpen(false) }}
+              className={cn(
+                "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-[11px] transition-colors",
+                opt.value === value
+                  ? "bg-white/5 text-foreground"
+                  : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+              )}
+            >
+              <span>{opt.menuLabel ?? opt.label}</span>
+              {opt.value === value && (
+                <span className="text-[9px] text-muted-foreground">active</span>
+              )}
+            </button>
+          ))}
+        </div>,
+        document.body,
       )}
     </>
   )
@@ -233,7 +340,79 @@ function McpDropdown({ servers, selected, onToggle, onRefresh, loading, onAuth }
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+// ── Permission mode dropdown ─────────────────────────────────────────────────
+
+const PERMISSION_MODES: Array<{ value: PermissionMode; label: string; color: string }> = [
+  { value: "bypassPermissions", label: "YOLO", color: "text-red-400" },
+  { value: "default", label: "Default", color: "text-blue-400" },
+  { value: "plan", label: "Plan", color: "text-purple-400" },
+  { value: "acceptEdits", label: "Accept Edits", color: "text-green-400" },
+  { value: "dontAsk", label: "Don't Ask", color: "text-amber-400" },
+]
+
+interface PermissionDropdownProps {
+  mode: PermissionMode
+  onChange: (mode: PermissionMode) => void
+}
+
+function PermissionDropdown({ mode, onChange }: PermissionDropdownProps) {
+  const { open, setOpen, triggerRef, menuRef, menuPos } = useDropdownState()
+
+  const current = PERMISSION_MODES.find((m) => m.value === mode) ?? PERMISSION_MODES[0]
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+          mode === "bypassPermissions"
+            ? "text-muted-foreground hover:text-foreground hover:bg-white/5"
+            : cn(current.color, "hover:bg-white/5"),
+        )}
+      >
+        <Shield className="size-3" />
+        <span className="truncate">{current.label}</span>
+        <ChevronDown className={cn("size-3 opacity-50 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[150px] rounded-lg border border-border/50 bg-elevation-3 py-1 depth-high animate-in fade-in-0 zoom-in-95 duration-100"
+          style={{ top: menuPos.top, left: menuPos.left, ...MENU_OFFSET_STYLE }}
+        >
+          <div className="px-3 py-1.5 border-b border-border/30">
+            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Permissions</span>
+          </div>
+          {PERMISSION_MODES.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => { onChange(opt.value); setOpen(false) }}
+              className={cn(
+                "flex w-full items-center justify-between gap-3 px-3 py-1.5 text-[11px] transition-colors",
+                opt.value === mode
+                  ? cn("bg-white/5", opt.color)
+                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
+              )}
+            >
+              <span>{opt.label}</span>
+              {opt.value === mode && (
+                <span className="text-[9px] text-muted-foreground">active</span>
+              )}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 export interface ChatInputSettingsProps {
+  agentKind?: AgentKind
+  onAgentKindChange?: (agentKind: AgentKind) => void
   selectedModel: string
   onModelChange: (model: string) => void
   selectedEffort: string
@@ -256,9 +435,15 @@ export interface ChatInputSettingsProps {
   mcpLoading?: boolean
   /** Called when a needs-auth server is clicked */
   onMcpAuth?: (serverName: string) => void
+  /** Current permission mode */
+  permissionMode?: PermissionMode
+  /** Called when permission mode changes */
+  onPermissionModeChange?: (mode: PermissionMode) => void
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
+  agentKind = "claude",
+  onAgentKindChange,
   selectedModel,
   onModelChange,
   selectedEffort,
@@ -274,6 +459,8 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   onRefreshMcpServers,
   mcpLoading,
   onMcpAuth,
+  permissionMode,
+  onPermissionModeChange,
 }: ChatInputSettingsProps) {
   // Use a ref to always have the latest onApplySettings without stale closures
   const applyRef = useRef(onApplySettings)
@@ -297,37 +484,61 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     [onEffortChange, changeAndApply],
   )
 
-  // Build model options with resolved "Default" label
-  const resolvedDefaultName = activeModelId ? friendlyModelName(activeModelId) : "Opus"
-  const modelOptions: readonly DropdownOption[] = MODEL_OPTIONS.map((opt) =>
+  // Build model options with resolved "Default" label — scoped to current agentKind
+  // so Codex sessions never show a Claude model name and vice versa
+  const resolvedDefaultName = agentKind === "codex"
+    ? (activeModelId?.toLowerCase().startsWith("gpt-") ? friendlyModelName(activeModelId) : "GPT-5.4")
+    : (activeModelId ? friendlyModelName(activeModelId) : "Opus")
+  const modelOptions: readonly DropdownOption[] = getModelOptions(agentKind).map((opt) =>
     opt.value === ""
       ? { value: "", label: resolvedDefaultName, menuLabel: `${resolvedDefaultName} (default)` }
       : opt
   )
+  const effortOptions = getEffortOptions(agentKind)
+  const showWorktree = agentKind === "claude"
 
   return (
     <div className="flex items-center pb-2">
       <div className="w-full flex items-center gap-0.5 flex-wrap">
         {/* Model */}
-        <MiniDropdown
-          value={selectedModel}
-          fallbackLabel="Model"
-          options={modelOptions}
-          onChange={handleModelChange}
-        />
+        {onAgentKindChange
+          ? (
+            <AgentModelDropdown
+              agentKind={agentKind}
+              onAgentKindChange={onAgentKindChange}
+              value={selectedModel}
+              fallbackLabel={resolvedDefaultName}
+              options={modelOptions}
+              onChange={handleModelChange}
+            />
+          )
+          : (
+            <MiniDropdown
+              value={selectedModel}
+              fallbackLabel="Model"
+              options={modelOptions}
+              onChange={handleModelChange}
+            />
+          )}
 
         <span className="text-border/60 text-[10px] select-none">/</span>
-
-        {/* Thinking Effort */}
         <MiniDropdown
-          value={selectedEffort || DEFAULT_EFFORT}
+          value={normalizeEffortForAgent(agentKind, selectedEffort || DEFAULT_EFFORT)}
           fallbackLabel="Effort"
-          options={EFFORT_OPTIONS}
+          options={effortOptions}
           onChange={handleEffortChange}
         />
 
+        {/* Permission mode — claude only */}
+        {agentKind === "claude" && onPermissionModeChange && permissionMode && (
+          <>
+            <span className="text-border/60 text-[10px] select-none">/</span>
+            <PermissionDropdown mode={permissionMode} onChange={onPermissionModeChange} />
+          </>
+        )}
+
         {/* Worktree toggle — new session only */}
-        {isNewSession && onWorktreeEnabledChange && (
+        {showWorktree && isNewSession && onWorktreeEnabledChange && (
           <>
             <span className="text-border/60 text-[10px] select-none">/</span>
             <button
