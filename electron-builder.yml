@@ -50,14 +50,19 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
         - x64
+        - arm64
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Cogpit
 
 linux:
   target:
