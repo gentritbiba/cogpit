@@ -7,8 +7,8 @@ import {
 } from "../permissions"
 
 describe("DEFAULT_PERMISSIONS", () => {
-  it("has bypassPermissions as default mode", () => {
-    expect(DEFAULT_PERMISSIONS.mode).toBe("bypassPermissions")
+  it("has 'default' as default mode (asks for tool approvals — never YOLO out of the box)", () => {
+    expect(DEFAULT_PERMISSIONS.mode).toBe("default")
   })
 
   it("has empty allowedTools and disallowedTools", () => {
