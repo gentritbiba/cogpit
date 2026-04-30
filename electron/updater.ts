@@ -28,10 +28,11 @@ function writePrefs(prefs: UpdatePrefs): void {
   writeFileSync(getPrefsPath(), JSON.stringify(prefs, null, 2))
 }
 
-type UpdatePlatform = "appimage" | "mac-notification" | "linux-notification"
+type UpdatePlatform = "appimage" | "mac-notification" | "win-notification" | "linux-notification"
 
 function getUpdatePlatform(): UpdatePlatform {
   if (process.platform === "darwin") return "mac-notification"
+  if (process.platform === "win32") return "win-notification"
   if (process.env.APPIMAGE) return "appimage"
   return "linux-notification"
 }
@@ -98,10 +99,14 @@ export function initUpdater(mainWindow: BrowserWindow): void {
       const prefs = readPrefs()
       if (prefs.dismissedVersion === release.version) return
 
+      const uiPlatform =
+        platform === "mac-notification" ? "mac" :
+        platform === "win-notification" ? "win" :
+        "linux-pkg"
       mainWindow.webContents.send("update-available", {
         version: release.version,
         url: release.url,
-        platform: platform === "mac-notification" ? "mac" : "linux-pkg",
+        platform: uiPlatform,
       })
     }, 5000)
   }

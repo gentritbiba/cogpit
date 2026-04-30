@@ -4,7 +4,7 @@ import { X, Download, ArrowUpCircle } from "lucide-react"
 interface UpdateInfo {
   version: string
   url: string
-  platform: string // "mac" | "linux-pkg"
+  platform: string // "mac" | "win" | "linux-pkg"
 }
 
 interface DownloadedInfo {
@@ -58,7 +58,7 @@ export function UpdateBanner() {
           Cogpit v{updateInfo.version} is available
         </span>
         <div className="flex-1" />
-        {updateInfo.platform === "mac" ? (
+        {updateInfo.platform === "mac" || updateInfo.platform === "win" ? (
           <a
             href={updateInfo.url}
             target="_blank"
