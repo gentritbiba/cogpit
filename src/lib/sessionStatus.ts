@@ -7,7 +7,7 @@
  * never stored as app state.
  */
 
-export type SessionStatus = "idle" | "thinking" | "tool_use" | "processing" | "completed" | "compacting"
+export type SessionStatus = "idle" | "thinking" | "tool_use" | "processing" | "completed" | "compacting" | "deferred"
 
 export interface SessionStatusInfo {
   status: SessionStatus
@@ -44,6 +44,27 @@ export function deriveSessionStatus(
     const info: SessionStatusInfo = { status, pendingQueue: Math.max(0, pendingEnqueues) }
     if (toolName) info.toolName = toolName
     return info
+  }
+
+  // Pre-pass: check if the latest meaningful event is a deferred hook_progress.
+  // A deferred state means a PreToolUse hook returned decision:"defer", pausing
+  // the session until `claude -p --resume <id>` re-evaluates it.
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const msg = rawMessages[i]
+    // Skip queue-operations — they don't affect the deferred signal
+    if (msg.type === "queue-operation") continue
+    // Skip progress messages that are NOT hook_progress
+    if (msg.type === "progress") {
+      const data = (msg as { data?: { type?: string; decision?: string; hookSpecificOutput?: { permissionDecision?: string } } }).data
+      if (data?.type === "hook_progress") {
+        const decision = data.decision ?? data.hookSpecificOutput?.permissionDecision
+        if (decision === "defer") return result("deferred")
+      }
+      // Any non-deferred progress message — stop looking for deferred
+      break
+    }
+    // Any other message type breaks the deferred check
+    break
   }
 
   // Walk backward to find the last meaningful signal
@@ -168,6 +189,7 @@ export function getStatusLabel(status: SessionStatus | undefined, toolName?: str
       return toolName ? `Using ${toolName}` : "Using tool..."
     case "processing": return "Processing..."
     case "compacting": return "Compressing context..."
+    case "deferred": return "Awaiting permission review"
     case "completed":
       if (terminalReason) return getTerminalReasonLabel(terminalReason)
       return "Done"

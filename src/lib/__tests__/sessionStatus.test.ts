@@ -174,6 +174,57 @@ describe("deriveSessionStatus", () => {
   })
 })
 
+describe("deriveSessionStatus — deferred", () => {
+  it("returns deferred when latest event is hook_progress with decision:defer", () => {
+    const msgs = [
+      { type: "user", message: { role: "user", content: "do something" } },
+      { type: "assistant", message: { stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name: "Edit" }] } },
+      { type: "progress", data: { type: "hook_progress", hook_event_name: "PreToolUse", decision: "defer" } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("deferred")
+  })
+
+  it("returns deferred when decision is on hookSpecificOutput.permissionDecision", () => {
+    const msgs = [
+      { type: "progress", data: { type: "hook_progress", hookSpecificOutput: { permissionDecision: "defer" } } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("deferred")
+  })
+
+  it("does not return deferred when a non-defer progress follows a defer progress", () => {
+    const msgs = [
+      { type: "progress", data: { type: "hook_progress", decision: "defer" } },
+      { type: "progress", data: { type: "hook_progress", decision: "allow" } },
+    ]
+    // Latest meaningful event is the non-defer progress — falls through to idle
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
+  })
+
+  it("does not return deferred when a later assistant message follows the defer", () => {
+    const msgs = [
+      { type: "progress", data: { type: "hook_progress", decision: "defer" } },
+      { type: "user", message: { role: "user", content: "hello" } },
+      { type: "assistant", message: { stop_reason: "end_turn", content: [] } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("does not crash on progress with missing data fields (defensive)", () => {
+    const msgs = [
+      { type: "progress", data: {} },
+    ]
+    expect(() => deriveSessionStatus(msgs)).not.toThrow()
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
+  })
+
+  it("does not return deferred for non-hook_progress progress type", () => {
+    const msgs = [
+      { type: "progress", data: { type: "agent_progress", decision: "defer" } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("idle")
+  })
+})
+
 describe("getStatusLabel", () => {
   it("returns null for idle", () => {
     expect(getStatusLabel("idle")).toBeNull()
@@ -206,6 +257,10 @@ describe("getStatusLabel", () => {
 
   it("returns Compressing context... for compacting", () => {
     expect(getStatusLabel("compacting")).toBe("Compressing context...")
+  })
+
+  it("returns Awaiting permission review for deferred", () => {
+    expect(getStatusLabel("deferred")).toBe("Awaiting permission review")
   })
 
   it("returns Done for completed", () => {

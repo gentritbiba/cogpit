@@ -8,6 +8,7 @@ import { shortPath, dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { SessionRow } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import { usePty } from "@/contexts/PtyContext"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -74,6 +75,7 @@ function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessio
 export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
+  const pty = usePty()
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
   const [processes, setProcesses] = useState<RunningProcess[]>([])
   const [loading, setLoading] = useState(false)
@@ -282,6 +284,25 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
   }, [onDeleteSession])
 
+  /**
+   * Spawn `claude -p --resume <sessionId>` in a PTY terminal so the user can
+   * re-evaluate a permission that was paused by a PreToolUse hook decision:"defer".
+   */
+  const handleResumeSession = useCallback((sessionId: string, cwd?: string) => {
+    const id = `resume_${crypto.randomUUID().slice(0, 8)}`
+    pty.send({
+      type: "spawn",
+      id,
+      name: `Resume ${sessionId.slice(0, 8)}`,
+      command: "claude",
+      args: ["-p", "--resume", sessionId],
+      cwd: cwd ?? undefined,
+      metadata: { type: "terminal" },
+    })
+    // Refresh sessions after a brief delay to pick up any status change
+    setTimeout(() => fetchData(debouncedSearchRef.current || undefined), 3000)
+  }, [pty, fetchData])
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Search bar + proc count */}
@@ -389,6 +410,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               creatingSession={creatingSession}
               pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
               onPrefetchSession={onPrefetchSession}
+              onResumeSession={handleResumeSession}
             />
           ))}
 
@@ -414,6 +436,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               creatingSession={creatingSession}
               pendingSession={pendingSession}
               onPrefetchSession={onPrefetchSession}
+              onResumeSession={handleResumeSession}
             />
           )}
 
@@ -446,6 +469,7 @@ function ProjectGroup({
   creatingSession,
   pendingSession,
   onPrefetchSession,
+  onResumeSession,
 }: {
   projectPath: string
   sessions: ActiveSessionInfo[]
@@ -467,6 +491,7 @@ function ProjectGroup({
   creatingSession?: boolean
   pendingSession?: PendingSessionInfo | null
   onPrefetchSession?: (dirName: string, fileName: string) => void
+  onResumeSession?: (sessionId: string, cwd?: string) => void
 }) {
   const hasPending = !!pendingSession
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
@@ -565,6 +590,7 @@ function ProjectGroup({
                 onDeleteSession={onDeleteSession}
                 onRenameSession={onRenameSession}
                 onPrefetchSession={onPrefetchSession}
+                onResumeSession={onResumeSession}
               />
             )
           })}

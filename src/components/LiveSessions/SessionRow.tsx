@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react"
-import { X, MessageSquare, Cpu, GitBranch } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { X, MessageSquare, Cpu, GitBranch, Play } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
@@ -66,6 +66,11 @@ interface SessionRowProps {
    * — rows without this prop behave exactly as before.
    */
   onPrefetchSession?: (dirName: string, fileName: string) => void
+  /**
+   * Called when the user clicks "Resume to evaluate" on a deferred session.
+   * The parent should spawn `claude -p --resume <sessionId>` in the session's cwd.
+   */
+  onResumeSession?: (sessionId: string, cwd?: string) => void
 }
 
 export function SessionRow({
@@ -82,8 +87,11 @@ export function SessionRow({
   onDeleteSession,
   onRenameSession,
   onPrefetchSession,
+  onResumeSession,
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
+  const isDeferred = s.agentStatus === "deferred"
+  const [resuming, setResuming] = useState(false)
   const statusLabel = hasProcess
     ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
     : null
@@ -113,6 +121,15 @@ export function SessionRow({
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
   }, [])
 
+  const handleResume = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!onResumeSession || resuming) return
+    setResuming(true)
+    onResumeSession(s.sessionId, s.cwd)
+    // Reset after 3 s in case parent doesn't unmount the row immediately
+    setTimeout(() => setResuming(false), 3000)
+  }
+
   const sessionRow = (
     <Tooltip>
       <TooltipTrigger render={<div
@@ -134,6 +151,27 @@ export function SessionRow({
           <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
           </span>
+
+          {/* Deferred pill + resume button */}
+          {isDeferred && (
+            <>
+              <span className="flex items-center rounded bg-amber-500/15 text-amber-400 px-1 py-px text-[9px] font-medium shrink-0">
+                deferred
+              </span>
+              {onResumeSession && (
+                <button
+                  onClick={handleResume}
+                  disabled={resuming}
+                  className="flex items-center gap-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 hover:text-amber-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors disabled:opacity-50"
+                  title="Resume to evaluate deferred permission"
+                  aria-label="Resume to evaluate"
+                >
+                  <Play className="size-2 fill-current" />
+                  Resume
+                </button>
+              )}
+            </>
+          )}
 
           {/* Worktree badge */}
           {worktreeName && (
@@ -238,6 +276,7 @@ function isIdleStatus(status?: SessionStatus): boolean {
 function getStatusColor(status?: SessionStatus): string {
   if (isIdleStatus(status)) return "text-green-400"
   if (status === "thinking") return "text-amber-400"
+  if (status === "deferred") return "text-amber-400"
   return "text-blue-400"
 }
 

@@ -256,6 +256,20 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
             }
           }
 
+          // Deferred hook_progress — prepend and return immediately
+          if (obj.type === "progress") {
+            const data = (obj as { data?: { type?: string; decision?: string; hookSpecificOutput?: { permissionDecision?: string } } }).data
+            if (data?.type === "hook_progress") {
+              const decision = data.decision ?? data.hookSpecificOutput?.permissionDecision
+              if (decision === "defer") {
+                meaningful.unshift(obj)
+                return deriveSessionStatus(meaningful)
+              }
+            }
+            // Non-deferred progress — not meaningful for status, skip
+            continue
+          }
+
           if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {
             // Prepend so array stays in file order (oldest first)
             meaningful.unshift(obj)
