@@ -11,41 +11,18 @@ import type {
   TokenUsage,
   ThinkingBlock,
   ContentBlock,
-  UserMessage,
-  AssistantMessage,
-  ProgressMessage,
-  SystemMessage,
-  SummaryMessage,
   AgentToolUseResult,
   ParsedHookEvent,
   HookProgressData,
 } from "./types"
-
-// ── Local type guards (duplicated to avoid circular deps with parser.ts) ─────
-
-function isUserMessage(msg: RawMessage): msg is UserMessage {
-  return msg.type === "user"
-}
-
-function isAssistantMessage(msg: RawMessage): msg is AssistantMessage {
-  return msg.type === "assistant"
-}
-
-function isProgressMessage(msg: RawMessage): msg is ProgressMessage {
-  return msg.type === "progress"
-}
-
-function isSystemMessage(msg: RawMessage): msg is SystemMessage {
-  return msg.type === "system"
-}
-
-function isSummaryMessage(msg: RawMessage): msg is SummaryMessage {
-  return msg.type === "summary"
-}
-
-function isCompactBoundary(msg: RawMessage): msg is SystemMessage {
-  return msg.type === "system" && (msg as SystemMessage).subtype === "compact_boundary"
-}
+import {
+  isUserMessage,
+  isAssistantMessage,
+  isProgressMessage,
+  isSystemMessage,
+  isSummaryMessage,
+  isCompactBoundary,
+} from "./messageTypeGuards"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content

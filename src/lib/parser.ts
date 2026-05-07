@@ -3,21 +3,17 @@ import type {
   ParsedSession,
   ContentBlock,
   ImageBlock,
-  AssistantMessage,
   UserContent,
 } from "./types"
 import { buildTurns } from "./turnBuilder"
 import { computeStats } from "./sessionStats"
 import { isCodexSessionText, parseCodexSession } from "./codex"
+import { isAssistantMessage } from "./messageTypeGuards"
 
 export type { PendingInteraction } from "./interactiveState"
 export { detectPendingInteraction } from "./interactiveState"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function isAssistantMessage(msg: RawMessage): msg is AssistantMessage {
-  return msg.type === "assistant"
-}
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
