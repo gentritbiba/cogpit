@@ -39,6 +39,18 @@ const TIMELINE_TOOL_BADGE_STYLES: Record<string, string> = {
   EnterPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
   ExitPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
   AskUserQuestion: "bg-pink-500/5 text-pink-400/40 border-pink-500/10",
+  // Scheduling / automation tools
+  Monitor: "bg-cyan-500/5 text-cyan-400/40 border-cyan-500/10",
+  CronCreate: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
+  CronDelete: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
+  CronList: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
+  ScheduleWakeup: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
+  RemoteTrigger: "bg-blue-500/5 text-blue-400/40 border-blue-500/10",
+  PushNotification: "bg-pink-500/10 text-pink-400/60 border-pink-500/20",
+  EnterWorktree: "bg-emerald-500/5 text-emerald-400/40 border-emerald-500/10",
+  ExitWorktree: "bg-emerald-500/5 text-emerald-400/40 border-emerald-500/10",
+  Skill: "bg-indigo-500/10 text-indigo-400/60 border-indigo-500/20",
+  ToolSearch: "bg-slate-500/5 text-slate-400/40 border-slate-500/10",
 }
 
 const DEFAULT_BADGE_STYLE = "bg-muted/5 text-muted-foreground/40 border-muted-foreground/10"
@@ -47,7 +59,7 @@ export function getToolBadgeStyle(name: string): string {
   return TIMELINE_TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
 }
 
-function getToolSummary(tc: ToolCall): string {
+export function getToolSummary(tc: ToolCall): string {
   const input = tc.input
   switch (tc.name) {
     case "Read":
@@ -75,6 +87,46 @@ function getToolSummary(tc: ToolCall): string {
       const questions = input.questions as Array<{ question?: string }> | undefined
       return questions?.[0]?.question ?? ""
     }
+    case "Monitor": {
+      const bashId = String(input.bash_id ?? "")
+      const filter = input.filter ? ` · filter=${input.filter}` : ""
+      return `${bashId}${filter}`
+    }
+    case "CronCreate": {
+      const sched = String(input.schedule ?? input.cron ?? "")
+      const prompt = String(input.prompt ?? "")
+      const trimmed = prompt.length > 60 ? prompt.slice(0, 60) + "..." : prompt
+      return sched && trimmed ? `${sched} → ${trimmed}` : sched || trimmed
+    }
+    case "CronList":
+      return ""
+    case "CronDelete":
+      return String(input.id ?? input.cron_id ?? "")
+    case "ScheduleWakeup": {
+      const sec = Number(input.delaySeconds ?? 0)
+      const m = Math.round(sec / 60)
+      const human = sec >= 3600 ? `${Math.round(sec / 3600)}h` : sec >= 60 ? `${m}m` : `${sec}s`
+      const reason = input.reason ? ` · ${input.reason}` : ""
+      return `in ${human}${reason}`
+    }
+    case "RemoteTrigger": {
+      const action = String(input.action ?? "")
+      const id = String(input.id ?? input.trigger_id ?? "")
+      return [action, id].filter(Boolean).join(" ")
+    }
+    case "PushNotification":
+      return String(input.title ?? input.body ?? "")
+    case "EnterWorktree": {
+      const name = String(input.name ?? input.branch ?? "")
+      const path = input.path ? ` (${input.path})` : ""
+      return `${name}${path}`
+    }
+    case "ExitWorktree":
+      return String(input.name ?? input.branch ?? "")
+    case "Skill":
+      return String(input.skill ?? input.name ?? "")
+    case "ToolSearch":
+      return String(input.query ?? "")
     default: {
       const keys = Object.keys(input)
       if (keys.length === 0) return ""
@@ -281,7 +333,7 @@ interface ToolCallCardProps {
 }
 
 /** Low-signal tools that are collapsed to a single line on mobile by default. */
-const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode"])
+const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive }: ToolCallCardProps) {
   const isMobile = useIsMobile()
