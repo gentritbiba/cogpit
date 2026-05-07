@@ -79,8 +79,7 @@ export async function handleActiveSessions(
     const codexFiles = await listCodexSessionFiles()
     for (const file of codexFiles) {
       try {
-        const codexCached = getCachedSessionMeta(file.filePath, file.mtimeMs)
-        const meta = codexCached ? codexCached.meta : await getSessionMeta(file.filePath)
+        const meta = await getSessionMeta(file.filePath)
         if (!meta.cwd) continue
         // Skip Codex sub-agent sessions — they're shown inline in their parent
         if (meta.isSubagent) continue
