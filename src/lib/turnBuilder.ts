@@ -234,6 +234,9 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   // Track compaction summary to attach to the next turn
   let pendingCompaction: string | null = null
 
+  // Track away_summary / recap to prepend as a recap content block on the next turn
+  let pendingRecap: { content: string; timestamp?: string } | null = null
+
   // Map from tool_use id -> index in current turn's toolCalls
   const pendingToolUses = new Map<string, { turn: Turn; index: number }>()
 
@@ -309,6 +312,14 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
         turns,
         msg.content ?? "Conversation compacted"
       )
+      continue
+    }
+
+    // away_summary system message (Claude Code v2.1.108+) — produced by /recap
+    // and automatically when returning to a long-running session.
+    // Real shape: { type: "system", subtype: "away_summary", content: "..." }
+    if (isSystemMessage(msg) && msg.subtype === "away_summary" && msg.content) {
+      pendingRecap = { content: msg.content, timestamp: msg.timestamp }
       continue
     }
 
@@ -406,6 +417,10 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       if (pendingCompaction) {
         current.compactionSummary = pendingCompaction
         pendingCompaction = null
+      }
+      if (pendingRecap) {
+        current.contentBlocks.push({ kind: "recap", content: pendingRecap.content, timestamp: pendingRecap.timestamp })
+        pendingRecap = null
       }
       continue
     }

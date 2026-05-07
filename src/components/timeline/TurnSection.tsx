@@ -7,6 +7,7 @@ import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
+import { RecapBanner } from "./RecapBanner"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
@@ -408,6 +409,18 @@ function ContentBlocks({
           planFilePath={block.planFilePath}
           status={block.status}
           toolCalls={block.toolCalls}
+        />
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "recap") {
+      elements.push(
+        <RecapBanner
+          key={`recap-${i}`}
+          content={block.content}
+          timestamp={block.timestamp}
         />
       )
       i++

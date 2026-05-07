@@ -279,6 +279,13 @@ export type TurnContentBlock =
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }
   | { kind: "plan_mode"; plan: string; planFilePath?: string; status: "pending" | "approved" | "rejected"; toolCalls: ToolCall[]; timestamp?: string }
+  /**
+   * Away summary / recap block — emitted as a system message with
+   * subtype "away_summary" (Claude Code v2.1.108+, observed in production
+   * JSONL as of 2026-04). The /recap command produces the same shape.
+   * Content is plain text (may be long-form prose, not always markdown).
+   */
+  | { kind: "recap"; content: string; timestamp?: string }
 
 export interface Turn {
   id: string

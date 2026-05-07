@@ -22,7 +22,7 @@ import {
   turnDurationMsg,
   toJsonl,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, ParsedHookEvent } from "@/lib/types"
+import type { ProgressMessage, ParsedHookEvent, SystemMessage } from "@/lib/types"
 
 beforeEach(() => {
   resetFixtureCounter()
@@ -528,5 +528,111 @@ describe("plan_mode grouping", () => {
     // but NOT intermediate ones, since those are embedded in the plan_mode block
     const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
     expect(planBlocks).toHaveLength(1)
+  })
+})
+
+// ── Recap / away_summary parsing tests ─────────────────────────────────────────
+//
+// Real shape (observed in production JSONL, Claude Code v2.1.114+):
+//   { type: "system", subtype: "away_summary", content: "...", isMeta: false, ... }
+//
+// The /recap command produces the same system message shape.
+// Content is plain text (not markdown), but we preserve it verbatim.
+
+let recapCounter = 0
+function awaySummaryMsg(
+  content: string,
+  overrides: Partial<SystemMessage> = {}
+): SystemMessage {
+  return {
+    type: "system",
+    subtype: "away_summary",
+    content,
+    isMeta: false,
+    uuid: `recap-${++recapCounter}`,
+    timestamp: "2025-01-15T10:00:00.500Z",
+    ...overrides,
+  }
+}
+
+describe("recap / away_summary parsing", () => {
+  it("produces a recap content block from a system message with subtype 'away_summary'", () => {
+    const jsonl = toJsonl([
+      awaySummaryMsg("Finished the nav refactor — all phases done."),
+      userMsg("Pick up where we left off"),
+      textAssistant("Sure!"),
+      turnDurationMsg(1000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    const recapBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "recap")
+    expect(recapBlocks).toHaveLength(1)
+
+    const block = recapBlocks[0]
+    if (block.kind !== "recap") return
+    expect(block.content).toBe("Finished the nav refactor — all phases done.")
+  })
+
+  it("preserves the recap content text verbatim", () => {
+    const rawText = "Round 1 done. Next: round 2 running. (disable recaps in /config)"
+    const jsonl = toJsonl([
+      awaySummaryMsg(rawText),
+      userMsg("Continue"),
+      textAssistant("On it."),
+      turnDurationMsg(500),
+    ])
+
+    const session = parseSession(jsonl)
+    const recapBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "recap")
+    expect(recapBlocks).toHaveLength(1)
+    if (recapBlocks[0].kind !== "recap") return
+    expect(recapBlocks[0].content).toBe(rawText)
+  })
+
+  it("preserves the timestamp from the away_summary message", () => {
+    const ts = "2026-04-20T10:58:07.711Z"
+    const jsonl = toJsonl([
+      awaySummaryMsg("Some recap", { timestamp: ts }),
+      userMsg("Go"),
+      textAssistant("Going."),
+      turnDurationMsg(500),
+    ])
+
+    const session = parseSession(jsonl)
+    const recapBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "recap")
+    expect(recapBlocks).toHaveLength(1)
+    if (recapBlocks[0].kind !== "recap") return
+    expect(recapBlocks[0].timestamp).toBe(ts)
+  })
+
+  it("non-recap system messages (turn_duration, compact_boundary) are unaffected", () => {
+    const jsonl = toJsonl([
+      userMsg("Hello"),
+      textAssistant("Hi!"),
+      turnDurationMsg(1000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    const recapBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "recap")
+    expect(recapBlocks).toHaveLength(0)
+  })
+
+  it("places the recap block before the user message content in the first turn", () => {
+    const jsonl = toJsonl([
+      awaySummaryMsg("Summary of last session"),
+      userMsg("Let's go"),
+      textAssistant("Ready."),
+      turnDurationMsg(800),
+    ])
+
+    const session = parseSession(jsonl)
+    const turn = session.turns[0]
+
+    const recapIndex = turn.contentBlocks.findIndex((b) => b.kind === "recap")
+    expect(recapIndex).toBe(0)
   })
 })
