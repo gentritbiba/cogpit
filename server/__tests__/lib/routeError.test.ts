@@ -210,3 +210,38 @@ describe("sendError with RouteErrorShape", () => {
     expect(res._getHeaders()["Content-Type"]).toBe("application/json")
   })
 })
+
+// ── sendError early-return guards ───────────────────────────────────────
+
+function makeMockResCommitted(opts: { headersSent?: boolean; writableEnded?: boolean }) {
+  let statusCode = 200
+  const res = {
+    get statusCode() {
+      return statusCode
+    },
+    set statusCode(v: number) {
+      statusCode = v
+    },
+    headersSent: opts.headersSent ?? false,
+    writableEnded: opts.writableEnded ?? false,
+    setHeader: vi.fn(),
+    end: vi.fn(),
+  } as unknown as ServerResponse
+  return res
+}
+
+describe("sendError no-op when response already committed", () => {
+  it("is a no-op when headersSent is true", () => {
+    const res = makeMockResCommitted({ headersSent: true })
+    sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "oops"))
+    expect(res.setHeader).not.toHaveBeenCalled()
+    expect(res.end).not.toHaveBeenCalled()
+  })
+
+  it("is a no-op when writableEnded is true", () => {
+    const res = makeMockResCommitted({ writableEnded: true })
+    sendError(res, new Error("stream already done"))
+    expect(res.setHeader).not.toHaveBeenCalled()
+    expect(res.end).not.toHaveBeenCalled()
+  })
+})

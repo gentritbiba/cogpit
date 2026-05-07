@@ -57,6 +57,11 @@ export function sendError(
   error: RouteError | Error | RouteErrorShape,
   defaultStatus = 500,
 ): void {
+  if (res.writableEnded || res.headersSent) {
+    // Response already committed; nothing to send.
+    return
+  }
+
   res.setHeader("Content-Type", "application/json")
 
   if (error instanceof RouteError) {
