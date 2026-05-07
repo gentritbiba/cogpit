@@ -5,6 +5,7 @@ import {
   join,
 } from "../helpers"
 import type { UseFn } from "../helpers"
+import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerFileRoutes(use: UseFn) {
   // POST /api/check-files-exist - check which files have been deleted + get line counts via git
@@ -165,9 +166,7 @@ export function registerFileRoutes(use: UseFn) {
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ deleted }))
       } catch {
-        res.statusCode = 400
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
       }
     })
   })

@@ -16,6 +16,7 @@ import {
 import type { PersistentSession, UseFn } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
 import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher } from "../sdk-session"
+import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerClaudeRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -30,8 +31,7 @@ export function registerClaudeRoutes(use: UseFn) {
         const { sessionId, message, images, cwd, permissions, model, effort, mcpConfig } = JSON.parse(body)
 
         if (!sessionId || (!message && (!images || images.length === 0))) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "sessionId and message or images are required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId and message or images are required"))
           return
         }
 
@@ -41,8 +41,7 @@ export function registerClaudeRoutes(use: UseFn) {
 
         if (agentKind === "codex") {
           if (existing && !existing.dead) {
-            res.statusCode = 409
-            res.end(JSON.stringify({ error: "Session is already active" }))
+            sendError(res, new RouteError(409, ErrorCodes.CONFLICT, "Session is already active"))
             return
           }
 
@@ -136,8 +135,7 @@ export function registerClaudeRoutes(use: UseFn) {
             ps.onResult = null
             res.setHeader("Content-Type", "application/json")
             if (result.is_error) {
-              res.statusCode = 500
-              res.end(JSON.stringify({ error: result.result || "Codex returned an error" }))
+              sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, result.result || "Codex returned an error"))
             } else {
               res.end(JSON.stringify({ success: true }))
             }
@@ -158,9 +156,7 @@ export function registerClaudeRoutes(use: UseFn) {
             mcpConfig,
           })
           if (!state) {
-            res.statusCode = 500
-            res.setHeader("Content-Type", "application/json")
-            res.end(JSON.stringify({ error: "Failed to send message to running session" }))
+            sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Failed to send message to running session"))
             return
           }
           // The message was injected into the live stream — respond immediately.
@@ -183,8 +179,7 @@ export function registerClaudeRoutes(use: UseFn) {
             legacyPs.onResult = null
             res.setHeader("Content-Type", "application/json")
             if (result.is_error) {
-              res.statusCode = 500
-              res.end(JSON.stringify({ error: result.result || "Claude returned an error" }))
+              sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, result.result || "Claude returned an error"))
             } else {
               res.end(JSON.stringify({ success: true }))
             }
@@ -194,8 +189,7 @@ export function registerClaudeRoutes(use: UseFn) {
             responded = true
             activeProcesses.delete(sessionId)
             legacyPs.onResult = null
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: "Claude process died unexpectedly" }))
+            sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Claude process died unexpectedly"))
           }
           legacyPs.proc.once("close", onDeath)
           legacyPs.proc.stdin?.write(streamMsg + "\n")
@@ -238,15 +232,13 @@ export function registerClaudeRoutes(use: UseFn) {
           sdkState.onResult = null
           res.setHeader("Content-Type", "application/json")
           if ((result as Record<string, unknown>).is_error) {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: String((result as Record<string, unknown>).result) || "Claude returned an error" }))
+            sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String((result as Record<string, unknown>).result) || "Claude returned an error"))
           } else {
             res.end(JSON.stringify({ success: true }))
           }
         }
       } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
       }
     })
   })

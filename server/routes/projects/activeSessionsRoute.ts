@@ -17,6 +17,7 @@ import {
   getCachedSessionMeta,
   setCachedSessionMeta,
 } from "../../lib/sessionMetaCache"
+import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -202,7 +203,6 @@ export async function handleActiveSessions(
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify(activeSessions))
   } catch (err) {
-    res.statusCode = 500
-    res.end(JSON.stringify({ error: String(err) }))
+    sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String(err)))
   }
 }

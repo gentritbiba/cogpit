@@ -282,6 +282,8 @@ describe("claude-manage routes", () => {
       sendBody()
 
       expect(res._getStatus()).toBe(400)
+      const body = res._getData()
+      expect(body.code).toBe("INVALID_REQUEST")
     })
 
     it("returns success:false when session not found", () => {
@@ -343,6 +345,8 @@ describe("claude-manage routes", () => {
       sendBody()
 
       expect(res._getStatus()).toBe(400)
+      const body = res._getData()
+      expect(body.code).toBe("INVALID_REQUEST")
     })
 
     it("returns 403 for untracked pid", () => {
@@ -355,6 +359,8 @@ describe("claude-manage routes", () => {
       sendBody()
 
       expect(res._getStatus()).toBe(403)
+      const body = res._getData()
+      expect(body.code).toBe("FORBIDDEN")
     })
   })
 })

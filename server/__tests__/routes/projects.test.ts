@@ -425,6 +425,8 @@ describe("project routes", () => {
       await handler(req, res, next)
 
       expect(res._getStatus()).toBe(500)
+      const response = JSON.parse(res._getData())
+      expect(response.code).toBe("INTERNAL_ERROR")
     })
 
     it("marks old sessions as not active", async () => {

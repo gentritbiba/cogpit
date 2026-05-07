@@ -276,6 +276,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
     expect(data.error).toContain("required")
+    expect(data.code).toBe("INVALID_REQUEST")
   })
 
   it("responds with 400 for missing message", async () => {
@@ -285,6 +286,8 @@ describe("registerNewSessionRoute (Claude)", () => {
     sendBody()
     await new Promise((r) => setTimeout(r, 20))
     expect(res._getStatus()).toBe(400)
+    const data = res._getData()
+    expect(data.code).toBe("INVALID_REQUEST")
   })
 
   // -------------------------------------------------------------------------
@@ -494,6 +497,8 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
     sendBody()
     await new Promise((r) => setTimeout(r, 20))
     expect(res._getStatus()).toBe(400)
+    const data = res._getData()
+    expect(data.code).toBe("INVALID_REQUEST")
   })
 
   // -------------------------------------------------------------------------

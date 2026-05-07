@@ -121,6 +121,8 @@ describe("file routes", () => {
       await vi.waitFor(() => {
         expect(res._getStatus()).toBe(400)
       })
+      const response = JSON.parse(res._getData())
+      expect(response.code).toBe("INVALID_REQUEST")
     })
 
     it("skips empty string file entries", async () => {

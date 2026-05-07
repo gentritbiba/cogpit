@@ -10,6 +10,7 @@ import {
 } from "../helpers"
 import type { UseFn } from "../helpers"
 import { stopSDKSession, cleanupAllSDKSessions } from "../sdk-session"
+import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerClaudeManageRoutes(use: UseFn) {
   use("/api/stop-session", (req, res, next) => {
@@ -24,8 +25,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         const { sessionId } = JSON.parse(body)
 
         if (!sessionId) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "sessionId is required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
           return
         }
 
@@ -63,8 +63,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ success: true }))
       } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
       }
     })
   })
@@ -225,8 +224,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
     child.on("error", () => {
       if (responded) return
       responded = true
-      res.statusCode = 500
-      res.end(JSON.stringify({ error: "Failed to list processes" }))
+      sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, "Failed to list processes"))
     })
   })
 
@@ -239,8 +237,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
       try {
         const { pid } = JSON.parse(body)
         if (!pid || typeof pid !== "number" || pid < 2) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Valid pid required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Valid pid required"))
           return
         }
 
@@ -265,9 +262,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         }
 
         if (!isTracked) {
-          res.statusCode = 403
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Can only kill tracked agent processes" }))
+          sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Can only kill tracked agent processes"))
           return
         }
 
@@ -281,12 +276,10 @@ export function registerClaudeManageRoutes(use: UseFn) {
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ success: true, pid }))
         } catch {
-          res.statusCode = 404
-          res.end(JSON.stringify({ error: "Process not found or already dead" }))
+          sendError(res, new RouteError(404, ErrorCodes.NOT_FOUND, "Process not found or already dead"))
         }
       } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
       }
     })
   })
@@ -303,15 +296,13 @@ export function registerClaudeManageRoutes(use: UseFn) {
         const { dirName, fileName } = JSON.parse(body)
 
         if (!dirName || !fileName) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "dirName and fileName are required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and fileName are required"))
           return
         }
 
         const filePath = await resolveSessionFilePath(dirName, fileName)
         if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
+          sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied"))
           return
         }
 
@@ -341,12 +332,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ success: true }))
       } catch (err) {
-        res.statusCode = 400
-        res.end(
-          JSON.stringify({
-            error: err instanceof Error ? err.message : "Failed to delete session",
-          })
-        )
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, err instanceof Error ? err.message : "Failed to delete session"))
       }
     })
   })

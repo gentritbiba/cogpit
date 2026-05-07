@@ -29,6 +29,7 @@ import {
 import type { PersistentSession, UseFn } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
+import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 export { buildStreamMessage } from "../../lib/streamMessage"
 
 export async function resolveProjectPath(
@@ -127,16 +128,14 @@ export function registerNewSessionRoute(use: UseFn) {
         const { dirName, message, permissions, model, effort, name } = JSON.parse(body)
 
         if (!dirName || !message) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "dirName and message are required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message are required"))
           return
         }
 
         if (isCodexDirName(dirName)) {
           const cwd = decodeCodexDirName(dirName)
           if (!cwd) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: "Invalid Codex project" }))
+            sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid Codex project"))
             return
           }
 
@@ -236,8 +235,7 @@ export function registerNewSessionRoute(use: UseFn) {
 
         const projectDir = join(dirs.PROJECTS_DIR, dirName)
         if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
+          sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied"))
           return
         }
 
@@ -328,16 +326,14 @@ export function registerCreateAndSendRoute(use: UseFn) {
         const { dirName, message, images, permissions, model, effort, worktreeName, mcpConfig, name } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "dirName and message (or images) are required" }))
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message (or images) are required"))
           return
         }
 
         if (isCodexDirName(dirName)) {
           const cwd = decodeCodexDirName(dirName)
           if (!cwd) {
-            res.statusCode = 400
-            res.end(JSON.stringify({ error: "Invalid Codex project" }))
+            sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid Codex project"))
             return
           }
 
@@ -486,8 +482,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
 
         const projectDir = join(dirs.PROJECTS_DIR, dirName)
         if (!isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
-          res.statusCode = 403
-          res.end(JSON.stringify({ error: "Access denied" }))
+          sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied"))
           return
         }
 
