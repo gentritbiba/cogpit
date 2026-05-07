@@ -15,6 +15,10 @@ import { InputToolbar, ActionButtons } from "./InputToolbar"
 export interface ChatInputHandle {
   toggleVoice: () => void
   focus: () => void
+  /** Get the current input text (for draft text preservation). */
+  getText: () => string
+  /** Set the input text (for draft text restoration). */
+  setText: (text: string) => void
 }
 
 /**
@@ -91,7 +95,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
   const [text, setText] = useState("")
   const [isMultiline, setIsMultiline] = useState(false)
   const isMultilineRef = useRef(false)
+  const textRef = useRef("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { textRef.current = text }, [text])
 
   const updateMultiline = useCallback((v: boolean) => { isMultilineRef.current = v; setIsMultiline(v) }, [])
 
@@ -159,7 +166,15 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
-  useImperativeHandle(ref, () => ({ toggleVoice, focus: () => textareaRef.current?.focus() }), [toggleVoice])
+  useImperativeHandle(ref, () => ({
+    toggleVoice,
+    focus: () => textareaRef.current?.focus(),
+    getText: () => textRef.current,
+    setText: (newText: string) => {
+      setText(newText)
+      requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
+    },
+  }), [toggleVoice, updateMultiline])
   useEffect(() => { return () => { destroyTranscriber() } }, [destroyTranscriber])
 
   const isPlanApproval = pendingInteraction?.type === "plan"
