@@ -125,7 +125,7 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("indexes user and assistant messages", () => {
+    it("indexes user and assistant messages", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("find the authentication bug"),
@@ -133,7 +133,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const stats = index.getStats()
       expect(stats.indexedFiles).toBe(1)
@@ -141,7 +141,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("indexes tool call inputs and results", () => {
+    it("indexes tool call inputs and results", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("read the config file"),
@@ -154,7 +154,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       // Should have rows for: userMessage, assistantMessage, toolCall input, toolCall result
       const stats = index.getStats()
@@ -162,7 +162,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("indexes thinking blocks", () => {
+    it("indexes thinking blocks", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("explain the code"),
@@ -173,7 +173,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const stats = index.getStats()
       // user message + assistant text + thinking
@@ -181,7 +181,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("indexes compaction summaries", () => {
+    it("indexes compaction summaries", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("first prompt"),
@@ -192,21 +192,21 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const stats = index.getStats()
       expect(stats.totalRows).toBeGreaterThan(0)
       index.close()
     })
 
-    it("re-indexes a file by deleting old rows first (idempotent)", () => {
+    it("re-indexes a file by deleting old rows first (idempotent)", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("first version keyword unique_marker_alpha"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const statsBefore = index.getStats()
       expect(statsBefore.totalRows).toBeGreaterThan(0)
@@ -216,7 +216,7 @@ describe("SearchIndex", () => {
       writeTestJsonl(fp, [
         makeUserMessage("second version keyword unique_marker_beta"),
       ])
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const statsAfter = index.getStats()
       // Should still have exactly 1 indexed file (not 2)
@@ -226,13 +226,13 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("tracks the file in indexed_files table", () => {
+    it("tracks the file in indexed_files table", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [makeUserMessage("hello world")])
 
       const index = new SearchIndex(TEST_DB)
       const mtimeMs = Date.now()
-      index.indexFile(fp, "test-session", mtimeMs)
+      await index.indexFile(fp, "test-session", mtimeMs)
 
       const stats = index.getStats()
       expect(stats.indexedFiles).toBe(1)
@@ -241,12 +241,12 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("tracks subagent files correctly", () => {
+    it("tracks subagent files correctly", async () => {
       const fp = join(TEST_DIR, "agent.jsonl")
       writeTestJsonl(fp, [makeUserMessage("subagent task")])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "parent-session", Date.now(), {
+      await index.indexFile(fp, "parent-session", Date.now(), {
         isSubagent: true,
         parentSessionId: "parent-session",
       })
@@ -258,7 +258,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("uses correct location strings for content types", () => {
+    it("uses correct location strings for content types", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("user prompt here"),
@@ -266,7 +266,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       // Query the raw rows to verify location strings
       // We'll use the internal db access through a search-like mechanism
@@ -276,13 +276,13 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("handles empty JSONL files gracefully", () => {
+    it("handles empty JSONL files gracefully", async () => {
       const fp = join(TEST_DIR, "empty.jsonl")
       writeTestJsonl(fp, [])
 
       const index = new SearchIndex(TEST_DB)
       // Should not throw
-      index.indexFile(fp, "empty-session", Date.now())
+      await index.indexFile(fp, "empty-session", Date.now())
 
       const stats = index.getStats()
       expect(stats.indexedFiles).toBe(1)
@@ -290,7 +290,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("handles multiple turns correctly", () => {
+    it("handles multiple turns correctly", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("first question about authentication"),
@@ -302,7 +302,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const stats = index.getStats()
       // 3 turns x 2 rows each (user + assistant) = 6 rows
@@ -310,7 +310,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("skips empty content blocks", () => {
+    it("skips empty content blocks", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("question"),
@@ -331,7 +331,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "test-session", Date.now())
+      await index.indexFile(fp, "test-session", Date.now())
 
       const stats = index.getStats()
       // Only user message should be indexed; empty assistant text is skipped
@@ -348,14 +348,14 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("returns hits with sessionId, location, snippet, and matchCount", () => {
+    it("returns hits with sessionId, location, snippet, and matchCount", async () => {
       const fp = join(TEST_DIR, "session-abc.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("the authentication system needs fixing"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session-abc", Date.now())
+      await index.indexFile(fp, "session-abc", Date.now())
       const hits = index.search("authentication")
 
       expect(hits.length).toBeGreaterThan(0)
@@ -367,7 +367,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("respects limit parameter", () => {
+    it("respects limit parameter", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       // Create 10 turns with interleaved user/assistant messages
       const lines: object[] = []
@@ -378,20 +378,20 @@ describe("SearchIndex", () => {
       writeTestJsonl(fp, lines)
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
       const hits = index.search("keyword", { limit: 3 })
       expect(hits.length).toBe(3)
       index.close()
     })
 
-    it("enforces max limit of 200", () => {
+    it("enforces max limit of 200", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("keyword content here"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
       // Requesting more than 200 should be clamped to 200
       const hits = index.search("keyword", { limit: 500 })
       // We only have 1 row, so just verify it doesn't throw
@@ -399,29 +399,29 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("defaults limit to 200 when not specified", () => {
+    it("defaults limit to 200 when not specified", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("keyword content"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
       // Should work without limit option
       const hits = index.search("keyword")
       expect(hits.length).toBeGreaterThan(0)
       index.close()
     })
 
-    it("filters by sessionId", () => {
+    it("filters by sessionId", async () => {
       const fp1 = join(TEST_DIR, "session-a.jsonl")
       const fp2 = join(TEST_DIR, "session-b.jsonl")
       writeTestJsonl(fp1, [makeUserMessage("keyword in session a")])
       writeTestJsonl(fp2, [makeUserMessage("keyword in session b")])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp1, "session-a", Date.now())
-      index.indexFile(fp2, "session-b", Date.now())
+      await index.indexFile(fp1, "session-a", Date.now())
+      await index.indexFile(fp2, "session-b", Date.now())
 
       const hits = index.search("keyword", { sessionId: "session-a" })
       expect(hits.length).toBeGreaterThan(0)
@@ -429,7 +429,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("filters by maxAgeMs via indexed_files mtime", () => {
+    it("filters by maxAgeMs via indexed_files mtime", async () => {
       const fp1 = join(TEST_DIR, "recent.jsonl")
       const fp2 = join(TEST_DIR, "old.jsonl")
       writeTestJsonl(fp1, [makeUserMessage("keyword recent file")])
@@ -437,8 +437,8 @@ describe("SearchIndex", () => {
 
       const now = Date.now()
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp1, "recent", now - 1000) // 1s ago
-      index.indexFile(fp2, "old", now - 10 * 24 * 3600_000) // 10 days ago
+      await index.indexFile(fp1, "recent", now - 1000) // 1s ago
+      await index.indexFile(fp2, "old", now - 10 * 24 * 3600_000) // 10 days ago
 
       const hits = index.search("keyword", { maxAgeMs: 5 * 24 * 3600_000 }) // 5 days
       expect(hits.length).toBeGreaterThan(0)
@@ -446,14 +446,14 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("supports case-insensitive search by default (FTS5 trigram)", () => {
+    it("supports case-insensitive search by default (FTS5 trigram)", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("Authentication is broken in the system"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
 
       // Lowercase query should match uppercase content
       const hits = index.search("authentication")
@@ -461,7 +461,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("supports case-sensitive post-filter", () => {
+    it("supports case-sensitive post-filter", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("Authentication is broken"),
@@ -469,7 +469,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
 
       // Case-sensitive search for lowercase "authentication"
       const hitsLower = index.search("authentication", { caseSensitive: true })
@@ -482,28 +482,28 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("returns empty array when no matches found", () => {
+    it("returns empty array when no matches found", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("hello world"),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
 
       const hits = index.search("xyznonexistentkeyword")
       expect(hits).toEqual([])
       index.close()
     })
 
-    it("handles queries with special characters (double quotes)", () => {
+    it("handles queries with special characters (double quotes)", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage('the value is "important" here'),
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
 
       // Should not throw even with quotes in query
       const hits = index.search('important')
@@ -511,7 +511,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("matches across different content types (user, assistant, tool)", () => {
+    it("matches across different content types (user, assistant, tool)", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
         makeUserMessage("find the special_marker_xyz in the code"),
@@ -524,7 +524,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp, "session", Date.now())
+      await index.indexFile(fp, "session", Date.now())
 
       const hits = index.search("special_marker_xyz")
       // Should find it in user message, assistant message, tool input, and tool result
@@ -537,7 +537,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("combines sessionId and maxAgeMs filters", () => {
+    it("combines sessionId and maxAgeMs filters", async () => {
       const fp1 = join(TEST_DIR, "session-a.jsonl")
       const fp2 = join(TEST_DIR, "session-b.jsonl")
       writeTestJsonl(fp1, [makeUserMessage("keyword in session a")])
@@ -545,8 +545,8 @@ describe("SearchIndex", () => {
 
       const now = Date.now()
       const index = new SearchIndex(TEST_DB)
-      index.indexFile(fp1, "session-a", now - 1000) // recent
-      index.indexFile(fp2, "session-b", now - 1000) // recent
+      await index.indexFile(fp1, "session-a", now - 1000) // recent
+      await index.indexFile(fp2, "session-b", now - 1000) // recent
 
       // Filter by both session and age
       const hits = index.search("keyword", {
@@ -567,7 +567,7 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("indexes all JSONL files in project directories", () => {
+    it("indexes all JSONL files in project directories", async () => {
       // Create fake project structure: projects/project-a/session-1.jsonl
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
@@ -579,7 +579,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       const stats = index.getStats()
       expect(stats.indexedSessions).toBe(2)
@@ -590,7 +590,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("indexes subagent files", () => {
+    it("indexes subagent files", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -604,7 +604,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       const stats = index.getStats()
       expect(stats.indexedSubagents).toBe(1)
@@ -615,7 +615,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("clears all existing data before rebuilding", () => {
+    it("clears all existing data before rebuilding", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -623,7 +623,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.search("unique_marker_first").length).toBeGreaterThan(0)
 
       // Remove the old file and add a new one
@@ -633,14 +633,14 @@ describe("SearchIndex", () => {
       ])
 
       // Rebuild should clear old data
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.search("unique_marker_first").length).toBe(0)
       expect(index.search("unique_marker_second").length).toBeGreaterThan(0)
       expect(index.getStats().indexedSessions).toBe(1)
       index.close()
     })
 
-    it("stores projectsDir for later use by rebuild()", () => {
+    it("stores projectsDir for later use by rebuild()", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -648,15 +648,15 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       // rebuild() should work without re-passing projectsDir
-      index.rebuild()
+      await index.rebuild()
       expect(index.getStats().indexedSessions).toBe(1)
       index.close()
     })
 
-    it("skips the 'memory' directory", () => {
+    it("skips the 'memory' directory", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       const memoryDir = join(TEST_DIR, "projects", "memory")
       mkdirSync(projectDir, { recursive: true })
@@ -669,27 +669,27 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       expect(index.getStats().indexedSessions).toBe(1)
       expect(index.search("memory content should be skipped").length).toBe(0)
       index.close()
     })
 
-    it("handles empty projects directory", () => {
+    it("handles empty projects directory", async () => {
       const projectsDir = join(TEST_DIR, "projects")
       mkdirSync(projectsDir, { recursive: true })
 
       const index = new SearchIndex(TEST_DB)
       // Should not throw
-      index.buildFull(projectsDir)
+      await index.buildFull(projectsDir)
 
       expect(index.getStats().indexedFiles).toBe(0)
       expect(index.getStats().lastFullBuild).not.toBeNull()
       index.close()
     })
 
-    it("handles deeply nested subagents (recursive)", () => {
+    it("handles deeply nested subagents (recursive)", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -709,7 +709,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       const stats = index.getStats()
       expect(stats.indexedSessions).toBe(1)
@@ -720,7 +720,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("skips files that fail to parse gracefully", () => {
+    it("skips files that fail to parse gracefully", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       // Valid file
@@ -732,7 +732,7 @@ describe("SearchIndex", () => {
 
       const index = new SearchIndex(TEST_DB)
       // Should not throw, just skip the bad file
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       // The good file should still be indexed
       expect(index.getStats().indexedFiles).toBeGreaterThanOrEqual(1)
@@ -749,33 +749,33 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("only re-indexes files with changed mtime", () => {
+    it("only re-indexes files with changed mtime", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       const fp = join(projectDir, "session-1.jsonl")
       writeTestJsonl(fp, [makeUserMessage("original keyword")])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.search("original").length).toBeGreaterThan(0)
 
       // updateStale with same mtime should NOT re-index (no changes)
       const beforeStats = index.getStats()
-      index.updateStale(join(TEST_DIR, "projects"))
+      await index.updateStale(join(TEST_DIR, "projects"))
       const afterStats = index.getStats()
       expect(afterStats.indexedFiles).toBe(beforeStats.indexedFiles)
 
       index.close()
     })
 
-    it("detects and re-indexes modified files", () => {
+    it("detects and re-indexes modified files", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       const fp = join(projectDir, "session-1.jsonl")
       writeTestJsonl(fp, [makeUserMessage("original unique_marker_stale")])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.search("unique_marker_stale").length).toBeGreaterThan(0)
 
       // Modify the file (changes mtime)
@@ -793,7 +793,7 @@ describe("SearchIndex", () => {
         utimesSync(fp, now, now)
       }
 
-      index.updateStale(join(TEST_DIR, "projects"))
+      await index.updateStale(join(TEST_DIR, "projects"))
 
       expect(index.search("unique_marker_fresh").length).toBeGreaterThan(0)
       // Old content should be gone since re-index deletes old rows
@@ -801,7 +801,7 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("discovers new files added since last build", () => {
+    it("discovers new files added since last build", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -809,7 +809,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.getStats().indexedSessions).toBe(1)
 
       // Add a new file
@@ -817,13 +817,13 @@ describe("SearchIndex", () => {
         makeUserMessage("session two new content"),
       ])
 
-      index.updateStale(join(TEST_DIR, "projects"))
+      await index.updateStale(join(TEST_DIR, "projects"))
       expect(index.getStats().indexedSessions).toBe(2)
       expect(index.search("session two new").length).toBeGreaterThan(0)
       index.close()
     })
 
-    it("updates _lastUpdate only when files were re-indexed", () => {
+    it("updates _lastUpdate only when files were re-indexed", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -831,19 +831,19 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
 
       const afterBuild = index.getStats().lastUpdate
 
       // updateStale with no changes should NOT update _lastUpdate
-      index.updateStale(join(TEST_DIR, "projects"))
+      await index.updateStale(join(TEST_DIR, "projects"))
       const afterNoChange = index.getStats().lastUpdate
       expect(afterNoChange).toBe(afterBuild)
 
       index.close()
     })
 
-    it("handles new subagent files in updateStale", () => {
+    it("handles new subagent files in updateStale", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -851,7 +851,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.getStats().indexedSubagents).toBe(0)
 
       // Add a subagent file
@@ -861,7 +861,7 @@ describe("SearchIndex", () => {
         makeUserMessage("new subagent content"),
       ])
 
-      index.updateStale(join(TEST_DIR, "projects"))
+      await index.updateStale(join(TEST_DIR, "projects"))
       expect(index.getStats().indexedSubagents).toBe(1)
       expect(index.search("new subagent content").length).toBeGreaterThan(0)
       index.close()
@@ -876,14 +876,14 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("sets watcherRunning to true when started and false when stopped", () => {
+    it("sets watcherRunning to true when started and false when stopped", async () => {
       const projectDir = join(TEST_DIR, "projects")
       mkdirSync(projectDir, { recursive: true })
 
       const index = new SearchIndex(TEST_DB)
       expect(index.getStats().watcherRunning).toBe(false)
 
-      index.startWatching(projectDir)
+      await index.startWatching(projectDir)
       expect(index.getStats().watcherRunning).toBe(true)
 
       index.stopWatching()
@@ -891,21 +891,21 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("stores projectsDir when startWatching is called", () => {
+    it("stores projectsDir when startWatching is called", async () => {
       const projectDir = join(TEST_DIR, "projects")
       mkdirSync(projectDir, { recursive: true })
 
       const index = new SearchIndex(TEST_DB)
       expect(index.projectsDir).toBeNull()
 
-      index.startWatching(projectDir)
+      await index.startWatching(projectDir)
       expect(index.projectsDir).toBe(projectDir)
 
       index.stopWatching()
       index.close()
     })
 
-    it("runs updateStale on initial startWatching call", () => {
+    it("runs updateStale on initial startWatching call", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -913,7 +913,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.startWatching(join(TEST_DIR, "projects"))
+      await index.startWatching(join(TEST_DIR, "projects"))
 
       // updateStale should have indexed the existing file
       const stats = index.getStats()
@@ -932,12 +932,12 @@ describe("SearchIndex", () => {
       index.close()
     })
 
-    it("stopWatching clears debounce timers", () => {
+    it("stopWatching clears debounce timers", async () => {
       const projectDir = join(TEST_DIR, "projects")
       mkdirSync(projectDir, { recursive: true })
 
       const index = new SearchIndex(TEST_DB)
-      index.startWatching(projectDir)
+      await index.startWatching(projectDir)
 
       // Internally there should be no timers yet, but stopWatching should
       // handle clearing an empty map gracefully
@@ -955,15 +955,15 @@ describe("SearchIndex", () => {
       try { rmSync(TEST_DIR, { recursive: true }) } catch {}
     })
 
-    it("does nothing when projectsDir is not set", () => {
+    it("does nothing when projectsDir is not set", async () => {
       const index = new SearchIndex(TEST_DB)
       // Should not throw
-      index.rebuild()
+      await index.rebuild()
       expect(index.getStats().indexedFiles).toBe(0)
       index.close()
     })
 
-    it("rebuilds using the stored projectsDir", () => {
+    it("rebuilds using the stored projectsDir", async () => {
       const projectDir = join(TEST_DIR, "projects", "project-a")
       mkdirSync(projectDir, { recursive: true })
       writeTestJsonl(join(projectDir, "session-1.jsonl"), [
@@ -971,7 +971,7 @@ describe("SearchIndex", () => {
       ])
 
       const index = new SearchIndex(TEST_DB)
-      index.buildFull(join(TEST_DIR, "projects"))
+      await index.buildFull(join(TEST_DIR, "projects"))
       expect(index.getStats().indexedSessions).toBe(1)
 
       // Add another file
@@ -980,7 +980,7 @@ describe("SearchIndex", () => {
       ])
 
       // Rebuild should re-discover everything
-      index.rebuild()
+      await index.rebuild()
       expect(index.getStats().indexedSessions).toBe(2)
       index.close()
     })

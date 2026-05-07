@@ -1,7 +1,31 @@
 import Database from "better-sqlite3"
-import { readFileSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs"
+import { promises as fsp } from "node:fs"
+import { statSync, watch, type FSWatcher } from "node:fs"
 import { join, basename } from "node:path"
 import { parseSession, getUserMessageText } from "../src/lib/parser"
+
+/** Simple async semaphore for bounding I/O concurrency. */
+class Semaphore {
+  private running = 0
+  private queue: Array<() => void> = []
+  constructor(private limit: number) {}
+
+  async acquire(): Promise<void> {
+    if (this.running < this.limit) {
+      this.running++
+      return
+    }
+    return new Promise<void>((resolve) => {
+      this.queue.push(() => { this.running++; resolve() })
+    })
+  }
+
+  release(): void {
+    this.running--
+    const next = this.queue.shift()
+    if (next) next()
+  }
+}
 
 export interface IndexStats {
   dbPath: string
@@ -96,13 +120,13 @@ export class SearchIndex {
    * Idempotent: deletes old data for the file before re-indexing.
    * All inserts run in a single transaction for performance.
    */
-  indexFile(
+  async indexFile(
     filePath: string,
     sessionId: string,
     mtimeMs: number,
     opts?: { isSubagent?: boolean; parentSessionId?: string | null }
-  ): void {
-    const content = readFileSync(filePath, "utf-8")
+  ): Promise<void> {
+    const content = await fsp.readFile(filePath, "utf-8")
     const session = parseSession(content)
 
     const isSubagent = opts?.isSubagent ? 1 : 0
@@ -323,16 +347,16 @@ export class SearchIndex {
    *
    * Stores `projectsDir` as a class field so `rebuild()` can reuse it.
    */
-  buildFull(projectsDir: string): void {
+  async buildFull(projectsDir: string): Promise<void> {
     this.projectsDir = projectsDir
 
     // Clear everything
     this.db.exec("DELETE FROM search_content")
     this.db.exec("DELETE FROM indexed_files")
 
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+    await this.discoverFiles(projectsDir, async (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
       try {
-        this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
+        await this.indexFile(filePath, sessionId, mtimeMs, { isSubagent, parentSessionId })
       } catch {
         // Skip files that fail to parse
       }
@@ -347,7 +371,7 @@ export class SearchIndex {
    * Incrementally re-index only files whose mtime has changed since last index.
    * New files (not in indexed_files) are always indexed.
    */
-  updateStale(projectsDir: string): void {
+  async updateStale(projectsDir: string): Promise<void> {
     this.projectsDir = projectsDir
 
     const getIndexed = this.db.prepare(
@@ -362,7 +386,7 @@ export class SearchIndex {
       parentSessionId: string | null
     }> = []
 
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+    await this.discoverFiles(projectsDir, async (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
       const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
       if (!existing || existing.mtime_ms < mtimeMs) {
         filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
@@ -371,7 +395,7 @@ export class SearchIndex {
 
     for (const file of filesToIndex) {
       try {
-        this.indexFile(file.path, file.sessionId, file.mtimeMs, {
+        await this.indexFile(file.path, file.sessionId, file.mtimeMs, {
           isSubagent: file.isSubagent,
           parentSessionId: file.parentSessionId,
         })
@@ -389,9 +413,9 @@ export class SearchIndex {
    * Re-run buildFull using the previously stored projectsDir.
    * No-op if projectsDir was never set.
    */
-  rebuild(): void {
+  async rebuild(): Promise<void> {
     if (!this.projectsDir) return
-    this.buildFull(this.projectsDir)
+    await this.buildFull(this.projectsDir)
   }
 
   /**
@@ -405,8 +429,9 @@ export class SearchIndex {
    *         agent-{agentId}.jsonl        <- subagent file (recursive)
    *
    * Skips the "memory" directory.
+   * Uses a semaphore (limit 8) to bound concurrent I/O across projects.
    */
-  private discoverFiles(
+  private async discoverFiles(
     projectsDir: string,
     callback: (
       filePath: string,
@@ -414,47 +439,60 @@ export class SearchIndex {
       mtimeMs: number,
       isSubagent: boolean,
       parentSessionId: string | null
-    ) => void
-  ): void {
+    ) => Promise<void>
+  ): Promise<void> {
     let entries: string[]
     try {
-      entries = readdirSync(projectsDir)
+      entries = await fsp.readdir(projectsDir)
     } catch {
       return
     }
 
-    for (const projectName of entries) {
-      if (projectName === "memory") continue
-      const projectDir = join(projectsDir, projectName)
-      try {
-        const s = statSync(projectDir)
-        if (!s.isDirectory()) continue
-      } catch {
-        continue
-      }
+    const sem = new Semaphore(8)
 
-      let files: string[]
-      try {
-        files = readdirSync(projectDir)
-      } catch {
-        continue
-      }
+    await Promise.all(
+      entries.map(async (projectName) => {
+        if (projectName === "memory") return
+        const projectDir = join(projectsDir, projectName)
 
-      for (const file of files) {
-        if (!file.endsWith(".jsonl")) continue
-        const filePath = join(projectDir, file)
-        const sessionId = basename(file, ".jsonl")
+        await sem.acquire()
         try {
-          const s = statSync(filePath)
-          callback(filePath, sessionId, s.mtimeMs, false, null)
-        } catch {
-          continue
-        }
+          let dirStat: Awaited<ReturnType<typeof fsp.stat>>
+          try {
+            dirStat = await fsp.stat(projectDir)
+            if (!dirStat.isDirectory()) return
+          } catch {
+            return
+          }
 
-        // Discover subagent files recursively
-        this.discoverSubagents(filePath, sessionId, callback, 0, 4)
-      }
-    }
+          let files: string[]
+          try {
+            files = await fsp.readdir(projectDir)
+          } catch {
+            return
+          }
+
+          for (const file of files) {
+            if (!file.endsWith(".jsonl")) continue
+            const filePath = join(projectDir, file)
+            const sessionId = basename(file, ".jsonl")
+            let fileStat: Awaited<ReturnType<typeof fsp.stat>>
+            try {
+              fileStat = await fsp.stat(filePath)
+            } catch {
+              continue
+            }
+
+            await callback(filePath, sessionId, fileStat.mtimeMs, false, null)
+
+            // Discover subagent files recursively
+            await this.discoverSubagents(filePath, sessionId, callback, 0, 4)
+          }
+        } finally {
+          sem.release()
+        }
+      })
+    )
   }
 
   /**
@@ -466,7 +504,7 @@ export class SearchIndex {
    *
    * Recurses up to `maxDepth` levels (default 4).
    */
-  private discoverSubagents(
+  private async discoverSubagents(
     parentPath: string,
     parentSessionId: string,
     callback: (
@@ -475,17 +513,17 @@ export class SearchIndex {
       mtimeMs: number,
       isSubagent: boolean,
       parentSessionId: string | null
-    ) => void,
+    ) => Promise<void>,
     depth: number,
     maxDepth: number
-  ): void {
+  ): Promise<void> {
     if (depth >= maxDepth) return
 
     // subagents dir lives at: parentPath minus .jsonl extension, plus /subagents
     const subDir = parentPath.replace(/\.jsonl$/, "") + "/subagents"
     let files: string[]
     try {
-      files = readdirSync(subDir)
+      files = await fsp.readdir(subDir)
     } catch {
       return
     }
@@ -493,15 +531,17 @@ export class SearchIndex {
     for (const file of files) {
       if (!file.startsWith("agent-") || !file.endsWith(".jsonl")) continue
       const filePath = join(subDir, file)
+      let fileStat: Awaited<ReturnType<typeof fsp.stat>>
       try {
-        const s = statSync(filePath)
-        callback(filePath, parentSessionId, s.mtimeMs, true, parentSessionId)
+        fileStat = await fsp.stat(filePath)
       } catch {
         continue
       }
 
+      await callback(filePath, parentSessionId, fileStat.mtimeMs, true, parentSessionId)
+
       // Recurse deeper for nested subagents
-      this.discoverSubagents(filePath, parentSessionId, callback, depth + 1, maxDepth)
+      await this.discoverSubagents(filePath, parentSessionId, callback, depth + 1, maxDepth)
     }
   }
 
@@ -511,11 +551,11 @@ export class SearchIndex {
    * `fs.watch` with `{ recursive: true }` (macOS-compatible) to detect
    * subsequent file changes and trigger debounced re-indexing.
    */
-  startWatching(projectsDir: string): void {
+  async startWatching(projectsDir: string): Promise<void> {
     this.projectsDir = projectsDir
 
     // Initial sync — index any files that are new or stale
-    this.updateStale(projectsDir)
+    await this.updateStale(projectsDir)
 
     // Watch for changes
     try {
@@ -551,6 +591,7 @@ export class SearchIndex {
    * Waits 2 seconds after the last change event for a given file path
    * before actually calling `indexFile()`. This coalesces rapid writes
    * (e.g. streaming JSONL appends) into a single index operation.
+   * The async work runs in a fire-and-forget async IIFE inside the timer.
    */
   private debouncedReindex(filePath: string): void {
     const existing = this.debounceTimers.get(filePath)
@@ -560,35 +601,38 @@ export class SearchIndex {
       filePath,
       setTimeout(() => {
         this.debounceTimers.delete(filePath)
-        try {
-          const s = statSync(filePath)
+        // Run async I/O in a fire-and-forget IIFE; errors are caught internally.
+        void (async () => {
+          try {
+            const fileStat = await fsp.stat(filePath)
 
-          // Determine sessionId and subagent status from the file path
-          const parts = filePath.split("/")
-          const fileName = parts[parts.length - 1]
-          const isSubagent = parts.includes("subagents")
+            // Determine sessionId and subagent status from the file path
+            const parts = filePath.split("/")
+            const fileName = parts[parts.length - 1]
+            const isSubagent = parts.includes("subagents")
 
-          let sessionId: string
-          let parentSessionId: string | null = null
+            let sessionId: string
+            let parentSessionId: string | null = null
 
-          if (isSubagent) {
-            // Walk up to find the parent session directory name
-            // Structure: .../projects/{project}/{sessionId}/subagents/agent-{id}.jsonl
-            const subagentsIdx = parts.lastIndexOf("subagents")
-            const parentDir = parts[subagentsIdx - 1]
-            sessionId = parentDir
-            parentSessionId = parentDir
-          } else {
-            sessionId = basename(fileName, ".jsonl")
+            if (isSubagent) {
+              // Walk up to find the parent session directory name
+              // Structure: .../projects/{project}/{sessionId}/subagents/agent-{id}.jsonl
+              const subagentsIdx = parts.lastIndexOf("subagents")
+              const parentDir = parts[subagentsIdx - 1]
+              sessionId = parentDir
+              parentSessionId = parentDir
+            } else {
+              sessionId = basename(fileName, ".jsonl")
+            }
+
+            await this.indexFile(filePath, sessionId, fileStat.mtimeMs, {
+              isSubagent,
+              parentSessionId,
+            })
+          } catch {
+            // File may have been deleted or is still being written to
           }
-
-          this.indexFile(filePath, sessionId, s.mtimeMs, {
-            isSubagent,
-            parentSessionId,
-          })
-        } catch {
-          // File may have been deleted or is still being written to
-        }
+        })()
       }, 2000)
     )
   }

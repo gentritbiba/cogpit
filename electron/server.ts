@@ -52,8 +52,8 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
     const dbPath = resolveSearchIndexPath({ userDataDir })
     const index = new SearchIndex(dbPath)
     setSearchIndex(index)
-    // startWatching is synchronous — safe to call immediately after init
-    if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
+    // startWatching does async I/O (updateStale) before setting up fs.watch
+    if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)
   } catch (err) {
     console.warn("[search-index] Failed to boot search index:", err)
   }

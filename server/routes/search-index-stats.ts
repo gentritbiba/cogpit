@@ -22,15 +22,12 @@ export function registerSearchIndexRoutes(use: UseFn) {
       return sendJson(res, 503, { error: "Search index not available" })
     }
 
-    // Respond immediately — rebuild runs in the next tick so the response is flushed first
+    // Respond immediately — rebuild runs asynchronously so the response is flushed first
     sendJson(res, 200, { status: "rebuilding" })
 
-    setTimeout(() => {
-      try {
-        index.rebuild()
-      } catch {
-        // Non-fatal — index will recover on next update
-      }
-    }, 0)
+    // Fire-and-forget: rebuild() is now async; errors are non-fatal
+    void index.rebuild().catch(() => {
+      // Non-fatal — index will recover on next update
+    })
   })
 }
