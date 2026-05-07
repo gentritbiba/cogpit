@@ -118,9 +118,81 @@ export interface AgentProgressData {
   agentId: string
 }
 
+export type HookEventName =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "PostToolUseFailure"
+  | "UserPromptSubmit"
+  | "SessionStart"
+  | "SessionEnd"
+  | "Stop"
+  | "StopFailure"
+  | "SubagentStop"
+  | "PreCompact"
+  | "PostCompact"
+  | "PermissionDenied"
+  | "TaskCreated"
+  | "WorktreeCreate"
+  | "CwdChanged"
+  | "FileChanged"
+  | "Elicitation"
+  | "ElicitationResult"
+  | "Notification"
+
 export interface HookProgressData {
   type: "hook_progress"
+  /** Event name (newer SDK: hook_event_name; older SDK: hookEvent) */
+  hook_event_name?: HookEventName | string
+  /** Older SDK field for event name (e.g. "PostToolUse") */
+  hookEvent?: HookEventName | string
+  /** Human-readable hook name like "PostToolUse:Read" (older SDK) */
+  hookName?: string
+  /** Source of the hook configuration: "settings" | "plugin" | "skill" */
+  source?: string
+  /** Tool call this hook is associated with (for Pre/PostToolUse) */
+  tool_use_id?: string
+  /** Tool name (Pre/PostToolUse) */
+  tool_name?: string
+  /** Hook command line that ran */
+  command?: string
+  /** stdout/stderr from the hook command */
+  output?: string
+  stderr?: string
+  /** Exit code */
+  exit_code?: number
+  /** Decision returned by hook (allow/deny/block/ask/defer) */
+  decision?: string
+  /** Duration in milliseconds (PostToolUse, 2.1.119+) */
+  duration_ms?: number
+  /** Hook-specific output (e.g., updatedToolOutput, sessionTitle) */
+  hookSpecificOutput?: Record<string, unknown>
+  /** Permits arbitrary additional fields without coupling */
   [key: string]: unknown
+}
+
+export interface ParsedHookEvent {
+  /** Event name like "PreToolUse" */
+  eventName: string
+  /** Source: settings/plugin/skill */
+  source?: string
+  /** Tool the hook is gated on (for Pre/PostToolUse) */
+  toolName?: string
+  toolUseId?: string
+  /** Command that ran */
+  command?: string
+  output?: string
+  stderr?: string
+  exitCode?: number
+  decision?: string
+  /** Duration in ms */
+  durationMs?: number
+  /** PostToolUse hooks (2.1.121) can replace tool output via updatedToolOutput */
+  updatedToolOutput?: string
+  /** UserPromptSubmit hooks (2.1.94) can set sessionTitle */
+  sessionTitle?: string
+  /** WorktreeCreate hooks (2.1.84) return worktreePath */
+  worktreePath?: string
+  timestamp: string
 }
 
 export interface ProgressMessage extends BaseMessage {
@@ -205,6 +277,7 @@ export type TurnContentBlock =
   | { kind: "tool_calls"; toolCalls: ToolCall[]; timestamp?: string }
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
+  | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }
 
 export interface Turn {
   id: string

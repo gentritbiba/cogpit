@@ -16,6 +16,8 @@ import type {
   SystemMessage,
   SummaryMessage,
   AgentToolUseResult,
+  ParsedHookEvent,
+  HookProgressData,
 } from "./types"
 
 // ── Local type guards (duplicated to avoid circular deps with parser.ts) ─────
@@ -535,6 +537,48 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       // in contentBlocks (near the tool call that spawned it)
       if (current) {
         flushSubAgentMessages(parentId)
+      }
+      continue
+    }
+
+    // hook_progress handling — parse hook lifecycle events into a hook_event content block
+    if (isProgressMessage(msg) && msg.data.type === "hook_progress") {
+      const data = msg.data as HookProgressData
+      // Resolve event name: newer SDK uses hook_event_name, older SDK uses hookEvent
+      const eventName = String(data.hook_event_name ?? data.hookEvent ?? "unknown")
+      const hookSpecific = data.hookSpecificOutput as Record<string, unknown> | undefined
+
+      const ev: ParsedHookEvent = {
+        eventName,
+        source: data.source !== undefined ? String(data.source) : undefined,
+        toolName: data.tool_name !== undefined ? String(data.tool_name) : undefined,
+        toolUseId: data.tool_use_id !== undefined ? String(data.tool_use_id) : undefined,
+        command: data.command !== undefined ? String(data.command) : undefined,
+        output: data.output !== undefined ? String(data.output) : undefined,
+        stderr: data.stderr !== undefined ? String(data.stderr) : undefined,
+        exitCode: data.exit_code !== undefined ? Number(data.exit_code) : undefined,
+        decision: data.decision !== undefined ? String(data.decision) : undefined,
+        durationMs: data.duration_ms !== undefined ? Number(data.duration_ms) : undefined,
+        updatedToolOutput: hookSpecific?.updatedToolOutput !== undefined
+          ? String(hookSpecific.updatedToolOutput)
+          : undefined,
+        sessionTitle: hookSpecific?.sessionTitle !== undefined
+          ? String(hookSpecific.sessionTitle)
+          : undefined,
+        worktreePath: hookSpecific?.worktreePath !== undefined
+          ? String(hookSpecific.worktreePath)
+          : undefined,
+        timestamp: msg.timestamp ?? "",
+      }
+
+      if (current) {
+        // Group consecutive hook events into one block to avoid N separate blocks
+        const last = current.contentBlocks[current.contentBlocks.length - 1]
+        if (last && last.kind === "hook_event") {
+          last.events.push(ev)
+        } else {
+          current.contentBlocks.push({ kind: "hook_event", events: [ev], timestamp: msg.timestamp })
+        }
       }
       continue
     }
