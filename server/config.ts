@@ -1,6 +1,7 @@
 import { readFile, writeFile, stat, readdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { hashPassword, isPasswordHashed } from "./password-utils"
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const PROJECT_ROOT = resolve(__dirname, "..")
@@ -34,10 +35,21 @@ export async function loadConfig(): Promise<AppConfig | null> {
     const raw = await readFile(CONFIG_PATH, "utf-8")
     const parsed = JSON.parse(raw)
     if (parsed.claudeDir && typeof parsed.claudeDir === "string") {
+      let networkPassword: string | undefined = parsed.networkPassword || undefined
+
+      // Migrate plaintext password to hashed form on first read.
+      // Empty/missing passwords are left as-is; already-hashed values are skipped.
+      if (networkPassword && !isPasswordHashed(networkPassword)) {
+        networkPassword = hashPassword(networkPassword)
+        // Write the hashed password back to disk so migration only happens once.
+        const migrated = { ...parsed, networkPassword }
+        await writeFile(CONFIG_PATH, JSON.stringify(migrated, null, 2), "utf-8")
+      }
+
       cachedConfig = {
         claudeDir: parsed.claudeDir,
         networkAccess: !!parsed.networkAccess,
-        networkPassword: parsed.networkPassword || undefined,
+        networkPassword,
         terminalApp: parsed.terminalApp || undefined,
         editorApp: parsed.editorApp || undefined,
       }

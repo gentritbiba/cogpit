@@ -9,13 +9,21 @@ vi.mock("node:fs/promises", () => ({
   readdir: vi.fn(),
 }))
 
+vi.mock("../password-utils", () => ({
+  hashPassword: vi.fn(),
+  isPasswordHashed: vi.fn(),
+}))
+
 import { readFile, writeFile, stat, readdir } from "node:fs/promises"
+import { hashPassword, isPasswordHashed } from "../password-utils"
 import { resolve, join } from "node:path"
 
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedStat = vi.mocked(stat)
 const mockedReaddir = vi.mocked(readdir)
+const mockedHashPassword = vi.mocked(hashPassword)
+const mockedIsPasswordHashed = vi.mocked(isPasswordHashed)
 
 // ── getDirs ─────────────────────────────────────────────────────────────
 
@@ -94,17 +102,54 @@ describe("loadConfig", () => {
     vi.clearAllMocks()
   })
 
-  it("loads valid config", async () => {
+  it("loads valid config with already-hashed password (no migration)", async () => {
     const { loadConfig } = await import("../config")
+    mockedIsPasswordHashed.mockReturnValueOnce(true)
     mockedReadFile.mockResolvedValueOnce(
-      JSON.stringify({ claudeDir: "/home/.claude", networkAccess: true, networkPassword: "pass" })
+      JSON.stringify({ claudeDir: "/home/.claude", networkAccess: true, networkPassword: "$sha256$abc:def" })
     )
 
     const config = await loadConfig()
     expect(config).not.toBeNull()
     expect(config!.claudeDir).toBe("/home/.claude")
     expect(config!.networkAccess).toBe(true)
-    expect(config!.networkPassword).toBe("pass")
+    expect(config!.networkPassword).toBe("$sha256$abc:def")
+    // Should NOT have written back to disk
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("migrates plaintext password to hashed on first read and writes back to disk", async () => {
+    const { loadConfig } = await import("../config")
+    mockedIsPasswordHashed.mockReturnValueOnce(false)
+    mockedHashPassword.mockReturnValueOnce("$sha256$aabbcc:ddeeff")
+    mockedWriteFile.mockResolvedValueOnce(undefined)
+    mockedReadFile.mockResolvedValueOnce(
+      JSON.stringify({ claudeDir: "/home/.claude", networkAccess: true, networkPassword: "plaintextpassword" })
+    )
+
+    const config = await loadConfig()
+    expect(config).not.toBeNull()
+    // Returned config should have the hashed password
+    expect(config!.networkPassword).toBe("$sha256$aabbcc:ddeeff")
+    // hashPassword must have been called with the original plaintext
+    expect(mockedHashPassword).toHaveBeenCalledWith("plaintextpassword")
+    // Should have written the migrated config back to disk
+    expect(mockedWriteFile).toHaveBeenCalledOnce()
+    const writtenContent = JSON.parse((mockedWriteFile.mock.calls[0][1] as string))
+    expect(writtenContent.networkPassword).toBe("$sha256$aabbcc:ddeeff")
+  })
+
+  it("does not migrate when networkPassword is empty/missing", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(
+      JSON.stringify({ claudeDir: "/home/.claude", networkAccess: false })
+    )
+
+    const config = await loadConfig()
+    expect(config).not.toBeNull()
+    expect(config!.networkPassword).toBeUndefined()
+    expect(mockedHashPassword).not.toHaveBeenCalled()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
   })
 
   it("returns null for missing file", async () => {

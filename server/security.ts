@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { timingSafeEqual, randomBytes, createHash } from "node:crypto"
+import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
 
 // ── Shared types (duplicated here to avoid circular imports) ─────────
@@ -99,20 +99,7 @@ setInterval(() => {
 
 // ── Password hashing ────────────────────────────────────────────────
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex")
-  const hash = createHash("sha256").update(salt + password).digest("hex")
-  return `${salt}:${hash}`
-}
-
-export function verifyPassword(password: string, stored: string): boolean {
-  if (!stored.includes(":")) {
-    return safeCompare(password, stored)
-  }
-  const [salt, hash] = stored.split(":")
-  const candidate = createHash("sha256").update(salt + password).digest("hex")
-  return safeCompare(candidate, hash)
-}
+export { hashPassword, isPasswordHashed, verifyPassword } from "./password-utils"
 
 // ── Password validation ─────────────────────────────────────────────
 

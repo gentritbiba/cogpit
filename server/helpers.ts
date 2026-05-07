@@ -540,6 +540,7 @@ export {
   revokeAllSessions,
   getConnectedDevices,
   hashPassword,
+  isPasswordHashed,
   verifyPassword,
   MIN_PASSWORD_LENGTH,
   validatePasswordStrength,
