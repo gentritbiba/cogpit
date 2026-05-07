@@ -7,6 +7,16 @@ export const BRANCH_INNER = ["#60a5fa", "#c084fc", "#fbbf24", "#22d3ee", "#f472b
 
 // ─── Tool style map ───────────────────────────────────────────
 
+/**
+ * BranchModal tool badge styles — used in TurnCards for the historical turn summary.
+ *
+ * High-contrast border+text only (no background fill), giving all tools equal visual
+ * weight in a compact archived-turn list. Uses more opaque border/text than the
+ * timeline variant to stay readable against the modal's elevated surface.
+ *
+ * Distinct from ToolCallCard's TIMELINE_TOOL_BADGE_STYLES (timeline/ToolCallCard.tsx),
+ * which uses desaturated backgrounds for a dense live-streaming timeline view.
+ */
 export const TOOL_BADGE_STYLES: Record<string, string> = {
   Read: "border-blue-700/50 text-blue-400",
   Edit: "border-amber-700/50 text-amber-400",

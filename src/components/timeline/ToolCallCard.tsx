@@ -14,7 +14,17 @@ import { EditDiffView } from "./EditDiffView"
 import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 
-const TOOL_BADGE_STYLES: Record<string, string> = {
+/**
+ * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
+ *
+ * Intentionally desaturated and background-filled to reduce noise in a dense,
+ * streaming list. Primary action tools (Write/Edit/Bash) use higher saturation to
+ * draw attention; secondary/read-only tools are very dim.
+ *
+ * Distinct from the BranchModal's TOOL_BADGE_STYLES (branchStyles.ts), which uses
+ * high-contrast border+text only (no background) for a compact historical summary view.
+ */
+const TIMELINE_TOOL_BADGE_STYLES: Record<string, string> = {
   // High saturation — primary action tools
   Write: "bg-green-500/20 text-green-400 border-green-500/30",
   Edit: "bg-amber-500/20 text-amber-400 border-amber-500/30",
@@ -34,7 +44,7 @@ const TOOL_BADGE_STYLES: Record<string, string> = {
 const DEFAULT_BADGE_STYLE = "bg-muted/5 text-muted-foreground/40 border-muted-foreground/10"
 
 export function getToolBadgeStyle(name: string): string {
-  return TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
+  return TIMELINE_TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
 }
 
 function getToolSummary(tc: ToolCall): string {
