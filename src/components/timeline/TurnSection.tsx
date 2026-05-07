@@ -15,6 +15,8 @@ import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { useSkillMetadata } from "@/hooks/useSkillMetadata"
+import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import type { Turn, TurnContentBlock } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDuration, getTurnDuration } from "@/lib/format"
@@ -55,6 +57,9 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
     isTurnDone = !ACTIVE_STATUSES.has(status)
   }
 
+  const cwd = session?.cwd ?? ""
+  const skillMetadata = useSkillMetadata(cwd)
+
   return (
     <TurnSectionInner
       turn={turn}
@@ -66,7 +71,8 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       isAgentActive={isAgentActive}
       isTurnDone={isTurnDone}
       isSubAgentView={isSubAgentView}
-      cwd={session?.cwd ?? ""}
+      cwd={cwd}
+      skillMetadata={skillMetadata}
       onRestoreToHere={isSubAgentView ? undefined : undoRedo.requestUndo}
       onOpenBranches={actions.handleOpenBranches}
       onEditCommand={actions.handleEditCommand}
@@ -88,6 +94,7 @@ interface TurnSectionInnerProps {
   isTurnDone: boolean
   isSubAgentView: boolean
   cwd: string
+  skillMetadata: Map<string, SkillMeta>
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
   onEditCommand?: (commandName: string) => void
@@ -105,6 +112,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   isTurnDone,
   isSubAgentView,
   cwd,
+  skillMetadata,
   onRestoreToHere,
   onOpenBranches,
   onEditCommand,
@@ -166,6 +174,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
             activeToolCallId={activeToolCallId}
             isAgentActive={isAgentActive}
             isSubAgentView={isSubAgentView}
+            skillMetadata={skillMetadata}
           />
 
           {isTurnDone && hasFileChanges && (
@@ -277,6 +286,7 @@ function ContentBlocks({
   activeToolCallId,
   isAgentActive,
   isSubAgentView: _isSubAgentView,
+  skillMetadata,
 }: {
   blocks: TurnContentBlock[]
   model: string | null
@@ -284,6 +294,7 @@ function ContentBlocks({
   activeToolCallId: string | null
   isAgentActive: boolean
   isSubAgentView: boolean
+  skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
 
@@ -304,6 +315,7 @@ function ContentBlocks({
               expandAll={expandAll}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
+              skillMetadata={skillMetadata}
             />
           </div>
         )
@@ -318,6 +330,7 @@ function ContentBlocks({
               isAgentActive={isAgentActive}
               activityItems={items}
               thinkingCount={thinkingCount}
+              skillMetadata={skillMetadata}
             />
           </div>
         )
@@ -348,6 +361,7 @@ function ContentBlocks({
                   isAgentActive={isAgentActive}
                   activityItems={thinkingCount > 0 ? items : undefined}
                   thinkingCount={thinkingCount}
+                  skillMetadata={skillMetadata}
                 />
               </div>
             )}

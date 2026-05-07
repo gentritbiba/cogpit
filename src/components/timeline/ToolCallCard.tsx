@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronDown,
   Loader2,
+  ExternalLink,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
@@ -13,6 +14,8 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
 import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { authFetch } from "@/lib/auth"
+import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
 /**
  * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
@@ -330,12 +333,13 @@ interface ToolCallCardProps {
   toolCall: ToolCall
   expandAll: boolean
   isAgentActive?: boolean
+  skillMetadata?: Map<string, SkillMeta>
 }
 
 /** Low-signal tools that are collapsed to a single line on mobile by default. */
 const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
 
-export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive }: ToolCallCardProps) {
+export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
   const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
@@ -350,6 +354,9 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const showDiff = expandAll || diffOpen
 
   const summary = getToolSummary(toolCall)
+  const skillMeta = toolCall.name === "Skill" && skillMetadata
+    ? skillMetadata.get(summary) ?? null
+    : null
   const resultText = toolCall.result ?? ""
   const isLongResult = resultText.length > 1000
   const visibleResult =
@@ -406,6 +413,29 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
       </div>
+
+      {skillMeta && !isCompactMobile && (
+        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground/60 font-mono">
+          <span>source: {skillMeta.source}</span>
+          {skillMeta.filePath && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                authFetch("/api/open-in-editor", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ path: skillMeta.filePath }),
+                })
+              }}
+              className="flex items-center gap-0.5 text-indigo-400/70 hover:text-indigo-400 transition-colors"
+              title={skillMeta.filePath}
+            >
+              <ExternalLink className="w-2.5 h-2.5" />
+              Open SKILL.md
+            </button>
+          )}
+        </div>
+      )}
 
       {!isCompactMobile && (
         <div className="flex gap-3 mt-1">

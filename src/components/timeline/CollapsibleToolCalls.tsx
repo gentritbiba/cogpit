@@ -7,6 +7,7 @@ import { toolCallCountLabel, activityCountLabel } from "@/lib/timelineHelpers"
 import type { ToolCall } from "@/lib/types"
 import type { ActivityItem } from "@/lib/timelineHelpers"
 import { cn } from "@/lib/utils"
+import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
 const THINKING_BADGE_STYLE = "bg-violet-500/5 text-violet-400/40 border-violet-500/10"
 
@@ -17,6 +18,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   isAgentActive = false,
   activityItems,
   thinkingCount = 0,
+  skillMetadata,
 }: {
   toolCalls: ToolCall[]
   expandAll: boolean
@@ -26,6 +28,8 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   activityItems?: ActivityItem[]
   /** Number of thinking blocks in the group (for label). */
   thinkingCount?: number
+  /** Skill metadata map for Skill tool rendering enrichment. */
+  skillMetadata?: Map<string, SkillMeta>
 }) {
   const [manualOpen, setManualOpen] = useState(false)
   const targetRef = useRef<HTMLDivElement | null>(null)
@@ -83,7 +87,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
           tc.id === activeToolCallId && "ring-1 ring-blue-500/50 rounded-md"
         )}
       >
-        <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} />
+        <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} skillMetadata={skillMetadata} />
       </div>
     )
   }
