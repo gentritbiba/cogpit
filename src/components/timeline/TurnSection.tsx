@@ -409,6 +409,9 @@ function ContentBlocks({
           planFilePath={block.planFilePath}
           status={block.status}
           toolCalls={block.toolCalls}
+          expandAll={expandAll}
+          isAgentActive={isAgentActive}
+          skillMetadata={skillMetadata}
         />
       )
       i++

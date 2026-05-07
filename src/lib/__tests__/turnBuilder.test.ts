@@ -630,6 +630,173 @@ describe("plan_mode grouping", () => {
     const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
     expect(planBlocks).toHaveLength(1)
   })
+
+  it("does not break grouping when a hook_event block appears before the Read inside the plan (Enter → hook → Read → Exit)", () => {
+    const enterId = "enter_hook_before"
+    const readId = "read_hook_before"
+    const exitId = "exit_hook_before"
+
+    const jsonl = toJsonl([
+      userMsg("Plan with early hook"),
+      toolUseAssistant("EnterPlanMode", { plan: "hook before read" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      // hook_event between Enter and the first intermediate tool call
+      hookProgressMsg(enterId, { hook_event_name: "PostToolUse", tool_name: "EnterPlanMode", tool_use_id: enterId, duration_ms: 5 }),
+      toolUseAssistant("Read", { file_path: "src/a.ts" }, readId),
+      toolResultMsg(readId, "file content"),
+      toolUseAssistant("ExitPlanMode", { path: "/tmp/plan.md" }, exitId),
+      toolResultMsg(exitId, "plan approved"),
+      textAssistant("Done."),
+      turnDurationMsg(2000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    // Must produce exactly ONE plan_mode block (not pending)
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    const planBlock = planBlocks[0]
+    if (planBlock.kind !== "plan_mode") return
+    expect(planBlock.status).toBe("approved")
+    // The Read is embedded in the plan block
+    expect(planBlock.toolCalls).toHaveLength(1)
+    expect(planBlock.toolCalls[0].name).toBe("Read")
+
+    // The hook_event block must still appear in the turn's contentBlocks
+    const hookBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "hook_event")
+    expect(hookBlocks).toHaveLength(1)
+  })
+
+  it("does not break grouping when a hook_event block appears after the Read inside the plan (Enter → Read → hook → Exit)", () => {
+    const enterId = "enter_hook_after"
+    const readId = "read_hook_after"
+    const exitId = "exit_hook_after"
+
+    const jsonl = toJsonl([
+      userMsg("Plan with hook after read"),
+      toolUseAssistant("EnterPlanMode", { plan: "hook after read" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      toolUseAssistant("Read", { file_path: "src/b.ts" }, readId),
+      toolResultMsg(readId, "file content"),
+      // hook_event between the Read and ExitPlanMode
+      hookProgressMsg(readId, { hook_event_name: "PostToolUse", tool_name: "Read", tool_use_id: readId, duration_ms: 10 }),
+      toolUseAssistant("ExitPlanMode", { path: "/tmp/plan.md" }, exitId),
+      toolResultMsg(exitId, "plan approved"),
+      textAssistant("Done."),
+      turnDurationMsg(2000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    // Must produce exactly ONE plan_mode block (not pending)
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    const planBlock = planBlocks[0]
+    if (planBlock.kind !== "plan_mode") return
+    expect(planBlock.status).toBe("approved")
+    expect(planBlock.toolCalls).toHaveLength(1)
+    expect(planBlock.toolCalls[0].name).toBe("Read")
+
+    // The hook_event block must still appear in the turn's contentBlocks
+    const hookBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "hook_event")
+    expect(hookBlocks).toHaveLength(1)
+  })
+
+  it("does not break grouping when a text block appears between Enter and Exit", () => {
+    const enterId = "enter_text_between"
+    const readId = "read_text_between"
+    const exitId = "exit_text_between"
+
+    // We simulate a text block by inserting a textAssistant message between the tools.
+    // In real sessions, Claude may emit a text block mid-plan-mode.
+    const jsonl = toJsonl([
+      userMsg("Plan with text between"),
+      // First assistant message: EnterPlanMode
+      toolUseAssistant("EnterPlanMode", { plan: "text between plan" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      // Second assistant message: text block
+      textAssistant("Thinking about the plan..."),
+      // Third assistant message: Read + Exit
+      toolUseAssistant("Read", { file_path: "src/c.ts" }, readId),
+      toolResultMsg(readId, "file content"),
+      toolUseAssistant("ExitPlanMode", { path: "/tmp/plan.md" }, exitId),
+      toolResultMsg(exitId, "plan approved"),
+      textAssistant("Done."),
+      turnDurationMsg(2000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    // Must produce exactly ONE plan_mode block (not pending)
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    const planBlock = planBlocks[0]
+    if (planBlock.kind !== "plan_mode") return
+    expect(planBlock.status).toBe("approved")
+    // Read is embedded
+    expect(planBlock.toolCalls).toHaveLength(1)
+    expect(planBlock.toolCalls[0].name).toBe("Read")
+
+    // The text block must still appear in the turn's contentBlocks
+    const textBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "text")
+    expect(textBlocks.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("produces plan_mode block plus trailing tool calls when a Read follows ExitPlanMode in the same logical block", () => {
+    const enterId = "enter_trailing"
+    const exitId = "exit_trailing"
+    const trailingReadId = "trailing_read"
+
+    // ExitPlanMode and a trailing Read are in the same assistant message
+    const jsonl = toJsonl([
+      userMsg("Plan with trailing read"),
+      toolUseAssistant("EnterPlanMode", { plan: "trailing read plan" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      // Single assistant message with Exit + trailing Read
+      {
+        type: "assistant",
+        uuid: "msg_trailing",
+        timestamp: "2025-01-15T10:00:01Z",
+        sessionId: "test-session-1",
+        message: {
+          model: "claude-opus-4-6-20250115",
+          id: "msg_trailing",
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: exitId, name: "ExitPlanMode", input: { path: "/tmp/plan.md" } },
+            { type: "tool_use", id: trailingReadId, name: "Read", input: { file_path: "src/trailing.ts" } },
+          ],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+      },
+      toolResultMsg(exitId, "plan approved"),
+      toolResultMsg(trailingReadId, "trailing file content"),
+      textAssistant("Done."),
+      turnDurationMsg(2000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    // plan_mode block must exist and be approved
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    const planBlock = planBlocks[0]
+    if (planBlock.kind !== "plan_mode") return
+    expect(planBlock.status).toBe("approved")
+    // No tools are embedded (Enter and Exit were in the same block, nothing between them)
+    expect(planBlock.toolCalls).toHaveLength(0)
+
+    // The trailing Read must appear as a tool_calls block in the turn
+    const toolCallBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "tool_calls")
+    expect(toolCallBlocks).toHaveLength(1)
+    if (toolCallBlocks[0].kind !== "tool_calls") return
+    expect(toolCallBlocks[0].toolCalls[0].name).toBe("Read")
+  })
 })
 
 // ── Recap / away_summary parsing tests ─────────────────────────────────────────

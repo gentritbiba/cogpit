@@ -3,6 +3,7 @@ import { ChevronRight, ChevronDown, NotebookPen, CheckCircle, Clock, XCircle } f
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { ToolCall } from "@/lib/types"
+import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { ToolCallCard } from "./ToolCallCard"
 import { markdownComponents } from "./markdown-components"
 import { cn } from "@/lib/utils"
@@ -12,9 +13,12 @@ interface Props {
   planFilePath?: string
   status: "pending" | "approved" | "rejected"
   toolCalls: ToolCall[]
+  expandAll?: boolean
+  isAgentActive?: boolean
+  skillMetadata?: Map<string, SkillMeta>
 }
 
-export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls }: Props) {
+export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls, expandAll = false, isAgentActive, skillMetadata }: Props) {
   const [open, setOpen] = useState(true)
   const [callsOpen, setCallsOpen] = useState(false)
 
@@ -78,7 +82,13 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
               {callsOpen && (
                 <div className="mt-1 ml-4 space-y-1">
                   {toolCalls.map((tc) => (
-                    <ToolCallCard key={tc.id} toolCall={tc} expandAll={false} />
+                    <ToolCallCard
+                      key={tc.id}
+                      toolCall={tc}
+                      expandAll={expandAll}
+                      isAgentActive={isAgentActive}
+                      skillMetadata={skillMetadata}
+                    />
                   ))}
                 </div>
               )}

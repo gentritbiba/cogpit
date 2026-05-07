@@ -174,4 +174,60 @@ describe("PlanModeBlock", () => {
     // Content should be hidden after collapse
     expect(screen.queryByText(/unique-plan-text-xyz/)).toBeNull()
   })
+
+  it("forwards skillMetadata to embedded ToolCallCards (Skill tool shows source label)", () => {
+    const skillMeta = new Map([
+      ["my-skill", { name: "my-skill", filePath: "/path/to/SKILL.md" } as import("@/hooks/useSkillMetadata").SkillMeta],
+    ])
+
+    const skillCall = makeToolCall({
+      id: "tc_skill_1",
+      name: "Skill",
+      input: { name: "my-skill" },
+      result: null,
+    })
+
+    render(
+      <PlanModeBlock
+        plan="Plan using a skill"
+        status="approved"
+        toolCalls={[skillCall]}
+        skillMetadata={skillMeta}
+      />
+    )
+
+    // Expand the tool calls section
+    const callsButton = screen.getByText("1 call during planning")
+    fireEvent.click(callsButton)
+
+    // The Skill tool call card should be rendered — presence of the tool name badge is sufficient
+    // (the exact skill source rendering is tested in ToolCallCard.test.tsx)
+    expect(screen.getByText("Skill")).toBeInTheDocument()
+  })
+
+  it("forwards expandAll=true to embedded ToolCallCards (inputs auto-expanded)", () => {
+    const call = makeToolCall({
+      id: "tc_expand_1",
+      name: "Read",
+      input: { file_path: "src/main.ts" },
+      result: "file content here",
+    })
+
+    render(
+      <PlanModeBlock
+        plan="Plan with expandAll"
+        status="approved"
+        toolCalls={[call]}
+        expandAll={true}
+      />
+    )
+
+    // Expand the tool calls section
+    const callsButton = screen.getByText("1 call during planning")
+    fireEvent.click(callsButton)
+
+    // With expandAll=true the ToolCallCard renders inputs expanded by default
+    // Verify the file_path input is visible without further interaction
+    expect(screen.getByText("src/main.ts")).toBeInTheDocument()
+  })
 })

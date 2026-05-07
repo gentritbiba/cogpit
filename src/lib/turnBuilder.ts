@@ -174,6 +174,11 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
           let status: "pending" | "approved" | "rejected" = "pending"
           let j = i + 1
 
+          // Passthrough blocks are skipped during the scan (they don't break the
+          // EnterPlanMode → ExitPlanMode grouping) and are re-emitted in their
+          // original chronological position after the plan_mode block is formed.
+          const passthroughBlocks: TurnContentBlock[] = []
+
           while (j < blocks.length) {
             const next = blocks[j]
             if (next.kind === "tool_calls") {
@@ -188,10 +193,9 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 }
                 // Tools after ExitPlanMode in this block
                 const tail = next.toolCalls.slice(exitIdx + 1)
-                if (tail.length > 0) {
-                  // Will be pushed after the plan_mode block
-                }
                 result.push({ kind: "plan_mode", plan, planFilePath, status, toolCalls: embedded, timestamp })
+                // Re-emit passthrough blocks (hook_event, text) that appeared mid-scan
+                result.push(...passthroughBlocks)
                 // Push tail of exit block back for further processing
                 if (tail.length > 0) {
                   result.push({ kind: "tool_calls", toolCalls: tail, timestamp: next.timestamp })
@@ -203,8 +207,13 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 embedded.push(...next.toolCalls)
                 j++
               }
+            } else if (next.kind === "hook_event" || next.kind === "text") {
+              // Skip hook_event and text blocks — don't break the scan.
+              // Collect them for re-emission in chronological position after the plan block.
+              passthroughBlocks.push(next)
+              j++
             } else {
-              // Non-tool_calls block (hook_event, text, etc.) — stop collecting and emit pending
+              // Any other block kind (sub_agent, background_agent, recap, etc.) — stop scanning
               break
             }
           }
@@ -212,6 +221,8 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
           if (!exitCall) {
             // No ExitPlanMode found — emit pending plan_mode with all collected embedded calls
             result.push({ kind: "plan_mode", plan, planFilePath: undefined, status: "pending", toolCalls: embedded, timestamp })
+            // Re-emit passthrough blocks even in the pending case
+            result.push(...passthroughBlocks)
             i = j
           }
           continue
