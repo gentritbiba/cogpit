@@ -1,4 +1,5 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readdir, readFile, stat, access } from "node:fs/promises"
+import { constants } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { parseFrontmatter } from "../slash-suggestions"
@@ -10,7 +11,7 @@ export interface ConfigTreeItem {
   name: string
   path: string
   type: "file" | "directory"
-  fileType?: "command" | "skill" | "agent" | "claude-md" | "settings" | "unknown"
+  fileType?: "command" | "skill" | "agent" | "claude-md" | "settings" | "unknown" | "theme" | "monitor" | "bin"
   description?: string
   children?: ConfigTreeItem[]
   readOnly?: boolean
@@ -29,7 +30,7 @@ export interface ConfigTreeSection {
 /** Scan a directory and build tree items */
 export async function scanDir(
   dir: string,
-  opts: { readOnly?: boolean; isSkillsDir?: boolean } = {},
+  opts: { readOnly?: boolean; isSkillsDir?: boolean; isMonitorsDir?: boolean; isBinDir?: boolean; isThemesDir?: boolean } = {},
 ): Promise<ConfigTreeItem[]> {
   const items: ConfigTreeItem[] = []
   try {
@@ -67,6 +68,23 @@ export async function scanDir(
               })
             }
           }
+        } else if (opts.isMonitorsDir) {
+          // Monitors: each subdir is a monitor; read manifest.json for description if present
+          let description = ""
+          const manifestPath = join(fullPath, "manifest.json")
+          try {
+            const raw = await readFile(manifestPath, "utf-8")
+            const manifest = JSON.parse(raw)
+            description = manifest.description || manifest.name || ""
+          } catch { /* no manifest — use empty description */ }
+          items.push({
+            name: entry.name,
+            path: fullPath,
+            type: "file",
+            fileType: "monitor",
+            description,
+            readOnly: opts.readOnly,
+          })
         } else {
           const children = await scanDir(fullPath, opts)
           if (children.length > 0) {
@@ -80,13 +98,31 @@ export async function scanDir(
           }
         }
       } else if (entry.isFile() || resolved?.isFile()) {
-        // Skip non-relevant files
+        if (opts.isBinDir) {
+          // bin/ entries: only include executable files
+          try {
+            await access(fullPath, constants.X_OK)
+            items.push({
+              name: entry.name,
+              path: fullPath,
+              type: "file",
+              fileType: "bin",
+              readOnly: opts.readOnly,
+            })
+          } catch { /* not executable — skip */ }
+          continue
+        }
+
+        // Skip non-relevant files (only .md and .json for normal dirs)
         if (!entry.name.endsWith(".md") && !entry.name.endsWith(".json")) continue
         // Skip installed_plugins.json, config.local.json etc at top level
         if (entry.name === "installed_plugins.json") continue
 
         let description = ""
-        const fileType = getFileType(fullPath, dir)
+        // Theme files: *.json files when the caller signals this is a themes directory
+        const fileType = (opts.isThemesDir && entry.name.endsWith(".json"))
+          ? "theme"
+          : getFileType(fullPath, dir)
         if (entry.name.endsWith(".md")) {
           try {
             const content = await readFile(fullPath, "utf-8")
@@ -148,6 +184,13 @@ export async function buildGlobalSection(): Promise<ConfigTreeSection> {
   const skills = await scanDir(skillsDir, { isSkillsDir: true })
   if (skills.length > 0) {
     items.push({ name: "skills", path: skillsDir, type: "directory", children: skills })
+  }
+
+  // themes/ (since Claude Code 2.1.118)
+  const themesDir = join(globalDir, "themes")
+  const themes = await scanDir(themesDir, { isThemesDir: true })
+  if (themes.length > 0) {
+    items.push({ name: "themes", path: themesDir, type: "directory", children: themes })
   }
 
   return { label: "Global", scope: "global", baseDir: globalDir, items }
@@ -240,6 +283,27 @@ export async function buildPluginSections(): Promise<ConfigTreeSection[]> {
       const agents = await scanDir(agentsDir, { readOnly: true })
       if (agents.length > 0) {
         items.push({ name: "agents", path: agentsDir, type: "directory", children: agents, readOnly: true })
+      }
+
+      // themes/ (since Claude Code 2.1.118)
+      const pluginThemesDir = join(installPath, "themes")
+      const pluginThemes = await scanDir(pluginThemesDir, { readOnly: true, isThemesDir: true })
+      if (pluginThemes.length > 0) {
+        items.push({ name: "themes", path: pluginThemesDir, type: "directory", children: pluginThemes, readOnly: true })
+      }
+
+      // monitors/ (each subdir is a monitor)
+      const monitorsDir = join(installPath, "monitors")
+      const monitors = await scanDir(monitorsDir, { readOnly: true, isMonitorsDir: true })
+      if (monitors.length > 0) {
+        items.push({ name: "monitors", path: monitorsDir, type: "directory", children: monitors, readOnly: true })
+      }
+
+      // bin/ (executable files only)
+      const binDir = join(installPath, "bin")
+      const bins = await scanDir(binDir, { readOnly: true, isBinDir: true })
+      if (bins.length > 0) {
+        items.push({ name: "bin", path: binDir, type: "directory", children: bins, readOnly: true })
       }
 
       if (items.length > 0) {
