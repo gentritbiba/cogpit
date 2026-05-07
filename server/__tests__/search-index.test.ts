@@ -482,6 +482,71 @@ describe("SearchIndex", () => {
       index.close()
     })
 
+    it("case-sensitive filter runs in SQL GLOB, not JS post-filter", async () => {
+      // Each turn (user+assistant pair) produces two indexed rows. We create three
+      // turns, each with a different casing of "authentication" in the user message,
+      // to get three distinct rows in the FTS index.
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("Authentication is broken"),        // capital A
+        makeAssistantMessage("ok"),
+        makeUserMessage("the authentication module has a bug"), // lowercase a
+        makeAssistantMessage("ok"),
+        makeUserMessage("AUTHENTICATION FAILED"),           // all caps
+        makeAssistantMessage("ok"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(fp, "session", Date.now())
+
+      // Insensitive search should find all 3 user-message rows (plus 3 assistant "ok" rows,
+      // but "ok" doesn't contain "authentication" so only the 3 user rows match).
+      const allHits = index.search("authentication")
+      expect(allHits.length).toBe(3)
+
+      // Sensitive search for exact lowercase "authentication"
+      const sensitiveHits = index.search("authentication", { caseSensitive: true })
+      expect(sensitiveHits.length).toBe(1)
+      expect(sensitiveHits[0].snippet).toContain("authentication")
+      expect(sensitiveHits[0].snippet).not.toMatch(/Authentication|AUTHENTICATION/)
+
+      // Sensitive search for capital-A variant
+      const capitalHits = index.search("Authentication", { caseSensitive: true })
+      expect(capitalHits.length).toBe(1)
+      expect(capitalHits[0].snippet).toContain("Authentication")
+
+      // Sensitive search for all-caps variant
+      const allCapsHits = index.search("AUTHENTICATION", { caseSensitive: true })
+      expect(allCapsHits.length).toBe(1)
+      expect(allCapsHits[0].snippet).toContain("AUTHENTICATION")
+
+      index.close()
+    })
+
+    it("case-sensitive GLOB escapes metacharacters in query", async () => {
+      // Queries containing GLOB metacharacters (* ? [) must not be treated as
+      // wildcards — they should match literal characters.
+      const fp = join(TEST_DIR, "session.jsonl")
+      writeTestJsonl(fp, [
+        makeUserMessage("Array<string> is used here"),
+        makeAssistantMessage("wildcard * matches everything"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(fp, "session", Date.now())
+
+      // Searching for the literal bracket pattern — should not match "wildcard *" row
+      const bracketHits = index.search("Array<string>", { caseSensitive: false })
+      expect(bracketHits.length).toBeGreaterThan(0)
+
+      // Case-sensitive search for exact bracket pattern
+      const sensitiveHits = index.search("Array<string>", { caseSensitive: true })
+      expect(sensitiveHits.length).toBeGreaterThan(0)
+      expect(sensitiveHits.every((h) => h.snippet.includes("Array<string>"))).toBe(true)
+
+      index.close()
+    })
+
     it("returns empty array when no matches found", async () => {
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [

@@ -236,8 +236,9 @@ export class SearchIndex {
    * Query the FTS5 index and return structured search results.
    *
    * - FTS5 trigram tokenizer is case-insensitive by default.
-   * - When `caseSensitive` is true, a post-filter checks the original query
-   *   against the snippet text (exact case match).
+   * - When `caseSensitive` is true, an `AND content GLOB ?` clause is added to
+   *   the SQL query — pushing exact-case filtering into SQLite's C runtime
+   *   instead of a JS-side post-filter over up to 200 rows.
    * - When `maxAgeMs` is provided, only files whose mtime in `indexed_files`
    *   falls within the window are included (join on source_file).
    * - `sessionId` restricts results to a single session.
@@ -282,6 +283,16 @@ export class SearchIndex {
       params.push(sessionId)
     }
 
+    // Push case-sensitive filter into SQL using GLOB (case-sensitive, unlike LIKE).
+    // FTS5 trigram is always case-insensitive; GLOB enforces exact-case matching
+    // at the SQLite C level, avoiding a JS-side post-filter over up to 200 rows.
+    // Escape GLOB metacharacters (* ? [) in the user query to prevent wildcard injection.
+    if (caseSensitive) {
+      const escapedQuery = query.replace(/[*?[]/g, (c) => `[${c}]`)
+      conditions.push("sc.content GLOB ?")
+      params.push(`*${escapedQuery}*`)
+    }
+
     sql += " WHERE " + conditions.join(" AND ")
     sql += " ORDER BY sc.rowid DESC"
     sql += " LIMIT ?"
@@ -293,20 +304,12 @@ export class SearchIndex {
       snippet: string
     }>
 
-    let hits: SearchHit[] = rows.map((row) => ({
+    return rows.map((row) => ({
       sessionId: row.session_id,
       location: row.location,
       snippet: row.snippet,
       matchCount: 1, // FTS5 trigram doesn't expose per-row match count; 1 = "at least one match"
     }))
-
-    // Post-filter for case sensitivity — FTS5 trigram is always case-insensitive,
-    // so we apply an exact-case check on the snippet text when requested.
-    if (caseSensitive) {
-      hits = hits.filter((h) => h.snippet.includes(query))
-    }
-
-    return hits
   }
 
   /**
