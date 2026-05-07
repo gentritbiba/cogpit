@@ -6,6 +6,7 @@ import { AssistantText } from "./AssistantText"
 import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { HookEventChip } from "./HookEventChip"
+import { PlanModeBlock } from "./PlanModeBlock"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
@@ -380,6 +381,20 @@ function ContentBlocks({
     if (block.kind === "hook_event") {
       elements.push(
         <HookEventChip key={`hook-${i}`} events={block.events} />
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "plan_mode") {
+      elements.push(
+        <PlanModeBlock
+          key={`plan-${i}`}
+          plan={block.plan}
+          planFilePath={block.planFilePath}
+          status={block.status}
+          toolCalls={block.toolCalls}
+        />
       )
       i++
       continue

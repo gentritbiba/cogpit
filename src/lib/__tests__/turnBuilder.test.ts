@@ -370,3 +370,163 @@ describe("hook_progress parsing", () => {
     expect(hookBlocks[0].events[0].timestamp).toBe(ts)
   })
 })
+
+// ── Plan mode grouping tests ─────────────────────────────────────────────────
+
+/**
+ * EnterPlanMode schema (observed from Claude Code):
+ *   input: { plan: string }  — the plan text (markdown)
+ *
+ * ExitPlanMode schema:
+ *   input: { path?: string } — optional file path where plan was saved
+ *
+ * The parser groups EnterPlanMode → [intermediate tool calls] → ExitPlanMode
+ * into a single plan_mode content block instead of separate tool_calls blocks.
+ */
+
+function planModeSession(opts: {
+  enterInput?: Record<string, unknown>
+  exitInput?: Record<string, unknown>
+  intermediateTools?: Array<{ name: string; input: Record<string, unknown>; id: string }>
+  hasExitResult?: boolean
+  exitIsError?: boolean
+  omitExit?: boolean
+}) {
+  const {
+    enterInput = { plan: "## Plan\n\n1. Read the file\n2. Edit it" },
+    exitInput = { path: "/tmp/plan.md" },
+    intermediateTools = [],
+    hasExitResult = true,
+    exitIsError = false,
+    omitExit = false,
+  } = opts
+
+  const enterId = "enter_plan_1"
+  const exitId = "exit_plan_1"
+
+  const msgs: Array<Record<string, unknown>> = [
+    userMsg("Please plan this"),
+    toolUseAssistant("EnterPlanMode", enterInput, enterId),
+    toolResultMsg(enterId, "ok"),
+  ]
+
+  for (const tool of intermediateTools) {
+    msgs.push(toolUseAssistant(tool.name, tool.input, tool.id))
+    msgs.push(toolResultMsg(tool.id, "result"))
+  }
+
+  if (!omitExit) {
+    msgs.push(toolUseAssistant("ExitPlanMode", exitInput, exitId))
+    if (hasExitResult) {
+      msgs.push(toolResultMsg(exitId, "plan approved", exitIsError))
+    }
+  }
+
+  msgs.push(textAssistant("Plan complete."))
+  msgs.push(turnDurationMsg(3000))
+  return toJsonl(msgs)
+}
+
+describe("plan_mode grouping", () => {
+  it("groups EnterPlanMode → ExitPlanMode into one plan_mode block", () => {
+    const jsonl = planModeSession({})
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+
+    const block = planBlocks[0]
+    if (block.kind !== "plan_mode") return
+    expect(block.plan).toBe("## Plan\n\n1. Read the file\n2. Edit it")
+    expect(block.planFilePath).toBe("/tmp/plan.md")
+    expect(block.status).toBe("approved")
+    expect(block.toolCalls).toHaveLength(0)
+  })
+
+  it("does NOT produce a separate tool_calls block for the Enter/Exit pair", () => {
+    const jsonl = planModeSession({})
+    const session = parseSession(jsonl)
+    const toolCallBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "tool_calls")
+    // The enter/exit tool calls must not appear as a separate tool_calls block
+    expect(toolCallBlocks).toHaveLength(0)
+  })
+
+  it("embeds intermediate tool calls under toolCalls in the plan_mode block", () => {
+    const jsonl = planModeSession({
+      intermediateTools: [
+        { name: "Read", input: { file_path: "src/main.ts" }, id: "inter_1" },
+        { name: "Read", input: { file_path: "src/lib.ts" }, id: "inter_2" },
+      ],
+    })
+    const session = parseSession(jsonl)
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    if (planBlocks[0].kind !== "plan_mode") return
+    expect(planBlocks[0].toolCalls).toHaveLength(2)
+    expect(planBlocks[0].toolCalls[0].name).toBe("Read")
+    expect(planBlocks[0].toolCalls[1].name).toBe("Read")
+  })
+
+  it("sets status to 'approved' when ExitPlanMode has a non-error result", () => {
+    const jsonl = planModeSession({ exitIsError: false })
+    const session = parseSession(jsonl)
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "plan_mode")
+    if (!block || block.kind !== "plan_mode") return
+    expect(block.status).toBe("approved")
+  })
+
+  it("sets status to 'rejected' when ExitPlanMode result is an error", () => {
+    const jsonl = planModeSession({ exitIsError: true })
+    const session = parseSession(jsonl)
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "plan_mode")
+    if (!block || block.kind !== "plan_mode") return
+    expect(block.status).toBe("rejected")
+  })
+
+  it("sets status to 'pending' when ExitPlanMode has no result yet", () => {
+    const jsonl = planModeSession({ hasExitResult: false })
+    const session = parseSession(jsonl)
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "plan_mode")
+    if (!block || block.kind !== "plan_mode") return
+    expect(block.status).toBe("pending")
+  })
+
+  it("sets status to 'pending' and emits plan_mode block when no ExitPlanMode yet", () => {
+    const jsonl = planModeSession({ omitExit: true })
+    const session = parseSession(jsonl)
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "plan_mode")
+    expect(block).toBeDefined()
+    if (!block || block.kind !== "plan_mode") return
+    expect(block.plan).toBe("## Plan\n\n1. Read the file\n2. Edit it")
+    expect(block.status).toBe("pending")
+    expect(block.planFilePath).toBeUndefined()
+  })
+
+  it("embeds non-readonly tools (e.g. Bash) without filtering", () => {
+    const jsonl = planModeSession({
+      intermediateTools: [
+        { name: "Bash", input: { command: "ls" }, id: "bash_1" },
+      ],
+    })
+    const session = parseSession(jsonl)
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "plan_mode")
+    if (!block || block.kind !== "plan_mode") return
+    // Bash must be embedded — no filtering
+    expect(block.toolCalls).toHaveLength(1)
+    expect(block.toolCalls[0].name).toBe("Bash")
+  })
+
+  it("does not treat a plan_mode block's embedded calls as flat toolCalls on the turn", () => {
+    const jsonl = planModeSession({
+      intermediateTools: [
+        { name: "Read", input: { file_path: "a.ts" }, id: "inter_r1" },
+      ],
+    })
+    const session = parseSession(jsonl)
+    // The turn's flat toolCalls should only include Enter+Exit (for stats/search compat)
+    // but NOT intermediate ones, since those are embedded in the plan_mode block
+    const planBlocks = session.turns[0].contentBlocks.filter((b) => b.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+  })
+})

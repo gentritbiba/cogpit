@@ -278,6 +278,7 @@ export type TurnContentBlock =
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }
+  | { kind: "plan_mode"; plan: string; planFilePath?: string; status: "pending" | "approved" | "rejected"; toolCalls: ToolCall[]; timestamp?: string }
 
 export interface Turn {
   id: string

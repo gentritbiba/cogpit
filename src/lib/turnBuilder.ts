@@ -5,6 +5,7 @@
 import type {
   RawMessage,
   Turn,
+  TurnContentBlock,
   ToolCall,
   SubAgentMessage,
   TokenUsage,
@@ -130,6 +131,123 @@ function buildCompactionSummary(turns: Turn[], title: string): string {
   return parts.join("\n")
 }
 
+// ── Plan Mode grouping ───────────────────────────────────────────────────────
+
+/**
+ * Post-processes a turn's contentBlocks to group EnterPlanMode → ... → ExitPlanMode
+ * tool call sequences into a single `plan_mode` content block.
+ *
+ * EnterPlanMode.input.plan — the plan text (markdown string)
+ * ExitPlanMode.input.path  — optional file path where plan was saved
+ *
+ * Status:
+ *   "approved" — ExitPlanMode has a non-error tool result
+ *   "rejected" — ExitPlanMode has an error tool result
+ *   "pending"  — ExitPlanMode not yet seen, or result not yet received
+ */
+function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
+  const result: TurnContentBlock[] = []
+  let i = 0
+  while (i < blocks.length) {
+    const block = blocks[i]
+
+    // Only inspect tool_calls blocks for EnterPlanMode
+    if (block.kind === "tool_calls") {
+      const enterIdx = block.toolCalls.findIndex((tc) => tc.name === "EnterPlanMode")
+      if (enterIdx !== -1) {
+        const enterCall = block.toolCalls[enterIdx]
+        const plan = String(enterCall.input.plan ?? "")
+        const timestamp = block.timestamp
+
+        // Collect non-Enter tool calls from the same block (before enter)
+        const before = block.toolCalls.slice(0, enterIdx)
+        if (before.length > 0) {
+          result.push({ kind: "tool_calls", toolCalls: before, timestamp: block.timestamp })
+        }
+
+        // Collect embedded tool calls (after enter in same block + subsequent blocks)
+        const embedded: ToolCall[] = []
+
+        // Same block: tools after EnterPlanMode
+        const afterEnterInSameBlock = block.toolCalls.slice(enterIdx + 1)
+        const exitInSameBlock = afterEnterInSameBlock.findIndex((tc) => tc.name === "ExitPlanMode")
+        if (exitInSameBlock !== -1) {
+          // ExitPlanMode is in the same tool_calls block
+          embedded.push(...afterEnterInSameBlock.slice(0, exitInSameBlock))
+          const exitCall = afterEnterInSameBlock[exitInSameBlock]
+          const planFilePath = exitCall.input.path ? String(exitCall.input.path) : undefined
+          let status: "pending" | "approved" | "rejected" = "pending"
+          if (exitCall.result !== null) {
+            status = exitCall.isError ? "rejected" : "approved"
+          }
+          result.push({ kind: "plan_mode", plan, planFilePath, status, toolCalls: embedded, timestamp })
+          // Any tools after ExitPlanMode in same block
+          const after = afterEnterInSameBlock.slice(exitInSameBlock + 1)
+          if (after.length > 0) {
+            result.push({ kind: "tool_calls", toolCalls: after, timestamp: block.timestamp })
+          }
+          i++
+          continue
+        } else {
+          // ExitPlanMode is in a later block — scan forward
+          embedded.push(...afterEnterInSameBlock)
+
+          let exitCall: ToolCall | undefined
+          let planFilePath: string | undefined
+          let status: "pending" | "approved" | "rejected" = "pending"
+          let j = i + 1
+
+          while (j < blocks.length) {
+            const next = blocks[j]
+            if (next.kind === "tool_calls") {
+              const exitIdx = next.toolCalls.findIndex((tc) => tc.name === "ExitPlanMode")
+              if (exitIdx !== -1) {
+                // Tools before ExitPlanMode in this block
+                embedded.push(...next.toolCalls.slice(0, exitIdx))
+                exitCall = next.toolCalls[exitIdx]
+                planFilePath = exitCall.input.path ? String(exitCall.input.path) : undefined
+                if (exitCall.result !== null) {
+                  status = exitCall.isError ? "rejected" : "approved"
+                }
+                // Tools after ExitPlanMode in this block
+                const tail = next.toolCalls.slice(exitIdx + 1)
+                if (tail.length > 0) {
+                  // Will be pushed after the plan_mode block
+                }
+                result.push({ kind: "plan_mode", plan, planFilePath, status, toolCalls: embedded, timestamp })
+                // Push tail of exit block back for further processing
+                if (tail.length > 0) {
+                  result.push({ kind: "tool_calls", toolCalls: tail, timestamp: next.timestamp })
+                }
+                i = j + 1
+                break
+              } else {
+                // This block has no ExitPlanMode — embed all its tool calls
+                embedded.push(...next.toolCalls)
+                j++
+              }
+            } else {
+              // Non-tool_calls block (hook_event, text, etc.) — stop collecting and emit pending
+              break
+            }
+          }
+
+          if (!exitCall) {
+            // No ExitPlanMode found — emit pending plan_mode with all collected embedded calls
+            result.push({ kind: "plan_mode", plan, planFilePath: undefined, status: "pending", toolCalls: embedded, timestamp })
+            i = j
+          }
+          continue
+        }
+      }
+    }
+
+    result.push(block)
+    i++
+  }
+  return result
+}
+
 // ── Build Turns State Machine ────────────────────────────────────────────────
 
 export function buildTurns(messages: RawMessage[]): Turn[] {
@@ -189,6 +307,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     for (const [parentId] of subAgentMap) {
       flushSubAgentMessages(parentId)
     }
+    // Group EnterPlanMode → ExitPlanMode sequences into plan_mode blocks
+    current.contentBlocks = groupPlanModeBlocks(current.contentBlocks)
     turns.push(current)
     current = null
     agentBlockMap.clear()
