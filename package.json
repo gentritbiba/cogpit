@@ -29,7 +29,7 @@
     "sync-cogpit-memory": "bun scripts/sync-cogpit-memory.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.132",
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@tanstack/react-virtual": "^3.13.18",
