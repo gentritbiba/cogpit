@@ -7,28 +7,19 @@ import { cn } from "@/lib/utils"
 import { GroupedFileCard } from "./GroupedFileCard"
 import { useFileChangesData, buildGroupedFiles, buildGroupedFilesByAgent, type AgentGroup } from "./useFileChangesData"
 import { OPEN_SUBAGENT_EVENT } from "./file-change-indicators"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 
 /** Custom event name for cross-panel file focus. */
 export const FOCUS_FILE_EVENT = "cogpit:focus-file"
 
 const PREFS_KEY = "cogpit:file-changes-prefs"
 
-function loadPref<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY)
-    if (!raw) return fallback
-    const prefs = JSON.parse(raw)
-    return key in prefs ? prefs[key] : fallback
-  } catch { return fallback }
-}
-
-function savePref(key: string, value: unknown): void {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY)
-    const prefs = raw ? JSON.parse(raw) : {}
-    prefs[key] = value
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
-  } catch { /* ignore */ }
+/** Shape of the persisted prefs bag. Numeric scope is transient and not stored. */
+interface FileChangesPrefs {
+  expanded: boolean
+  diffMode: "net" | "per-edit"
+  scope: "last" | "all"
+  groupByAgent: boolean
 }
 
 /** Scope: last turn, all turns, or a specific turn index. */
@@ -109,26 +100,44 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const prevTurnCountRef = useRef(session.turns.length)
   const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
-  const [allExpanded, setAllExpanded] = useState(() => loadPref("expanded", true))
-  const [diffMode, setDiffMode] = useState<DiffMode>(() => loadPref("diffMode", "net"))
 
-  // Scope: "last" (default), "all", or a specific turn index
-  const [scope, setScope] = useState<Scope>(() => loadPref("scope", "last") as Scope)
+  // Persisted prefs bag — all prefs share one localStorage key to match previous storage format
+  const [prefs, setPrefs] = useLocalStorage<FileChangesPrefs>(PREFS_KEY, {
+    expanded: true,
+    diffMode: "net",
+    scope: "last",
+    groupByAgent: false,
+  })
 
-  // Persist toggle preferences
-  useEffect(() => { savePref("expanded", allExpanded) }, [allExpanded])
-  useEffect(() => { savePref("diffMode", diffMode) }, [diffMode])
+  const allExpanded = prefs.expanded
+  const diffMode = prefs.diffMode as DiffMode
+  const groupByAgent = prefs.groupByAgent
+
+  // Scope: "last" (default), "all", or a specific turn index (transient — not persisted)
+  const [scope, setScope] = useState<Scope>(prefs.scope)
+
+  const setAllExpanded = useCallback((value: boolean) => {
+    setPrefs((prev) => ({ ...prev, expanded: value }))
+  }, [setPrefs])
+
+  const setDiffMode = useCallback((value: DiffMode) => {
+    setPrefs((prev) => ({ ...prev, diffMode: value }))
+  }, [setPrefs])
+
+  const setGroupByAgent = useCallback((value: boolean) => {
+    setPrefs((prev) => ({ ...prev, groupByAgent: value }))
+  }, [setPrefs])
+
+  // Only persist "last" or "all" scope — numeric scope is transient (from click events)
   useEffect(() => {
-    // Only persist "last" or "all" — numeric scope is transient (from click events)
-    if (typeof scope !== "number") savePref("scope", scope)
-  }, [scope])
+    if (typeof scope !== "number") {
+      setPrefs((prev) => ({ ...prev, scope }))
+    }
+  }, [scope, setPrefs])
 
   // Highlighted file path (from TurnChangedFiles click)
   const [highlightPath, setHighlightPath] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const [groupByAgent, setGroupByAgent] = useState(() => loadPref("groupByAgent", false))
-  useEffect(() => { savePref("groupByAgent", groupByAgent) }, [groupByAgent])
 
   const {
     fileChanges,
@@ -216,7 +225,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
     scrollOnNextChangeRef.current = false
     prevChangeCountRef.current = fileChanges.length
     prevTurnCountRef.current = session.turns.length
-    setScope(loadPref("scope", "last") as Scope)
+    setScope(prefs.scope)
     setHighlightPath(null)
     updateScrollIndicators()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only runs on session switch

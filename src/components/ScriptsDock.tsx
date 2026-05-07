@@ -5,6 +5,7 @@ import { useScriptDiscovery, type ScriptEntry } from "@/hooks/useScriptDiscovery
 import { useScriptRunner, type ManagedProcess } from "@/hooks/useScriptRunner"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -74,9 +75,7 @@ export const ScriptsDock = memo(function ScriptsDock({
   projectDir,
   onScriptStarted,
 }: ScriptsDockProps) {
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(COLLAPSED_KEY) === "true" } catch { return false }
-  })
+  const [collapsed, setCollapsed] = useLocalStorage(COLLAPSED_KEY, false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [showAll, setShowAll] = useState<Set<string>>(new Set())
@@ -87,12 +86,8 @@ export const ScriptsDock = memo(function ScriptsDock({
   const { runningProcesses, runScript, stopScript } = useScriptRunner(onScriptStarted)
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev
-      try { localStorage.setItem(COLLAPSED_KEY, String(next)) } catch { /* ignore */ }
-      return next
-    })
-  }, [])
+    setCollapsed((prev) => !prev)
+  }, [setCollapsed])
 
   const handleNewTerminal = useCallback(() => {
     const cwd = projectDir ?? undefined
