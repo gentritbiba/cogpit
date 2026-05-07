@@ -15,6 +15,7 @@ import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
 import { DesktopHeader } from "@/components/DesktopHeader"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
+import { SessionStatusBar } from "@/components/SessionStatusBar"
 import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
@@ -999,6 +1000,10 @@ export default function App() {
                     onShowFileChanges={() => setShowMobileFileChanges(true)}
                     hasFileChanges={hasFileChanges}
                   />
+                  <SessionStatusBar
+                    session={state.session}
+                    thinkingEnabled={state.session.turns.some((t) => t.thinking.length > 0)}
+                  />
                   <ChatArea searchInputRef={searchInputRef} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                 </div>
               ) : state.pendingDirName ? (
@@ -1197,6 +1202,10 @@ export default function App() {
                       onDuplicateSession={handlers.handleDuplicateSession}
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
+                    />
+                    <SessionStatusBar
+                      session={state.session}
+                      thinkingEnabled={state.session.turns.some((t) => t.thinking.length > 0)}
                     />
                     <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                     <SessionInputFooter floating>
