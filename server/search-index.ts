@@ -321,6 +321,7 @@ export class SearchIndex {
     opts?: {
       sessionId?: string
       maxAgeMs?: number
+      caseSensitive?: boolean
     }
   ): { totalHits: number; sessionsSearched: number } {
     const ftsQuery = `"${query.replace(/"/g, '""')}"`
@@ -343,6 +344,15 @@ export class SearchIndex {
     if (opts?.sessionId) {
       conditions.push("sc.session_id = ?")
       params.push(opts.sessionId)
+    }
+
+    // Mirror the same GLOB escape + case-sensitive filter used in search().
+    // Without this, countMatches over a capped result set includes case-insensitive
+    // matches, inflating the reported total when caseSensitive=true.
+    if (opts?.caseSensitive) {
+      const escapedQuery = query.replace(/[*?[]/g, (c) => `[${c}]`)
+      conditions.push("sc.content GLOB ?")
+      params.push(`*${escapedQuery}*`)
     }
 
     sql += " WHERE " + conditions.join(" AND ")

@@ -524,25 +524,49 @@ describe("SearchIndex", () => {
     })
 
     it("case-sensitive GLOB escapes metacharacters in query", async () => {
-      // Queries containing GLOB metacharacters (* ? [) must not be treated as
-      // wildcards — they should match literal characters.
+      // FTS5 trigram tokenizer behaviour with GLOB metacharacters:
+      //
+      // - Standalone `*`, `?`, `[` are NOT indexed by FTS5 trigram because the
+      //   tokenizer requires at least 3 characters. Single-char punctuation
+      //   produces no trigrams, so FTS5 MATCH cannot find them in isolation.
+      //
+      // - Multi-character patterns such as "foo[bar]" ARE indexed (the trigrams
+      //   span the bracket, e.g. oo[ / o[b / [ba / bar / ar]). This means
+      //   escaping `[` in GLOB is necessary and testable: without escaping,
+      //   SQLite treats `[bar]` as the character class {b,a,r} and the pattern
+      //   fails to match; with escaping (`[[]`), the literal bracket is matched.
+      //
+      // The escape path in search() is: query.replace(/[*?[]/g, (c) => `[${c}]`)
+      // This test exercises that path with a real `[` in the query string.
+
       const fp = join(TEST_DIR, "session.jsonl")
       writeTestJsonl(fp, [
-        makeUserMessage("Array<string> is used here"),
-        makeAssistantMessage("wildcard * matches everything"),
+        // Contains a literal `[` — FTS5 will index the surrounding trigrams
+        makeUserMessage("foo[bar] is the array syntax"),
+        // Should NOT be returned when searching for the exact string "foo[bar]"
+        makeUserMessage("foobar is unrelated content"),
+        makeUserMessage("baz unrelated content"),
       ])
 
       const index = new SearchIndex(TEST_DB)
       await index.indexFile(fp, "session", Date.now())
 
-      // Searching for the literal bracket pattern — should not match "wildcard *" row
-      const bracketHits = index.search("Array<string>", { caseSensitive: false })
-      expect(bracketHits.length).toBeGreaterThan(0)
+      // Case-insensitive baseline: FTS5 should find the row with "foo[bar]"
+      const baselineHits = index.search("foo[bar]", { caseSensitive: false })
+      expect(baselineHits.length).toBe(1)
+      expect(baselineHits[0].snippet).toContain("foo[bar]")
 
-      // Case-sensitive search for exact bracket pattern
-      const sensitiveHits = index.search("Array<string>", { caseSensitive: true })
-      expect(sensitiveHits.length).toBeGreaterThan(0)
-      expect(sensitiveHits.every((h) => h.snippet.includes("Array<string>"))).toBe(true)
+      // Case-sensitive search: the GLOB clause must escape `[` so it is treated
+      // as a literal bracket, not a character class.  Without escaping,
+      // `*foo[bar]*` would mean "foo followed by one char from {b,a,r}" and
+      // would NOT match the row — but it would also GLOB-match "foobar" (via the
+      // `r` branch of [bar]).  The escape ensures only the literal row matches.
+      const sensitiveHits = index.search("foo[bar]", { caseSensitive: true })
+      expect(sensitiveHits.length).toBe(1)
+      expect(sensitiveHits[0].snippet).toContain("foo[bar]")
+
+      // Confirm the unrelated rows are not present in the results
+      expect(sensitiveHits.every((h) => h.snippet.includes("foo[bar]"))).toBe(true)
 
       index.close()
     })

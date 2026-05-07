@@ -346,6 +346,7 @@ export function registerSessionSearchRoutes(use: UseFn) {
           const counts = searchIndex.countMatches(query, {
             sessionId: sessionId ?? undefined,
             maxAgeMs,
+            caseSensitive,
           })
           totalHits = counts.totalHits
           sessionsSearched = counts.sessionsSearched
