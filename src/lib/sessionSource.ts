@@ -11,9 +11,6 @@ export type { AgentKind } from "./providers/types"
 export { isCodexDirName, encodeCodexDirName } from "./providers/codex"
 export { inferAgentKind as inferSessionSourceKind, inferAgentKind as agentKindFromDirName } from "./providers/registry"
 
-/** @deprecated Alias for AgentKind — use AgentKind directly */
-export type SessionSourceKind = AgentKind
-
 export function getResumeCommand(
   agentKind: AgentKind,
   sessionId: string,
