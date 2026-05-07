@@ -485,14 +485,48 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
 // ── Cleanup ─────────────────────────────────────────────────────────────
 
 export function cleanupProcesses(): void {
-  for (const [sid, proc] of activeProcesses) {
-    try { proc.kill("SIGTERM") } catch { /* already dead */ }
+  // Build snapshot of process refs BEFORE clearing Maps.
+  // This prevents the SIGKILL fallback from iterating already-deleted entries,
+  // and mirrors the same fix applied to the kill-all route in claude-manage.ts.
+  const sigkillProcs: Array<{ kill(sig: string): void; pid?: number }> = []
+  for (const proc of activeProcesses.values()) sigkillProcs.push(proc)
+  for (const ps of persistentSessions.values()) sigkillProcs.push(ps.proc)
+
+  // SIGTERM all active processes (snapshot-before-mutation pattern)
+  for (const [sid, proc] of [...activeProcesses.entries()]) {
+    try {
+      proc.kill("SIGTERM")
+    } catch (err) {
+      console.error(`[cleanupProcesses] SIGTERM failed for activeProcess ${sid}`, err)
+    }
     activeProcesses.delete(sid)
   }
-  for (const [sid, ps] of persistentSessions) {
+
+  // SIGTERM all persistent sessions (snapshot-before-mutation pattern)
+  for (const [sid, ps] of [...persistentSessions.entries()]) {
     ps.subagentWatcher?.close()
-    try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
+    try {
+      ps.proc.kill("SIGTERM")
+    } catch (err) {
+      console.error(`[cleanupProcesses] SIGTERM failed for persistentSession ${sid}`, err)
+    }
     persistentSessions.delete(sid)
+  }
+
+  // Schedule SIGKILL fallback using the pre-clear snapshot.
+  // unref() so the timer does not prevent the process from exiting if all
+  // children are already dead before the 3s grace period elapses.
+  if (sigkillProcs.length > 0) {
+    const forceKill = setTimeout(() => {
+      for (const p of sigkillProcs) {
+        try {
+          p.kill("SIGKILL")
+        } catch (err) {
+          console.error(`[cleanupProcesses] SIGKILL failed for pid ${p.pid ?? "unknown"}`, err)
+        }
+      }
+    }, 3000)
+    forceKill.unref()
   }
 }
 

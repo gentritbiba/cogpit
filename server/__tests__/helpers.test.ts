@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { EventEmitter } from "node:events"
 
@@ -21,6 +21,9 @@ import {
   bodySizeLimit,
   authMiddleware,
   buildPermArgs,
+  cleanupProcesses,
+  activeProcesses,
+  persistentSessions,
 } from "../helpers"
 
 // ── isWithinDir ─────────────────────────────────────────────────────────
@@ -601,5 +604,174 @@ describe("buildPermArgs", () => {
 
   it("returns bypass flag when mode is empty string", () => {
     expect(buildPermArgs({ mode: "" })).toEqual(["--dangerously-skip-permissions"])
+  })
+})
+
+// ── cleanupProcesses ─────────────────────────────────────────────────────
+
+function makeFakeProc(pid = 1234): { kill: ReturnType<typeof vi.fn>; pid: number } {
+  return { kill: vi.fn(), pid }
+}
+
+function makeFakeSession(pid = 5678): {
+  proc: { kill: ReturnType<typeof vi.fn>; pid: number }
+  subagentWatcher: { close: ReturnType<typeof vi.fn> } | null
+  dead: boolean
+} {
+  return {
+    proc: { kill: vi.fn(), pid },
+    subagentWatcher: { close: vi.fn() },
+    dead: false,
+  }
+}
+
+describe("cleanupProcesses", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    activeProcesses.clear()
+    persistentSessions.clear()
+  })
+
+  afterEach(() => {
+    activeProcesses.clear()
+    persistentSessions.clear()
+    vi.useRealTimers()
+  })
+
+  it("sends SIGTERM to all activeProcesses", () => {
+    const proc1 = makeFakeProc(100)
+    const proc2 = makeFakeProc(101)
+    activeProcesses.set("sid-1", proc1 as never)
+    activeProcesses.set("sid-2", proc2 as never)
+
+    cleanupProcesses()
+
+    expect(proc1.kill).toHaveBeenCalledWith("SIGTERM")
+    expect(proc2.kill).toHaveBeenCalledWith("SIGTERM")
+  })
+
+  it("sends SIGTERM to all persistentSessions", () => {
+    const sess1 = makeFakeSession(200)
+    const sess2 = makeFakeSession(201)
+    persistentSessions.set("sid-a", sess1 as never)
+    persistentSessions.set("sid-b", sess2 as never)
+
+    cleanupProcesses()
+
+    expect(sess1.proc.kill).toHaveBeenCalledWith("SIGTERM")
+    expect(sess2.proc.kill).toHaveBeenCalledWith("SIGTERM")
+  })
+
+  it("clears both Maps after SIGTERM", () => {
+    activeProcesses.set("sid-1", makeFakeProc(300) as never)
+    persistentSessions.set("sid-a", makeFakeSession(301) as never)
+
+    cleanupProcesses()
+
+    expect(activeProcesses.size).toBe(0)
+    expect(persistentSessions.size).toBe(0)
+  })
+
+  it("sends SIGKILL to snapshot after 3000ms", () => {
+    const proc = makeFakeProc(400)
+    activeProcesses.set("sid-1", proc as never)
+
+    cleanupProcesses()
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM")
+    expect(proc.kill).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(3000)
+
+    expect(proc.kill).toHaveBeenCalledWith("SIGKILL")
+    expect(proc.kill).toHaveBeenCalledTimes(2)
+  })
+
+  it("sends SIGKILL to persistentSession procs after 3000ms", () => {
+    const sess = makeFakeSession(500)
+    persistentSessions.set("sid-a", sess as never)
+
+    cleanupProcesses()
+    expect(sess.proc.kill).toHaveBeenCalledWith("SIGTERM")
+
+    vi.advanceTimersByTime(3000)
+
+    expect(sess.proc.kill).toHaveBeenCalledWith("SIGKILL")
+  })
+
+  it("SIGKILL uses snapshot taken before Map clear (map-mutation safety)", () => {
+    const proc1 = makeFakeProc(600)
+    const proc2 = makeFakeProc(601)
+    const proc3 = makeFakeProc(602)
+    activeProcesses.set("sid-1", proc1 as never)
+    activeProcesses.set("sid-2", proc2 as never)
+    activeProcesses.set("sid-3", proc3 as never)
+
+    cleanupProcesses()
+    // Maps should be empty now
+    expect(activeProcesses.size).toBe(0)
+
+    vi.advanceTimersByTime(3000)
+
+    // All 3 procs should still get SIGKILL despite Map being cleared
+    expect(proc1.kill).toHaveBeenCalledWith("SIGKILL")
+    expect(proc2.kill).toHaveBeenCalledWith("SIGKILL")
+    expect(proc3.kill).toHaveBeenCalledWith("SIGKILL")
+  })
+
+  it("logs SIGTERM failure instead of silently swallowing", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const proc = makeFakeProc(700)
+    proc.kill.mockImplementationOnce((sig: string) => {
+      if (sig === "SIGTERM") throw new Error("already dead")
+    })
+    activeProcesses.set("sid-err", proc as never)
+
+    cleanupProcesses()
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cleanupProcesses]"),
+      expect.any(Error)
+    )
+
+    consoleSpy.mockRestore()
+  })
+
+  it("logs SIGKILL failure instead of silently swallowing", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const proc = makeFakeProc(800)
+    // SIGTERM succeeds, SIGKILL throws
+    proc.kill.mockImplementation((sig: string) => {
+      if (sig === "SIGKILL") throw new Error("still dead")
+    })
+    activeProcesses.set("sid-kill-err", proc as never)
+
+    cleanupProcesses()
+    vi.advanceTimersByTime(3000)
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[cleanupProcesses]"),
+      expect.any(Error)
+    )
+
+    consoleSpy.mockRestore()
+  })
+
+  it("closes subagentWatcher on persistent sessions", () => {
+    const sess = makeFakeSession(900)
+    persistentSessions.set("sid-watcher", sess as never)
+
+    cleanupProcesses()
+
+    expect(sess.subagentWatcher!.close).toHaveBeenCalled()
+  })
+
+  it("does not throw when called with empty Maps", () => {
+    expect(() => cleanupProcesses()).not.toThrow()
+  })
+
+  it("does not schedule SIGKILL timer when no processes exist", () => {
+    // No processes — advanceTimers should not cause errors
+    cleanupProcesses()
+    expect(() => vi.advanceTimersByTime(3000)).not.toThrow()
   })
 })
