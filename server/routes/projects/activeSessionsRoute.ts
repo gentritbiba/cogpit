@@ -13,6 +13,10 @@ import {
   stat,
 } from "../../helpers"
 import type { NextFn } from "../../helpers"
+import {
+  getCachedSessionMeta,
+  setCachedSessionMeta,
+} from "../../lib/sessionMetaCache"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -75,7 +79,8 @@ export async function handleActiveSessions(
     const codexFiles = await listCodexSessionFiles()
     for (const file of codexFiles) {
       try {
-        const meta = await getSessionMeta(file.filePath)
+        const codexCached = getCachedSessionMeta(file.filePath, file.mtimeMs)
+        const meta = codexCached ? codexCached.meta : await getSessionMeta(file.filePath)
         if (!meta.cwd) continue
         // Skip Codex sub-agent sessions — they're shown inline in their parent
         if (meta.isSubagent) continue
@@ -126,10 +131,22 @@ export async function handleActiveSessions(
     const results = await Promise.all(
       scanPool.map(async (c) => {
         try {
-          const [meta, statusInfo] = await Promise.all([
-            getSessionMeta(c.filePath),
-            getSessionStatus(c.filePath),
-          ])
+          const cached = getCachedSessionMeta(c.filePath, c.mtimeMs)
+          const [meta, statusInfo] = cached
+            ? [cached.meta, cached.status]
+            : await Promise.all([
+                getSessionMeta(c.filePath),
+                getSessionStatus(c.filePath),
+              ])
+
+          if (!cached) {
+            setCachedSessionMeta(c.filePath, {
+              meta,
+              status: statusInfo,
+              mtimeMs: c.mtimeMs,
+              cachedAt: Date.now(),
+            })
+          }
           const shortName = c.dirName.startsWith("codex__")
             ? `${(meta.cwd || "").replace(/\/+$/, "").split("/").at(-1) || "Codex"} (Codex)`
             : projectDirToReadableName(c.dirName).shortName

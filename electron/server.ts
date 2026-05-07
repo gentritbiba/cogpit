@@ -37,6 +37,7 @@ import { registerScriptRoutes } from "../server/routes/scripts"
 import { registerPermissionRoutes } from "../server/routes/permissions"
 import { SearchIndex } from "../server/search-index"
 import { PtySessionManager } from "../server/pty-server"
+import { invalidateSessionMeta } from "../server/lib/sessionMetaCache"
 
 // ── Server factory ──────────────────────────────────────────────────
 export async function createAppServer(staticDir: string, userDataDir: string) {
@@ -51,6 +52,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   try {
     const dbPath = resolveSearchIndexPath({ userDataDir })
     const index = new SearchIndex(dbPath)
+    index.onFileChanged = invalidateSessionMeta
     setSearchIndex(index)
     // startWatching does async I/O (updateStale) before setting up fs.watch
     if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)

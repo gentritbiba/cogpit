@@ -57,6 +57,14 @@ export class SearchIndex {
   private watcher: FSWatcher | null = null
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+  /**
+   * Optional hook called whenever the watcher detects a changed `.jsonl` file.
+   * Consumers (e.g. activeSessionsRoute) can set this to invalidate their own
+   * caches. The callback is best-effort: the mtime-key cache self-invalidates
+   * anyway, so missing a notification is not catastrophic.
+   */
+  onFileChanged: ((filePath: string) => void) | null = null
+
   constructor(dbPath: string) {
     this.dbPath = dbPath
     this.db = new Database(dbPath)
@@ -596,6 +604,10 @@ export class SearchIndex {
   private debouncedReindex(filePath: string): void {
     const existing = this.debounceTimers.get(filePath)
     if (existing) clearTimeout(existing)
+
+    // Best-effort: notify consumers (e.g. session-meta cache) immediately so
+    // stale entries are dropped even before the 2-second debounce fires.
+    this.onFileChanged?.(filePath)
 
     this.debounceTimers.set(
       filePath,

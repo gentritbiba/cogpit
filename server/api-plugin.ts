@@ -30,6 +30,7 @@ import { registerNotifyRoutes } from "./routes/notify"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerPermissionRoutes } from "./routes/permissions"
 import { SearchIndex } from "./search-index"
+import { invalidateSessionMeta } from "./lib/sessionMetaCache"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -52,6 +53,7 @@ export function sessionApiPlugin(): Plugin {
         try {
           const dbPath = resolveSearchIndexPath()
           const index = new SearchIndex(dbPath)
+          index.onFileChanged = invalidateSessionMeta
           setSearchIndex(index)
           // startWatching does async I/O (updateStale) before setting up fs.watch
           if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)
