@@ -74,10 +74,19 @@ export function registerClaudeManageRoutes(use: UseFn) {
 
     let killed = 0
 
+    // Build SIGKILL snapshot BEFORE clearing the Maps (fix for Bug #2:
+    // previous code read from already-empty Maps after deletion loops).
+    const sigkillProcs: Array<{ kill(sig: string): void }> = []
+    for (const ps of persistentSessions.values()) sigkillProcs.push(ps.proc)
+    for (const proc of activeProcesses.values()) sigkillProcs.push(proc)
+
     // Kill SDK sessions first
     killed += cleanupAllSDKSessions()
 
-    for (const [sid, ps] of persistentSessions) {
+    // Snapshot keys before iterating to avoid mutating the Map mid-iteration
+    // (fix for Bug #1: `persistentSessions.delete(sid)` inside a `for…of`
+    // over the same Map is undefined behaviour in some engines).
+    for (const [sid, ps] of [...persistentSessions.entries()]) {
       if (!ps.dead) {
         ps.dead = true
         try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
@@ -86,16 +95,15 @@ export function registerClaudeManageRoutes(use: UseFn) {
       persistentSessions.delete(sid)
     }
 
-    for (const [sid, proc] of activeProcesses) {
+    for (const [sid, proc] of [...activeProcesses.entries()]) {
       try { proc.kill("SIGTERM") } catch { /* already dead */ }
       activeProcesses.delete(sid)
       killed++
     }
 
     if (killed > 0) {
-      const snapshot = [...persistentSessions.values()].map(p => p.proc).concat([...activeProcesses.values()])
       const forceKill = setTimeout(() => {
-        for (const p of snapshot) {
+        for (const p of sigkillProcs) {
           try { p.kill("SIGKILL") } catch { /* already dead */ }
         }
       }, 3000)
