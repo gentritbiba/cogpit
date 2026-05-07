@@ -287,6 +287,30 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     for (const [parentId] of subAgentMap) {
       flushSubAgentMessages(parentId)
     }
+
+    // Cross-link PostToolUse hook events onto their matching ToolCall.
+    // Done at finalization time so all hook events are collected before we scan.
+    for (const block of current.contentBlocks) {
+      if (block.kind !== "hook_event") continue
+      for (const ev of block.events) {
+        // Only PostToolUse events (both older "PostToolUse:ToolName" and newer exact match)
+        const isPostToolUse =
+          ev.eventName === "PostToolUse" ||
+          ev.eventName.startsWith("PostToolUse:")
+        if (!isPostToolUse || !ev.toolUseId) continue
+
+        const toolCall = current.toolCalls.find((tc) => tc.id === ev.toolUseId)
+        if (!toolCall) continue
+
+        if (ev.updatedToolOutput) {
+          toolCall.outputReplacedByHook = true
+        }
+        if (ev.durationMs !== undefined) {
+          toolCall.hookDurationMs = (toolCall.hookDurationMs ?? 0) + ev.durationMs
+        }
+      }
+    }
+
     // Group EnterPlanMode → ExitPlanMode sequences into plan_mode blocks
     current.contentBlocks = groupPlanModeBlocks(current.contentBlocks)
     turns.push(current)

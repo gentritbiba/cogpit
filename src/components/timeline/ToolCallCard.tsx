@@ -410,6 +410,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
+          {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && (
+            <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
+          )}
+          {toolCall.outputReplacedByHook && (
+            <span className="text-[10px] text-blue-400" title="Output replaced by hook">hook</span>
+          )}
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
       </div>

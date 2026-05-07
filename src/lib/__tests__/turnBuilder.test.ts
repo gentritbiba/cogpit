@@ -371,6 +371,107 @@ describe("hook_progress parsing", () => {
   })
 })
 
+// ── PostToolUse hook cross-linking tests ─────────────────────────────────────
+
+describe("PostToolUse hook cross-linking onto ToolCall", () => {
+  it("sets outputReplacedByHook and hookDurationMs when updatedToolOutput is present", () => {
+    const toolId = "toolu_crosslink1"
+    const jsonl = toJsonl([
+      userMsg("Read with hook replacement"),
+      toolUseAssistant("Read", { file_path: "src/main.ts" }, toolId),
+      hookProgressMsg(toolId, {
+        hook_event_name: "PostToolUse",
+        tool_name: "Read",
+        tool_use_id: toolId,
+        duration_ms: 42,
+        hookSpecificOutput: { updatedToolOutput: "replaced!" },
+      }),
+      toolResultMsg(toolId, "original output"),
+      textAssistant("Done."),
+      turnDurationMsg(1000),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(1)
+    const tc = session.turns[0].toolCalls[0]
+    expect(tc.outputReplacedByHook).toBe(true)
+    expect(tc.hookDurationMs).toBe(42)
+  })
+
+  it("sums hookDurationMs across multiple hook events on the same tool call", () => {
+    const toolId = "toolu_crosslink2"
+    const jsonl = toJsonl([
+      userMsg("Multiple hooks"),
+      toolUseAssistant("Bash", { command: "ls" }, toolId),
+      hookProgressMsg(toolId, {
+        hook_event_name: "PostToolUse",
+        tool_use_id: toolId,
+        duration_ms: 10,
+        hookSpecificOutput: { updatedToolOutput: "first" },
+      }),
+      hookProgressMsg(toolId, {
+        hook_event_name: "PostToolUse",
+        tool_use_id: toolId,
+        duration_ms: 20,
+        hookSpecificOutput: { updatedToolOutput: "second" },
+      }),
+      toolResultMsg(toolId, "raw"),
+      textAssistant("Done."),
+      turnDurationMsg(1000),
+    ])
+
+    const session = parseSession(jsonl)
+    const tc = session.turns[0].toolCalls[0]
+    expect(tc.outputReplacedByHook).toBe(true)
+    expect(tc.hookDurationMs).toBe(30)
+  })
+
+  it("does not set outputReplacedByHook when updatedToolOutput is absent", () => {
+    const toolId = "toolu_crosslink3"
+    const jsonl = toJsonl([
+      userMsg("Hook without replacement"),
+      toolUseAssistant("Read", { file_path: "x.ts" }, toolId),
+      hookProgressMsg(toolId, {
+        hook_event_name: "PostToolUse",
+        tool_use_id: toolId,
+        duration_ms: 5,
+      }),
+      toolResultMsg(toolId, "ok"),
+      textAssistant("Done."),
+      turnDurationMsg(500),
+    ])
+
+    const session = parseSession(jsonl)
+    const tc = session.turns[0].toolCalls[0]
+    expect(tc.outputReplacedByHook).toBeUndefined()
+    expect(tc.hookDurationMs).toBe(5)
+  })
+
+  it("skips gracefully when tool_use_id does not match any tool call", () => {
+    const toolId = "toolu_crosslink4"
+    const unknownId = "toolu_unknown99"
+    const jsonl = toJsonl([
+      userMsg("Unmatched hook"),
+      toolUseAssistant("Read", { file_path: "x.ts" }, toolId),
+      hookProgressMsg(unknownId, {
+        hook_event_name: "PostToolUse",
+        tool_use_id: unknownId,
+        duration_ms: 7,
+        hookSpecificOutput: { updatedToolOutput: "replaced" },
+      }),
+      toolResultMsg(toolId, "ok"),
+      textAssistant("Done."),
+      turnDurationMsg(500),
+    ])
+
+    const session = parseSession(jsonl)
+    // Should not throw; the existing tool call is unaffected
+    const tc = session.turns[0].toolCalls[0]
+    expect(tc.outputReplacedByHook).toBeUndefined()
+    expect(tc.hookDurationMs).toBeUndefined()
+  })
+})
+
 // ── Plan mode grouping tests ─────────────────────────────────────────────────
 
 /**

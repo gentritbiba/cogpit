@@ -248,6 +248,10 @@ export interface ToolCall {
   result: string | null
   isError: boolean
   timestamp: string
+  /** Set by parser when a PostToolUse hook replaced this tool's output */
+  outputReplacedByHook?: boolean
+  /** Total duration of PostToolUse hooks attached to this call, summed in ms */
+  hookDurationMs?: number
 }
 
 export interface SubAgentMessage {

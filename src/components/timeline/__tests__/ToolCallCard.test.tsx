@@ -171,3 +171,67 @@ describe("ToolCallCard Skill rendering", () => {
     expect(screen.queryByText("Open SKILL.md")).toBeNull()
   })
 })
+
+describe("ToolCallCard hook badge rendering", () => {
+  it("shows 'hook' badge when outputReplacedByHook is true", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "x.ts" }),
+      outputReplacedByHook: true,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByText("hook")).toBeTruthy()
+  })
+
+  it("shows hook duration when hookDurationMs is set and > 0", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Bash", { command: "ls" }),
+      hookDurationMs: 42,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByText("42ms")).toBeTruthy()
+  })
+
+  it("shows both 'hook' badge and duration when both fields are set", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Bash", { command: "ls" }),
+      outputReplacedByHook: true,
+      hookDurationMs: 99,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByText("hook")).toBeTruthy()
+    expect(screen.getByText("99ms")).toBeTruthy()
+  })
+
+  it("does not show 'hook' badge when outputReplacedByHook is not set", () => {
+    const toolCall = makeToolCall("Read", { file_path: "x.ts" })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByText("hook")).toBeNull()
+  })
+
+  it("does not show duration when hookDurationMs is not set", () => {
+    const toolCall = makeToolCall("Read", { file_path: "x.ts" })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByText(/ms$/)).toBeNull()
+  })
+
+  it("does not show duration when hookDurationMs is 0", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "x.ts" }),
+      hookDurationMs: 0,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByText("0ms")).toBeNull()
+  })
+})
