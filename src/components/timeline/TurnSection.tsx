@@ -5,6 +5,7 @@ import { UserMessage } from "./UserMessage"
 import { AssistantText } from "./AssistantText"
 import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
+import { HookEventChip } from "./HookEventChip"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
@@ -371,6 +372,14 @@ function ContentBlocks({
         <div key={`bg-agent-${i}`} className="border-l-2 border-violet-500/30 pl-3 ml-1">
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "hook_event") {
+      elements.push(
+        <HookEventChip key={`hook-${i}`} events={block.events} />
       )
       i++
       continue
