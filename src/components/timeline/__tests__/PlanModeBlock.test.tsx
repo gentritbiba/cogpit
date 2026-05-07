@@ -3,6 +3,23 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { PlanModeBlock } from "../PlanModeBlock"
 import type { ToolCall } from "@/lib/types"
 
+// Mock useSessionContext — required by ToolCallCard
+vi.mock("@/contexts/SessionContext", () => ({
+  useSessionContext: vi.fn(() => ({ session: { sessionId: "test-session" } })),
+}))
+
+// Mock authFetch — required by ToolCallCard (Skill tool)
+vi.mock("@/lib/auth", () => ({
+  authFetch: vi.fn().mockResolvedValue({ ok: true }),
+  isRemoteClient: vi.fn().mockReturnValue(false),
+}))
+
+// Mock shiki — required by ToolCallCard syntax highlighting
+vi.mock("@/lib/shiki", () => ({
+  highlightCode: vi.fn().mockResolvedValue([]),
+  getLangFromPath: vi.fn().mockReturnValue(null),
+}))
+
 // Mock window.matchMedia — required by ToolCallCard → useIsMobile
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {

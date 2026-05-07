@@ -1,13 +1,20 @@
 import { describe, it, expect, vi, beforeAll } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { getToolSummary, ToolCallCard } from "../ToolCallCard"
 import type { ToolCall } from "@/lib/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
-// Mock authFetch — needed when "Open SKILL.md" button is clicked
+// Mock authFetch — needed when "Open SKILL.md" button is clicked / answer submission
+const mockAuthFetchFn = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
 vi.mock("@/lib/auth", () => ({
-  authFetch: vi.fn().mockResolvedValue({ ok: true }),
+  authFetch: (...args: unknown[]) => mockAuthFetchFn(...args),
   isRemoteClient: vi.fn().mockReturnValue(false),
+}))
+
+// Mock useSessionContext — used by ToolCallCard for sessionId
+const mockSession = { sessionId: "test-session-id" }
+vi.mock("@/contexts/SessionContext", () => ({
+  useSessionContext: vi.fn(() => ({ session: mockSession })),
 }))
 
 // Mock shiki (syntax highlighting) to avoid async side-effects in tests
@@ -125,10 +132,8 @@ describe("ToolCallCard Skill rendering", () => {
     expect(screen.getByText("Open SKILL.md")).toBeTruthy()
   })
 
-  it("calls authFetch with correct path when Open SKILL.md is clicked", async () => {
-    const { authFetch } = await import("@/lib/auth")
-    const mockAuthFetch = authFetch as unknown as ReturnType<typeof vi.fn>
-    mockAuthFetch.mockClear()
+  it("calls authFetch with correct path when Open SKILL.md is clicked", () => {
+    mockAuthFetchFn.mockClear()
 
     const filePath = "/home/user/.claude/skills/commit/SKILL.md"
     const skillMeta: Map<string, SkillMeta> = new Map([
@@ -141,7 +146,7 @@ describe("ToolCallCard Skill rendering", () => {
     const btn = screen.getByText("Open SKILL.md")
     fireEvent.click(btn)
 
-    expect(mockAuthFetch).toHaveBeenCalledWith(
+    expect(mockAuthFetchFn).toHaveBeenCalledWith(
       "/api/open-in-editor",
       expect.objectContaining({
         method: "POST",
@@ -233,5 +238,103 @@ describe("ToolCallCard hook badge rendering", () => {
     render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
 
     expect(screen.queryByText("0ms")).toBeNull()
+  })
+})
+
+describe("ToolCallCard AskUserQuestion inline form", () => {
+  const questions = [
+    { question: "What is your name?", options: [] },
+    { question: "What do you want to do?", options: [{ label: "Option A" }, { label: "Option B" }] },
+  ]
+
+  function makeAskUserQuestionCall(result: string | null = null): ToolCall {
+    return {
+      id: "tool-use-id-123",
+      name: "AskUserQuestion",
+      input: { questions },
+      result,
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  beforeAll(() => {
+    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+  })
+
+  it("renders one input per open question when pending and agent active", () => {
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    // Open-ended question gets a textarea
+    expect(screen.getByPlaceholderText("Type your answer...")).toBeTruthy()
+  })
+
+  it("renders option buttons for multiple-choice questions when pending and agent active", () => {
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    expect(screen.getByText("Option A")).toBeTruthy()
+    expect(screen.getByText("Option B")).toBeTruthy()
+  })
+
+  it("renders send answer button when pending and agent active", () => {
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    expect(screen.getByText("Send answer")).toBeTruthy()
+  })
+
+  it("does NOT render form when agent is NOT active", () => {
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+
+    expect(screen.queryByText("Send answer")).toBeNull()
+    expect(screen.queryByPlaceholderText("Type your answer...")).toBeNull()
+  })
+
+  it("does NOT render form when toolCall already has a result", () => {
+    const toolCall = makeAskUserQuestionCall("User responded")
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    expect(screen.queryByText("Send answer")).toBeNull()
+  })
+
+  it("calls authFetch with correct payload on form submit", async () => {
+    mockAuthFetchFn.mockClear()
+    mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
+
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    const submitBtn = screen.getByText("Send answer")
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(mockAuthFetchFn).toHaveBeenCalledWith(
+        "/api/ask-user-answer",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("test-session-id"),
+        }),
+      )
+    })
+  })
+
+  it("shows error message when fetch fails", async () => {
+    mockAuthFetchFn.mockResolvedValue({
+      ok: false,
+      json: vi.fn().mockResolvedValue({ error: "Session not found" }),
+    })
+
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    const submitBtn = screen.getByText("Send answer")
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText("Session not found")).toBeTruthy()
+    })
   })
 })

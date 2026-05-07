@@ -16,6 +16,7 @@ import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { authFetch } from "@/lib/auth"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
+import { useSessionContext } from "@/contexts/SessionContext"
 
 /**
  * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
@@ -327,6 +328,122 @@ function JsonResultHighlighted({
   return <HighlightedCodeBlock lines={lines} tokens={tokens} />
 }
 
+// ── AskUserQuestion inline answer form ─────────────────────────────────────
+
+interface AskUserQuestion {
+  question: string
+  header?: string
+  options?: Array<{ label: string; description?: string }>
+  type?: string
+}
+
+function AskUserAnswerForm({
+  toolCall,
+  sessionId,
+}: {
+  toolCall: ToolCall
+  sessionId: string
+}): React.ReactElement | null {
+  const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
+  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""))
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (questions.length === 0) return null
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await authFetch("/api/ask-user-answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, toolUseId: toolCall.id, answers }),
+      })
+      if (res.ok) {
+        setSubmitted(true)
+      } else {
+        const data = await res.json() as { error?: string }
+        setError(data.error ?? "Failed to submit answer")
+      }
+    } catch {
+      setError("Network error")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(e) => { void handleSubmit(e) }}
+      className={cn(
+        "mt-2 rounded-md border border-pink-500/30 bg-pink-500/5 p-2.5 space-y-2",
+        submitted && "opacity-50 pointer-events-none",
+      )}
+    >
+      {questions.map((q, i) => {
+        const isMultipleChoice = q.options && q.options.length > 0
+        return (
+          <div key={i} className="space-y-1">
+            {(q.header || q.question) && (
+              <div className="text-[11px] text-pink-300">
+                {q.header && <span className="font-medium mr-1">{q.header}</span>}
+                {q.question}
+              </div>
+            )}
+            {isMultipleChoice ? (
+              <div className="flex flex-wrap gap-1.5">
+                {q.options!.map((opt, oi) => (
+                  <button
+                    key={oi}
+                    type="button"
+                    onClick={() => {
+                      const next = [...answers]
+                      next[i] = opt.label
+                      setAnswers(next)
+                    }}
+                    className={cn(
+                      "text-[11px] px-2 py-0.5 rounded border transition-colors",
+                      answers[i] === opt.label
+                        ? "border-pink-500/60 bg-pink-500/20 text-pink-200"
+                        : "border-pink-500/20 text-pink-400 hover:bg-pink-500/10",
+                    )}
+                    title={opt.description}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <textarea
+                value={answers[i]}
+                onChange={(e) => {
+                  const next = [...answers]
+                  next[i] = e.target.value
+                  setAnswers(next)
+                }}
+                rows={2}
+                className="w-full text-[11px] font-mono bg-elevation-2 border border-pink-500/20 rounded p-1.5 text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:border-pink-500/50"
+                placeholder="Type your answer..."
+              />
+            )}
+          </div>
+        )
+      })}
+      {error && <p className="text-[10px] text-red-400">{error}</p>}
+      <button
+        type="submit"
+        disabled={submitting || submitted}
+        className="text-[11px] px-2.5 py-1 rounded border border-pink-500/40 bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 transition-colors disabled:opacity-50"
+      >
+        {submitted ? "Sent" : submitting ? "Sending..." : "Send answer"}
+      </button>
+    </form>
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────
 
 interface ToolCallCardProps {
@@ -340,6 +457,7 @@ interface ToolCallCardProps {
 const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
+  const { session } = useSessionContext()
   const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
@@ -481,6 +599,10 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           result={JSON.stringify(toolCall.input)}
           expanded={true}
         />
+      )}
+
+      {toolCall.name === "AskUserQuestion" && toolCall.result === null && isAgentActive && session?.sessionId && (
+        <AskUserAnswerForm toolCall={toolCall} sessionId={session.sessionId} />
       )}
 
       {showResult && toolCall.result !== null && (

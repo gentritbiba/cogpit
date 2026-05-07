@@ -35,6 +35,7 @@ import { registerMcpRoutes } from "../server/routes/mcp"
 import { registerNotifyRoutes } from "../server/routes/notify"
 import { registerScriptRoutes } from "../server/routes/scripts"
 import { registerPermissionRoutes } from "../server/routes/permissions"
+import { registerAskUserRoutes } from "../server/routes/ask-user"
 import { SearchIndex } from "../server/search-index"
 import { PtySessionManager } from "../server/pty-server"
 import { invalidateSessionMeta } from "../server/lib/sessionMetaCache"
@@ -108,6 +109,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerNotifyRoutes(use)
   registerScriptRoutes(use)
   registerPermissionRoutes(use)
+  registerAskUserRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL

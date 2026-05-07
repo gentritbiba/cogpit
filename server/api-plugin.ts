@@ -29,6 +29,7 @@ import { registerMcpRoutes } from "./routes/mcp"
 import { registerNotifyRoutes } from "./routes/notify"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerPermissionRoutes } from "./routes/permissions"
+import { registerAskUserRoutes } from "./routes/ask-user"
 import { SearchIndex } from "./search-index"
 import { invalidateSessionMeta } from "./lib/sessionMetaCache"
 
@@ -112,6 +113,7 @@ export function sessionApiPlugin(): Plugin {
       registerNotifyRoutes(use)
       registerScriptRoutes(use)
       registerPermissionRoutes(use)
+      registerAskUserRoutes(use)
     },
   }
 }
