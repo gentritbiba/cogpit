@@ -22,6 +22,13 @@ interface FileChangesPrefs {
   groupByAgent: boolean
 }
 
+const PREFS_DEFAULTS: FileChangesPrefs = {
+  expanded: true,
+  diffMode: "net",
+  scope: "last",
+  groupByAgent: false,
+}
+
 /** Scope: last turn, all turns, or a specific turn index. */
 type Scope = "last" | "all" | number
 
@@ -101,39 +108,36 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
 
-  // Persisted prefs bag — all prefs share one localStorage key to match previous storage format
-  const [prefs, setPrefs] = useLocalStorage<FileChangesPrefs>(PREFS_KEY, {
-    expanded: true,
-    diffMode: "net",
-    scope: "last",
-    groupByAgent: false,
-  })
+  // Persisted prefs bag — stored as Partial to survive schema additions without data loss.
+  // Merge with defaults at read time so missing keys never produce undefined.
+  const [storedPrefs, setStoredPrefs] = useLocalStorage<Partial<FileChangesPrefs>>(PREFS_KEY, {})
+  const prefs: FileChangesPrefs = { ...PREFS_DEFAULTS, ...storedPrefs }
 
   const allExpanded = prefs.expanded
-  const diffMode = prefs.diffMode as DiffMode
+  const diffMode = prefs.diffMode
   const groupByAgent = prefs.groupByAgent
 
   // Scope: "last" (default), "all", or a specific turn index (transient — not persisted)
   const [scope, setScope] = useState<Scope>(prefs.scope)
 
   const setAllExpanded = useCallback((value: boolean) => {
-    setPrefs((prev) => ({ ...prev, expanded: value }))
-  }, [setPrefs])
+    setStoredPrefs((prev) => ({ ...prev, expanded: value }))
+  }, [setStoredPrefs])
 
   const setDiffMode = useCallback((value: DiffMode) => {
-    setPrefs((prev) => ({ ...prev, diffMode: value }))
-  }, [setPrefs])
+    setStoredPrefs((prev) => ({ ...prev, diffMode: value }))
+  }, [setStoredPrefs])
 
   const setGroupByAgent = useCallback((value: boolean) => {
-    setPrefs((prev) => ({ ...prev, groupByAgent: value }))
-  }, [setPrefs])
+    setStoredPrefs((prev) => ({ ...prev, groupByAgent: value }))
+  }, [setStoredPrefs])
 
   // Only persist "last" or "all" scope — numeric scope is transient (from click events)
   useEffect(() => {
     if (typeof scope !== "number") {
-      setPrefs((prev) => ({ ...prev, scope }))
+      setStoredPrefs((prev) => ({ ...prev, scope }))
     }
-  }, [scope, setPrefs])
+  }, [scope, setStoredPrefs])
 
   // Highlighted file path (from TurnChangedFiles click)
   const [highlightPath, setHighlightPath] = useState<string | null>(null)

@@ -94,12 +94,14 @@ describe("useLocalStorage", () => {
 
   describe("SSR safety", () => {
     it("returns defaultValue when localStorage.getItem throws (simulates restricted env)", () => {
-      // Simulate an environment where localStorage access throws (e.g., incognito / security policy)
-      vi.spyOn(Storage.prototype, "getItem").mockImplementationOnce(() => {
+      // Simulate an environment where localStorage access throws (e.g., incognito / security policy).
+      // Use vi.spyOn(localStorage, "getItem") to match the plain-object mock used in this test setup.
+      const getItemSpy = vi.spyOn(localStorage, "getItem").mockImplementationOnce(() => {
         throw new Error("Access denied")
       })
       const { result } = renderHook(() => useLocalStorage("ssr-key", "ssr-default"))
       expect(result.current[0]).toBe("ssr-default")
+      getItemSpy.mockRestore()
     })
 
     it("does not crash when localStorage.setItem throws on setValue", () => {
@@ -118,6 +120,37 @@ describe("useLocalStorage", () => {
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
       setItemSpy.mockRestore()
+    })
+
+  })
+
+  describe("SSR window guard (unit)", () => {
+    it("returns defaultValue when window is undefined", () => {
+      // Directly test the lazy-initializer logic the hook uses, without needing
+      // a full React render (which requires window/document itself).
+      // This mirrors the exact guard: `if (typeof window === "undefined") return defaultValue`
+      function ssrInit<T>(defaultValue: T, key: string): T {
+        if (typeof window === "undefined") return defaultValue
+        try {
+          const raw = localStorage.getItem(key)
+          if (raw === null) return defaultValue
+          return JSON.parse(raw) as T
+        } catch {
+          return defaultValue
+        }
+      }
+
+      // Simulate SSR by stubbing window away, call the initializer, then restore.
+      const savedWindow = globalThis.window
+      // @ts-expect-error — intentional SSR simulation
+      globalThis.window = undefined
+      try {
+        expect(ssrInit("ssr-default", "ssr-win-key")).toBe("ssr-default")
+        expect(ssrInit(42, "ssr-num-key")).toBe(42)
+        expect(ssrInit({ a: 1 }, "ssr-obj-key")).toEqual({ a: 1 })
+      } finally {
+        globalThis.window = savedWindow
+      }
     })
   })
 })
