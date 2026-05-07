@@ -1,7 +1,6 @@
 import type { Plugin } from "vite"
-import { join } from "node:path"
-import { homedir } from "node:os"
 import { loadConfig, getConfig } from "./config"
+import { resolveSearchIndexPath } from "./lib/searchIndexPath"
 import { dirs, refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { registerConfigRoutes } from "./routes/config"
 import { registerProjectRoutes } from "./routes/projects"
@@ -51,13 +50,11 @@ export function sessionApiPlugin(): Plugin {
         refreshDirs()
         // Boot search index after dirs are ready
         try {
-          const dbPath = join(homedir(), ".claude", "agent-window", "search-index.db")
+          const dbPath = resolveSearchIndexPath()
           const index = new SearchIndex(dbPath)
           setSearchIndex(index)
-          // Start watching after a short delay to not block startup
-          setTimeout(() => {
-            if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
-          }, 1000)
+          // startWatching is synchronous — safe to call immediately after init
+          if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
         } catch (err) {
           console.warn("[search-index] Failed to boot search index:", err)
         }

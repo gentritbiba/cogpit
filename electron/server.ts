@@ -2,6 +2,7 @@ import express from "express"
 import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
 import { WebSocketServer } from "ws"
+import { resolveSearchIndexPath } from "../server/lib/searchIndexPath"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
@@ -48,13 +49,11 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // Boot search index
   try {
-    const dbPath = join(userDataDir, "search-index.db")
+    const dbPath = resolveSearchIndexPath({ userDataDir })
     const index = new SearchIndex(dbPath)
     setSearchIndex(index)
-    // Start watching after a short delay to not block startup
-    setTimeout(() => {
-      if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
-    }, 1000)
+    // startWatching is synchronous — safe to call immediately after init
+    if (dirs.PROJECTS_DIR) index.startWatching(dirs.PROJECTS_DIR)
   } catch (err) {
     console.warn("[search-index] Failed to boot search index:", err)
   }
