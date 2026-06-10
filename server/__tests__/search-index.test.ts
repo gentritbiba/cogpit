@@ -115,6 +115,21 @@ describe("SearchIndex", () => {
       expect(stats.totalRows).toBe(0)
       index.close()
     })
+
+    it("creates the parent directory if it does not exist", () => {
+      // Mirrors the dev fallback path (~/.claude/agent-window) on a fresh
+      // machine where the directory has never been created. better-sqlite3
+      // will not create parent dirs, so the constructor must.
+      const nestedDir = join("/tmp", "test-search-index-nested-" + crypto.randomUUID())
+      const nestedDbPath = join(nestedDir, "deep", "search-index.db")
+      try {
+        const index = new SearchIndex(nestedDbPath)
+        expect(statSync(nestedDbPath).isFile()).toBe(true)
+        index.close()
+      } finally {
+        rmSync(nestedDir, { recursive: true, force: true })
+      }
+    })
   })
 
   describe("indexFile", () => {

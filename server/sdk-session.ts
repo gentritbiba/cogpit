@@ -14,23 +14,30 @@ import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 
-// In a packaged Electron app the SDK's sdk.mjs lives inside app.asar. When it
-// resolves `./cli.js` via import.meta.url it hands back an asar path, which the
-// real `node` subprocess the SDK spawns cannot read (asar is only virtualized
-// inside Electron). Resolve the SDK main entry (cli.js isn't in package.exports)
-// and rewrite to the unpacked copy.
-const CLAUDE_CLI_PATH: string | undefined = (() => {
+// The SDK ships the Claude CLI as a native binary inside a platform-specific
+// optional package (e.g. @anthropic-ai/claude-agent-sdk-darwin-arm64) — there
+// is no cli.js next to sdk.mjs anymore. Outside Electron the SDK's own
+// resolution works, so we pass undefined. In a packaged Electron app the
+// binary resolves to a path inside app.asar, which cannot be spawned (asar is
+// only virtualized inside Electron), so we rewrite to the unpacked copy.
+export function resolveClaudeCliPath(
+  resolveModule: (id: string) => string,
+): string | undefined {
   try {
-    const req = createRequire(import.meta.url)
-    const sdkMain = req.resolve("@anthropic-ai/claude-agent-sdk")
-    const cliPath = join(dirname(sdkMain), "cli.js")
-    return cliPath.includes("/app.asar/")
-      ? cliPath.replace("/app.asar/", "/app.asar.unpacked/")
-      : cliPath
+    const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+    const binName = process.platform === "win32" ? "claude.exe" : "claude"
+    const binPath = join(dirname(resolveModule(`${platformPkg}/package.json`)), binName)
+    return binPath.includes("/app.asar/")
+      ? binPath.replace("/app.asar/", "/app.asar.unpacked/")
+      : undefined
   } catch {
     return undefined
   }
-})()
+}
+
+const CLAUDE_CLI_PATH: string | undefined = resolveClaudeCliPath((id) =>
+  createRequire(import.meta.url).resolve(id),
+)
 
 // ── Types ────────────────────────────────────────────────────────────────
 

@@ -55,8 +55,16 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
     const index = new SearchIndex(dbPath)
     index.onFileChanged = invalidateSessionMeta
     setSearchIndex(index)
-    // startWatching does async I/O (updateStale) before setting up fs.watch
-    if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)
+    // startWatching runs a full stale-index sync (updateStale) before setting
+    // up fs.watch — on a cold/stale index that can take minutes, and main.ts
+    // kills the app if the worker isn't ready in 15s. Run it in the background
+    // so the server can signal ready immediately; search serves the existing
+    // index until the sync completes.
+    if (dirs.PROJECTS_DIR) {
+      index.startWatching(dirs.PROJECTS_DIR).catch((err) => {
+        console.warn("[search-index] startWatching failed:", err)
+      })
+    }
   } catch (err) {
     console.warn("[search-index] Failed to boot search index:", err)
   }

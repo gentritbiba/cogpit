@@ -92,6 +92,37 @@ afterEach(async () => {
   cleanupAllSDKSessions()
 })
 
+describe("resolveClaudeCliPath", () => {
+  const binName = process.platform === "win32" ? "claude.exe" : "claude"
+  const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+
+  it("returns undefined outside asar so the SDK resolves its own native binary", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(
+      (id) => `/Users/me/app/node_modules/${id}`,
+    )
+    expect(result).toBeUndefined()
+  })
+
+  it("rewrites app.asar paths to app.asar.unpacked", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(
+      (id) => `/Applications/Cogpit.app/Contents/Resources/app.asar/node_modules/${id}`,
+    )
+    expect(result).toBe(
+      `/Applications/Cogpit.app/Contents/Resources/app.asar.unpacked/node_modules/${platformPkg}/${binName}`,
+    )
+  })
+
+  it("returns undefined when the platform package cannot be resolved", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(() => {
+      throw new Error("Cannot find module")
+    })
+    expect(result).toBeUndefined()
+  })
+})
+
 describe("sdk-session effort propagation", () => {
   it("createSDKSession passes the initial effort to the first query", async () => {
     const { createSDKSession } = await loadModule()

@@ -198,10 +198,16 @@ export function registerClaudeRoutes(use: UseFn) {
 
         if (legacyPs) persistentSessions.delete(sessionId)
 
-        // Resume via Agent SDK — start a new query with resume
+        // Resume via Agent SDK — start a new query with resume.
+        // Claude Code scopes --resume to the project directory derived from
+        // cwd, so when the client omits cwd we must recover it from the
+        // session's own metadata or the resume won't find the session.
+        const resumeMeta = !cwd && sessionPath
+          ? await getSessionMeta(sessionPath).catch(() => null)
+          : null
         const sdkState = resumeSDKSession({
           sessionId,
-          cwd: cwd || homedir(),
+          cwd: cwd || resumeMeta?.cwd || homedir(),
           message,
           images,
           permissionMode: permissions?.mode,
@@ -232,7 +238,11 @@ export function registerClaudeRoutes(use: UseFn) {
           sdkState.onResult = null
           res.setHeader("Content-Type", "application/json")
           if ((result as Record<string, unknown>).is_error) {
-            sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, String((result as Record<string, unknown>).result) || "Claude returned an error"))
+            const { result: errResult, subtype } = result as Record<string, unknown>
+            const errorMessage = errResult != null
+              ? String(errResult)
+              : `Claude returned an error${subtype ? ` (${subtype})` : ""}`
+            sendError(res, new RouteError(500, ErrorCodes.INTERNAL_ERROR, errorMessage))
           } else {
             res.end(JSON.stringify({ success: true }))
           }

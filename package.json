@@ -11,15 +11,15 @@
   "type": "module",
   "main": "out/main/main.js",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "node scripts/ensure-sqlite-abi.mjs && vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "node scripts/ensure-sqlite-abi.mjs && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "electron:dev": "electron-vite dev",
+    "electron:dev": "node scripts/ensure-sqlite-abi.mjs --electron && electron-vite dev",
     "electron:build": "electron-vite build",
     "electron:preview": "electron-vite build && electron .",
     "electron:package": "start=$(date +%s) && electron-vite build && electron-builder --publish never && echo \"\\n✅ electron:package completed in $(($(date +%s) - start))s\"",
@@ -29,7 +29,7 @@
     "sync-cogpit-memory": "bun scripts/sync-cogpit-memory.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.132",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.172",
     "@base-ui/react": "^1.2.0",
     "@fontsource-variable/geist": "^5.2.8",
     "@tanstack/react-virtual": "^3.13.18",

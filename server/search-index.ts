@@ -1,7 +1,7 @@
 import Database from "better-sqlite3"
 import { promises as fsp } from "node:fs"
-import { statSync, watch, type FSWatcher } from "node:fs"
-import { join, basename } from "node:path"
+import { statSync, watch, mkdirSync, type FSWatcher } from "node:fs"
+import { join, basename, dirname } from "node:path"
 import { parseSession, getUserMessageText } from "../src/lib/parser"
 
 /** Simple async semaphore for bounding I/O concurrency. */
@@ -67,6 +67,12 @@ export class SearchIndex {
 
   constructor(dbPath: string) {
     this.dbPath = dbPath
+    // better-sqlite3 will not create missing parent directories. Ensure the
+    // target dir exists so a fresh machine (e.g. the dev fallback path
+    // ~/.claude/agent-window, never created by anything else) doesn't throw.
+    if (dbPath !== ":memory:") {
+      mkdirSync(dirname(dbPath), { recursive: true })
+    }
     this.db = new Database(dbPath)
     this.db.pragma("journal_mode = WAL")
     this.db.pragma("synchronous = NORMAL")

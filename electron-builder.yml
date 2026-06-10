@@ -14,6 +14,8 @@ directories:
 asar: true
 asarUnpack:
   - packages/cogpit-memory/dist/**/*
+  # Native Claude CLI binary spawned by the agent SDK — must live outside asar
+  - node_modules/@anthropic-ai/claude-agent-sdk-*/**
 compression: maximum
 
 files:
