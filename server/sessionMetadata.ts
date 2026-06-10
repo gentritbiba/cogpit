@@ -81,12 +81,15 @@ export async function getSessionMeta(filePath: string) {
   let timestamp = ""
   let lastTimestamp = ""
   let turnCount = 0
+  let aiTitle = ""
   let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line)
       if (obj.sessionId && !sessionId) sessionId = obj.sessionId
+      // Claude Code v2.1.1xx+ writes AI-generated session titles; last one wins
+      if (obj.type === "ai-title" && obj.aiTitle) aiTitle = obj.aiTitle
       if (obj.version && !version) version = obj.version
       if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
       if (obj.slug && !slug) slug = obj.slug
@@ -126,6 +129,7 @@ export async function getSessionMeta(filePath: string) {
       let leftover = ""
       let foundMessage = false
       let foundTimestamp = false
+      let foundAiTitle = false
       outer: for (let i = 0; i < MAX_CHUNKS && cursor > 0; i++) {
         const readSize = Math.min(CHUNK, cursor)
         cursor -= readSize
@@ -137,7 +141,19 @@ export async function getSessionMeta(filePath: string) {
         const startIdx = cursor > 0 ? 1 : 0
         for (let j = splitLines.length - 1; j >= startIdx; j--) {
           const line = splitLines[j]
-          if (!line || !line.includes('"user"')) continue
+          if (!line) continue
+          // Scanning newest→oldest, so the first ai-title hit is the latest
+          if (!foundAiTitle && line.includes('"ai-title"')) {
+            try {
+              const obj = JSON.parse(line)
+              if (obj.type === "ai-title" && obj.aiTitle) {
+                aiTitle = obj.aiTitle
+                foundAiTitle = true
+              }
+            } catch { /* skip */ }
+            continue
+          }
+          if (!line.includes('"user"')) continue
           try {
             const obj = JSON.parse(line)
             if (obj.type !== "user" || obj.isMeta) continue
@@ -153,7 +169,7 @@ export async function getSessionMeta(filePath: string) {
                 foundMessage = true
               }
             }
-            if (foundMessage && foundTimestamp) break outer
+            if (foundMessage && foundTimestamp && foundAiTitle) break outer
           } catch { continue }
         }
       }
@@ -172,6 +188,7 @@ export async function getSessionMeta(filePath: string) {
     model,
     slug,
     name,
+    aiTitle,
     cwd,
     firstUserMessage,
     lastUserMessage,

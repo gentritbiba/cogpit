@@ -62,6 +62,7 @@ function mergeTokenUsage(
     cache_read_input_tokens:
       (existing.cache_read_input_tokens ?? 0) +
       (incoming.cache_read_input_tokens ?? 0),
+    speed: incoming.speed ?? existing.speed,
   }
 }
 

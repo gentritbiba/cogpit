@@ -76,6 +76,7 @@ export function getToolSummary(tc: ToolCall): string {
     case "Glob":
       return String(input.pattern ?? "")
     case "Task":
+    case "Agent":
       return String(input.description ?? input.prompt ?? "")
     case "WebFetch":
       return String(input.url ?? "")
@@ -454,7 +455,7 @@ interface ToolCallCardProps {
 }
 
 /** Low-signal tools that are collapsed to a single line on mobile by default. */
-const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
+const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "Agent", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
   const { session } = useSessionContext()

@@ -84,6 +84,8 @@ export interface TokenUsage {
   output_tokens: number
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
+  /** "fast" when the turn ran in fast mode (billed at a higher tier on Opus 4.6/4.7) */
+  speed?: string
 }
 
 export interface AssistantMessage extends BaseMessage {

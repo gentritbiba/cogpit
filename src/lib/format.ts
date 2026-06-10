@@ -4,6 +4,9 @@ export { calculateTurnCost, formatCost, computeAgentBreakdown, computeModelBreak
 
 export function shortenModel(model: string): string {
   if (!model) return "unknown"
+  if (model.includes("fable-5")) return "fable 5"
+  if (model.includes("mythos-5")) return "mythos 5"
+  if (model.includes("opus-4-8")) return "opus 4.8"
   if (model.includes("opus-4-7")) return "opus 4.7"
   if (model.includes("opus-4-6")) return "opus 4.6"
   if (model.includes("opus-4-5")) return "opus 4.5"
@@ -13,6 +16,8 @@ export function shortenModel(model: string): string {
   if (model.includes("haiku-4-5")) return "haiku 4.5"
   if (model.includes("opus-4-0")) return "opus 4"
   if (model.includes("sonnet-4-0")) return "sonnet 4"
+  if (model.includes("fable")) return "fable"
+  if (model.includes("mythos")) return "mythos"
   if (model.includes("opus")) return "opus"
   if (model.includes("sonnet")) return "sonnet"
   if (model.includes("haiku")) return "haiku"

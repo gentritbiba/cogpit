@@ -53,13 +53,32 @@ function makeSubAgent(overrides: Partial<SubAgentMessage> = {}): SubAgentMessage
 // ── calculateCost — pricing tiers ────────────────────────────────────────────
 
 describe("calculateCost", () => {
-  // Use 100k tokens (under 200k threshold) so extended pricing doesn't kick in
-  describe("latest tier (opus 4.5/4.6, sonnet 4.5/4.6): $5/$25", () => {
+  describe("frontier tier (fable 5, mythos 5, opus 4.8): $10/$50", () => {
     const models = [
+      "claude-fable-5",
+      "claude-fable-5[1m]",
+      "claude-mythos-5",
+      "claude-opus-4-8",
+    ]
+    for (const model of models) {
+      it(`${model}: input=$10/M, output=$50/M`, () => {
+        const cost = calculateCost({ model, inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
+        // 100k input * $10/M + 100k output * $50/M = 1 + 5 = 6
+        expect(cost).toBeCloseTo(6)
+      })
+      it(`${model}: cacheWrite=$12.50/M, cacheRead=$1/M`, () => {
+        const cost = calculateCost({ model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 100_000, cacheReadTokens: 100_000 })
+        // 100k cacheWrite * $12.50/M + 100k cacheRead * $1/M = 1.25 + 0.1 = 1.35
+        expect(cost).toBeCloseTo(1.35)
+      })
+    }
+  })
+
+  describe("opus 4.5/4.6/4.7 tier: $5/$25", () => {
+    const models = [
+      "claude-opus-4-7",
       "claude-opus-4-6",
       "claude-opus-4-5-20251101",
-      "claude-sonnet-4-6",
-      "claude-sonnet-4-5-20250929",
     ]
     for (const model of models) {
       it(`${model}: input=$5/M, output=$25/M`, () => {
@@ -75,8 +94,10 @@ describe("calculateCost", () => {
     }
   })
 
-  describe("sonnet legacy tier (3.5, 3.7, 4.0): $3/$15", () => {
+  describe("sonnet tier (3.5 through 4.6): $3/$15", () => {
     const models = [
+      "claude-sonnet-4-6",
+      "claude-sonnet-4-5-20250929",
       "claude-sonnet-4-0-20250514",
       "claude-3-7-sonnet-20250219",
       "claude-3-5-sonnet-20241022",
@@ -115,42 +136,54 @@ describe("calculateCost", () => {
     })
   })
 
-  describe("extended context pricing (>200k total input)", () => {
-    it("opus 4.6 extended: $10/$37.5", () => {
-      // Total input = 150k input + 60k cacheRead = 210k > 200k → extended
-      const cost = calculateCost({
-        model: "claude-opus-4-6",
-        inputTokens: 150_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 60_000,
-      })
-      const expected = (150_000 / 1e6) * 10 + (100_000 / 1e6) * 37.5 + (60_000 / 1e6) * 1
-      expect(cost).toBeCloseTo(expected)
-    })
-
-    it("sonnet 4.0 extended: $6/$22.5", () => {
-      const cost = calculateCost({
-        model: "claude-sonnet-4-0-20250514",
-        inputTokens: 210_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 0,
-      })
-      const expected = (210_000 / 1e6) * 6 + (100_000 / 1e6) * 22.5
-      expect(cost).toBeCloseTo(expected)
-    })
-
-    it("standard pricing when under 200k threshold", () => {
+  describe("fast mode pricing (usage.speed === 'fast')", () => {
+    it("opus 4.6 fast: $30/$150", () => {
       const cost = calculateCost({
         model: "claude-opus-4-6",
         inputTokens: 100_000,
         outputTokens: 100_000,
         cacheWriteTokens: 0,
         cacheReadTokens: 0,
+        speed: "fast",
       })
-      const expected = (100_000 / 1e6) * 5 + (100_000 / 1e6) * 25
+      const expected = (100_000 / 1e6) * 30 + (100_000 / 1e6) * 150
       expect(cost).toBeCloseTo(expected)
+    })
+
+    it("opus 4.8 fast: same $10/$50 as standard", () => {
+      const cost = calculateCost({
+        model: "claude-opus-4-8",
+        inputTokens: 100_000,
+        outputTokens: 100_000,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        speed: "fast",
+      })
+      expect(cost).toBeCloseTo(6) // 1 + 5
+    })
+
+    it("speed 'standard' uses normal pricing", () => {
+      const cost = calculateCost({
+        model: "claude-opus-4-6",
+        inputTokens: 100_000,
+        outputTokens: 100_000,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        speed: "standard",
+      })
+      expect(cost).toBeCloseTo(3) // 0.5 + 2.5
+    })
+
+    it("fast on a non-fast-mode model (fable) uses normal pricing", () => {
+      const cost = calculateCost({
+        model: "claude-fable-5",
+        inputTokens: 100_000,
+        outputTokens: 100_000,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        speed: "fast",
+      })
+      expect(cost).toBeCloseTo(6) // 1 + 5
     })
   })
 
@@ -166,13 +199,12 @@ describe("calculateCost", () => {
     expect(cost).toBeCloseTo(0.05) // 5 * $0.01
   })
 
-  it("fallback for unknown models uses latest tier (extended when >200k)", () => {
-    // 100k input → under threshold → standard $5/M
+  it("fallback for unknown models uses the default tier ($5/M input)", () => {
     const cost = calculateCost({ model: "unknown-model", inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
     expect(cost).toBeCloseTo(0.5) // 100k * $5/M
   })
 
-  it("null model uses latest tier", () => {
+  it("null model uses the default tier", () => {
     const cost = calculateCost({ model: null, inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
     expect(cost).toBeCloseTo(0.5) // 100k * $5/M
   })

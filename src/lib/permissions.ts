@@ -29,6 +29,7 @@ export const KNOWN_TOOLS = [
   "WebSearch",
   "NotebookEdit",
   "Task",
+  "Agent",
 ] as const
 
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"

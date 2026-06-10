@@ -21,6 +21,8 @@ export interface ActiveSessionInfo {
   fileName: string
   sessionId: string
   slug?: string
+  /** AI-generated session title from Claude Code's ai-title JSONL events */
+  aiTitle?: string
   firstUserMessage?: string
   lastUserMessage?: string
   gitBranch?: string
@@ -96,7 +98,7 @@ export function SessionRow({
     ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
-  const title = customName || truncate(s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
+  const title = customName || truncate(s.aiTitle || s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
 
   // Hover-intent prefetch: warm the session cache if the cursor dwells on the
   // row for HOVER_PREFETCH_MS. Fires on focus too so keyboard users benefit.

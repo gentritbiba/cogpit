@@ -26,6 +26,15 @@ describe("shortenModel", () => {
     expect(shortenModel("")).toBe("unknown")
   })
 
+  it("shortens fable 5 model ids (including [1m] variant)", () => {
+    expect(shortenModel("claude-fable-5")).toBe("fable 5")
+    expect(shortenModel("claude-fable-5[1m]")).toBe("fable 5")
+  })
+
+  it("shortens opus 4.8 model ids", () => {
+    expect(shortenModel("claude-opus-4-8")).toBe("opus 4.8")
+  })
+
   it("shortens opus 4.6 model ids", () => {
     expect(shortenModel("claude-opus-4-6-20250115")).toBe("opus 4.6")
   })
@@ -259,8 +268,7 @@ describe("truncate", () => {
 })
 
 // ── calculateTurnCost ─────────────────────────────────────────────────────
-// Pricing matches Claude Code v2.1.53 internal pricing tiers.
-// Tests use 100k tokens to stay under the 200k extended-context threshold.
+// Pricing matches Claude Code v2.1.172 internal pricing tiers.
 
 describe("calculateTurnCost", () => {
   it("calculates cost for opus 4.6 (latest tier: $5/$25)", () => {
@@ -269,9 +277,15 @@ describe("calculateTurnCost", () => {
     expect(cost).toBeCloseTo(3)
   })
 
-  it("calculates cost for sonnet 4.5 (latest tier: $5/$25)", () => {
+  it("calculates cost for sonnet 4.5 ($3/$15)", () => {
     const cost = calculateTurnCost("claude-sonnet-4-5-20250101", 100_000, 100_000, 0, 0)
-    expect(cost).toBeCloseTo(3)
+    expect(cost).toBeCloseTo(1.8)
+  })
+
+  it("calculates cost for fable 5 (frontier tier: $10/$50)", () => {
+    const cost = calculateTurnCost("claude-fable-5", 100_000, 100_000, 0, 0)
+    // 100k input * $10/M + 100k output * $50/M = 1 + 5 = $6
+    expect(cost).toBeCloseTo(6)
   })
 
   it("calculates cost for haiku 4.5 ($1/$5)", () => {

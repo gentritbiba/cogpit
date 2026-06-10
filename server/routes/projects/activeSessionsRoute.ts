@@ -155,6 +155,7 @@ export async function handleActiveSessions(
           let matchedMessage: string | undefined
           if (search) {
             const metaMatch =
+              meta.aiTitle?.toLowerCase().includes(q) ||
               meta.firstUserMessage?.toLowerCase().includes(q) ||
               meta.lastUserMessage?.toLowerCase().includes(q) ||
               meta.slug?.toLowerCase().includes(q) ||
@@ -177,6 +178,7 @@ export async function handleActiveSessions(
             sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
             slug: meta.slug,
             name: meta.name,
+            aiTitle: meta.aiTitle,
             model: meta.model,
             firstUserMessage: meta.firstUserMessage,
             lastUserMessage: meta.lastUserMessage,

@@ -28,6 +28,8 @@ export interface CostInput {
   cacheWriteTokens: number
   cacheReadTokens: number
   webSearchRequests?: number
+  /** Fast-mode flag from usage.speed — "fast" bills a higher tier on Opus 4.6/4.7 */
+  speed?: string
 }
 
 /**
@@ -38,8 +40,7 @@ export interface CostInput {
  * themselves.
  */
 export function calculateCost(c: CostInput): number {
-  const totalInput = c.inputTokens + c.cacheWriteTokens + c.cacheReadTokens
-  const p = resolveTier(c.model ?? "", totalInput)
+  const p = resolveTier(c.model ?? "", c.speed)
   return (
     (c.inputTokens / 1_000_000) * p.input +
     (c.outputTokens / 1_000_000) * p.output +
@@ -121,6 +122,7 @@ export function calculateTurnCostEstimated(turn: Turn): number {
     outputTokens: estimateTotalOutputTokens(turn),
     cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
     cacheReadTokens: u.cache_read_input_tokens ?? 0,
+    speed: u.speed,
   })
 }
 
@@ -134,6 +136,7 @@ export function calculateSubAgentCostEstimated(sa: SubAgentMessage): number {
     outputTokens: estimateSubAgentOutput(sa),
     cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
     cacheReadTokens: u.cache_read_input_tokens ?? 0,
+    speed: u.speed,
   })
 }
 

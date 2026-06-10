@@ -8,8 +8,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Aliases accepted by the Claude Code CLI (v2.1.172):
+// sonnet, opus, haiku, fable, best, sonnet[1m], opus[1m], fable[1m], opusplan
 export const CLAUDE_MODEL_OPTIONS = [
   { value: "", label: "Default" },
+  { value: "fable", label: "Fable" },
+  { value: "fable[1m]", label: "Fable 1M" },
   { value: "opus", label: "Opus" },
   { value: "opus[1m]", label: "Opus 1M" },
   { value: "sonnet", label: "Sonnet" },
