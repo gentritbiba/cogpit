@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
 import { highlightCode, getLangFromPath } from "@/lib/shiki"
@@ -604,6 +605,10 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
 
       {toolCall.name === "AskUserQuestion" && toolCall.result === null && isAgentActive && session?.sessionId && (
         <AskUserAnswerForm toolCall={toolCall} sessionId={session.sessionId} />
+      )}
+
+      {(toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null && (
+        <LiveSubagentTranscript toolUseId={toolCall.id} />
       )}
 
       {showResult && toolCall.result !== null && (

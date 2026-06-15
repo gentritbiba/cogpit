@@ -818,4 +818,186 @@ describe("useLiveSession", () => {
 
     vi.useRealTimers()
   })
+
+  // ── Token-streaming overlay ─────────────────────────────────────────
+
+  describe("streaming overlay", () => {
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "session-1.jsonl",
+      rawText: '{"type":"user"}',
+    }
+
+    function textDeltaEvent(messageId: string, delta: string, parentToolUseId: string | null = null) {
+      return {
+        type: "stream_delta",
+        events: [
+          { messageId, parentToolUseId, blockIndex: 0, blockType: "text", delta },
+        ],
+      }
+    }
+
+    it("stream_delta updates the overlay without any worker call", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+      workerParse.mockClear()
+      workerAppend.mockClear()
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_1", "Hello "))
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_1", "world"))
+        flushRAF()
+      })
+
+      expect(workerParse).not.toHaveBeenCalled()
+      expect(workerAppend).not.toHaveBeenCalled()
+      expect(result.current.streamingOverlay).toHaveLength(1)
+      expect(result.current.streamingOverlay[0].blocks[0].text).toBe("Hello world")
+      expect(result.current.isLive).toBe(true)
+    })
+
+    it("coalesces overlay updates to one rAF flush per burst", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        for (let i = 0; i < 10; i++) {
+          getLastEventSource().simulateMessage(textDeltaEvent("msg_1", String(i)))
+        }
+      })
+      // 10 deltas → a single scheduled rAF callback
+      expect(rafCallbacks.length).toBe(1)
+
+      act(() => flushRAF())
+      expect(result.current.streamingOverlay[0].blocks[0].text).toBe("0123456789")
+    })
+
+    it("stream_snapshot replaces the overlay wholesale", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_old", "stale"))
+        getLastEventSource().simulateMessage({
+          type: "stream_snapshot",
+          messages: [
+            {
+              messageId: "msg_snap",
+              parentToolUseId: null,
+              stopped: false,
+              blocks: [{ index: 0, blockType: "text", text: "mid-flight text" }],
+            },
+          ],
+        })
+        flushRAF()
+      })
+
+      expect(result.current.streamingOverlay).toHaveLength(1)
+      expect(result.current.streamingOverlay[0].messageId).toBe("msg_snap")
+      expect(result.current.streamingOverlay[0].blocks[0].text).toBe("mid-flight text")
+    })
+
+    it("incoming lines reconcile away the landed overlay message", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_landed", "streamed"))
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_pending", "still going"))
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(2)
+
+      act(() => {
+        getLastEventSource().simulateMessage({
+          type: "lines",
+          lines: ['{"type":"assistant","message":{"id":"msg_landed","content":[]}}'],
+        })
+        flushRAF()
+      })
+
+      expect(result.current.streamingOverlay.map((m) => m.messageId)).toEqual(["msg_pending"])
+    })
+
+    it("stream_clear empties the overlay", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_1", "text"))
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(1)
+
+      act(() => {
+        getLastEventSource().simulateMessage({ type: "stream_clear" })
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(0)
+    })
+
+    it("SSE error clears the overlay (snapshot rebuilds on reconnect)", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_1", "text"))
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(1)
+
+      act(() => {
+        getLastEventSource().simulateError()
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(0)
+    })
+
+    it("compaction clears the overlay", () => {
+      const { result } = renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        getLastEventSource().simulateMessage(textDeltaEvent("msg_1", "text"))
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(1)
+
+      act(() => {
+        getLastEventSource().simulateMessage({ type: "compacting_in_progress" })
+        flushRAF()
+      })
+      expect(result.current.streamingOverlay).toHaveLength(0)
+    })
+
+    it("keeps the existing worker coalescing regression intact alongside streaming", () => {
+      let resolveAppend: ((s: ParsedSession) => void) | null = null
+      workerAppend.mockImplementation(
+        () => new Promise<ParsedSession>((resolve) => { resolveAppend = resolve }),
+      )
+
+      renderHook(() =>
+        useLiveSession(source, onUpdate, workerParse, workerAppend, undefined, mockParsedSession),
+      )
+
+      act(() => {
+        const es = getLastEventSource()
+        for (let i = 0; i < 20; i++) {
+          es.simulateMessage({ type: "lines", lines: [`{"n":${i}}`] })
+          es.simulateMessage(textDeltaEvent("msg_1", String(i)))
+        }
+      })
+
+      // Interleaved stream deltas must not break the ≤2-worker-call guarantee
+      expect(workerAppend.mock.calls.length).toBeLessThanOrEqual(2)
+      act(() => { resolveAppend?.(mockParsedSession) })
+    })
+  })
 })

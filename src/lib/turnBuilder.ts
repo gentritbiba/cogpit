@@ -398,6 +398,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
 
             const agentMsg: SubAgentMessage = {
               agentId: toolUseResult.agentId,
+              parentToolUseId: toolUseId || undefined,
               agentName: taskMeta?.name ?? null,
               subagentType: taskMeta?.subagentType ?? null,
               type: "assistant",
@@ -617,6 +618,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       const taskMeta = taskMetaMap.get(parentId)
       const agentMsg: SubAgentMessage = {
         agentId: data.agentId,
+        parentToolUseId: parentId || undefined,
         agentName: taskMeta?.name ?? null,
         subagentType: taskMeta?.subagentType ?? null,
         type: data.message.type,

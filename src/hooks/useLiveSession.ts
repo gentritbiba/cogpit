@@ -3,6 +3,14 @@ import { authUrl } from "@/lib/auth"
 import type { ParsedSession } from "@/lib/types"
 import type { AgentKind } from "@/lib/sessionSource"
 import { sessionCache } from "@/lib/sessionCache"
+import {
+  applyDeltas,
+  applySnapshot,
+  reconcileWithLines,
+  sweepStale,
+  EMPTY_OVERLAY,
+  type StreamingOverlay,
+} from "@/lib/streamingOverlay"
 
 export interface SessionSource {
   dirName: string
@@ -31,8 +39,12 @@ export function useLiveSession(
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
   const [isCompacting, setIsCompacting] = useState(false)
+  // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
+  // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
+  const [streamingOverlay, setStreamingOverlay] = useState<StreamingOverlay>(EMPTY_OVERLAY)
   const textRef = useRef("")
   const sessionRef = useRef<ParsedSession | null>(null)
+  const overlayRef = useRef<StreamingOverlay>(EMPTY_OVERLAY)
   const sseStateRef = useRef<SseConnectionState>("disconnected")
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate
@@ -124,6 +136,49 @@ export function useLiveSession(
       rafId = requestAnimationFrame(flushUpdate)
     }
 
+    // ── Streaming overlay flushing ──────────────────────────────────────
+    // Overlay deltas arrive at up to ~13 Hz; mutate the ref and publish to
+    // React state at most once per animation frame. Separate scheduler from
+    // scheduleUpdate so overlay churn never forces a session re-render.
+    let overlayDirty = false
+    let overlayRafId: number | null = null
+    let staleSweep: ReturnType<typeof setInterval> | null = null
+
+    const flushOverlay = () => {
+      overlayDirty = false
+      overlayRafId = null
+      setStreamingOverlay(overlayRef.current)
+    }
+
+    const scheduleOverlayFlush = () => {
+      if (overlayDirty) return
+      overlayDirty = true
+      overlayRafId = requestAnimationFrame(flushOverlay)
+    }
+
+    const setOverlay = (next: StreamingOverlay) => {
+      if (next === overlayRef.current) return
+      overlayRef.current = next
+      scheduleOverlayFlush()
+      // Stale-sweep runs only while the overlay has content: stopped
+      // messages whose JSONL line never matched are dropped after 10 s.
+      if (next.length > 0 && !staleSweep) {
+        staleSweep = setInterval(() => {
+          const swept = sweepStale(overlayRef.current)
+          if (swept !== overlayRef.current) {
+            overlayRef.current = swept
+            scheduleOverlayFlush()
+          }
+          if (overlayRef.current.length === 0 && staleSweep) {
+            clearInterval(staleSweep)
+            staleSweep = null
+          }
+        }, 5_000)
+      }
+    }
+
+    const clearOverlay = () => setOverlay(EMPTY_OVERLAY)
+
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
       const toFlush = pendingText
@@ -187,11 +242,26 @@ export function useLiveSession(
         } else if (data.type === "compacting_in_progress") {
           setIsLive(true)
           setIsCompacting(true)
+          clearOverlay()
           resetStaleTimer()
+        } else if (data.type === "stream_snapshot") {
+          // Mid-turn connect/reconnect: replace the overlay wholesale.
+          setIsLive(true)
+          resetStaleTimer()
+          setOverlay(applySnapshot(data.messages ?? []))
+        } else if (data.type === "stream_delta") {
+          setIsLive(true)
+          resetStaleTimer()
+          setOverlay(applyDeltas(overlayRef.current, data.events ?? []))
+        } else if (data.type === "stream_clear") {
+          clearOverlay()
         } else if (data.type === "lines" && data.lines.length > 0) {
           setIsLive(true)
           setIsCompacting(false)
           resetStaleTimer()
+
+          // Drop overlay messages superseded by their complete JSONL line.
+          setOverlay(reconcileWithLines(overlayRef.current, data.lines))
 
           const newText = data.lines.join("\n") + "\n"
           textRef.current += newText
@@ -208,6 +278,9 @@ export function useLiveSession(
       wasDisconnectedRef.current = sseStateRef.current === "connected"
       sseStateRef.current = "disconnected"
       setSseState("disconnected")
+      // EventSource auto-reconnects; a fresh stream_snapshot will rebuild the
+      // overlay, so drop the (possibly gapped) current one.
+      clearOverlay()
     }
 
     return () => {
@@ -220,8 +293,12 @@ export function useLiveSession(
       setSseState("disconnected")
       if (staleTimer) clearTimeout(staleTimer)
       if (rafId !== null) cancelAnimationFrame(rafId)
+      if (overlayRafId !== null) cancelAnimationFrame(overlayRafId)
+      if (staleSweep) clearInterval(staleSweep)
+      overlayRef.current = EMPTY_OVERLAY
+      setStreamingOverlay(EMPTY_OVERLAY)
     }
   }, [dirName, fileName, rawText])
 
-  return { isLive, sseState, isCompacting }
+  return { isLive, sseState, isCompacting, streamingOverlay }
 }

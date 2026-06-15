@@ -11,6 +11,7 @@ import { ConversationTimeline } from "@/components/ConversationTimeline"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
+import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { FindInSession, type FindInSessionHandle } from "@/components/FindInSession"
 import { useAppContext } from "@/contexts/AppContext"
@@ -108,6 +109,7 @@ export const ChatArea = memo(function ChatArea({
                   onLoadMore={onLoadMore}
                 />
               )}
+              <StreamingTurnOverlay />
               {pendingMessages.map((msg, i) => (
                 <PendingTurnPreview
                   key={i}

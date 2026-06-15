@@ -39,6 +39,7 @@ import { registerAskUserRoutes } from "../server/routes/ask-user"
 import { SearchIndex } from "../server/search-index"
 import { PtySessionManager } from "../server/pty-server"
 import { invalidateSessionMeta } from "../server/lib/sessionMetaCache"
+import { sdkSessions } from "../server/sdk-session"
 
 // ── Server factory ──────────────────────────────────────────────────
 export async function createAppServer(staticDir: string, userDataDir: string) {
@@ -54,6 +55,13 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
     const dbPath = resolveSearchIndexPath({ userDataDir })
     const index = new SearchIndex(dbPath)
     index.onFileChanged = invalidateSessionMeta
+    // Never index while a Cogpit-driven session is running — the index would
+    // compete with the live session (and the UI) for CPU/disk.
+    // (Idle entries stay in the map for follow-ups, so check `running`.)
+    index.shouldDeferIndexing = () => {
+      for (const s of sdkSessions.values()) if (s.running) return true
+      return false
+    }
     setSearchIndex(index)
     // startWatching runs a full stale-index sync (updateStale) before setting
     // up fs.watch — on a cold/stale index that can take minutes, and main.ts

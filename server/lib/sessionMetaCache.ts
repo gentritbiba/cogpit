@@ -6,8 +6,11 @@
  *   2. The stored `mtimeMs` matches the caller's `mtimeMs` (auto-invalidates on file change).
  *   3. The entry is younger than SESSION_META_TTL_MS.
  *
- * TTL: 8 seconds — request bursts arrive at 1-2 Hz, so 8 s safely covers
- * a few rapid refreshes without masking genuine session changes.
+ * The mtime comparison is the real correctness mechanism — any write to the
+ * session file changes mtime and misses the cache. The TTL is only a backstop
+ * against pathological mtime reuse, so it can be long. (It used to be 8 s,
+ * which guaranteed a cold pass on every 10 s dashboard poll: ~50 session
+ * files re-read and re-scanned per poll for nothing.)
  */
 
 import type { SessionStatusInfo } from "../../src/lib/sessionStatus"
@@ -21,7 +24,10 @@ export interface CachedMeta {
   cachedAt: number
 }
 
-const SESSION_META_TTL_MS = 8_000
+export const SESSION_META_TTL_MS = 600_000
+
+/** Memory backstop: evict the oldest entries once the cache grows past this. */
+const MAX_ENTRIES = 1000
 
 const cache = new Map<string, CachedMeta>()
 
@@ -43,6 +49,17 @@ export function getCachedSessionMeta(filePath: string, mtimeMs: number): CachedM
 /** Store (or overwrite) a metadata entry for `filePath`. */
 export function setCachedSessionMeta(filePath: string, value: CachedMeta): void {
   cache.set(filePath, value)
+  if (cache.size > MAX_ENTRIES) {
+    let oldestKey: string | null = null
+    let oldestAt = Infinity
+    for (const [key, entry] of cache) {
+      if (entry.cachedAt < oldestAt) {
+        oldestAt = entry.cachedAt
+        oldestKey = key
+      }
+    }
+    if (oldestKey !== null) cache.delete(oldestKey)
+  }
 }
 
 /** Remove a single entry. Safe to call even when the path is not cached. */

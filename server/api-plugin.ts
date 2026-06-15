@@ -32,6 +32,7 @@ import { registerPermissionRoutes } from "./routes/permissions"
 import { registerAskUserRoutes } from "./routes/ask-user"
 import { SearchIndex } from "./search-index"
 import { invalidateSessionMeta } from "./lib/sessionMetaCache"
+import { sdkSessions } from "./sdk-session"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -55,6 +56,13 @@ export function sessionApiPlugin(): Plugin {
           const dbPath = resolveSearchIndexPath()
           const index = new SearchIndex(dbPath)
           index.onFileChanged = invalidateSessionMeta
+          // Never index while a Cogpit-driven session is running — the index
+          // would compete with the live session (and the UI) for CPU/disk.
+          // (Idle entries stay in the map for follow-ups, so check `running`.)
+          index.shouldDeferIndexing = () => {
+            for (const s of sdkSessions.values()) if (s.running) return true
+            return false
+          }
           setSearchIndex(index)
           // startWatching does async I/O (updateStale) before setting up fs.watch
           if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)

@@ -11,6 +11,7 @@ import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useVoiceInput } from "./useVoiceInput"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
+import { ErrorBanner } from "./ErrorBanner"
 
 export interface ChatInputHandle {
   toggleVoice: () => void
@@ -255,7 +256,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
             <ActionButtons hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
           </div>
         </div>
-        {status === "error" && error && <p className="mt-1 text-[10px] text-red-400">{error}</p>}
+        {status === "error" && error && <ErrorBanner error={error} />}
       </div>
     </div>
   )

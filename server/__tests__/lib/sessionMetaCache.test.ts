@@ -72,27 +72,48 @@ describe("sessionMetaCache", () => {
   })
 
   it("returns null after TTL expiry", async () => {
-    const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
+    const { getCachedSessionMeta, setCachedSessionMeta, SESSION_META_TTL_MS } = await loadModule()
     const value = makeCachedMeta({ cachedAt: Date.now() })
     setCachedSessionMeta("/test/file.jsonl", value)
 
-    // Advance time past TTL (8 seconds default)
-    vi.advanceTimersByTime(9000)
+    // Advance time past TTL
+    vi.advanceTimersByTime(SESSION_META_TTL_MS + 1000)
 
     const result = getCachedSessionMeta("/test/file.jsonl", 1000)
     expect(result).toBeNull()
   })
 
   it("returns cached value within TTL window", async () => {
-    const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
+    const { getCachedSessionMeta, setCachedSessionMeta, SESSION_META_TTL_MS } = await loadModule()
     const value = makeCachedMeta({ cachedAt: Date.now() })
     setCachedSessionMeta("/test/file.jsonl", value)
 
     // Advance time but stay within TTL
-    vi.advanceTimersByTime(5000)
+    vi.advanceTimersByTime(SESSION_META_TTL_MS - 1000)
 
     const result = getCachedSessionMeta("/test/file.jsonl", 1000)
     expect(result).not.toBeNull()
+  })
+
+  it("survives a 10s dashboard-poll interval (regression: TTL used to be 8s)", async () => {
+    const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
+    setCachedSessionMeta("/test/file.jsonl", makeCachedMeta({ cachedAt: Date.now() }))
+
+    vi.advanceTimersByTime(10_000)
+
+    expect(getCachedSessionMeta("/test/file.jsonl", 1000)).not.toBeNull()
+  })
+
+  it("evicts the oldest entry once the cache exceeds 1000 entries", async () => {
+    const { getCachedSessionMeta, setCachedSessionMeta } = await loadModule()
+    setCachedSessionMeta("/test/oldest.jsonl", makeCachedMeta({ cachedAt: Date.now() }))
+    vi.advanceTimersByTime(10)
+    for (let i = 0; i < 1000; i++) {
+      setCachedSessionMeta(`/test/file-${i}.jsonl`, makeCachedMeta({ cachedAt: Date.now() }))
+    }
+
+    expect(getCachedSessionMeta("/test/oldest.jsonl", 1000)).toBeNull()
+    expect(getCachedSessionMeta("/test/file-999.jsonl", 1000)).not.toBeNull()
   })
 
   it("explicit invalidation removes entry", async () => {

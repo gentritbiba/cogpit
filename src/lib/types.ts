@@ -258,6 +258,8 @@ export interface ToolCall {
 
 export interface SubAgentMessage {
   agentId: string
+  /** The Task/Agent tool_use id this agent belongs to (streaming overlay key) */
+  parentToolUseId?: string
   agentName: string | null
   subagentType: string | null
   type: "user" | "assistant"

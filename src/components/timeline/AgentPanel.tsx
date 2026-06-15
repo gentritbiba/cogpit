@@ -3,6 +3,7 @@ import { Users, ChevronRight, ChevronDown, Clock, Wrench, CheckCircle2, XCircle,
 import { cn } from "@/lib/utils"
 import { formatDuration, parseSubAgentPath } from "@/lib/format"
 import type { SubAgentMessage } from "@/lib/types"
+import { LiveSubagentTranscript } from "./LiveSubagentTranscript"
 import { buildAgentLabelMap } from "./agent-utils"
 import { useSubagentContent } from "@/hooks/useSubagentContent"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -84,6 +85,15 @@ export const AgentPanel = memo(function AgentPanel({
       if (m.toolUseCount != null) existing.toolUseCount = m.toolUseCount
       if (m.status) existing.status = m.status
       map.set(m.agentId, existing)
+    }
+    return map
+  }, [messages, displayMessages])
+
+  // agentId → Task/Agent tool_use id (key for the live streaming transcript)
+  const parentToolByAgent = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const m of [...messages, ...displayMessages]) {
+      if (m.parentToolUseId && !map.has(m.agentId)) map.set(m.agentId, m.parentToolUseId)
     }
     return map
   }, [messages, displayMessages])
@@ -176,6 +186,13 @@ export const AgentPanel = memo(function AgentPanel({
         )}
       </button>
 
+      {/* Live transcript is visible even while the panel is collapsed —
+          running agents stream here before any return text exists. */}
+      {!isOpen && agentIds.map((id) => {
+        const ptid = parentToolByAgent.get(id)
+        return ptid ? <LiveSubagentTranscript key={id} toolUseId={ptid} /> : null
+      })}
+
       {isOpen && (
         <div className="mt-2 space-y-2">
           {isLoading && (
@@ -197,6 +214,7 @@ export const AgentPanel = memo(function AgentPanel({
                 badgeClass={color.badge}
                 message={msg}
                 stats={stats}
+                parentToolUseId={parentToolByAgent.get(id)}
                 canNavigate={canNavigate}
                 onOpen={() => {
                   if (!canNavigate) return
@@ -222,6 +240,7 @@ interface AgentReturnItemProps {
   badgeClass: string
   message: SubAgentMessage | undefined
   stats: { durationMs?: number; toolUseCount?: number; status?: string } | undefined
+  parentToolUseId: string | undefined
   canNavigate: boolean
   onOpen: () => void
 }
@@ -232,6 +251,7 @@ function AgentReturnItem({
   badgeClass,
   message,
   stats,
+  parentToolUseId,
   canNavigate,
   onOpen,
 }: AgentReturnItemProps): React.ReactElement {
@@ -288,15 +308,18 @@ function AgentReturnItem({
             </ReactMarkdown>
           </div>
         ) : (
-          <div className="text-[11px] text-muted-foreground/60 italic inline-flex items-center gap-1.5">
-            {isRunning ? (
-              <>
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Working — no return yet
-              </>
-            ) : (
-              <>No return message from this agent</>
-            )}
+          <div className="space-y-1">
+            <div className="text-[11px] text-muted-foreground/60 italic inline-flex items-center gap-1.5">
+              {isRunning ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Working — no return yet
+                </>
+              ) : (
+                <>No return message from this agent</>
+              )}
+            </div>
+            {parentToolUseId && <LiveSubagentTranscript toolUseId={parentToolUseId} />}
           </div>
         )}
       </div>

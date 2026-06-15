@@ -10,6 +10,7 @@ import {
 } from "../helpers"
 import { readdir } from "node:fs/promises"
 import type { UseFn } from "../helpers"
+import * as streamBus from "../lib/streamBus"
 
 export function registerFileWatchRoutes(use: UseFn) {
   // GET /api/task-output?path=<outputFile> - SSE stream of background task output
@@ -205,10 +206,30 @@ export function registerFileWatchRoutes(use: UseFn) {
     let heartbeat: ReturnType<typeof setInterval> | null = null
     let closed = false
 
+    // ── Token-level streaming (SDK-driven sessions only) ───────────────
+    // The stream bus carries partial-message events published by
+    // sdk-session.ts. External sessions never publish, so this is inert
+    // for them. Codex sessions have no SDK stream either.
+    let unsubscribeStream: (() => void) | null = null
+    if (!isCodexDirName(dirName)) {
+      const sessionId = fileName.replace(/\.jsonl$/, "")
+      const snapshot = streamBus.getSnapshot(sessionId)
+      if (snapshot && snapshot.length > 0) {
+        res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
+      }
+      unsubscribeStream = streamBus.subscribe(sessionId, (ev) => {
+        if (!closed) {
+          res.write(`data: ${JSON.stringify(ev)}\n\n`)
+        }
+      })
+    }
+
     function cleanup() {
       closed = true
       watcher?.close()
       watcher = null
+      unsubscribeStream?.()
+      unsubscribeStream = null
       if (throttleTimer) clearTimeout(throttleTimer)
       if (trailingTimer) clearTimeout(trailingTimer)
       if (pollTimer) clearInterval(pollTimer)
@@ -233,6 +254,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // Throttle: fire immediately on first change, then at most once per
     // THROTTLE_MS while writes continue. A trailing flush catches the
     // final write after activity stops.
+    let watcherHealthy = false
     try {
       watcher = watch(filePath, () => {
         if (closed) return
@@ -246,12 +268,15 @@ export function registerFileWatchRoutes(use: UseFn) {
         }, THROTTLE_MS)
       })
       watcher.on("error", () => {}) // prevent uncaught crash when file is removed
+      watcherHealthy = true
     } catch {
       // file may not exist yet -- poller below will pick up changes
     }
 
-    // Poll as a fallback for fs.watch
-    const POLL_MS = 500
+    // Poll as a fallback for fs.watch. With a healthy watcher the poll is
+    // only a safety net for missed FSEvents, so it can be slow; without one
+    // it's the primary delivery mechanism and must stay fast.
+    const POLL_MS = watcherHealthy ? 2000 : 500
     pollTimer = setInterval(() => {
       if (!closed) flushNewLines()
     }, POLL_MS)

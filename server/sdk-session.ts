@@ -13,6 +13,7 @@ import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
+import * as streamBus from "./lib/streamBus"
 
 // The SDK ships the Claude CLI as a native binary inside a platform-specific
 // optional package (e.g. @anthropic-ai/claude-agent-sdk-darwin-arm64) — there
@@ -86,6 +87,10 @@ export interface SDKSessionState {
   model?: string
   effort?: string
   mcpConfig?: string | null
+  /** stderr captured from the Claude CLI subprocess for the current run —
+   *  surfaced in the error result so failures show the real reason (e.g. a
+   *  missing native binary or glibc mismatch) instead of "exited with code 1". */
+  stderr?: string
 }
 
 export const sdkSessions = new Map<string, SDKSessionState>()
@@ -159,6 +164,12 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     effort: state.effort as Options["effort"],
     persistSession: true,
     pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+    // Token-level streaming: raw Anthropic stream events are forwarded to
+    // the stream bus so the UI can render text as it is generated.
+    includePartialMessages: true,
+    // Forward the full subagent conversation (tagged with parent_tool_use_id)
+    // so live subagent transcripts can render under their tool card.
+    forwardSubagentText: true,
   }
 
   if (isBypass) {
@@ -185,6 +196,13 @@ function buildQueryOptions(state: SDKSessionState, opts: {
   queryOpts.env = { ...process.env }
   delete queryOpts.env.CLAUDECODE
 
+  // Capture the CLI subprocess's stderr so a spawn/exit failure carries its
+  // real cause into the error result. Capped to avoid unbounded growth.
+  queryOpts.stderr = (data: string) => {
+    const next = (state.stderr || "") + data
+    state.stderr = next.length > 16_000 ? next.slice(-16_000) : next
+  }
+
   return queryOpts
 }
 
@@ -194,12 +212,57 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "result") {
     state.running = false
     state.activeQuery = null
+    streamBus.clear(state.sessionId)
     state.onResult?.(msg as unknown as Record<string, unknown>)
     state.onResult = null
   }
 
+  if (msg.type === "stream_event") {
+    const ev = msg as unknown as {
+      event: streamBus.RawStreamEvent
+      parent_tool_use_id: string | null
+    }
+    streamBus.publish(state.sessionId, ev.event, ev.parent_tool_use_id ?? null)
+  }
+
   if (msg.type === "assistant") {
-    const message = (msg as Record<string, unknown>).message as { content?: unknown[] } | undefined
+    const raw = msg as unknown as Record<string, unknown>
+    const message = raw.message as { id?: string; content?: unknown[] } | undefined
+    const parentToolUseId = (raw.parent_tool_use_id as string | null | undefined) ?? null
+
+    // With forwardSubagentText enabled, subagents' own COMPLETE messages flow
+    // through here (the SDK emits no token-level stream events for subagents).
+    // Publish them to the bus for the live transcript, and keep them out of
+    // pendingTaskCalls — a subagent's nested Task call would corrupt the
+    // subagentWatcher's prompt matching.
+    if (parentToolUseId !== null) {
+      const content = message?.content as Array<{ type: string; text?: string; thinking?: string }> | undefined
+      if (message?.id && Array.isArray(content)) {
+        const textBlocks: Array<{ blockType: "text" | "thinking"; text: string }> = []
+        for (const block of content) {
+          if (block.type === "text" && block.text) {
+            textBlocks.push({ blockType: "text", text: block.text })
+          } else if (block.type === "thinking" && block.thinking) {
+            textBlocks.push({ blockType: "thinking", text: block.thinking })
+          }
+        }
+        if (textBlocks.length > 0) {
+          streamBus.publishCompleteMessage(state.sessionId, {
+            messageId: message.id,
+            parentToolUseId,
+            blocks: textBlocks,
+          })
+        }
+      }
+      return
+    }
+
+    // Main thread: the complete message now exists in the JSONL — drop the
+    // stream copy so a late snapshot never duplicates the file tail.
+    if (message?.id) {
+      streamBus.completeMessage(state.sessionId, message.id)
+    }
+
     const blocks = message?.content as Array<{ type: string; name?: string; id?: string; input?: { prompt?: string } }> | undefined
     if (!Array.isArray(blocks)) return
     for (const block of blocks) {
@@ -228,6 +291,7 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
 }): void {
   state.abort = new AbortController()
   state.running = true
+  state.stderr = ""
 
   const queryOpts = buildQueryOptions(state, opts)
 
@@ -247,13 +311,19 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
       }
     } catch (err) {
       if (state.onResult) {
-        state.onResult({ type: "result", is_error: true, result: String(err) })
+        const base = String(err)
+        const detail = state.stderr?.trim()
+        // Append captured stderr so the surfaced error is verbose enough to
+        // diagnose (the SDK's own message is just "exited with code 1").
+        const result = detail && !base.includes(detail) ? `${base}\n\n${detail}` : base
+        state.onResult({ type: "result", is_error: true, result })
         state.onResult = null
       }
     } finally {
       state.running = false
       state.activeQuery = null
       state.abort = null
+      streamBus.clear(state.sessionId)
       rejectAllPending(state, "Session ended")
     }
   })()
@@ -487,6 +557,7 @@ export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
 // ── Stop / cleanup ───────────────────────────────────────────────────
 
 function teardownState(state: SDKSessionState): void {
+  streamBus.clear(state.sessionId)
   rejectAllPending(state, "Session stopped")
   state.subagentWatcher?.close()
   state.subagentWatcher = null

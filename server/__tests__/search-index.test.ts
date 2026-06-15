@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, afterEach, beforeEach } from "vitest"
-import { SearchIndex, type SearchHit } from "../search-index"
+import { SearchIndex, INDEX_TUNING, type SearchHit } from "../search-index"
 import { unlinkSync, writeFileSync, mkdirSync, rmSync, statSync } from "node:fs"
 import { join } from "node:path"
 
@@ -1086,6 +1086,152 @@ describe("SearchIndex", () => {
       // Rebuild should re-discover everything
       await index.rebuild()
       expect(index.getStats().indexedSessions).toBe(2)
+      index.close()
+    })
+  })
+
+  describe("good-neighbor indexing", () => {
+    const savedTuning = { ...INDEX_TUNING }
+
+    function sleep(ms: number) {
+      return new Promise((resolve) => setTimeout(resolve, ms))
+    }
+
+    /** Trigger the watcher's reindex path without depending on fs.watch. */
+    function triggerReindex(index: SearchIndex, filePath: string): void {
+      ;(index as unknown as { debouncedReindex(p: string): void }).debouncedReindex(filePath)
+    }
+
+    beforeEach(() => {
+      mkdirSync(TEST_DIR, { recursive: true })
+    })
+
+    afterEach(() => {
+      Object.assign(INDEX_TUNING, savedTuning)
+      try { rmSync(TEST_DIR, { recursive: true }) } catch { /* already gone */ }
+    })
+
+    it("chunked writes stay idempotent for files larger than one batch", async () => {
+      // > WRITE_BATCH_SIZE (200) rows: 150 turns × (user + assistant) = 300 rows
+      const lines: object[] = []
+      for (let i = 0; i < 150; i++) {
+        lines.push(makeUserMessage(`user message number ${i} batchy_content`))
+        lines.push(makeAssistantMessage(`assistant reply number ${i}`))
+      }
+      const filePath = join(TEST_DIR, "big-session.jsonl")
+      writeTestJsonl(filePath, lines)
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(filePath, "big-session", 1000)
+      const rowsFirst = index.getStats().totalRows
+      expect(rowsFirst).toBeGreaterThan(200)
+
+      // Re-index: no duplicate rows, registration intact
+      await index.indexFile(filePath, "big-session", 2000)
+      expect(index.getStats().totalRows).toBe(rowsFirst)
+      expect(index.getStats().indexedFiles).toBe(1)
+      expect(index.search("batchy_content").length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("registers files that produce zero searchable rows", async () => {
+      const filePath = join(TEST_DIR, "empty-session.jsonl")
+      writeTestJsonl(filePath, [])
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(filePath, "empty-session", 1000)
+      expect(index.getStats().indexedFiles).toBe(1)
+      expect(index.getStats().totalRows).toBe(0)
+      index.close()
+    })
+
+    it("hot-file cooldown skips reindexing a recently indexed file", async () => {
+      INDEX_TUNING.debounceMs = 30
+      INDEX_TUNING.hotFileMinIntervalSmallMs = 60_000
+
+      const filePath = join(TEST_DIR, "hot-session.jsonl")
+      writeTestJsonl(filePath, [makeUserMessage("original hot content")])
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(filePath, "hot-session", 1000) // sets lastIndexedAt
+
+      writeTestJsonl(filePath, [
+        makeUserMessage("original hot content"),
+        makeUserMessage("freshly appended cooldown_test_content"),
+      ])
+      triggerReindex(index, filePath)
+      await sleep(300)
+
+      // Still in cooldown — the new content must NOT be indexed yet
+      expect(index.search("cooldown_test_content").length).toBe(0)
+      index.close()
+    })
+
+    it("reindexes once the hot-file cooldown has elapsed", async () => {
+      INDEX_TUNING.debounceMs = 30
+      INDEX_TUNING.hotFileMinIntervalSmallMs = 0
+
+      const filePath = join(TEST_DIR, "warm-session.jsonl")
+      writeTestJsonl(filePath, [makeUserMessage("original warm content")])
+
+      const index = new SearchIndex(TEST_DB)
+      await index.indexFile(filePath, "warm-session", 1000)
+
+      writeTestJsonl(filePath, [
+        makeUserMessage("original warm content"),
+        makeUserMessage("freshly appended nocooldown_test_content"),
+      ])
+      triggerReindex(index, filePath)
+      await sleep(300)
+
+      expect(index.search("nocooldown_test_content").length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("defers watcher reindexing while shouldDeferIndexing is true", async () => {
+      INDEX_TUNING.debounceMs = 30
+      INDEX_TUNING.deferRecheckMs = 60
+      INDEX_TUNING.hotFileMinIntervalSmallMs = 0
+
+      const filePath = join(TEST_DIR, "deferred-session.jsonl")
+      writeTestJsonl(filePath, [makeUserMessage("deferred_test_content")])
+
+      const index = new SearchIndex(TEST_DB)
+      let defer = true
+      index.shouldDeferIndexing = () => defer
+
+      triggerReindex(index, filePath)
+      await sleep(300)
+      expect(index.search("deferred_test_content").length).toBe(0)
+
+      defer = false
+      await sleep(300)
+      expect(index.search("deferred_test_content").length).toBeGreaterThan(0)
+      index.close()
+    })
+
+    it("defers the initial stale sync while shouldDeferIndexing is true", async () => {
+      INDEX_TUNING.deferRecheckMs = 60
+      INDEX_TUNING.syncPacingMs = 1
+
+      const projectDir = join(TEST_DIR, "projects", "project-a")
+      mkdirSync(projectDir, { recursive: true })
+      writeTestJsonl(join(projectDir, "session-1.jsonl"), [
+        makeUserMessage("stale_sync_deferred_content"),
+      ])
+
+      const index = new SearchIndex(TEST_DB)
+      let defer = true
+      index.shouldDeferIndexing = () => defer
+
+      const syncDone = index.updateStale(join(TEST_DIR, "projects"))
+      await sleep(200)
+      expect(index.getStats().indexedFiles).toBe(0)
+
+      defer = false
+      await syncDone
+      expect(index.getStats().indexedFiles).toBe(1)
+      expect(index.search("stale_sync_deferred_content").length).toBeGreaterThan(0)
       index.close()
     })
   })

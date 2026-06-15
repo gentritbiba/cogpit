@@ -74,6 +74,7 @@ import {
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
 
 // Lazy-loaded components (only rendered when user opens them)
@@ -283,7 +284,7 @@ export default function App() {
   // duplicate worker parse on every source change (the session was already
   // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting } = useLiveSession(
+  const { isLive, sseState, isCompacting, streamingOverlay } = useLiveSession(
     state.sessionSource,
     (updated) => {
       startTransition(() => {
@@ -954,6 +955,7 @@ export default function App() {
       <AppProvider value={appContextValue}>
       <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
+      <StreamingOverlayProvider value={streamingOverlay}>
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
         <UpdateBanner />
@@ -1111,6 +1113,7 @@ export default function App() {
           </Suspense>
         )}
       </div>
+      </StreamingOverlayProvider>
       </SessionProvider>
       </PtyProvider>
       </AppProvider>
@@ -1122,6 +1125,7 @@ export default function App() {
     <AppProvider value={appContextValue}>
     <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
+      <StreamingOverlayProvider value={streamingOverlay}>
     <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {backgroundServers}
       <UpdateBanner />
@@ -1361,7 +1365,8 @@ export default function App() {
 
       {errorToast || sseIndicator}
     </div>
-    </SessionProvider>
+    </StreamingOverlayProvider>
+      </SessionProvider>
     </PtyProvider>
     </AppProvider>
   )

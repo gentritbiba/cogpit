@@ -47,6 +47,34 @@ export interface SearchHit {
   matchCount: number
 }
 
+/** Gate for env-controlled perf instrumentation. */
+const PERF_LOG = process.env.COGPIT_PERF_LOG === "1"
+
+/** Rows inserted per transaction before yielding back to the event loop. */
+const WRITE_BATCH_SIZE = 200
+
+/**
+ * Timing knobs for background indexing. Exported as a mutable object so
+ * tests can shrink the intervals; production code never mutates it.
+ */
+export const INDEX_TUNING = {
+  /** Quiescence debounce after a file change before reindexing. */
+  debounceMs: 2000,
+  /** Pacing gap between files during the initial stale sync. */
+  syncPacingMs: 50,
+  /** Re-check interval while indexing is deferred (live session running). */
+  deferRecheckMs: 15_000,
+  /** Minimum interval between reindexes of the same file. */
+  hotFileMinIntervalLargeMs: 30_000, // files above the size threshold
+  hotFileMinIntervalSmallMs: 5_000,
+  /** File size above which the large hot-file interval applies. */
+  hotFileSizeThreshold: 2 * 1024 * 1024,
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export class SearchIndex {
   private db: InstanceType<typeof Database>
   private dbPath: string
@@ -56,6 +84,8 @@ export class SearchIndex {
   private _lastUpdate: string | null = null
   private watcher: FSWatcher | null = null
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private lastIndexedAt = new Map<string, number>()
+  private aborted = false
 
   /**
    * Optional hook called whenever the watcher detects a changed `.jsonl` file.
@@ -64,6 +94,15 @@ export class SearchIndex {
    * anyway, so missing a notification is not catastrophic.
    */
   onFileChanged: ((filePath: string) => void) | null = null
+
+  /**
+   * Optional gate: while it returns true, background indexing (initial stale
+   * sync and watcher-triggered reindexes) is deferred and re-checked every
+   * INDEX_TUNING.deferRecheckMs. Wire this to "any live Claude session running" so the
+   * index never competes with an active session for CPU/disk — search keeps
+   * serving the existing index and freshness repairs on quiescence.
+   */
+  shouldDeferIndexing: (() => boolean) | null = null
 
   constructor(dbPath: string) {
     this.dbPath = dbPath
@@ -104,7 +143,14 @@ export class SearchIndex {
     }
   }
 
+  private statsCache: { stats: IndexStats; at: number } | null = null
+
   getStats(): IndexStats {
+    // COUNT(*) over a large FTS5 table is tens of ms of synchronous work and
+    // the stats panel polls this; memoize briefly and invalidate on writes.
+    if (this.statsCache && Date.now() - this.statsCache.at < 30_000) {
+      return this.statsCache.stats
+    }
     const { count: indexedFiles } = this.db.prepare("SELECT COUNT(*) as count FROM indexed_files").get() as { count: number }
     const { count: indexedSessions } = this.db.prepare("SELECT COUNT(*) as count FROM indexed_files WHERE is_subagent = 0").get() as { count: number }
     const { count: indexedSubagents } = this.db.prepare("SELECT COUNT(*) as count FROM indexed_files WHERE is_subagent = 1").get() as { count: number }
@@ -113,9 +159,11 @@ export class SearchIndex {
     let dbSizeBytes = 0
     try {
       dbSizeBytes = statSync(this.dbPath).size
-    } catch {}
+    } catch {
+      // in-memory DB or file missing — size stays 0
+    }
 
-    return {
+    const stats: IndexStats = {
       dbPath: this.dbPath,
       dbSizeBytes,
       dbSizeMB: Math.round((dbSizeBytes / 1024 / 1024) * 10) / 10,
@@ -127,12 +175,20 @@ export class SearchIndex {
       lastFullBuild: this._lastFullBuild,
       lastUpdate: this._lastUpdate,
     }
+    this.statsCache = { stats, at: Date.now() }
+    return stats
   }
 
   /**
    * Parse a JSONL file and insert all searchable content into the FTS5 index.
    * Idempotent: deletes old data for the file before re-indexing.
-   * All inserts run in a single transaction for performance.
+   *
+   * Rows are collected first (pure JS), then written in batches of
+   * WRITE_BATCH_SIZE inserts per transaction with event-loop yields between
+   * batches — a 20 MB session no longer blocks the server's event loop for
+   * seconds at a time. The `indexed_files` registration row is written only
+   * in the FINAL batch, so an interrupted index leaves no registration and
+   * self-heals on the next `updateStale()`.
    */
   async indexFile(
     filePath: string,
@@ -140,16 +196,84 @@ export class SearchIndex {
     mtimeMs: number,
     opts?: { isSubagent?: boolean; parentSessionId?: string | null }
   ): Promise<void> {
+    const t0 = Date.now()
     const content = await fsp.readFile(filePath, "utf-8")
     const session = parseSession(content)
 
     const isSubagent = opts?.isSubagent ? 1 : 0
     const parentSessionId = opts?.parentSessionId ?? null
 
+    // ── Collect rows (no DB work) ────────────────────────────────────
+    const rows: Array<[string, string]> = [] // [location, content]
+    const add = (location: string, text: string) => rows.push([location, text])
+
+    const collectToolCalls = (toolCalls: typeof session.turns[0]["toolCalls"], locationPrefix: string): void => {
+      for (const tc of toolCalls) {
+        const inputStr = JSON.stringify(tc.input)
+        if (inputStr && inputStr !== "{}") {
+          add(`${locationPrefix}/toolCall/${tc.id}/input`, inputStr)
+        }
+        if (tc.result) {
+          add(`${locationPrefix}/toolCall/${tc.id}/result`, tc.result)
+        }
+      }
+    }
+
+    for (let i = 0; i < session.turns.length; i++) {
+      const turn = session.turns[i]
+      const prefix = `turn/${i}`
+
+      // User message
+      const userText = getUserMessageText(turn.userMessage)
+      if (userText.trim()) {
+        add(`${prefix}/userMessage`, userText)
+      }
+
+      // Assistant text
+      const assistantJoined = turn.assistantText.join("\n\n").trim()
+      if (assistantJoined) {
+        add(`${prefix}/assistantMessage`, assistantJoined)
+      }
+
+      // Thinking blocks
+      const thinkingText = turn.thinking
+        .filter((t) => t.thinking)
+        .map((t) => t.thinking)
+        .join("\n\n")
+        .trim()
+      if (thinkingText) {
+        add(`${prefix}/thinking`, thinkingText)
+      }
+
+      collectToolCalls(turn.toolCalls, prefix)
+
+      // Sub-agent inline activity
+      for (const sa of turn.subAgentActivity) {
+        const saPrefix = `agent/${sa.agentId}`
+        const saText = sa.text.join("\n\n").trim()
+        if (saText) {
+          add(`${saPrefix}/assistantMessage`, saText)
+        }
+        const saThinking = sa.thinking
+          .filter((t) => t.length > 0)
+          .join("\n\n")
+          .trim()
+        if (saThinking) {
+          add(`${saPrefix}/thinking`, saThinking)
+        }
+        collectToolCalls(sa.toolCalls, saPrefix)
+      }
+
+      // Compaction summary
+      if (turn.compactionSummary) {
+        add(`${prefix}/compactionSummary`, turn.compactionSummary)
+      }
+    }
+
+    // ── Write in yielded batches ─────────────────────────────────────
     const insert = this.db.prepare(
       "INSERT INTO search_content (session_id, source_file, location, content) VALUES (?, ?, ?, ?)"
     )
-
     const deleteContent = this.db.prepare(
       "DELETE FROM search_content WHERE source_file = ?"
     )
@@ -160,82 +284,42 @@ export class SearchIndex {
       "INSERT OR REPLACE INTO indexed_files (file_path, mtime_ms, session_id, is_subagent, parent_session_id) VALUES (?, ?, ?, ?, ?)"
     )
 
-    const txn = this.db.transaction(() => {
-      // Delete old data for this specific file (idempotent re-index)
-      // Scoped by source_file, not session_id, to avoid deleting content from
-      // other files that share the same session_id (e.g. parent + subagent)
+    // Delete old data for this specific file (idempotent re-index).
+    // Scoped by source_file, not session_id, to avoid deleting content from
+    // other files that share the same session_id (e.g. parent + subagent).
+    // This also drops the registration row, so an interruption before the
+    // final batch leaves the file unregistered → re-indexed next sync.
+    this.db.transaction(() => {
       deleteContent.run(filePath)
       deleteFile.run(filePath)
+    })()
 
-      function indexToolCalls(toolCalls: typeof session.turns[0]["toolCalls"], locationPrefix: string): void {
-        for (const tc of toolCalls) {
-          const inputStr = JSON.stringify(tc.input)
-          if (inputStr && inputStr !== "{}") {
-            insert.run(sessionId, filePath, `${locationPrefix}/toolCall/${tc.id}/input`, inputStr)
-          }
-          if (tc.result) {
-            insert.run(sessionId, filePath, `${locationPrefix}/toolCall/${tc.id}/result`, tc.result)
-          }
+    for (let i = 0; i < rows.length; i += WRITE_BATCH_SIZE) {
+      if (this.aborted) return
+      const batch = rows.slice(i, i + WRITE_BATCH_SIZE)
+      const isLast = i + WRITE_BATCH_SIZE >= rows.length
+      this.db.transaction(() => {
+        for (const [location, text] of batch) {
+          insert.run(sessionId, filePath, location, text)
         }
-      }
-
-      for (let i = 0; i < session.turns.length; i++) {
-        const turn = session.turns[i]
-        const prefix = `turn/${i}`
-
-        // User message
-        const userText = getUserMessageText(turn.userMessage)
-        if (userText.trim()) {
-          insert.run(sessionId, filePath, `${prefix}/userMessage`, userText)
+        if (isLast) {
+          insertFile.run(filePath, mtimeMs, sessionId, isSubagent, parentSessionId)
         }
-
-        // Assistant text
-        const assistantJoined = turn.assistantText.join("\n\n").trim()
-        if (assistantJoined) {
-          insert.run(sessionId, filePath, `${prefix}/assistantMessage`, assistantJoined)
-        }
-
-        // Thinking blocks
-        const thinkingText = turn.thinking
-          .filter((t) => t.thinking)
-          .map((t) => t.thinking)
-          .join("\n\n")
-          .trim()
-        if (thinkingText) {
-          insert.run(sessionId, filePath, `${prefix}/thinking`, thinkingText)
-        }
-
-        indexToolCalls(turn.toolCalls, prefix)
-
-        // Sub-agent inline activity
-        for (const sa of turn.subAgentActivity) {
-          const saPrefix = `agent/${sa.agentId}`
-          const saText = sa.text.join("\n\n").trim()
-          if (saText) {
-            insert.run(sessionId, filePath, `${saPrefix}/assistantMessage`, saText)
-          }
-          const saThinking = sa.thinking
-            .filter((t) => t.length > 0)
-            .join("\n\n")
-            .trim()
-          if (saThinking) {
-            insert.run(sessionId, filePath, `${saPrefix}/thinking`, saThinking)
-          }
-          indexToolCalls(sa.toolCalls, saPrefix)
-        }
-
-        // Compaction summary
-        if (turn.compactionSummary) {
-          insert.run(sessionId, filePath, `${prefix}/compactionSummary`, turn.compactionSummary)
-        }
-      }
-
-      // Track the file
+      })()
+      if (!isLast) await new Promise((resolve) => setImmediate(resolve))
+    }
+    if (rows.length === 0) {
       insertFile.run(filePath, mtimeMs, sessionId, isSubagent, parentSessionId)
-    })
+    }
 
-    txn()
+    this.lastIndexedAt.set(filePath, Date.now())
     this._lastUpdate = new Date().toISOString()
+    this.statsCache = null
+    if (PERF_LOG) {
+      console.error(
+        `[perf][search-index] indexFile ${basename(filePath)} rows=${rows.length} bytes=${content.length} took=${Date.now() - t0}ms`
+      )
+    }
   }
 
   /**
@@ -380,6 +464,7 @@ export class SearchIndex {
     // Clear everything
     this.db.exec("DELETE FROM search_content")
     this.db.exec("DELETE FROM indexed_files")
+    this.statsCache = null
 
     await this.discoverFiles(projectsDir, async (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
       try {
@@ -397,8 +482,13 @@ export class SearchIndex {
   /**
    * Incrementally re-index only files whose mtime has changed since last index.
    * New files (not in indexed_files) are always indexed.
+   *
+   * Good-neighbor behavior: files are indexed smallest-first (useful results
+   * land early), with a pacing gap between files, and the whole sync pauses
+   * while `shouldDeferIndexing()` reports a live session.
    */
   async updateStale(projectsDir: string): Promise<void> {
+    const t0 = Date.now()
     this.projectsDir = projectsDir
 
     const getIndexed = this.db.prepare(
@@ -409,18 +499,28 @@ export class SearchIndex {
       path: string
       sessionId: string
       mtimeMs: number
+      sizeBytes: number
       isSubagent: boolean
       parentSessionId: string | null
     }> = []
 
-    await this.discoverFiles(projectsDir, async (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+    await this.discoverFiles(projectsDir, async (filePath, sessionId, mtimeMs, isSubagent, parentSessionId, sizeBytes) => {
       const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
       if (!existing || existing.mtime_ms < mtimeMs) {
-        filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
+        filesToIndex.push({ path: filePath, sessionId, mtimeMs, sizeBytes, isSubagent, parentSessionId })
       }
     })
 
+    // Smallest first: recent/small sessions become searchable early; the big
+    // archive files index last when nothing else is contending.
+    filesToIndex.sort((a, b) => a.sizeBytes - b.sizeBytes)
+
     for (const file of filesToIndex) {
+      if (this.aborted) return
+      while (this.shouldDeferIndexing?.() && !this.aborted) {
+        await sleep(INDEX_TUNING.deferRecheckMs)
+      }
+      if (this.aborted) return
       try {
         await this.indexFile(file.path, file.sessionId, file.mtimeMs, {
           isSubagent: file.isSubagent,
@@ -429,10 +529,16 @@ export class SearchIndex {
       } catch {
         // Skip files that fail to parse
       }
+      await sleep(INDEX_TUNING.syncPacingMs)
     }
 
     if (filesToIndex.length > 0) {
       this._lastUpdate = new Date().toISOString()
+    }
+    if (PERF_LOG) {
+      console.error(
+        `[perf][search-index] updateStale files=${filesToIndex.length} took=${Date.now() - t0}ms`
+      )
     }
   }
 
@@ -465,7 +571,8 @@ export class SearchIndex {
       sessionId: string,
       mtimeMs: number,
       isSubagent: boolean,
-      parentSessionId: string | null
+      parentSessionId: string | null,
+      sizeBytes: number
     ) => Promise<void>
   ): Promise<void> {
     let entries: string[]
@@ -510,7 +617,7 @@ export class SearchIndex {
               continue
             }
 
-            await callback(filePath, sessionId, fileStat.mtimeMs, false, null)
+            await callback(filePath, sessionId, fileStat.mtimeMs, false, null, fileStat.size)
 
             // Discover subagent files recursively
             await this.discoverSubagents(filePath, sessionId, callback, 0, 4)
@@ -539,7 +646,8 @@ export class SearchIndex {
       sessionId: string,
       mtimeMs: number,
       isSubagent: boolean,
-      parentSessionId: string | null
+      parentSessionId: string | null,
+      sizeBytes: number
     ) => Promise<void>,
     depth: number,
     maxDepth: number
@@ -565,7 +673,7 @@ export class SearchIndex {
         continue
       }
 
-      await callback(filePath, parentSessionId, fileStat.mtimeMs, true, parentSessionId)
+      await callback(filePath, parentSessionId, fileStat.mtimeMs, true, parentSessionId, fileStat.size)
 
       // Recurse deeper for nested subagents
       await this.discoverSubagents(filePath, parentSessionId, callback, depth + 1, maxDepth)
@@ -591,9 +699,11 @@ export class SearchIndex {
         this.debouncedReindex(join(projectsDir, filename))
       })
       this._watcherRunning = true
+      this.statsCache = null
     } catch (err) {
       console.warn("[search-index] fs.watch failed (recursive may not be supported):", err)
       this._watcherRunning = false
+      this.statsCache = null
     }
   }
 
@@ -611,22 +721,33 @@ export class SearchIndex {
     }
     this.debounceTimers.clear()
     this._watcherRunning = false
+    this.statsCache = null
   }
 
   /**
    * Private helper: debounce re-indexing of a single file.
-   * Waits 2 seconds after the last change event for a given file path
-   * before actually calling `indexFile()`. This coalesces rapid writes
-   * (e.g. streaming JSONL appends) into a single index operation.
-   * The async work runs in a fire-and-forget async IIFE inside the timer.
+   *
+   * Three gates run in sequence when the timer fires:
+   *   1. 2-second quiescence debounce — coalesces rapid JSONL appends.
+   *   2. Deferral — while `shouldDeferIndexing()` is true (live session
+   *      running), re-arm and re-check every the defer interval.
+   *   3. Hot-file minimum interval — a file already indexed recently is
+   *      re-armed for the remaining cooldown instead of re-indexed (30 s for
+   *      files > 2 MB, 5 s otherwise). Without this, a streaming session's
+   *      multi-MB JSONL was fully re-read, re-parsed, and re-written into
+   *      sqlite at every 2 s write gap.
    */
   private debouncedReindex(filePath: string): void {
-    const existing = this.debounceTimers.get(filePath)
-    if (existing) clearTimeout(existing)
-
     // Best-effort: notify consumers (e.g. session-meta cache) immediately so
     // stale entries are dropped even before the 2-second debounce fires.
     this.onFileChanged?.(filePath)
+
+    this.armReindexTimer(filePath, INDEX_TUNING.debounceMs)
+  }
+
+  private armReindexTimer(filePath: string, delayMs: number): void {
+    const existing = this.debounceTimers.get(filePath)
+    if (existing) clearTimeout(existing)
 
     this.debounceTimers.set(
       filePath,
@@ -635,7 +756,25 @@ export class SearchIndex {
         // Run async I/O in a fire-and-forget IIFE; errors are caught internally.
         void (async () => {
           try {
+            if (this.aborted) return
+
+            if (this.shouldDeferIndexing?.()) {
+              this.armReindexTimer(filePath, INDEX_TUNING.deferRecheckMs)
+              return
+            }
+
             const fileStat = await fsp.stat(filePath)
+
+            // Hot-file cooldown: re-arm for the remainder instead of indexing.
+            const minInterval = fileStat.size > INDEX_TUNING.hotFileSizeThreshold
+              ? INDEX_TUNING.hotFileMinIntervalLargeMs
+              : INDEX_TUNING.hotFileMinIntervalSmallMs
+            const lastIndexed = this.lastIndexedAt.get(filePath) ?? 0
+            const cooldownLeft = lastIndexed + minInterval - Date.now()
+            if (cooldownLeft > 0) {
+              this.armReindexTimer(filePath, cooldownLeft)
+              return
+            }
 
             // Determine sessionId and subagent status from the file path
             const parts = filePath.split("/")
@@ -664,11 +803,12 @@ export class SearchIndex {
             // File may have been deleted or is still being written to
           }
         })()
-      }, 2000)
+      }, delayMs)
     )
   }
 
   close(): void {
+    this.aborted = true
     this.stopWatching()
     this.db.close()
   }
