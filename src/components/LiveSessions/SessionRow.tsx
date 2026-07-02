@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { X, MessageSquare, Cpu, GitBranch, Play, Bot, Users } from "lucide-react"
+import { X, MessageSquare, Cpu, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
@@ -65,6 +65,12 @@ interface SessionRowProps {
   customName?: string
   /** When set, this session belongs to a git worktree — shows an indicator badge. */
   worktreeName?: string
+  /** Number of teammate sessions nested under this lead — shows a collapse chip. */
+  teammateCount?: number
+  /** Whether the nested teammate group is currently collapsed. */
+  teammatesCollapsed?: boolean
+  /** Toggles the nested teammate group open/closed. */
+  onToggleTeammates?: () => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void
@@ -89,6 +95,9 @@ export function SessionRow({
   isNewlyCompleted,
   customName,
   worktreeName,
+  teammateCount,
+  teammatesCollapsed,
+  onToggleTeammates,
   onSelectSession,
   onKill,
   onDuplicateSession,
@@ -172,6 +181,24 @@ export function SessionRow({
               <Bot className="size-2" />
               {title !== s.agentName && s.agentName}
             </span>
+          )}
+
+          {/* Team collapse chip — on lead rows with nested teammate sessions */}
+          {!!teammateCount && onToggleTeammates && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleTeammates() }}
+              className="flex items-center gap-0.5 rounded bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:text-violet-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors"
+              title={teammatesCollapsed ? "Show team agents" : "Hide team agents"}
+              aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
+              aria-expanded={!teammatesCollapsed}
+            >
+              <Users className="size-2" />
+              {teammateCount}
+              <ChevronRight className={cn(
+                "size-2 transition-transform duration-150",
+                !teammatesCollapsed && "rotate-90"
+              )} />
+            </button>
           )}
 
           {/* Deferred pill + resume button */}

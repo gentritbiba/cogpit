@@ -516,6 +516,17 @@ function ProjectGroup({
     return { topLevelSessions, teammatesByLead }
   }, [sessions])
 
+  // Per-lead collapse state for nested teammate groups (default expanded)
+  const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
+  const toggleTeamCollapse = (leadId: string) => {
+    setCollapsedTeams((prev) => {
+      const next = new Set(prev)
+      if (next.has(leadId)) next.delete(leadId)
+      else next.add(leadId)
+      return next
+    })
+  }
+
   // Each row is ~32px; show 5 visible, rest scrollable
   const VISIBLE_COUNT = 5
   const ROW_HEIGHT = 32
@@ -528,8 +539,13 @@ function ProjectGroup({
   const customProjectName = dirName ? projectNames[dirName] : undefined
 
   // Render one session row. worktreeName is passed only for top-level rows —
-  // nested teammate rows never show a worktree badge.
-  function renderSessionRow(sess: ActiveSessionInfo, worktreeName?: string) {
+  // nested teammate rows never show a worktree badge. teamToggle renders the
+  // collapse chip on lead rows that have nested teammates.
+  function renderSessionRow(
+    sess: ActiveSessionInfo,
+    worktreeName?: string,
+    teamToggle?: { count: number; collapsed: boolean; onToggle: () => void },
+  ) {
     return (
       <SessionRow
         key={`${sess.dirName}/${sess.fileName}`}
@@ -540,6 +556,9 @@ function ProjectGroup({
         isNewlyCompleted={newlyCompleted.has(sess.sessionId)}
         customName={sessionNames[sess.sessionId]}
         worktreeName={worktreeName}
+        teammateCount={teamToggle?.count}
+        teammatesCollapsed={teamToggle?.collapsed}
+        onToggleTeammates={teamToggle?.onToggle}
         onSelectSession={onSelectSession}
         onKill={onKill}
         onDuplicateSession={onDuplicateSession}
@@ -618,15 +637,22 @@ function ProjectGroup({
             const rawPath = s.cwd ?? dirNameToPath(s.dirName)
             const wt = parseWorktreePath(rawPath)
             const teammates = teammatesByLead.get(s.sessionId)
-            const row = renderSessionRow(s, wt?.worktreeName)
-            if (!teammates) return row
-            // Lead session with teammates — nest the agents it spawned below it
+            if (!teammates) return renderSessionRow(s, wt?.worktreeName)
+            // Lead session with teammates — nest the agents it spawned below
+            // it, collapsible via the chip on the lead row
+            const teamCollapsed = collapsedTeams.has(s.sessionId)
             return (
               <div key={`${s.dirName}/${s.fileName}`} className="flex flex-col gap-px">
-                {row}
-                <div className="flex flex-col gap-px ml-3 border-l border-violet-500/30 pl-1">
-                  {teammates.map((t) => renderSessionRow(t))}
-                </div>
+                {renderSessionRow(s, wt?.worktreeName, {
+                  count: teammates.length,
+                  collapsed: teamCollapsed,
+                  onToggle: () => toggleTeamCollapse(s.sessionId),
+                })}
+                {!teamCollapsed && (
+                  <div className="flex flex-col gap-px ml-3 border-l border-violet-500/30 pl-1">
+                    {teammates.map((t) => renderSessionRow(t))}
+                  </div>
+                )}
               </div>
             )
           })}
