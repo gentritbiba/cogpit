@@ -66,7 +66,7 @@ export async function getSessionMeta(filePath: string) {
       lines = content.split("\n").filter(Boolean)
     }
     const meta = extractCodexMetadataFromLines(lines)
-    return { ...meta, lineCount: lines.length }
+    return { ...meta, lineCount: lines.length, teamName: "", agentName: "" }
   }
 
   let sessionId = ""
@@ -83,11 +83,17 @@ export async function getSessionMeta(filePath: string) {
   let turnCount = 0
   let aiTitle = ""
   let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
+  // Agent-team identity: teammate sessions (CC 2.1.19x+) tag their lines
+  // with the team they belong to and their member name within it
+  let teamName = ""
+  let agentName = ""
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line)
       if (obj.sessionId && !sessionId) sessionId = obj.sessionId
+      if (typeof obj.teamName === "string" && obj.teamName && !teamName) teamName = obj.teamName
+      if (typeof obj.agentName === "string" && obj.agentName && !agentName) agentName = obj.agentName
       // Claude Code v2.1.1xx+ writes AI-generated session titles; last one wins
       if (obj.type === "ai-title" && obj.aiTitle) aiTitle = obj.aiTitle
       if (obj.version && !version) version = obj.version
@@ -197,6 +203,8 @@ export async function getSessionMeta(filePath: string) {
     turnCount,
     lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
     branchedFrom,
+    teamName,
+    agentName,
     isSubagent: false,
     parentSessionId: null,
   }

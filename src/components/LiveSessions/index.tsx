@@ -497,6 +497,25 @@ function ProjectGroup({
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const isCollapsed = (forceExpand || hasPending) ? false : collapsed
 
+  // Agent-team grouping: teammate sessions nest under their lead session
+  // when the lead is present in this project group; orphans render flat.
+  const { topLevelSessions, teammatesByLead } = useMemo(() => {
+    const ids = new Set(sessions.map((s) => s.sessionId))
+    const teammatesByLead = new Map<string, ActiveSessionInfo[]>()
+    const topLevelSessions: ActiveSessionInfo[] = []
+    for (const s of sessions) {
+      const lead = s.teamLeadSessionId
+      if (lead && lead !== s.sessionId && ids.has(lead)) {
+        const list = teammatesByLead.get(lead)
+        if (list) list.push(s)
+        else teammatesByLead.set(lead, [s])
+      } else {
+        topLevelSessions.push(s)
+      }
+    }
+    return { topLevelSessions, teammatesByLead }
+  }, [sessions])
+
   // Each row is ~32px; show 5 visible, rest scrollable
   const VISIBLE_COUNT = 5
   const ROW_HEIGHT = 32
@@ -507,6 +526,30 @@ function ProjectGroup({
   const dirName = (sessions.find(s => !parseWorktreePath(s.cwd ?? dirNameToPath(s.dirName)))?.dirName
     ?? sessions[0]?.dirName ?? pendingSession?.dirName)
   const customProjectName = dirName ? projectNames[dirName] : undefined
+
+  // Render one session row. worktreeName is passed only for top-level rows —
+  // nested teammate rows never show a worktree badge.
+  function renderSessionRow(sess: ActiveSessionInfo, worktreeName?: string) {
+    return (
+      <SessionRow
+        key={`${sess.dirName}/${sess.fileName}`}
+        session={sess}
+        isActiveSession={activeSessionKey === `${sess.dirName}/${sess.fileName}`}
+        proc={procBySession.get(sess.sessionId)}
+        killingPids={killingPids}
+        isNewlyCompleted={newlyCompleted.has(sess.sessionId)}
+        customName={sessionNames[sess.sessionId]}
+        worktreeName={worktreeName}
+        onSelectSession={onSelectSession}
+        onKill={onKill}
+        onDuplicateSession={onDuplicateSession}
+        onDeleteSession={onDeleteSession}
+        onRenameSession={onRenameSession}
+        onPrefetchSession={onPrefetchSession}
+        onResumeSession={onResumeSession}
+      />
+    )
+  }
 
   return (
     <div className="flex flex-col">
@@ -571,27 +614,20 @@ function ProjectGroup({
           {hasPending && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
           )}
-          {sessions.map((s) => {
+          {topLevelSessions.map((s) => {
             const rawPath = s.cwd ?? dirNameToPath(s.dirName)
             const wt = parseWorktreePath(rawPath)
+            const teammates = teammatesByLead.get(s.sessionId)
+            const row = renderSessionRow(s, wt?.worktreeName)
+            if (!teammates) return row
+            // Lead session with teammates — nest the agents it spawned below it
             return (
-              <SessionRow
-                key={`${s.dirName}/${s.fileName}`}
-                session={s}
-                isActiveSession={activeSessionKey === `${s.dirName}/${s.fileName}`}
-                proc={procBySession.get(s.sessionId)}
-                killingPids={killingPids}
-                isNewlyCompleted={newlyCompleted.has(s.sessionId)}
-                customName={sessionNames[s.sessionId]}
-                worktreeName={wt?.worktreeName}
-                onSelectSession={onSelectSession}
-                onKill={onKill}
-                onDuplicateSession={onDuplicateSession}
-                onDeleteSession={onDeleteSession}
-                onRenameSession={onRenameSession}
-                onPrefetchSession={onPrefetchSession}
-                onResumeSession={onResumeSession}
-              />
+              <div key={`${s.dirName}/${s.fileName}`} className="flex flex-col gap-px">
+                {row}
+                <div className="flex flex-col gap-px ml-3 border-l border-violet-500/30 pl-1">
+                  {teammates.map((t) => renderSessionRow(t))}
+                </div>
+              </div>
             )
           })}
         </div>

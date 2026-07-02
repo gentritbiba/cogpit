@@ -149,7 +149,13 @@ Read the raw JSONL content of a specific session file. Use this to read what Cla
 
 ### GET /api/active-sessions
 
-List the most recent sessions across all projects.
+List the most recent sessions across all projects. Response items may include team membership metadata (Claude Code 2.1.19x+).
+
+**Response fields:**
+- `dirName`, `fileName`, `projectShortName`, `cwd`, `isActive` — session identity
+- `teamName` (optional) — if this session is a team member
+- `agentName` (optional) — member's name within the team
+- `teamLeadSessionId` (optional) — UUID of the lead session; use to group teammates under their lead
 
 ### GET /api/running-processes
 

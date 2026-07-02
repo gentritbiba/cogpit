@@ -82,3 +82,26 @@ describe("getSessionMeta ai-title support", () => {
     expect(meta.aiTitle).toBe("Long session title")
   })
 })
+
+describe("getSessionMeta agent-team tags", () => {
+  it("extracts teamName and agentName from teammate session lines", async () => {
+    const filePath = await writeSession([
+      { type: "agent-setting", agentSetting: "claude-code-guide", sessionId: "s1" },
+      {
+        ...userLine("<teammate-message teammate_id=\"team-lead\">do research</teammate-message>"),
+        teamName: "session-ad264e74",
+        agentName: "cc-research",
+      },
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.teamName).toBe("session-ad264e74")
+    expect(meta.agentName).toBe("cc-research")
+  })
+
+  it("returns empty team tags for regular sessions", async () => {
+    const filePath = await writeSession([userLine("hello there friend")])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.teamName).toBe("")
+    expect(meta.agentName).toBe("")
+  })
+})

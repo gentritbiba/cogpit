@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { X, MessageSquare, Cpu, GitBranch, Play } from "lucide-react"
+import { X, MessageSquare, Cpu, GitBranch, Play, Bot, Users } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
@@ -36,6 +36,12 @@ export interface ActiveSessionInfo {
   agentStatus?: SessionStatus
   agentToolName?: string
   agentTerminalReason?: string
+  /** Agent-team name when this session is a teammate's own session */
+  teamName?: string
+  /** Member name within the team (e.g. "cc-research") */
+  agentName?: string
+  /** Session ID of the team lead that spawned this teammate session */
+  teamLeadSessionId?: string
 }
 
 export interface RunningProcess {
@@ -98,7 +104,13 @@ export function SessionRow({
     ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
-  const title = customName || truncate(s.aiTitle || s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId, 50)
+  const isTeammate = !!(s.teamName && s.agentName)
+  // Teammate sessions rarely have readable prompts (they start with a
+  // teammate-message envelope) — their member name is the clearest label
+  const title = customName || truncate(
+    s.aiTitle || (isTeammate ? s.agentName! : "") || s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId,
+    50
+  )
 
   // Hover-intent prefetch: warm the session cache if the cursor dwells on the
   // row for HOVER_PREFETCH_MS. Fires on focus too so keyboard users benefit.
@@ -153,6 +165,14 @@ export function SessionRow({
           <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
           </span>
+
+          {/* Teammate badge — marks sessions spawned as agent-team members */}
+          {isTeammate && (
+            <span className="flex items-center gap-0.5 rounded bg-violet-500/10 text-violet-400 px-1 py-px text-[9px] font-medium shrink-0">
+              <Bot className="size-2" />
+              {title !== s.agentName && s.agentName}
+            </span>
+          )}
 
           {/* Deferred pill + resume button */}
           {isDeferred && (
@@ -224,6 +244,12 @@ export function SessionRow({
           {statusLabel && (
             <span className={cn("font-medium", getStatusColor(s.agentStatus))}>
               {statusLabel}
+            </span>
+          )}
+          {isTeammate && (
+            <span className="flex items-center gap-1 text-violet-400">
+              <Users className="size-2.5" />
+              {s.agentName} · {s.teamName}
             </span>
           )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">

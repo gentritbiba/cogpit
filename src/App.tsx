@@ -458,7 +458,10 @@ export default function App() {
   })
 
   // Detect if session belongs to a team
-  const teamContext = useSessionTeam(state.sessionSource?.fileName ?? null)
+  const teamContext = useSessionTeam(
+    state.sessionSource?.fileName ?? null,
+    state.sessionSource?.dirName ?? null
+  )
 
   // Sync currentMemberName from team context detection
   useEffect(() => {

@@ -5,9 +5,11 @@ import {
   encodeCodexDirName,
   getSessionMeta,
   getSessionStatus,
+  isWithinDir,
   join,
   listCodexSessionFiles,
   projectDirToReadableName,
+  readFile,
   readdir,
   searchSessionMessages,
   stat,
@@ -128,6 +130,26 @@ export async function handleActiveSessions(
     const now = Date.now()
     const q = search ? search.toLowerCase() : ""
 
+    // Teammate sessions (agent teams) carry a teamName — resolve each team's
+    // lead session once per request so the client can group them together.
+    const teamLeadCache = new Map<string, Promise<string | null>>()
+    const resolveTeamLead = (teamName: string): Promise<string | null> => {
+      let cached = teamLeadCache.get(teamName)
+      if (!cached) {
+        const configPath = join(dirs.TEAMS_DIR, teamName, "config.json")
+        cached = isWithinDir(dirs.TEAMS_DIR, configPath)
+          ? readFile(configPath, "utf-8")
+              .then((raw) => {
+                const lead = JSON.parse(String(raw)).leadSessionId
+                return typeof lead === "string" && lead ? lead : null
+              })
+              .catch(() => null)
+          : Promise.resolve(null)
+        teamLeadCache.set(teamName, cached)
+      }
+      return cached
+    }
+
     const results = await Promise.all(
       scanPool.map(async (c) => {
         try {
@@ -171,6 +193,10 @@ export async function handleActiveSessions(
             }
           }
 
+          const teamLeadSessionId = meta.teamName
+            ? await resolveTeamLead(meta.teamName)
+            : null
+
           return {
             dirName: c.dirName,
             projectShortName: shortName,
@@ -192,6 +218,11 @@ export async function handleActiveSessions(
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
             agentTerminalReason: statusInfo.terminalReason,
+            ...(meta.teamName && {
+              teamName: meta.teamName,
+              agentName: meta.agentName || undefined,
+              teamLeadSessionId: teamLeadSessionId || undefined,
+            }),
             ...(matchedMessage !== undefined && { matchedMessage }),
           }
         } catch {

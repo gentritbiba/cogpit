@@ -269,6 +269,44 @@ export async function matchSubagentToMember(
 
 const HOME_PREFIX = homedir().replace(/\//g, "-").replace(/^-/, "").toLowerCase()
 
+/**
+ * Read a session's agent-team identity from the head of its JSONL file.
+ * Claude Code 2.1.19x+ runs team members as their own top-level sessions
+ * whose message lines carry `teamName` and `agentName` fields.
+ */
+export async function readSessionTeamTags(
+  filePath: string
+): Promise<{ teamName: string | null; agentName: string | null }> {
+  try {
+    const fh = await open(filePath, "r")
+    try {
+      const buf = Buffer.alloc(32768)
+      const { bytesRead } = await fh.read(buf, 0, 32768, 0)
+      const text = buf.subarray(0, bytesRead).toString("utf-8")
+      const lines = text.split("\n")
+      // The last line may be cut off mid-JSON when the file is larger than the read
+      const complete = bytesRead === 32768 ? lines.slice(0, -1) : lines
+      for (const line of complete.slice(0, 40)) {
+        if (!line || !line.includes('"teamName"')) continue
+        try {
+          const obj = JSON.parse(line)
+          if (typeof obj.teamName === "string" && obj.teamName) {
+            return {
+              teamName: obj.teamName,
+              agentName: typeof obj.agentName === "string" && obj.agentName ? obj.agentName : null,
+            }
+          }
+        } catch { /* skip malformed */ }
+      }
+      return { teamName: null, agentName: null }
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return { teamName: null, agentName: null }
+  }
+}
+
 export function projectDirToReadableName(dirName: string): { path: string; shortName: string } {
   const raw = dirName.replace(/^-/, "")
   const lowerRaw = raw.toLowerCase()

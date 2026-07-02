@@ -457,6 +457,29 @@ Comprehensive file modification tracking across sessions:
 - Navigates to `/project/session1/subagents/agent-xyz.jsonl`
 - Main view shows sub-agent session with "Back to main" button
 
+### Team Member Sessions (Agent Teams)
+
+**New Format (Claude Code 2.1.19x+):** Team members run as **top-level sessions** in the same `~/.claude/projects/<dirName>/` as the lead, tagged with `teamName`/`agentName` fields. No nested `subagents/` paths.
+
+**Format:**
+- Session file: `<uuid>.jsonl` (same level as lead session)
+- Team identity stored in message lines: `{"teamName": "...", "agentName": "...", ...}`
+- Team config: `~/.claude/teams/<teamName>/config.json` with `leadSessionId` field
+- Session metadata (via `/api/active-sessions`) includes `teamName`, `agentName`, `teamLeadSessionId`
+
+**Resolution Flow:**
+1. `/api/active-sessions` scans project dirs for `*.jsonl` files
+2. `getSessionMeta()` reads `teamName`/`agentName` from first ~32KB of JSONL
+3. For tagged sessions, resolve `leadSessionId` from team config
+4. Return active session items grouped by team in `/api/active-sessions` response
+5. Frontend (LiveSessions sidebar) nests teammate sessions under their lead with agent-name labels
+
+**UI Display:**
+- Lead session shows as top-level row
+- Teammate sessions appear indented/nested underneath with "Agent Name" badges
+- Click teammate to navigate to their session (same as main session click)
+- Breadcrumb in header shows team hierarchy
+
 ---
 
 ## Notification System

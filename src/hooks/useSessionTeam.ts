@@ -12,11 +12,14 @@ export interface SessionTeamContext {
 /**
  * Detects if the current session belongs to a team.
  * Extracts leadSessionId from the fileName (handles both lead and subagent paths)
- * and queries the server for team membership.
+ * and queries the server for team membership. The server also detects the
+ * reverse case where the session is itself a teammate's own top-level session
+ * (new agent-team format) — dirName lets it read that file directly.
  * Subscribes to live updates so the members bar refreshes automatically.
  */
 export function useSessionTeam(
-  sessionFileName: string | null
+  sessionFileName: string | null,
+  sessionDirName?: string | null
 ): SessionTeamContext | null {
   const [ctx, setCtx] = useState<SessionTeamContext | null>(null)
   const paramsRef = useRef<string | null>(null)
@@ -35,6 +38,7 @@ export function useSessionTeam(
     }
     const params = new URLSearchParams({ leadSessionId })
     if (subagentFile) params.set("subagentFile", subagentFile)
+    if (sessionDirName) params.set("dirName", sessionDirName)
     return params.toString()
   })()
 
