@@ -4,13 +4,27 @@ import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
 
 // GUI apps don't inherit the user's shell PATH.
-// Spawn their shell to get the real PATH so `claude` CLI is found.
-try {
-  const userShell = process.env.SHELL || "/bin/zsh"
-  const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
-  if (realPath) process.env.PATH = realPath
-} catch {
-  // Fall back to system PATH
+// Resolve the real PATH so `claude` CLI is found regardless of install location.
+if (process.platform === "win32") {
+  try {
+    // Combine Machine + User PATH from the Windows registry so tools installed
+    // via npm/nvm/scoop/winget are discoverable even from a GUI process.
+    const combined = execSync(
+      'powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable(\'PATH\',\'Machine\') + \';\' + [System.Environment]::GetEnvironmentVariable(\'PATH\',\'User\')"',
+      { encoding: "utf-8" }
+    ).trim()
+    if (combined) process.env.PATH = combined
+  } catch {
+    // Fall back to inherited PATH
+  }
+} else {
+  try {
+    const userShell = process.env.SHELL || "/bin/zsh"
+    const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
+    if (realPath) process.env.PATH = realPath
+  } catch {
+    // Fall back to system PATH
+  }
 }
 
 let mainWindow: BrowserWindow | null = null

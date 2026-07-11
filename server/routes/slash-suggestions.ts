@@ -63,39 +63,40 @@ const BUILTIN_PUBLISHERS = new Set([
 ])
 
 /**
+ * Claude Code CLI commands built into the binary.
+ * These appear in the Commands section of the slash suggestions dropdown.
+ */
+const BUILTIN_COMMANDS: SlashSuggestion[] = [
+  { name: "help",           description: "Show available commands and keyboard shortcuts",                    type: "command", source: "built-in", filePath: "" },
+  { name: "clear",          description: "Clear conversation history and free up context window",             type: "command", source: "built-in", filePath: "" },
+  { name: "compact",        description: "Compact conversation history to free up context window space",      type: "command", source: "built-in", filePath: "" },
+  { name: "model",          description: "Switch the AI model for this session",                              type: "command", source: "built-in", filePath: "" },
+  { name: "permissions",    description: "View and manage tool permissions for this session",                 type: "command", source: "built-in", filePath: "" },
+  { name: "config",         description: "Open Claude Code configuration settings",                          type: "command", source: "built-in", filePath: "" },
+  { name: "init",           description: "Initialize project with a CLAUDE.md memory file",                  type: "command", source: "built-in", filePath: "" },
+  { name: "cost",           description: "Show token usage and cost for this session",                       type: "command", source: "built-in", filePath: "" },
+  { name: "status",         description: "Show account and subscription status",                             type: "command", source: "built-in", filePath: "" },
+  { name: "review",         description: "Review code changes in the current project",                       type: "command", source: "built-in", filePath: "" },
+  { name: "pr-comments",    description: "Fetch and address pull request review comments",                   type: "command", source: "built-in", filePath: "" },
+  { name: "memory",         description: "View and edit Claude's persistent memory",                         type: "command", source: "built-in", filePath: "" },
+  { name: "mcp",            description: "Manage Model Context Protocol (MCP) servers",                     type: "command", source: "built-in", filePath: "" },
+  { name: "doctor",         description: "Check Claude Code installation health and configuration",          type: "command", source: "built-in", filePath: "" },
+  { name: "vim",            description: "Toggle vim keybindings mode",                                     type: "command", source: "built-in", filePath: "" },
+  { name: "terminal-setup", description: "Configure terminal integration (shift+enter support)",             type: "command", source: "built-in", filePath: "" },
+  { name: "login",          description: "Log in to your Anthropic account",                                type: "command", source: "built-in", filePath: "" },
+  { name: "logout",         description: "Log out of your Anthropic account",                               type: "command", source: "built-in", filePath: "" },
+  { name: "bug",            description: "Report a bug with Claude Code",                                   type: "command", source: "built-in", filePath: "" },
+  { name: "release-notes",  description: "Show what's new in the latest Claude Code release",               type: "command", source: "built-in", filePath: "" },
+]
+
+/**
  * Skills bundled into the Claude Code binary itself.
  * These aren't discoverable from the filesystem — they're hardcoded in the CLI.
- * Source: https://code.claude.com/docs/en/skills#bundled-skills
  */
 const BUILTIN_SKILLS: SlashSuggestion[] = [
-  {
-    name: "simplify",
-    description: "Review changed code for reuse, quality, and efficiency, then fix any issues found",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "batch",
-    description: "Orchestrate large-scale changes across a codebase in parallel using isolated worktrees",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "debug",
-    description: "Troubleshoot your current Claude Code session by reading the session debug log",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "compact",
-    description: "Compact conversation history to free up context window space",
-    type: "command",
-    source: "built-in",
-    filePath: "",
-  },
+  { name: "simplify", description: "Review changed code for reuse, quality, and efficiency, then fix any issues found",     type: "skill", source: "built-in", filePath: "" },
+  { name: "batch",    description: "Orchestrate large-scale changes across a codebase in parallel using isolated worktrees", type: "skill", source: "built-in", filePath: "" },
+  { name: "debug",    description: "Troubleshoot your current Claude Code session by reading the session debug log",         type: "skill", source: "built-in", filePath: "" },
 ]
 
 /**
@@ -252,8 +253,9 @@ export function registerSlashSuggestionRoutes(use: UseFn) {
         scanPluginSkills(),
       ])
 
-    // Deduplicate: project commands override user commands with same name
+    // Deduplicate: built-in → user → project (later wins)
     const commandMap = new Map<string, SlashSuggestion>()
+    for (const cmd of BUILTIN_COMMANDS) commandMap.set(cmd.name, cmd)
     for (const cmd of userCommands) commandMap.set(cmd.name, cmd)
     for (const cmd of projectCommands) commandMap.set(cmd.name, cmd)
 

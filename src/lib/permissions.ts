@@ -13,7 +13,7 @@ export interface PermissionsConfig {
 }
 
 export const DEFAULT_PERMISSIONS: PermissionsConfig = {
-  mode: "bypassPermissions",
+  mode: "default",
   allowedTools: [],
   disallowedTools: [],
 }

@@ -388,27 +388,27 @@ describe("formatCost", () => {
 // ── getContextLimit ───────────────────────────────────────────────────────
 
 describe("getContextLimit", () => {
-  it("defaults to 1M for opus models", () => {
+  it("returns 1M for opus models", () => {
     expect(getContextLimit("claude-opus-4-6")).toBe(1_000_000)
   })
 
-  it("defaults to 1M for sonnet models", () => {
-    expect(getContextLimit("claude-sonnet-4-5")).toBe(1_000_000)
+  it("returns 200k for sonnet models", () => {
+    expect(getContextLimit("claude-sonnet-4-5")).toBe(200_000)
   })
 
-  it("defaults to 1M for haiku models", () => {
-    expect(getContextLimit("claude-haiku-4-5")).toBe(1_000_000)
+  it("returns 200k for haiku models", () => {
+    expect(getContextLimit("claude-haiku-4-5")).toBe(200_000)
   })
 
-  it("defaults to 1M for unknown models", () => {
-    expect(getContextLimit("gpt-4")).toBe(1_000_000)
+  it("returns 200k for unknown models", () => {
+    expect(getContextLimit("gpt-4")).toBe(200_000)
   })
 
   it("returns 1M for opus[1m] models", () => {
     expect(getContextLimit("claude-opus-4-6[1m]")).toBe(1_000_000)
   })
 
-  it("returns 1M for sonnet[1m] models", () => {
+  it("returns 1M for sonnet[1m] extended context models", () => {
     expect(getContextLimit("claude-sonnet-4-6[1m]")).toBe(1_000_000)
   })
 })

@@ -139,11 +139,12 @@ export function parseSubAgentPath(fileName: string): {
 // Compaction fires at roughly (limit - buffer), not at the absolute limit.
 const AUTO_COMPACT_BUFFER = 33_000
 
-const DEFAULT_CONTEXT_LIMIT = 1_000_000
-const EXTENDED_CONTEXT_LIMIT = 1_000_000
+const OPUS_CONTEXT_LIMIT = 1_000_000   // Opus 4.x default
+const DEFAULT_CONTEXT_LIMIT = 200_000  // Sonnet / Haiku default
 
 export function getContextLimit(model: string): number {
-  if (model.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
+  if (model.includes("[1m]")) return OPUS_CONTEXT_LIMIT  // extended-context flag
+  if (model.includes("opus")) return OPUS_CONTEXT_LIMIT
   return DEFAULT_CONTEXT_LIMIT
 }
 
