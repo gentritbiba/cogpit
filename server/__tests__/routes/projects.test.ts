@@ -2,6 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Stats, Dirent } from "node:fs"
 
+const mockGetActiveCodexTurnId = vi.hoisted(() => vi.fn())
+
 vi.mock("../../helpers", () => ({
   dirs: {
     PROJECTS_DIR: "/tmp/test-projects",
@@ -22,6 +24,14 @@ vi.mock("../../helpers", () => ({
   stat: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
+
+vi.mock("../../codex-app-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../codex-app-server")>()
+  return {
+    ...actual,
+    codexAppServer: { getActiveTurnId: mockGetActiveCodexTurnId },
+  }
+})
 
 import {
   findJsonlPath,
@@ -83,6 +93,7 @@ describe("project routes", () => {
     mockedListCodexSessionFiles.mockResolvedValue([])
     mockedResolveSessionFilePath.mockImplementation((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
     mockedFindJsonlPath.mockResolvedValue(null)
+    mockGetActiveCodexTurnId.mockReturnValue(undefined)
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
@@ -166,11 +177,40 @@ describe("project routes", () => {
       expect(response).toEqual([])
     })
 
-    it("returns 500 on readdir error", async () => {
+    it("returns Codex projects when the Claude projects directory is missing", async () => {
+      const handler = handlers.get("/api/projects")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      mockedListCodexSessionFiles.mockResolvedValueOnce([{
+        fileName: "rollout-codex-1.jsonl",
+        filePath: "/tmp/codex-sessions/rollout-codex-1.jsonl",
+        mtimeMs: 2000,
+        size: 300,
+      }])
+      mockedGetSessionMeta.mockResolvedValueOnce({
+        sessionId: "codex-1", version: "", gitBranch: "main", model: "gpt-5.6-terra",
+        slug: "", cwd: "/code/codex-only", firstUserMessage: "hello", lastUserMessage: "bye",
+        timestamp: "", turnCount: 2, lineCount: 4,
+      })
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(200)
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          dirName: "codex__/code/codex-only",
+          path: "/code/codex-only",
+          shortName: "codex-only (Codex)",
+          sessionCount: 1,
+        }),
+      ])
+    })
+
+    it("returns 500 on non-missing-directory readdir errors", async () => {
       const handler = handlers.get("/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
 
       await handler(req, res, next)
 
@@ -343,7 +383,7 @@ describe("project routes", () => {
       const response = JSON.parse(res._getData())
       expect(response).toHaveLength(1)
       expect(response[0].sessionId).toBe("s1")
-      expect(response[0].isActive).toBe(true)
+      expect(response[0].isActive).toBe(false)
       expect(response[0].projectShortName).toBe("a")
     })
 
@@ -416,11 +456,40 @@ describe("project routes", () => {
       expect(response).toEqual([])
     })
 
-    it("returns 500 on top-level error", async () => {
+    it("returns Codex sessions when the Claude projects directory is missing", async () => {
+      const handler = handlers.get("/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      mockedListCodexSessionFiles.mockResolvedValueOnce([{
+        fileName: "rollout-codex-active.jsonl",
+        filePath: "/tmp/codex-sessions/rollout-codex-active.jsonl",
+        mtimeMs: Date.now(),
+        size: 400,
+      }])
+      mockedGetSessionMeta.mockResolvedValue({
+        sessionId: "codex-active", version: "", gitBranch: "main", model: "gpt-5.6-terra",
+        slug: "", cwd: "/code/codex-only", firstUserMessage: "hello", lastUserMessage: "bye",
+        timestamp: "", turnCount: 2, lineCount: 4,
+      })
+      mockGetActiveCodexTurnId.mockReturnValue("turn-codex-active")
+
+      await handler(req, res, next)
+
+      expect(res._getStatus()).toBe(200)
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          sessionId: "codex-active",
+          projectShortName: "codex-only (Codex)",
+          isActive: true,
+        }),
+      ])
+    })
+
+    it("returns 500 on non-missing-directory top-level errors", async () => {
       const handler = handlers.get("/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
 
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
 
       await handler(req, res, next)
 

@@ -12,6 +12,7 @@ export {
   buildCodexPermArgs,
   buildCodexEffortArgs,
   buildCodexModelArgs,
+  buildCodexFastModeArgs,
   getCodexResumeCommand,
 } from "./codex"
 

@@ -5,6 +5,8 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
+import type { AgentKind } from "@/lib/sessionSource"
+import { formatTokenCount } from "@/lib/format"
 
 function getUtilColor(pct: number) {
   if (pct >= 90) return "text-red-400"
@@ -23,15 +25,15 @@ function getDotColor(pct: number) {
 function TooltipBody({ usage }: { usage: UsageData }) {
   const rows: { label: string; pct: number; resetsAt?: string }[] = []
 
-  if (usage.fiveHour) rows.push({ label: "5-hour", pct: usage.fiveHour.utilization, resetsAt: usage.fiveHour.resetsAt })
-  if (usage.sevenDay) rows.push({ label: "7-day", pct: usage.sevenDay.utilization, resetsAt: usage.sevenDay.resetsAt })
+  if (usage.fiveHour) rows.push({ label: usage.fiveHour.label ?? "5-hour", pct: usage.fiveHour.utilization, resetsAt: usage.fiveHour.resetsAt })
+  if (usage.sevenDay) rows.push({ label: usage.sevenDay.label ?? "7-day", pct: usage.sevenDay.utilization, resetsAt: usage.sevenDay.resetsAt })
   if (usage.sevenDayOpus) rows.push({ label: "Opus", pct: usage.sevenDayOpus.utilization, resetsAt: usage.sevenDayOpus.resetsAt })
   if (usage.sevenDaySonnet) rows.push({ label: "Sonnet", pct: usage.sevenDaySonnet.utilization, resetsAt: usage.sevenDaySonnet.resetsAt })
 
   return (
     <div className="space-y-2 min-w-[180px]">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-wider">Claude Usage</span>
+        <span className="text-[10px] font-medium uppercase tracking-wider">{usage.providerName ?? "Agent"} Usage</span>
         {usage.subscriptionType && (
           <span className="text-[9px] font-medium text-cyan-300 bg-cyan-500/15 border border-cyan-500/30 rounded px-1 py-0.5">
             {usage.subscriptionType}
@@ -39,8 +41,9 @@ function TooltipBody({ usage }: { usage: UsageData }) {
         )}
       </div>
       {rows.map((r) => {
-        const now = Date.now()
-        const resetMs = r.resetsAt ? new Date(r.resetsAt).getTime() - now : null
+        const resetMs = r.resetsAt && usage.fetchedAt != null
+          ? new Date(r.resetsAt).getTime() - usage.fetchedAt
+          : null
         const resetH = resetMs != null ? Math.max(0, Math.round(resetMs / 3_600_000)) : null
         return (
           <div key={r.label} className="space-y-0.5">
@@ -67,13 +70,21 @@ function TooltipBody({ usage }: { usage: UsageData }) {
           Extra: ${usage.extraUsage.usedCredits.toFixed(2)} / ${usage.extraUsage.monthlyLimit.toFixed(2)}
         </div>
       )}
+      {(usage.lifetimeTokens != null || usage.creditBalance || usage.creditsUnlimited) && (
+        <div className="space-y-1 border-t border-border/30 pt-1 text-[10px] text-muted-foreground">
+          {usage.lifetimeTokens != null && <div>Lifetime: {formatTokenCount(usage.lifetimeTokens)} tokens</div>}
+          {usage.creditsUnlimited
+            ? <div>Credits: Unlimited</div>
+            : usage.creditBalance ? <div>Credits: {usage.creditBalance}</div> : null}
+        </div>
+      )}
     </div>
   )
 }
 
 /** Compact usage indicator for the top bar. Renders nothing if unavailable. */
-export function TokenUsageIndicator() {
-  const { usage, loading, available, refresh } = useTokenUsage()
+export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: AgentKind }) {
+  const { usage, loading, available, refresh } = useTokenUsage(agentKind)
 
   if (!available || !usage) return null
 
@@ -83,7 +94,7 @@ export function TokenUsageIndicator() {
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<button onClick={refresh} disabled={loading} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1" />}>
+      <TooltipTrigger render={<button type="button" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1" />}>
           <span className={cn("inline-block size-1.5 rounded-full shrink-0", getDotColor(primary))} />
           <span className={cn("tabular-nums", getUtilColor(primary), loading && "animate-pulse")}>
             {primary.toFixed(0)}%

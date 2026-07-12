@@ -1,6 +1,7 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 
 interface UploadedImage {
+  id: string
   file: File
   preview: string
   data: string
@@ -44,22 +45,41 @@ function compressImage(img: HTMLImageElement, sourceType: string): { dataUrl: st
   return { dataUrl, base64, mediaType: outputType }
 }
 
-export function useImageUpload() {
+export function useImageUpload(enabled = true) {
   const [images, setImages] = useState<UploadedImage[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  const [unsupportedAttempt, setUnsupportedAttempt] = useState(false)
+  const enabledRef = useRef(enabled)
+
+  useEffect(() => {
+    enabledRef.current = enabled
+  }, [enabled])
 
   const addImageFiles = useCallback((files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"))
+    if (!enabled) {
+      if (imageFiles.length > 0) setUnsupportedAttempt(true)
+      return
+    }
+    setUnsupportedAttempt(false)
     for (const file of imageFiles) {
       const reader = new FileReader()
       reader.onload = () => {
+        if (!enabledRef.current) {
+          setUnsupportedAttempt(true)
+          return
+        }
         const dataUrl = reader.result as string
         const img = new Image()
         img.onload = () => {
+          if (!enabledRef.current) {
+            setUnsupportedAttempt(true)
+            return
+          }
           const compressed = compressImage(img, file.type)
           setImages((prev) => [
             ...prev,
-            { file, preview: compressed.dataUrl, data: compressed.base64, mediaType: compressed.mediaType },
+            { id: crypto.randomUUID(), file, preview: compressed.dataUrl, data: compressed.base64, mediaType: compressed.mediaType },
           ])
         }
         img.src = dataUrl
@@ -69,20 +89,24 @@ export function useImageUpload() {
       }
       reader.readAsDataURL(file)
     }
-  }, [])
+  }, [enabled])
 
   const removeImage = useCallback((index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index))
+    setUnsupportedAttempt(false)
   }, [])
 
   const clearImages = useCallback(() => {
     setImages([])
+    setUnsupportedAttempt(false)
   }, [])
+
+  const dismissImageError = useCallback(() => setUnsupportedAttempt(false), [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    setIsDragOver(true)
-  }, [])
+    if (enabled) setIsDragOver(true)
+  }, [enabled])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -118,6 +142,13 @@ export function useImageUpload() {
   return {
     images,
     isDragOver,
+    imageError: !enabled && images.length > 0
+      ? "The selected model does not accept images. Switch models or remove the attachments."
+      : !enabled && unsupportedAttempt
+        ? "The selected model does not accept the image you tried to add."
+        : null,
+    hasUnsupportedAttachments: !enabled && images.length > 0,
+    dismissImageError,
     removeImage,
     clearImages,
     handleDragOver,

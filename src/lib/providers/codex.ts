@@ -40,8 +40,21 @@ export function decodeCodexDirName(dirName: string): string | null {
 // ── CLI arg builders ──────────────────────────────────────────────────────────
 
 export function buildCodexPermArgs(permissions?: PermissionsConfig): string[] {
-  void permissions
-  return ["--dangerously-bypass-approvals-and-sandbox"]
+  const mode = permissions?.mode || "default"
+  if (mode === "bypassPermissions") {
+    return ["--dangerously-bypass-approvals-and-sandbox"]
+  }
+
+  // `codex exec` is non-interactive, so it cannot present an approval prompt.
+  // Keep execution inside a sandbox and return denied operations to the model
+  // instead of silently granting full machine access. The app-server adapter
+  // upgrades this to interactive approvals when it owns the live thread.
+  return [
+    "--sandbox",
+    mode === "plan" ? "read-only" : "workspace-write",
+    "-c",
+    'approval_policy="never"',
+  ]
 }
 
 export function buildCodexEffortArgs(effort?: string): string[] {
@@ -50,6 +63,12 @@ export function buildCodexEffortArgs(effort?: string): string[] {
 
 export function buildCodexModelArgs(model?: string): string[] {
   return model ? ["-m", model] : []
+}
+
+export function buildCodexFastModeArgs(enabled?: boolean): string[] {
+  return enabled
+    ? ["-c", 'service_tier="fast"', "--enable", "fast_mode"]
+    : []
 }
 
 // ── Resume command ────────────────────────────────────────────────────────────

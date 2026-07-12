@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // handle whose lifecycle we can drive manually.
 
 interface CapturedCall {
-  options: { model?: string; effort?: string; mcpServers?: unknown; stderr?: (data: string) => void }
+  options: { model?: string; effort?: string; settings?: unknown; mcpServers?: unknown; stderr?: (data: string) => void }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
   completed: Promise<void>
@@ -26,6 +26,8 @@ const captured: CapturedCall[] = []
 
 let applyFlagSettingsSpy: ReturnType<typeof vi.fn> | null = null
 let setModelSpy: ReturnType<typeof vi.fn> | null = null
+let setPermissionModeSpy: ReturnType<typeof vi.fn> | null = null
+let setMcpServersSpy: ReturnType<typeof vi.fn> | null = null
 
 // When set, the next query's generator yields these messages instead of the
 // default one-assistant-one-result exchange.
@@ -49,6 +51,8 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       // then closes. This models a normal one-turn exchange.
       applyFlagSettingsSpy = vi.fn().mockResolvedValue(undefined)
       setModelSpy = vi.fn().mockResolvedValue(undefined)
+      setPermissionModeSpy = vi.fn().mockResolvedValue(undefined)
+      setMcpServersSpy = vi.fn().mockResolvedValue({ added: [], removed: [], errors: {} })
 
       async function* gen() {
         if (scriptedError) {
@@ -69,11 +73,23 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
         setModel?: typeof setModelSpy
         streamInput: typeof vi.fn
         interrupt: typeof vi.fn
+        setPermissionMode: typeof vi.fn
+        setMcpServers: typeof vi.fn
+        stopTask: typeof vi.fn
+        backgroundTasks: typeof vi.fn
+        rewindFiles: typeof vi.fn
+        close: typeof vi.fn
       }
       iter.applyFlagSettings = applyFlagSettingsSpy
       iter.setModel = setModelSpy
       iter.streamInput = vi.fn().mockResolvedValue(undefined)
       iter.interrupt = vi.fn().mockResolvedValue(undefined)
+      iter.setPermissionMode = setPermissionModeSpy
+      iter.setMcpServers = setMcpServersSpy
+      iter.stopTask = vi.fn().mockResolvedValue(undefined)
+      iter.backgroundTasks = vi.fn().mockResolvedValue(true)
+      iter.rewindFiles = vi.fn().mockResolvedValue({ canRewind: true })
+      iter.close = vi.fn()
       return iter
     },
   }
@@ -113,6 +129,8 @@ beforeEach(() => {
   captured.length = 0
   applyFlagSettingsSpy = null
   setModelSpy = null
+  setPermissionModeSpy = null
+  setMcpServersSpy = null
   scriptedMessages = null
   scriptedStderr = null
   scriptedError = null
@@ -296,6 +314,127 @@ describe("sdk-session effort propagation", () => {
     await Promise.resolve()
 
     expect(setModelSpy).toHaveBeenCalledWith("claude-opus-4-7")
+  })
+
+  it("ultracode at creation forces xhigh effort and injects the ultracode setting", async () => {
+    const { createSDKSession } = await loadModule()
+
+    createSDKSession({
+      sessionId: "u1",
+      cwd: "/tmp",
+      message: "first",
+      effort: "low",
+      ultracode: true,
+    })
+    await waitUntil(() => captured.length === 1)
+
+    // effort is pinned to xhigh regardless of the selected "low"
+    expect(captured[0].options.effort).toBe("xhigh")
+    // ultracode is supplied via the settings layer, with workflows enabled
+    expect(captured[0].options.settings).toEqual(
+      expect.objectContaining({ ultracode: true, enableWorkflows: true }),
+    )
+  })
+
+  it("non-ultracode sessions do not inject the ultracode setting", async () => {
+    const { createSDKSession } = await loadModule()
+
+    createSDKSession({
+      sessionId: "u2",
+      cwd: "/tmp",
+      message: "first",
+      effort: "high",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    expect(captured[0].options.effort).toBe("high")
+    expect(captured[0].options.settings).toBeUndefined()
+  })
+
+  it("passes Fast as an independent Claude session setting", async () => {
+    const { createSDKSession } = await loadModule()
+    createSDKSession({
+      sessionId: "fast-1",
+      cwd: "/tmp",
+      message: "first",
+      effort: "low",
+      fastMode: true,
+    })
+    await waitUntil(() => captured.length === 1)
+
+    expect(captured[0].options.effort).toBe("low")
+    expect(captured[0].options.settings).toEqual(expect.objectContaining({ fastMode: true }))
+  })
+
+  it("applies Fast and Auto live without restarting the query", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    createSDKSession({ sessionId: "live-settings", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("live-settings", {
+      fastMode: true,
+      permissionMode: "auto",
+    })
+
+    expect(sdkSessions.get("live-settings")?.fastMode).toBe(true)
+    expect(sdkSessions.get("live-settings")?.permissionMode).toBe("auto")
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({ fastMode: true }))
+    expect(setPermissionModeSpy).toHaveBeenCalledWith("auto")
+    expect(result.found).toBe(true)
+  })
+
+  it("applies scoped tool rules and clears MCP servers live", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+    createSDKSession({
+      sessionId: "live-permissions",
+      cwd: "/tmp",
+      message: "first",
+      mcpConfig: JSON.stringify({ local: { command: "test" } }),
+    })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("live-permissions", {
+      allowedTools: ["Bash(git status)"],
+      disallowedTools: ["Bash(rm *)"],
+      mcpConfig: null,
+    })
+
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({
+      permissions: {
+        allow: ["Bash(git status)"],
+        deny: ["Bash(rm *)"],
+        defaultMode: "default",
+      },
+    }))
+    expect(setMcpServersSpy).toHaveBeenCalledWith({})
+    expect(result.appliedLive).toEqual(expect.arrayContaining(["permissions", "mcpConfig"]))
+  })
+
+  it("enabling ultracode mid-turn applies the flag and pins effort to xhigh live", async () => {
+    const { createSDKSession, sendSDKMessage, sdkSessions } = await loadModule()
+
+    createSDKSession({
+      sessionId: "u3",
+      cwd: "/tmp",
+      message: "first",
+      effort: "low",
+    })
+    await waitUntil(() => captured.length === 1)
+    expect(applyFlagSettingsSpy).not.toBeNull()
+
+    sendSDKMessage("u3", "follow-up", undefined, { ultracode: true })
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(sdkSessions.get("u3")?.ultracode).toBe(true)
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ ultracode: true }),
+    )
+    // effort jumps to xhigh because ultracode pins it
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ effortLevel: "xhigh" }),
+    )
   })
 })
 

@@ -4,6 +4,7 @@ export type PermissionMode =
   | "plan"
   | "acceptEdits"
   | "dontAsk"
+  | "auto"
   | "delegate"
 
 export interface PermissionsConfig {
@@ -13,7 +14,7 @@ export interface PermissionsConfig {
 }
 
 export const DEFAULT_PERMISSIONS: PermissionsConfig = {
-  mode: "bypassPermissions",
+  mode: "default",
   allowedTools: [],
   disallowedTools: [],
 }
@@ -46,6 +47,7 @@ export function buildPermissionArgs(config: PermissionsConfig): string[] {
     plan: "plan",
     acceptEdits: "acceptEdits",
     dontAsk: "dontAsk",
+    auto: "auto",
   }
   const mapped = modeMap[config.mode]
   if (mapped) {

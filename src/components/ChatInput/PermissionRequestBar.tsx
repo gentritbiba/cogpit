@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useEffectEvent } from "react"
 import { Shield, Terminal, PenLine, Eye, Search, Globe, Wrench, Check, X, Infinity as InfinityIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
@@ -14,6 +14,19 @@ interface ToolMeta {
   label: string
   icon: typeof Terminal
   tone: "cmd" | "write" | "read" | "search" | "net" | "other"
+}
+
+const DEFAULT_DECISIONS: readonly PermissionDecision[] = [
+  "allow",
+  "allow_always",
+  "deny",
+]
+
+function supportsDecision(
+  request: PermissionRequest,
+  decision: PermissionDecision,
+): boolean {
+  return (request.availableDecisions ?? DEFAULT_DECISIONS).includes(decision)
 }
 
 function getToolMeta(toolName: string): ToolMeta {
@@ -40,48 +53,61 @@ function getToolDetail(toolName: string, input: Record<string, unknown>): string
   const keys = Object.keys(input).slice(0, 2)
   if (keys.length === 0) return null
   return keys
-    .map((k) => {
+    .flatMap((k) => {
       const v = input[k]
       const s = typeof v === "string" ? v : JSON.stringify(v)
-      return s && s.length > 160 ? s.slice(0, 157) + "…" : s
+      if (!s) return []
+      return [s.length > 160 ? s.slice(0, 157) + "…" : s]
     })
-    .filter(Boolean)
     .join(" · ")
 }
 
 export function PermissionRequestBar({ requests, responding, onRespond, onRespondAll }: PermissionRequestBarProps) {
   const current = requests[0]
   const remaining = requests.length
+  const canAllow = current ? supportsDecision(current, "allow") : false
+  const canAllowAlways = current
+    ? supportsDecision(current, "allow_always")
+    : false
+  const canDeny = current ? supportsDecision(current, "deny") : false
+  const canAllowAll =
+    remaining > 1 && requests.every((request) => supportsDecision(request, "allow"))
 
   // Keyboard shortcuts:
   //   A = allow once · S = always for session · D = deny · Shift+A = allow all (multi)
-  useEffect(() => {
+  const handleShortcut = useEffectEvent((e: KeyboardEvent) => {
     if (!current) return
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const key = e.key.toLowerCase()
-      if (key === "a" && e.shiftKey && remaining > 1) {
-        e.preventDefault()
-        onRespondAll("allow")
-      } else if (key === "a") {
-        e.preventDefault()
-        onRespond(current.requestId, "allow")
-      } else if (key === "s") {
-        e.preventDefault()
-        onRespond(current.requestId, "allow_always")
-      } else if (key === "d") {
-        e.preventDefault()
-        onRespond(current.requestId, "deny")
-      }
+    const target = e.target as HTMLElement | null
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    const key = e.key.toLowerCase()
+    if (key === "a" && e.shiftKey && canAllowAll) {
+      e.preventDefault()
+      onRespondAll("allow")
+    } else if (key === "a" && canAllow) {
+      e.preventDefault()
+      onRespond(current.requestId, "allow")
+    } else if (key === "s" && canAllowAlways) {
+      e.preventDefault()
+      onRespond(current.requestId, "allow_always")
+    } else if (key === "d" && canDeny) {
+      e.preventDefault()
+      onRespond(current.requestId, "deny")
     }
+  })
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => handleShortcut(event)
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [current, remaining, onRespond, onRespondAll])
+    // Effect Events are intentionally non-reactive and omitted from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  const meta = useMemo(() => (current ? getToolMeta(current.toolName) : null), [current])
-  const detail = useMemo(() => (current ? getToolDetail(current.toolName, current.input) : null), [current])
+  const meta = current ? getToolMeta(current.toolName) : null
+  const detail = current ? getToolDetail(current.toolName, current.input) : null
+  const rationale = current?.decisionReason || current?.description || current?.blockedPath
+  const hasScopedSuggestion = (current?.suggestions?.length ?? 0) > 0
 
   if (!current || !meta) return null
   const Icon = meta.icon
@@ -111,6 +137,12 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
           </div>
         )}
 
+        {rationale && rationale !== detail && (
+          <p className="hidden max-w-64 truncate text-[10px] text-muted-foreground xl:block" title={rationale}>
+            {rationale}
+          </p>
+        )}
+
         {/* Multi-request counter */}
         {isMulti && (
           <span className="shrink-0 text-[10px] font-medium text-amber-300/70 tabular-nums bg-amber-500/10 rounded px-1.5 py-0.5">
@@ -120,33 +152,39 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
 
         {/* Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2.5 text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 gap-1"
-            disabled={isLoading}
-            onClick={() => onRespond(current.requestId, "deny")}
-            title="Deny (D)"
-          >
-            <X className="size-3" />
-            Deny
-            <kbd className="ml-0.5 text-[9px] font-mono text-muted-foreground/50">D</kbd>
-          </Button>
+          {canDeny && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2.5 text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 gap-1"
+              disabled={isLoading}
+              onClick={() => onRespond(current.requestId, "deny")}
+              title="Deny (D)"
+            >
+              <X className="size-3" />
+              Deny
+              <kbd className="ml-0.5 text-[9px] font-mono text-muted-foreground/50">D</kbd>
+            </Button>
+          )}
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2.5 text-xs text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10 gap-1"
-            disabled={isLoading}
-            onClick={() => onRespond(current.requestId, "allow_always")}
-            title={`Allow ${current.toolName} for this session (S)`}
-          >
-            <InfinityIcon className="size-3" />
-            Session
-            <kbd className="ml-0.5 text-[9px] font-mono text-amber-300/50">S</kbd>
-          </Button>
+          {canAllowAlways && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2.5 text-xs text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10 gap-1"
+              disabled={isLoading}
+              onClick={() => onRespond(current.requestId, "allow_always")}
+              title={hasScopedSuggestion
+                ? "Apply Claude's suggested scoped permission rule (S)"
+                : `Allow ${current.toolName} for this session (S)`}
+            >
+              <InfinityIcon className="size-3" />
+              {hasScopedSuggestion ? "Remember rule" : "Session"}
+              <kbd className="ml-0.5 text-[9px] font-mono text-amber-300/50">S</kbd>
+            </Button>
+          )}
 
-          {isMulti && (
+          {canAllowAll && (
             <Button
               variant="ghost"
               size="sm"
@@ -160,17 +198,25 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
             </Button>
           )}
 
-          <Button
-            size="sm"
-            className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white border-0 font-medium gap-1 shadow-sm shadow-emerald-900/40"
-            disabled={isLoading}
-            onClick={() => onRespond(current.requestId, "allow")}
-            title="Allow once (A)"
-          >
-            <Check className="size-3" />
-            Allow
-            <kbd className="ml-0.5 text-[9px] font-mono text-emerald-100/70">A</kbd>
-          </Button>
+          {canAllow && (
+            <Button
+              size="sm"
+              className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white border-0 font-medium gap-1 shadow-sm shadow-emerald-900/40"
+              disabled={isLoading}
+              onClick={() => onRespond(current.requestId, "allow")}
+              title="Allow once (A)"
+            >
+              <Check className="size-3" />
+              Allow
+              <kbd className="ml-0.5 text-[9px] font-mono text-emerald-100/70">A</kbd>
+            </Button>
+          )}
+
+          {!canAllow && !canAllowAlways && !canDeny && (
+            <span className="text-[11px] text-muted-foreground">
+              Resolve this approval in Codex
+            </span>
+          )}
         </div>
       </div>
     </div>

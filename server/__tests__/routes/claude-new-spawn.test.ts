@@ -33,6 +33,7 @@ const {
   mockCreateInterface,
   mockListCodexSessionFiles,
   mockFindNewestCodexSession,
+  mockCodexAppServer,
 } = vi.hoisted(() => {
   const mockActiveProcesses = new Map<string, unknown>()
   const mockPersistentSessions = new Map<string, unknown>()
@@ -46,6 +47,16 @@ const {
   const mockCreateInterface = vi.fn(() => ({ on: vi.fn(), close: vi.fn() }))
   const mockListCodexSessionFiles = vi.fn().mockResolvedValue([])
   const mockFindNewestCodexSession = vi.fn().mockResolvedValue(null)
+  const mockCodexAppServer = {
+    start: vi.fn(),
+    startThread: vi.fn(),
+    resumeThread: vi.fn(),
+    startTurn: vi.fn(),
+    steerTurn: vi.fn(),
+    interruptTurn: vi.fn(),
+    getActiveTurnId: vi.fn(),
+    call: vi.fn(),
+  }
   return {
     mockActiveProcesses,
     mockPersistentSessions,
@@ -59,6 +70,7 @@ const {
     mockCreateInterface,
     mockListCodexSessionFiles,
     mockFindNewestCodexSession,
+    mockCodexAppServer,
   }
 })
 
@@ -87,6 +99,7 @@ vi.mock("../../helpers", () => ({
   buildCodexPermArgs: vi.fn(() => []),
   buildCodexModelArgs: vi.fn(() => []),
   buildCodexEffortArgs: vi.fn(() => []),
+  buildCodexFastModeArgs: vi.fn(() => []),
   writeTempImageFiles: mockWriteTempImageFiles,
   cleanupTempFiles: mockCleanupTempFiles,
   findJsonlPath: vi.fn().mockResolvedValue(null),
@@ -105,6 +118,11 @@ vi.mock("../../sdk-session", () => ({
   })),
   attachSubagentWatcher: vi.fn(),
 }))
+
+vi.mock("../../codex-app-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../codex-app-server")>()
+  return { ...actual, codexAppServer: mockCodexAppServer }
+})
 
 // ---------------------------------------------------------------------------
 // A factory that creates a mock ChildProcess EventEmitter
@@ -288,6 +306,53 @@ describe("registerNewSessionRoute (Claude)", () => {
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
     expect(data.code).toBe("INVALID_REQUEST")
+  })
+
+  it("uses app-server and returns the nested rollout identity immediately", async () => {
+    mockCodexAppServer.start.mockResolvedValue({})
+    mockCodexAppServer.startThread.mockResolvedValue({
+      thread: {
+        id: "thread-native",
+        path: "/tmp/.codex/sessions/2026/07/12/rollout-thread-native.jsonl",
+        turns: [],
+      },
+    })
+    mockCodexAppServer.startTurn.mockResolvedValue({ turn: { id: "turn-native" } })
+    mockReadFile.mockResolvedValue("native rollout")
+
+    const body = JSON.stringify({
+      dirName: "codex:/tmp/myproject",
+      message: "hello",
+      model: "gpt-5.6-sol",
+      effort: "ultra",
+      fastMode: true,
+      permissions: { mode: "default" },
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(mockCodexAppServer.startThread).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/tmp/myproject",
+      model: "gpt-5.6-sol",
+      serviceTier: "priority",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+    }))
+    expect(mockCodexAppServer.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread-native",
+      effort: "ultra",
+      input: [{ type: "text", text: "hello", text_elements: [] }],
+    }))
+    expect(res._getData()).toEqual({
+      success: true,
+      dirName: "codex:/tmp/myproject",
+      fileName: "2026/07/12/rollout-thread-native.jsonl",
+      sessionId: "thread-native",
+      initialContent: "native rollout",
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -474,6 +539,7 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
     mockFindNewestCodexSession.mockResolvedValue(null)
     mockWriteTempImageFiles.mockResolvedValue([])
     mockCleanupTempFiles.mockResolvedValue(undefined)
+    mockCodexAppServer.start.mockRejectedValue(new Error("Codex app-server unavailable"))
 
     // createInterface returns a minimal readline mock that never fires "line"
     mockCreateInterface.mockReturnValue({

@@ -1,5 +1,6 @@
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
+import type { AgentKind } from "@/lib/sessionSource"
 
 // ── App Config ──────────────────────────────────────────────────────────────
 
@@ -7,6 +8,8 @@ export interface AppConfig {
   configLoading: boolean
   configError: string | null
   claudeDir: string | null
+  /** Provider used for provider-neutral dashboard controls when no thread is open. */
+  defaultAgentKind: AgentKind
   setClaudeDir: (dir: string | null) => void
   showConfigDialog: boolean
   openConfigDialog: () => void

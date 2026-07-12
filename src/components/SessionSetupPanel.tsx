@@ -1,5 +1,6 @@
 import { Cpu, GitBranch, Gauge } from "lucide-react"
-import { DEFAULT_EFFORT, getEffortOptions, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
+import { getEffortOptions, normalizeEffortForAgent } from "@/lib/utils"
+import { useModelOptions } from "@/hooks/useModelOptions"
 import { OptionGrid } from "@/components/OptionGrid"
 import type { AgentKind } from "@/lib/sessionSource"
 
@@ -28,9 +29,14 @@ export function SessionSetupPanel({
   worktreeName,
   onWorktreeNameChange,
 }: SessionSetupPanelProps) {
-  const showEffort = !!onEffortChange
+  const effortOptions = getEffortOptions(agentKind, selectedModel)
+  const showEffort = !!onEffortChange && effortOptions.length > 0
   const showWorktree = agentKind === "claude" && !!onWorktreeEnabledChange
-  const effortOptions = getEffortOptions(agentKind)
+  const modelOptions = useModelOptions(agentKind)
+  const describedModelOptions = modelOptions.map((option) => ({
+    ...option,
+    description: [option.description, option.availabilityMessage].filter(Boolean).join(" · ") || undefined,
+  }))
 
   return (
     <aside className="shrink-0 w-[300px] border-l border-border bg-elevation-0 overflow-y-auto h-full panel-enter-right">
@@ -52,10 +58,13 @@ export function SessionSetupPanel({
                 Model
               </h3>
               <OptionGrid
-                options={getModelOptions(agentKind)}
+                options={describedModelOptions}
                 selected={selectedModel || ""}
                 onChange={onModelChange}
+                columns={1}
                 accentColor="blue"
+                ariaLabel="Model"
+                showDescriptions
               />
             </section>
           </div>
@@ -72,10 +81,11 @@ export function SessionSetupPanel({
               </h3>
               <OptionGrid
                 options={effortOptions}
-                selected={normalizeEffortForAgent(agentKind, selectedEffort || DEFAULT_EFFORT)}
+                selected={normalizeEffortForAgent(agentKind, selectedEffort, selectedModel)}
                 onChange={onEffortChange}
                 columns={effortOptions.length}
                 accentColor="orange"
+                ariaLabel="Thinking effort"
               />
             </section>
           </div>

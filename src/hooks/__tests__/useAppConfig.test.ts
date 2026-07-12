@@ -68,6 +68,21 @@ describe("useAppConfig", () => {
       expect(result.current.configError).toBeNull()
     })
 
+    it("uses the configured provider for dashboard controls", async () => {
+      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString()
+        if (url.includes("/api/config")) {
+          return new Response(JSON.stringify({ claudeDir: "/compat/.claude", mode: "codex" }), { status: 200 })
+        }
+        return new Response(JSON.stringify({ enabled: false }), { status: 200 })
+      })
+
+      const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => expect(result.current.configLoading).toBe(false))
+      expect(result.current.defaultAgentKind).toBe("codex")
+    })
+
     it("handles config with null claudeDir", async () => {
       mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString()

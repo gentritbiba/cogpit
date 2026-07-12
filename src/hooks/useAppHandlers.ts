@@ -10,6 +10,8 @@ import type { SessionAction } from "./useSessionState"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
 import { parseSubAgentPath } from "@/lib/format"
+import { agentKindFromDirName } from "@/lib/sessionSource"
+import type { PermissionsConfig } from "@/lib/permissions"
 
 interface AppHandlersDeps {
   state: {
@@ -21,10 +23,13 @@ interface AppHandlersDeps {
   handleJumpToTurn: (index: number, toolCallId?: string) => void
   markPermissionsApplied: () => void
   hasPermsPendingChanges: boolean
+  permissionsConfig: PermissionsConfig
   selectedModel: string
   setSelectedModel: React.Dispatch<React.SetStateAction<string>>
   selectedEffort: string
   setSelectedEffort: React.Dispatch<React.SetStateAction<string>>
+  fastMode: boolean
+  setFastMode: React.Dispatch<React.SetStateAction<boolean>>
   mcpConfig: string | null
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
@@ -33,7 +38,13 @@ interface AppHandlersDeps {
 interface AppliedSettings {
   model: string
   effort: string
+  fastMode: boolean
   mcpConfig: string | null
+}
+
+export function settingsApplyRequiresRestart(source: SessionSource | null): boolean {
+  void source
+  return false
 }
 
 interface AppHandlersResult {
@@ -69,9 +80,10 @@ interface AppHandlersResult {
 export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
     state, dispatch, isMobile, handleJumpToTurn,
-    markPermissionsApplied, hasPermsPendingChanges,
+    markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
     selectedModel, setSelectedModel,
     selectedEffort, setSelectedEffort,
+    fastMode, setFastMode,
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
   } = deps
@@ -188,6 +200,10 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   selectedEffortRef.current = selectedEffort
   const mcpConfigRef = useRef(mcpConfig)
   mcpConfigRef.current = mcpConfig
+  const fastModeRef = useRef(fastMode)
+  fastModeRef.current = fastMode
+  const permissionsConfigRef = useRef(permissionsConfig)
+  permissionsConfigRef.current = permissionsConfig
 
   const currentSessionId = state.session?.sessionId ?? null
   const prevSessionIdRef = useRef<string | null>(null)
@@ -199,6 +215,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
       if (currentSessionId in prev) {
         setSelectedModel(prev[currentSessionId].model)
         setSelectedEffort(prev[currentSessionId].effort)
+        setFastMode(prev[currentSessionId].fastMode)
         return prev
       }
       return {
@@ -206,34 +223,61 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         [currentSessionId]: {
           model: selectedModelRef.current,
           effort: selectedEffortRef.current,
+          fastMode: fastModeRef.current,
           mcpConfig: mcpConfigRef.current,
         },
       }
     })
-  }, [currentSessionId, setSelectedModel, setSelectedEffort])
+  }, [currentSessionId, setSelectedModel, setSelectedEffort, setFastMode])
 
   const applied = currentSessionId ? appliedSettings[currentSessionId] : undefined
   const mcpChanged = mcpConfig !== (applied?.mcpConfig ?? null)
   const hasSettingsChanges = applied != null &&
     (selectedModel !== applied.model ||
      selectedEffort !== applied.effort ||
+     fastMode !== applied.fastMode ||
      hasPermsPendingChanges ||
      mcpChanged)
 
   // ── Apply settings ─────────────────────────────────────────────────────────
   const handleApplySettings = useCallback(async () => {
     if (!currentSessionId) return
-    await authFetch("/api/stop-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: currentSessionId }),
-    })
+    // Settings controls update React state immediately and schedule this action
+    // for the next tick. Read refs here so the native Claude update always gets
+    // the value the user just selected, rather than the previous render's value.
+    const nextModel = selectedModelRef.current
+    const nextEffort = selectedEffortRef.current
+    const nextFastMode = fastModeRef.current
+    const nextMcpConfig = mcpConfigRef.current
+    const nextPermissions = permissionsConfigRef.current
+    const agentKind = state.sessionSource?.agentKind
+      ?? agentKindFromDirName(state.sessionSource?.dirName ?? null)
+    if (agentKind === "claude") {
+      await authFetch(`/api/claude/settings/${encodeURIComponent(currentSessionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: nextModel,
+          effort: nextEffort,
+          fastMode: nextFastMode,
+          mcpConfig: nextMcpConfig,
+          permissionMode: nextPermissions.mode,
+          allowedTools: nextPermissions.allowedTools,
+          disallowedTools: nextPermissions.disallowedTools,
+        }),
+      })
+    }
     setAppliedSettings(prev => ({
       ...prev,
-      [currentSessionId]: { model: selectedModel, effort: selectedEffort, mcpConfig },
+      [currentSessionId]: {
+        model: nextModel,
+        effort: nextEffort,
+        fastMode: nextFastMode,
+        mcpConfig: nextMcpConfig,
+      },
     }))
     markPermissionsApplied()
-  }, [currentSessionId, selectedModel, selectedEffort, mcpConfig, markPermissionsApplied])
+  }, [currentSessionId, state.sessionSource, markPermissionsApplied])
 
   // ── Stop session ───────────────────────────────────────────────────────────
   const handleStopSession = useCallback(async () => {

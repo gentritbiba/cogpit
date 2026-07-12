@@ -289,10 +289,8 @@ describe("securityHeaders", () => {
     expect(headers["X-Content-Type-Options"]).toBe("nosniff")
     expect(headers["X-Frame-Options"]).toBe("DENY")
     expect(headers["Referrer-Policy"]).toBe("no-referrer")
-    expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(self), geolocation=()")
+    expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=()")
     expect(headers["X-XSS-Protection"]).toBe("1; mode=block")
-    expect(headers["Cross-Origin-Embedder-Policy"]).toBe("credentialless")
-    expect(headers["Cross-Origin-Opener-Policy"]).toBe("same-origin")
     expect(next).toHaveBeenCalledOnce()
   })
 })
@@ -574,8 +572,8 @@ describe("isRateLimited isolation between IPs", () => {
 // ── buildPermArgs ────────────────────────────────────────────────────────
 
 describe("buildPermArgs", () => {
-  it("returns bypass flag when permissions is undefined", () => {
-    expect(buildPermArgs()).toEqual(["--dangerously-skip-permissions"])
+  it("uses the safe default mode when permissions is undefined", () => {
+    expect(buildPermArgs()).toEqual(["--permission-mode", "default"])
   })
 
   it("returns bypass flag for bypassPermissions mode", () => {
@@ -603,8 +601,8 @@ describe("buildPermArgs", () => {
     expect(buildPermArgs({ mode: "plan" })).toEqual(["--permission-mode", "plan"])
   })
 
-  it("returns bypass flag when mode is empty string", () => {
-    expect(buildPermArgs({ mode: "" })).toEqual(["--dangerously-skip-permissions"])
+  it("uses the safe default mode when mode is empty", () => {
+    expect(buildPermArgs({ mode: "" })).toEqual(["--permission-mode", "default"])
   })
 })
 

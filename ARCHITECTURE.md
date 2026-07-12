@@ -7,7 +7,7 @@
 - Monitors background sub-agents spawned via Task tool calls
 - Tracks background servers (dev servers, API servers) running in background Bash commands
 - Provides live streaming updates via Server-Sent Events (SSE)
-- Offers undo/redo with branching, team dashboards, voice input, and permission management
+- Offers undo/redo with branching, team dashboards, and permission management
 
 **Tech Stack:**
 - Frontend: React 19, TypeScript 5.6, Vite 6, Tailwind CSS 4, Radix UI, Shiki (syntax highlighting)
@@ -36,7 +36,6 @@
    - Starts embedded Express server via `createAppServer()`
    - Binds to `0.0.0.0:19384` if network access enabled, otherwise `127.0.0.1`
    - Dynamically allocates port (0 = any available) in production for non-networked mode
-   - Grants microphone permission for Whisper WASM voice input
    - Registers custom menu (removes conflicting shortcuts)
 
 ### Electron Server (`electron/server.ts`)
@@ -116,24 +115,6 @@ Gracefully terminates process listening on a port:
 - Waits for graceful shutdown
 - Falls back to `SIGKILL` after 5s
 
-### 6. Cogpit Session Search (`/api/cogpit-search`)
-
-**Route:** `server/routes/cogpit-search.ts`
-
-Deep session search powered by the local `packages/cogpit-memory` indexing package:
-- **Query params:**
-  - `q` (required, min 2 chars) — Search query
-  - `limit` (optional, default 20, max 100) — Max results to return
-  - `maxAge` (optional, default "30d") — Filter to recent sessions (e.g., "7d", "30d")
-- **Returns:** `ActiveSessionInfo[]` shaped for LiveSessions UI
-  - Fields: dirName, projectShortName, cwd, firstUserMessage, lastUserMessage, gitBranch, lastModified, turnCount, isActive, matchedMessage (snippet), hitCount
-- **Implementation:** Spawns cogpit-memory CLI as child process
-  - Dev: `bun packages/cogpit-memory/src/cli.ts` (TypeScript source for fast reload)
-  - Packaged app: `node packages/cogpit-memory/dist/cli.js` (compiled, from app.asar.unpacked via asarUnpack configuration)
-- **Used by:** LiveSessions panel for fast deep search across all sessions via pre-built cogpit-memory index (faster than full JSONL scan)
-
----
-
 ## Backend API Routes
 
 All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electron/server.ts` (Express).
@@ -151,7 +132,6 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/teams` | GET | List teams in `~/.claude/teams/` |
 | `/api/team-detail/:name` | GET | Team config, tasks, and inbox |
 | `/api/watch-team/:name` | GET (SSE) | Live stream for team updates |
-| `/api/cogpit-search` | GET | Deep session search via cogpit-memory (query, limit, maxAge params) |
 | `/api/check-ports` | GET | Test TCP listening on ports |
 | `/api/background-tasks` | GET | Scan Claude's task dir for background Bash tasks |
 | `/api/background-agents` | GET | Scan `projects/` for background agent symlinks |

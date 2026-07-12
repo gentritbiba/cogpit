@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch, isRemoteClient, getToken } from "@/lib/auth"
 import type { AppConfig } from "@/contexts/AppContext"
+import type { AgentKind } from "@/lib/sessionSource"
 
 interface NetworkState {
   url: string | null
@@ -21,18 +22,27 @@ async function fetchNetworkInfo(): Promise<NetworkState> {
   }
 }
 
-/** Fetch the config endpoint and return the claudeDir or throw. */
-async function fetchConfig(signal?: AbortSignal): Promise<string | null> {
+interface ConfigSnapshot {
+  claudeDir: string | null
+  defaultAgentKind: AgentKind
+}
+
+/** Fetch the config endpoint and return its provider-aware snapshot or throw. */
+async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
   const res = await authFetch("/api/config", { signal })
   if (!res.ok) throw new Error(`Config request failed (${res.status})`)
-  const data = (await res.json()) as { claudeDir?: string }
-  return data?.claudeDir ?? null
+  const data = (await res.json()) as { claudeDir?: string; mode?: string } | null
+  return {
+    claudeDir: data?.claudeDir ?? null,
+    defaultAgentKind: data?.mode === "codex" ? "codex" : "claude",
+  }
 }
 
 export function useAppConfig(): AppConfig {
   const [configLoading, setConfigLoading] = useState(true)
   const [configError, setConfigError] = useState<string | null>(null)
   const [claudeDir, setClaudeDir] = useState<string | null>(null)
+  const [defaultAgentKind, setDefaultAgentKind] = useState<AgentKind>("claude")
   const [showConfigDialog, setShowConfigDialog] = useState(false)
   const [networkUrl, setNetworkUrl] = useState<string | null>(null)
   const [networkAccessDisabled, setNetworkAccessDisabled] = useState(false)
@@ -53,8 +63,9 @@ export function useAppConfig(): AppConfig {
     setConfigLoading(true)
     setConfigError(null)
     fetchConfig(controller.signal)
-      .then((dir) => {
-        setClaudeDir(dir)
+      .then((snapshot) => {
+        setClaudeDir(snapshot.claudeDir)
+        setDefaultAgentKind(snapshot.defaultAgentKind)
       })
       .catch((err) => {
         if (err instanceof Error && err.name === "AbortError") return
@@ -95,8 +106,9 @@ export function useAppConfig(): AppConfig {
     setConfigLoading(true)
     setConfigError(null)
     fetchConfig()
-      .then((dir) => {
-        setClaudeDir(dir)
+      .then((snapshot) => {
+        setClaudeDir(snapshot.claudeDir)
+        setDefaultAgentKind(snapshot.defaultAgentKind)
       })
       .catch((err) => {
         setClaudeDir(null)
@@ -109,6 +121,7 @@ export function useAppConfig(): AppConfig {
     configLoading,
     configError,
     claudeDir,
+    defaultAgentKind,
     setClaudeDir,
     showConfigDialog,
     openConfigDialog,

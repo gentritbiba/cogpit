@@ -9,6 +9,7 @@ import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
+import { GoalBar } from "@/components/GoalBar"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
@@ -22,6 +23,7 @@ import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
+import { useSessionWorkflows } from "@/hooks/useSessionWorkflows"
 import { usePtyChat } from "@/hooks/usePtyChat"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useSessionState } from "@/hooks/useSessionState"
@@ -56,7 +58,8 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
-import { DEFAULT_EFFORT, getModelOptions, normalizeEffortForAgent } from "@/lib/utils"
+import { getFastServiceTierOption, isUltracodeCapableModel, normalizeEffortForAgent, supportsImageInput } from "@/lib/utils"
+import { useModelOptions } from "@/hooks/useModelOptions"
 import {
   agentKindFromDirName,
   findClaudeProjectDirNameForCwd,
@@ -83,6 +86,7 @@ const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then(m => 
 const ConfigDialog = lazy(() => import("@/components/ConfigDialog").then(m => ({ default: m.ConfigDialog })))
 const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModal").then(m => ({ default: m.ProjectSwitcherModal })))
 const TeamsDashboard = lazy(() => import("@/components/TeamsDashboard").then(m => ({ default: m.TeamsDashboard })))
+const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then(m => ({ default: m.ThemeSelectorModal })))
 const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then(m => ({ default: m.WorktreePanel })))
 const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then(m => ({ default: m.MobileFileChanges })))
@@ -158,6 +162,7 @@ export default function App() {
     ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
   const supportsWorktrees = currentAgentKind === "claude"
   const supportsMcp = currentAgentKind === "claude"
+  const availableModelOptions = useModelOptions(currentAgentKind ?? "claude")
 
   const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
   const suggestionsRef = useRef(slashSuggestions.suggestions)
@@ -240,6 +245,37 @@ export default function App() {
     )
   }, [state.session])
 
+  // Cheaply detect workflow runs from already-parsed turns (Workflow tool calls).
+  // Drives the trigger button and gates the per-session workflow fetch/watch so
+  // we never open an fs.watch on sessions that never launched a workflow.
+  const workflowToolCallCount = useMemo(() => {
+    if (!state.session) return 0
+    let n = 0
+    for (const turn of state.session.turns)
+      for (const tc of turn.toolCalls)
+        if (tc.name === "Workflow") n++
+    return n
+  }, [state.session])
+  const hasWorkflowToolCalls = workflowToolCallCount > 0
+
+  // Workflows live under the top-level session dir; not shown on sub-agent views.
+  const workflowSource = useMemo(() => {
+    const src = state.sessionSource
+    if (!src || parseSubAgentPath(src.fileName)) {
+      return { dirName: null as string | null, sessionId: null as string | null }
+    }
+    return { dirName: src.dirName, sessionId: src.fileName.replace(/\.jsonl$/, "") }
+  }, [state.sessionSource])
+
+  const sessionWorkflows = useSessionWorkflows(
+    workflowSource.dirName,
+    workflowSource.sessionId,
+    hasWorkflowToolCalls,
+  )
+  const workflowBadgeCount = sessionWorkflows.workflows.length || workflowToolCallCount
+  const setShowWorkflows = panels.setShowWorkflows
+  const handleShowWorkflows = useCallback(() => setShowWorkflows(true), [setShowWorkflows])
+
   // Track whether the file changes panel has been collapsed via drag
   const [fileChangesCollapsed, setFileChangesCollapsed] = useState(false)
   const handleFileChangesPanelCollapse = useCallback(() => setFileChangesCollapsed(true), [])
@@ -308,14 +344,33 @@ export default function App() {
 
   // Model override (empty = use session default)
   const [selectedModel, setSelectedModel] = useState("")
+  const [modelFallbackNotice, setModelFallbackNotice] = useState<string | null>(null)
+  const lastClaudeFallbackRef = useRef<string | null>(null)
 
   const handleCodexModelRejected = useCallback((rejectedModel: string) => {
     setSelectedModel((current) => current === rejectedModel ? "" : current)
+    setModelFallbackNotice(
+      `${rejectedModel} is unavailable for this account. Cogpit retried the turn with Codex's default model.`,
+    )
   }, [])
 
   // Thinking effort level
-  const [selectedEffort, setSelectedEffort] = useState(DEFAULT_EFFORT)
-  const effectiveEffort = normalizeEffortForAgent(currentAgentKind ?? "claude", selectedEffort)
+  // Empty means "use the selected model's recommended default". Codex's live
+  // catalog currently recommends Medium for GPT-5.6; Claude falls back to High.
+  const [selectedEffort, setSelectedEffort] = useState("")
+  const [fastModeEnabled, setFastModeEnabled] = useState(false)
+  // Ultracode: xhigh effort + standing dynamic-workflow orchestration. Claude
+  // only, and only meaningful on xhigh-capable models.
+  const [ultracodeEnabled, setUltracodeEnabled] = useState(false)
+  const ultracodeAvailable = isUltracodeCapableModel(currentAgentKind ?? "claude", selectedModel)
+  const ultracodeActive = ultracodeEnabled && ultracodeAvailable
+  // Ultracode pins effort to xhigh; otherwise use the user's selection.
+  const effectiveEffort = ultracodeActive
+    ? "xhigh"
+    : normalizeEffortForAgent(currentAgentKind ?? "claude", selectedEffort, selectedModel)
+  const fastModeAvailable = !!getFastServiceTierOption(currentAgentKind ?? "claude", selectedModel)
+  const fastModeActive = fastModeAvailable && fastModeEnabled
+  const imageInputAvailable = supportsImageInput(currentAgentKind ?? "claude", selectedModel)
 
   // MCP server selection
   const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
@@ -324,12 +379,20 @@ export default function App() {
     supportsMcp ? (currentDirName ?? undefined) : undefined,
     supportsMcp ? state.sessionSource?.fileName ?? undefined : undefined
   )
+  const { showWorktrees, setShowWorktrees, showWorkflows } = panels
 
   useEffect(() => {
-    if (!supportsWorktrees && panels.showWorktrees) {
-      panels.setShowWorktrees(false)
+    if (!supportsWorktrees && showWorktrees) {
+      setShowWorktrees(false)
     }
-  }, [supportsWorktrees, panels.showWorktrees, panels.setShowWorktrees])
+  }, [supportsWorktrees, showWorktrees, setShowWorktrees])
+
+  // Close the workflows panel when navigating to a session without workflows.
+  useEffect(() => {
+    if (showWorkflows && !hasWorkflowToolCalls) {
+      setShowWorkflows(false)
+    }
+  }, [showWorkflows, hasWorkflowToolCalls, setShowWorkflows])
 
   // New session creation (lazy — no backend call until first message)
   // Declared before usePtyChat because it provides the onCreateSession callback.
@@ -362,6 +425,8 @@ export default function App() {
     onCodexModelRejected: handleCodexModelRejected,
     model: selectedModel,
     effort: effectiveEffort,
+    fastMode: fastModeActive,
+    ultracode: ultracodeActive,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
   })
 
@@ -437,11 +502,10 @@ export default function App() {
   useEffect(() => {
     if (!selectedModel) return
     if (!state.sessionSource && !state.pendingDirName) return
-    const options = getModelOptions(currentAgentKind ?? "claude")
-    if (!options.some((option) => option.value === selectedModel)) {
+    if (!availableModelOptions.some((option) => option.value === selectedModel)) {
       setSelectedModel("")
     }
-  }, [currentAgentKind, selectedModel, state.sessionSource, state.pendingDirName])
+  }, [availableModelOptions, selectedModel, state.sessionSource, state.pendingDirName])
 
   // Active agent chat
   const claudeChat = usePtyChat({
@@ -452,6 +516,7 @@ export default function App() {
     onPermissionsApplied: perms.markApplied,
     model: selectedModel,
     effort: effectiveEffort,
+    fastMode: fastModeActive,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     onCodexModelRejected: handleCodexModelRejected,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
@@ -558,10 +623,13 @@ export default function App() {
     handleJumpToTurn: actions.handleJumpToTurn,
     markPermissionsApplied: perms.markApplied,
     hasPermsPendingChanges: perms.hasPendingChanges,
+    permissionsConfig: perms.config,
     selectedModel,
     setSelectedModel,
     selectedEffort: effectiveEffort,
     setSelectedEffort,
+    fastMode: fastModeActive,
+    setFastMode: setFastModeEnabled,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
@@ -679,6 +747,37 @@ export default function App() {
     const timer = setTimeout(clearActiveError, 8000)
     return () => clearTimeout(timer)
   }, [activeError, clearActiveError])
+
+  useEffect(() => {
+    if (!modelFallbackNotice) return
+    const timer = setTimeout(() => setModelFallbackNotice(null), 12_000)
+    return () => clearTimeout(timer)
+  }, [modelFallbackNotice])
+
+  useEffect(() => {
+    if (!isLive || state.session?.agentKind !== "claude") return
+    const rawMessages = state.session.rawMessages
+    let fallback: (typeof rawMessages)[number] | undefined
+    for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
+      const message = rawMessages[index]
+      if (message.type === "system" && message.subtype === "model_refusal_fallback") {
+        fallback = message
+        break
+      }
+    }
+    if (!fallback) return
+    const identity = typeof fallback.uuid === "string"
+      ? fallback.uuid
+      : `${String(fallback.original_model)}:${String(fallback.fallback_model)}:${String(fallback.request_id)}`
+    if (lastClaudeFallbackRef.current === identity) return
+    lastClaudeFallbackRef.current = identity
+    const original = typeof fallback.original_model === "string" ? fallback.original_model : "Fable"
+    const replacement = typeof fallback.fallback_model === "string" ? fallback.fallback_model : "Opus"
+    const explanation = typeof fallback.api_refusal_explanation === "string"
+      ? ` ${fallback.api_refusal_explanation}`
+      : ""
+    setModelFallbackNotice(`${original} could not handle this request, so Claude continued with ${replacement}.${explanation}`)
+  }, [isLive, state.session?.agentKind, state.session?.rawMessages])
 
   // ─── Build context values ──────────────────────────────────────────────────
 
@@ -847,10 +946,19 @@ export default function App() {
       <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
       <span className="text-xs text-red-400 flex-1">{activeError}</span>
       {clearActiveError && (
-        <button onClick={clearActiveError} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Dismiss error">
+        <button type="button" onClick={clearActiveError} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Dismiss error">
           <X className="size-3.5" />
         </button>
       )}
+    </div>
+  )
+  const modelFallbackToast = modelFallbackNotice && (
+    <div role="status" className="fixed bottom-4 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3 px-3 py-2 depth-high toast-enter">
+      <AlertTriangle className="size-3.5 shrink-0 text-amber-400" />
+      <span className="flex-1 text-xs text-amber-300">{modelFallbackNotice}</span>
+      <button type="button" onClick={() => setModelFallbackNotice(null)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss model notice">
+        <X className="size-3.5" />
+      </button>
     </div>
   )
   const undoConfirmDialog = (
@@ -903,11 +1011,34 @@ export default function App() {
     />
   )
 
+  // Workflow visualization panel — mounted only for sessions that ran a
+  // workflow, so its chunk loads lazily and the Sheet can animate open/close.
+  const workflowsPanelNode = hasWorkflowToolCalls && (
+    <Suspense fallback={null}>
+      <WorkflowsPanel
+        open={panels.showWorkflows}
+        onOpenChange={panels.setShowWorkflows}
+        dirName={workflowSource.dirName}
+        sessionId={workflowSource.sessionId}
+        workflows={sessionWorkflows.workflows}
+        isLive={sessionWorkflows.isLive}
+        onRefetchList={sessionWorkflows.refetch}
+      />
+    </Suspense>
+  )
+
   const isNewSession = !!state.pendingDirName && !state.session
 
   const chatInputNode = (
     <div className="shrink-0 bg-elevation-1">
-      <ChatInput ref={chatInputRef} />
+      {currentAgentKind && state.session && (
+        <GoalBar
+          agentKind={currentAgentKind}
+          session={state.session}
+          onSendCommand={claudeChat.sendMessage}
+        />
+      )}
+      <ChatInput ref={chatInputRef} allowImages={imageInputAvailable} agentKind={currentAgentKind} />
       <ChatInputSettings
         agentKind={currentAgentKind ?? "claude"}
         onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
@@ -915,9 +1046,13 @@ export default function App() {
         onModelChange={setSelectedModel}
         selectedEffort={effectiveEffort}
         onEffortChange={setSelectedEffort}
+        fastModeEnabled={fastModeActive}
+        onFastModeEnabledChange={fastModeAvailable ? setFastModeEnabled : undefined}
         isNewSession={isNewSession}
         worktreeEnabled={worktreeEnabled}
         onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
+        ultracodeEnabled={ultracodeActive}
+        onUltracodeEnabledChange={isNewSession && ultracodeAvailable ? setUltracodeEnabled : undefined}
         onApplySettings={handlers.handleApplySettings}
         activeModelId={state.session?.model}
         mcpServers={supportsMcp ? mcpData.servers : undefined}
@@ -1004,6 +1139,8 @@ export default function App() {
                     onBackToMain={isSubAgentView ? handleBackToMain : undefined}
                     onShowFileChanges={() => setShowMobileFileChanges(true)}
                     hasFileChanges={hasFileChanges}
+                    onShowWorkflows={handleShowWorkflows}
+                    workflowCount={workflowBadgeCount}
                   />
                   <SessionStatusBar
                     session={state.session}
@@ -1087,6 +1224,7 @@ export default function App() {
         </main>
 
         {processPanelNode}
+        {workflowsPanelNode}
         {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && (
           <>
             {todoProgress && <TodoProgressPanel progress={todoProgress} />}
@@ -1104,7 +1242,7 @@ export default function App() {
 
         {undoConfirmDialog}
         {branchModal}
-        {errorToast || sseIndicator}
+        {errorToast || modelFallbackToast || sseIndicator}
         {state.session && (
           <Suspense fallback={null}>
             <MobileFileChanges
@@ -1209,6 +1347,8 @@ export default function App() {
                       onDuplicateSession={handlers.handleDuplicateSession}
                       onOpenTerminal={handleOpenTerminal}
                       onBackToMain={isSubAgentView ? handleBackToMain : undefined}
+                      onShowWorkflows={handleShowWorkflows}
+                      workflowCount={workflowBadgeCount}
                     />
                     <SessionStatusBar
                       session={state.session}
@@ -1334,6 +1474,7 @@ export default function App() {
       </Suspense>
 
       {processPanelNode}
+      {workflowsPanelNode}
       {undoConfirmDialog}
       {branchModal}
 
@@ -1366,7 +1507,7 @@ export default function App() {
         />
       </Suspense>
 
-      {errorToast || sseIndicator}
+      {errorToast || modelFallbackToast || sseIndicator}
     </div>
     </StreamingOverlayProvider>
       </SessionProvider>

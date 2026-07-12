@@ -7,6 +7,7 @@ import {
   buildCodexPermArgs,
   buildCodexModelArgs,
   buildCodexEffortArgs,
+  buildCodexFastModeArgs,
   writeTempImageFiles,
   cleanupTempFiles,
   getAgentKindFromSessionPath,
@@ -17,6 +18,11 @@ import type { PersistentSession, UseFn } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
 import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
+import { codexAppServer } from "../codex-app-server"
+import {
+  continueCodexExecution,
+  isCodexAppServerUnavailable,
+} from "../lib/codexExecution"
 
 export function registerClaudeRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -28,7 +34,7 @@ export function registerClaudeRoutes(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { sessionId, message, images, cwd, permissions, model, effort, mcpConfig } = JSON.parse(body)
+        const { sessionId, message, images, cwd, permissions, model, effort, fastMode, ultracode, mcpConfig } = JSON.parse(body)
 
         if (!sessionId || (!message && (!images || images.length === 0))) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId and message or images are required"))
@@ -45,29 +51,62 @@ export function registerClaudeRoutes(use: UseFn) {
             return
           }
 
+          const sessionMeta = sessionPath ? await getSessionMeta(sessionPath).catch(() => null) : null
+          const resolvedCwd = cwd || sessionMeta?.cwd || homedir()
+          try {
+            await continueCodexExecution(
+              codexAppServer,
+              sessionId,
+              sessionPath,
+              {
+                cwd: resolvedCwd,
+                message,
+                images,
+                permissions,
+                model,
+                effort,
+                fastMode,
+              },
+            )
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ success: true }))
+            return
+          } catch (error) {
+            if (!isCodexAppServerUnavailable(error)) {
+              sendError(res, new RouteError(
+                500,
+                ErrorCodes.INTERNAL_ERROR,
+                error instanceof Error ? error.message : "Codex failed to accept the message",
+              ))
+              return
+            }
+          }
+
+          // Compatibility path for Codex versions that predate app-server.
           const imagePaths = await writeTempImageFiles(images)
           const permArgs = buildCodexPermArgs(permissions)
           const modelArgs = buildCodexModelArgs(model)
           const effortArgs = buildCodexEffortArgs(effort)
+          const fastModeArgs = buildCodexFastModeArgs(fastMode)
           const imageArgs = imagePaths.flatMap((filePath) => ["-i", filePath])
-          const sessionMeta = sessionPath ? await getSessionMeta(sessionPath).catch(() => null) : null
           const prompt = message || (imagePaths.length > 0 ? CODEX_IMAGE_ONLY_PROMPT : "")
 
           const child = spawn(
             "codex",
             [
               "exec",
+              ...permArgs,
               "resume",
               "--json",
-              ...permArgs,
               ...modelArgs,
               ...effortArgs,
+              ...fastModeArgs,
               ...imageArgs,
               sessionId,
               ...(prompt ? [prompt] : []),
             ],
             {
-              cwd: cwd || sessionMeta?.cwd || homedir(),
+              cwd: resolvedCwd,
               env: process.env,
               stdio: ["ignore", "pipe", "pipe"],
             }
@@ -78,7 +117,7 @@ export function registerClaudeRoutes(use: UseFn) {
             proc: child,
             onResult: null,
             dead: false,
-            cwd: cwd || sessionMeta?.cwd || homedir(),
+            cwd: resolvedCwd,
             permArgs,
             modelArgs,
             effortArgs,
@@ -153,6 +192,8 @@ export function registerClaudeRoutes(use: UseFn) {
           const state = sendSDKMessage(sessionId, message, images, {
             model,
             effort,
+            fastMode,
+            ultracode,
             mcpConfig,
           })
           if (!state) {
@@ -215,6 +256,8 @@ export function registerClaudeRoutes(use: UseFn) {
           disallowedTools: permissions?.disallowedTools,
           model,
           effort,
+          fastMode,
+          ultracode,
           mcpConfig,
         })
 

@@ -70,6 +70,70 @@ function functionCall(callId: string, name: string, args: string, timestamp = "2
   })
 }
 
+function namespacedFunctionCall(
+  callId: string,
+  name: string,
+  args: Record<string, unknown>,
+  timestamp = "2024-01-01T00:00:03.000Z",
+): string {
+  return JSON.stringify({
+    type: "response_item",
+    timestamp,
+    payload: {
+      type: "function_call",
+      call_id: callId,
+      name,
+      namespace: "collaboration",
+      arguments: JSON.stringify(args),
+    },
+  })
+}
+
+function subAgentActivity(
+  eventId: string,
+  agentThreadId: string,
+  agentPath: string,
+  kind: "started" | "interacted" | "interrupted",
+  timestamp = "2024-01-01T00:00:04.000Z",
+): string {
+  return JSON.stringify({
+    type: "event_msg",
+    timestamp,
+    payload: {
+      type: "sub_agent_activity",
+      event_id: eventId,
+      agent_thread_id: agentThreadId,
+      agent_path: agentPath,
+      kind,
+    },
+  })
+}
+
+function interAgentMessage(
+  author: string,
+  messageType: "MESSAGE" | "FINAL_ANSWER" | "INTERRUPTED",
+  text: string,
+  timestamp = "2024-01-01T00:00:05.000Z",
+): string {
+  return JSON.stringify({
+    type: "response_item",
+    timestamp,
+    payload: {
+      type: "agent_message",
+      author,
+      recipient: "/root",
+      content: [
+        {
+          type: "input_text",
+          text: `Message Type: ${messageType}\nTask name: /root\nSender: ${author}\nPayload:\n${text}`,
+        },
+        { type: "encrypted_content", encrypted_content: "opaque-transport-data" },
+      ],
+      inter_agent_communication_metadata: { turn_id: "turn-1" },
+    },
+  })
+}
+
 function functionCallOutput(callId: string, output: string, timestamp = "2024-01-01T00:00:04.000Z"): string {
   return JSON.stringify({
     type: "response_item",
@@ -78,13 +142,18 @@ function functionCallOutput(callId: string, output: string, timestamp = "2024-01
   })
 }
 
-function tokenCount(inputTokens: number, outputTokens: number, timestamp = "2024-01-01T00:00:05.000Z"): string {
+function tokenCount(
+  inputTokens: number,
+  outputTokens: number,
+  usageOverrides: Record<string, unknown> = {},
+  timestamp = "2024-01-01T00:00:05.000Z",
+): string {
   return JSON.stringify({
     type: "event_msg",
     timestamp,
     payload: {
       type: "token_count",
-      info: { last_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+      info: { last_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens, ...usageOverrides } },
     },
   })
 }
@@ -289,6 +358,51 @@ describe("parseCodexSession", () => {
     expect(session.turns).toHaveLength(1)
     expect(session.turns[0].tokenUsage?.input_tokens).toBe(100)
     expect(session.turns[0].tokenUsage?.output_tokens).toBe(50)
+  })
+
+  it("splits Codex cached input from uncached input", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Hello"),
+      assistantMessage("Hi!"),
+      tokenCount(100, 50, { cached_input_tokens: 30 }),
+    ].join("\n")
+
+    const usage = parseCodexSession(text).turns[0].tokenUsage
+    expect(usage?.input_tokens).toBe(70)
+    expect(usage?.cache_read_input_tokens).toBe(30)
+    expect(usage?.output_tokens).toBe(50)
+  })
+
+  it("clamps uncached Codex input to zero", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Hello"),
+      tokenCount(20, 5, { cached_input_tokens: 30 }),
+    ].join("\n")
+
+    const usage = parseCodexSession(text).turns[0].tokenUsage
+    expect(usage?.input_tokens).toBe(0)
+    expect(usage?.cache_read_input_tokens).toBe(30)
+  })
+
+  it("preserves Anthropic-shaped cache usage fields", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Hello"),
+      tokenCount(100, 50, {
+        cache_creation_input_tokens: 20,
+        cache_read_input_tokens: 30,
+      }),
+    ].join("\n")
+
+    const usage = parseCodexSession(text).turns[0].tokenUsage
+    expect(usage?.input_tokens).toBe(100)
+    expect(usage?.cache_creation_input_tokens).toBe(20)
+    expect(usage?.cache_read_input_tokens).toBe(30)
   })
 
   it("populates rawMessages", () => {
@@ -655,6 +769,137 @@ describe("parseCodexSession", () => {
     expect(subBlocks).toHaveLength(1)
     expect(subBlocks[0].messages).toHaveLength(1)
     expect(subBlocks[0].messages[0].agentId).toBe("agent-abc-123")
+  })
+
+  it("upserts current Codex multi-agent activity and strips routing envelopes", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Delegate this audit"),
+      namespacedFunctionCall("call-spawn-modern", "collaboration.spawnAgent", {
+        task_name: "auditor",
+        fork_turns: "all",
+        message: "Review the parser",
+      }),
+      subAgentActivity(
+        "call-spawn-modern",
+        "agent-thread-modern",
+        "/root/auditor",
+        "started",
+        "2024-01-01T00:00:04.000Z",
+      ),
+      functionCallOutput(
+        "call-spawn-modern",
+        JSON.stringify({ task_name: "/root/auditor" }),
+        "2024-01-01T00:00:04.100Z",
+      ),
+      // Outbound routing records are persisted alongside replies. This must not
+      // synthesize a second `/root` agent.
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.200Z",
+        payload: {
+          type: "agent_message",
+          author: "/root",
+          recipient: "/root/auditor",
+          content: [{
+            type: "input_text",
+            text: "Message Type: NEW_TASK\nTask name: /root/auditor\nSender: /root\nPayload:\nReview the parser",
+          }],
+        },
+      }),
+      interAgentMessage(
+        "/root/auditor",
+        "MESSAGE",
+        "I found the relevant code.",
+        "2024-01-01T00:00:05.000Z",
+      ),
+      subAgentActivity(
+        "call-send-modern",
+        "agent-thread-modern",
+        "/root/auditor",
+        "interacted",
+        "2024-01-01T00:00:05.100Z",
+      ),
+      JSON.stringify({
+        type: "inter_agent_communication_metadata",
+        timestamp: "2024-01-01T00:00:05.200Z",
+        payload: { trigger_turn: false },
+      }),
+      interAgentMessage(
+        "/root/auditor",
+        "FINAL_ANSWER",
+        "The parser needs an upsert map.",
+        "2024-01-01T00:00:10.000Z",
+      ),
+      // Replayed/forked records should update the same object, not duplicate it.
+      interAgentMessage(
+        "/root/auditor",
+        "FINAL_ANSWER",
+        "The parser needs an upsert map.",
+        "2024-01-01T00:00:10.000Z",
+      ),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const turn = session.turns[0]
+    expect(turn.subAgentActivity).toHaveLength(1)
+    expect(turn.subAgentActivity[0]).toMatchObject({
+      agentId: "agent-thread-modern",
+      parentToolUseId: "call-spawn-modern",
+      agentName: "auditor",
+      prompt: "Review the parser",
+      status: "completed",
+      durationMs: 6000,
+    })
+    expect(turn.subAgentActivity[0].text).toEqual([
+      "I found the relevant code.",
+      "The parser needs an upsert map.",
+    ])
+    expect(String(turn.subAgentActivity[0].content)).not.toContain("Message Type:")
+
+    const subAgentBlocks = turn.contentBlocks.filter((block) => block.kind === "sub_agent")
+    expect(subAgentBlocks).toHaveLength(1)
+    expect(subAgentBlocks[0].messages).toHaveLength(1)
+    expect(turn.toolCalls[0].name).toBe("spawn_agent")
+    expect(session.rawMessages.some((record) => record.type === "inter_agent_communication_metadata")).toBe(true)
+  })
+
+  it("maps current interrupted activity without duplicating the agent", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Stop if blocked"),
+      namespacedFunctionCall("call-spawn-interrupted", "spawn_agent", {
+        task_name: "scout",
+        message: "Inspect the issue",
+      }),
+      subAgentActivity(
+        "call-spawn-interrupted",
+        "agent-thread-interrupted",
+        "/root/scout",
+        "started",
+        "2024-01-01T00:00:04.000Z",
+      ),
+      functionCallOutput(
+        "call-spawn-interrupted",
+        JSON.stringify({ task_name: "/root/scout" }),
+        "2024-01-01T00:00:04.100Z",
+      ),
+      subAgentActivity(
+        "call-interrupt-modern",
+        "agent-thread-interrupted",
+        "/root/scout",
+        "interrupted",
+        "2024-01-01T00:00:06.000Z",
+      ),
+    ].join("\n")
+
+    const agent = parseCodexSession(text).turns[0].subAgentActivity
+    expect(agent).toHaveLength(1)
+    expect(agent[0].agentId).toBe("agent-thread-interrupted")
+    expect(agent[0].status).toBe("interrupted")
+    expect(agent[0].durationMs).toBe(2000)
   })
 
   it("appends local_images as markdown image references in userMessage", () => {

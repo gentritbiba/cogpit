@@ -1,19 +1,10 @@
-import type { LucideIcon } from "lucide-react"
-import { Send, Square, Mic, MicOff, Power } from "lucide-react"
+import { Send, Square, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
-import { Spinner } from "@/components/ui/Spinner"
-import type { VoiceStatus } from "./useVoiceInput"
-import { getVoiceButtonClass, getVoiceTooltip } from "./useVoiceInput"
-
-function getVoiceIcon(status: VoiceStatus): LucideIcon | typeof Spinner {
-  if (status === "loading") return Spinner
-  if (status === "listening") return MicOff
-  return Mic
-}
+import { agentKindFromDirName } from "@/lib/sessionSource"
 
 interface InputToolbarProps {
   isPlanApproval: boolean
@@ -52,26 +43,20 @@ export function InputToolbar({
 
 interface ActionButtonsProps {
   hasContent: boolean
-  voiceStatus: VoiceStatus
-  voiceProgress: number
-  voiceError: string | null
-  onToggleVoice: () => void
   onSubmit: () => void
+  submitLabel?: string
 }
 
 export function ActionButtons({
   hasContent,
-  voiceStatus,
-  voiceProgress,
-  voiceError,
-  onToggleVoice,
   onSubmit,
+  submitLabel = "Send message",
 }: ActionButtonsProps) {
-  const { isLive, actions: { handleStopSession: onStopSession } } = useSessionContext()
+  const { isLive, sessionSource, actions: { handleStopSession: onStopSession } } = useSessionContext()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
   const showAgentControls = isConnected || isLive
-
-  const VoiceIcon = getVoiceIcon(voiceStatus)
+  const agentKind = sessionSource?.agentKind ?? agentKindFromDirName(sessionSource?.dirName ?? null)
+  const interruptLabel = agentKind === "codex" ? "Stop active turn" : "Interrupt agent"
 
   return (
     <div className="flex items-center">
@@ -83,43 +68,31 @@ export function ActionButtons({
               size="sm"
               className="h-7 w-7 shrink-0 p-0 rounded-full text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
               onClick={onInterrupt}
+              aria-label={interruptLabel}
+              title={interruptLabel}
             />}>
               <Square className="size-3 fill-current" />
           </TooltipTrigger>
-          <TooltipContent>Interrupt agent (Esc)</TooltipContent>
+          <TooltipContent>{interruptLabel} (Esc)</TooltipContent>
         </Tooltip>
       )}
 
       {/* Stop session -- kills the server process */}
-      {showAgentControls && (
+      {showAgentControls && agentKind !== "codex" && (
         <Tooltip>
           <TooltipTrigger render={<Button
               variant="ghost"
               size="sm"
               className="h-7 w-7 shrink-0 p-0 rounded-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
               onClick={onStopSession}
+              aria-label="Stop session"
+              title="Stop session"
             />}>
               <Power className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent>Stop session</TooltipContent>
         </Tooltip>
       )}
-
-      {/* Voice input button */}
-      <Tooltip>
-        <TooltipTrigger render={<Button
-            variant="ghost"
-            size="sm"
-            className={cn("h-7 w-7 shrink-0 p-0 rounded-full", getVoiceButtonClass(voiceStatus))}
-            onClick={onToggleVoice}
-            disabled={voiceStatus === "loading"}
-          />}>
-            <VoiceIcon className={cn("size-3.5", voiceStatus === "loading" && "mr-0")} />
-        </TooltipTrigger>
-        <TooltipContent>
-          {getVoiceTooltip(voiceStatus, voiceProgress, voiceError)}
-        </TooltipContent>
-      </Tooltip>
 
       <Button
         variant="ghost"
@@ -132,7 +105,8 @@ export function ActionButtons({
         )}
         disabled={!hasContent}
         onClick={onSubmit}
-        aria-label="Send message"
+        aria-label={submitLabel}
+        title={submitLabel}
       >
         <Send className="size-3.5" />
       </Button>

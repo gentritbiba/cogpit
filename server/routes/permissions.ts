@@ -1,8 +1,158 @@
 import { persistentSessions, activeProcesses, sendJson } from "../helpers"
 import { sdkSessions, resolvePermission, resolveAllPermissions, getSDKPermissions } from "../sdk-session"
+import {
+  codexAppServer,
+  type ApprovalDecision,
+  type CodexAppServer,
+  type PendingApproval,
+} from "../codex-app-server"
 import type { UseFn } from "../helpers"
 
-export function registerPermissionRoutes(use: UseFn) {
+export type CodexApprovalClient = Pick<
+  CodexAppServer,
+  "listPendingApprovals" | "respondApproval"
+>
+
+interface FrontendPermissionRequest {
+  requestId: string
+  toolName: string
+  input: Record<string, unknown>
+  toolUseId: string
+  title: string
+  displayName: string
+  description?: string
+  decisionReason?: string
+  blockedPath?: string
+  timestamp: number
+  availableDecisions: ApprovalDecision[]
+}
+
+/** Convert provider-native approval data to the existing permission bar shape. */
+export function normalizeCodexApproval(
+  approval: PendingApproval,
+): FrontendPermissionRequest {
+  const command = approval.kind === "commandExecution"
+  const network =
+    approval.networkApprovalContext &&
+    typeof approval.networkApprovalContext === "object" &&
+    !Array.isArray(approval.networkApprovalContext)
+      ? (approval.networkApprovalContext as Record<string, unknown>)
+      : null
+  const networkHost =
+    network && typeof network.host === "string" ? network.host : null
+  const networkProtocol =
+    network && typeof network.protocol === "string"
+      ? network.protocol.replace(/:$/, "")
+      : "https"
+  const networkPort =
+    network && (typeof network.port === "number" || typeof network.port === "string")
+      ? `:${String(network.port)}`
+      : ""
+  const input: Record<string, unknown> = {}
+  if (command) {
+    if (approval.command) input.command = approval.command
+    if (approval.cwd) input.cwd = approval.cwd
+    if (network) input.networkApprovalContext = network
+    if (networkHost) {
+      input.url = `${networkProtocol}://${networkHost}${networkPort}`
+    }
+    for (const field of [
+      "commandActions",
+      "additionalPermissions",
+      "proposedExecpolicyAmendment",
+      "proposedNetworkPolicyAmendments",
+    ]) {
+      if (approval.params[field] !== undefined) {
+        input[field] = approval.params[field]
+      }
+    }
+  } else {
+    if (approval.grantRoot) input.file_path = approval.grantRoot
+    if (approval.params.changes !== undefined) {
+      input.changes = approval.params.changes
+    }
+  }
+  if (approval.reason) input.reason = approval.reason
+  const networkRequest = command && networkHost !== null
+  return {
+    requestId: String(approval.requestId),
+    toolName: networkRequest ? "WebFetch" : command ? "Bash" : "Write",
+    input,
+    toolUseId: approval.itemId,
+    title: networkRequest
+      ? "Allow network access"
+      : command
+        ? "Run command"
+        : "Apply file changes",
+    displayName: networkRequest
+      ? "Network access"
+      : command
+        ? "Command execution"
+        : "File change",
+    description: approval.reason,
+    decisionReason: approval.reason,
+    blockedPath: command ? approval.cwd : approval.grantRoot,
+    timestamp: approval.requestedAt,
+    availableDecisions: [...approval.availableDecisions],
+  }
+}
+
+/**
+ * Pick a batch decision without silently escalating access. "Always allow"
+ * may safely degrade to one-time allow, but one-time allow never broadens to a
+ * session grant and deny never changes into an allow.
+ */
+export function selectCodexBatchDecision(
+  approval: PendingApproval,
+  requested: ApprovalDecision,
+): ApprovalDecision | null {
+  if (approval.availableDecisions.includes(requested)) return requested
+  if (
+    requested === "allow_always" &&
+    approval.availableDecisions.includes("allow")
+  ) {
+    return "allow"
+  }
+  return null
+}
+
+function sendUnavailableDecision(
+  res: Parameters<typeof sendJson>[0],
+  approval: PendingApproval,
+  decision: ApprovalDecision,
+): void {
+  sendJson(res, 400, {
+    error: `Decision '${decision}' is not available for this approval request`,
+    code: "CODEX_APPROVAL_DECISION_UNAVAILABLE",
+    requestId: String(approval.requestId),
+    availableDecisions: approval.availableDecisions,
+  })
+}
+
+function findCodexApproval(
+  client: CodexApprovalClient,
+  threadId: string,
+  requestId: string,
+): PendingApproval | undefined {
+  return client
+    .listPendingApprovals(threadId)
+    .find((approval) => String(approval.requestId) === requestId)
+}
+
+function sendCodexApprovalError(res: Parameters<typeof sendJson>[0], error: unknown): void {
+  sendJson(res, 502, {
+    error:
+      error instanceof Error
+        ? error.message
+        : "Failed to resolve Codex approval request",
+    code: "CODEX_APPROVAL_FAILED",
+  })
+}
+
+export function registerPermissionRoutes(
+  use: UseFn,
+  codex: CodexApprovalClient = codexAppServer,
+) {
   use("/api/permissions", (req, res, next) => {
     const url = req.url ?? ""
 
@@ -15,6 +165,16 @@ export function registerPermissionRoutes(use: UseFn) {
       const sdkPerms = getSDKPermissions(sessionId)
       if (sdkPerms.length > 0) {
         sendJson(res, 200, { permissions: sdkPerms })
+        return
+      }
+
+      // Codex app-server approvals are live requests: answering them resumes
+      // the turn directly, with no process kill/retry cycle.
+      const codexPerms = codex
+        .listPendingApprovals(sessionId)
+        .map(normalizeCodexApproval)
+      if (codexPerms.length > 0) {
+        sendJson(res, 200, { permissions: codexPerms })
         return
       }
 
@@ -36,11 +196,11 @@ export function registerPermissionRoutes(use: UseFn) {
       const sessionId = decodeURIComponent(respondMatch[1])
       let body = ""
       req.on("data", (chunk: string) => { body += chunk })
-      req.on("end", () => {
+      req.on("end", async () => {
         try {
           const { requestId, behavior } = JSON.parse(body)
 
-          if (!requestId) {
+          if (typeof requestId !== "string" || !requestId) {
             sendJson(res, 400, { error: "requestId is required" })
             return
           }
@@ -60,6 +220,29 @@ export function registerPermissionRoutes(use: UseFn) {
               success: true,
               action: behavior === "deny" ? "denied" : "allowed",
               toolName: result.toolName,
+            })
+            return
+          }
+
+          const codexApproval = findCodexApproval(codex, sessionId, requestId)
+          if (codexApproval) {
+            const decision = behavior as ApprovalDecision
+            if (!codexApproval.availableDecisions.includes(decision)) {
+              sendUnavailableDecision(res, codexApproval, decision)
+              return
+            }
+            try {
+              await codex.respondApproval(codexApproval, decision)
+            } catch (error) {
+              sendCodexApprovalError(res, error)
+              return
+            }
+            const permission = normalizeCodexApproval(codexApproval)
+            sendJson(res, 200, {
+              success: true,
+              action: behavior === "deny" ? "denied" : "allowed",
+              toolName: permission.toolName,
+              shouldRetry: false,
             })
             return
           }
@@ -115,7 +298,7 @@ export function registerPermissionRoutes(use: UseFn) {
       const sessionId = decodeURIComponent(respondAllMatch[1])
       let body = ""
       req.on("data", (chunk: string) => { body += chunk })
-      req.on("end", () => {
+      req.on("end", async () => {
         try {
           const { behavior } = JSON.parse(body)
 
@@ -132,6 +315,51 @@ export function registerPermissionRoutes(use: UseFn) {
               action: behavior === "deny" ? "denied" : "allowed",
               count: toolNames.length,
               toolNames,
+            })
+            return
+          }
+
+          const codexPending = codex.listPendingApprovals(sessionId)
+          if (codexPending.length > 0) {
+            const requestedDecision = behavior as ApprovalDecision
+            const decisions: Array<{
+              approval: PendingApproval
+              decision: ApprovalDecision
+            }> = []
+            for (const approval of codexPending) {
+              const decision = selectCodexBatchDecision(
+                approval,
+                requestedDecision,
+              )
+              if (!decision) {
+                sendUnavailableDecision(res, approval, requestedDecision)
+                return
+              }
+              decisions.push({ approval, decision })
+            }
+            try {
+              await Promise.all(
+                decisions.map(({ approval, decision }) =>
+                  codex.respondApproval(approval, decision),
+                ),
+              )
+            } catch (error) {
+              sendCodexApprovalError(res, error)
+              return
+            }
+            const toolNames = [
+              ...new Set(
+                codexPending.map(
+                  (approval) => normalizeCodexApproval(approval).toolName,
+                ),
+              ),
+            ]
+            sendJson(res, 200, {
+              success: true,
+              action: behavior === "deny" ? "denied" : "allowed",
+              count: codexPending.length,
+              toolNames,
+              shouldRetry: false,
             })
             return
           }

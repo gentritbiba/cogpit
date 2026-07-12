@@ -9,10 +9,127 @@ import {
   spawn,
 } from "../helpers"
 import type { UseFn } from "../helpers"
-import { stopSDKSession, cleanupAllSDKSessions } from "../sdk-session"
+import {
+  stopSDKSession,
+  cleanupAllSDKSessions,
+  interruptSDKTurn,
+  updateSDKSession,
+  rewindClaudeFiles,
+  stopSDKTask,
+  backgroundSDKTasks,
+  type SDKSessionUpdates,
+} from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
+import { codexAppServer } from "../codex-app-server"
 
 export function registerClaudeManageRoutes(use: UseFn) {
+  use("/api/claude/settings", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    const match = (req.url ?? "").match(/^\/([^/?]+)$/)
+    if (!match) return next()
+    const sessionId = decodeURIComponent(match[1])
+    let body = ""
+    req.on("data", (chunk: string) => { body += chunk })
+    req.on("end", async () => {
+      try {
+        const updates = JSON.parse(body) as SDKSessionUpdates
+        const result = await updateSDKSession(sessionId, updates)
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ success: true, ...result }))
+      } catch {
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid Claude settings payload"))
+      }
+    })
+  })
+
+  use("/api/interrupt-session", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    let body = ""
+    req.on("data", (chunk: string) => { body += chunk })
+    req.on("end", async () => {
+      try {
+        const { sessionId } = JSON.parse(body)
+        if (!sessionId) {
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
+          return
+        }
+        const activeCodexTurnId = codexAppServer.getActiveTurnId(sessionId)
+        const interrupted = activeCodexTurnId
+          ? await codexAppServer.interruptTurn(sessionId, activeCodexTurnId).then(() => true)
+          : await interruptSDKTurn(sessionId)
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ success: interrupted }))
+      } catch {
+        sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
+      }
+    })
+  })
+
+  use("/api/claude/checkpoints", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    const match = (req.url ?? "").match(/^\/([^/?]+)\/rewind$/)
+    if (!match) return next()
+    const sessionId = decodeURIComponent(match[1])
+    let body = ""
+    req.on("data", (chunk: string) => { body += chunk })
+    req.on("end", async () => {
+      try {
+        const { userMessageId, cwd, dryRun } = JSON.parse(body)
+        if (typeof userMessageId !== "string" || typeof cwd !== "string") {
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "userMessageId and cwd are required"))
+          return
+        }
+        const result = await rewindClaudeFiles(sessionId, userMessageId, cwd, dryRun === true)
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify(result))
+      } catch (error) {
+        sendError(res, new RouteError(
+          502,
+          ErrorCodes.INTERNAL_ERROR,
+          error instanceof Error ? error.message : "Claude checkpoint rewind failed",
+        ))
+      }
+    })
+  })
+
+  use("/api/claude/tasks", (req, res, next) => {
+    const path = req.url ?? ""
+    const stopMatch = path.match(/^\/([^/?]+)\/([^/?]+)$/)
+    const backgroundMatch = path.match(/^\/([^/?]+)\/background$/)
+    if (req.method === "DELETE" && stopMatch) {
+      void stopSDKTask(
+        decodeURIComponent(stopMatch[1]),
+        decodeURIComponent(stopMatch[2]),
+      ).then((stopped) => {
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify({ success: stopped }))
+      }, (error) => {
+        sendError(res, new RouteError(502, ErrorCodes.INTERNAL_ERROR, String(error)))
+      })
+      return
+    }
+    if (req.method === "POST" && backgroundMatch) {
+      let body = ""
+      req.on("data", (chunk: string) => { body += chunk })
+      req.on("end", () => {
+        let toolUseId: string | undefined
+        try {
+          const parsed = body ? JSON.parse(body) : {}
+          toolUseId = typeof parsed.toolUseId === "string" ? parsed.toolUseId : undefined
+        } catch {
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
+          return
+        }
+        void backgroundSDKTasks(decodeURIComponent(backgroundMatch[1]), toolUseId).then((backgrounded) => {
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({ success: backgrounded }))
+        })
+      })
+      return
+    }
+    next()
+  })
+
   use("/api/stop-session", (req, res, next) => {
     if (req.method !== "POST") return next()
 
@@ -20,13 +137,25 @@ export function registerClaudeManageRoutes(use: UseFn) {
     req.on("data", (chunk: string) => {
       body += chunk
     })
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { sessionId } = JSON.parse(body)
 
         if (!sessionId) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "sessionId is required"))
           return
+        }
+
+        let stoppedNativeCodex = false
+        const activeCodexTurnId = codexAppServer.getActiveTurnId(sessionId)
+        if (activeCodexTurnId) {
+          try {
+            await codexAppServer.interruptTurn(sessionId, activeCodexTurnId)
+            stoppedNativeCodex = true
+          } catch {
+            // Fall through to the legacy process controls below. This keeps
+            // stop working with older CLIs and during app-server restarts.
+          }
         }
 
         // Stop SDK session if present
@@ -44,7 +173,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
         }
 
         const child = activeProcesses.get(sessionId)
-        if (!child && !ps && !stoppedSDK) {
+        if (!child && !ps && !stoppedSDK && !stoppedNativeCodex) {
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ success: false, error: "No active process for this session" }))
           return
@@ -71,46 +200,74 @@ export function registerClaudeManageRoutes(use: UseFn) {
   use("/api/kill-all", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let killed = 0
+    const activeNativeTurns = codexAppServer.listActiveTurns()
 
-    // Build SIGKILL snapshot BEFORE clearing the Maps (fix for Bug #2:
-    // previous code read from already-empty Maps after deletion loops).
-    const sigkillProcs: Array<{ kill(sig: string): void }> = []
-    for (const ps of persistentSessions.values()) sigkillProcs.push(ps.proc)
-    for (const proc of activeProcesses.values()) sigkillProcs.push(proc)
+    const finishKillAll = (
+      nativeResults: PromiseSettledResult<unknown>[],
+    ) => {
+      const interruptedNative = nativeResults.filter(
+        (result) => result.status === "fulfilled",
+      ).length
+      const failedNative = nativeResults.length - interruptedNative
+      let killed = interruptedNative
 
-    // Kill SDK sessions first
-    killed += cleanupAllSDKSessions()
+      // Build SIGKILL snapshot BEFORE clearing the Maps (fix for Bug #2:
+      // previous code read from already-empty Maps after deletion loops).
+      const sigkillProcs: Array<{ kill(sig: string): void }> = []
+      for (const ps of persistentSessions.values()) sigkillProcs.push(ps.proc)
+      for (const proc of activeProcesses.values()) sigkillProcs.push(proc)
 
-    // Snapshot keys before iterating to avoid mutating the Map mid-iteration
-    // (fix for Bug #1: `persistentSessions.delete(sid)` inside a `for…of`
-    // over the same Map is undefined behaviour in some engines).
-    for (const [sid, ps] of [...persistentSessions.entries()]) {
-      if (!ps.dead) {
-        ps.dead = true
-        try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
+      // Kill SDK sessions first
+      killed += cleanupAllSDKSessions()
+
+      // Snapshot keys before iterating to avoid mutating the Map mid-iteration
+      // (fix for Bug #1: `persistentSessions.delete(sid)` inside a `for…of`
+      // over the same Map is undefined behaviour in some engines).
+      for (const [sid, ps] of [...persistentSessions.entries()]) {
+        if (!ps.dead) {
+          ps.dead = true
+          try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
+          killed++
+        }
+        persistentSessions.delete(sid)
+      }
+
+      for (const [sid, proc] of [...activeProcesses.entries()]) {
+        try { proc.kill("SIGTERM") } catch { /* already dead */ }
+        activeProcesses.delete(sid)
         killed++
       }
-      persistentSessions.delete(sid)
+
+      if (sigkillProcs.length > 0) {
+        const forceKill = setTimeout(() => {
+          for (const p of sigkillProcs) {
+            try { p.kill("SIGKILL") } catch { /* already dead */ }
+          }
+        }, 3000)
+        forceKill.unref()
+      }
+
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({
+        success: failedNative === 0,
+        killed,
+        ...(failedNative > 0 ? { nativeInterruptFailures: failedNative } : {}),
+      }))
     }
 
-    for (const [sid, proc] of [...activeProcesses.entries()]) {
-      try { proc.kill("SIGTERM") } catch { /* already dead */ }
-      activeProcesses.delete(sid)
-      killed++
+    if (activeNativeTurns.length === 0) {
+      finishKillAll([])
+      return
     }
 
-    if (killed > 0) {
-      const forceKill = setTimeout(() => {
-        for (const p of sigkillProcs) {
-          try { p.kill("SIGKILL") } catch { /* already dead */ }
-        }
-      }, 3000)
-      forceKill.unref()
-    }
-
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({ success: true, killed }))
+    // Native turns (including subagent turns) are not represented by a child
+    // process per session. Interrupt every transport-reported turn before
+    // cleaning up the legacy process maps.
+    void Promise.allSettled(
+      activeNativeTurns.map(({ threadId, turnId }) =>
+        codexAppServer.interruptTurn(threadId, turnId),
+      ),
+    ).then(finishKillAll)
   })
 
   use("/api/running-processes", (req, res, next) => {

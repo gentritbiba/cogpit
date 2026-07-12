@@ -2,7 +2,6 @@ import express from "express"
 import { createServer, request as httpRequest } from "node:http"
 import { join } from "node:path"
 import { WebSocketServer } from "ws"
-import { resolveSearchIndexPath } from "../server/lib/searchIndexPath"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
@@ -13,9 +12,11 @@ import { registerProjectRoutes } from "../server/routes/projects"
 import { registerClaudeRoutes } from "../server/routes/claude"
 import { registerClaudeNewRoutes } from "../server/routes/claude-new"
 import { registerClaudeManageRoutes } from "../server/routes/claude-manage"
+import { registerClaudeRuntimeRoutes } from "../server/routes/claude-runtime"
 import { registerPortRoutes } from "../server/routes/ports"
 import { registerTeamRoutes } from "../server/routes/teams"
 import { registerTeamSessionRoutes } from "../server/routes/team-session"
+import { registerWorkflowRoutes } from "../server/routes/workflows"
 import { registerUndoRoutes } from "../server/routes/undo"
 import { registerFileRoutes } from "../server/routes/files"
 import { registerFileWatchRoutes } from "../server/routes/files-watch"
@@ -26,20 +27,17 @@ import { registerWorktreeRoutes } from "../server/routes/worktrees"
 import { registerUsageRoutes } from "../server/routes/usage"
 import { registerSlashSuggestionRoutes } from "../server/routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "../server/routes/config-browser"
-import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "../server/routes/session-search"
 import { registerLocalFileRoutes } from "../server/routes/local-file"
 import { registerFileContentRoutes } from "../server/routes/file-content"
-import { registerSearchIndexRoutes } from "../server/routes/search-index-stats"
-import { registerCogpitSearchRoutes } from "../server/routes/cogpit-search"
 import { registerMcpRoutes } from "../server/routes/mcp"
 import { registerNotifyRoutes } from "../server/routes/notify"
 import { registerScriptRoutes } from "../server/routes/scripts"
 import { registerPermissionRoutes } from "../server/routes/permissions"
 import { registerAskUserRoutes } from "../server/routes/ask-user"
-import { SearchIndex } from "../server/search-index"
+import { registerModelRoutes } from "../server/routes/models"
+import { registerCodexRuntimeRoutes } from "../server/routes/codex-runtime"
+import { codexAppServer } from "../server/codex-app-server"
 import { PtySessionManager } from "../server/pty-server"
-import { invalidateSessionMeta } from "../server/lib/sessionMetaCache"
-import { sdkSessions } from "../server/sdk-session"
 
 // ── Server factory ──────────────────────────────────────────────────
 export async function createAppServer(staticDir: string, userDataDir: string) {
@@ -49,33 +47,6 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   refreshDirs()
   // Override undo dir to writable location
   dirs.UNDO_DIR = join(userDataDir, "undo-history")
-
-  // Boot search index
-  try {
-    const dbPath = resolveSearchIndexPath({ userDataDir })
-    const index = new SearchIndex(dbPath)
-    index.onFileChanged = invalidateSessionMeta
-    // Never index while a Cogpit-driven session is running — the index would
-    // compete with the live session (and the UI) for CPU/disk.
-    // (Idle entries stay in the map for follow-ups, so check `running`.)
-    index.shouldDeferIndexing = () => {
-      for (const s of sdkSessions.values()) if (s.running) return true
-      return false
-    }
-    setSearchIndex(index)
-    // startWatching runs a full stale-index sync (updateStale) before setting
-    // up fs.watch — on a cold/stale index that can take minutes, and main.ts
-    // kills the app if the worker isn't ready in 15s. Run it in the background
-    // so the server can signal ready immediately; search serves the existing
-    // index until the sync completes.
-    if (dirs.PROJECTS_DIR) {
-      index.startWatching(dirs.PROJECTS_DIR).catch((err) => {
-        console.warn("[search-index] startWatching failed:", err)
-      })
-    }
-  } catch (err) {
-    console.warn("[search-index] Failed to boot search index:", err)
-  }
 
   const app = express()
   const httpServer = createServer(app)
@@ -103,9 +74,11 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerClaudeRoutes(use)
   registerClaudeNewRoutes(use)
   registerClaudeManageRoutes(use)
+  registerClaudeRuntimeRoutes(use)
   registerPortRoutes(use)
   registerTeamRoutes(use)
   registerTeamSessionRoutes(use)
+  registerWorkflowRoutes(use)
   registerUndoRoutes(use)
   registerFileRoutes(use)
   registerFileWatchRoutes(use)
@@ -116,16 +89,15 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerUsageRoutes(use)
   registerSlashSuggestionRoutes(use)
   registerConfigBrowserRoutes(use)
-  registerSessionSearchRoutes(use)
   registerLocalFileRoutes(use)
   registerFileContentRoutes(use)
-  registerSearchIndexRoutes(use)
-  registerCogpitSearchRoutes(use)
   registerMcpRoutes(use)
   registerNotifyRoutes(use)
   registerScriptRoutes(use)
   registerPermissionRoutes(use)
   registerAskUserRoutes(use)
+  registerModelRoutes(use)
+  registerCodexRuntimeRoutes(use)
 
   // ── Static files / dev proxy ────────────────────────────────────
   const viteDevUrl = process.env.ELECTRON_RENDERER_URL
@@ -200,11 +172,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   httpServer.on("close", () => {
     ptyManager.cleanup()
     cleanupProcesses()
-    const index = getSearchIndex()
-    if (index) {
-      index.stopWatching()
-      index.close()
-    }
+    void codexAppServer.shutdown()
   })
 
   return { httpServer }

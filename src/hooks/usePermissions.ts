@@ -11,11 +11,21 @@ function loadFromStorage(): PermissionsConfig {
     const raw = localStorage.getItem(PERMISSIONS_STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
-      return {
-        mode: (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode,
+      const storedMode = (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode
+      // Older Cogpit builds defaulted to YOLO/bypass. Never carry that legacy
+      // choice into the new provider-aware safety model without confirmation.
+      const migratedMode = storedMode === "bypassPermissions"
+        ? DEFAULT_PERMISSIONS.mode
+        : storedMode
+      const migrated = {
+        mode: migratedMode,
         allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
         disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
       }
+      if (migratedMode !== storedMode) {
+        localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(migrated))
+      }
+      return migrated
     }
   } catch {
     // corrupted storage

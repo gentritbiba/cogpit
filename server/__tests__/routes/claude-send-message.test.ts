@@ -9,6 +9,7 @@
  * straight to homedir().
  */
 
+import { EventEmitter } from "node:events"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const {
@@ -18,6 +19,9 @@ const {
   mockFindJsonlPath,
   mockGetSessionMeta,
   mockResumeSDKSession,
+  mockGetAgentKind,
+  mockSpawn,
+  mockCodexAppServer,
 } = vi.hoisted(() => ({
   mockActiveProcesses: new Map<string, unknown>(),
   mockPersistentSessions: new Map<string, unknown>(),
@@ -25,20 +29,38 @@ const {
   mockFindJsonlPath: vi.fn(),
   mockGetSessionMeta: vi.fn(),
   mockResumeSDKSession: vi.fn(),
+  mockGetAgentKind: vi.fn(() => "claude"),
+  mockSpawn: vi.fn(),
+  mockCodexAppServer: {
+    start: vi.fn(),
+    startThread: vi.fn(),
+    resumeThread: vi.fn(),
+    startTurn: vi.fn(),
+    steerTurn: vi.fn(),
+    interruptTurn: vi.fn(),
+    getActiveTurnId: vi.fn(),
+    call: vi.fn(),
+  },
 }))
 
 vi.mock("../../helpers", () => ({
   activeProcesses: mockActiveProcesses,
   persistentSessions: mockPersistentSessions,
   findJsonlPath: mockFindJsonlPath,
-  spawn: vi.fn(),
+  spawn: mockSpawn,
   homedir: () => "/Users/me",
-  buildCodexPermArgs: vi.fn(() => []),
+  buildCodexPermArgs: vi.fn(() => [
+    "--sandbox",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+  ]),
   buildCodexModelArgs: vi.fn(() => []),
   buildCodexEffortArgs: vi.fn(() => []),
+  buildCodexFastModeArgs: vi.fn(() => []),
   writeTempImageFiles: vi.fn().mockResolvedValue([]),
   cleanupTempFiles: vi.fn().mockResolvedValue(undefined),
-  getAgentKindFromSessionPath: vi.fn(() => "claude"),
+  getAgentKindFromSessionPath: mockGetAgentKind,
   getSessionMeta: mockGetSessionMeta,
   friendlySpawnError: vi.fn((err: Error) => err.message),
 }))
@@ -49,6 +71,11 @@ vi.mock("../../sdk-session", () => ({
   resumeSDKSession: mockResumeSDKSession,
   attachSubagentWatcher: vi.fn(),
 }))
+
+vi.mock("../../codex-app-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../codex-app-server")>()
+  return { ...actual, codexAppServer: mockCodexAppServer }
+})
 
 import type { UseFn, Middleware } from "../../helpers"
 import { registerClaudeRoutes } from "../../routes/claude"
@@ -113,11 +140,45 @@ async function postSendMessage(body: Record<string, unknown>) {
   return { res }
 }
 
+function makeMockChild() {
+  const child = new EventEmitter() as EventEmitter & {
+    pid: number
+    stdout: EventEmitter
+    stderr: EventEmitter
+    stdin: null
+    kill: ReturnType<typeof vi.fn>
+  }
+  child.pid = 7001
+  child.stdout = new EventEmitter()
+  child.stderr = new EventEmitter()
+  child.stdin = null
+  child.kill = vi.fn()
+  return child
+}
+
+async function postCodexMessage(body: Record<string, unknown>) {
+  const handler = getHandler("/api/send-message")
+  const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify(body))
+  handler(req as never, res as never, next)
+  sendBody()
+  return { res }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockActiveProcesses.clear()
   mockPersistentSessions.clear()
   mockSdkSessions.clear()
+  mockGetAgentKind.mockReturnValue("claude")
+  mockSpawn.mockReset()
+  mockCodexAppServer.start.mockResolvedValue({})
+  mockCodexAppServer.getActiveTurnId.mockReturnValue(undefined)
+  mockCodexAppServer.resumeThread.mockResolvedValue({
+    thread: { id: "sess-1", turns: [] },
+  })
+  mockCodexAppServer.startTurn.mockResolvedValue({ turn: { id: "turn-new" } })
+  mockCodexAppServer.steerTurn.mockResolvedValue({ turnId: "turn-active" })
+  mockCodexAppServer.call.mockResolvedValue({})
   mockResumeSDKSession.mockReturnValue({
     sessionId: "sess-1",
     jsonlPath: null,
@@ -156,6 +217,89 @@ describe("/api/send-message SDK resume cwd", () => {
 
     expect(mockResumeSDKSession).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: "/Users/me" }),
+    )
+  })
+})
+
+describe("/api/send-message Codex app-server", () => {
+  beforeEach(() => {
+    mockGetAgentKind.mockReturnValue("codex")
+    mockFindJsonlPath.mockResolvedValue(
+      "/Users/me/.codex/sessions/2026/07/12/rollout-sess-1.jsonl",
+    )
+    mockGetSessionMeta.mockResolvedValue({ cwd: "/Users/me/proj" })
+  })
+
+  it("resumes an idle thread and starts a turn", async () => {
+    const { res } = await postCodexMessage({
+      sessionId: "sess-1",
+      message: "continue",
+      model: "gpt-5.6-terra",
+      effort: "high",
+      fastMode: true,
+    })
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockCodexAppServer.resumeThread).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        path: "/Users/me/.codex/sessions/2026/07/12/rollout-sess-1.jsonl",
+        cwd: "/Users/me/proj",
+        model: "gpt-5.6-terra",
+        serviceTier: "priority",
+      }),
+    )
+    expect(mockCodexAppServer.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "sess-1",
+      effort: "high",
+      input: [{ type: "text", text: "continue", text_elements: [] }],
+    }))
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(res._getData()).toEqual({ success: true })
+  })
+
+  it("steers the current native turn instead of returning a conflict", async () => {
+    mockCodexAppServer.getActiveTurnId.mockReturnValue("turn-active")
+    const { res } = await postCodexMessage({
+      sessionId: "sess-1",
+      message: "focus on tests",
+    })
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockCodexAppServer.resumeThread).not.toHaveBeenCalled()
+    expect(mockCodexAppServer.steerTurn).toHaveBeenCalledWith(
+      "sess-1",
+      [{ type: "text", text: "focus on tests", text_elements: [] }],
+      "turn-active",
+    )
+    expect(mockCodexAppServer.startTurn).not.toHaveBeenCalled()
+    expect(res._getData()).toEqual({ success: true })
+  })
+
+  it("falls back to codex exec resume when app-server is unavailable", async () => {
+    mockCodexAppServer.start.mockRejectedValue(
+      new Error("Codex app-server unavailable"),
+    )
+    const child = makeMockChild()
+    mockSpawn.mockReturnValue(child)
+
+    await postCodexMessage({ sessionId: "sess-1", message: "legacy path" })
+    await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled())
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "codex",
+      [
+        "exec",
+        "--sandbox",
+        "workspace-write",
+        "-c",
+        'approval_policy="never"',
+        "resume",
+        "--json",
+        "sess-1",
+        "legacy path",
+      ],
+      expect.objectContaining({ cwd: "/Users/me/proj" }),
     )
   })
 })

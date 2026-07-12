@@ -343,6 +343,19 @@ describe("config routes", () => {
       expect(response.networkPassword).toBeNull()
     })
 
+    it("identifies an auto-bootstrapped Codex-only configuration", async () => {
+      const handler = handlers.get("/api/config")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        codexOnly: true,
+      })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).mode).toBe("codex")
+    })
+
     it("calls next for non-root GET paths", async () => {
       const handler = handlers.get("/api/config")
       const { req, res, next } = createMockReqRes("GET", "/subpath")
@@ -407,6 +420,37 @@ describe("config routes", () => {
       expect(response.success).toBe(true)
       expect(mockedSaveConfig).toHaveBeenCalled()
       expect(mockedRefreshDirs).toHaveBeenCalled()
+    })
+
+    it("saves unrelated settings for a Codex-only config without requiring Claude history", async () => {
+      const handler = handlers.get("/api/config")
+      const body = JSON.stringify({
+        claudeDir: "/home/.claude",
+        terminalApp: "Ghostty",
+      })
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        codexOnly: true,
+      })
+      mockedValidateClaudeDir.mockResolvedValueOnce({
+        valid: false,
+        error: "Path does not exist",
+      })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => {
+        expect(res.end).toHaveBeenCalled()
+      })
+      expect(res._getStatus()).toBe(200)
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        claudeDir: "/home/.claude",
+        codexOnly: true,
+        terminalApp: "Ghostty",
+      }))
     })
 
     it("returns 400 for weak password", async () => {

@@ -91,12 +91,6 @@ export function useKeyboardShortcuts({
         onToggleRightSidebar()
       }
 
-      // Ctrl+Shift+M — toggle voice input and focus chat
-      if (mod && e.shiftKey && e.key === "M") {
-        e.preventDefault()
-        chatInputRef.current?.focus()
-        chatInputRef.current?.toggleVoice()
-      }
       // Ctrl+Cmd+N (Mac) or Ctrl+Alt+N (Windows/Linux) — open project switcher
       if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "n") {
         e.preventDefault()

@@ -20,6 +20,8 @@ interface UseNewSessionOpts {
   onCodexModelRejected?: (model: string) => void
   model: string
   effort: string
+  fastMode?: boolean
+  ultracode?: boolean
   mcpConfig?: string | null
 }
 
@@ -229,6 +231,8 @@ export function useNewSession({
   onCodexModelRejected,
   model,
   effort,
+  fastMode,
+  ultracode,
   mcpConfig,
 }: UseNewSessionOpts) {
   const [creatingSession, setCreatingSession] = useState(false)
@@ -281,6 +285,8 @@ export function useNewSession({
           images,
           permissions: permissionsConfig,
           effort: effort || undefined,
+          fastMode: fastMode ? true : undefined,
+          ultracode: agentKind === "claude" && ultracode ? true : undefined,
           name: agentKind === "claude" ? (sessionName || undefined) : undefined,
           worktreeName: agentKind === "claude" && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           mcpConfig: agentKind === "claude" ? (mcpConfig || undefined) : undefined,
@@ -332,7 +338,7 @@ export function useNewSession({
         }
       }
     },
-    [permissionsConfig, model, effort, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onCodexModelRejected]
+    [permissionsConfig, model, effort, fastMode, ultracode, mcpConfig, worktreeEnabled, worktreeName, dispatch, isMobile, onSessionFinalized, onCreateStarted, onCodexModelRejected]
   )
 
   const clearCreateError = useCallback(() => setCreateError(null), [])

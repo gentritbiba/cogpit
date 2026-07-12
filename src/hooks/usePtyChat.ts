@@ -16,6 +16,7 @@ interface UsePtyChatOpts {
   onPermissionsApplied?: () => void
   model?: string
   effort?: string
+  fastMode?: boolean
   mcpConfig?: string | null
   onCodexModelRejected?: (model: string) => void
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
@@ -25,7 +26,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, mcpConfig, onCodexModelRejected, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, mcpConfig, onCodexModelRejected, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -131,6 +132,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           cwd: cwd || undefined,
           permissions: permsConfig,
           effort: effort || undefined,
+          fastMode: fastMode ? true : undefined,
           mcpConfig: mcpConfig || undefined,
         }
 
@@ -171,7 +173,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, mcpConfig, onCodexModelRejected, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, mcpConfig, onCodexModelRejected, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.
@@ -183,7 +185,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   /** Send a stop request to the server for the current session. */
   const sendStopRequest = useCallback(() => {
     if (!sessionId) return
-    authFetch("/api/stop-session", {
+    authFetch("/api/interrupt-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),

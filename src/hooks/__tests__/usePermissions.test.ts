@@ -34,6 +34,19 @@ describe("usePermissions", () => {
       expect(result.current.config.disallowedTools).toEqual(["Bash"])
     })
 
+    it("migrates the legacy bypass default to the safe workspace mode", () => {
+      localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify({
+        mode: "bypassPermissions",
+        allowedTools: [],
+        disallowedTools: [],
+      }))
+
+      const { result } = renderHook(() => usePermissions())
+
+      expect(result.current.config.mode).toBe("default")
+      expect(JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode).toBe("default")
+    })
+
     it("falls back to DEFAULT_PERMISSIONS for malformed JSON", () => {
       localStorage.setItem(PERMISSIONS_STORAGE_KEY, "not-valid-json")
 

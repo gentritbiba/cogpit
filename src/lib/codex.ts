@@ -31,6 +31,8 @@ interface CodexMetadata {
   isSubagent: boolean
   /** Parent session ID for sub-agent sessions */
   parentSessionId: string | null
+  /** Canonical collaboration path for the agent that owns this rollout. */
+  agentPath: string
 }
 
 const SKIP_PROMPT_PREFIXES = [
@@ -62,6 +64,7 @@ function isCodexRecord(record: CodexRecord | null): record is CodexRecord {
     || record.type === "turn_context"
     || record.type === "event_msg"
     || record.type === "response_item"
+    || record.type === "inter_agent_communication_metadata"
 }
 
 function extractMessageText(payload: Record<string, unknown> | undefined, blockType: "input_text" | "output_text"): string {
@@ -72,6 +75,72 @@ function extractMessageText(payload: Record<string, unknown> | undefined, blockT
     .map((block) => block.text as string)
     .join("\n")
     .trim()
+}
+
+function normalizeFunctionName(rawName: string): string {
+  // Current collaboration tools carry a namespace separately, but older and
+  // transitional rollouts also encoded it in the function name itself.
+  const leaf = rawName
+    .split(/(?:__|[.:/])+/)
+    .filter(Boolean)
+    .at(-1) ?? rawName
+
+  const aliases: Record<string, string> = {
+    spawnAgent: "spawn_agent",
+    waitAgent: "wait_agent",
+    sendMessage: "send_message",
+    followupTask: "followup_task",
+    listAgents: "list_agents",
+    interruptAgent: "interrupt_agent",
+  }
+  const canonicalCollaborationNames = new Set([
+    "spawn_agent",
+    "wait_agent",
+    "send_message",
+    "followup_task",
+    "list_agents",
+    "interrupt_agent",
+  ])
+  if (aliases[leaf]) return aliases[leaf]
+  if (canonicalCollaborationNames.has(leaf)) return leaf
+  return rawName
+}
+
+interface InterAgentMessage {
+  messageType: string | null
+  text: string
+}
+
+function extractInterAgentMessage(payload: Record<string, unknown>): InterAgentMessage {
+  const rawText = extractMessageText(payload, "input_text")
+  if (!rawText) return { messageType: null, text: "" }
+
+  // Multi-agent messages use a small plaintext routing envelope. Only the
+  // payload belongs in the transcript; routing metadata is already represented
+  // by author/recipient fields on the response item.
+  const headerEnd = rawText.match(/\r?\nPayload:\s*(?:\r?\n|$)/)
+  if (!rawText.startsWith("Message Type:") || !headerEnd || headerEnd.index === undefined) {
+    return { messageType: null, text: rawText.trim() }
+  }
+
+  const header = rawText.slice(0, headerEnd.index)
+  const messageType = header.match(/^Message Type:\s*([^\r\n]+)/)?.[1]?.trim().toUpperCase() ?? null
+  const text = rawText.slice(headerEnd.index + headerEnd[0].length).trim()
+  return { messageType, text }
+}
+
+function agentNameFromPath(agentPath: string): string | null {
+  const segments = agentPath.split("/").filter(Boolean)
+  return segments.at(-1) ?? null
+}
+
+function readableAgentPrompt(value: unknown): string {
+  if (typeof value !== "string") return ""
+  const prompt = value.trim()
+  // Codex 0.144 encrypts delegated task payloads in persisted rollouts. Do not
+  // surface that ciphertext as if it were the human-readable agent prompt.
+  if (/^gAAAAA[A-Za-z0-9_-]+$/.test(prompt)) return ""
+  return prompt
 }
 
 function normalizePromptText(text: string): string {
@@ -95,10 +164,20 @@ function mergeTokenUsage(existing: TokenUsage | null, incoming: TokenUsage): Tok
 
 function parseTokenUsage(value: unknown): TokenUsage | null {
   if (!isObject(value)) return null
-  const inputTokens = typeof value.input_tokens === "number" ? value.input_tokens : 0
+  const reportedInputTokens = typeof value.input_tokens === "number" ? value.input_tokens : 0
   const outputTokens = typeof value.output_tokens === "number" ? value.output_tokens : 0
   const cacheCreation = typeof value.cache_creation_input_tokens === "number" ? value.cache_creation_input_tokens : 0
-  const cacheRead = typeof value.cache_read_input_tokens === "number" ? value.cache_read_input_tokens : 0
+  const nativeCachedInput = typeof value.cached_input_tokens === "number"
+    ? Math.max(0, value.cached_input_tokens)
+    : null
+  const cacheRead = nativeCachedInput
+    ?? (typeof value.cache_read_input_tokens === "number" ? value.cache_read_input_tokens : 0)
+  // Codex reports input_tokens inclusive of cached input. TokenUsage follows
+  // the Anthropic-shaped split used by the rest of Cogpit, where input_tokens
+  // is uncached and cache_read_input_tokens is tracked separately.
+  const inputTokens = nativeCachedInput === null
+    ? reportedInputTokens
+    : Math.max(0, reportedInputTokens - nativeCachedInput)
   if (inputTokens === 0 && outputTokens === 0 && cacheCreation === 0 && cacheRead === 0) return null
   return {
     input_tokens: inputTokens,
@@ -147,6 +226,7 @@ function finalizeTurn(turns: Turn[], current: Turn | null, lastTimestamp: string
     || current.assistantText.length > 0
     || current.toolCalls.length > 0
     || current.thinking.length > 0
+    || current.subAgentActivity.length > 0
   if (!hasContent) return null
 
   if (current.timestamp && lastTimestamp) {
@@ -327,6 +407,7 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
   let turnCount = 0
   let isSubagent = false
   let parentSessionId: string | null = null
+  let agentPath = "/root"
 
   let previousPrompt = ""
 
@@ -353,6 +434,10 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
       const source = isObject(record.payload.source) ? record.payload.source : null
       if (source && isObject(source.subagent)) {
         isSubagent = true
+        const threadSpawn = isObject(source.subagent.thread_spawn) ? source.subagent.thread_spawn : null
+        if (threadSpawn && typeof threadSpawn.agent_path === "string") {
+          agentPath = threadSpawn.agent_path
+        }
       }
       if (typeof record.payload.forked_from_id === "string" && record.payload.forked_from_id) {
         parentSessionId = record.payload.forked_from_id
@@ -395,6 +480,7 @@ function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
     turnCount,
     isSubagent,
     parentSessionId,
+    agentPath,
   }
 }
 
@@ -429,20 +515,97 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
   const spawnAgentCalls = new Map<string, {
     callId: string
     message: string
+    taskName: string | null
     model: string | null
     agentType: string | null
     timestamp: string
   }>()
-  // agentId → resolved agent info (from spawn_agent results)
-  const agentRegistry = new Map<string, {
+  type AgentInfo = {
     agentId: string
     nickname: string | null
+    agentPath: string | null
     message: string
     model: string | null
     agentType: string | null
     timestamp: string
     parentToolCallId: string
-  }>()
+  }
+  // agentId → resolved agent info (from legacy spawn results or 0.144 activity events)
+  const agentRegistry = new Map<string, AgentInfo>()
+  const agentIdByPath = new Map<string, string>()
+  const agentIdBySpawnCall = new Map<string, string>()
+  // One mutable presentation object per agent. Content blocks retain a reference
+  // to this object, so later activity/final-answer records update in place.
+  const agentMessages = new Map<string, { message: SubAgentMessage; turn: Turn }>()
+
+  function upsertAgentMessage(
+    agentId: string,
+    targetTurn: Turn,
+    eventTimestamp: string,
+    update: { status?: string; text?: string } = {},
+  ): SubAgentMessage {
+    const info = agentRegistry.get(agentId)
+    let entry = agentMessages.get(agentId)
+
+    if (!entry) {
+      const agentMessage: SubAgentMessage = {
+        agentId,
+        parentToolUseId: info?.parentToolCallId || undefined,
+        agentName: info?.nickname ?? (info?.agentPath ? agentNameFromPath(info.agentPath) : null),
+        subagentType: info?.agentType ?? null,
+        type: "assistant",
+        content: null,
+        toolCalls: [],
+        thinking: [],
+        text: [],
+        timestamp: info?.timestamp ?? eventTimestamp,
+        tokenUsage: null,
+        model: info?.model ?? null,
+        isBackground: false,
+        prompt: info?.message || undefined,
+        status: update.status ?? "running",
+      }
+      targetTurn.subAgentActivity.push(agentMessage)
+      const lastBlock = targetTurn.contentBlocks[targetTurn.contentBlocks.length - 1]
+      if (lastBlock?.kind === "sub_agent") {
+        lastBlock.messages.push(agentMessage)
+      } else {
+        targetTurn.contentBlocks.push({ kind: "sub_agent", messages: [agentMessage], timestamp: eventTimestamp })
+      }
+      entry = { message: agentMessage, turn: targetTurn }
+      agentMessages.set(agentId, entry)
+    }
+
+    const agentMessage = entry.message
+    if (info) {
+      agentMessage.parentToolUseId = info.parentToolCallId || agentMessage.parentToolUseId
+      agentMessage.agentName = info.nickname ?? (info.agentPath ? agentNameFromPath(info.agentPath) : agentMessage.agentName)
+      agentMessage.subagentType = info.agentType
+      agentMessage.model = info.model
+      agentMessage.prompt = info.message || agentMessage.prompt
+    }
+
+    if (update.text && !agentMessage.text.includes(update.text)) {
+      agentMessage.text.push(update.text)
+      agentMessage.content = agentMessage.text.join("\n\n")
+    }
+
+    if (update.status) {
+      const terminalStatuses = new Set(["completed", "failed", "interrupted"])
+      if (!(update.status === "running" && agentMessage.status && terminalStatuses.has(agentMessage.status))) {
+        agentMessage.status = update.status
+      }
+      if (terminalStatuses.has(update.status) && agentMessage.timestamp && eventTimestamp) {
+        const startedAt = new Date(agentMessage.timestamp).getTime()
+        const endedAt = new Date(eventTimestamp).getTime()
+        if (Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt >= startedAt) {
+          agentMessage.durationMs = endedAt - startedAt
+        }
+      }
+    }
+
+    return agentMessage
+  }
 
   let current: Turn | null = null
   let currentTurnId: string | null = null
@@ -490,6 +653,52 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       continue
     }
 
+    if (
+      record.type === "event_msg"
+      && payload?.type === "sub_agent_activity"
+      && typeof payload.agent_thread_id === "string"
+      && typeof payload.agent_path === "string"
+    ) {
+      const agentId = payload.agent_thread_id
+      const eventId = typeof payload.event_id === "string" ? payload.event_id : ""
+      const kind = typeof payload.kind === "string" ? payload.kind : "started"
+      const spawnInfo = eventId ? spawnAgentCalls.get(eventId) : undefined
+      const existingId = agentIdByPath.get(payload.agent_path)
+      const existing = agentRegistry.get(agentId) ?? (existingId ? agentRegistry.get(existingId) : undefined)
+
+      // An `interacted` event may point back at the parent/root agent. Only a
+      // `started` event (or a previously known agent) establishes a child.
+      if (kind !== "started" && !existing && !spawnInfo) continue
+
+      if (existingId && existingId !== agentId && !agentMessages.has(agentId)) {
+        const provisionalEntry = agentMessages.get(existingId)
+        if (provisionalEntry) {
+          provisionalEntry.message.agentId = agentId
+          agentMessages.delete(existingId)
+          agentMessages.set(agentId, provisionalEntry)
+        }
+        agentRegistry.delete(existingId)
+      }
+
+      const info: AgentInfo = {
+        agentId,
+        nickname: existing?.nickname ?? agentNameFromPath(payload.agent_path) ?? spawnInfo?.taskName ?? null,
+        agentPath: payload.agent_path,
+        message: existing?.message ?? spawnInfo?.message ?? "",
+        model: existing?.model ?? spawnInfo?.model ?? null,
+        agentType: existing?.agentType ?? spawnInfo?.agentType ?? null,
+        timestamp: existing?.timestamp ?? (timestamp || spawnInfo?.timestamp || ""),
+        parentToolCallId: existing?.parentToolCallId ?? eventId,
+      }
+      agentRegistry.set(agentId, info)
+      agentIdByPath.set(payload.agent_path, agentId)
+      if (eventId && (kind === "started" || spawnInfo)) agentIdBySpawnCall.set(eventId, agentId)
+
+      const status = kind === "interrupted" ? "interrupted" : "running"
+      upsertAgentMessage(agentId, current, timestamp, { status })
+      continue
+    }
+
     if (record.type !== "response_item" || !payload) continue
 
     if (payload.type === "reasoning") {
@@ -511,25 +720,70 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       continue
     }
 
+    if (payload.type === "agent_message" && typeof payload.author === "string") {
+      const author = payload.author
+      const recipient = typeof payload.recipient === "string" ? payload.recipient : null
+      const interAgentMessage = extractInterAgentMessage(payload)
+      if (interAgentMessage.messageType === "NEW_TASK") continue
+
+      const knownAgentId = agentIdByPath.get(author)
+      // Outbound root → child routing messages are persisted too. They are not
+      // sub-agent output and must not create a synthetic parent agent. A reply
+      // without its preceding activity record is still recoverable when its
+      // author is a descendant of, and recipient is, this rollout's agent.
+      const isPotentialChild = author.startsWith(`${metadata.agentPath}/`)
+        && (recipient === null || recipient === metadata.agentPath)
+      if (!knownAgentId && !isPotentialChild) continue
+
+      const agentId = knownAgentId ?? author
+      if (!knownAgentId) {
+        agentRegistry.set(agentId, {
+          agentId,
+          nickname: agentNameFromPath(author),
+          agentPath: author,
+          message: "",
+          model: null,
+          agentType: null,
+          timestamp,
+          parentToolCallId: "",
+        })
+        agentIdByPath.set(author, agentId)
+      }
+
+      let status: string | undefined
+      if (interAgentMessage.messageType === "FINAL_ANSWER") status = "completed"
+      else if (interAgentMessage.messageType === "ERROR" || interAgentMessage.messageType === "FAILED") status = "failed"
+      else if (interAgentMessage.messageType === "INTERRUPTED") status = "interrupted"
+      else if (interAgentMessage.messageType === "MESSAGE") status = "running"
+
+      upsertAgentMessage(agentId, current, timestamp, {
+        status,
+        text: interAgentMessage.text || undefined,
+      })
+      continue
+    }
+
     if (payload.type === "function_call" && typeof payload.call_id === "string") {
       const rawName = typeof payload.name === "string" ? payload.name : "tool"
+      const functionName = normalizeFunctionName(rawName)
       const parsedInput = parseToolInput(payload.arguments)
 
       // Normalize Codex tool names + inputs to Claude Code equivalents
-      let name = rawName
+      let name = functionName
       let input = parsedInput
-      if (rawName === "exec_command") {
+      if (functionName === "exec_command") {
         name = "Bash"
-      } else if (rawName === "update_plan") {
+      } else if (functionName === "update_plan") {
         name = "TodoWrite"
         input = normalizePlanToTodos(parsedInput)
       }
 
       // Detect spawn_agent → synthesize sub-agent activity
-      if (rawName === "spawn_agent") {
+      if (functionName === "spawn_agent") {
         spawnAgentCalls.set(payload.call_id as string, {
           callId: payload.call_id as string,
-          message: typeof parsedInput.message === "string" ? parsedInput.message : "",
+          message: readableAgentPrompt(parsedInput.message),
+          taskName: typeof parsedInput.task_name === "string" ? parsedInput.task_name : null,
           model: typeof parsedInput.model === "string" ? parsedInput.model : null,
           agentType: typeof parsedInput.agent_type === "string" ? parsedInput.agent_type : null,
           timestamp,
@@ -561,19 +815,30 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       if (toolCall.name === "spawn_agent" && output) {
         try {
           const result = JSON.parse(output) as Record<string, unknown>
-          const agentId = typeof result.agent_id === "string" ? result.agent_id : ""
-          const nickname = typeof result.nickname === "string" ? result.nickname : null
+          const agentId = typeof result.agent_id === "string"
+            ? result.agent_id
+            : agentIdBySpawnCall.get(toolCall.id) ?? ""
+          const agentPath = typeof result.task_name === "string" ? result.task_name : null
+          const nickname = typeof result.nickname === "string"
+            ? result.nickname
+            : agentPath ? agentNameFromPath(agentPath) : null
           if (agentId) {
             const spawnInfo = spawnAgentCalls.get(toolCall.id)
-            agentRegistry.set(agentId, {
+            const existing = agentRegistry.get(agentId)
+            const info: AgentInfo = {
               agentId,
-              nickname,
-              message: spawnInfo?.message ?? "",
-              model: spawnInfo?.model ?? null,
-              agentType: spawnInfo?.agentType ?? null,
-              timestamp: spawnInfo?.timestamp ?? timestamp,
-              parentToolCallId: toolCall.id,
-            })
+              nickname: nickname ?? existing?.nickname ?? spawnInfo?.taskName ?? null,
+              agentPath: agentPath ?? existing?.agentPath ?? null,
+              message: existing?.message ?? spawnInfo?.message ?? "",
+              model: existing?.model ?? spawnInfo?.model ?? null,
+              agentType: existing?.agentType ?? spawnInfo?.agentType ?? null,
+              timestamp: existing?.timestamp ?? spawnInfo?.timestamp ?? timestamp,
+              parentToolCallId: existing?.parentToolCallId ?? toolCall.id,
+            }
+            agentRegistry.set(agentId, info)
+            agentIdBySpawnCall.set(toolCall.id, agentId)
+            if (info.agentPath) agentIdByPath.set(info.agentPath, agentId)
+            upsertAgentMessage(agentId, current, timestamp, { status: "running" })
           }
         } catch { /* skip */ }
       }
@@ -583,34 +848,34 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
         try {
           const result = JSON.parse(output) as Record<string, unknown>
           const statusMap = isObject(result.status) ? result.status : {}
-          const batchMessages: SubAgentMessage[] = []
           for (const [agentId, status] of Object.entries(statusMap)) {
-            const info = agentRegistry.get(agentId)
-            const completedText = isObject(status) && typeof (status as Record<string, unknown>).completed === "string"
-              ? (status as Record<string, unknown>).completed as string
-              : null
-            const agentMsg: SubAgentMessage = {
-              agentId,
-              agentName: info?.nickname ?? null,
-              subagentType: info?.agentType ?? null,
-              type: "assistant",
-              content: completedText,
-              toolCalls: [],
-              thinking: [],
-              text: completedText ? [completedText] : [],
-              timestamp: info?.timestamp ?? timestamp,
-              tokenUsage: null,
-              model: info?.model ?? null,
-              isBackground: false,
-              prompt: info?.message ?? undefined,
-              status: completedText ? "completed" : "running",
+            const statusValue = isObject(status) ? status : {}
+            const completedText = typeof statusValue.completed === "string" ? statusValue.completed : ""
+            const failedText = typeof statusValue.failed === "string"
+              ? statusValue.failed
+              : typeof statusValue.error === "string" ? statusValue.error : ""
+            const interruptedText = typeof statusValue.interrupted === "string" ? statusValue.interrupted : ""
+            const lifecycle = completedText
+              ? "completed"
+              : failedText ? "failed"
+                : interruptedText ? "interrupted"
+                  : typeof statusValue.status === "string" ? statusValue.status : "running"
+            if (!agentRegistry.has(agentId)) {
+              agentRegistry.set(agentId, {
+                agentId,
+                nickname: null,
+                agentPath: null,
+                message: "",
+                model: null,
+                agentType: null,
+                timestamp,
+                parentToolCallId: "",
+              })
             }
-            current.subAgentActivity.push(agentMsg)
-            batchMessages.push(agentMsg)
-          }
-          // Create a sub_agent content block so they render inline and in the sidebar
-          if (batchMessages.length > 0) {
-            current.contentBlocks.push({ kind: "sub_agent", messages: batchMessages })
+            upsertAgentMessage(agentId, current, timestamp, {
+              status: lifecycle,
+              text: completedText || failedText || interruptedText || undefined,
+            })
           }
         } catch { /* skip */ }
       }

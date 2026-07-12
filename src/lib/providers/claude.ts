@@ -10,7 +10,10 @@ export function isClaudeDirName(dirName: string | null | undefined): boolean {
 // ── CLI arg builders ──────────────────────────────────────────────────────────
 
 export function buildClaudePermArgs(permissions?: PermissionsConfig): string[] {
-  if (!permissions || !permissions.mode || permissions.mode === "bypassPermissions") {
+  if (!permissions || !permissions.mode) {
+    return ["--permission-mode", "default"]
+  }
+  if (permissions.mode === "bypassPermissions") {
     return ["--dangerously-skip-permissions"]
   }
 
@@ -21,6 +24,7 @@ export function buildClaudePermArgs(permissions?: PermissionsConfig): string[] {
     plan: "plan",
     acceptEdits: "acceptEdits",
     dontAsk: "dontAsk",
+    auto: "auto",
   }
   const mapped = modeMap[permissions.mode]
   if (mapped) {

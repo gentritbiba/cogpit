@@ -64,8 +64,11 @@ export const DesktopHeader = memo(function DesktopHeader({
   showConfig,
   onToggleConfig,
 }: DesktopHeaderProps) {
-  const { config: { networkUrl, networkAccessDisabled } } = useAppContext()
+  const { config: { networkUrl, networkAccessDisabled, defaultAgentKind } } = useAppContext()
   const { session, sessionSource, isLive } = useSessionContext()
+  const activeAgentKind = sessionSource
+    ? sessionSource.agentKind ?? agentKindFromDirName(sessionSource.dirName)
+    : defaultAgentKind
   const [cmdCopied, copyCmd] = useCopyWithFeedback()
   const [urlCopied, copyUrl] = useCopyWithFeedback()
 
@@ -85,6 +88,7 @@ export const DesktopHeader = memo(function DesktopHeader({
       <div className="flex items-center gap-2 min-w-0">
         <Tooltip>
           <TooltipTrigger render={<button
+              type="button"
               onClick={onGoHome}
               className="shrink-0 transition-opacity hover:opacity-70"
               aria-label={session ? "Back to Dashboard" : "Cogpit"}
@@ -100,6 +104,7 @@ export const DesktopHeader = memo(function DesktopHeader({
           <>
             <Tooltip>
               <TooltipTrigger render={<button
+                  type="button"
                   className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
                   onClick={handleCopyResumeCmd}
                 />}>
@@ -145,7 +150,7 @@ export const DesktopHeader = memo(function DesktopHeader({
 
       <div className="flex-1" />
 
-      <TokenUsageIndicator />
+      <TokenUsageIndicator agentKind={activeAgentKind} />
 
       <NetworkStatus
         networkUrl={networkUrl}
@@ -227,6 +232,7 @@ function NetworkStatus({ networkUrl, networkAccessDisabled, urlCopied, onCopyUrl
     return (
       <Tooltip>
         <TooltipTrigger render={<button
+            type="button"
             onClick={onCopyUrl}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
           />}>

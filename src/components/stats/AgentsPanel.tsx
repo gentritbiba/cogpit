@@ -5,6 +5,7 @@ import { AgentCard } from "@/components/stats/AgentCard"
 import type { ParsedSession } from "@/lib/types"
 import { parseSubAgentPath } from "@/lib/format"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
+import { authFetch } from "@/lib/auth"
 
 // ── Inline Agent Extraction ─────────────────────────────────────────────────
 
@@ -124,6 +125,13 @@ export function AgentsPanel({
   const totalCount = sessionBgAgents.length + inlineOnlyAgents.length
   if (totalCount === 0) return null
 
+  const stopBackgroundAgent = (agentId: string) => {
+    void authFetch(
+      `/api/claude/tasks/${encodeURIComponent(session.sessionId)}/${encodeURIComponent(agentId)}`,
+      { method: "DELETE" },
+    )
+  }
+
   const currentAgentId = subAgentView?.agentId ?? null
 
   return (
@@ -133,6 +141,7 @@ export function AgentsPanel({
       {/* Back to Main button when viewing a sub-agent */}
       {subAgentView && onLoadSession && (
         <button
+          type="button"
           onClick={() => onLoadSession(subAgentView.dirName, subAgentView.parentFileName)}
           className="mb-2 flex w-full items-center gap-1.5 rounded border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/20 hover:border-blue-500/50"
         >
@@ -160,6 +169,7 @@ export function AgentsPanel({
               isBackground
               isActive={agent.isActive}
               disabled={!onLoadSession}
+              onStop={agent.isActive ? () => stopBackgroundAgent(agent.agentId) : undefined}
               onClick={() => onLoadSession?.(agent.dirName, agent.fileName)}
             />
           )

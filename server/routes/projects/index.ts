@@ -18,6 +18,7 @@ import {
   stat,
 } from "../../helpers"
 import { handleActiveSessions } from "./activeSessionsRoute"
+import { readClaudeProjectEntries } from "./claudeProjectEntries"
 
 // ── Bottom-first loading helpers ────────────────────────────────────────────
 
@@ -143,7 +144,7 @@ export function registerProjectRoutes(use: UseFn) {
     if (_req.url && _req.url !== "/" && _req.url !== "") return next()
 
     try {
-      const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
+      const entries = await readClaudeProjectEntries()
       const projects = []
 
       for (const entry of entries) {

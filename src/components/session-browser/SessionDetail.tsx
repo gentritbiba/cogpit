@@ -206,7 +206,9 @@ function StatsGrid({ session }: { session: ParsedSession }): React.ReactElement 
           icon={<DollarSign className="size-3" />}
           label="API Cost"
           value={formatCost(session.stats.totalCostUSD)}
-          tooltip="Estimated cost based on Anthropic API pricing"
+          tooltip={Number.isFinite(session.stats.totalCostUSD)
+            ? "Estimated cost based on published provider pricing"
+            : "Token usage is available, but this model has no published USD price"}
         />
       </div>
     </div>

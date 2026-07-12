@@ -1,14 +1,15 @@
 import { useState, useMemo, useCallback, useEffect, memo, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, Terminal, Pencil, X } from "lucide-react"
+import { ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, Terminal, Pencil, X, Users } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
 import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
+import { parseTeammateMessage } from "@/lib/teammateMessage"
 import { cn } from "@/lib/utils"
 import { CompletedIcon, FailedIcon, RunningIcon, ProcessingIcon } from "@/components/ui/StatusIcons"
 
 const SYSTEM_TAG_RE =
-  /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
+  /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)>/g
 
 const COMMAND_MESSAGE_RE = /<command-message>([^<]+)<\/command-message>/
 const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/
@@ -272,7 +273,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
   const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
-  const cleanText = useMemo(() => stripSystemTags(rawText), [rawText])
+  const { teammateId, isTeammate, text: unwrappedText } = useMemo(() => parseTeammateMessage(rawText), [rawText])
+  const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
   const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(cleanText), [cleanText])
   const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
 
@@ -325,6 +327,15 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             </button>
           )}
         </div>
+
+        {!showRaw && isTeammate && (
+          <div className="mb-2">
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/25 bg-violet-500/10 px-2 py-1 text-xs font-medium text-violet-300">
+              <Users className="w-3 h-3" />
+              {teammateId ? `From ${teammateId}` : "Teammate message"}
+            </span>
+          </div>
+        )}
 
         {commandName && (
           <div className="mb-2">

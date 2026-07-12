@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
-import { Loader2, RefreshCw, Activity, X, Search, AlertTriangle, FolderOpen, ChevronRight, Plus } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo, useRef, useId, memo } from "react"
+import { Loader2, RefreshCw, Activity, AlertTriangle, FolderOpen, ChevronRight, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -15,6 +15,7 @@ import { useProjectNames } from "@/hooks/useProjectNames"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { hapticMedium } from "@/lib/haptics"
+import { countLiveSessions } from "./liveSessionSummary"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -82,48 +83,33 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
-  const [debouncedSearch, setDebouncedSearch] = useState("")
-  const [searching, setSearching] = useState(false)
   // Tracks sessions that transitioned to "completed" during this browser session
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
   const prevStatusRef = useRef<Map<string, string> | null>(null)
   const sessionsRef = useRef(sessions)
   sessionsRef.current = sessions
-  const searchInputRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const debouncedSearchRef = useRef(debouncedSearch)
-  debouncedSearchRef.current = debouncedSearch
 
   // Expose imperative refresh so parent can force a data fetch (e.g. after session finalization)
   const fetchDataRef = useRef<typeof fetchData | null>(null)
   useEffect(() => {
     if (refreshRef) {
-      refreshRef.current = () => fetchDataRef.current?.(debouncedSearchRef.current || undefined)
+      refreshRef.current = () => fetchDataRef.current?.()
     }
     return () => {
       if (refreshRef) refreshRef.current = null
     }
   }, [refreshRef])
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
-    return () => clearTimeout(timer)
-  }, [searchQuery])
-
-  const fetchData = useCallback(async (search?: string) => {
+  const fetchData = useCallback(async () => {
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
 
     setLoading(true)
-    if (search) setSearching(true)
     try {
-      // Use cogpit-memory deep search when query is >= 2 chars, otherwise list active sessions
-      const sessUrl = search && search.length >= 2
-        ? `/api/cogpit-search?q=${encodeURIComponent(search)}&limit=50&maxAge=365d`
-        : "/api/active-sessions"
       const [sessRes, procRes] = await Promise.all([
-        authFetch(sessUrl, { signal: ac.signal }),
+        authFetch("/api/active-sessions", { signal: ac.signal }),
         authFetch("/api/running-processes", { signal: ac.signal }),
       ])
       if (ac.signal.aborted) return
@@ -144,7 +130,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     } finally {
       if (!ac.signal.aborted) {
         setLoading(false)
-        setSearching(false)
       }
     }
   }, [])
@@ -155,11 +140,11 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const isMobile = useIsMobile()
 
   useEffect(() => {
-    fetchData(debouncedSearch || undefined)
-  }, [debouncedSearch, fetchData])
+    fetchData()
+  }, [fetchData])
 
   useEffect(() => {
-    const interval = setInterval(() => fetchData(debouncedSearchRef.current || undefined), 10000)
+    const interval = setInterval(() => fetchData(), 10000)
     return () => clearInterval(interval)
   }, [fetchData])
 
@@ -167,9 +152,35 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     () => buildProcMap(processes),
     [processes]
   )
+  const liveSessionCount = useMemo(
+    () => countLiveSessions(sessions, procBySession),
+    [sessions, procBySession]
+  )
+
+  const filteredSessions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return sessions
+    return sessions.filter((session) => {
+      const customSessionName = sessionNames[session.sessionId]
+      const customProjectName = projectNames[session.dirName]
+      return [
+        customSessionName,
+        customProjectName,
+        session.aiTitle,
+        session.firstUserMessage,
+        session.lastUserMessage,
+        session.slug,
+        session.cwd,
+        session.projectShortName,
+        session.gitBranch,
+        session.agentName,
+        session.teamName,
+      ].some((value) => value?.toLowerCase().includes(query))
+    })
+  }, [sessions, searchQuery, sessionNames, projectNames])
 
   // Group sessions by project path
-  const grouped = useMemo(() => groupByProject(sessions), [sessions])
+  const grouped = useMemo(() => groupByProject(filteredSessions), [filteredSessions])
 
   // Derive pending session's project path once (used for group matching)
   const pendingProjectPath = useMemo(() => {
@@ -255,7 +266,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       })
-      setTimeout(() => fetchData(debouncedSearchRef.current || undefined), 1500)
+      setTimeout(() => fetchData(), 1500)
     } catch { /* ignore */ }
     setTimeout(() => {
       setKillingPids(prev => {
@@ -300,51 +311,52 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       metadata: { type: "terminal" },
     })
     // Refresh sessions after a brief delay to pick up any status change
-    setTimeout(() => fetchData(debouncedSearchRef.current || undefined), 3000)
+    setTimeout(() => fetchData(), 3000)
   }, [pty, fetchData])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Search bar + proc count */}
+      {/* Provider-neutral session search + truthful live summary */}
       <div className="shrink-0 flex items-center gap-1.5 px-2 py-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <div className="relative min-w-0 flex-1">
+          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
-            ref={searchInputRef}
-            type="text"
+            type="search"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search sessions & prompts\u2026"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search live & recent…"
+            aria-label="Search live and recent sessions by project, branch, title, first prompt, or latest prompt"
             className="w-full rounded-md border border-border/60 py-1.5 pl-7 pr-7 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
-          {searchQuery && !searching && (
+          {searchQuery && (
             <button
-              onClick={() => { setSearchQuery(""); searchInputRef.current?.focus() }}
+              type="button"
+              onClick={() => setSearchQuery("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear session search"
             >
               <X className="size-3" />
             </button>
           )}
-          {searching && (
-            <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 size-3 animate-spin text-muted-foreground" />
-          )}
         </div>
-        {processes.length > 0 && (
-          <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-            {processes.length}
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn("p-0 shrink-0", isMobile ? "h-8 w-8" : "h-6 w-6")}
-          onClick={() => { hapticMedium(); fetchData(debouncedSearch || undefined) }}
-          aria-label="Refresh live sessions"
-        >
-          <RefreshCw
-            className={cn(isMobile ? "size-4" : "size-3", loading && "animate-spin")}
-          />
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {liveSessionCount > 0 && (
+            <span className="text-[11px] text-muted-foreground whitespace-nowrap" aria-label={`${liveSessionCount} live sessions`}>
+              {liveSessionCount} live
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("p-0 shrink-0", isMobile ? "h-8 w-8" : "h-6 w-6")}
+            onClick={() => { hapticMedium(); fetchData() }}
+            aria-label="Refresh sessions"
+          >
+            <RefreshCw
+              className={cn(isMobile ? "size-4" : "size-3", loading && "animate-spin")}
+            />
+          </Button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
@@ -354,7 +366,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               <AlertTriangle className="size-3 text-red-400 shrink-0" />
               <span className="text-[10px] text-red-400 flex-1 truncate">{fetchError}</span>
               <button
-                onClick={() => { setFetchError(null); fetchData(debouncedSearchRef.current || undefined) }}
+                type="button"
+                onClick={() => { setFetchError(null); fetchData() }}
                 className="text-[10px] text-red-400 hover:text-red-300 shrink-0"
               >
                 Retry
@@ -362,19 +375,19 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             </div>
           )}
 
-          {sessions.length === 0 && !loading && !fetchError && (
+          {filteredSessions.length === 0 && !pendingSession && !loading && !fetchError && (
             <div className="px-3 py-8 text-center">
-              {debouncedSearch ? (
+              {searchQuery.trim() ? (
                 <>
                   <Search className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-[13px] text-muted-foreground">No sessions match &quot;{debouncedSearch}&quot;</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Try a different search term</p>
+                  <p className="text-[13px] text-muted-foreground">No matching sessions</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Try a project, branch, title, first prompt, or latest prompt</p>
                 </>
               ) : (
                 <>
                   <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-[13px] text-muted-foreground">No active sessions</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code or Codex to see sessions here</p>
+                  <p className="text-[13px] text-muted-foreground">No sessions yet</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code or Codex to see live and recent work here</p>
                 </>
               )}
             </div>
@@ -393,7 +406,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               projectPath={projectPath}
               sessions={projectSessions}
               defaultCollapsed={idx >= 3}
-              forceExpand={!!debouncedSearch}
+              forceExpand={!!searchQuery.trim()}
               activeSessionKey={activeSessionKey}
               procBySession={procBySession}
               killingPids={killingPids}
@@ -493,6 +506,7 @@ function ProjectGroup({
   onPrefetchSession?: (dirName: string, fileName: string) => void
   onResumeSession?: (sessionId: string, cwd?: string) => void
 }) {
+  const sessionGroupId = useId()
   const hasPending = !!pendingSession
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const isCollapsed = (forceExpand || hasPending) ? false : collapsed
@@ -580,7 +594,12 @@ function ProjectGroup({
       >
         <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
           <button
+            type="button"
             onClick={() => setCollapsed((c) => !c)}
+            disabled={forceExpand}
+            aria-expanded={!isCollapsed}
+            aria-controls={sessionGroupId}
+            title={forceExpand ? "Groups stay expanded while searching" : undefined}
             className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
           >
             <ChevronRight className={cn(
@@ -602,6 +621,7 @@ function ProjectGroup({
           </button>
           {onNewSession && sessions.length > 0 && (
             <button
+              type="button"
               className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
               disabled={creatingSession}
               onClick={(e) => {
@@ -624,6 +644,7 @@ function ProjectGroup({
       {/* Session rows — left border + scrollable when > 5 */}
       {!isCollapsed && (
         <div
+          id={sessionGroupId}
           className={cn(
             "flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1",
             needsScroll && "overflow-y-auto scrollbar-thin"

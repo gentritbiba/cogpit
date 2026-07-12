@@ -105,6 +105,33 @@ describe("useTodoProgress", () => {
   })
 
   describe("basic extraction", () => {
+    it("reconstructs Claude structured tasks and their status updates", () => {
+      const session = makeSession([
+        makeTurn([
+          makeToolCall({
+            name: "TaskCreate",
+            input: { subject: "Map runtime capabilities", activeForm: "Mapping capabilities" },
+            result: "Task #1 created successfully",
+          }),
+          makeToolCall({
+            name: "TaskCreate",
+            input: { subject: "Build goal bar", activeForm: "Building goal bar" },
+            result: "Task #2 created successfully",
+          }),
+          makeToolCall({ name: "TaskUpdate", input: { taskId: "1", status: "completed" } }),
+          makeToolCall({ name: "TaskUpdate", input: { taskId: "2", status: "in_progress", owner: "Claude" } }),
+        ]),
+      ])
+
+      const { result } = renderHook(() => useTodoProgress(session))
+
+      expect(result.current).toMatchObject({ completed: 1, total: 2 })
+      expect(result.current?.todos).toEqual([
+        expect.objectContaining({ id: "1", content: "Map runtime capabilities", status: "completed" }),
+        expect.objectContaining({ id: "2", content: "Build goal bar", status: "in_progress", owner: "Claude" }),
+      ])
+    })
+
     it("extracts todos from the last TodoWrite call", () => {
       const todos = [
         { content: "Task 1", status: "completed" as const, activeForm: "done" },

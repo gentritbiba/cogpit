@@ -86,6 +86,12 @@ export interface SDKSessionState {
   disallowedTools: string[]
   model?: string
   effort?: string
+  /** Fast is a Claude session setting, independent from reasoning effort. */
+  fastMode?: boolean
+  /** Ultracode: xhigh effort + standing dynamic-workflow orchestration for the
+   *  session. Set at launch via the SDK `settings` option (the --settings path);
+   *  forces effort to xhigh and ensures Workflows are enabled. */
+  ultracode?: boolean
   mcpConfig?: string | null
   /** stderr captured from the Claude CLI subprocess for the current run —
    *  surfaced in the error result so failures show the real reason (e.g. a
@@ -153,6 +159,10 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 }): Options {
   const isBypass = state.permissionMode === "bypassPermissions"
 
+  // Ultracode requires xhigh effort — override whatever the UI selected so the
+  // launched session and its effort label stay consistent with the flag.
+  const effort = state.ultracode ? "xhigh" : state.effort
+
   const queryOpts: Options = {
     abortController: state.abort!,
     cwd: state.cwd,
@@ -161,7 +171,8 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     allowedTools: state.allowedTools.length > 0 ? state.allowedTools : undefined,
     disallowedTools: state.disallowedTools.length > 0 ? state.disallowedTools : undefined,
     canUseTool: isBypass ? undefined : makeCanUseTool(state),
-    effort: state.effort as Options["effort"],
+    effort: effort as Options["effort"],
+    enableFileCheckpointing: true,
     persistSession: true,
     pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
     // Token-level streaming: raw Anthropic stream events are forwarded to
@@ -191,6 +202,16 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     try {
       queryOpts.mcpServers = JSON.parse(opts.mcpConfig)
     } catch { /* ignore invalid JSON */ }
+  }
+
+  // Ultracode is session-scoped and provided via the `settings` layer (the
+  // --settings equivalent). It needs Workflows enabled to function, so we turn
+  // that on alongside it.
+  if (state.ultracode || state.fastMode) {
+    queryOpts.settings = {
+      ...(state.ultracode ? { ultracode: true, enableWorkflows: true } : {}),
+      ...(state.fastMode ? { fastMode: true } : {}),
+    }
   }
 
   queryOpts.env = { ...process.env }
@@ -380,6 +401,8 @@ interface SDKSessionInitOpts {
   disallowedTools?: string[]
   model?: string
   effort?: string
+  fastMode?: boolean
+  ultracode?: boolean
   name?: string
   worktreeName?: string
   mcpConfig?: string | null
@@ -404,6 +427,8 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     disallowedTools: opts.disallowedTools ? [...opts.disallowedTools] : [],
     model: opts.model,
     effort: opts.effort,
+    fastMode: opts.fastMode,
+    ultracode: opts.ultracode,
     mcpConfig: opts.mcpConfig,
   }
 }
@@ -435,7 +460,141 @@ export function createSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
 export interface SDKSessionUpdates {
   model?: string
   effort?: string
+  fastMode?: boolean
+  ultracode?: boolean
   mcpConfig?: string | null
+  permissionMode?: string
+  allowedTools?: string[]
+  disallowedTools?: string[]
+}
+
+interface AppliedSessionUpdates {
+  modelChanged: boolean
+  effortChanged: boolean
+  fastModeChanged: boolean
+  ultracodeChanged: boolean
+  permissionModeChanged: boolean
+  permissionsChanged: boolean
+  mcpConfigChanged: boolean
+  nextEffort?: string
+}
+
+function applySessionUpdates(
+  state: SDKSessionState,
+  updates?: SDKSessionUpdates,
+): AppliedSessionUpdates {
+  const effectiveEffort = (session: SDKSessionState) =>
+    session.ultracode ? "xhigh" : session.effort
+  const previousEffort = effectiveEffort(state)
+  const modelChanged = updates?.model !== undefined && updates.model !== state.model
+  const fastModeChanged = updates?.fastMode !== undefined && updates.fastMode !== state.fastMode
+  const ultracodeChanged = updates?.ultracode !== undefined && updates.ultracode !== state.ultracode
+  const permissionModeChanged = updates?.permissionMode !== undefined
+    && updates.permissionMode !== state.permissionMode
+  const permissionsChanged = updates?.allowedTools !== undefined
+    || updates?.disallowedTools !== undefined
+  const mcpConfigChanged = updates?.mcpConfig !== undefined && updates.mcpConfig !== state.mcpConfig
+
+  if (updates) {
+    if (updates.model !== undefined) state.model = updates.model
+    if (updates.effort !== undefined) state.effort = updates.effort
+    if (updates.fastMode !== undefined) state.fastMode = updates.fastMode
+    if (updates.ultracode !== undefined) state.ultracode = updates.ultracode
+    if (updates.mcpConfig !== undefined) state.mcpConfig = updates.mcpConfig
+    if (updates.permissionMode !== undefined) state.permissionMode = updates.permissionMode
+    if (updates.allowedTools !== undefined) state.allowedTools = [...updates.allowedTools]
+    if (updates.disallowedTools !== undefined) state.disallowedTools = [...updates.disallowedTools]
+  }
+
+  const nextEffort = effectiveEffort(state)
+  return {
+    modelChanged,
+    effortChanged: nextEffort !== undefined && nextEffort !== previousEffort,
+    fastModeChanged,
+    ultracodeChanged,
+    permissionModeChanged,
+    permissionsChanged,
+    mcpConfigChanged,
+    nextEffort,
+  }
+}
+
+async function pushSessionUpdates(
+  state: SDKSessionState,
+  changes: AppliedSessionUpdates,
+): Promise<string[]> {
+  const queryHandle = state.activeQuery
+  if (!state.running || !queryHandle) return []
+
+  const applied: string[] = []
+  if (changes.modelChanged) {
+    await queryHandle.setModel(state.model || undefined)
+    applied.push("model")
+  }
+  if (changes.permissionModeChanged) {
+    await queryHandle.setPermissionMode(state.permissionMode as PermissionMode)
+    applied.push("permissionMode")
+  }
+
+  const flagSettings: Record<string, unknown> = {}
+  if (changes.ultracodeChanged) {
+    flagSettings.ultracode = state.ultracode ?? false
+    flagSettings.enableWorkflows = state.ultracode ?? false
+  }
+  if (changes.fastModeChanged) flagSettings.fastMode = state.fastMode ?? false
+  if (changes.permissionsChanged) {
+    flagSettings.permissions = {
+      allow: state.allowedTools,
+      deny: state.disallowedTools,
+      defaultMode: (state.permissionMode || "default") as PermissionMode,
+    }
+  }
+  // Max is intentionally session-scoped and is not accepted by the persisted
+  // effortLevel setting. Keep it staged for the next resumed query instead.
+  if (changes.effortChanged && changes.nextEffort && changes.nextEffort !== "max") {
+    flagSettings.effortLevel = changes.nextEffort
+  }
+  if (Object.keys(flagSettings).length > 0) {
+    await queryHandle.applyFlagSettings(
+      flagSettings as Parameters<Query["applyFlagSettings"]>[0],
+    )
+    applied.push(...Object.keys(flagSettings))
+  }
+
+  if (changes.mcpConfigChanged) {
+    try {
+      const parsed = state.mcpConfig
+        ? JSON.parse(state.mcpConfig) as Record<string, unknown>
+        : {}
+      await queryHandle.setMcpServers(parsed as Parameters<Query["setMcpServers"]>[0])
+      applied.push("mcpConfig")
+    } catch {
+      // Invalid or provider-managed MCP configuration remains staged for the
+      // next query, where the normal SDK option validation will report it.
+    }
+  }
+  return applied
+}
+
+export async function updateSDKSession(
+  sessionId: string,
+  updates: SDKSessionUpdates,
+): Promise<{ found: boolean; appliedLive: string[]; staged: string[] }> {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates) }
+  const changes = applySessionUpdates(state, updates)
+  let appliedLive: string[] = []
+  try {
+    appliedLive = await pushSessionUpdates(state, changes)
+  } catch {
+    // The query may finish between checking `running` and sending a control
+    // request. State is still updated, so the next resume applies the values.
+  }
+  return {
+    found: true,
+    appliedLive,
+    staged: Object.keys(updates).filter((key) => !appliedLive.includes(key)),
+  }
 }
 
 export function sendSDKMessage(
@@ -447,14 +606,7 @@ export function sendSDKMessage(
   const state = sdkSessions.get(sessionId)
   if (!state) return null
 
-  const modelChanged = updates?.model !== undefined && updates.model !== state.model
-  const effortChanged = updates?.effort !== undefined && updates.effort !== state.effort
-
-  if (updates) {
-    if (updates.model !== undefined) state.model = updates.model
-    if (updates.effort !== undefined) state.effort = updates.effort
-    if (updates.mcpConfig !== undefined) state.mcpConfig = updates.mcpConfig
-  }
+  const changes = applySessionUpdates(state, updates)
 
   if (state.running && state.activeQuery) {
     const q = state.activeQuery
@@ -470,13 +622,25 @@ export function sendSDKMessage(
     q.streamInput(input).catch(() => {
       // streamInput can fail if the query finished between our check and the call
     })
-    if (modelChanged && state.model !== undefined) {
+    if (changes.modelChanged) {
       q.setModel(state.model).catch(() => {})
     }
-    if (effortChanged && state.effort !== undefined) {
+    if (changes.ultracodeChanged) {
       q.applyFlagSettings({
-        effortLevel: state.effort as "low" | "medium" | "high" | "xhigh",
+        ultracode: state.ultracode,
+        ...(state.ultracode ? { enableWorkflows: true } : {}),
       }).catch(() => {})
+    }
+    if (changes.fastModeChanged) {
+      q.applyFlagSettings({ fastMode: state.fastMode ?? false }).catch(() => {})
+    }
+    if (changes.effortChanged && changes.nextEffort !== undefined && changes.nextEffort !== "max") {
+      q.applyFlagSettings({
+        effortLevel: changes.nextEffort as "low" | "medium" | "high" | "xhigh",
+      }).catch(() => {})
+    }
+    if (changes.permissionModeChanged) {
+      q.setPermissionMode(state.permissionMode as PermissionMode).catch(() => {})
     }
     return state
   }
@@ -507,9 +671,17 @@ function applyDecision(
     return
   }
   if (behavior === "allow_always") {
-    state.sessionAllowedTools.add(pending.toolName)
+    if (!pending.suggestions?.length) {
+      state.sessionAllowedTools.add(pending.toolName)
+    }
   }
-  pending.resolve({ behavior: "allow", updatedInput: pending.input })
+  pending.resolve({
+    behavior: "allow",
+    updatedInput: pending.input,
+    ...(behavior === "allow_always" && pending.suggestions?.length
+      ? { updatedPermissions: pending.suggestions }
+      : {}),
+  })
 }
 
 export function resolvePermission(
@@ -575,6 +747,60 @@ export function stopSDKSession(sessionId: string): boolean {
   teardownState(state)
   sdkSessions.delete(sessionId)
   return true
+}
+
+export async function interruptSDKTurn(sessionId: string): Promise<boolean> {
+  const state = sdkSessions.get(sessionId)
+  if (!state?.running || !state.activeQuery) return false
+  await state.activeQuery.interrupt()
+  return true
+}
+
+export async function stopSDKTask(sessionId: string, taskId: string): Promise<boolean> {
+  const queryHandle = sdkSessions.get(sessionId)?.activeQuery
+  if (!queryHandle) return false
+  await queryHandle.stopTask(taskId)
+  return true
+}
+
+export async function backgroundSDKTasks(
+  sessionId: string,
+  toolUseId?: string,
+): Promise<boolean> {
+  const queryHandle = sdkSessions.get(sessionId)?.activeQuery
+  if (!queryHandle) return false
+  return queryHandle.backgroundTasks(toolUseId)
+}
+
+export async function rewindClaudeFiles(
+  sessionId: string,
+  userMessageId: string,
+  cwd: string,
+  dryRun = false,
+) {
+  const active = sdkSessions.get(sessionId)?.activeQuery
+  if (active) return active.rewindFiles(userMessageId, { dryRun })
+
+  const abort = new AbortController()
+  const control = query({
+    // eslint-disable-next-line require-yield
+    prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+      await new Promise(() => {})
+    })(),
+    options: {
+      abortController: abort,
+      cwd,
+      resume: sessionId,
+      enableFileCheckpointing: true,
+      pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+    },
+  })
+  try {
+    return await control.rewindFiles(userMessageId, { dryRun })
+  } finally {
+    abort.abort()
+    control.close()
+  }
 }
 
 export function cleanupAllSDKSessions(): number {

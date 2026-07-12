@@ -30,6 +30,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
     <div className="shrink-0 bg-elevation-1">
       {/* Header — always visible */}
       <button
+        type="button"
         onClick={toggleExpanded}
         className="flex w-full items-center gap-2.5 py-1.5 text-left transition-colors hover:bg-elevation-2 rounded-md px-2"
       >
@@ -39,7 +40,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
           <ChevronUp className="size-3 text-muted-foreground" />
         )}
         <span className="text-[11px] font-medium text-muted-foreground">
-          TODOs
+          Tasks
         </span>
         <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
           {completed}/{total}
@@ -75,7 +76,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             {todos.map((todo, i) => (
               <div
-                key={i}
+                key={todo.id ?? i}
                 className="flex items-center gap-1.5 min-w-0"
               >
                 {todo.status === "completed" ? (
@@ -96,6 +97,11 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                 >
                   {todo.content}
                 </span>
+                {todo.owner && (
+                  <span className="shrink-0 text-[9px] text-muted-foreground/70">
+                    {todo.owner}
+                  </span>
+                )}
               </div>
             ))}
           </div>

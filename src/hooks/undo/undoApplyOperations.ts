@@ -75,7 +75,30 @@ export async function applyUndo(
   // TODO: If file revert succeeds but JSONL truncation fails, we're in a
   // half-applied state. Consider reordering (truncate first) or adding rollback.
   const ops = buildUndoOperations(session.turns, session.turns.length - 1, effectiveTarget)
-  await tryApplyOps(ops, applyOperations)
+  let restoredWithNativeCheckpoint = false
+  if (session.agentKind === "claude") {
+    const rewindTarget = session.turns[effectiveTarget + 1]?.id
+    if (rewindTarget) {
+      try {
+        const response = await authFetch(
+          `/api/claude/checkpoints/${encodeURIComponent(session.sessionId)}/rewind`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userMessageId: rewindTarget, cwd: session.cwd }),
+          },
+        )
+        if (response.ok) {
+          const result = await response.json() as { canRewind?: boolean }
+          restoredWithNativeCheckpoint = result.canRewind === true
+        }
+      } catch {
+        // Older Claude runtimes do not expose SDK checkpoint controls. The
+        // existing deterministic Edit/Write reversal remains the fallback.
+      }
+    }
+  }
+  if (!restoredWithNativeCheckpoint) await tryApplyOps(ops, applyOperations)
 
   // Archive undone turns + truncate JSONL
   const keepTurnCount = effectiveTarget + 1

@@ -18,6 +18,7 @@ import {
   buildCodexPermArgs,
   buildCodexModelArgs,
   buildCodexEffortArgs,
+  buildCodexFastModeArgs,
   writeTempImageFiles,
   cleanupTempFiles,
   isCodexDirName,
@@ -30,6 +31,12 @@ import type { PersistentSession, UseFn } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
+import { codexAppServer, type CodexThread } from "../../codex-app-server"
+import {
+  getCodexThreadIdentity,
+  isCodexAppServerUnavailable,
+  startCodexExecution,
+} from "../../lib/codexExecution"
 export { buildStreamMessage } from "../../lib/streamMessage"
 
 export async function resolveProjectPath(
@@ -84,6 +91,20 @@ async function waitForCodexSession(
   return null
 }
 
+async function resolveCodexStartedThread(
+  thread: CodexThread,
+  cwd: string,
+  knownPaths: Set<string>,
+  startedAt: number,
+): Promise<{ filePath: string; fileName: string; sessionId: string }> {
+  const direct = getCodexThreadIdentity(thread)
+  if (direct) return direct
+
+  const discovered = await waitForCodexSession(cwd, knownPaths, startedAt)
+  if (discovered) return discovered
+  throw new Error(`Codex created thread ${thread.id} but did not provide a rollout path`)
+}
+
 function extractCodexSessionIdentity(line: string): { sessionId: string; fileName: string; filePath: string } | null {
   try {
     const parsed = JSON.parse(line) as { type?: string; timestamp?: string; payload?: unknown }
@@ -125,7 +146,7 @@ export function registerNewSessionRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, permissions, model, effort, name } = JSON.parse(body)
+        const { dirName, message, permissions, model, effort, fastMode, name } = JSON.parse(body)
 
         if (!dirName || !message) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message are required"))
@@ -140,13 +161,57 @@ export function registerNewSessionRoute(use: UseFn) {
           }
 
           const knownPaths = new Set((await listCodexSessionFiles()).map((file) => file.filePath))
+          const appServerStartedAt = Date.now()
+          try {
+            const started = await startCodexExecution(codexAppServer, {
+              cwd,
+              message,
+              permissions,
+              model,
+              effort,
+              fastMode,
+            })
+            const identity = await resolveCodexStartedThread(
+              started.thread,
+              cwd,
+              knownPaths,
+              appServerStartedAt,
+            )
+            let initialContent: string | undefined
+            try {
+              initialContent = await readFile(identity.filePath, "utf-8")
+            } catch {
+              // The rollout may be materialized just after turn/start is accepted.
+            }
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({
+              success: true,
+              dirName,
+              fileName: identity.fileName,
+              sessionId: identity.sessionId,
+              initialContent,
+            }))
+            return
+          } catch (error) {
+            if (!isCodexAppServerUnavailable(error)) {
+              sendError(res, new RouteError(
+                500,
+                ErrorCodes.INTERNAL_ERROR,
+                error instanceof Error ? error.message : "Failed to start Codex thread",
+              ))
+              return
+            }
+          }
+
+          // Compatibility path for Codex versions that predate app-server.
           const permArgs = buildCodexPermArgs(permissions)
           const modelArgs = buildCodexModelArgs(model)
           const effortArgs = buildCodexEffortArgs(effort)
+          const fastModeArgs = buildCodexFastModeArgs(fastMode)
           const startedAt = Date.now()
           const child = spawn(
             "codex",
-            ["exec", "--json", ...permArgs, ...modelArgs, ...effortArgs, message],
+            ["exec", "--json", ...permArgs, ...modelArgs, ...effortArgs, ...fastModeArgs, message],
             {
               cwd,
               env: process.env,
@@ -323,7 +388,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model, effort, worktreeName, mcpConfig, name } = JSON.parse(body)
+        const { dirName, message, images, permissions, model, effort, fastMode, ultracode, worktreeName, mcpConfig, name } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message (or images) are required"))
@@ -338,10 +403,55 @@ export function registerCreateAndSendRoute(use: UseFn) {
           }
 
           const knownPaths = new Set((await listCodexSessionFiles()).map((file) => file.filePath))
+          const appServerStartedAt = Date.now()
+          try {
+            const started = await startCodexExecution(codexAppServer, {
+              cwd,
+              message,
+              images,
+              permissions,
+              model,
+              effort,
+              fastMode,
+            })
+            const identity = await resolveCodexStartedThread(
+              started.thread,
+              cwd,
+              knownPaths,
+              appServerStartedAt,
+            )
+            let initialContent: string | undefined
+            try {
+              initialContent = await readFile(identity.filePath, "utf-8")
+            } catch {
+              // Let the existing JSONL polling path fill content on the client.
+            }
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({
+              success: true,
+              dirName,
+              fileName: identity.fileName,
+              sessionId: identity.sessionId,
+              initialContent,
+            }))
+            return
+          } catch (error) {
+            if (!isCodexAppServerUnavailable(error)) {
+              sendError(res, new RouteError(
+                500,
+                ErrorCodes.INTERNAL_ERROR,
+                error instanceof Error ? error.message : "Failed to start Codex thread",
+              ))
+              return
+            }
+          }
+
+          // Compatibility path for Codex versions that predate app-server.
           const imagePaths = await writeTempImageFiles(images)
           const permArgs = buildCodexPermArgs(permissions)
           const modelArgs = buildCodexModelArgs(model)
           const effortArgs = buildCodexEffortArgs(effort)
+          const fastModeArgs = buildCodexFastModeArgs(fastMode)
           const imageArgs = imagePaths.flatMap((filePath) => ["-i", filePath])
           const prompt = message || (imagePaths.length > 0 ? CODEX_IMAGE_ONLY_PROMPT : "")
           const startedAt = Date.now()
@@ -354,6 +464,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
               ...permArgs,
               ...modelArgs,
               ...effortArgs,
+              ...fastModeArgs,
               ...imageArgs,
               ...(prompt ? [prompt] : []),
             ],
@@ -501,6 +612,8 @@ export function registerCreateAndSendRoute(use: UseFn) {
           disallowedTools: permissions?.disallowedTools,
           model,
           effort,
+          fastMode,
+          ultracode: !!ultracode,
           name,
           worktreeName,
           mcpConfig,

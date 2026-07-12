@@ -32,7 +32,6 @@ export interface ActiveSessionInfo {
   turnCount?: number
   size: number
   isActive?: boolean
-  matchedMessage?: string
   agentStatus?: SessionStatus
   agentToolName?: string
   agentTerminalReason?: string
@@ -107,10 +106,14 @@ export function SessionRow({
   onResumeSession,
 }: SessionRowProps) {
   const hasProcess = proc !== undefined
+  const isNativeLive = s.isActive === true
+  const isLive = hasProcess || isNativeLive
   const isDeferred = s.agentStatus === "deferred"
   const [resuming, setResuming] = useState(false)
-  const statusLabel = hasProcess
-    ? (getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Idle")
+  const statusLabel = isLive
+    ? (isNativeLive && isIdleStatus(s.agentStatus)
+        ? "Running"
+        : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Running")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   const isTeammate = !!(s.teamName && s.agentName)
@@ -160,14 +163,20 @@ export function SessionRow({
           tabIndex={0}
           data-live-session
           onClick={() => onSelectSession(s.dirName, s.fileName)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSession(s.dirName, s.fileName) } }}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              onSelectSession(s.dirName, s.fileName)
+            }
+          }}
           onMouseEnter={handleHoverStart}
           onMouseLeave={handleHoverEnd}
           onFocus={handleHoverStart}
           onBlur={handleHoverEnd}
           className={cn(
             "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
-            cardStyle(isActiveSession, hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
+            cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
           )}
         />}>
           {/* Title */}
@@ -183,9 +192,26 @@ export function SessionRow({
             </span>
           )}
 
+          {/* Native app-server turns have no killable OS process, but are live. */}
+          {isLive && !isDeferred && statusLabel && (
+            <span
+              data-session-live-state
+              className={cn(
+                "flex items-center rounded px-1 py-px text-[9px] font-medium shrink-0",
+                isNativeLive && isIdleStatus(s.agentStatus)
+                  ? "bg-blue-500/10 text-blue-400"
+                  : "bg-muted/60",
+                !(isNativeLive && isIdleStatus(s.agentStatus)) && getStatusColor(s.agentStatus),
+              )}
+            >
+              {statusLabel}
+            </span>
+          )}
+
           {/* Team collapse chip — on lead rows with nested teammate sessions */}
           {!!teammateCount && onToggleTeammates && (
             <button
+              type="button"
               onClick={(e) => { e.stopPropagation(); onToggleTeammates() }}
               className="flex items-center gap-0.5 rounded bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:text-violet-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors"
               title={teammatesCollapsed ? "Show team agents" : "Hide team agents"}
@@ -209,6 +235,7 @@ export function SessionRow({
               </span>
               {onResumeSession && (
                 <button
+                  type="button"
                   onClick={handleResume}
                   disabled={resuming}
                   className="flex items-center gap-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 hover:text-amber-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors disabled:opacity-50"
@@ -227,13 +254,6 @@ export function SessionRow({
             <span className="flex items-center gap-0.5 rounded bg-emerald-500/10 text-emerald-400 px-1 py-px text-[9px] font-medium shrink-0">
               <GitBranch className="size-2" />
               {worktreeName}
-            </span>
-          )}
-
-          {/* Matched search snippet */}
-          {s.matchedMessage && (
-            <span className="text-[10px] text-amber-500/70 truncate max-w-[80px] italic shrink-0">
-              {s.matchedMessage}
             </span>
           )}
 
@@ -256,9 +276,10 @@ export function SessionRow({
           {/* Kill button — absolute badge, no layout space */}
           {hasProcess && (
             <button
+              type="button"
               onClick={(e) => onKill(proc.pid, e)}
               disabled={killingPids.has(proc.pid)}
-              className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-bl rounded-tr-md p-0.5 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 disabled:opacity-50 z-10"
+              className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity rounded-bl rounded-tr-md p-0.5 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 disabled:opacity-50 z-10"
               title={`Kill PID ${proc.pid}`}
               aria-label={`Kill process ${proc.pid}`}
             >
@@ -334,4 +355,3 @@ function getStatusColor(status?: SessionStatus): string {
   if (status === "deferred") return "text-amber-400"
   return "text-blue-400"
 }
-

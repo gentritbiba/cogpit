@@ -32,9 +32,5 @@ export default defineConfig({
     watch: {
       ignored: ['**/undo-history/**', '**/.claude/worktrees/**'],
     },
-    headers: {
-      'Cross-Origin-Embedder-Policy': 'credentialless',
-      'Cross-Origin-Opener-Policy': 'same-origin',
-    },
   },
 })

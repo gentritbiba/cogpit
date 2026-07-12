@@ -1,7 +1,6 @@
 import type { Plugin } from "vite"
 import { loadConfig, getConfig } from "./config"
-import { resolveSearchIndexPath } from "./lib/searchIndexPath"
-import { dirs, refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { registerConfigRoutes } from "./routes/config"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerClaudeRoutes } from "./routes/claude"
@@ -10,6 +9,7 @@ import { registerClaudeManageRoutes } from "./routes/claude-manage"
 import { registerPortRoutes } from "./routes/ports"
 import { registerTeamRoutes } from "./routes/teams"
 import { registerTeamSessionRoutes } from "./routes/team-session"
+import { registerWorkflowRoutes } from "./routes/workflows"
 import { registerUndoRoutes } from "./routes/undo"
 import { registerFileRoutes } from "./routes/files"
 import { registerFileWatchRoutes } from "./routes/files-watch"
@@ -20,19 +20,17 @@ import { registerWorktreeRoutes } from "./routes/worktrees"
 import { registerUsageRoutes } from "./routes/usage"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
-import { registerSessionSearchRoutes, setSearchIndex, getSearchIndex } from "./routes/session-search"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerFileContentRoutes } from "./routes/file-content"
-import { registerSearchIndexRoutes } from "./routes/search-index-stats"
-import { registerCogpitSearchRoutes } from "./routes/cogpit-search"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerNotifyRoutes } from "./routes/notify"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerPermissionRoutes } from "./routes/permissions"
 import { registerAskUserRoutes } from "./routes/ask-user"
-import { SearchIndex } from "./search-index"
-import { invalidateSessionMeta } from "./lib/sessionMetaCache"
-import { sdkSessions } from "./sdk-session"
+import { registerModelRoutes } from "./routes/models"
+import { registerCodexRuntimeRoutes } from "./routes/codex-runtime"
+import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
+import { codexAppServer } from "./codex-app-server"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -41,34 +39,12 @@ export function sessionApiPlugin(): Plugin {
       // Kill all active child processes when the server shuts down
       server.httpServer?.on("close", () => {
         cleanupProcesses()
-        const index = getSearchIndex()
-        if (index) {
-          index.stopWatching()
-          index.close()
-        }
+        void codexAppServer.shutdown()
       })
 
-      // Load config on startup, then boot search index
-      loadConfig().then(async () => {
+      // Load config on startup
+      loadConfig().then(() => {
         refreshDirs()
-        // Boot search index after dirs are ready
-        try {
-          const dbPath = resolveSearchIndexPath()
-          const index = new SearchIndex(dbPath)
-          index.onFileChanged = invalidateSessionMeta
-          // Never index while a Cogpit-driven session is running — the index
-          // would compete with the live session (and the UI) for CPU/disk.
-          // (Idle entries stay in the map for follow-ups, so check `running`.)
-          index.shouldDeferIndexing = () => {
-            for (const s of sdkSessions.values()) if (s.running) return true
-            return false
-          }
-          setSearchIndex(index)
-          // startWatching does async I/O (updateStale) before setting up fs.watch
-          if (dirs.PROJECTS_DIR) await index.startWatching(dirs.PROJECTS_DIR)
-        } catch (err) {
-          console.warn("[search-index] Failed to boot search index:", err)
-        }
       })
 
       // Security middleware (before all routes)
@@ -102,6 +78,7 @@ export function sessionApiPlugin(): Plugin {
       registerPortRoutes(use)
       registerTeamRoutes(use)
       registerTeamSessionRoutes(use)
+      registerWorkflowRoutes(use)
       registerUndoRoutes(use)
       registerFileRoutes(use)
       registerFileWatchRoutes(use)
@@ -112,16 +89,16 @@ export function sessionApiPlugin(): Plugin {
       registerUsageRoutes(use)
       registerSlashSuggestionRoutes(use)
       registerConfigBrowserRoutes(use)
-      registerSessionSearchRoutes(use)
       registerLocalFileRoutes(use)
       registerFileContentRoutes(use)
-      registerSearchIndexRoutes(use)
-      registerCogpitSearchRoutes(use)
       registerMcpRoutes(use)
       registerNotifyRoutes(use)
       registerScriptRoutes(use)
       registerPermissionRoutes(use)
       registerAskUserRoutes(use)
+      registerModelRoutes(use)
+      registerCodexRuntimeRoutes(use)
+      registerClaudeRuntimeRoutes(use)
     },
   }
 }

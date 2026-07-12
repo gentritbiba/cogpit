@@ -9,6 +9,10 @@ vi.mock("node:fs/promises", () => ({
   readdir: vi.fn(),
 }))
 
+vi.mock("node:os", () => ({
+  homedir: () => "/home/test",
+}))
+
 vi.mock("../password-utils", () => ({
   hashPassword: vi.fn(),
   isPasswordHashed: vi.fn(),
@@ -100,6 +104,7 @@ describe("validateClaudeDir", () => {
 describe("loadConfig", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    delete process.env.CODEX_HOME
   })
 
   it("loads valid config with already-hashed password (no migration)", async () => {
@@ -139,6 +144,22 @@ describe("loadConfig", () => {
     expect(writtenContent.networkPassword).toBe("$sha256$aabbcc:ddeeff")
   })
 
+  it("does not mask a config migration failure as first-run Codex setup", async () => {
+    const { loadConfig } = await import("../config")
+    mockedIsPasswordHashed.mockReturnValueOnce(false)
+    mockedHashPassword.mockReturnValueOnce("$sha256$aabbcc:ddeeff")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/.claude",
+      networkPassword: "plaintextpassword",
+    }))
+    mockedWriteFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+
+    const config = await loadConfig()
+
+    expect(config).toBeNull()
+    expect(mockedStat).not.toHaveBeenCalled()
+  })
+
   it("does not migrate when networkPassword is empty/missing", async () => {
     const { loadConfig } = await import("../config")
     mockedReadFile.mockResolvedValueOnce(
@@ -154,10 +175,38 @@ describe("loadConfig", () => {
 
   it("returns null for missing file", async () => {
     const { loadConfig } = await import("../config")
-    mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
     const config = await loadConfig()
     expect(config).toBeNull()
+  })
+
+  it("bootstraps a Codex-only config when no config file exists", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+
+    const config = await loadConfig()
+
+    expect(config).toEqual({
+      claudeDir: "/home/test/.claude",
+      codexOnly: true,
+    })
+    expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.codex"))
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("honors CODEX_HOME when bootstrapping a Codex-only config", async () => {
+    const { loadConfig } = await import("../config")
+    process.env.CODEX_HOME = "/opt/codex-data"
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+
+    const config = await loadConfig()
+
+    expect(config?.codexOnly).toBe(true)
+    expect(mockedStat).toHaveBeenCalledWith(resolve("/opt/codex-data"))
   })
 
   it("returns null for malformed JSON", async () => {
@@ -166,6 +215,7 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
     expect(config).toBeNull()
+    expect(mockedStat).not.toHaveBeenCalled()
   })
 
   it("returns null when claudeDir is missing from JSON", async () => {
@@ -174,6 +224,18 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
     expect(config).toBeNull()
+  })
+
+  it("restores a persisted Codex-only config", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/test/.claude",
+      codexOnly: true,
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.codexOnly).toBe(true)
   })
 })
 

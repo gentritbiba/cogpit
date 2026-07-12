@@ -20,6 +20,8 @@ import {
   setCachedSessionMeta,
 } from "../../lib/sessionMetaCache"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
+import { readClaudeProjectEntries } from "./claudeProjectEntries"
+import { codexAppServer } from "../../codex-app-server"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -40,7 +42,7 @@ export async function handleActiveSessions(
   const projectFilter = url.searchParams.get("project")?.trim() || ""
 
   try {
-    const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
+    const entries = await readClaudeProjectEntries()
 
     // First pass: collect all session files with their mtime (cheap stat only)
     const candidates: Array<{
@@ -127,7 +129,6 @@ export async function handleActiveSessions(
     }
 
     // Second pass: read metadata (+ search) in parallel for speed
-    const now = Date.now()
     const q = search ? search.toLowerCase() : ""
 
     // Teammate sessions (agent teams) carry a teamName — resolve each team's
@@ -196,12 +197,15 @@ export async function handleActiveSessions(
           const teamLeadSessionId = meta.teamName
             ? await resolveTeamLead(meta.teamName)
             : null
+          const sessionId = meta.sessionId || c.fileName.replace(".jsonl", "")
+          const isNativeCodexActive = c.dirName.startsWith("codex__")
+            && codexAppServer.getActiveTurnId(sessionId) !== undefined
 
           return {
             dirName: c.dirName,
             projectShortName: shortName,
             fileName: c.fileName,
-            sessionId: meta.sessionId || c.fileName.replace(".jsonl", ""),
+            sessionId,
             slug: meta.slug,
             name: meta.name,
             aiTitle: meta.aiTitle,
@@ -214,7 +218,7 @@ export async function handleActiveSessions(
             lastActivityAt: meta.lastTimestamp || lastModified,
             turnCount: meta.turnCount,
             size: c.size,
-            isActive: now - c.mtimeMs < 5 * 60 * 1000,
+            isActive: isNativeCodexActive,
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
             agentTerminalReason: statusInfo.terminalReason,

@@ -216,7 +216,7 @@ describe("usePtyChat", () => {
     expect(result.current.pendingMessages).toEqual([])
   })
 
-  it("interrupt calls stop-session endpoint and resets state", async () => {
+  it("interrupt calls the non-destructive interrupt endpoint and resets state", async () => {
     // Make send-message hang so we have an active request
     mockedAuthFetch.mockImplementation((url) => {
       if (typeof url === "string" && url.includes("stop-session")) {
@@ -245,7 +245,7 @@ describe("usePtyChat", () => {
 
     expect(result.current.status).toBe("idle")
     expect(result.current.pendingMessages).toEqual([])
-    expect(mockedAuthFetch).toHaveBeenCalledWith("/api/stop-session", expect.objectContaining({
+    expect(mockedAuthFetch).toHaveBeenCalledWith("/api/interrupt-session", expect.objectContaining({
       method: "POST",
     }))
   })

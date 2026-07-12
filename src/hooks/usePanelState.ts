@@ -9,6 +9,7 @@ interface PanelState {
   showSidebar: boolean
   showStats: boolean
   showWorktrees: boolean
+  showWorkflows: boolean
   showFileChanges: boolean
   showProjectSwitcher: boolean
   showThemeSelector: boolean
@@ -16,6 +17,7 @@ interface PanelState {
   handleToggleSidebar: () => void
   handleToggleStats: () => void
   handleToggleWorktrees: () => void
+  handleToggleWorkflows: () => void
   handleToggleFileChanges: () => void
   handleToggleConfig: () => void
   handleEditConfig: (filePath: string) => void
@@ -26,6 +28,7 @@ interface PanelState {
 
   setShowSidebar: React.Dispatch<React.SetStateAction<boolean>>
   setShowWorktrees: React.Dispatch<React.SetStateAction<boolean>>
+  setShowWorkflows: React.Dispatch<React.SetStateAction<boolean>>
   setShowFileChanges: React.Dispatch<React.SetStateAction<boolean>>
 }
 
@@ -36,6 +39,7 @@ export function usePanelState(
   const [showSidebar, setShowSidebar] = useState(true)
   const [showStats, setShowStats] = useState(false)
   const [showWorktrees, setShowWorktrees] = useState(false)
+  const [showWorkflows, setShowWorkflows] = useState(false)
   const [showFileChanges, setShowFileChanges] = useState(true)
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
@@ -43,6 +47,7 @@ export function usePanelState(
   const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [])
   const handleToggleStats = useCallback(() => setShowStats((p) => !p), [])
   const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [])
+  const handleToggleWorkflows = useCallback(() => setShowWorkflows((p) => !p), [])
   const handleToggleFileChanges = useCallback(() => setShowFileChanges((p) => !p), [])
   const handleToggleConfig = useCallback(() => {
     if (state.mainView === "config") {
@@ -63,12 +68,14 @@ export function usePanelState(
     showSidebar,
     showStats,
     showWorktrees,
+    showWorkflows,
     showFileChanges,
     showProjectSwitcher,
     showThemeSelector,
     handleToggleSidebar,
     handleToggleStats,
     handleToggleWorktrees,
+    handleToggleWorkflows,
     handleToggleFileChanges,
     handleToggleConfig,
     handleEditConfig,
@@ -78,6 +85,7 @@ export function usePanelState(
     handleCloseThemeSelector,
     setShowSidebar,
     setShowWorktrees,
+    setShowWorkflows,
     setShowFileChanges,
   }
 }

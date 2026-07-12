@@ -53,6 +53,27 @@ function makeSubAgent(overrides: Partial<SubAgentMessage> = {}): SubAgentMessage
 // ── calculateCost — pricing tiers ────────────────────────────────────────────
 
 describe("calculateCost", () => {
+  describe("OpenAI GPT tiers", () => {
+    const models = [
+      { model: "gpt-5.6-sol", input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.50 },
+      { model: "gpt-5.6", input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.50 },
+      { model: "gpt-5.6-terra", input: 2.50, output: 15, cacheWrite: 3.125, cacheRead: 0.25 },
+      { model: "gpt-5.6-luna", input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.10 },
+      { model: "gpt-5.5", input: 5, output: 30, cacheWrite: 5, cacheRead: 0.50 },
+      { model: "gpt-5.4", input: 2.50, output: 15, cacheWrite: 2.50, cacheRead: 0.25 },
+      { model: "gpt-5.4-mini", input: 0.75, output: 4.50, cacheWrite: 0.75, cacheRead: 0.075 },
+    ]
+
+    for (const prices of models) {
+      it(`${prices.model}: uses official token and cache prices`, () => {
+        expect(calculateCost({ model: prices.model, inputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })).toBeCloseTo(prices.input)
+        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 1_000_000, cacheWriteTokens: 0, cacheReadTokens: 0 })).toBeCloseTo(prices.output)
+        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 1_000_000, cacheReadTokens: 0 })).toBeCloseTo(prices.cacheWrite)
+        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 1_000_000 })).toBeCloseTo(prices.cacheRead)
+      })
+    }
+  })
+
   describe("frontier tier (fable 5, mythos 5, opus 4.8): $10/$50", () => {
     const models = [
       "claude-fable-5",
@@ -207,6 +228,12 @@ describe("calculateCost", () => {
   it("null model uses the default tier", () => {
     const cost = calculateCost({ model: null, inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
     expect(cost).toBeCloseTo(0.5) // 100k * $5/M
+  })
+
+  it("does not invent a Claude price for an unknown GPT model", () => {
+    const cost = calculateCost({ model: "gpt-9.9-unknown", inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
+    expect(cost).toBeNaN()
+    expect(formatCost(cost)).toBe("—")
   })
 
   it("returns 0 for zero everything", () => {

@@ -1,5 +1,6 @@
 import { readFile, writeFile, stat, readdir } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { hashPassword, isPasswordHashed } from "./password-utils"
 
@@ -18,6 +19,12 @@ export function setConfigPath(p: string): void {
 
 export interface AppConfig {
   claudeDir: string
+  /**
+   * True when Cogpit bootstrapped from an existing Codex installation and the
+   * Claude history directory is only a compatibility path. This keeps the
+   * existing directory contract intact without requiring Claude Code.
+   */
+  codexOnly?: boolean
   networkAccess?: boolean
   networkPassword?: string
   terminalApp?: string
@@ -30,9 +37,38 @@ export function getConfig(): AppConfig | null {
   return cachedConfig
 }
 
-export async function loadConfig(): Promise<AppConfig | null> {
+async function detectCodexOnlyConfig(): Promise<AppConfig | null> {
+  const codexHome = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
   try {
-    const raw = await readFile(CONFIG_PATH, "utf-8")
+    const codexStat = await stat(codexHome)
+    if (codexStat.isDirectory()) {
+      return {
+        claudeDir: join(homedir(), ".claude"),
+        codexOnly: true,
+      }
+    }
+  } catch {
+    // Codex is not installed/configured either — show normal setup.
+  }
+  return null
+}
+
+export async function loadConfig(): Promise<AppConfig | null> {
+  let raw: string
+  try {
+    raw = await readFile(CONFIG_PATH, "utf-8")
+  } catch (error) {
+    // A first-run Codex user should not be forced to create a Claude history
+    // directory. Only bootstrap on a genuinely missing config file: malformed
+    // or unreadable user configuration must remain visible instead of being
+    // silently ignored.
+    cachedConfig = (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? await detectCodexOnlyConfig()
+      : null
+    return cachedConfig
+  }
+
+  try {
     const parsed = JSON.parse(raw)
     if (parsed.claudeDir && typeof parsed.claudeDir === "string") {
       let networkPassword: string | undefined = parsed.networkPassword || undefined
@@ -48,6 +84,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
 
       cachedConfig = {
         claudeDir: parsed.claudeDir,
+        codexOnly: !!parsed.codexOnly,
         networkAccess: !!parsed.networkAccess,
         networkPassword,
         terminalApp: parsed.terminalApp || undefined,
@@ -56,7 +93,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
       return cachedConfig
     }
   } catch {
-    // File doesn't exist or is malformed
+    // File is malformed or a migration failed.
   }
   cachedConfig = null
   return null

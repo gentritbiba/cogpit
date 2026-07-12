@@ -12,6 +12,7 @@ import {
 } from "../helpers"
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
 import { networkInterfaces } from "node:os"
+import { resolve } from "node:path"
 
 function getLanIp(): string | null {
   const ifaces = networkInterfaces()
@@ -127,6 +128,7 @@ export function registerConfigRoutes(use: UseFn) {
       res.setHeader("Content-Type", "application/json")
       res.end(JSON.stringify(config ? {
         claudeDir: config.claudeDir,
+        mode: config.codexOnly ? "codex" : "claude",
         networkAccess: config.networkAccess || false,
         networkPassword: config.networkPassword ? "set" : null,
         terminalApp: config.terminalApp || null,
@@ -148,15 +150,22 @@ export function registerConfigRoutes(use: UseFn) {
             return
           }
 
+          const currentConfig = getConfig()
           const validation = await validateClaudeDir(claudeDir)
-          if (!validation.valid) {
+          // A Codex-only bootstrap deliberately does not require
+          // ~/.claude/projects. Allow saving unrelated settings while that
+          // compatibility path is unchanged; any new Claude path must still
+          // pass the normal validation above.
+          const reusingCodexFallback = !!currentConfig?.codexOnly
+            && resolve(claudeDir) === resolve(currentConfig.claudeDir)
+          if (!validation.valid && !reusingCodexFallback) {
             res.statusCode = 400
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({ error: validation.error }))
             return
           }
-
-          const currentConfig = getConfig()
+          const resolvedClaudeDir = validation.resolved
+            || (reusingCodexFallback ? currentConfig.claudeDir : claudeDir)
 
           // Handle password: new password provided, or keep existing
           let finalPassword = currentConfig?.networkPassword || undefined
@@ -188,7 +197,8 @@ export function registerConfigRoutes(use: UseFn) {
           }
 
           await saveConfig({
-            claudeDir: validation.resolved || claudeDir,
+            claudeDir: resolvedClaudeDir,
+            codexOnly: reusingCodexFallback || undefined,
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,
@@ -196,7 +206,10 @@ export function registerConfigRoutes(use: UseFn) {
           refreshDirs()
 
           res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ success: true, claudeDir: validation.resolved || claudeDir }))
+          res.end(JSON.stringify({
+            success: true,
+            claudeDir: resolvedClaudeDir,
+          }))
         } catch {
           res.statusCode = 400
           res.setHeader("Content-Type", "application/json")

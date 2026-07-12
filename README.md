@@ -14,7 +14,7 @@
 
 ---
 
-Cogpit reads the JSONL session files that Claude Code and Codex write to disk and turns them into a live, interactive dashboard — so you can watch, control, and debug your AI agents without leaving your workflow. Start sessions with either provider, switch between them, and manage everything from one place.
+Cogpit turns Claude Code and Codex into one live, interactive control center. It uses provider-native control APIs for active work and the CLIs' on-disk history for restoration, so you can watch, steer, approve, and debug agents without leaving your workflow.
 
 Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
 
@@ -36,30 +36,33 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 
 - **See everything at once** — live sessions, token costs, file changes, and agent activity in one screen
 - **Talk to your agents** — send messages, approve plans, answer questions, interrupt or branch at any point
-- **Track the money** — per-turn token breakdown, model-aware cost calculation, API rate limit monitoring
-- **Debug faster** — full-text search across all sessions, color-coded tool calls, expandable thinking blocks, line-by-line edit diffs
+- **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring
+- **Debug faster** — color-coded tool calls, expandable thinking blocks, line-by-line edit diffs, and complete session history
 - **Manage multi-agent workflows** — team dashboards with kanban boards, inter-agent messaging, and per-member session navigation
 - **Undo anything** — rewind sessions to any turn with full branching support and file operation reversal
 
 ## Features
 
 ### Multi-Provider Support
-Start sessions with Claude Code or Codex from the same interface. A provider dialog lets you pick your agent when creating a new session. Model settings adapt per provider — Claude sessions show Opus/Sonnet/Haiku, Codex sessions show GPT models. Both support `low` through `max` effort (including `xhigh`). If a Codex model is unavailable, Cogpit automatically retries with the default.
+Start sessions with Claude Code or Codex from the same interface. Model settings come from the installed CLIs, including descriptions, recommended and supported reasoning levels, image support, personality support, and speed tiers. GPT-5.6 Sol, Terra, and Luna are supported, with Ultra and Fast shown only when the selected model and account advertise them. If a Codex model is unavailable, Cogpit visibly reports the fallback and retries with the provider default.
 
 ### Live Session Monitoring
-Stream active sessions via SSE. Watch Claude or Codex think, call tools, and edit files in real-time. Status indicators show running, thinking, tool use, and idle states. Process monitor tracks all agent CLI processes with PID, memory, and CPU.
+Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations.
 
 ### Interactive Chat
-Send messages to running sessions with model override (Opus, Sonnet, Haiku for Claude; GPT-5.4 and variants for Codex). Voice input via Whisper WASM. Slash command autocomplete from project skills and commands. Image support with drag-and-drop, paste, and format conversion.
+Send or steer messages with a model and effort override, toggle Fast where supported, and choose Read only, Workspace, or explicitly confirmed Full access. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
+
+### Long-Running Goals
+Create persistent goals above the composer and monitor status, tokens, elapsed time, and provider-native evaluator feedback. Codex goals can optionally use token budgets and explicit pause/resume controls; Claude goals follow Claude Code's native goal lifecycle.
 
 ### Conversation Timeline
-Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling. Full-text search across all content.
+Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling across long sessions.
 
 ### Sub-Agent Viewer
-When Claude spawns sub-agents via the Task tool, Cogpit tracks them automatically. Color-coded panels (green for sub-agents, violet for background agents) show the final return message from each agent within the parent session. Click "Open chat" to view the full sub-agent session inline. Background agents get their own distinct panels.
+When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. Color-coded panels show each result within the parent timeline, and full agent threads remain inspectable.
 
 ### Token Analytics & Cost Tracking
-Per-turn token usage (input, output, cache creation, cache read). Model-aware pricing. SVG bar charts. Context window percentage with color coding. Tool call breakdown, error tracking, duration metrics, agent/model breakdowns, cache efficiency, and API rate limit widget.
+Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
 
 ### Undo / Redo with Branching
 Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.
@@ -74,7 +77,7 @@ Inspect multi-agent teams: member status cards, kanban task board, color-coded m
 List active git worktrees with dirty/clean status, commits-ahead count, and linked sessions. Create PRs directly. Bulk cleanup of stale worktrees.
 
 ### Permissions & MCP Server Selector
-Configure permission modes (bypass, default, plan, acceptEdits, dontAsk, delegate) and tool-level allow/block. Choose which MCP servers to enable per session from a searchable selector — toggle servers on or off before sending a message.
+Use provider-specific access profiles and tool-level policies. Workspace access is the default; Full access requires a separate warning dialog. Native Codex command, file, and network approval requests—including requests raised by nested subagents—appear in the composer, expose only decisions allowed by the runtime, and resume directly when answered. Choose which MCP servers to enable per session from a searchable selector.
 
 ### Agent Configuration Editor
 Browse and edit your project's `.claude/` directory directly from the dashboard — skills, slash commands, CLAUDE.md, and MCP server configs. Changes are written to disk immediately, no terminal needed.

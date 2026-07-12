@@ -4,13 +4,25 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // ---------------------------------------------------------------------------
 // Mutable Maps must be hoisted so vi.mock factory can reference them
 // ---------------------------------------------------------------------------
-const { mockActiveProcesses, mockPersistentSessions } = vi.hoisted(() => {
+const { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls } = vi.hoisted(() => {
   const mockActiveProcesses = new Map<string, { pid: number; kill: ReturnType<typeof vi.fn> }>()
   const mockPersistentSessions = new Map<string, {
     dead: boolean
     proc: { pid: number; kill: ReturnType<typeof vi.fn> }
   }>()
-  return { mockActiveProcesses, mockPersistentSessions }
+  const mockCodexAppServer = {
+    getActiveTurnId: vi.fn(),
+    listActiveTurns: vi.fn(),
+    interruptTurn: vi.fn(),
+  }
+  const mockSDKControls = {
+    interruptSDKTurn: vi.fn(),
+    updateSDKSession: vi.fn(),
+    rewindClaudeFiles: vi.fn(),
+    stopSDKTask: vi.fn(),
+    backgroundSDKTasks: vi.fn(),
+  }
+  return { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls }
 })
 
 vi.mock("../../helpers", () => ({
@@ -27,7 +39,13 @@ vi.mock("../../helpers", () => ({
 vi.mock("../../sdk-session", () => ({
   stopSDKSession: vi.fn(() => false),
   cleanupAllSDKSessions: vi.fn(() => 0),
+  ...mockSDKControls,
 }))
+
+vi.mock("../../codex-app-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../codex-app-server")>()
+  return { ...actual, codexAppServer: mockCodexAppServer }
+})
 
 import type { UseFn, Middleware } from "../../helpers"
 import { registerClaudeManageRoutes } from "../../routes/claude-manage"
@@ -95,12 +113,90 @@ describe("claude-manage routes", () => {
     vi.clearAllMocks()
     mockActiveProcesses.clear()
     mockPersistentSessions.clear()
+    mockCodexAppServer.getActiveTurnId.mockReturnValue(undefined)
+    mockCodexAppServer.listActiveTurns.mockReturnValue([])
+    mockCodexAppServer.interruptTurn.mockResolvedValue({})
+    mockSDKControls.interruptSDKTurn.mockResolvedValue(true)
+    mockSDKControls.updateSDKSession.mockResolvedValue({ found: true, appliedLive: ["model"], staged: [] })
+    mockSDKControls.rewindClaudeFiles.mockResolvedValue({ canRewind: true })
+    mockSDKControls.stopSDKTask.mockResolvedValue(true)
+    mockSDKControls.backgroundSDKTasks.mockResolvedValue(true)
 
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
     }
     registerClaudeManageRoutes(use)
+  })
+
+  describe("native Claude controls", () => {
+    it("applies session settings live", async () => {
+      const handler = handlers.get("/api/claude/settings")!
+      const updates = { model: "claude-opus-4-6", fastMode: true, permissionMode: "auto" }
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/session-1", JSON.stringify(updates),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockSDKControls.updateSDKSession).toHaveBeenCalledWith("session-1", updates)
+      expect(res._getData()).toEqual({
+        success: true,
+        found: true,
+        appliedLive: ["model"],
+        staged: [],
+      })
+    })
+
+    it("interrupts an active Claude SDK turn", async () => {
+      const handler = handlers.get("/api/interrupt-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/", JSON.stringify({ sessionId: "claude-session" }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockSDKControls.interruptSDKTurn).toHaveBeenCalledWith("claude-session")
+      expect(res._getData()).toEqual({ success: true })
+    })
+
+    it("rewinds files to a native checkpoint", async () => {
+      const handler = handlers.get("/api/claude/checkpoints")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST",
+        "/session-1/rewind",
+        JSON.stringify({ userMessageId: "message-1", cwd: "/tmp/project", dryRun: true }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockSDKControls.rewindClaudeFiles).toHaveBeenCalledWith(
+        "session-1", "message-1", "/tmp/project", true,
+      )
+      expect(res._getData()).toEqual({ canRewind: true })
+    })
+
+    it("stops and backgrounds native agent tasks", async () => {
+      const handler = handlers.get("/api/claude/tasks")!
+      const stop = createMockReqRes("DELETE", "/session-1/task-7")
+      handler(stop.req as never, stop.res as never, stop.next)
+      await vi.waitFor(() => expect(stop.res.end).toHaveBeenCalled())
+      expect(mockSDKControls.stopSDKTask).toHaveBeenCalledWith("session-1", "task-7")
+
+      const background = createMockReqRes(
+        "POST", "/session-1/background", JSON.stringify({ toolUseId: "tool-9" }),
+      )
+      handler(background.req as never, background.res as never, background.next)
+      background.sendBody()
+      await vi.waitFor(() => expect(background.res.end).toHaveBeenCalled())
+      expect(mockSDKControls.backgroundSDKTasks).toHaveBeenCalledWith("session-1", "tool-9")
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -204,6 +300,36 @@ describe("claude-manage routes", () => {
       const body = res._getData()
       expect(body.killed).toBe(5)
       expect(body.success).toBe(true)
+    })
+
+    it("interrupts every native parent and subagent turn before process cleanup", async () => {
+      const pendingInterrupts: Array<() => void> = []
+      mockCodexAppServer.listActiveTurns.mockReturnValue([
+        { threadId: "thread-parent", turnId: "turn-parent" },
+        { threadId: "thread-child", turnId: "turn-child" },
+      ])
+      mockCodexAppServer.interruptTurn.mockImplementation(
+        () => new Promise<void>((resolve) => pendingInterrupts.push(resolve)),
+      )
+      const legacy = makeMockProc(2001)
+      mockActiveProcesses.set("legacy", legacy)
+
+      const handler = handlers.get("/api/kill-all")!
+      const { req, res, next } = createMockReqRes("POST", "/api/kill-all")
+      handler(req as never, res as never, next)
+
+      expect(mockCodexAppServer.interruptTurn.mock.calls).toEqual([
+        ["thread-parent", "turn-parent"],
+        ["thread-child", "turn-child"],
+      ])
+      expect(legacy.kill).not.toHaveBeenCalled()
+      expect(res.end).not.toHaveBeenCalled()
+
+      pendingInterrupts.forEach((resolve) => resolve())
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(legacy.kill).toHaveBeenCalledWith("SIGTERM")
+      expect(res._getData()).toEqual({ success: true, killed: 3 })
     })
 
     it("skips already-dead persistent sessions but still removes them from Map", () => {
@@ -330,6 +456,44 @@ describe("claude-manage routes", () => {
 
       expect(ap.kill).toHaveBeenCalledWith("SIGTERM")
       expect(res._getData().success).toBe(true)
+    })
+
+    it("interrupts a native Codex turn without inventing a process", async () => {
+      mockCodexAppServer.getActiveTurnId.mockReturnValue("turn-native")
+      const handler = handlers.get("/api/stop-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/", JSON.stringify({ sessionId: "thread-native" })
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCodexAppServer.interruptTurn).toHaveBeenCalledWith(
+        "thread-native",
+        "turn-native",
+      )
+      expect(res._getData()).toEqual({ success: true })
+    })
+
+    it("tries native interruption before falling back to a legacy process", async () => {
+      mockCodexAppServer.getActiveTurnId.mockReturnValue("turn-native")
+      mockCodexAppServer.interruptTurn.mockRejectedValue(new Error("transport lost"))
+      const ps = makeMockPersistentSession(1001)
+      mockPersistentSessions.set("sess-legacy", ps)
+      const handler = handlers.get("/api/stop-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/", JSON.stringify({ sessionId: "sess-legacy" })
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCodexAppServer.interruptTurn).toHaveBeenCalled()
+      expect(ps.proc.kill).toHaveBeenCalledWith("SIGTERM")
+      expect(mockCodexAppServer.interruptTurn.mock.invocationCallOrder[0])
+        .toBeLessThan(ps.proc.kill.mock.invocationCallOrder[0])
     })
   })
 

@@ -9,6 +9,7 @@ import {
   Bot,
   ChevronRight,
   FileCode2,
+  Workflow as WorkflowIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -33,6 +34,8 @@ interface SessionInfoBarProps {
   onBackToMain?: () => void
   onShowFileChanges?: () => void
   hasFileChanges?: boolean
+  onShowWorkflows?: () => void
+  workflowCount?: number
 }
 
 export const SessionInfoBar = memo(function SessionInfoBar({
@@ -43,6 +46,8 @@ export const SessionInfoBar = memo(function SessionInfoBar({
   onBackToMain,
   onShowFileChanges,
   hasFileChanges,
+  onShowWorkflows,
+  workflowCount,
 }: SessionInfoBarProps) {
   const { isMobile } = useAppContext()
   const { session: sessionOrNull, sessionSource } = useSessionContext()
@@ -58,6 +63,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
         <>
           {onBackToMain && (
             <button
+              type="button"
               onClick={onBackToMain}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-400 hover:bg-blue-500/15 transition-colors"
             >
@@ -101,6 +107,22 @@ export const SessionInfoBar = memo(function SessionInfoBar({
       )}
 
       <div className="flex-1" />
+
+      {/* Workflows button — shown on both mobile and desktop when the session has workflows */}
+      {onShowWorkflows && (workflowCount ?? 0) > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-violet-400 hover:bg-violet-500/20"
+          onClick={onShowWorkflows}
+        >
+          <WorkflowIcon className="size-3" />
+          {isMobile ? "Flows" : "Workflows"}
+          <Badge variant="outline" className="h-4 min-w-4 justify-center px-1 text-[9px] font-semibold border-violet-700/50 text-violet-300">
+            {workflowCount}
+          </Badge>
+        </Button>
+      )}
 
       {/* File changes button (mobile only) */}
       {isMobile && hasFileChanges && onShowFileChanges && (

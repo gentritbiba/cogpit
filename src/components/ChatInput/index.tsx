@@ -8,18 +8,23 @@ import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { UserQuestionBar } from "./UserQuestionBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
-import { useVoiceInput } from "./useVoiceInput"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
+import type { AgentKind } from "@/lib/sessionSource"
 
 export interface ChatInputHandle {
-  toggleVoice: () => void
   focus: () => void
   /** Get the current input text (for draft text preservation). */
   getText: () => string
   /** Set the input text (for draft text restoration). */
   setText: (text: string) => void
+}
+
+interface ChatInputProps {
+  /** Whether the selected provider/model accepts image input. */
+  allowImages?: boolean
+  agentKind?: AgentKind | null
 }
 
 /**
@@ -63,10 +68,11 @@ function autoResize(el: HTMLTextAreaElement | null, currentlyMultiline: boolean)
   return needsMultiline
 }
 
-function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean, hasPermissionRequests?: boolean): string {
+function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean, hasPermissionRequests?: boolean, isSteering?: boolean): string {
   if (hasPermissionRequests) return "Resolve approval to continue..."
   if (isPlanApproval) return "Provide feedback to request changes..."
   if (isUserQuestion) return "Type a custom response..."
+  if (isSteering) return "Steer the active turn… (Enter to send)"
   if (isConnected) return "Message... (Enter to send)"
   return "Send a message... (Enter to send)"
 }
@@ -78,7 +84,7 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_props, ref) {
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind }, ref) {
   const {
     isLive,
     actions: { handleEditConfig: onEditConfig },
@@ -103,17 +109,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
 
   const updateMultiline = useCallback((v: boolean) => { isMultilineRef.current = v; setIsMultiline(v) }, [])
 
-  const { voiceStatus, voiceProgress, voiceError, toggleVoice, destroyTranscriber } = useVoiceInput({
-    onTranscript: (transcript) => {
-      setText((prev) => {
-        const joined = prev ? prev + " " + transcript : transcript
-        requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
-        return joined
-      })
-    },
-  })
-
-  const { images, isDragOver, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload()
+  const { images, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(allowImages)
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const showSlash = text.startsWith("/") && !text.includes(" ")
@@ -146,13 +142,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
-    const imagePayload = images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
+    if (!allowImages && images.length > 0) return
+    const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
     onSend(trimmed, imagePayload)
     setText("")
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, onSend, clearImages, updateMultiline])
+  }, [text, images, allowImages, onSend, clearImages, updateMultiline])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showSlash && filteredSlashList.length > 0) {
@@ -168,20 +165,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
   useImperativeHandle(ref, () => ({
-    toggleVoice,
     focus: () => textareaRef.current?.focus(),
     getText: () => textRef.current,
     setText: (newText: string) => {
       setText(newText)
       requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
     },
-  }), [toggleVoice, updateMultiline])
-  useEffect(() => { return () => { destroyTranscriber() } }, [destroyTranscriber])
+  }), [updateMultiline])
 
   const isPlanApproval = pendingInteraction?.type === "plan"
   const isUserQuestion = pendingInteraction?.type === "question"
   const hasPermissions = permissionRequests.length > 0
-  const hasContent = text.trim().length > 0 || images.length > 0
+  const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
+  const isSteering = agentKind === "codex" && canInterrupt
 
   return (
     <div
@@ -207,13 +203,24 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {images.map((img, i) => (
-              <div key={i} className="relative group/thumb">
+              <div key={img.id} className="relative group/thumb">
                 <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-lg border border-border/50 object-contain bg-muted" />
-                <button onClick={() => removeImage(i)} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-muted border border-border flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity hover:bg-red-900 hover:border-red-600" aria-label={`Remove image ${i + 1}`}>
+                <button type="button" onClick={() => removeImage(i)} className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted opacity-100 transition-opacity hover:border-red-600 hover:bg-red-900 sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
                   <X className="w-3 h-3 text-foreground" />
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {imageError && (
+          <div role="status" aria-live="polite" className="mb-2 flex items-center gap-2 text-xs text-amber-400">
+            <span className="flex-1">{imageError}</span>
+            {!hasUnsupportedAttachments && (
+              <button type="button" onClick={dismissImageError} className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Dismiss image notice">
+                <X className="size-3" />
+              </button>
+            )}
           </div>
         )}
 
@@ -241,7 +248,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
               // On mobile, scroll textarea into view after virtual keyboard opens
               setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
             }}
-            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions)}
+            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering)}
             rows={1}
             className={cn(
               "w-full resize-none bg-transparent pl-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none",
@@ -253,7 +260,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle>(function ChatInput(_pr
             isMultiline ? "px-2 pb-2 justify-end" : "pr-1.5 pb-1.5"
           )}>
             <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
-            <ActionButtons hasContent={hasContent} voiceStatus={voiceStatus} voiceProgress={voiceProgress} voiceError={voiceError} onToggleVoice={toggleVoice} onSubmit={handleSubmit} />
+            <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
           </div>
         </div>
         {status === "error" && error && <ErrorBanner error={error} />}

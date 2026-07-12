@@ -136,4 +136,20 @@ describe("SessionRow — deferred state", () => {
     fireEvent.click(screen.getByRole("button", { name: /resume to evaluate/i }))
     expect(onSelect).not.toHaveBeenCalled()
   })
+
+  it("renders native Codex live state without a killable process", () => {
+    render(
+      <SessionRow
+        session={makeSession({ isActive: true, agentStatus: "idle" })}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Running")).toHaveAttribute("data-session-live-state")
+    expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
+  })
 })

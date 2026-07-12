@@ -13,14 +13,12 @@ directories:
 
 asar: true
 asarUnpack:
-  - packages/cogpit-memory/dist/**/*
   # Native Claude CLI binary spawned by the agent SDK — must live outside asar
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**
 compression: maximum
 
 files:
   - out/**/*
-  - packages/cogpit-memory/dist/**/*
   - "!out/**/*.map"
   - "!node_modules/**/*.{md,map,ts,d.ts}"
   - "!node_modules/**/{CHANGELOG,README,LICENSE,LICENCE,readme,changelog}*"
@@ -36,7 +34,6 @@ files:
   - "!node_modules/class-variance-authority/**"
   - "!node_modules/tailwind-merge/**"
   - "!node_modules/remark-gfm/**"
-  - "!node_modules/whisper-web-transcriber/**"
 
 extraMetadata:
   main: out/main/main.js

@@ -11,6 +11,7 @@ import {
   buildCodexPermArgs as _buildCodexPermArgs,
   buildCodexEffortArgs as _buildCodexEffortArgs,
   buildCodexModelArgs as _buildCodexModelArgs,
+  buildCodexFastModeArgs as _buildCodexFastModeArgs,
   isCodexDirName as _isCodexDirName,
   encodeCodexDirName as _encodeCodexDirName,
   decodeCodexDirName as _decodeCodexDirName,
@@ -82,6 +83,11 @@ export function buildCodexModelArgs(model?: string): string[] {
   return _buildCodexModelArgs(model)
 }
 
+/** Build Codex Fast-mode config args (delegates to providers/codex) */
+export function buildCodexFastModeArgs(enabled?: boolean): string[] {
+  return _buildCodexFastModeArgs(enabled)
+}
+
 const IMAGE_EXT: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/gif": "gif",
@@ -122,7 +128,8 @@ export const dirs = {
   UNDO_DIR: "",
 }
 
-export const CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions")
+export const CODEX_HOME_DIR = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
+export const CODEX_SESSIONS_DIR = join(CODEX_HOME_DIR, "sessions")
 
 /** Delegates to providers/codex.isCodexDirName */
 export function isCodexDirName(dirName: string): boolean {

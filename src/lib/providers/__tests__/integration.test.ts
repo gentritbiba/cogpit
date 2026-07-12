@@ -12,6 +12,7 @@ import {
   isCodexDirName,
   encodeCodexDirName,
   decodeCodexDirName,
+  buildCodexFastModeArgs,
   AGENT_KINDS,
 } from "../index"
 
@@ -168,9 +169,9 @@ describe("isCodexDirName", () => {
 // ── Provider arg builders ─────────────────────────────────────────────────────
 
 describe("provider.buildPermArgs", () => {
-  it("claude: returns dangerously-skip-permissions with no config", () => {
+  it("claude: defaults to the safe permission mode with no config", () => {
     const args = getProvider("claude").buildPermArgs()
-    expect(args).toContain("--dangerously-skip-permissions")
+    expect(args).toEqual(["--permission-mode", "default"])
   })
 
   it("claude: dontAsk mode returns --permission-mode dontAsk", () => {
@@ -183,9 +184,14 @@ describe("provider.buildPermArgs", () => {
     expect(args).toContain("--dangerously-skip-permissions")
   })
 
-  it("codex: defaults to bypass approvals and sandbox", () => {
+  it("codex: defaults to workspace sandboxing without silent elevation", () => {
     const args = getProvider("codex").buildPermArgs()
-    expect(args).toEqual(["--dangerously-bypass-approvals-and-sandbox"])
+    expect(args).toEqual(["--sandbox", "workspace-write", "-c", 'approval_policy="never"'])
+  })
+
+  it("codex: plan mode is read-only", () => {
+    const args = getProvider("codex").buildPermArgs({ mode: "plan" })
+    expect(args).toEqual(["--sandbox", "read-only", "-c", 'approval_policy="never"'])
   })
 
   it("codex: bypassPermissions returns dangerously-bypass flag", () => {
@@ -221,6 +227,21 @@ describe("provider.buildEffortArgs", () => {
 
   it("codex: returns model_reasoning_effort config for xhigh", () => {
     expect(getProvider("codex").buildEffortArgs("xhigh")).toEqual(["-c", "model_reasoning_effort=\"xhigh\""])
+  })
+})
+
+describe("Codex Fast mode args", () => {
+  it("enables the priority service tier when Fast is selected", () => {
+    expect(buildCodexFastModeArgs(true)).toEqual([
+      "-c",
+      'service_tier="fast"',
+      "--enable",
+      "fast_mode",
+    ])
+  })
+
+  it("does not override the service tier in Standard mode", () => {
+    expect(buildCodexFastModeArgs(false)).toEqual([])
   })
 })
 

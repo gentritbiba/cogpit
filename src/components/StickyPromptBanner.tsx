@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react"
 import { ChevronUp } from "lucide-react"
 import type { ParsedSession } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
+import { parseTeammateMessage } from "@/lib/teammateMessage"
 import { cn } from "@/lib/utils"
 
 const SYSTEM_TAG_RE =
-  /<(?:system-reminder|local-command-caveat|command-name|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|teammate-message|env|claude_background_info|fast_mode_info|gitStatus)>/g
+  /<(?:system-reminder|local-command-caveat|command-name|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|env|claude_background_info|fast_mode_info|gitStatus)>/g
 
 interface StickyPromptBannerProps {
   session: ParsedSession
@@ -122,7 +123,8 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     const turn = session.turns[stickyTurn.index]
     if (!turn?.userMessage) return null
     const raw = getUserMessageText(turn.userMessage)
-    const clean = raw.replace(SYSTEM_TAG_RE, "").trim()
+    const { text: unwrapped } = parseTeammateMessage(raw)
+    const clean = unwrapped.replace(SYSTEM_TAG_RE, "").trim()
     if (!clean) return null
     const firstLine = clean.split("\n")[0]
     return firstLine.length > 150 ? firstLine.slice(0, 150) + "..." : firstLine

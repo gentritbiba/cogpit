@@ -13,24 +13,27 @@ export interface PermissionRequest {
   description?: string
   decisionReason?: string
   blockedPath?: string
+  suggestions?: Array<Record<string, unknown>>
   timestamp: number
+  /** Decisions this provider allows for this exact request. Omitted by legacy providers. */
+  availableDecisions?: PermissionDecision[]
 }
 
 const POLL_INTERVAL = 600
 
 export function usePermissionRequests(
   sessionId: string | null,
-  permissionMode: string | undefined,
+  _permissionMode: string | undefined,
 ) {
   const [requests, setRequests] = useState<PermissionRequest[]>([])
   const [responding, setResponding] = useState<Set<string>>(new Set())
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
 
-  const isBypass = !permissionMode || permissionMode === "bypassPermissions"
-
+  // Access mode controls future tool calls. An approval already issued by a
+  // provider remains pending until the user explicitly answers it.
   useEffect(() => {
-    if (!sessionId || isBypass) {
+    if (!sessionId) {
       setRequests([])
       return
     }
@@ -54,7 +57,7 @@ export function usePermissionRequests(
     poll()
     const id = setInterval(poll, POLL_INTERVAL)
     return () => { cancelled = true; clearInterval(id) }
-  }, [sessionId, isBypass])
+  }, [sessionId])
 
   const respond = useCallback(async (
     requestId: string,

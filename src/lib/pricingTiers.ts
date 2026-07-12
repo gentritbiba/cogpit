@@ -1,8 +1,9 @@
 /**
  * Pricing tier constants and model-to-tier resolution.
  *
- * Source: Claude Code v2.1.172 binary (decompiled JS bundle).
- * CC uses a model->tier mapping; each tier has five price points.
+ * Sources: Claude Code v2.1.172 binary (decompiled JS bundle) for Anthropic
+ * models, and the official OpenAI model pricing pages for GPT models.
+ * Each model maps to a tier with five price points.
  *
  * Changes vs the old v2.1.53 table:
  *  - Extended-context (>200k input) pricing is gone — flat pricing per model.
@@ -29,6 +30,16 @@ const TIER_OPUS_MID:  PricingTier = { input: 5,    output: 25,  cacheWrite: 6.25
 const TIER_FRONTIER:  PricingTier = { input: 10,   output: 50,  cacheWrite: 12.50, cacheRead: 1.00, webSearch: 0.01 }
 const TIER_OPUS_LEGACY: PricingTier = { input: 15, output: 75,  cacheWrite: 18.75, cacheRead: 1.50, webSearch: 0.01 }
 
+// GPT-5.6 publishes a separate cache-write price at 1.25x uncached input.
+// Earlier GPT models publish only standard and cached-input prices, so cache
+// creation remains at their standard input rate.
+const TIER_GPT_56_SOL:   PricingTier = { input: 5,    output: 30,  cacheWrite: 6.25,   cacheRead: 0.50,  webSearch: 0.01 }
+const TIER_GPT_56_TERRA: PricingTier = { input: 2.50, output: 15,  cacheWrite: 3.125,  cacheRead: 0.25,  webSearch: 0.01 }
+const TIER_GPT_56_LUNA:  PricingTier = { input: 1,    output: 6,   cacheWrite: 1.25,   cacheRead: 0.10,  webSearch: 0.01 }
+const TIER_GPT_55:       PricingTier = { input: 5,    output: 30,  cacheWrite: 5,      cacheRead: 0.50,  webSearch: 0.01 }
+const TIER_GPT_54:       PricingTier = { input: 2.50, output: 15,  cacheWrite: 2.50,   cacheRead: 0.25,  webSearch: 0.01 }
+const TIER_GPT_54_MINI:  PricingTier = { input: 0.75, output: 4.5, cacheWrite: 0.75,   cacheRead: 0.075, webSearch: 0.01 }
+
 /** Fast-mode surcharge tier (speed === "fast" on Opus 4.6/4.7). */
 const TIER_FAST:      PricingTier = { input: 30,   output: 150, cacheWrite: 37.50, cacheRead: 3.00, webSearch: 0.01 }
 
@@ -38,6 +49,14 @@ const TIER_FAST:      PricingTier = { input: 30,   output: 150, cacheWrite: 37.5
 // key.  We match with `includes()` for robustness; the `[1m]` context suffix
 // (e.g. "claude-fable-5[1m]") matches the same entries.
 const MODEL_TIERS: Array<{ match: string; tier: PricingTier }> = [
+  // OpenAI GPT models. Keep variants before their shared family prefixes.
+  { match: "gpt-5.6-sol",   tier: TIER_GPT_56_SOL },
+  { match: "gpt-5.6-terra", tier: TIER_GPT_56_TERRA },
+  { match: "gpt-5.6-luna",  tier: TIER_GPT_56_LUNA },
+  { match: "gpt-5.6",        tier: TIER_GPT_56_SOL },
+  { match: "gpt-5.4-mini",   tier: TIER_GPT_54_MINI },
+  { match: "gpt-5.5",        tier: TIER_GPT_55 },
+  { match: "gpt-5.4",        tier: TIER_GPT_54 },
   // Frontier (Fable 5 / Mythos 5 / Opus 4.8)
   { match: "fable-5",        tier: TIER_FRONTIER },
   { match: "mythos-5",       tier: TIER_FRONTIER },
@@ -94,4 +113,18 @@ export function resolveTier(model: string, speed?: string): PricingTier {
   }
 
   return DEFAULT_TIER
+}
+
+/**
+ * Whether Cogpit has a published USD price for this model.
+ *
+ * Keep the historical Claude-family fallback for old rollouts whose model is
+ * absent or abbreviated, but never price a future/unknown GPT model as if it
+ * were Claude. That would create a precise-looking but invented dollar value.
+ */
+export function hasKnownPricing(model: string | null | undefined): boolean {
+  if (!model) return true
+  const normalized = model.toLowerCase()
+  if (!normalized.startsWith("gpt-")) return true
+  return MODEL_TIERS.some((entry) => normalized.includes(entry.match))
 }

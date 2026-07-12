@@ -10,7 +10,7 @@
  */
 
 import type { Turn, SubAgentMessage } from "./types"
-import { resolveTier } from "./pricingTiers"
+import { hasKnownPricing, resolveTier } from "./pricingTiers"
 
 export { computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./costAnalytics"
 
@@ -40,6 +40,7 @@ export interface CostInput {
  * themselves.
  */
 export function calculateCost(c: CostInput): number {
+  if (!hasKnownPricing(c.model)) return Number.NaN
   const p = resolveTier(c.model ?? "", c.speed)
   return (
     (c.inputTokens / 1_000_000) * p.input +
@@ -143,6 +144,7 @@ export function calculateSubAgentCostEstimated(sa: SubAgentMessage): number {
 // ── Formatting ───────────────────────────────────────────────────────────────
 
 export function formatCost(usd: number): string {
+  if (!Number.isFinite(usd)) return "—"
   if (usd < 0.01) return `$${usd.toFixed(4)}`
   if (usd < 1) return `$${usd.toFixed(3)}`
   return `$${usd.toFixed(2)}`

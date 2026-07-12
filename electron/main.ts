@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session, shell, systemPreferences, utilityProcess } from "electron"
+import { app, BrowserWindow, Menu, shell, utilityProcess } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
@@ -112,19 +112,6 @@ app.whenReady().then(async () => {
   }
 
   console.log(`Cogpit server ready on port ${port} (utility process)`)
-
-  // Grant microphone permission for voice input (Whisper WASM)
-  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === "media")
-  })
-  session.defaultSession.setPermissionCheckHandler(() => true)
-
-  // macOS: request system-level microphone access BEFORE loading the window
-  // so the OS permission dialog appears proactively. Without this, getUserMedia
-  // fails with NotAllowedError because macOS blocks unregistered apps.
-  if (process.platform === "darwin") {
-    await systemPreferences.askForMediaAccess("microphone").catch(() => {})
-  }
 
   // Custom menu: removes macOS "Show Tab Bar" (Ctrl+Cmd+T) which
   // conflicts with the open-terminal shortcut in the renderer.

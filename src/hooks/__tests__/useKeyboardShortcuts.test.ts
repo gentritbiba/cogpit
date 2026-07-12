@@ -8,7 +8,7 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
   return {
     isMobile: false,
     searchInputRef: { current: null } as RefObject<HTMLInputElement | null>,
-    chatInputRef: { current: null } as RefObject<{ focus: () => void; toggleVoice: () => void } | null>,
+    chatInputRef: { current: null } as RefObject<{ focus: () => void } | null>,
     dispatch: vi.fn() as Dispatch<SessionAction>,
     onToggleSidebar: vi.fn(),
     onToggleRightSidebar: vi.fn(),
@@ -141,36 +141,12 @@ describe("useKeyboardShortcuts", () => {
     })
   })
 
-  describe("Cmd+Shift+M - toggle voice and focus chat", () => {
-    it("focuses chat input and toggles voice", () => {
-      const focusMock = vi.fn()
-      const toggleVoiceMock = vi.fn()
-      const chatInputRef = {
-        current: { focus: focusMock, toggleVoice: toggleVoiceMock },
-      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
-      const opts = createOpts({ chatInputRef })
-      renderHook(() => useKeyboardShortcuts(opts))
-
-      fireKey("M", { metaKey: true, shiftKey: true })
-      expect(focusMock).toHaveBeenCalled()
-      expect(toggleVoiceMock).toHaveBeenCalled()
-    })
-
-    it("does nothing when chatInputRef.current is null", () => {
-      const opts = createOpts()
-      renderHook(() => useKeyboardShortcuts(opts))
-
-      // Should not throw
-      fireKey("M", { metaKey: true, shiftKey: true })
-    })
-  })
-
   describe("Space - focus chat input", () => {
     it("focuses chat input when no input is focused", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
-        current: { focus: focusMock, toggleVoice: vi.fn() },
-      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+        current: { focus: focusMock },
+      } as unknown as RefObject<{ focus: () => void } | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 
@@ -181,8 +157,8 @@ describe("useKeyboardShortcuts", () => {
     it("does not focus chat input when an input is focused", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
-        current: { focus: focusMock, toggleVoice: vi.fn() },
-      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+        current: { focus: focusMock },
+      } as unknown as RefObject<{ focus: () => void } | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 
@@ -199,8 +175,8 @@ describe("useKeyboardShortcuts", () => {
     it("does not focus chat input when a textarea is focused", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
-        current: { focus: focusMock, toggleVoice: vi.fn() },
-      } as unknown as RefObject<{ focus: () => void; toggleVoice: () => void } | null>
+        current: { focus: focusMock },
+      } as unknown as RefObject<{ focus: () => void } | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 
