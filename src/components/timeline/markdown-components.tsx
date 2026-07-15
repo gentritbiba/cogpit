@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { PluggableList } from "unified"
+import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 
 const IMAGE_EXTENSIONS = new Set([
@@ -25,9 +26,62 @@ function resolveImageSrc(src: string | undefined): string | undefined {
   return src
 }
 
+interface LocalFileTarget {
+  path: string
+  line?: number
+  column?: number
+}
+
+/** Parse an absolute filesystem link, including optional :line:column or #LxCy. */
+export function parseLocalFileHref(href: string | undefined): LocalFileTarget | null {
+  if (!href) return null
+
+  let target = href
+  if (target.toLowerCase().startsWith("file://")) {
+    try {
+      const fileUrl = new URL(target)
+      target = `${fileUrl.pathname}${fileUrl.hash}`
+    } catch {
+      return null
+    }
+  }
+
+  const isPosixPath = target.startsWith("/") && !target.startsWith("//")
+  const isWindowsPath = /^\/?[a-z]:[\\/]/i.test(target)
+  if (!isPosixPath && !isWindowsPath) return null
+
+  let line: number | undefined
+  let column: number | undefined
+
+  const fragmentLocation = target.match(/#L(\d+)(?:C(\d+))?$/i)
+  if (fragmentLocation) {
+    line = Number(fragmentLocation[1])
+    column = fragmentLocation[2] ? Number(fragmentLocation[2]) : undefined
+    target = target.slice(0, -fragmentLocation[0].length)
+  } else {
+    const suffixLocation = target.match(/:(\d+)(?::(\d+))?$/)
+    if (suffixLocation) {
+      line = Number(suffixLocation[1])
+      column = suffixLocation[2] ? Number(suffixLocation[2]) : undefined
+      target = target.slice(0, -suffixLocation[0].length)
+    }
+  }
+
+  try {
+    target = decodeURIComponent(target)
+  } catch {
+    return null
+  }
+
+  // file:///C:/path is represented as /C:/path by URL.pathname.
+  if (/^\/[a-z]:[\\/]/i.test(target)) target = target.slice(1)
+
+  return { path: target, line, column }
+}
+
 /**
- * Custom link component that opens URLs in the default browser
- * via window.open(), which Electron intercepts via setWindowOpenHandler.
+ * Opens filesystem links in the configured code editor and web URLs in the
+ * default browser (Electron intercepts window.open for external navigation).
  */
 function ExternalLink({
   href,
@@ -35,8 +89,16 @@ function ExternalLink({
   ...props
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (href) {
-      e.preventDefault()
+    if (!href) return
+
+    e.preventDefault()
+    const fileTarget = parseLocalFileHref(href)
+    if (fileTarget) {
+      openInEditor(fileTarget.path, "file", {
+        line: fileTarget.line,
+        column: fileTarget.column,
+      })
+    } else {
       window.open(href, "_blank")
     }
   }
@@ -45,7 +107,7 @@ function ExternalLink({
     <a
       href={href}
       onClick={handleClick}
-      className="text-blue-600 dark:text-blue-400 underline decoration-blue-500/30 hover:decoration-blue-500/60 cursor-pointer transition-colors"
+      className="text-primary underline decoration-primary/30 hover:decoration-primary/60 cursor-pointer transition-colors"
       title={href}
       {...props}
     >

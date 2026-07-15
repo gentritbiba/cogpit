@@ -114,8 +114,16 @@ function ProcessTab({
   onClose: () => void
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onClick()
+        }
+      }}
       title={process.source ?? process.name}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors shrink-0",
@@ -140,14 +148,16 @@ function ProcessTab({
         {process.type}
       </span>
 
-      <span
-        role="button"
+      <button
+        type="button"
+        aria-label={`Close ${process.name}`}
         onClick={(e) => { e.stopPropagation(); onClose() }}
+        onKeyDown={(e) => e.stopPropagation()}
         className="ml-0.5 rounded p-0.5 hover:bg-elevation-3 text-muted-foreground hover:text-foreground"
       >
         <X className="size-2.5" />
-      </span>
-    </button>
+      </button>
+    </div>
   )
 }
 
@@ -175,6 +185,8 @@ interface ProcessPanelProps {
   onSetActive: (id: string) => void
   onRemove: (id: string) => void
   onToggleCollapse: () => void
+  onRequestTerminal?: () => void
+  onAddTerminalContext?: (text: string) => void
   onUpdateStatus?: (id: string, status: ProcessEntry["status"]) => void
 }
 
@@ -185,6 +197,8 @@ export const ProcessPanel = memo(function ProcessPanel({
   onSetActive,
   onRemove,
   onToggleCollapse,
+  onRequestTerminal,
+  onAddTerminalContext,
   onUpdateStatus,
 }: ProcessPanelProps) {
   const pty = usePty()
@@ -224,11 +238,8 @@ export const ProcessPanel = memo(function ProcessPanel({
   const onPointerUp = useCallback(() => {
     if (!dragRef.current) return
     dragRef.current = null
-    setHeight((h) => {
-      try { localStorage.setItem(HEIGHT_KEY, String(h)) } catch { /* ignore */ }
-      return h
-    })
-  }, [])
+    try { localStorage.setItem(HEIGHT_KEY, String(height)) } catch { /* ignore */ }
+  }, [height])
 
   if (processes.size === 0) return null
 
@@ -249,6 +260,7 @@ export const ProcessPanel = memo(function ProcessPanel({
 
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-elevation-1 px-3">
         <button
+          type="button"
           className="flex items-center gap-1.5 hover:text-foreground transition-colors"
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand process panel" : "Collapse process panel"}
@@ -287,6 +299,9 @@ export const ProcessPanel = memo(function ProcessPanel({
               key={activeProcess.id}
               processId={activeProcess.id}
               autoFocus
+              onRequestNew={onRequestTerminal}
+              onRequestClose={() => handleClose(activeProcess)}
+              onAddContext={onAddTerminalContext}
             />
           )}
         </div>

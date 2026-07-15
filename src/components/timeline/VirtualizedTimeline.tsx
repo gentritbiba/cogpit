@@ -8,6 +8,7 @@ import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { getTurnKey } from "@/components/stats/turnKey"
 import type { Turn } from "@/lib/types"
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
   return (
     <div className="space-y-3">
       {filteredTurns.map(({ turn, index }) => (
-        <MaybeContextMenuTurn key={turn.id} index={index}>
+        <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
           <div ref={setTurnRef(index)} data-turn-index={index}>
             {turn.compactionSummary && (
               <CompactionMarker summary={turn.compactionSummary} />
@@ -208,7 +209,7 @@ export function VirtualizedTimeline({
         const isLastVirtualRow = virtualRow.index === filteredTurns.length - 1
 
         return (
-          <MaybeContextMenuTurn key={turn.id} index={index}>
+          <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
             <div
               data-index={virtualRow.index}
               data-turn-index={index}

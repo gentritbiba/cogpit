@@ -29,6 +29,9 @@ import { registerSlashSuggestionRoutes } from "../server/routes/slash-suggestion
 import { registerConfigBrowserRoutes } from "../server/routes/config-browser"
 import { registerLocalFileRoutes } from "../server/routes/local-file"
 import { registerFileContentRoutes } from "../server/routes/file-content"
+import { registerProjectFileRoutes } from "../server/routes/project-files"
+import { registerProjectFileContentRoutes } from "../server/routes/project-file"
+import { registerGitStatusRoutes } from "../server/routes/git-status"
 import { registerMcpRoutes } from "../server/routes/mcp"
 import { registerNotifyRoutes } from "../server/routes/notify"
 import { registerScriptRoutes } from "../server/routes/scripts"
@@ -91,6 +94,9 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   registerConfigBrowserRoutes(use)
   registerLocalFileRoutes(use)
   registerFileContentRoutes(use)
+  registerProjectFileRoutes(use)
+  registerProjectFileContentRoutes(use)
+  registerGitStatusRoutes(use)
   registerMcpRoutes(use)
   registerNotifyRoutes(use)
   registerScriptRoutes(use)

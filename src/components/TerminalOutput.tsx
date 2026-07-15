@@ -1,8 +1,11 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebLinksAddon } from "@xterm/addon-web-links"
+import { Quote } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { usePty } from "@/contexts/PtyContext"
+import { matchesKeybinding } from "@/lib/keybindings"
 import "@xterm/xterm/css/xterm.css"
 
 // ── Theme — hardcoded hex values matching dark theme CSS variables ────────────
@@ -31,9 +34,12 @@ const TERMINAL_THEME = {
   brightWhite: "#ffffff",
 }
 
-export function TerminalOutput({ processId, autoFocus = false }: {
+export function TerminalOutput({ processId, autoFocus = false, onRequestNew, onRequestClose, onAddContext }: {
   processId: string
   autoFocus?: boolean
+  onRequestNew?: () => void
+  onRequestClose?: () => void
+  onAddContext?: (text: string) => void
 }) {
   const pty = usePty()
 
@@ -41,6 +47,12 @@ export function TerminalOutput({ processId, autoFocus = false }: {
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const rafRef = useRef<number | null>(null)
+  const shortcutCallbacksRef = useRef({ onRequestNew, onRequestClose })
+  const [selectedText, setSelectedText] = useState("")
+
+  useEffect(() => {
+    shortcutCallbacksRef.current = { onRequestNew, onRequestClose }
+  }, [onRequestClose, onRequestNew])
 
   const scheduleFit = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
@@ -98,6 +110,17 @@ export function TerminalOutput({ processId, autoFocus = false }: {
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(webLinksAddon)
     terminal.open(container)
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (matchesKeybinding("newIntegratedTerminal", event)) {
+        if (event.type === "keydown") shortcutCallbacksRef.current.onRequestNew?.()
+        return false
+      }
+      if (matchesKeybinding("closeIntegratedTerminal", event)) {
+        if (event.type === "keydown") shortcutCallbacksRef.current.onRequestClose?.()
+        return false
+      }
+      return true
+    })
 
     termRef.current = terminal
     fitRef.current = fitAddon
@@ -119,6 +142,9 @@ export function TerminalOutput({ processId, autoFocus = false }: {
     const dataDisposable = terminal.onData((data: string) => {
       pty.writeInput(processId, data)
     })
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      setSelectedText(terminal.getSelection())
+    })
 
     const resizeObserver = new ResizeObserver(scheduleFit)
     resizeObserver.observe(container)
@@ -127,6 +153,7 @@ export function TerminalOutput({ processId, autoFocus = false }: {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       resizeObserver.disconnect()
       dataDisposable.dispose()
+      selectionDisposable.dispose()
       pty.unsubscribe(processId)
       terminal.dispose()
       termRef.current = null
@@ -141,10 +168,33 @@ export function TerminalOutput({ processId, autoFocus = false }: {
   }, [])
 
   return (
-    <div
-      ref={containerRef}
-      className="size-full bg-[#1a1a2e] p-1"
-      onClick={handleClick}
-    />
+    <div className="relative size-full bg-[#1a1a2e]">
+      <div
+        ref={containerRef}
+        className="size-full p-1"
+        role="region"
+        aria-label="Terminal output"
+        tabIndex={0}
+        onClick={handleClick}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") handleClick()
+        }}
+      />
+      {selectedText && onAddContext && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="absolute right-3 top-3"
+          onClick={() => {
+            onAddContext(selectedText)
+            termRef.current?.clearSelection()
+            setSelectedText("")
+          }}
+        >
+          <Quote data-icon="inline-start" />
+          Add to prompt
+        </Button>
+      )}
+    </div>
   )
 }

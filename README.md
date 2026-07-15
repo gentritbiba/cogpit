@@ -82,6 +82,15 @@ Use provider-specific access profiles and tool-level policies. Workspace access 
 ### Agent Configuration Editor
 Browse and edit your project's `.claude/` directory directly from the dashboard — skills, slash commands, CLAUDE.md, and MCP server configs. Changes are written to disk immediately, no terminal needed.
 
+### Command Palette & Keyboard Shortcuts
+Press `Cmd+K` to open the command palette: navigate projects, sessions, toggle panels, access settings, and more. Customize keyboard shortcuts globally with conflict detection and preset categories (General, View, Tools).
+
+### Integrated Terminal Context
+Select text in terminal output and add it to the chat composer with one action. Flows terminal debugging context directly into your next message to Claude or Codex.
+
+### Project File Editor & Previews
+Edit project files securely: read and write to any file in your project with optimistic concurrency control (mtime-based conflict detection prevents lost writes). Preview viewport with zoom controls for rendered content. File suggestions with `@-mention` autocomplete in the chat input.
+
 ### Network Access
 Access Cogpit from your phone or tablet on the same LAN. Password-protected with rate-limited auth. Full feature parity with the local client.
 

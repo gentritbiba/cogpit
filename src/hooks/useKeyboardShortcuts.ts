@@ -1,6 +1,7 @@
 import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { ChatInputHandle } from "@/components/ChatInput"
+import { matchesKeybinding } from "@/lib/keybindings"
 
 interface HistoryEntry {
   dirName: string
@@ -14,9 +15,13 @@ interface UseKeyboardShortcutsOpts {
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
   onToggleRightSidebar: () => void
+  onOpenCommandPalette?: () => void
   onOpenProjectSwitcher: () => void
   onOpenThemeSelector: () => void
   onOpenTerminal: () => void
+  onToggleIntegratedTerminal: () => void
+  onTogglePreview: () => void
+  onToggleProjectFiles: () => void
   onHistoryBack: () => HistoryEntry | null
   onHistoryForward: () => HistoryEntry | null
   onNavigateToSession: (dirName: string, fileName: string) => void
@@ -61,9 +66,13 @@ export function useKeyboardShortcuts({
   dispatch,
   onToggleSidebar,
   onToggleRightSidebar,
+  onOpenCommandPalette,
   onOpenProjectSwitcher,
   onOpenThemeSelector,
   onOpenTerminal,
+  onToggleIntegratedTerminal,
+  onTogglePreview,
+  onToggleProjectFiles,
   onHistoryBack,
   onHistoryForward,
   onNavigateToSession,
@@ -74,37 +83,65 @@ export function useKeyboardShortcuts({
     function handleKeyDown(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey
 
-      if (mod && e.key === "e" && !e.shiftKey) {
+      if (matchesKeybinding("commandPalette", e)) {
+        e.preventDefault()
+        onOpenCommandPalette?.()
+        return
+      }
+
+      if (matchesKeybinding("integratedTerminal", e)) {
+        e.preventDefault()
+        onToggleIntegratedTerminal()
+        return
+      }
+
+      if (matchesKeybinding("preview", e)) {
+        e.preventDefault()
+        onTogglePreview()
+        return
+      }
+
+      if (matchesKeybinding("projectFiles", e)) {
+        e.preventDefault()
+        onToggleProjectFiles()
+        return
+      }
+
+      if (matchesKeybinding("expandAll", e)) {
         e.preventDefault()
         dispatch({ type: "SET_EXPAND_ALL", value: true })
+        return
       }
-      if (mod && e.key === "e" && e.shiftKey) {
+      if (matchesKeybinding("collapseAll", e)) {
         e.preventDefault()
         dispatch({ type: "SET_EXPAND_ALL", value: false })
+        return
       }
-      if (mod && e.key === "b" && !e.shiftKey) {
+      if (matchesKeybinding("toggleSidebar", e)) {
         e.preventDefault()
         onToggleSidebar()
+        return
       }
-      if (mod && e.shiftKey && (e.key === "b" || e.key === "B")) {
+      if (matchesKeybinding("toggleStats", e)) {
         e.preventDefault()
         onToggleRightSidebar()
+        return
       }
 
       // Ctrl+Cmd+N (Mac) or Ctrl+Alt+N (Windows/Linux) — open project switcher
-      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "n") {
+      if (matchesKeybinding("newSession", e)) {
         e.preventDefault()
         onOpenProjectSwitcher()
       }
 
       // Ctrl+Cmd+S (Mac) or Ctrl+Alt+S (Windows/Linux) — open theme selector
-      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "s") {
+      if (matchesKeybinding("themeSelector", e)) {
         e.preventDefault()
         onOpenThemeSelector()
       }
 
       // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open terminal at project
-      if (e.ctrlKey && (e.metaKey || e.altKey) && e.key === "t") {
+      if (matchesKeybinding("systemTerminal", e)) {
         e.preventDefault()
         onOpenTerminal()
       }
@@ -186,5 +223,5 @@ export function useKeyboardShortcuts({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenCommandPalette, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onToggleIntegratedTerminal, onTogglePreview, onToggleProjectFiles, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

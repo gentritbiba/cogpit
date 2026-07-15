@@ -14,6 +14,7 @@ import {
   GitBranch,
   SlidersHorizontal,
   FileCode2,
+  Search,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -43,6 +44,8 @@ interface DesktopHeaderProps {
   onToggleFileChanges?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
+  onOpenCommandPalette: () => void
+  commandPaletteShortcut: string
   showConfig?: boolean
   onToggleConfig?: () => void
 }
@@ -61,6 +64,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   onToggleFileChanges,
   onKillAll,
   onOpenSettings,
+  onOpenCommandPalette,
+  commandPaletteShortcut,
   showConfig,
   onToggleConfig,
 }: DesktopHeaderProps) {
@@ -160,6 +165,12 @@ export const DesktopHeader = memo(function DesktopHeader({
       />
 
       <div className="flex items-center gap-0.5 shrink-0">
+        <HeaderIconButton
+          icon={Search}
+          label={`Command palette (${commandPaletteShortcut})`}
+          onClick={onOpenCommandPalette}
+          className="text-muted-foreground hover:text-foreground"
+        />
         {onToggleConfig && (
           <HeaderIconButton
             icon={SlidersHorizontal}

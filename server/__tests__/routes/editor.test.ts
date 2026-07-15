@@ -32,7 +32,38 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   }
 })
 
-import { terminalCommand, resolveActionPath } from "../../routes/editor"
+import { editorOpenArgs, terminalCommand, resolveActionPath } from "../../routes/editor"
+
+describe("editorOpenArgs", () => {
+  it("keeps the existing positional path when no line is provided", () => {
+    expect(editorOpenArgs("cursor", "/tmp/project/src/app.ts")).toEqual([
+      "/tmp/project/src/app.ts",
+    ])
+  })
+
+  it("uses --goto for Cursor and VS Code-compatible editors", () => {
+    expect(editorOpenArgs("cursor", "/tmp/project/src/app.ts", 42, 7)).toEqual([
+      "--goto",
+      "/tmp/project/src/app.ts:42:7",
+    ])
+    expect(editorOpenArgs("/usr/local/bin/code", "/tmp/project/src/app.ts", 12)).toEqual([
+      "--goto",
+      "/tmp/project/src/app.ts:12",
+    ])
+  })
+
+  it("uses a positional location for Zed", () => {
+    expect(editorOpenArgs("zed", "/tmp/project/src/app.ts", 8, 3)).toEqual([
+      "/tmp/project/src/app.ts:8:3",
+    ])
+  })
+
+  it("falls back to opening the file for editors without location support", () => {
+    expect(editorOpenArgs("custom-editor", "/tmp/project/src/app.ts", 8, 3)).toEqual([
+      "/tmp/project/src/app.ts",
+    ])
+  })
+})
 
 describe("terminalCommand", () => {
   beforeEach(() => {

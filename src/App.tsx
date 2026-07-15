@@ -42,6 +42,7 @@ import { useNewSession } from "@/hooks/useNewSession"
 import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useMcpServers } from "@/hooks/useMcpServers"
+import { shortcutLabel } from "@/lib/keybindings"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
@@ -90,6 +91,10 @@ const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m =
 const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then(m => ({ default: m.ThemeSelectorModal })))
 const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then(m => ({ default: m.WorktreePanel })))
 const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then(m => ({ default: m.MobileFileChanges })))
+const CommandPaletteHost = lazy(() => import("@/components/CommandPaletteHost").then(m => ({ default: m.CommandPaletteHost })))
+const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })))
+const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then(m => ({ default: m.PreviewPanel })))
+const ProjectFilesPanel = lazy(() => import("@/components/ProjectFilesPanel").then(m => ({ default: m.ProjectFilesPanel })))
 
 const MOBILE_TAB_ORDER = ["sessions", "chat", "stats", "teams"] as const
 
@@ -146,6 +151,13 @@ export default function App() {
 
   const searchInputRef = useRef<HTMLInputElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
+  const [rightWorkspace, setRightWorkspace] = useState<{
+    kind: "preview" | "project-files"
+    cwd: string
+  } | null>(null)
+  const [launchTerminalRequest, setLaunchTerminalRequest] = useState(0)
 
   // Stable callbacks
   const handleSidebarTabChange = useCallback(
@@ -153,6 +165,10 @@ export default function App() {
     [dispatch]
   )
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
+  const handleOpenCommandPalette = useCallback(() => setShowCommandPalette(true), [])
+  const handleFocusComposer = useCallback(() => chatInputRef.current?.focus(), [])
+  const handleExpandAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: true }), [dispatch])
+  const handleCollapseAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: false }), [dispatch])
   const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
@@ -226,6 +242,28 @@ export default function App() {
 
   // Process panel state (unified: scripts + tasks + terminals)
   const processPanel = useProcessPanel(state.session?.sessionId)
+
+  const handleToggleIntegratedTerminal = useCallback(() => {
+    const terminals = [...processPanel.processes.values()].filter((entry) => entry.type === "terminal")
+    const terminal = terminals.at(-1)
+    if (!terminal) {
+      if (state.session?.cwd ?? pendingPath) {
+        setLaunchTerminalRequest((request) => request + 1)
+      }
+      return
+    }
+    if (processPanel.activeProcessId === terminal.id && !processPanel.collapsed) {
+      processPanel.toggleCollapse()
+    } else {
+      processPanel.setActive(terminal.id)
+    }
+  }, [pendingPath, processPanel, state.session?.cwd])
+
+  const handleNewIntegratedTerminal = useCallback(() => {
+    if (state.session?.cwd ?? pendingPath) {
+      setLaunchTerminalRequest((request) => request + 1)
+    }
+  }, [pendingPath, state.session?.cwd])
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
@@ -374,6 +412,28 @@ export default function App() {
 
   // MCP server selection
   const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
+  const showPreview = Boolean(
+    currentCwd && rightWorkspace?.kind === "preview" && rightWorkspace.cwd === currentCwd,
+  )
+  const showProjectFiles = Boolean(
+    currentCwd && rightWorkspace?.kind === "project-files" && rightWorkspace.cwd === currentCwd,
+  )
+  const handleTogglePreview = useCallback(() => {
+    if (!currentCwd) return
+    setRightWorkspace((current) =>
+      current?.kind === "preview" && current.cwd === currentCwd
+        ? null
+        : { kind: "preview", cwd: currentCwd },
+    )
+  }, [currentCwd])
+  const handleToggleProjectFiles = useCallback(() => {
+    if (!currentCwd) return
+    setRightWorkspace((current) =>
+      current?.kind === "project-files" && current.cwd === currentCwd
+        ? null
+        : { kind: "project-files", cwd: currentCwd },
+    )
+  }, [currentCwd])
   const mcpData = useMcpServers(
     supportsMcp ? currentCwd : undefined,
     supportsMcp ? (currentDirName ?? undefined) : undefined,
@@ -595,6 +655,12 @@ export default function App() {
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
+  const goHome = actions.handleGoHome
+  const handleOpenPaletteProject = useCallback((dirName: string) => {
+    goHome()
+    handleSelectProject(dirName)
+  }, [goHome, handleSelectProject])
+
   // Sync URL <-> state
   useUrlSync({
     state,
@@ -679,9 +745,13 @@ export default function App() {
     dispatch,
     onToggleSidebar: panels.handleToggleSidebar,
     onToggleRightSidebar: panels.handleToggleStats,
+    onOpenCommandPalette: handleOpenCommandPalette,
     onOpenProjectSwitcher: panels.handleOpenProjectSwitcher,
     onOpenThemeSelector: panels.handleToggleThemeSelector,
     onOpenTerminal: handleOpenTerminal,
+    onToggleIntegratedTerminal: handleToggleIntegratedTerminal,
+    onTogglePreview: handleTogglePreview,
+    onToggleProjectFiles: handleToggleProjectFiles,
     onHistoryBack: sessionHistory.goBack,
     onHistoryForward: sessionHistory.goForward,
     onNavigateToSession: actions.handleDashboardSelect,
@@ -996,6 +1066,16 @@ export default function App() {
       onSetActive={processPanel.setActive}
       onRemove={processPanel.removeProcess}
       onToggleCollapse={processPanel.toggleCollapse}
+      onRequestTerminal={handleNewIntegratedTerminal}
+      onAddTerminalContext={(selection) => {
+        const value = selection.trim()
+        if (!value) return
+        const fence = value.includes("```") ? "````" : "```"
+        const context = `${fence}terminal\n${value}\n${fence}`
+        const current = chatInputRef.current?.getText().trimEnd() ?? ""
+        chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
+        chatInputRef.current?.focus()
+      }}
       onUpdateStatus={processPanel.updateProcessStatus}
     />
   )
@@ -1038,7 +1118,7 @@ export default function App() {
           onSendCommand={claudeChat.sendMessage}
         />
       )}
-      <ChatInput ref={chatInputRef} allowImages={imageInputAvailable} agentKind={currentAgentKind} />
+      <ChatInput ref={chatInputRef} allowImages={imageInputAvailable} agentKind={currentAgentKind} projectCwd={currentCwd} />
       <ChatInputSettings
         agentKind={currentAgentKind ?? "claude"}
         onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
@@ -1286,6 +1366,8 @@ export default function App() {
         onToggleConfig={panels.handleToggleConfig}
         onKillAll={handleKillAll}
         onOpenSettings={config.openConfigDialog}
+        onOpenCommandPalette={handleOpenCommandPalette}
+        commandPaletteShortcut={shortcutLabel("commandPalette")}
       />
 
       <div className="relative flex flex-1 min-h-0 overflow-hidden">
@@ -1440,8 +1522,8 @@ export default function App() {
 
         <HoverRevealPanel
           side="right"
-          visible={panels.showStats && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
-          enabled={!!state.session && state.mainView !== "teams" && state.mainView !== "config"}
+          visible={!showPreview && !showProjectFiles && panels.showStats && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
+          enabled={!showPreview && !showProjectFiles && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
         >
           <StatsPanel
             onJumpToTurn={actions.handleJumpToTurn}
@@ -1452,6 +1534,32 @@ export default function App() {
             backgroundAgents={backgroundAgents}
           />
         </HoverRevealPanel>
+
+        {showPreview && currentCwd && (
+          <Suspense fallback={null}>
+            <PreviewPanel cwd={currentCwd} onClose={() => setRightWorkspace(null)} />
+          </Suspense>
+        )}
+
+        {showProjectFiles && currentCwd && (
+          <Suspense fallback={null}>
+            <ProjectFilesPanel
+              cwd={currentCwd}
+              onClose={() => setRightWorkspace(null)}
+              onAddToPrompt={({ path, text, startLine, endLine, comment }) => {
+                let context = `@${path}`
+                if (text) {
+                  const fence = text.includes("```") ? "````" : "```"
+                  const lines = startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`
+                  context = `${comment ? `Review request: ${comment}\n` : ""}${path} (${lines})\n${fence}\n${text}\n${fence}`
+                }
+                const current = chatInputRef.current?.getText().trimEnd() ?? ""
+                chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
+                chatInputRef.current?.focus()
+              }}
+            />
+          </Suspense>
+        )}
 
       </div>
 
@@ -1504,6 +1612,59 @@ export default function App() {
           currentTheme={themeCtx.theme}
           onSelectTheme={themeCtx.setTheme}
           onPreviewTheme={themeCtx.setPreview}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <CommandPaletteHost
+          open={showCommandPalette}
+          onOpenChange={setShowCommandPalette}
+          onGoHome={actions.handleGoHome}
+          onNewSession={panels.handleOpenProjectSwitcher}
+          onOpenProject={handleOpenPaletteProject}
+          onOpenSession={actions.handleDashboardSelect}
+          onToggleSidebar={panels.handleToggleSidebar}
+          onToggleStats={panels.handleToggleStats}
+          onToggleFileChanges={panels.handleToggleFileChanges}
+          onToggleWorktrees={panels.handleToggleWorktrees}
+          onOpenConfig={panels.handleToggleConfig}
+          onOpenSettings={config.openConfigDialog}
+          onOpenKeyboardShortcuts={() => setShowKeyboardShortcuts(true)}
+          onTogglePreview={currentCwd ? handleTogglePreview : undefined}
+          onToggleProjectFiles={currentCwd ? handleToggleProjectFiles : undefined}
+          onOpenTheme={panels.handleToggleThemeSelector}
+          onOpenTerminal={handleOpenTerminal}
+          onFocusComposer={handleFocusComposer}
+          onExpandAll={handleExpandAll}
+          onCollapseAll={handleCollapseAll}
+          canFocusComposer={Boolean(state.session || state.pendingDirName)}
+          canOpenTerminal={Boolean(
+            state.session?.cwd
+            ?? pendingPath
+            ?? state.sessionSource?.dirName
+            ?? state.pendingDirName
+            ?? state.dashboardProject
+          )}
+          hasSession={Boolean(state.session)}
+          hasFileChanges={hasFileChanges}
+          supportsWorktrees={supportsWorktrees}
+          showSidebar={panels.showSidebar}
+          showStats={panels.showStats}
+          showProjectFiles={showProjectFiles}
+          showFileChanges={panels.showFileChanges}
+          showWorktrees={panels.showWorktrees}
+          showConfig={state.mainView === "config"}
+          currentProjectDirName={currentDirName}
+          projectCwd={state.session?.cwd ?? pendingPath ?? null}
+          onProcessStarted={processPanel.addProcess}
+          launchTerminalRequest={launchTerminalRequest}
+        />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <KeyboardShortcutsDialog
+          open={showKeyboardShortcuts}
+          onOpenChange={setShowKeyboardShortcuts}
         />
       </Suspense>
 

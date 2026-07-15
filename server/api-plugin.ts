@@ -22,6 +22,9 @@ import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerFileContentRoutes } from "./routes/file-content"
+import { registerProjectFileRoutes } from "./routes/project-files"
+import { registerProjectFileContentRoutes } from "./routes/project-file"
+import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerNotifyRoutes } from "./routes/notify"
 import { registerScriptRoutes } from "./routes/scripts"
@@ -91,6 +94,9 @@ export function sessionApiPlugin(): Plugin {
       registerConfigBrowserRoutes(use)
       registerLocalFileRoutes(use)
       registerFileContentRoutes(use)
+      registerProjectFileRoutes(use)
+      registerProjectFileContentRoutes(use)
+      registerGitStatusRoutes(use)
       registerMcpRoutes(use)
       registerNotifyRoutes(use)
       registerScriptRoutes(use)

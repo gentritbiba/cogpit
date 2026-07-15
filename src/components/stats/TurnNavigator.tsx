@@ -5,6 +5,7 @@ import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn } from "@/lib/types"
 import { truncate } from "@/lib/format"
 import { getUserMessageText } from "@/lib/parser"
+import { getTurnKey } from "@/components/stats/turnKey"
 
 interface TurnNavigatorProps {
   turns: Turn[]
@@ -26,7 +27,8 @@ export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): JSX.
             const isActive = activeTurn === i
             return (
               <button
-                key={turn.id}
+                key={getTurnKey(turn, i)}
+                type="button"
                 onClick={() => {
                   setActiveTurn(i)
                   onJumpToTurn?.(i)

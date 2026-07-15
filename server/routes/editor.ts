@@ -103,6 +103,12 @@ export function terminalCommand(terminal: string, dirPath: string): { cmd: strin
 /** Editors that support the --diff flag */
 const DIFF_CAPABLE = new Set(["cursor", "code", "windsurf"])
 
+/** Editors whose CLI supports VS Code-style --goto file:line:column. */
+const GOTO_FLAG_EDITORS = new Set(["cursor", "code", "code-insiders", "windsurf"])
+
+/** Editors that accept file:line:column as a positional argument. */
+const POSITIONAL_GOTO_EDITORS = new Set(["zed", "subl", "sublime_text"])
+
 /** Fallback detection order when no config or $VISUAL is set */
 const DETECT_EDITORS = ["cursor", "code", "zed", "windsurf"] as const
 
@@ -141,6 +147,23 @@ function openWithEditor(editor: string, args: string[]): Promise<void> {
       else resolve()
     })
   })
+}
+
+/** Build editor arguments, preserving line/column navigation where supported. */
+export function editorOpenArgs(
+  editor: string,
+  filePath: string,
+  line?: number,
+  column?: number,
+): string[] {
+  if (!Number.isInteger(line) || (line ?? 0) < 1) return [filePath]
+
+  const editorName = basename(editor).toLowerCase().replace(/\.exe$/, "")
+  const location = `${filePath}:${line}${Number.isInteger(column) && (column ?? 0) > 0 ? `:${column}` : ""}`
+
+  if (GOTO_FLAG_EDITORS.has(editorName)) return ["--goto", location]
+  if (POSITIONAL_GOTO_EDITORS.has(editorName)) return [location]
+  return [filePath]
 }
 
 /** Get the git-tracked version of a file at HEAD (throws if not tracked or no commits) */
@@ -294,7 +317,7 @@ end tell`
   })
 
   // POST /api/open-in-editor — open a file or project in the user's default code editor
-  // Body: { path?: string, dirName?: string, mode?: "file" | "diff" }
+  // Body: { path?: string, dirName?: string, mode?: "file" | "diff", line?: number, column?: number }
   //   mode "file" (default): open the file/folder directly
   //   mode "diff": open a side-by-side diff of HEAD vs working copy in the editor
   use("/api/open-in-editor", async (req, res, next) => {
@@ -308,6 +331,8 @@ end tell`
       try {
         const parsed = JSON.parse(body)
         const { mode = "file" } = parsed
+        const line = Number.isInteger(parsed.line) && parsed.line > 0 ? parsed.line : undefined
+        const column = Number.isInteger(parsed.column) && parsed.column > 0 ? parsed.column : undefined
         const path = await resolveActionPath(parsed)
         if (!path) {
           res.statusCode = 400
@@ -364,7 +389,7 @@ end tell`
         // mode === "file": open file/folder
         if (editor) {
           try {
-            await openWithEditor(editor, [path])
+            await openWithEditor(editor, editorOpenArgs(editor, path, line, column))
             res.end(JSON.stringify({ success: true, editor }))
           } catch {
             res.statusCode = 500

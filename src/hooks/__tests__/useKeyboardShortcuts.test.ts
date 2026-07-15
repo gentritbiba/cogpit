@@ -15,6 +15,9 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
     onOpenProjectSwitcher: vi.fn(),
     onOpenThemeSelector: vi.fn(),
     onOpenTerminal: vi.fn(),
+    onToggleIntegratedTerminal: vi.fn(),
+    onTogglePreview: vi.fn(),
+    onToggleProjectFiles: vi.fn(),
     onHistoryBack: vi.fn(() => null),
     onHistoryForward: vi.fn(() => null),
     onNavigateToSession: vi.fn(),
@@ -49,6 +52,75 @@ describe("useKeyboardShortcuts", () => {
 
       fireKey("e", { metaKey: true })
       expect(opts.dispatch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("Cmd+K / Ctrl+K - open command palette", () => {
+    it("opens the command palette and prevents the browser shortcut", () => {
+      const onOpenCommandPalette = vi.fn()
+      const opts = createOpts({ onOpenCommandPalette })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("k", { metaKey: true })
+
+      expect(onOpenCommandPalette).toHaveBeenCalledOnce()
+      expect(event.defaultPrevented).toBe(true)
+    })
+
+    it("works with Ctrl on Windows and Linux", () => {
+      const onOpenCommandPalette = vi.fn()
+      const opts = createOpts({ onOpenCommandPalette })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("k", { ctrlKey: true })
+
+      expect(onOpenCommandPalette).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe("Cmd+J / Ctrl+J - toggle integrated terminal", () => {
+    it("toggles the integrated terminal and prevents the browser shortcut", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("j", { metaKey: true })
+
+      expect(opts.onToggleIntegratedTerminal).toHaveBeenCalledOnce()
+      expect(event.defaultPrevented).toBe(true)
+    })
+
+    it("works with Ctrl on Windows and Linux", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("j", { ctrlKey: true })
+
+      expect(opts.onToggleIntegratedTerminal).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe("Cmd+Shift+J / Ctrl+Shift+J - toggle development preview", () => {
+    it("toggles the preview and prevents the browser shortcut", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("j", { metaKey: true, shiftKey: true })
+
+      expect(opts.onTogglePreview).toHaveBeenCalledOnce()
+      expect(event.defaultPrevented).toBe(true)
+      expect(opts.onToggleIntegratedTerminal).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("Cmd+Shift+F / Ctrl+Shift+F - toggle project files", () => {
+    it("opens the project file workspace and prevents the browser shortcut", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("f", { metaKey: true, shiftKey: true })
+
+      expect(opts.onToggleProjectFiles).toHaveBeenCalledOnce()
+      expect(event.defaultPrevented).toBe(true)
     })
   })
 

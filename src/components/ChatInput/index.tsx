@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
 import { SlashSuggestions } from "@/components/SlashSuggestions"
+import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import { PlanApprovalBar } from "./PlanApprovalBar"
 import { UserQuestionBar } from "./UserQuestionBar"
@@ -12,6 +13,8 @@ import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
 import type { AgentKind } from "@/lib/sessionSource"
+import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
+import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 
 export interface ChatInputHandle {
   focus: () => void
@@ -25,6 +28,7 @@ interface ChatInputProps {
   /** Whether the selected provider/model accepts image input. */
   allowImages?: boolean
   agentKind?: AgentKind | null
+  projectCwd?: string | null
 }
 
 /**
@@ -84,7 +88,7 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind }, ref) {
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd }, ref) {
   const {
     isLive,
     actions: { handleEditConfig: onEditConfig },
@@ -112,6 +116,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const { images, isDragOver, imageError, hasUnsupportedAttachments, dismissImageError, removeImage, clearImages, handleDragOver, handleDragLeave, handleDrop, handlePaste } = useImageUpload(allowImages)
 
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [fileSelectedIndex, setFileSelectedIndex] = useState(0)
+  const [fileSuggestionsDismissed, setFileSuggestionsDismissed] = useState(false)
   const showSlash = text.startsWith("/") && !text.includes(" ")
   const slashFilter = showSlash ? text.slice(1) : ""
   const filteredSlashList = useMemo(() => {
@@ -126,7 +132,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     return [...commands, ...skills]
   }, [showSlash, slashFilter, slashSuggestions])
 
+  const fileMention = useMemo(() => findFileMention(text), [text])
+  const showFiles = Boolean(fileMention && projectCwd && !fileSuggestionsDismissed)
+  const fileSuggestions = useProjectFileSuggestions(
+    projectCwd,
+    fileMention?.query ?? "",
+    showFiles,
+  )
+
   useEffect(() => { setSlashSelectedIndex(0) }, [slashFilter])
+  useEffect(() => { setFileSelectedIndex(0) }, [fileMention?.query])
 
   const elapsedSec = useElapsedTimer(isConnected)
 
@@ -138,6 +153,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
     })
   }, [updateMultiline])
+
+  const handleFileSelect = useCallback((path: string) => {
+    if (!fileMention) return
+    const nextText = replaceFileMention(text, fileMention, path)
+    setText(nextText)
+    setFileSuggestionsDismissed(true)
+    setFileSelectedIndex(0)
+    requestAnimationFrame(() => {
+      const element = textareaRef.current
+      if (!element) return
+      element.focus()
+      element.selectionStart = element.selectionEnd = element.value.length
+      updateMultiline(autoResize(element, isMultilineRef.current))
+    })
+  }, [fileMention, text, updateMultiline])
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
@@ -152,6 +182,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   }, [text, images, allowImages, onSend, clearImages, updateMultiline])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (showFiles && e.key === "Escape") {
+      e.preventDefault()
+      setFileSuggestionsDismissed(true)
+      return
+    }
+    if (showFiles && fileSuggestions.files.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setFileSelectedIndex((index) => index < fileSuggestions.files.length - 1 ? index + 1 : 0); return }
+      if (e.key === "ArrowUp") { e.preventDefault(); setFileSelectedIndex((index) => index > 0 ? index - 1 : fileSuggestions.files.length - 1); return }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); const selected = fileSuggestions.files[fileSelectedIndex]; if (selected) handleFileSelect(selected); return }
+    }
     if (showSlash && filteredSlashList.length > 0) {
       if (e.key === "ArrowDown") { e.preventDefault(); setSlashSelectedIndex((i) => i < filteredSlashList.length - 1 ? i + 1 : 0); return }
       if (e.key === "ArrowUp") { e.preventDefault(); setSlashSelectedIndex((i) => i > 0 ? i - 1 : filteredSlashList.length - 1); return }
@@ -160,15 +200,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
-  }, [handleSubmit, canInterrupt, onInterrupt, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
+  }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
 
-  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
 
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
     getText: () => textRef.current,
     setText: (newText: string) => {
       setText(newText)
+      setFileSuggestionsDismissed(false)
       requestAnimationFrame(() => updateMultiline(autoResize(textareaRef.current, isMultilineRef.current)))
     },
   }), [updateMultiline])
@@ -194,6 +235,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
       {showSlash && (
         <SlashSuggestions suggestions={filteredSlashList} filter={slashFilter} loading={slashSuggestionsLoading} selectedIndex={slashSelectedIndex} onSelect={handleSlashSelect} onHover={setSlashSelectedIndex} onEdit={onEditConfig} />
+      )}
+
+      {showFiles && (
+        <FileSuggestions
+          files={fileSuggestions.files}
+          query={fileMention?.query ?? ""}
+          loading={fileSuggestions.loading}
+          selectedIndex={fileSelectedIndex}
+          onSelect={handleFileSelect}
+          onHover={setFileSelectedIndex}
+        />
       )}
 
       <div>

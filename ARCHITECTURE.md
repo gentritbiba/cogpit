@@ -150,6 +150,56 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/scripts/output` | GET | SSE stream for process output (query: `id=processId`) |
 | `/api/usage` | GET | Token usage tracking |
 | `/api/notify` | POST | Receive Claude Code hook payloads, display system notifications with click-to-navigate |
+| `/api/project-files` | GET | List project files with search ranking (query: `cwd`, `q`, `limit`) |
+| `/api/project-file` | GET/PUT | Read/write individual file with optimistic concurrency (query: `cwd`, `path`; body: mtime-based conflict check) |
+| `/api/git-status` | GET | Branch info, ahead/behind counts, and per-file working-tree/index status (query: `cwd`) |
+
+---
+
+## File & Project Context
+
+### Project File Read/Write (`/api/project-file` & `/api/project-files`)
+
+**File Resolution & Security:**
+- Files are resolved relative to a given `cwd` (project root or subdirectory)
+- `realpath()` verification ensures symlinks don't escape the project boundaries
+- Relative paths are checked for traversal attempts (e.g., `../../../secret`)
+- Binary files (containing null bytes) rejected with 415 error; valid UTF-8 enforced
+- File size capped at 2MB; requests with larger content rejected with 413 error
+
+**Write Concurrency Control:**
+- On GET: response includes file's `mtimeMs` (modification time milliseconds)
+- On PUT: request body includes `expectedMtimeMs`; write rejected (409 Conflict) if file changed on disk since read
+- Prevents lost writes in race conditions (e.g., file editor + Claude both writing)
+- Uses atomic rename (write to temp file, then rename) for crash safety
+- If mtime mismatch detected: response includes error message "File changed on disk. Reload it before saving."
+
+**Use Cases:**
+- ProjectFilesPanel: UI for editing `.claude/` config files, CLAUDE.md, skills
+- FileSuggestions: Autocomplete with `@-mention` syntax for file paths in chat input
+- Editor route enhancement: `/api/open-in-editor` now supports `line` and `column` parameters for precise cursor positioning
+
+### Git Status (`/api/git-status`)
+
+**Output Format:**
+- Parses `git status --porcelain=v1 --branch -z` for robust handling of filenames with special characters
+- Returns branch name, upstream tracking info, ahead/behind commit counts
+- Per-file status: index status (staged changes) and working-tree status (unstaged changes)
+- Renames/copies flagged with `R`/`C` and include original path
+
+**Path Relativization:**
+- Paths relativized to requested `cwd` (allows subdirectory projects within monorepos)
+- Entries with both original and new path (renames) included only if new path within cwd
+- Entries entirely outside cwd dropped from results
+- Example: git reports `packages/app/src/button.tsx` as modified; if cwd is `packages/app`, response shows `src/button.tsx`
+
+**Error Handling:**
+- Non-repository directories handled gracefully: returns `{ isRepository: false, files: [] }`
+- Git not in PATH: returns 503 Service Unavailable
+- Permission errors: returns 500 Internal Server Error with generic message
+
+**Use Case:**
+- ProjectFilesPanel header: displays branch name, dirty/clean status, upstream tracking for current project
 
 ---
 
