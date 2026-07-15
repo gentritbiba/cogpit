@@ -233,6 +233,13 @@ export interface SummaryMessage extends BaseMessage {
   summary?: string
 }
 
+/** Claude Code persists prompts submitted during an active turn as queue operations. */
+export interface QueueOperationMessage extends BaseMessage {
+  type: "queue-operation"
+  operation: "enqueue" | "dequeue" | "remove" | string
+  content?: string | null
+}
+
 export type RawMessage =
   | UserMessage
   | AssistantMessage
@@ -240,6 +247,7 @@ export type RawMessage =
   | SystemMessage
   | FileHistorySnapshotMessage
   | SummaryMessage
+  | QueueOperationMessage
 
 // ── Parsed Structures ───────────────────────────────────────────────────────
 
@@ -283,6 +291,7 @@ export type TurnContentBlock =
   | { kind: "thinking"; blocks: ThinkingBlock[]; timestamp?: string }
   | { kind: "text"; text: string[]; timestamp?: string }
   | { kind: "tool_calls"; toolCalls: ToolCall[]; timestamp?: string }
+  | { kind: "queued_prompt"; content: string; timestamp?: string }
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }

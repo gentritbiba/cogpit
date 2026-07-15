@@ -90,6 +90,58 @@ not valid json
     expect(t2.toolCalls[0].result).toBe("File edited successfully")
   })
 
+  it("keeps prompts queued during an active Claude turn in chronological order", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Inspect the project"),
+      toolUseAssistant("Read", { file_path: "src/app.ts" }, "read-1"),
+      toolResultMsg("read-1", "file contents"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: "Also check the tests before changing anything",
+        timestamp: "2025-01-15T10:00:02Z",
+        sessionId: "test-session-1",
+      },
+      toolUseAssistant("Grep", { pattern: "describe\\(" }, "grep-1"),
+      toolResultMsg("grep-1", "test matches"),
+      textAssistant("I checked both implementation and tests."),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.map((block) => block.kind)).toEqual([
+      "tool_calls",
+      "queued_prompt",
+      "tool_calls",
+      "text",
+    ])
+    const queued = session.turns[0].contentBlocks[1]
+    expect(queued.kind).toBe("queued_prompt")
+    if (queued.kind !== "queued_prompt") return
+    expect(queued.content).toBe("Also check the tests before changing anything")
+    expect(queued.timestamp).toBe("2025-01-15T10:00:02Z")
+  })
+
+  it("does not render Claude's internal queued task notifications as prompts", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Run the audit"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: "<task-notification>background task complete</task-notification>",
+        timestamp: "2025-01-15T10:00:02Z",
+      },
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: null,
+        timestamp: "2025-01-15T10:00:03Z",
+      },
+      textAssistant("Done."),
+    ]))
+
+    expect(session.turns[0].contentBlocks.some((block) => block.kind === "queued_prompt")).toBe(false)
+  })
+
   it("parses a session with thinking blocks", () => {
     const session = parseSession(thinkingSession())
     expect(session.turns).toHaveLength(1)

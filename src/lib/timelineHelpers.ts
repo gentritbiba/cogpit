@@ -17,6 +17,12 @@ export function matchesSearch(turn: Turn, query: string): boolean {
     if (t.toLowerCase().includes(q)) return true
   }
 
+  for (const block of turn.contentBlocks) {
+    if (block.kind === "queued_prompt" && block.content.toLowerCase().includes(q)) {
+      return true
+    }
+  }
+
   for (const tb of turn.thinking) {
     if (tb.thinking.toLowerCase().includes(q)) return true
   }

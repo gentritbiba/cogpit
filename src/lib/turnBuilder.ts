@@ -22,6 +22,7 @@ import {
   isSystemMessage,
   isSummaryMessage,
   isCompactBoundary,
+  isQueueOperationMessage,
 } from "./messageTypeGuards"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
@@ -42,6 +43,14 @@ function extractToolResultText(content: string | ContentBlock[] | undefined | nu
     })
     .filter(Boolean)
     .join("\n")
+}
+
+/** Queue entries also carry internal task notifications; only user-authored prompts belong in the timeline. */
+function isVisibleQueuedPrompt(content: string | null | undefined): content is string {
+  if (!content?.trim()) return false
+  const trimmed = content.trimStart()
+  return !trimmed.startsWith("<task-notification>")
+    && !trimmed.startsWith("<local-command-")
 }
 
 // ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
@@ -208,8 +217,8 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 embedded.push(...next.toolCalls)
                 j++
               }
-            } else if (next.kind === "hook_event" || next.kind === "text") {
-              // Skip hook_event and text blocks — don't break the scan.
+            } else if (next.kind === "hook_event" || next.kind === "text" || next.kind === "queued_prompt") {
+              // Passthrough presentation blocks don't break the scan.
               // Collect them for re-emission in chronological position after the plan block.
               passthroughBlocks.push(next)
               j++
@@ -356,6 +365,36 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // Real shape: { type: "system", subtype: "away_summary", content: "..." }
     if (isSystemMessage(msg) && msg.subtype === "away_summary" && msg.content) {
       pendingRecap = { content: msg.content, timestamp: msg.timestamp }
+      continue
+    }
+
+    // Claude Code records messages submitted during an active turn as
+    // queue-operation/enqueue entries instead of normal user messages. Keep
+    // those prompts inline at their chronological position so they remain
+    // visible after the in-memory optimistic preview is gone or the page reloads.
+    if (isQueueOperationMessage(msg)) {
+      if (msg.operation === "enqueue" && isVisibleQueuedPrompt(msg.content)) {
+        if (!current) {
+          current = {
+            id: `queued-${msg.timestamp ?? crypto.randomUUID()}`,
+            userMessage: null,
+            contentBlocks: [],
+            thinking: [],
+            assistantText: [],
+            toolCalls: [],
+            subAgentActivity: [],
+            timestamp: msg.timestamp ?? "",
+            durationMs: null,
+            tokenUsage: null,
+            model: null,
+          }
+        }
+        current.contentBlocks.push({
+          kind: "queued_prompt",
+          content: msg.content,
+          timestamp: msg.timestamp,
+        })
+      }
       continue
     }
 

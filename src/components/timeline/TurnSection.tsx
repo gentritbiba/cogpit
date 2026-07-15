@@ -286,7 +286,7 @@ function ContentBlocks({
   expandAll,
   activeToolCallId,
   isAgentActive,
-  isSubAgentView: _isSubAgentView,
+  isSubAgentView,
   skillMetadata,
 }: {
   blocks: TurnContentBlock[]
@@ -370,6 +370,25 @@ function ContentBlocks({
         )
       })
       i = nextIndex
+      continue
+    }
+
+    if (block.kind === "queued_prompt") {
+      elements.push(
+        <div
+          key={`queued-prompt-${block.timestamp ?? "untimed"}-${block.content}`}
+          className={cn(
+            "rounded-2xl p-3",
+            isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
+          )}
+        >
+          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-blue-400/70">
+            Sent while Claude was working
+          </div>
+          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} />
+        </div>
+      )
+      i++
       continue
     }
 

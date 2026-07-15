@@ -214,6 +214,84 @@ describe("useChatScroll", () => {
     expect(consumePending).toHaveBeenCalledWith(1)
   })
 
+  it("replaces an optimistic preview when a queued Claude prompt is persisted", () => {
+    const initial = makeSession(1)
+    const { rerender } = renderHook(
+      (props) => useChatScroll(props),
+      { initialProps: { ...defaultOpts, session: initial } },
+    )
+
+    rerender({
+      ...defaultOpts,
+      session: initial,
+      pendingMessages: ["Also check the tests"],
+    })
+    expect(consumePending).not.toHaveBeenCalled()
+
+    const persisted = makeSession(1)
+    persisted.turns[0].contentBlocks.push({
+      kind: "queued_prompt",
+      content: "Also check the tests",
+      timestamp: "2025-01-15T10:00:01Z",
+    })
+    rerender({
+      ...defaultOpts,
+      session: persisted,
+      pendingMessages: ["Also check the tests"],
+    })
+
+    expect(consumePending).toHaveBeenCalledWith(1)
+  })
+
+  it("does not consume a new preview because of historical queued prompts", () => {
+    const session = makeSession(1)
+    session.turns[0].contentBlocks.push({
+      kind: "queued_prompt",
+      content: "An older prompt",
+      timestamp: "2025-01-15T10:00:01Z",
+    })
+    const { rerender } = renderHook(
+      (props) => useChatScroll(props),
+      { initialProps: { ...defaultOpts, session } },
+    )
+
+    rerender({
+      ...defaultOpts,
+      session,
+      pendingMessages: ["A new prompt"],
+    })
+
+    expect(consumePending).not.toHaveBeenCalled()
+  })
+
+  it("does not consume a preview when a different queued prompt arrives externally", () => {
+    const initial = makeSession(1)
+    const { rerender } = renderHook(
+      (props) => useChatScroll(props),
+      { initialProps: { ...defaultOpts, session: initial } },
+    )
+
+    rerender({
+      ...defaultOpts,
+      session: initial,
+      pendingMessages: ["Dashboard prompt"],
+    })
+
+    const updated = makeSession(1)
+    updated.turns[0].contentBlocks.push({
+      kind: "queued_prompt",
+      content: "Prompt sent from another client",
+      timestamp: "2025-01-15T10:00:01Z",
+    })
+    rerender({
+      ...defaultOpts,
+      session: updated,
+      pendingMessages: ["Dashboard prompt"],
+    })
+
+    expect(consumePending).not.toHaveBeenCalled()
+  })
+
   it("does not update scroll indicators when values haven't changed", () => {
     const { result } = renderHook(() => useChatScroll(defaultOpts))
 

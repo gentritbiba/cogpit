@@ -745,6 +745,41 @@ describe("plan_mode grouping", () => {
     expect(textBlocks.length).toBeGreaterThanOrEqual(1)
   })
 
+  it("does not break plan grouping when a queued prompt appears between Enter and Exit", () => {
+    const enterId = "enter_queued_prompt"
+    const readId = "read_queued_prompt"
+    const exitId = "exit_queued_prompt"
+
+    const jsonl = toJsonl([
+      userMsg("Plan with a steer"),
+      toolUseAssistant("EnterPlanMode", { plan: "queued prompt plan" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: "Please include regression tests",
+        timestamp: "2025-01-15T10:00:01.500Z",
+      },
+      toolUseAssistant("Read", { file_path: "src/plan.ts" }, readId),
+      toolResultMsg(readId, "file content"),
+      toolUseAssistant("ExitPlanMode", { path: "/tmp/plan.md" }, exitId),
+      toolResultMsg(exitId, "plan approved"),
+      textAssistant("Done."),
+    ])
+
+    const session = parseSession(jsonl)
+    const planBlocks = session.turns[0].contentBlocks.filter((block) => block.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    if (planBlocks[0].kind !== "plan_mode") return
+    expect(planBlocks[0].status).toBe("approved")
+    expect(planBlocks[0].toolCalls.map((tool) => tool.name)).toEqual(["Read"])
+
+    const queuedBlocks = session.turns[0].contentBlocks.filter((block) => block.kind === "queued_prompt")
+    expect(queuedBlocks).toHaveLength(1)
+    if (queuedBlocks[0].kind !== "queued_prompt") return
+    expect(queuedBlocks[0].content).toBe("Please include regression tests")
+  })
+
   it("produces plan_mode block plus trailing tool calls when a Read follows ExitPlanMode in the same logical block", () => {
     const enterId = "enter_trailing"
     const exitId = "exit_trailing"

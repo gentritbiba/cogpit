@@ -13,6 +13,7 @@ import type {
   ProgressMessage,
   SystemMessage,
   SummaryMessage,
+  QueueOperationMessage,
 } from "./types"
 
 export function isUserMessage(msg: RawMessage): msg is UserMessage {
@@ -33,6 +34,10 @@ export function isSystemMessage(msg: RawMessage): msg is SystemMessage {
 
 export function isSummaryMessage(msg: RawMessage): msg is SummaryMessage {
   return msg.type === "summary"
+}
+
+export function isQueueOperationMessage(msg: RawMessage): msg is QueueOperationMessage {
+  return msg.type === "queue-operation"
 }
 
 export function isCompactBoundary(msg: RawMessage): msg is SystemMessage {

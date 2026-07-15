@@ -27,6 +27,18 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   const chatIsAtBottomRef = useRef(true)
   const chatScrollOnNextRef = useRef(false)
   const prevTurnCountRef = useRef(0)
+  const persistedQueuedPrompts = useMemo(() => session?.turns.flatMap((turn) => (
+    turn.contentBlocks.flatMap((block) => block.kind === "queued_prompt"
+      ? [{
+          id: JSON.stringify([block.timestamp ?? "", block.content]),
+          content: block.content,
+        }]
+      : [])
+  )) ?? [], [session?.turns])
+  const queuedPromptStateRef = useRef<{
+    sessionId: string | null
+    ids: Set<string>
+  } | null>(null)
   // When set, the next sessionChangeKey scroll will go to top instead of bottom
   const scrollToTopOnNextChangeRef = useRef(false)
 
@@ -118,6 +130,32 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
       smoothScrollToEnd()
     }
   }, [pendingCount, smoothScrollToEnd])
+
+  // Mid-turn Claude prompts are first shown optimistically, then persisted as
+  // queue-operation entries. Once the parser exposes the persisted copy,
+  // consume the matching number of optimistic previews to avoid duplicates.
+  useEffect(() => {
+    const sessionId = session?.sessionId ?? null
+    const previous = queuedPromptStateRef.current
+    const ids = new Set(persistedQueuedPrompts.map((prompt) => prompt.id))
+    if (!previous || previous.sessionId !== sessionId) {
+      queuedPromptStateRef.current = { sessionId, ids }
+      return
+    }
+
+    const added = persistedQueuedPrompts.filter((prompt) => !previous.ids.has(prompt.id))
+    queuedPromptStateRef.current = { sessionId, ids }
+    if (added.length === 0 || pendingCount === 0) return
+
+    let matched = 0
+    for (const prompt of added) {
+      const pending = pendingMessages[matched]
+      if (pending === prompt.content || (pending?.trim() === "" && prompt.content.length > 0)) {
+        matched++
+      }
+    }
+    if (matched > 0) consumePending(matched)
+  }, [session?.sessionId, persistedQueuedPrompts, pendingMessages, pendingCount, consumePending])
 
   // New turns -- auto-scroll and consume pending messages
   const turnCount = session?.turns.length ?? 0
