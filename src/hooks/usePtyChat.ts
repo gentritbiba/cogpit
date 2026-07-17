@@ -17,6 +17,7 @@ interface UsePtyChatOpts {
   model?: string
   effort?: string
   fastMode?: boolean
+  ultracode?: boolean
   mcpConfig?: string | null
   onCodexModelRejected?: (model: string) => void
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
@@ -26,7 +27,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, mcpConfig, onCodexModelRejected, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -133,6 +134,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
           permissions: permsConfig,
           effort: effort || undefined,
           fastMode: fastMode ? true : undefined,
+          ultracode: ultracode ? true : undefined,
           mcpConfig: mcpConfig || undefined,
         }
 
@@ -173,7 +175,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, mcpConfig, onCodexModelRejected, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.

@@ -813,14 +813,14 @@ export const ChatInputSettings = memo(function ChatInputSettings({
           </>
         )}
 
-        {/* Ultracode toggle — claude only, new session only */}
-        {showWorktree && isNewSession && onUltracodeEnabledChange && (
+        {/* Ultracode toggle — available for Claude sessions with a capable model */}
+        {showWorktree && onUltracodeEnabledChange && (
           <>
             <span className="text-border/60 text-[10px] select-none">/</span>
             <button
               type="button"
               aria-pressed={!!ultracodeEnabled}
-              onClick={() => onUltracodeEnabledChange(!ultracodeEnabled)}
+              onClick={() => changeAndApply(() => onUltracodeEnabledChange(!ultracodeEnabled))}
               title="Ultracode: XHigh effort + standing multi-agent workflow orchestration"
               className={cn(
                 "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",

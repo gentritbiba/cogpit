@@ -40,6 +40,8 @@ export function isQueueOperationMessage(msg: RawMessage): msg is QueueOperationM
   return msg.type === "queue-operation"
 }
 
-export function isCompactBoundary(msg: RawMessage): msg is SystemMessage {
-  return msg.type === "system" && (msg as SystemMessage).subtype === "compact_boundary"
+export function isCompactBoundary(
+  msg: RawMessage,
+): msg is SystemMessage & { subtype: "compact_boundary" } {
+  return msg.type === "system" && msg.subtype === "compact_boundary"
 }

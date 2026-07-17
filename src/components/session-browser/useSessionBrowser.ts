@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
 import { parseSession } from "@/lib/parser"
 import type { ParsedSession } from "@/lib/types"
-import type { View, ProjectInfo, SessionInfo } from "./types"
+import type { View, ProjectInfo, SessionInfo, CodexSubagentInfo } from "./types"
 
 // ── Return type ────────────────────────────────────────────────────────────
 
@@ -20,8 +20,10 @@ interface UseSessionBrowserReturn {
   loadProjects: () => Promise<void>
   loadSessions: (project: ProjectInfo, page?: number, append?: boolean) => Promise<void>
   loadLiveSession: (dirName: string, fileName: string) => Promise<void>
+  showSubagents: () => void
   handleBack: () => void
   handleSelectSession: (s: SessionInfo) => void
+  handleSelectSubagent: (agent: CodexSubagentInfo) => void
   handleDeleteSession: (s: SessionInfo) => void
   handleDuplicateSession: (s: SessionInfo) => void
   handleLoadMoreSessions: () => void
@@ -55,6 +57,7 @@ export function useSessionBrowser({
   const [isLoading, setIsLoading] = useState(false)
   const [searchFilter, setSearchFilter] = useState("")
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [detailOrigin, setDetailOrigin] = useState<Exclude<View, "detail">>("projects")
 
   // Load projects on mount
   const loadProjects = useCallback(async () => {
@@ -123,6 +126,7 @@ export function useSessionBrowser({
           fileName: session.fileName,
           rawText: text,
         })
+        setDetailOrigin("sessions")
         setView("detail")
       } catch (err) {
         setFetchError(err instanceof Error ? err.message : "Failed to load session")
@@ -146,6 +150,7 @@ export function useSessionBrowser({
         const text = await res.text()
         const parsed = parseSession(text)
         onLoadSession(parsed, { dirName, fileName, rawText: text })
+        setDetailOrigin("projects")
         setView("detail")
       } catch (err) {
         setFetchError(err instanceof Error ? err.message : "Failed to load session")
@@ -156,12 +161,17 @@ export function useSessionBrowser({
     [onLoadSession, onBeforeLoad]
   )
 
+  const showSubagents = useCallback(() => {
+    setSelectedProject(null)
+    setSearchFilter("")
+    setFetchError(null)
+    setView("subagents")
+  }, [])
+
   const handleBack = useCallback(() => {
-    if (view === "detail" && selectedProject) {
-      setView("sessions")
-    } else if (view === "detail") {
-      setView("projects")
-    } else if (view === "sessions") {
+    if (view === "detail") {
+      setView(detailOrigin === "sessions" && !selectedProject ? "projects" : detailOrigin)
+    } else if (view === "sessions" || view === "subagents") {
       setView("projects")
       setSelectedProject(null)
       setSessions([])
@@ -169,13 +179,41 @@ export function useSessionBrowser({
       setSessionsPage(1)
     }
     setSearchFilter("")
-  }, [view, selectedProject])
+  }, [view, selectedProject, detailOrigin])
 
   const handleSelectSession = useCallback(
     (s: SessionInfo) => {
       if (selectedProject) loadSessionFile(selectedProject, s)
     },
     [selectedProject, loadSessionFile]
+  )
+
+  const handleSelectSubagent = useCallback(
+    async (agent: CodexSubagentInfo) => {
+      onBeforeLoad?.()
+      setIsLoading(true)
+      setFetchError(null)
+      try {
+        const res = await authFetch(
+          `/api/sessions/${encodeURIComponent(agent.dirName)}/${encodeURIComponent(agent.fileName)}`
+        )
+        if (!res.ok) throw new Error(`Failed to load subagent (${res.status})`)
+        const text = await res.text()
+        const parsed = parseSession(text)
+        onLoadSession(parsed, {
+          dirName: agent.dirName,
+          fileName: agent.fileName,
+          rawText: text,
+        })
+        setDetailOrigin("subagents")
+        setView("detail")
+      } catch (err) {
+        setFetchError(err instanceof Error ? err.message : "Failed to load subagent")
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [onLoadSession, onBeforeLoad]
   )
 
   const handleDeleteSession = useCallback(
@@ -214,8 +252,10 @@ export function useSessionBrowser({
     loadProjects,
     loadSessions,
     loadLiveSession,
+    showSubagents,
     handleBack,
     handleSelectSession,
+    handleSelectSubagent,
     handleDeleteSession,
     handleDuplicateSession,
     handleLoadMoreSessions,

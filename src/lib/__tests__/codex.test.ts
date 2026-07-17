@@ -260,6 +260,18 @@ describe("extractCodexMetadataFromLines", () => {
     expect(meta.lastUserMessage).toBe("Thanks!")
   })
 
+  it("skips injected AGENTS.md instructions when selecting the task preview", () => {
+    const meta = extractCodexMetadataFromLines([
+      sessionMeta(),
+      userMessage("# AGENTS.md instructions for /home/user/project\n\n<INSTRUCTIONS>\nRepository context\n</INSTRUCTIONS>"),
+      userMessage("Inspect the session API"),
+    ])
+
+    expect(meta.firstUserMessage).toBe("Inspect the session API")
+    expect(meta.lastUserMessage).toBe("Inspect the session API")
+    expect(meta.turnCount).toBe(1)
+  })
+
   it("counts turns correctly", () => {
     const meta = extractCodexMetadataFromLines(MULTI_TURN_SESSION.split("\n"))
     expect(meta.turnCount).toBe(2)
@@ -914,6 +926,69 @@ describe("parseCodexSession", () => {
     expect(session.turns[0].userMessage).toBe(
       "check this screenshot\n![image](</tmp/screenshot1.png>)\n![image](</var/folders/abc/image2.jpg>)",
     )
+  })
+
+  it("converts Codex event image data URLs into renderable image blocks", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "user_message",
+          message: "check both screenshots",
+          images: [
+            "data:image/png;base64,cG5n",
+            "data:image/jpeg;base64,anBlZw==",
+          ],
+          local_images: [],
+        },
+      }),
+      assistantMessage("Got it"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].userMessage).toEqual([
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: "cG5n" },
+      },
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: "anBlZw==" },
+      },
+      { type: "text", text: "check both screenshots" },
+    ])
+  })
+
+  it("reads input_image blocks when a Codex response item is the only user record", () => {
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "image only fallback" },
+            { type: "input_image", image_url: "data:image/webp;base64,d2VicA==" },
+          ],
+        },
+      }),
+      assistantMessage("Got it"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].userMessage).toEqual([
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/webp", data: "d2VicA==" },
+      },
+      { type: "text", text: "image only fallback" },
+    ])
   })
 
   it("handles empty local_images gracefully", () => {

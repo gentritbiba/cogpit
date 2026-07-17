@@ -19,14 +19,18 @@ function findSkillContent(): string {
     const thisDir = dirname(fileURLToPath(import.meta.url))
     candidates.push(join(thisDir, "..", "skill", "SKILL.md"))
     candidates.push(join(thisDir, "..", "..", "skill", "SKILL.md"))
-  } catch {}
+  } catch {
+    // import.meta.url is unavailable in some compiled CommonJS builds.
+  }
 
   for (const candidate of candidates) {
     try {
       if (existsSync(candidate)) {
         return readFileSync(candidate, "utf-8")
       }
-    } catch {}
+    } catch {
+      // Try the next candidate when this path is unreadable.
+    }
   }
 
   throw new Error("Could not find SKILL.md — try reinstalling cogpit-memory")

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "@/lib/types"
+import { isCodexSessionText, parseCodexSession } from "@/lib/codex"
 
 function extractToolResultText(content: string | ContentBlock[] | undefined | null): string {
   if (!content) return ""
@@ -14,9 +15,33 @@ function extractToolResultText(content: string | ContentBlock[] | undefined | nu
 
 /**
  * Parses a subagent JSONL file into SubAgentMessage[].
- * Handles both user (tool_result) and assistant (thinking/text/tool_use) messages.
+ * Supports native Codex rollouts and Claude user/assistant transcript records.
  */
 export function parseSubagentJsonl(jsonlText: string, agentId: string): SubAgentMessage[] {
+  if (isCodexSessionText(jsonlText)) {
+    const session = parseCodexSession(jsonlText)
+    return session.turns
+      .filter((turn) =>
+        turn.assistantText.length > 0 ||
+        turn.thinking.length > 0 ||
+        turn.toolCalls.length > 0
+      )
+      .map((turn) => ({
+        agentId,
+        agentName: null,
+        subagentType: null,
+        type: "assistant" as const,
+        content: turn.assistantText.join("\n\n"),
+        toolCalls: turn.toolCalls,
+        thinking: turn.thinking.map((block) => block.thinking),
+        text: [...turn.assistantText],
+        timestamp: turn.timestamp,
+        tokenUsage: turn.tokenUsage,
+        model: turn.model,
+        isBackground: true,
+      }))
+  }
+
   const messages: SubAgentMessage[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
 

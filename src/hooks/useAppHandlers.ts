@@ -30,6 +30,8 @@ interface AppHandlersDeps {
   setSelectedEffort: React.Dispatch<React.SetStateAction<string>>
   fastMode: boolean
   setFastMode: React.Dispatch<React.SetStateAction<boolean>>
+  ultracode: boolean
+  setUltracode: React.Dispatch<React.SetStateAction<boolean>>
   mcpConfig: string | null
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
@@ -39,6 +41,7 @@ interface AppliedSettings {
   model: string
   effort: string
   fastMode: boolean
+  ultracode: boolean
   mcpConfig: string | null
 }
 
@@ -84,6 +87,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     selectedModel, setSelectedModel,
     selectedEffort, setSelectedEffort,
     fastMode, setFastMode,
+    ultracode, setUltracode,
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
   } = deps
@@ -202,6 +206,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   mcpConfigRef.current = mcpConfig
   const fastModeRef = useRef(fastMode)
   fastModeRef.current = fastMode
+  const ultracodeRef = useRef(ultracode)
+  ultracodeRef.current = ultracode
   const permissionsConfigRef = useRef(permissionsConfig)
   permissionsConfigRef.current = permissionsConfig
 
@@ -216,6 +222,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         setSelectedModel(prev[currentSessionId].model)
         setSelectedEffort(prev[currentSessionId].effort)
         setFastMode(prev[currentSessionId].fastMode)
+        setUltracode(prev[currentSessionId].ultracode)
         return prev
       }
       return {
@@ -224,11 +231,12 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
           model: selectedModelRef.current,
           effort: selectedEffortRef.current,
           fastMode: fastModeRef.current,
+          ultracode: ultracodeRef.current,
           mcpConfig: mcpConfigRef.current,
         },
       }
     })
-  }, [currentSessionId, setSelectedModel, setSelectedEffort, setFastMode])
+  }, [currentSessionId, setSelectedModel, setSelectedEffort, setFastMode, setUltracode])
 
   const applied = currentSessionId ? appliedSettings[currentSessionId] : undefined
   const mcpChanged = mcpConfig !== (applied?.mcpConfig ?? null)
@@ -236,6 +244,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     (selectedModel !== applied.model ||
      selectedEffort !== applied.effort ||
      fastMode !== applied.fastMode ||
+     ultracode !== applied.ultracode ||
      hasPermsPendingChanges ||
      mcpChanged)
 
@@ -248,6 +257,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     const nextModel = selectedModelRef.current
     const nextEffort = selectedEffortRef.current
     const nextFastMode = fastModeRef.current
+    const nextUltracode = ultracodeRef.current
     const nextMcpConfig = mcpConfigRef.current
     const nextPermissions = permissionsConfigRef.current
     const agentKind = state.sessionSource?.agentKind
@@ -260,6 +270,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
           model: nextModel,
           effort: nextEffort,
           fastMode: nextFastMode,
+          ultracode: nextUltracode,
           mcpConfig: nextMcpConfig,
           permissionMode: nextPermissions.mode,
           allowedTools: nextPermissions.allowedTools,
@@ -273,6 +284,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         model: nextModel,
         effort: nextEffort,
         fastMode: nextFastMode,
+        ultracode: nextUltracode,
         mcpConfig: nextMcpConfig,
       },
     }))

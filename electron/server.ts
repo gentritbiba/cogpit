@@ -39,6 +39,7 @@ import { registerPermissionRoutes } from "../server/routes/permissions"
 import { registerAskUserRoutes } from "../server/routes/ask-user"
 import { registerModelRoutes } from "../server/routes/models"
 import { registerCodexRuntimeRoutes } from "../server/routes/codex-runtime"
+import { registerPerformanceRoutes } from "../server/routes/performance"
 import { codexAppServer } from "../server/codex-app-server"
 import { PtySessionManager } from "../server/pty-server"
 
@@ -72,6 +73,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // ── API routes (shared with Vite server) ───────────────────────
   const use = app.use.bind(app)
+  registerPerformanceRoutes(use)
   registerConfigRoutes(use)
   registerProjectRoutes(use)
   registerClaudeRoutes(use)

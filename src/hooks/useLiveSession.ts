@@ -17,6 +17,8 @@ export interface SessionSource {
   fileName: string
   rawText: string
   agentKind?: AgentKind
+  /** Byte position in the on-disk JSONL file represented by rawText. */
+  watchOffset?: number
 }
 
 export type SseConnectionState = "connecting" | "connected" | "disconnected"
@@ -63,6 +65,7 @@ export function useLiveSession(
   const dirName = source?.dirName ?? null
   const fileName = source?.fileName ?? null
   const rawText = source?.rawText ?? ""
+  const watchOffset = source?.watchOffset ?? new TextEncoder().encode(rawText).byteLength
 
   // Reset accumulated text and cached session when source changes
   useEffect(() => {
@@ -96,7 +99,7 @@ export function useLiveSession(
 
     setSseState("connecting")
 
-    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
+    const url = `/api/watch/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?offset=${watchOffset}`
     const es = new EventSource(authUrl(url))
     let staleTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -117,6 +120,7 @@ export function useLiveSession(
     // Ordering is preserved because text fragments are appended in arrival
     // order and only one worker call is in flight at a time.
     let pendingText = ""
+    let trackedOffset = watchOffset
     let workerBusy = false
     let closed = false
     let pendingUpdate = false
@@ -195,8 +199,13 @@ export function useLiveSession(
           if (closed) return
           sessionRef.current = result
           if (dirName && fileName) {
-            sessionCache.update(dirName, fileName, { parsed: result })
-            sessionCache.updateRawText(dirName, fileName, textRef.current)
+            sessionCache.update(dirName, fileName, {
+              parsed: result,
+              source: {
+                rawText: textRef.current,
+                watchOffset: trackedOffset,
+              },
+            })
           }
           scheduleUpdate()
         })
@@ -264,6 +273,7 @@ export function useLiveSession(
           setOverlay(reconcileWithLines(overlayRef.current, data.lines))
 
           const newText = data.lines.join("\n") + "\n"
+          trackedOffset += new TextEncoder().encode(newText).byteLength
           textRef.current += newText
           pendingText += newText
           flushToWorker()
@@ -298,7 +308,7 @@ export function useLiveSession(
       overlayRef.current = EMPTY_OVERLAY
       setStreamingOverlay(EMPTY_OVERLAY)
     }
-  }, [dirName, fileName, rawText])
+  }, [dirName, fileName, rawText, watchOffset])
 
   return { isLive, sseState, isCompacting, streamingOverlay }
 }

@@ -185,4 +185,72 @@ describe("parseSubagentJsonl", () => {
     expect(messages).toHaveLength(1)
     expect(messages[0].text).toEqual(["Valid"])
   })
+
+  it("parses Codex sub-agent apply_patch calls as file edits", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: /workspace/src/app.ts",
+      "@@",
+      "-const value = 1",
+      "+const value = 2",
+      "*** End Patch",
+    ].join("\n")
+    const jsonl = buildSubagentJsonl([
+      {
+        type: "session_meta",
+        timestamp: "2026-07-15T10:00:00Z",
+        payload: {
+          id: "codex-child-session",
+          cwd: "/workspace",
+          source: { subagent: { thread_spawn: { agent_path: "/root/worker" } } },
+          forked_from_id: "codex-parent-session",
+        },
+      },
+      {
+        type: "turn_context",
+        timestamp: "2026-07-15T10:00:01Z",
+        payload: { turn_id: "child-turn", model: "gpt-5", cwd: "/workspace" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-07-15T10:00:02Z",
+        payload: { type: "user_message", message: "Update the value" },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-07-15T10:00:03Z",
+        payload: {
+          type: "custom_tool_call",
+          status: "completed",
+          call_id: "patch-call",
+          name: "apply_patch",
+          input: patch,
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2026-07-15T10:00:04Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "patch-call",
+          output: JSON.stringify({ output: "Done!", metadata: { exit_code: 0 } }),
+        },
+      },
+    ])
+
+    const messages = parseSubagentJsonl(jsonl, "codex-child-session")
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0].agentId).toBe("codex-child-session")
+    expect(messages[0].toolCalls).toHaveLength(1)
+    expect(messages[0].toolCalls[0]).toMatchObject({
+      name: "Edit",
+      isError: false,
+      input: {
+        file_path: "/workspace/src/app.ts",
+        old_string: "const value = 1",
+        new_string: "const value = 2",
+      },
+    })
+  })
 })

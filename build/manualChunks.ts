@@ -5,6 +5,13 @@
  * (Electron renderer) to keep vendor bundles consistent.
  */
 
+const REACT_PATTERNS = [
+  "node_modules/react/",
+  "node_modules/react-dom/",
+  "node_modules/scheduler/",
+  "commonjsHelpers.js",
+]
+
 const SHIKI_PATTERNS = [
   "node_modules/shiki/",
   "node_modules/@shikijs/core/",
@@ -24,6 +31,8 @@ const MARKDOWN_PATTERNS = [
 ]
 
 const UI_PATTERNS = [
+  "node_modules/@base-ui/",
+  "node_modules/@floating-ui/",
   "node_modules/@radix-ui/",
   "node_modules/lucide-react/",
   "node_modules/react-resizable-panels/",
@@ -38,6 +47,7 @@ function matchesAny(id: string, patterns: string[]): boolean {
 }
 
 export function manualChunks(id: string): string | undefined {
+  if (matchesAny(id, REACT_PATTERNS)) return "vendor-react"
   if (matchesAny(id, SHIKI_PATTERNS)) return "vendor-shiki"
   if (matchesAny(id, MARKDOWN_PATTERNS)) return "vendor-markdown"
   if (matchesAny(id, UI_PATTERNS)) return "vendor-ui"

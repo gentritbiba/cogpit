@@ -188,12 +188,16 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
             cwdCache.set(filePath, obj.payload.cwd)
             return obj.payload.cwd
           }
-        } catch {}
+        } catch {
+          // Ignore malformed JSONL lines and keep scanning the file header.
+        }
       }
     } finally {
       await fh.close()
     }
-  } catch {}
+  } catch {
+    // Unreadable session metadata has no usable cwd.
+  }
   cwdCache.set(filePath, "")
   return ""
 }

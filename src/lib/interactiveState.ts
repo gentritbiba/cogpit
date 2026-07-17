@@ -13,6 +13,7 @@ export interface PlanApprovalState {
 
 export interface UserQuestionState {
   type: "question"
+  toolUseId: string
   questions: Array<{
     question: string
     header?: string
@@ -71,7 +72,7 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
   // AskUserQuestion
   const questions = input.questions as UserQuestionState["questions"] | undefined
   if (questions && questions.length > 0) {
-    return { type: "question", questions }
+    return { type: "question", toolUseId: lastToolCall.id, questions }
   }
 
   return null

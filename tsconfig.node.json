@@ -13,6 +13,12 @@
     "moduleDetection": "force",
     "noEmit": true,
 
+    /* Path aliases */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,
@@ -20,5 +26,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "server/**/*.ts", "src/lib/**/*.ts"]
+  "include": ["vite.config.ts", "server/**/*.ts"]
 }

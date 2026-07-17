@@ -467,6 +467,17 @@ html.electron .electron-drag {
   }
 }
 
+/*
+ * Ping/pulse indicators are purely decorative but keep Chromium's compositor
+ * producing frames indefinitely. Solid status colors communicate the same
+ * state without a permanent GPU tax. Short entrance and loading animations
+ * remain available.
+ */
+.animate-ping,
+.animate-pulse {
+  animation: none !important;
+}
+
 /* ── Chat input 3D lighting (ChatGPT-style subtle depth) ── */
 .chat-input-3d {
   box-shadow:
@@ -506,4 +517,3 @@ mark.find-in-session-active {
 .dark mark.find-in-session-active {
   background-color: rgba(250, 204, 21, 0.5);
 }
-

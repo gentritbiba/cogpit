@@ -138,6 +138,34 @@ function shortNameFromPath(path: string): string {
 }
 
 export function registerProjectRoutes(use: UseFn) {
+  // GET /api/codex-subagents - list Codex sub-agent rollouts across projects
+  use("/api/codex-subagents", async (_req, res, next) => {
+    if (_req.method !== "GET") return next()
+
+    try {
+      const subagents = []
+      for (const file of await listCodexSessionFiles()) {
+        try {
+          const meta = await getSessionMeta(file.filePath)
+          if (!meta.isSubagent || !meta.parentSessionId || !meta.cwd) continue
+          subagents.push({
+            ...meta,
+            fileName: `${meta.parentSessionId}/subagents/agent-${meta.sessionId}.jsonl`,
+            dirName: encodeCodexDirName(meta.cwd),
+            size: file.size,
+            lastModified: new Date(file.mtimeMs).toISOString(),
+          })
+        } catch { /* ignore incomplete rollouts */ }
+      }
+      subagents.sort((a, b) => b.lastModified.localeCompare(a.lastModified))
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify(subagents))
+    } catch (err) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: String(err) }))
+    }
+  })
+
   // GET /api/projects - list all projects
   use("/api/projects", async (_req, res, next) => {
     if (_req.method !== "GET") return next()
@@ -388,12 +416,12 @@ export function registerProjectRoutes(use: UseFn) {
         return
       }
 
-      let filePath = await resolveSessionFilePath(dirName, fileName)
+      let filePath: string | null = null
 
-      // For Codex sessions, resolve virtual paths by session ID lookup.
-      // Matches sub-agent paths ({parentId}/subagents/agent-{id}.jsonl)
-      // and simple session ID paths ({sessionId}.jsonl).
-      if (!filePath && isCodexDirName(dirName)) {
+      // Codex stores every rollout in its date-based sessions tree rather than
+      // nesting subagents beneath their parent. Resolve virtual UI paths by ID
+      // before trying the literal relative path.
+      if (isCodexDirName(dirName)) {
         const idMatch = fileName.match(/\/subagents\/agent-([^.]+)\.jsonl$/)
           ?? fileName.match(/^([^/]+)\.jsonl$/)
         if (idMatch) {
@@ -402,6 +430,10 @@ export function registerProjectRoutes(use: UseFn) {
             filePath = resolved
           }
         }
+      }
+
+      if (!filePath) {
+        filePath = await resolveSessionFilePath(dirName, fileName)
       }
 
       if (!filePath) {

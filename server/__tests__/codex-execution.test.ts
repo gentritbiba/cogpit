@@ -85,12 +85,11 @@ describe("Codex execution mappings", () => {
     }))
   })
 
-  it("resumes an idle thread and starts a new turn", async () => {
+  it("resumes an idle thread by id and starts a new turn", async () => {
     const runtime = client()
     const result = await continueCodexExecution(
       runtime,
       "thread-1",
-      "/safe/rollout.jsonl",
       {
         cwd: "/work/project",
         message: "Continue",
@@ -100,7 +99,6 @@ describe("Codex execution mappings", () => {
     )
 
     expect(runtime.resumeThread).toHaveBeenCalledWith("thread-1", {
-      path: "/safe/rollout.jsonl",
       cwd: "/work/project",
       approvalPolicy: "never",
       sandbox: "read-only",
@@ -120,7 +118,7 @@ describe("Codex execution mappings", () => {
     const runtime = client({
       getActiveTurnId: vi.fn(() => "turn-active"),
     })
-    const result = await continueCodexExecution(runtime, "thread-1", null, {
+    const result = await continueCodexExecution(runtime, "thread-1", {
       cwd: "/work/project",
       message: "Focus on tests",
     })
@@ -141,7 +139,7 @@ describe("Codex execution mappings", () => {
         thread: thread({ turns: [{ id: "turn-resumed", status: "inProgress" }] }),
       }),
     })
-    await continueCodexExecution(runtime, "thread-1", null, {
+    await continueCodexExecution(runtime, "thread-1", {
       cwd: "/work/project",
       message: "Add this constraint",
     })

@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn } from "@/lib/types"
 
-export function ModelDistribution({ turns }: { turns: Turn[] }): JSX.Element | null {
+export function ModelDistribution({ turns }: { turns: Turn[] }): React.JSX.Element | null {
   const models = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const t of turns) {

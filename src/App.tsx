@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, TerminalSquare, Code2, F
 import { Button } from "@/components/ui/button"
 import { SessionBrowser } from "@/components/SessionBrowser"
 import { StatsPanel } from "@/components/StatsPanel"
+import { AgentContextBar } from "@/components/AgentContextBar"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
@@ -66,6 +67,7 @@ import {
   findClaudeProjectDirNameForCwd,
   isCodexDirName,
   projectDirNameForAgent,
+  projectDirNameForNewFolder,
 } from "@/lib/sessionSource"
 import type { AgentKind } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
@@ -400,7 +402,10 @@ export default function App() {
   // Ultracode: xhigh effort + standing dynamic-workflow orchestration. Claude
   // only, and only meaningful on xhigh-capable models.
   const [ultracodeEnabled, setUltracodeEnabled] = useState(false)
-  const ultracodeAvailable = isUltracodeCapableModel(currentAgentKind ?? "claude", selectedModel)
+  const ultracodeAvailable = isUltracodeCapableModel(
+    currentAgentKind ?? "claude",
+    selectedModel || state.session?.model,
+  )
   const ultracodeActive = ultracodeEnabled && ultracodeAvailable
   // Ultracode pins effort to xhigh; otherwise use the user's selection.
   const effectiveEffort = ultracodeActive
@@ -534,6 +539,11 @@ export default function App() {
     handleNewSession(dirName, normalizedCwd)
   }, [handleNewSession, resolveClaudeProjectDirName])
 
+  const handleStartNewFolder = useCallback((cwd: string) => {
+    const dirName = projectDirNameForNewFolder(cwd, config.defaultAgentKind)
+    void handleStartNewSession(dirName, cwd)
+  }, [config.defaultAgentKind, handleStartNewSession])
+
   const handlePendingSessionAgentChange = useCallback((agentKind: AgentKind) => {
     const pending = pendingAgentSource
     if (!pending?.cwd) return
@@ -577,6 +587,7 @@ export default function App() {
     model: selectedModel,
     effort: effectiveEffort,
     fastMode: fastModeActive,
+    ultracode: ultracodeActive,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     onCodexModelRejected: handleCodexModelRejected,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
@@ -696,6 +707,8 @@ export default function App() {
     setSelectedEffort,
     fastMode: fastModeActive,
     setFastMode: setFastModeEnabled,
+    ultracode: ultracodeActive,
+    setUltracode: setUltracodeEnabled,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
@@ -1091,6 +1104,18 @@ export default function App() {
     />
   )
 
+  // Keep delegated Claude agents visible in the session context, even when
+  // the optional Stats panel is closed. The detailed timeline and Stats panel
+  // remain the places for full transcripts and metrics.
+  const agentContextBar = state.session && !isSubAgentView && (
+    <AgentContextBar
+      session={state.session}
+      sessionSource={state.sessionSource}
+      backgroundAgents={backgroundAgents}
+      onLoadSession={handlers.handleLoadSessionScrollAware}
+    />
+  )
+
   // Workflow visualization panel — mounted only for sessions that ran a
   // workflow, so its chunk loads lazily and the Sheet can animate open/close.
   const workflowsPanelNode = hasWorkflowToolCalls && (
@@ -1132,7 +1157,7 @@ export default function App() {
         worktreeEnabled={worktreeEnabled}
         onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
         ultracodeEnabled={ultracodeActive}
-        onUltracodeEnabledChange={isNewSession && ultracodeAvailable ? setUltracodeEnabled : undefined}
+        onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
         onApplySettings={handlers.handleApplySettings}
         activeModelId={state.session?.model}
         mcpServers={supportsMcp ? mcpData.servers : undefined}
@@ -1211,6 +1236,7 @@ export default function App() {
               ) : state.session ? (
                 <div className="flex flex-1 min-h-0 flex-col">
                   {teamMembersBar}
+                  {agentContextBar}
                   <SessionInfoBar
                     creatingSession={creatingSession}
                     onNewSession={handleStartNewSession}
@@ -1423,6 +1449,7 @@ export default function App() {
                 <ResizablePanel defaultSize={showFileChangesPanel ? 70 : 100} minSize="500px">
                   <div className="relative h-full min-h-0 flex flex-col">
                     {teamMembersBar}
+                    {agentContextBar}
                     <SessionInfoBar
                       creatingSession={creatingSession}
                       onNewSession={handleStartNewSession}
@@ -1600,6 +1627,8 @@ export default function App() {
           open={panels.showProjectSwitcher}
           onClose={panels.handleCloseProjectSwitcher}
           onNewSession={handleStartNewSession}
+          onNewFolder={handleStartNewFolder}
+          defaultAgentKind={config.defaultAgentKind}
           currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
           currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
         />

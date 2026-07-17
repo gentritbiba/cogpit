@@ -15,6 +15,7 @@ import { ErrorBanner } from "./ErrorBanner"
 import type { AgentKind } from "@/lib/sessionSource"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
+import { authFetch } from "@/lib/auth"
 
 export interface ChatInputHandle {
   focus: () => void
@@ -90,6 +91,7 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd }, ref) {
   const {
+    session,
     isLive,
     actions: { handleEditConfig: onEditConfig },
     pendingInteraction,
@@ -145,6 +147,28 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   const elapsedSec = useElapsedTimer(isConnected)
 
+  const submitUserQuestion = useCallback(async (answer: string) => {
+    const interaction = pendingInteraction
+    if (!session?.sessionId || interaction?.type !== "question") return
+
+    const question = interaction.questions[0]
+    if (!question || !answer.trim()) return
+
+    const res = await authFetch("/api/ask-user-answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: session.sessionId,
+        toolUseId: interaction.toolUseId,
+        answers: { [question.question]: answer },
+      }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      throw new Error(data.error ?? "Failed to submit answer")
+    }
+  }, [pendingInteraction, session?.sessionId])
+
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
     setText(`/${suggestion.name} `)
     setSlashSelectedIndex(0)
@@ -173,13 +197,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
     if (!allowImages && images.length > 0) return
+
+    if (pendingInteraction?.type === "question") {
+      void submitUserQuestion(trimmed)
+      setText("")
+      updateMultiline(false)
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
+      return
+    }
+
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
     onSend(trimmed, imagePayload)
     setText("")
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, allowImages, onSend, clearImages, updateMultiline])
+  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showFiles && e.key === "Escape") {
@@ -250,7 +283,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
       <div>
           {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
-        {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={onSend} />}
+        {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={(answer) => { void submitUserQuestion(answer) }} />}
 
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">

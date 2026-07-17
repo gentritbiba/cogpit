@@ -73,7 +73,7 @@ function getTaskTitle(task: BgTask): string {
 
 // ── Port Badge ──────────────────────────────────────────────────────────────
 
-function PortBadge({ port, isActive }: { port: number; isActive: boolean }): JSX.Element {
+function PortBadge({ port, isActive }: { port: number; isActive: boolean }): React.JSX.Element {
   return (
     <span className="inline-flex items-center gap-1 rounded bg-elevation-2 px-1.5 py-0.5 text-[10px] font-mono">
       <span
@@ -96,7 +96,7 @@ export function BackgroundServers({
   turns,
   onToggleServer,
   onServersChanged,
-}: BackgroundServersProps): JSX.Element | null {
+}: BackgroundServersProps): React.JSX.Element | null {
   const [tasks, setTasks] = useState<BgTask[]>([])
   const jsonlPorts = useJsonlPorts(turns)
 

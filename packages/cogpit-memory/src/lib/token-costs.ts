@@ -12,8 +12,6 @@
 import type { Turn, SubAgentMessage } from "./types"
 import { resolveTier } from "./pricingTiers"
 
-export { computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./costAnalytics"
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Approximate characters per token for content-based estimation. */

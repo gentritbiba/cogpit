@@ -7,6 +7,12 @@ export function isClaudeDirName(dirName: string | null | undefined): boolean {
   return typeof dirName === "string" && !dirName.startsWith("codex__")
 }
 
+/** Encode a cwd using Claude Code's project-directory naming convention. */
+export function encodeClaudeDirName(cwd: string): string {
+  const normalized = cwd.replace(/[\\/]+$/, "") || cwd
+  return normalized.replace(/[:\\/]/g, "-")
+}
+
 // ── CLI arg builders ──────────────────────────────────────────────────────────
 
 export function buildClaudePermArgs(permissions?: PermissionsConfig): string[] {

@@ -11,3 +11,7 @@ contextBridge.exposeInMainWorld("electronUpdater", {
     ipcRenderer.send("dismiss-update", version)
   },
 })
+
+contextBridge.exposeInMainWorld("electronPerformance", {
+  getSnapshot: () => ipcRenderer.invoke("performance:get-snapshot"),
+})

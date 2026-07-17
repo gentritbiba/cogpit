@@ -37,7 +37,7 @@ interface SearchHeaderProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>
 }
 
-function SearchHeader({ searchInputRef }: SearchHeaderProps): JSX.Element {
+function SearchHeader({ searchInputRef }: SearchHeaderProps): React.JSX.Element {
   const { state: { searchQuery, expandAll }, dispatch } = useAppContext()
   const { actions: { handleToggleExpandAll } } = useSessionContext()
   return (

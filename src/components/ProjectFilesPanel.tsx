@@ -20,7 +20,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { Spinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/ui/Spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"

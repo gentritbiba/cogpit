@@ -18,6 +18,7 @@ import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { authFetch } from "@/lib/auth"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
 
 /**
  * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
@@ -187,7 +188,7 @@ function StatusIcon({
     return <CheckCircle className="w-4 h-4 text-green-500/60" />
   }
   if (isAgentActive) {
-    return <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+    return <Loader2 className="w-4 h-4 text-blue-400" />
   }
   return null
 }
@@ -336,6 +337,7 @@ interface AskUserQuestion {
   question: string
   header?: string
   options?: Array<{ label: string; description?: string }>
+  multiSelect?: boolean
   type?: string
 }
 
@@ -347,7 +349,9 @@ function AskUserAnswerForm({
   sessionId: string
 }): React.ReactElement | null {
   const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
-  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""))
+  const [answers, setAnswers] = useState<Record<string, string>>(() => (
+    Object.fromEntries(questions.map((question) => [question.question, ""]))
+  ))
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -402,13 +406,23 @@ function AskUserAnswerForm({
                     key={oi}
                     type="button"
                     onClick={() => {
-                      const next = [...answers]
-                      next[i] = opt.label
+                      const current = answers[q.question] ?? ""
+                      const selected = q.multiSelect
+                        ? current.split(", ").filter(Boolean)
+                        : []
+                      const nextValue = q.multiSelect
+                        ? selected.includes(opt.label)
+                          ? selected.filter((label) => label !== opt.label).join(", ")
+                          : [...selected, opt.label].join(", ")
+                        : opt.label
+                      const next = { ...answers, [q.question]: nextValue }
                       setAnswers(next)
                     }}
                     className={cn(
                       "text-[11px] px-2 py-0.5 rounded border transition-colors",
-                      answers[i] === opt.label
+                      (q.multiSelect
+                        ? (answers[q.question] ?? "").split(", ").includes(opt.label)
+                        : answers[q.question] === opt.label)
                         ? "border-pink-500/60 bg-pink-500/20 text-pink-200"
                         : "border-pink-500/20 text-pink-400 hover:bg-pink-500/10",
                     )}
@@ -420,10 +434,9 @@ function AskUserAnswerForm({
               </div>
             ) : (
               <textarea
-                value={answers[i]}
+                value={answers[q.question] ?? ""}
                 onChange={(e) => {
-                  const next = [...answers]
-                  next[i] = e.target.value
+                  const next = { ...answers, [q.question]: e.target.value }
                   setAnswers(next)
                 }}
                 rows={2}
@@ -597,10 +610,16 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       )}
 
       {showInput && (
-        <JsonResultHighlighted
-          result={JSON.stringify(toolCall.input)}
-          expanded={true}
-        />
+        toolCall.name === "Bash" && (typeof toolCall.input.command === "string" || typeof toolCall.input.cmd === "string") ? (
+          <BashToolInput input={toolCall.input} />
+        ) : (toolCall.name === "exec" || /(?:^|__|[.:/])exec$/.test(toolCall.name)) && typeof toolCall.input.raw === "string" ? (
+          <CodexExecToolInput input={toolCall.input} />
+        ) : (
+          <JsonResultHighlighted
+            result={JSON.stringify(toolCall.input)}
+            expanded={true}
+          />
+        )
       )}
 
       {toolCall.name === "AskUserQuestion" && toolCall.result === null && isAgentActive && session?.sessionId && (

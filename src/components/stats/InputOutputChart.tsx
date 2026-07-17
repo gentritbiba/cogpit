@@ -50,7 +50,7 @@ function computeTurnData(turns: Turn[]): TurnData[] {
 
 // ── Chart Tooltip ───────────────────────────────────────────────────────────
 
-function ChartTooltip({ data }: { data: TurnData }): JSX.Element {
+function ChartTooltip({ data }: { data: TurnData }): React.JSX.Element {
   return (
     <div className="pointer-events-none absolute left-0 right-0 top-[28px] z-10 px-1">
       <div className="rounded-md bg-elevation-2 px-2.5 py-2 text-[10px] shadow-lg w-fit">
@@ -78,7 +78,7 @@ function ChartTooltip({ data }: { data: TurnData }): JSX.Element {
 
 // ── Chart Legend ─────────────────────────────────────────────────────────────
 
-function ChartLegend({ padLeft, svgHeight }: { padLeft: number; svgHeight: number }): JSX.Element {
+function ChartLegend({ padLeft, svgHeight }: { padLeft: number; svgHeight: number }): React.JSX.Element {
   return (
     <>
       <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#60a5fa" opacity={0.85} />
@@ -108,7 +108,7 @@ interface BarGroupProps {
   padTop: number
 }
 
-function BarGroup({ data: d, groupX, barW, groupW, baseY, chartH, maxVal, isHovered, onHover, padTop }: BarGroupProps): JSX.Element {
+function BarGroup({ data: d, groupX, barW, groupW, baseY, chartH, maxVal, isHovered, onHover, padTop }: BarGroupProps): React.JSX.Element {
   const cacheReadH = (d.cacheRead / maxVal) * chartH
   const cacheWriteH = (d.cacheWrite / maxVal) * chartH
   const newInputH = (d.newInput / maxVal) * chartH
@@ -161,7 +161,7 @@ const PAD_RIGHT = 8
 const CHART_W = SVG_WIDTH - PAD_LEFT - PAD_RIGHT
 const CHART_H = SVG_HEIGHT - PAD_TOP - PAD_BOTTOM
 
-export function InputOutputChart({ turns }: { turns: Turn[] }): JSX.Element | null {
+export function InputOutputChart({ turns }: { turns: Turn[] }): React.JSX.Element | null {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
 
   const data = useMemo(() => computeTurnData(turns), [turns])

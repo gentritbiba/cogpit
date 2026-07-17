@@ -1,4 +1,4 @@
-import { sdkSessions, sendSDKMessage } from "../sdk-session"
+import { sdkSessions, resolveUserQuestion, type UserQuestionAnswers } from "../sdk-session"
 import { sendJson } from "../helpers"
 import type { UseFn } from "../helpers"
 
@@ -39,23 +39,18 @@ export function registerAskUserRoutes(use: UseFn) {
           return
         }
 
-        // Build a text message from the answers.
-        // answers can be string[], or Record<string, string>.
-        let message: string
-        if (Array.isArray(answers)) {
-          message = answers.join("\n")
-        } else if (typeof answers === "object") {
-          message = Object.values(answers as Record<string, string>).join("\n")
-        } else if (typeof answers === "string") {
-          message = answers
-        } else {
+        if (
+          typeof answers !== "string" &&
+          !Array.isArray(answers) &&
+          (typeof answers !== "object" || answers === null)
+        ) {
           sendJson(res, 400, { error: "answers must be an array or object" })
           return
         }
 
-        const state = sendSDKMessage(sessionId, message)
-        if (!state) {
-          sendJson(res, 404, { error: "Session not found" })
+        const result = resolveUserQuestion(sessionId, toolUseId, answers as UserQuestionAnswers)
+        if (!result.found) {
+          sendJson(res, 404, { error: "Question not found or already answered" })
           return
         }
 

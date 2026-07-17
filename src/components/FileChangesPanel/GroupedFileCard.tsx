@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, memo, useCallback, startTransition } from "react"
+import { useState, useRef, useEffect, memo, useCallback, startTransition } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { ChevronDown, ChevronRight, Code2, GitCompareArrows } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
-import type { DiffMode } from "."
+
+export type DiffMode = "net" | "per-edit"
 
 const EXT_COLORS: Record<string, string> = {
   tsx: "text-blue-400",
@@ -93,14 +94,12 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
   const hasDiff = effectiveDiffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
 
   const showDiff = deferredOpen && isNear && hasDiff
-  const diffRef = useRef<HTMLDivElement>(null)
-  const lastDiffHeightRef = useRef(0)
-
-  useLayoutEffect(() => {
-    if (showDiff && diffRef.current) {
-      lastDiffHeightRef.current = diffRef.current.offsetHeight
-    }
-  }, [showDiff, effectiveDiffMode])
+  const [lastDiffHeight, setLastDiffHeight] = useState(0)
+  const measureDiff = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    const height = node.offsetHeight
+    setLastDiffHeight((current) => current === height ? current : height)
+  }, [])
 
   const turnLabel = file.turnRange[0] === file.turnRange[1]
     ? `T${file.turnRange[0] + 1}`
@@ -119,6 +118,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
     >
       <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t hover:bg-elevation-3 transition-colors group">
         <button
+          type="button"
           onClick={() => setOpenWithTransition(!open)}
           className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1"
         >
@@ -151,6 +151,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <Tooltip>
               <TooltipTrigger render={<button
+                  type="button"
                   onClick={() => openInEditor(file.filePath, "file")}
                   className="p-1 text-muted-foreground hover:text-blue-400 transition-colors"
                   aria-label="Open file in editor"
@@ -161,6 +162,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
             </Tooltip>
             <Tooltip>
               <TooltipTrigger render={<button
+                  type="button"
                   onClick={() => openInEditor(file.filePath, "diff")}
                   className="p-1 text-muted-foreground hover:text-amber-400 transition-colors"
                   aria-label="View git diff"
@@ -183,8 +185,8 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
         showDiff={showDiff}
         open={open}
         hasDiff={hasDiff}
-        diffRef={diffRef}
-        lastDiffHeight={lastDiffHeightRef.current}
+        diffRef={measureDiff}
+        lastDiffHeight={lastDiffHeight}
         oldString={oldString}
         newString={newString}
         filePath={file.filePath}
@@ -212,7 +214,7 @@ const DiffContent = memo(function DiffContent({
   showDiff: boolean
   open: boolean
   hasDiff: boolean
-  diffRef: React.RefObject<HTMLDivElement | null>
+  diffRef: React.RefCallback<HTMLDivElement>
   lastDiffHeight: number
   oldString: string
   newString: string
@@ -223,7 +225,7 @@ const DiffContent = memo(function DiffContent({
 }): React.ReactElement | null {
   if (showDiff) {
     return (
-      <div ref={diffRef} className="overflow-hidden rounded-b">
+      <div key={diffMode} ref={diffRef} className="overflow-hidden rounded-b">
         {diffMode === "per-edit" ? (
           <PerEditDiffs edits={edits} filePath={filePath} />
         ) : (
@@ -277,7 +279,7 @@ const PerEditDiffs = memo(function PerEditDiffs({ edits, filePath }: { edits: In
   return (
     <div className="divide-y divide-border/30">
       {editsToRender.map((edit, i) => (
-        <div key={i}>
+        <div key={edit.id}>
           {total > 1 && (
             <div className="flex items-center gap-2 px-2.5 py-1 bg-elevation-1/50">
               <span className="text-[9px] font-mono text-muted-foreground/60">

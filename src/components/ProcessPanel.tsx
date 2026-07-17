@@ -1,10 +1,13 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react"
+import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "react"
 import { authUrl } from "@/lib/auth"
 import { ChevronDown, ChevronRight, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
-import { TerminalOutput } from "@/components/TerminalOutput"
 import { usePty } from "@/contexts/PtyContext"
+
+const TerminalOutput = lazy(() =>
+  import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
+)
 
 // ── ANSI stripping ───────────────────────────────────────────────────────────
 
@@ -295,14 +298,22 @@ export const ProcessPanel = memo(function ProcessPanel({
               process={activeProcess}
             />
           ) : (
-            <TerminalOutput
-              key={activeProcess.id}
-              processId={activeProcess.id}
-              autoFocus
-              onRequestNew={onRequestTerminal}
-              onRequestClose={() => handleClose(activeProcess)}
-              onAddContext={onAddTerminalContext}
-            />
+            <Suspense
+              fallback={(
+                <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
+                  Loading terminal…
+                </div>
+              )}
+            >
+              <TerminalOutput
+                key={activeProcess.id}
+                processId={activeProcess.id}
+                autoFocus
+                onRequestNew={onRequestTerminal}
+                onRequestClose={() => handleClose(activeProcess)}
+                onAddContext={onAddTerminalContext}
+              />
+            </Suspense>
           )}
         </div>
       )}

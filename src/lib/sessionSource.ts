@@ -6,9 +6,11 @@
 import type { AgentKind } from "./providers/types"
 import { getProvider, inferAgentKind } from "./providers/registry"
 import { encodeCodexDirName, isCodexDirName } from "./providers/codex"
+import { encodeClaudeDirName } from "./providers/claude"
 
 export type { AgentKind } from "./providers/types"
 export { isCodexDirName, encodeCodexDirName } from "./providers/codex"
+export { encodeClaudeDirName } from "./providers/claude"
 export { inferAgentKind as inferSessionSourceKind, inferAgentKind as agentKindFromDirName } from "./providers/registry"
 
 export function getResumeCommand(
@@ -29,6 +31,10 @@ export function projectDirNameForAgent(
   agentKind: AgentKind,
 ): string {
   return agentKind === "codex" ? encodeCodexDirName(cwd) : claudeDirName
+}
+
+export function projectDirNameForNewFolder(cwd: string, agentKind: AgentKind): string {
+  return agentKind === "codex" ? encodeCodexDirName(cwd) : encodeClaudeDirName(cwd)
 }
 
 interface ProjectDirEntry {

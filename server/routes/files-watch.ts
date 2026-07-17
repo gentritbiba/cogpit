@@ -11,6 +11,7 @@ import {
 import { readdir } from "node:fs/promises"
 import type { UseFn } from "../helpers"
 import * as streamBus from "../lib/streamBus"
+import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
 export function registerFileWatchRoutes(use: UseFn) {
   // GET /api/task-output?path=<outputFile> - SSE stream of background task output
@@ -45,6 +46,7 @@ export function registerFileWatchRoutes(use: UseFn) {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     })
+    const endTaskOutputStream = beginActivity("Open task output streams")
 
     let offset = 0
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -52,6 +54,7 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     // Read existing content first, then watch for changes
     async function readAndSend() {
+      recordActivity("Task output checks")
       try {
         const s = await stat(resolved)
         if (s.size <= offset) return
@@ -61,6 +64,7 @@ export function registerFileWatchRoutes(use: UseFn) {
           const buf = Buffer.alloc(s.size - offset)
           const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
           offset = s.size
+          recordActivity("Task output reads", { bytes: bytesRead })
           const text = buf.subarray(0, bytesRead).toString("utf-8")
           if (text) {
             res.write(`data: ${JSON.stringify({ type: "output", text })}\n\n`)
@@ -99,6 +103,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     }, 15000)
 
     req.on("close", () => {
+      endTaskOutputStream()
       watcher?.close()
       if (debounceTimer) clearTimeout(debounceTimer)
       clearInterval(poller)
@@ -137,14 +142,21 @@ export function registerFileWatchRoutes(use: UseFn) {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     })
+    const endLiveSessionStream = beginActivity("Open live session streams")
 
-    let offset = 0
+    const offsetParam = url.searchParams.get("offset")
+    const requestedOffset = offsetParam === null ? Number.NaN : Number(offsetParam)
+    const hasRequestedOffset = Number.isFinite(requestedOffset) && requestedOffset >= 0
+    let offset = hasRequestedOffset ? requestedOffset : 0
+    let initialized = false
     let throttleTimer: ReturnType<typeof setTimeout> | null = null
     let trailingTimer: ReturnType<typeof setTimeout> | null = null
     let remainder = "" // partial line buffer
     const THROTTLE_MS = 150
 
     async function flushNewLines() {
+      if (!initialized) return
+      recordActivity("Session file checks")
       try {
         const s = await stat(filePath)
         if (s.size < offset) {
@@ -180,6 +192,7 @@ export function registerFileWatchRoutes(use: UseFn) {
             offset
           )
           offset = s.size
+          recordActivity("Session JSONL reads", { bytes: bytesRead })
 
           const raw = remainder + buf.subarray(0, bytesRead).toString("utf-8")
           const rawParts = raw.split("\n")
@@ -219,13 +232,16 @@ export function registerFileWatchRoutes(use: UseFn) {
       }
       unsubscribeStream = streamBus.subscribe(sessionId, (ev) => {
         if (!closed) {
-          res.write(`data: ${JSON.stringify(ev)}\n\n`)
+          const payload = JSON.stringify(ev)
+          recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })
+          res.write(`data: ${payload}\n\n`)
         }
       })
     }
 
     function cleanup() {
       closed = true
+      endLiveSessionStream()
       watcher?.close()
       watcher = null
       unsubscribeStream?.()
@@ -236,12 +252,18 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (heartbeat) clearInterval(heartbeat)
     }
 
-    // Get initial file size, then start watching
+    // Establish the baseline after the client snapshot. When the client sends
+    // its snapshot byte offset, replay anything written between that snapshot
+    // and this connection. Without this, a line written in that race window
+    // is skipped and the UI stays one response behind until the next write.
     stat(filePath)
       .then((s) => {
-        offset = s.size
+        if (!hasRequestedOffset) offset = s.size
+        else if (offset > s.size) offset = s.size
+        initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
+        void flushNewLines()
       })
       .catch(() => {
         res.write(
@@ -258,6 +280,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     try {
       watcher = watch(filePath, () => {
         if (closed) return
+        recordActivity("Session file events")
         if (trailingTimer) clearTimeout(trailingTimer)
         trailingTimer = setTimeout(() => flushNewLines(), THROTTLE_MS)
 
@@ -294,6 +317,7 @@ export function registerFileWatchRoutes(use: UseFn) {
       ? null
       : setInterval(async () => {
         if (closed) return
+        recordActivity("Compaction checks")
         try {
           const files = await readdir(subagentsDir)
           const compactFile = files.find(

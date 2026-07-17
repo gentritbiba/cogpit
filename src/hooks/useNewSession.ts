@@ -242,11 +242,14 @@ export function useNewSession({
   const abortRef = useRef<AbortController | null>(null)
   /** The dirName of the pending session (set before first message) */
   const pendingDirNameRef = useRef<string | null>(null)
+  /** The exact cwd selected for the pending session, when known. */
+  const pendingCwdRef = useRef<string | null>(null)
 
   /** Instantly show the empty chat view for a new session (no backend call). */
   const handleNewSession = useCallback(
     (dirName: string, cwd?: string) => {
       pendingDirNameRef.current = dirName
+      pendingCwdRef.current = cwd ?? null
       setCreateError(null)
       setCreatingSession(false)
       dispatch({ type: "INIT_PENDING_SESSION", dirName, cwd, isMobile })
@@ -267,6 +270,7 @@ export function useNewSession({
       const dirName = pendingDirNameRef.current
       if (!dirName) return null
       const agentKind = agentKindFromDirName(dirName)
+      const cwd = pendingCwdRef.current
 
       abortRef.current?.abort()
       const controller = new AbortController()
@@ -281,6 +285,7 @@ export function useNewSession({
         const sessionName = deriveSessionName(message)
         const requestBody = {
           dirName,
+          cwd: agentKind === "claude" ? (cwd ?? undefined) : undefined,
           message,
           images,
           permissions: permissionsConfig,
@@ -311,6 +316,8 @@ export function useNewSession({
           if (agentKind === "codex") {
             const recovered = await recoverCodexSession(dirName, message, startedAt, controller)
             if (recovered) {
+              pendingDirNameRef.current = null
+              pendingCwdRef.current = null
               const recoveredId = await finalizeDiscoveredSession(recovered, controller, dispatch, isMobile, onSessionFinalized)
               if (sessionName && recoveredId) renameSession(recoveredId, sessionName)
               return recoveredId
@@ -322,6 +329,7 @@ export function useNewSession({
 
         const response = await res.json() as CreateSessionResponse
         pendingDirNameRef.current = null
+        pendingCwdRef.current = null
         const newSessionId = await finalizeDiscoveredSession(response, controller, dispatch, isMobile, onSessionFinalized)
         // Auto-store the derived session name so it appears in sidebar/lists
         if (sessionName && newSessionId) {
@@ -349,6 +357,7 @@ export function useNewSession({
     abortRef.current?.abort()
     abortRef.current = null
     pendingDirNameRef.current = null
+    pendingCwdRef.current = null
     setCreatingSession(false)
     setCreateError(null)
   }, [])

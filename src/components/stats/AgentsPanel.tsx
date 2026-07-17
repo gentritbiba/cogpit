@@ -51,7 +51,7 @@ export function AgentsPanel({
   sessionSource,
   bgAgents,
   onLoadSession,
-}: AgentsPanelProps): JSX.Element | null {
+}: AgentsPanelProps): React.JSX.Element | null {
   // Detect if we're currently viewing a sub-agent
   const subAgentView = useMemo(() => {
     if (!sessionSource) return null

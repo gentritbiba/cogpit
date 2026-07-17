@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { GroupedFileCard } from "./GroupedFileCard"
+import { GroupedFileCard, type DiffMode } from "./GroupedFileCard"
 import { useFileChangesData, buildGroupedFiles, buildGroupedFilesByAgent, type AgentGroup } from "./useFileChangesData"
 import { OPEN_SUBAGENT_EVENT } from "./file-change-indicators"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
@@ -32,8 +32,7 @@ const PREFS_DEFAULTS: FileChangesPrefs = {
 /** Scope: last turn, all turns, or a specific turn index. */
 type Scope = "last" | "all" | number
 
-/** Diff display mode: aggregated net diff or individual per-edit diffs. */
-export type DiffMode = "net" | "per-edit"
+export type { DiffMode } from "./GroupedFileCard"
 
 interface FileChangesPanelProps {
   session: ParsedSession

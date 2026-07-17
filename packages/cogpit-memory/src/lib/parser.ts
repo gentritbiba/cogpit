@@ -129,19 +129,20 @@ export function parseSessionAppend(
   const newMessages = parseLines(newJsonlText)
   if (newMessages.length === 0) return existing
 
-  const allRawMessages = [...existing.rawMessages, ...newMessages]
+  const existingMessages = existing.rawMessages as RawMessage[]
+  const allRawMessages = [...existingMessages, ...newMessages]
 
   // Find the raw message index where the last existing turn started.
   // We pop the last turn and re-build from that point forward.
   // This way, even for a 500-turn session, we only re-process ~1 turn's worth of messages.
-  let lastTurnStartIdx = existing.rawMessages.length // default: start of new messages
+  let lastTurnStartIdx = existingMessages.length // default: start of new messages
   let turnsToKeep = existing.turns.length > 0 ? existing.turns.length - 1 : 0
   if (existing.turns.length > 0) {
     // Walk backwards through existing raw messages to find the last non-meta
     // user message (which starts a turn)
     let userMsgCount = 0
-    for (let i = existing.rawMessages.length - 1; i >= 0; i--) {
-      const msg = existing.rawMessages[i]
+    for (let i = existingMessages.length - 1; i >= 0; i--) {
+      const msg = existingMessages[i]
       if (msg.type === "user" && !msg.isMeta) {
         const content = msg.message?.content
         // Skip tool-result user messages
@@ -179,8 +180,8 @@ export function parseSessionAppend(
           // Need to rebuild from this earlier turn.  Find its start in rawMessages.
           turnsToKeep = t
           let found = 0
-          for (let i = 0; i < existing.rawMessages.length; i++) {
-            const msg = existing.rawMessages[i]
+          for (let i = 0; i < existingMessages.length; i++) {
+            const msg = existingMessages[i]
             if (msg.type === "user" && !msg.isMeta) {
               const content = msg.message?.content
               if (Array.isArray(content) && content.some((b: { type: string }) => b.type === "tool_result")) {
@@ -216,11 +217,13 @@ export function parseSessionAppend(
     gitBranch: existing.gitBranch,
     cwd: existing.cwd,
     slug: existing.slug,
+    name: existing.name,
     model: existing.model || (allTurns.length > 0 ? allTurns[allTurns.length - 1].model || "" : ""),
     turns: allTurns,
     stats,
     rawMessages: allRawMessages,
     branchedFrom: existing.branchedFrom,
+    agentKind: existing.agentKind,
   }
 }
 

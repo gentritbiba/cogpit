@@ -12,7 +12,7 @@ interface TurnNavigatorProps {
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
 }
 
-export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): JSX.Element | null {
+export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): React.JSX.Element | null {
   const [activeTurn, setActiveTurn] = useState<number | null>(null)
 
   if (turns.length === 0) return null

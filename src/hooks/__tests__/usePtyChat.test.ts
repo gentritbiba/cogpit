@@ -47,6 +47,7 @@ describe("usePtyChat", () => {
     const { result } = renderHook(() =>
       usePtyChat({
         sessionSource: { dirName: "proj", fileName: "sess.jsonl", rawText: "" },
+        ultracode: true,
       })
     )
 
@@ -60,6 +61,8 @@ describe("usePtyChat", () => {
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/send-message", expect.objectContaining({
       method: "POST",
     }))
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.ultracode).toBe(true)
   })
 
   it("sets error status on failed response", async () => {

@@ -40,7 +40,7 @@ describe("parseMcpListOutput", () => {
       "claude.ai Notion: https://mcp.notion.com/mcp - ! Needs authentication",
       "next-devtools: npx -y next-devtools-mcp@latest - ✓ Connected",
       "clickup: npx -y mcp-remote https://mcp.clickup.com/mcp - ✓ Connected",
-      "gitnexus: npx -y gitnexus mcp - ✓ Connected",
+      "example-mcp: npx -y example-mcp serve - ✓ Connected",
       "",
     ].join("\n")
     const result = parseMcpListOutput(output)

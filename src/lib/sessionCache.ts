@@ -7,6 +7,7 @@ export interface CacheEntry {
     fileName: string
     rawText: string
     agentKind?: "claude" | "codex"
+    watchOffset?: number
   }
   nextByteOffset: number
   hasMore: boolean
@@ -39,6 +40,7 @@ class SessionCache {
     nextByteOffset: number,
     hasMore: boolean,
     agentKind?: "claude" | "codex",
+    watchOffset?: number,
   ): void {
     const key = makeKey(dirName, fileName)
 
@@ -48,7 +50,13 @@ class SessionCache {
 
     this.cache.set(key, {
       parsed,
-      source: { dirName, fileName, rawText, agentKind },
+      source: {
+        dirName,
+        fileName,
+        rawText,
+        agentKind,
+        ...(watchOffset !== undefined ? { watchOffset } : {}),
+      },
       nextByteOffset,
       hasMore,
       lastAccessed: Date.now(),
@@ -67,13 +75,6 @@ class SessionCache {
     if (partial.source) {
       entry.source = { ...entry.source, ...partial.source }
     }
-  }
-
-  updateRawText(dirName: string, fileName: string, rawText: string): void {
-    const key = makeKey(dirName, fileName)
-    const entry = this.cache.get(key)
-    if (!entry) return
-    entry.source.rawText = rawText
   }
 
   evict(dirName?: string, fileName?: string): void {

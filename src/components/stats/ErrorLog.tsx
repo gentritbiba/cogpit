@@ -29,7 +29,7 @@ interface ErrorLogProps {
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
 }
 
-export function ErrorLog({ turns, onJumpToTurn }: ErrorLogProps): JSX.Element | null {
+export function ErrorLog({ turns, onJumpToTurn }: ErrorLogProps): React.JSX.Element | null {
   const errors = useMemo(() => collectErrors(turns), [turns])
 
   if (errors.length === 0) return null

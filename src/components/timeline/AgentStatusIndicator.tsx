@@ -1,29 +1,23 @@
-import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react"
+import { memo, useMemo, useState, useEffect, useRef } from "react"
+import { Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
 import { formatDuration, getTurnDuration } from "@/lib/format"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { SessionStatus } from "@/lib/sessionStatus"
-import {
-  ThinkingIcon,
-  ToolUseIcon,
-  ProcessingIcon,
-  CompactingIcon,
-  CompletedIcon,
-} from "@/components/ui/StatusIcons"
 
 function StatusIcon({ status }: { status: SessionStatus }) {
   switch (status) {
     case "thinking":
-      return <ThinkingIcon className="text-amber-500" />
+      return <Brain className="size-5 text-amber-500" />
     case "tool_use":
-      return <ToolUseIcon className="text-blue-400" />
+      return <TerminalSquare className="size-5 text-blue-400" />
     case "processing":
-      return <ProcessingIcon className="text-amber-500" />
+      return <CircleEllipsis className="size-5 text-amber-500" />
     case "compacting":
-      return <CompactingIcon className="text-amber-500" />
+      return <ChevronsDownUp className="size-5 text-amber-500" />
     case "completed":
-      return <CompletedIcon className="text-emerald-400" />
+      return <CheckCircle2 className="size-5 text-emerald-400" />
     default:
       return null
   }
@@ -70,27 +64,24 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
 
   // Three-phase lifecycle: "visible" → "fading" → "hidden"
   const [fadePhase, setFadePhase] = useState<"visible" | "fading" | "hidden">("visible")
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
-
-  const clearTimers = useCallback(() => {
-    for (const t of timersRef.current) clearTimeout(t)
-    timersRef.current = []
-  }, [])
 
   const isCompleted = agentStatus?.status === "completed"
 
   useEffect(() => {
-    clearTimers()
     if (isCompleted) {
-      timersRef.current.push(
-        setTimeout(() => setFadePhase("fading"), FADE_DELAY),
-        setTimeout(() => setFadePhase("hidden"), FADE_DELAY + FADE_DURATION),
+      const fadeTimer = setTimeout(() => setFadePhase("fading"), FADE_DELAY)
+      const hideTimer = setTimeout(
+        () => setFadePhase("hidden"),
+        FADE_DELAY + FADE_DURATION,
       )
-    } else {
-      setFadePhase("visible")
+      return () => {
+        clearTimeout(fadeTimer)
+        clearTimeout(hideTimer)
+      }
     }
-    return clearTimers
-  }, [isCompleted, clearTimers])
+
+    setFadePhase("visible")
+  }, [isCompleted])
 
   const isActive = !isCompleted
   const lastTurn = session?.turns[session.turns.length - 1] ?? null

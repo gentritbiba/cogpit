@@ -22,7 +22,7 @@ import {
   turnDurationMsg,
   toJsonl,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, ParsedHookEvent, SystemMessage } from "@/lib/types"
+import type { ProgressMessage, SystemMessage } from "@/lib/types"
 
 beforeEach(() => {
   resetFixtureCounter()

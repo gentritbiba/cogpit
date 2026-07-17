@@ -16,7 +16,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // handle whose lifecycle we can drive manually.
 
 interface CapturedCall {
-  options: { model?: string; effort?: string; settings?: unknown; mcpServers?: unknown; stderr?: (data: string) => void }
+  options: {
+    model?: string
+    effort?: string
+    settings?: unknown
+    mcpServers?: unknown
+    stderr?: (data: string) => void
+    canUseTool?: (
+      toolName: string,
+      input: Record<string, unknown>,
+      options: { toolUseID: string; signal?: AbortSignal },
+    ) => Promise<unknown>
+  }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
   completed: Promise<void>
@@ -37,6 +48,8 @@ let scriptedMessages: unknown[] | null = null
 // and then throws scriptedError, modeling a CLI spawn/exit failure.
 let scriptedStderr: string | null = null
 let scriptedError: Error | null = null
+let holdQueryOpen = false
+let releaseHeldQuery: (() => void) | null = null
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => {
   return {
@@ -55,6 +68,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       setMcpServersSpy = vi.fn().mockResolvedValue({ added: [], removed: [], errors: {} })
 
       async function* gen() {
+        if (holdQueryOpen) {
+          await new Promise<void>((resolve) => { releaseHeldQuery = resolve })
+        }
         if (scriptedError) {
           if (scriptedStderr) args.options.stderr?.(scriptedStderr)
           const err = scriptedError
@@ -97,7 +113,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
 
 // subagentWatcher pulls in fs — stub it out
 vi.mock("../subagentWatcher", () => ({
-  watchSubagents: () => ({ close: () => {} }),
+  watchSubagents: vi.fn(() => ({ close: vi.fn() })),
 }))
 
 // Stream bus — spy on the wiring without exercising the real throttling
@@ -134,6 +150,8 @@ beforeEach(() => {
   scriptedMessages = null
   scriptedStderr = null
   scriptedError = null
+  holdQueryOpen = false
+  releaseHeldQuery = null
   vi.clearAllMocks()
 })
 
@@ -208,6 +226,94 @@ describe("sdk-session error reporting", () => {
 
     await waitUntil(() => result !== null)
     expect(String(result!.result)).toBe("Error: failed: boom")
+  })
+})
+
+describe("sdk-session AskUserQuestion handling", () => {
+  it("resolves the blocked tool with answers keyed by question text", async () => {
+    const { createSDKSession, resolveUserQuestion, sdkSessions } = await loadModule()
+    createSDKSession({ sessionId: "question-1", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    const input = {
+      questions: [{ question: "Which option?", options: [{ label: "A" }, { label: "B" }] }],
+    }
+    const resultPromise = captured[0].options.canUseTool!("AskUserQuestion", input, {
+      toolUseID: "tool-question-1",
+    })
+
+    expect(sdkSessions.get("question-1")?.pendingUserQuestions.size).toBe(1)
+    expect(resolveUserQuestion("question-1", "tool-question-1", { "Which option?": "B" }))
+      .toEqual({ found: true })
+    await expect(resultPromise).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: { ...input, answers: { "Which option?": "B" } },
+    })
+    expect(sdkSessions.get("question-1")?.pendingUserQuestions.size).toBe(0)
+  })
+})
+
+describe("sdk-session subagent watcher lifecycle", () => {
+  it("does not attach a watcher after a query has already completed", async () => {
+    const watcherModule = await import("../subagentWatcher")
+    const watchSubagents = vi.mocked(watcherModule.watchSubagents)
+    const { attachSubagentWatcher, createSDKSession } = await loadModule()
+    const state = createSDKSession({ sessionId: "watch-late", cwd: "/tmp", message: "hi" })
+
+    await captured[0].completed
+    await waitUntil(() => !state.running)
+    state.jsonlPath = "/tmp/watch-late.jsonl"
+    attachSubagentWatcher(state)
+
+    expect(watchSubagents).not.toHaveBeenCalled()
+    expect(state.subagentWatcher).toBeNull()
+  })
+
+  it("closes the watcher on natural completion and reattaches for the next query", async () => {
+    const watcherModule = await import("../subagentWatcher")
+    const watchSubagents = vi.mocked(watcherModule.watchSubagents)
+    const firstClose = vi.fn()
+    const secondClose = vi.fn()
+    watchSubagents
+      .mockReturnValueOnce({ close: firstClose })
+      .mockReturnValueOnce({ close: secondClose })
+
+    const { createSDKSession, sendSDKMessage } = await loadModule()
+    const state = createSDKSession({ sessionId: "watch-repeat", cwd: "/tmp", message: "first" })
+    await captured[0].completed
+    await waitUntil(() => !state.running)
+    state.jsonlPath = "/tmp/watch-repeat.jsonl"
+
+    sendSDKMessage("watch-repeat", "second")
+    expect(state.subagentWatcher).not.toBeNull()
+    await captured[1].completed
+    await waitUntil(() => state.subagentWatcher === null)
+    expect(firstClose).toHaveBeenCalledTimes(1)
+
+    sendSDKMessage("watch-repeat", "third")
+    expect(state.subagentWatcher).not.toBeNull()
+    await captured[2].completed
+    await waitUntil(() => state.subagentWatcher === null)
+    expect(secondClose).toHaveBeenCalledTimes(1)
+    expect(watchSubagents).toHaveBeenCalledTimes(2)
+  })
+
+  it("closes an active watcher when the session is explicitly stopped", async () => {
+    holdQueryOpen = true
+    const watcherModule = await import("../subagentWatcher")
+    const watchSubagents = vi.mocked(watcherModule.watchSubagents)
+    const close = vi.fn()
+    watchSubagents.mockReturnValueOnce({ close })
+
+    const { attachSubagentWatcher, createSDKSession, sdkSessions, stopSDKSession } = await loadModule()
+    const state = createSDKSession({ sessionId: "watch-stop", cwd: "/tmp", message: "hi" })
+    state.jsonlPath = "/tmp/watch-stop.jsonl"
+    attachSubagentWatcher(state)
+
+    expect(stopSDKSession("watch-stop")).toBe(true)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(sdkSessions.has("watch-stop")).toBe(false)
+    releaseHeldQuery?.()
   })
 })
 
@@ -381,6 +487,31 @@ describe("sdk-session effort propagation", () => {
     expect(applyFlagSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({ fastMode: true }))
     expect(setPermissionModeSpy).toHaveBeenCalledWith("auto")
     expect(result.found).toBe(true)
+  })
+
+  it("applies Ultracode through live settings and pins effort to xhigh", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    createSDKSession({
+      sessionId: "live-ultracode",
+      cwd: "/tmp",
+      message: "first",
+      effort: "high",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("live-ultracode", { ultracode: true })
+
+    expect(sdkSessions.get("live-ultracode")?.ultracode).toBe(true)
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ultracode: true,
+      enableWorkflows: true,
+      effortLevel: "xhigh",
+    }))
+    expect(result.appliedLive).toEqual(expect.arrayContaining([
+      "ultracode",
+      "enableWorkflows",
+      "effortLevel",
+    ]))
   })
 
   it("applies scoped tool rules and clears MCP servers live", async () => {

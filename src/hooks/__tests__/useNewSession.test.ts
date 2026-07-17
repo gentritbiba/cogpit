@@ -110,12 +110,12 @@ describe("useNewSession", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
-  it("createAndSend promotes immediately and hydrates content in the background", async () => {
+  it("createAndSend preserves the exact cwd and promotes immediately", async () => {
     const { result } = renderHook(() => useNewSession(defaultOpts))
 
     // Set up the pending dirName
     act(() => {
-      result.current.handleNewSession("project-dir")
+      result.current.handleNewSession("-tmp-my-project", "/tmp/my-project")
     })
 
     // Mock the create-and-send response
@@ -123,7 +123,7 @@ describe("useNewSession", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
-          dirName: "project-dir",
+          dirName: "-tmp-my-project",
           fileName: "session.jsonl",
           sessionId: "session-123",
         }),
@@ -140,6 +140,8 @@ describe("useNewSession", () => {
     })
 
     expect(sessionId).toBe("session-123")
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.cwd).toBe("/tmp/my-project")
     expect(result.current.creatingSession).toBe(false)
     expect(dispatch).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -149,7 +151,7 @@ describe("useNewSession", () => {
     )
     expect(onSessionFinalized).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-123", turns: [] }),
-      expect.objectContaining({ dirName: "project-dir", fileName: "session.jsonl" })
+      expect.objectContaining({ dirName: "-tmp-my-project", fileName: "session.jsonl" })
     )
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(

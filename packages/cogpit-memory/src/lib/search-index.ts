@@ -96,7 +96,9 @@ export class SearchIndex {
     let dbSizeBytes = 0
     try {
       dbSizeBytes = statSync(this.dbPath).size
-    } catch {}
+    } catch {
+      // A missing database has a size of zero until the first index build.
+    }
 
     return {
       dbPath: this.dbPath,
@@ -371,9 +373,13 @@ export class SearchIndex {
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
     this.db.close()
-    try { unlinkSync(this.dbPath) } catch {}
-    try { unlinkSync(this.dbPath + "-wal") } catch {}
-    try { unlinkSync(this.dbPath + "-shm") } catch {}
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        unlinkSync(this.dbPath + suffix)
+      } catch {
+        // The database and SQLite sidecars may not exist yet.
+      }
+    }
     this.db = new Database(this.dbPath)
     this.db.exec("PRAGMA journal_mode = WAL")
     this.db.exec("PRAGMA synchronous = OFF")

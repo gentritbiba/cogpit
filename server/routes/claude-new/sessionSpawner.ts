@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path"
+import { encodeClaudeDirName } from "../../../src/lib/providers/claude"
 import {
   CODEX_SESSIONS_DIR,
   dirs,
@@ -388,7 +390,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, message, images, permissions, model, effort, fastMode, ultracode, worktreeName, mcpConfig, name } = JSON.parse(body)
+        const { dirName, cwd: requestedCwd, message, images, permissions, model, effort, fastMode, ultracode, worktreeName, mcpConfig, name } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message (or images) are required"))
@@ -597,7 +599,20 @@ export function registerCreateAndSendRoute(use: UseFn) {
           return
         }
 
-        const projectPath = await resolveProjectPath(projectDir, dirName)
+        if (requestedCwd !== undefined && (
+          typeof requestedCwd !== "string" ||
+          requestedCwd.includes("\0") ||
+          !isAbsolute(requestedCwd)
+        )) {
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "cwd must be a non-NUL absolute path"))
+          return
+        }
+        if (requestedCwd !== undefined && encodeClaudeDirName(requestedCwd) !== dirName) {
+          sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "cwd does not match dirName"))
+          return
+        }
+
+        const projectPath = requestedCwd ?? await resolveProjectPath(projectDir, dirName)
         const sessionId = randomUUID()
         const fileName = `${sessionId}.jsonl`
 

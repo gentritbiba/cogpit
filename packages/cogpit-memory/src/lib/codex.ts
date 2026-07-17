@@ -20,6 +20,7 @@ interface CodexMetadata {
   cwd: string
   model: string
   slug: string
+  name: string
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
   firstUserMessage: string
   lastUserMessage: string

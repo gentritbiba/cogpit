@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, shell, utilityProcess } from "electron"
+import { app, BrowserWindow, ipcMain, Menu, shell, utilityProcess } from "electron"
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
@@ -16,6 +16,29 @@ try {
 let mainWindow: BrowserWindow | null = null
 let serverProcess: Electron.UtilityProcess | null = null
 
+function processName(metric: Electron.ProcessMetric): string {
+  if (metric.pid === serverProcess?.pid) return "Server"
+  if (metric.type === "Browser") return "App"
+  if (metric.type === "Tab") return "Renderer"
+  if (metric.type === "GPU") return "GPU"
+  if (metric.type === "Utility") return metric.serviceName || "Utility"
+  return metric.type
+}
+
+ipcMain.handle("performance:get-snapshot", () => ({
+  capturedAt: Date.now(),
+  processes: app.getAppMetrics().map((metric) => ({
+    pid: metric.pid,
+    name: processName(metric),
+    type: metric.type,
+    cpuPercent: metric.cpu.percentCPUUsage,
+    memoryMb: metric.memory.workingSetSize / 1024,
+    ...(typeof metric.cpu.idleWakeupsPerSecond === "number"
+      ? { idleWakeupsPerSecond: metric.cpu.idleWakeupsPerSecond }
+      : {}),
+  })),
+}))
+
 async function createWindow(port: number) {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -30,7 +53,9 @@ async function createWindow(port: number) {
       preload: join(__dirname, "../preload/preload.js"),
       sandbox: true,
       contextIsolation: true,
-      backgroundThrottling: false,
+      // Session I/O lives in the utility process, so hidden windows can safely
+      // throttle renderer timers and animation frames to save power.
+      backgroundThrottling: true,
     },
   })
 

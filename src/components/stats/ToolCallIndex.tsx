@@ -75,7 +75,7 @@ interface ToolCallIndexProps {
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
 }
 
-export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): JSX.Element | null {
+export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): React.JSX.Element | null {
   const turnCostShares = useMemo(() => computeTurnCostShares(turns), [turns])
 
   const toolCallGroups = useMemo(

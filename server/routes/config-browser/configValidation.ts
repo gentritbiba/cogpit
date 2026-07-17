@@ -1,5 +1,15 @@
 import { resolve, sep, basename } from "node:path"
-import type { ConfigTreeItem } from "./configTree"
+
+export type ConfigFileType =
+  | "command"
+  | "skill"
+  | "agent"
+  | "claude-md"
+  | "settings"
+  | "unknown"
+  | "theme"
+  | "monitor"
+  | "bin"
 
 /** Check if a path is an allowed config file (inside .claude/ or a CLAUDE.md beside it) */
 export function isAllowedConfigPath(filePath: string): boolean {
@@ -19,7 +29,7 @@ export function isUserOwned(filePath: string): boolean {
 }
 
 /** Get file type from path and context */
-export function getFileType(filePath: string, parentDir: string): ConfigTreeItem["fileType"] {
+export function getFileType(filePath: string, parentDir: string): ConfigFileType {
   const name = basename(filePath)
   if (name === "CLAUDE.md") return "claude-md"
   if (name === "settings.json" || name === "settings.local.json") return "settings"

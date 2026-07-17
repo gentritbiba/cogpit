@@ -40,10 +40,6 @@ function isSummaryMessage(msg: RawMessage): msg is SummaryMessage {
   return msg.type === "summary"
 }
 
-function isCompactBoundary(msg: RawMessage): msg is SystemMessage {
-  return msg.type === "system" && (msg as SystemMessage).subtype === "compact_boundary"
-}
-
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
   return content
@@ -205,7 +201,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     }
 
     // compact_boundary system message (Claude Code v2.1.34+) — real compaction signal
-    if (isCompactBoundary(msg)) {
+    if (msg.type === "system" && msg.subtype === "compact_boundary") {
       finalizeTurn()
       pendingCompaction = buildCompactionSummary(
         turns,

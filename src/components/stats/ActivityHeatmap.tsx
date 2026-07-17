@@ -5,7 +5,7 @@ import type { Turn } from "@/lib/types"
 const SVG_WIDTH = 280
 const SVG_HEIGHT = 32
 
-export function ActivityHeatmap({ turns }: { turns: Turn[] }): JSX.Element | null {
+export function ActivityHeatmap({ turns }: { turns: Turn[] }): React.JSX.Element | null {
   const [hoveredTurn, setHoveredTurn] = useState<number | null>(null)
 
   const maxToolCalls = useMemo(

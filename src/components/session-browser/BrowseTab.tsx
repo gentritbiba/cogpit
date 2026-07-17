@@ -7,6 +7,7 @@ import {
   Loader2,
   AlertTriangle,
   MessageSquare,
+  Bot,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -19,10 +20,11 @@ import { cn } from "@/lib/utils"
 import { projectName } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 import { useSessionContext } from "@/contexts/SessionContext"
-import type { View, ProjectInfo, SessionInfo } from "./types"
+import type { View, ProjectInfo, SessionInfo, CodexSubagentInfo } from "./types"
 import { ProjectsList } from "./ProjectsList"
 import { SessionsList } from "./SessionsList"
 import { SessionDetail } from "./SessionDetail"
+import { SubagentsList } from "./SubagentsList"
 
 // ── Props ──────────────────────────────────────────────────────────────────
 
@@ -40,8 +42,10 @@ interface BrowseTabProps {
   onSearchFilterChange: (value: string) => void
   onBack: () => void
   onRefreshProjects: () => void
+  onShowSubagents: () => void
   onSelectProject: (p: ProjectInfo) => void
   onSelectSession: (s: SessionInfo) => void
+  onSelectSubagent: (agent: CodexSubagentInfo) => void
   onDuplicateSession?: (s: SessionInfo) => void
   onDeleteSession?: (s: SessionInfo) => void
   onNewSession?: (dirName: string, cwd?: string) => void
@@ -60,6 +64,7 @@ function BrowseHeader({
   creatingSession,
   onBack,
   onRefreshProjects,
+  onShowSubagents,
   onNewSession,
 }: {
   view: View
@@ -69,6 +74,7 @@ function BrowseHeader({
   creatingSession?: boolean
   onBack: () => void
   onRefreshProjects: () => void
+  onShowSubagents: () => void
   onNewSession?: (dirName: string, cwd?: string) => void
 }): React.ReactElement {
   const sizeClass = isMobile ? "h-8 w-8 p-0" : "h-6 w-6 p-0"
@@ -79,6 +85,7 @@ function BrowseHeader({
       return projectName(selectedProject.path)
     }
     if (view === "detail") return "Session"
+    if (view === "subagents") return "Codex subagents"
     return "Projects"
   }
 
@@ -104,6 +111,17 @@ function BrowseHeader({
       )}>
         {getTitle()}
       </span>
+      {view === "projects" && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-[11px]"
+          onClick={onShowSubagents}
+        >
+          <Bot data-icon="inline-start" />
+          Subagents
+        </Button>
+      )}
       {view === "projects" && (
         <Button
           variant="ghost"
@@ -231,8 +249,10 @@ export function BrowseTab({
   onSearchFilterChange,
   onBack,
   onRefreshProjects,
+  onShowSubagents,
   onSelectProject,
   onSelectSession,
+  onSelectSubagent,
   onDuplicateSession,
   onDeleteSession,
   onNewSession,
@@ -241,7 +261,11 @@ export function BrowseTab({
   onClearError,
 }: BrowseTabProps): React.ReactElement {
   const { session } = useSessionContext()
-  const searchPlaceholder = view === "projects" ? "Filter projects..." : "Filter sessions..."
+  const searchPlaceholder = view === "projects"
+    ? "Filter projects..."
+    : view === "subagents"
+      ? "Filter subagents..."
+      : "Filter sessions..."
 
   const handleRetry = useCallback(() => {
     onClearError()
@@ -258,6 +282,7 @@ export function BrowseTab({
         creatingSession={creatingSession}
         onBack={onBack}
         onRefreshProjects={onRefreshProjects}
+        onShowSubagents={onShowSubagents}
         onNewSession={onNewSession}
       />
 
@@ -294,6 +319,13 @@ export function BrowseTab({
             hasMore={sessions.length < sessionsTotal}
             isLoading={isLoading}
             onLoadMore={onLoadMoreSessions}
+          />
+        )}
+        {view === "subagents" && (
+          <SubagentsList
+            filter={searchFilter}
+            onSelect={onSelectSubagent}
+            isMobile={isMobile}
           />
         )}
         {view === "detail" && session && !isMobile && (

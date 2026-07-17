@@ -1,6 +1,7 @@
 import type { RawMessage, Turn } from "./types"
 
-export { calculateTurnCost, formatCost, computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./token-costs"
+export { calculateTurnCost, formatCost } from "./token-costs"
+export { computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./costAnalytics"
 
 export function shortenModel(model: string): string {
   if (!model) return "unknown"
@@ -192,4 +193,3 @@ export function getContextUsage(
   }
   return null
 }
-

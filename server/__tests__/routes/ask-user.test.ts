@@ -10,12 +10,12 @@ vi.mock("../../helpers", () => ({
 }))
 
 // Mock sdk-session
-const mockSendSDKMessage = vi.fn()
+const mockResolveUserQuestion = vi.fn()
 const mockSdkSessions = new Map<string, unknown>()
 
 vi.mock("../../sdk-session", () => ({
   get sdkSessions() { return mockSdkSessions },
-  sendSDKMessage: (...args: unknown[]) => mockSendSDKMessage(...args),
+  resolveUserQuestion: (...args: unknown[]) => mockResolveUserQuestion(...args),
 }))
 
 import { registerAskUserRoutes } from "../../routes/ask-user"
@@ -72,14 +72,14 @@ function makeReqRes(body: string) {
 describe("POST /api/ask-user-answer", () => {
   beforeEach(() => {
     mockSdkSessions.clear()
-    mockSendSDKMessage.mockReset()
+    mockResolveUserQuestion.mockReset()
   })
 
-  it("returns 200 and calls sendSDKMessage for a valid string[] payload", () => {
+  it("returns 200 and resolves a valid string[] payload", () => {
     const handler = buildHandler()
 
     mockSdkSessions.set("session-abc", {})
-    mockSendSDKMessage.mockReturnValue({})
+    mockResolveUserQuestion.mockReturnValue({ found: true })
 
     const body = JSON.stringify({ sessionId: "session-abc", toolUseId: "tu-1", answers: ["Yes", "No"] })
     const { req, res, next, simulate } = makeReqRes(body)
@@ -89,14 +89,14 @@ describe("POST /api/ask-user-answer", () => {
 
     expect(res._getStatus()).toBe(200)
     expect(res._getData()).toEqual({ ok: true })
-    expect(mockSendSDKMessage).toHaveBeenCalledWith("session-abc", "Yes\nNo")
+    expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"])
   })
 
-  it("returns 200 and calls sendSDKMessage for a Record<string, string> payload", () => {
+  it("returns 200 and resolves a Record<string, string> payload", () => {
     const handler = buildHandler()
 
     mockSdkSessions.set("session-abc", {})
-    mockSendSDKMessage.mockReturnValue({})
+    mockResolveUserQuestion.mockReturnValue({ found: true })
 
     const body = JSON.stringify({ sessionId: "session-abc", toolUseId: "tu-2", answers: { q1: "blue", q2: "fast" } })
     const { req, res, next, simulate } = makeReqRes(body)
@@ -106,7 +106,7 @@ describe("POST /api/ask-user-answer", () => {
 
     expect(res._getStatus()).toBe(200)
     expect(res._getData()).toEqual({ ok: true })
-    expect(mockSendSDKMessage).toHaveBeenCalledWith("session-abc", "blue\nfast")
+    expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-2", { q1: "blue", q2: "fast" })
   })
 
   it("returns 404 when sessionId is not a live SDK session", () => {
@@ -183,6 +183,6 @@ describe("POST /api/ask-user-answer", () => {
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
 
     expect(next).toHaveBeenCalled()
-    expect(mockSendSDKMessage).not.toHaveBeenCalled()
+    expect(mockResolveUserQuestion).not.toHaveBeenCalled()
   })
 })

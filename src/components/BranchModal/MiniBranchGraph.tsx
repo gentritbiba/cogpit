@@ -1,12 +1,16 @@
 import { BRANCH_COLORS, BRANCH_INNER } from "./branchStyles"
-import type { DisplayBranch } from "./index"
+
+interface BranchGraphItem {
+  id: string
+  graphTurnCount: number
+}
 
 export function MiniBranchGraph({
   branches,
   activeBranchIdx,
   branchPointTurnIndex,
 }: {
-  branches: DisplayBranch[]
+  branches: readonly BranchGraphItem[]
   activeBranchIdx: number
   branchPointTurnIndex: number
 }) {

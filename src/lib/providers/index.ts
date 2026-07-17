@@ -20,6 +20,7 @@ export {
 export {
   claudeProvider,
   isClaudeDirName,
+  encodeClaudeDirName,
   buildClaudePermArgs,
   buildClaudeModelArgs,
   getClaudeResumeCommand,

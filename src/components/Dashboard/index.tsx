@@ -103,8 +103,6 @@ export const Dashboard = memo(function Dashboard({
 
   useEffect(() => {
     fetchDashboard()
-    const interval = setInterval(() => fetchDashboard(), 10000)
-    return () => clearInterval(interval)
   }, [fetchDashboard])
 
   const fetchSessions = useCallback(async (dirName: string, page = 1, append = false) => {

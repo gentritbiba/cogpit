@@ -208,7 +208,6 @@ export async function startCodexExecution(
 export async function continueCodexExecution(
   client: CodexExecutionClient,
   threadId: string,
-  path: string | null,
   options: CodexExecutionOptions,
 ): Promise<CodexContinuationResult> {
   await ensureCodexAppServer(client)
@@ -221,7 +220,6 @@ export async function continueCodexExecution(
   }
 
   const resumed = await client.resumeThread(threadId, {
-    ...(path ? { path } : {}),
     ...threadSettings(options),
   })
   const resumedThreadId = resumed.thread.id || threadId

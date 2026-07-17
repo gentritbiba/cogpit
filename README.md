@@ -50,7 +50,7 @@ Start sessions with Claude Code or Codex from the same interface. Model settings
 Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations.
 
 ### Interactive Chat
-Send or steer messages with a model and effort override, toggle Fast where supported, and choose Read only, Workspace, or explicitly confirmed Full access. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
+Send or steer messages with a model and effort override, toggle Fast where supported, and choose Read only, Workspace, or explicitly confirmed Full access. On capable Claude models, Ultracode can be enabled for new or active sessions to pin XHigh effort and standing multi-agent orchestration. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
 
 ### Long-Running Goals
 Create persistent goals above the composer and monitor status, tokens, elapsed time, and provider-native evaluator feedback. Codex goals can optionally use token budgets and explicit pause/resume controls; Claude goals follow Claude Code's native goal lifecycle.
@@ -59,10 +59,13 @@ Create persistent goals above the composer and monitor status, tokens, elapsed t
 Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling across long sessions.
 
 ### Sub-Agent Viewer
-When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. Color-coded panels show each result within the parent timeline, and full agent threads remain inspectable.
+When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. A session-level context bar keeps delegated agents visible, while the session browser provides a global view of Codex subagents across projects. Color-coded panels show each result within the parent timeline, and full agent threads remain inspectable.
 
 ### Token Analytics & Cost Tracking
 Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
+
+### Power & Activity Monitor
+Open the header monitor to inspect Cogpit's CPU, memory, event-loop, file/stream, and API activity. The desktop app also breaks usage down by Electron process, and the monitor polls only while it is open.
 
 ### Undo / Redo with Branching
 Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.

@@ -26,11 +26,22 @@ export interface SessionInfo {
   turnCount?: number
   lineCount?: number
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
+  isSubagent?: boolean
+  parentSessionId?: string | null
+  agentPath?: string
+}
+
+export interface CodexSubagentInfo extends SessionInfo {
+  dirName: string
+  cwd: string
+  isSubagent: true
+  parentSessionId: string
+  agentPath: string
 }
 
 // ── Component Props ────────────────────────────────────────────────────────
 
-export type View = "projects" | "sessions" | "detail"
+export type View = "projects" | "sessions" | "detail" | "subagents"
 
 /** Info about a session that is currently being created (pending first message response) */
 export interface PendingSessionInfo {

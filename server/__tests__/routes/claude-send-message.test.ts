@@ -243,12 +243,12 @@ describe("/api/send-message Codex app-server", () => {
     expect(mockCodexAppServer.resumeThread).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({
-        path: "/Users/me/.codex/sessions/2026/07/12/rollout-sess-1.jsonl",
         cwd: "/Users/me/proj",
         model: "gpt-5.6-terra",
         serviceTier: "priority",
       }),
     )
+    expect(mockCodexAppServer.resumeThread.mock.calls[0]?.[1]).not.toHaveProperty("path")
     expect(mockCodexAppServer.startTurn).toHaveBeenCalledWith(expect.objectContaining({
       threadId: "sess-1",
       effort: "high",

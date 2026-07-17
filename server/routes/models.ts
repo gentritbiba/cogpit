@@ -69,6 +69,7 @@ const CACHE_TTL_MS = 10 * 60 * 1000
 export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
   if (!Array.isArray(models) || models.length === 0) return null
   const options: ModelOption[] = []
+  let defaultAlias: ModelOption | undefined
   for (const m of models) {
     if (!m?.value || !m.displayName) continue
     const capabilities: Partial<ModelOption> = {}
@@ -90,9 +91,25 @@ export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
     }
     if (m.value === "default") {
       options.push({ value: "", label: "Default", description: m.description, ...capabilities })
+      const family = m.description?.match(/\b(opus|sonnet|haiku|fable)\b/i)?.[1]?.toLowerCase()
+      if (family) {
+        defaultAlias = {
+          value: family,
+          label: family.charAt(0).toUpperCase() + family.slice(1),
+          description: m.description,
+          ...capabilities,
+        }
+      }
     } else {
       options.push({ value: m.value, label: m.displayName, description: m.description, ...capabilities })
     }
+  }
+  // The SDK exposes the recommended model only through its "default" pseudo-model.
+  // Keep the underlying family selectable so an active session can switch back to
+  // it explicitly (for example, Fable -> Opus) without losing live capabilities.
+  if (defaultAlias && !options.some((o) => o.value === defaultAlias.value)) {
+    const defaultIndex = options.findIndex((o) => o.value === "")
+    options.splice(defaultIndex + 1, 0, defaultAlias)
   }
   // Ensure a "" Default entry always exists and comes first
   if (!options.some((o) => o.value === "")) {

@@ -230,6 +230,51 @@ describe("project routes", () => {
     })
   })
 
+  describe("GET /api/codex-subagents", () => {
+    it("returns Codex subagents with read-only virtual paths", async () => {
+      const handler = handlers.get("/api/codex-subagents")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedListCodexSessionFiles.mockResolvedValueOnce([
+        {
+          fileName: "2026/07/14/rollout-sub-older.jsonl",
+          filePath: "/tmp/codex-sessions/2026/07/14/rollout-sub-older.jsonl",
+          mtimeMs: 1_000,
+          size: 200,
+        },
+        {
+          fileName: "2026/07/15/rollout-parent.jsonl",
+          filePath: "/tmp/codex-sessions/2026/07/15/rollout-parent.jsonl",
+          mtimeMs: 3_000,
+          size: 400,
+        },
+      ])
+      mockedGetSessionMeta
+        .mockResolvedValueOnce({
+          sessionId: "sub-older", version: "", gitBranch: "main", model: "gpt-5",
+          slug: "", cwd: "/code/cogpit", firstUserMessage: "Inspect the API", lastUserMessage: "Inspect the API",
+          timestamp: "", lastTimestamp: "", turnCount: 1, lineCount: 4,
+          isSubagent: true, parentSessionId: "parent-1", agentPath: "/root/api_scout",
+        })
+        .mockResolvedValueOnce({
+          sessionId: "parent", version: "", gitBranch: "main", model: "gpt-5",
+          slug: "", cwd: "/code/cogpit", firstUserMessage: "Build it", lastUserMessage: "Build it",
+          timestamp: "", lastTimestamp: "", turnCount: 2, lineCount: 8,
+          isSubagent: false, parentSessionId: null, agentPath: "/root",
+        })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          sessionId: "sub-older",
+          dirName: "codex__/code/cogpit",
+          fileName: "parent-1/subagents/agent-sub-older.jsonl",
+          parentSessionId: "parent-1",
+        }),
+      ])
+    })
+  })
+
   // ── GET /api/sessions/:dirName ────────────────────────────────────────
 
   describe("GET /api/sessions/:dirName (list sessions)", () => {
@@ -338,6 +383,25 @@ describe("project routes", () => {
 
       expect(res._getData()).toBe('{"line":1}\n{"line":2}\n')
       expect(res._getHeaders()["Content-Type"]).toBe("text/plain")
+    })
+
+    it("resolves a virtual Codex subagent path to its flat rollout file", async () => {
+      const handler = handlers.get("/api/sessions/")
+      const { req, res, next } = createMockReqRes(
+        "GET",
+        "codex__project/parent-1/subagents/agent-sub-1.jsonl"
+      )
+      mockedFindJsonlPath.mockResolvedValueOnce("/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl")
+      mockedReadFile.mockResolvedValueOnce('{"type":"session_meta"}\n' as unknown as Buffer)
+
+      await handler(req, res, next)
+
+      expect(mockedFindJsonlPath).toHaveBeenCalledWith("sub-1")
+      expect(mockedReadFile).toHaveBeenCalledWith(
+        "/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl",
+        "utf-8"
+      )
+      expect(res._getStatus()).toBe(200)
     })
 
     it("returns 404 when file not found", async () => {

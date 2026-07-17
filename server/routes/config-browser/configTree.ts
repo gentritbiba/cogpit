@@ -3,7 +3,7 @@ import { constants } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { parseFrontmatter } from "../slash-suggestions"
-import { getFileType } from "./configValidation"
+import { getFileType, type ConfigFileType } from "./configValidation"
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -11,7 +11,7 @@ export interface ConfigTreeItem {
   name: string
   path: string
   type: "file" | "directory"
-  fileType?: "command" | "skill" | "agent" | "claude-md" | "settings" | "unknown" | "theme" | "monitor" | "bin"
+  fileType?: ConfigFileType
   description?: string
   children?: ConfigTreeItem[]
   readOnly?: boolean

@@ -23,6 +23,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
+import { PowerMonitor } from "@/components/PowerMonitor"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useAppContext } from "@/contexts/AppContext"
@@ -165,6 +166,7 @@ export const DesktopHeader = memo(function DesktopHeader({
       />
 
       <div className="flex items-center gap-0.5 shrink-0">
+        <PowerMonitor />
         <HeaderIconButton
           icon={Search}
           label={`Command palette (${commandPaletteShortcut})`}

@@ -25,6 +25,15 @@ describe("mapClaudeModels", () => {
     expect(options[0]).toMatchObject({ value: "", label: "Default" })
   })
 
+  it("keeps the recommended model family explicitly selectable", () => {
+    const options = mapClaudeModels(sdkModels)!
+    expect(options[1]).toEqual({
+      value: "opus",
+      label: "Opus",
+      description: "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+    })
+  })
+
   it("keeps real models with their display names and descriptions", () => {
     const options = mapClaudeModels(sdkModels)!
     expect(options).toContainEqual({
@@ -32,7 +41,7 @@ describe("mapClaudeModels", () => {
       label: "Fable",
       description: "Fable 5 · Most capable for your hardest tasks",
     })
-    expect(options.map((o) => o.value)).toEqual(["", "claude-fable-5[1m]", "sonnet", "haiku"])
+    expect(options.map((o) => o.value)).toEqual(["", "opus", "claude-fable-5[1m]", "sonnet", "haiku"])
   })
 
   it("preserves Claude capability flags for effort, Fast, and Auto controls", () => {
@@ -65,8 +74,11 @@ describe("mapClaudeModels", () => {
   it("returns null for empty or useless input", () => {
     expect(mapClaudeModels([])).toBeNull()
     expect(mapClaudeModels(undefined as unknown as ModelInfo[])).toBeNull()
-    // Only a default entry → nothing worth swapping in
-    expect(mapClaudeModels([sdkModels[0]])).toBeNull()
+    // A default entry with no identifiable model family gives us no real choice.
+    expect(mapClaudeModels([{
+      ...sdkModels[0],
+      description: "Use the recommended model",
+    }])).toBeNull()
   })
 
   it("skips malformed entries", () => {
@@ -74,7 +86,17 @@ describe("mapClaudeModels", () => {
       { value: "", displayName: "" } as ModelInfo,
       ...sdkModels,
     ])!
-    expect(options.map((o) => o.value)).toEqual(["", "claude-fable-5[1m]", "sonnet", "haiku"])
+    expect(options.map((o) => o.value)).toEqual(["", "opus", "claude-fable-5[1m]", "sonnet", "haiku"])
+  })
+
+  it("does not duplicate a recommended family already listed by the SDK", () => {
+    const options = mapClaudeModels([
+      sdkModels[0],
+      { value: "opus", displayName: "Opus", description: "Opus alias" },
+      sdkModels[1],
+    ])!
+
+    expect(options.filter((o) => o.value === "opus")).toHaveLength(1)
   })
 })
 

@@ -69,6 +69,47 @@ describe("ChatInputSettings", () => {
     expect(screen.queryByRole("button", { name: /^Codex$/ })).not.toBeInTheDocument()
   })
 
+  it("offers Ultracode for capable active Claude sessions and applies the toggle", async () => {
+    const onUltracodeEnabledChange = vi.fn()
+    const onApplySettings = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel="fable"
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        ultracodeEnabled={false}
+        onUltracodeEnabledChange={onUltracodeEnabledChange}
+        onApplySettings={onApplySettings}
+        isNewSession={false}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Ultracode" }))
+
+    expect(onUltracodeEnabledChange).toHaveBeenCalledWith(true)
+    await vi.waitFor(() => expect(onApplySettings).toHaveBeenCalled())
+  })
+
+  it("pins the effort selector while Ultracode is enabled", () => {
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel="fable"
+        onModelChange={vi.fn()}
+        selectedEffort="xhigh"
+        onEffortChange={vi.fn()}
+        ultracodeEnabled
+        onUltracodeEnabledChange={vi.fn()}
+        isNewSession={false}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Extra High" })).toBeDisabled()
+  })
+
   it("offers Fast only for models that advertise the tier", () => {
     const onFastModeEnabledChange = vi.fn()
     const { rerender } = render(

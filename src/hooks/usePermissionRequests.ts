@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
 
 export type PermissionDecision = "allow" | "allow_always" | "deny"
@@ -19,7 +19,18 @@ export interface PermissionRequest {
   availableDecisions?: PermissionDecision[]
 }
 
-const POLL_INTERVAL = 600
+// Permission requests need to feel responsive, but this poll must not become a
+// render clock for the entire session tree. Electron also throttles the window
+// in the background, and we skip polling entirely while the document is hidden.
+const POLL_INTERVAL = 2_000
+
+function permissionRequestsEqual(
+  current: PermissionRequest[],
+  next: PermissionRequest[],
+): boolean {
+  if (current.length !== next.length) return false
+  return JSON.stringify(current) === JSON.stringify(next)
+}
 
 export function usePermissionRequests(
   sessionId: string | null,
@@ -27,8 +38,6 @@ export function usePermissionRequests(
 ) {
   const [requests, setRequests] = useState<PermissionRequest[]>([])
   const [responding, setResponding] = useState<Set<string>>(new Set())
-  const sessionIdRef = useRef(sessionId)
-  sessionIdRef.current = sessionId
 
   // Access mode controls future tool calls. An approval already issued by a
   // provider remains pending until the user explicitly answers it.
@@ -41,22 +50,40 @@ export function usePermissionRequests(
     let cancelled = false
 
     const poll = async () => {
-      if (cancelled || !sessionIdRef.current) return
+      if (cancelled) return
       try {
-        const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionIdRef.current)}`)
+        const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}`)
         if (cancelled) return
         if (res.ok) {
           const data = await res.json() as { permissions: PermissionRequest[] }
-          setRequests(data.permissions)
+          setRequests((current) => (
+            permissionRequestsEqual(current, data.permissions)
+              ? current
+              : data.permissions
+          ))
         }
       } catch {
         // ignore
       }
     }
 
-    poll()
-    const id = setInterval(poll, POLL_INTERVAL)
-    return () => { cancelled = true; clearInterval(id) }
+    const pollWhenVisible = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void poll()
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void poll()
+    }
+
+    pollWhenVisible()
+    const id = setInterval(pollWhenVisible, POLL_INTERVAL)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
   }, [sessionId])
 
   const respond = useCallback(async (

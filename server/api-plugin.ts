@@ -33,6 +33,7 @@ import { registerAskUserRoutes } from "./routes/ask-user"
 import { registerModelRoutes } from "./routes/models"
 import { registerCodexRuntimeRoutes } from "./routes/codex-runtime"
 import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
+import { registerPerformanceRoutes } from "./routes/performance"
 import { codexAppServer } from "./codex-app-server"
 
 export function sessionApiPlugin(): Plugin {
@@ -73,6 +74,7 @@ export function sessionApiPlugin(): Plugin {
       })
 
       const use = server.middlewares.use.bind(server.middlewares)
+      registerPerformanceRoutes(use)
       registerConfigRoutes(use)
       registerProjectRoutes(use)
       registerClaudeRoutes(use)

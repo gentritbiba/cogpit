@@ -57,7 +57,13 @@ async function fetchTailAndParse(
 
   return {
     parsed,
-    source: { dirName, fileName, rawText: text, agentKind: agentKindFromDirName(dirName) },
+    source: {
+      dirName,
+      fileName,
+      rawText: text,
+      agentKind: agentKindFromDirName(dirName),
+      watchOffset: data.totalSize,
+    },
     byteOffset: data.byteOffset,
     hasMore: data.hasMore,
   }
@@ -92,6 +98,7 @@ async function loadSessionTailCached(
     byteOffset,
     hasMore,
     agentKindFromDirName(dirName),
+    source.watchOffset,
   )
   return { parsed, source }
 }

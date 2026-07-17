@@ -241,6 +241,75 @@ describe("ToolCallCard hook badge rendering", () => {
   })
 })
 
+describe("ToolCallCard Bash input rendering", () => {
+  it("renders Bash input as a readable command card", () => {
+    const toolCall = makeToolCall("Bash", {
+      command: "cd /workspace && npm test",
+      description: "Run the focused test suite",
+      timeout: 600_000,
+    })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+
+    expect(screen.getByLabelText("Bash command").textContent).toContain("cd /workspace && npm test")
+    expect(screen.getByText("Run the focused test suite")).toBeTruthy()
+    expect(screen.getByText("10 min")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy()
+    expect(screen.queryByText('"command"')).toBeNull()
+  })
+
+  it("shows execution mode and additional Bash options", () => {
+    const toolCall = makeToolCall("Bash", {
+      cmd: "npm run build",
+      run_in_background: true,
+      sandbox: "strict",
+    })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+
+    expect(screen.getByLabelText("Bash command").textContent).toContain("npm run build")
+    expect(screen.getByText("Background")).toBeTruthy()
+    expect(screen.getByText("Sandbox")).toBeTruthy()
+    expect(screen.getByText("strict")).toBeTruthy()
+  })
+})
+
+describe("ToolCallCard Codex exec input rendering", () => {
+  it("renders the raw Codex orchestration as readable code", () => {
+    const script = `const r = await tools.exec_command({
+  cmd: "npm test",
+  workdir: "/workspace/cogpit",
+  yield_time_ms: 10000,
+  max_output_tokens: 20000
+});
+text(r.output);`
+    const toolCall = makeToolCall("exec", { raw: script })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+
+    const renderedScript = screen.getByLabelText("Codex exec script")
+    expect(renderedScript.textContent).toContain("tools.exec_command")
+    expect(renderedScript.children.length).toBeGreaterThan(1)
+    expect(screen.getByText("Exec command")).toBeTruthy()
+    expect(screen.getByText("/workspace/cogpit")).toBeTruthy()
+    expect(screen.getByText("10 sec")).toBeTruthy()
+    expect(screen.getByText("20,000 tokens")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Copy script" })).toBeTruthy()
+    expect(screen.queryByText('"raw"')).toBeNull()
+  })
+
+  it("supports namespaced Codex exec tool names", () => {
+    const toolCall = makeToolCall("functions.exec", {
+      raw: 'const r = await tools.view_image({ path: "/tmp/screenshot.png" });\nimage(r.image_url);',
+    })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+
+    expect(screen.getByLabelText("Codex exec script").textContent).toContain("tools.view_image")
+    expect(screen.getByText("View image")).toBeTruthy()
+  })
+})
+
 describe("ToolCallCard AskUserQuestion inline form", () => {
   const questions = [
     { question: "What is your name?", options: [] },
@@ -318,6 +387,11 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
           body: expect.stringContaining("test-session-id"),
         }),
       )
+      const payload = JSON.parse(mockAuthFetchFn.mock.calls[0][1].body as string) as { answers: Record<string, string> }
+      expect(payload.answers).toEqual({
+        "What is your name?": "",
+        "What do you want to do?": "",
+      })
     })
   })
 

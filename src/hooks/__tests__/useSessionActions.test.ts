@@ -248,6 +248,7 @@ describe("useSessionActions", () => {
         150,
         false,
         expect.anything(),
+        200,
       )
     })
   })

@@ -144,7 +144,10 @@ function makeMockChild(pid = 12345) {
 }
 
 import type { UseFn, Middleware } from "../../helpers"
+import { createSDKSession } from "../../sdk-session"
 import { registerNewSessionRoute, registerCreateAndSendRoute } from "../../routes/claude-new/sessionSpawner"
+
+const mockedCreateSDKSession = vi.mocked(createSDKSession)
 
 // ---------------------------------------------------------------------------
 // Shared req/res factory
@@ -521,6 +524,72 @@ describe("registerNewSessionRoute (Claude)", () => {
     expect(res._getStatus()).toBe(500)
     const data = res._getData()
     expect(data.error).toBe("Claude CLI is not installed")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests: registerCreateAndSendRoute (Claude path) — exact cwd validation
+// ---------------------------------------------------------------------------
+describe("registerCreateAndSendRoute (Claude cwd)", () => {
+  let handler: Middleware
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockStat.mockResolvedValue({})
+    mockReadFile.mockRejectedValue(new Error("not written yet"))
+    handler = getHandler(registerCreateAndSendRoute, "/api/create-and-send")
+  })
+
+  it("uses an explicit cwd instead of reconstructing a hyphenated path", async () => {
+    const body = JSON.stringify({
+      dirName: "-tmp-my-project",
+      cwd: "/tmp/my-project",
+      message: "hello",
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockedCreateSDKSession).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/tmp/my-project" }),
+    )
+    expect(mockReaddir).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["relative cwd", "tmp/my-project"],
+    ["NUL-containing cwd", "/tmp/my\0project"],
+  ])("rejects an invalid %s", async (_label, cwd) => {
+    const body = JSON.stringify({ dirName: "-tmp-my-project", cwd, message: "hello" })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(res._getStatus()).toBe(400)
+    expect(res._getData().code).toBe("INVALID_REQUEST")
+    expect(mockedCreateSDKSession).not.toHaveBeenCalled()
+  })
+
+  it("rejects a cwd whose Claude encoding does not match dirName", async () => {
+    const body = JSON.stringify({
+      dirName: "-tmp-my-project",
+      cwd: "/tmp/other-project",
+      message: "hello",
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(res._getStatus()).toBe(400)
+    expect(res._getData().code).toBe("INVALID_REQUEST")
+    expect(mockedCreateSDKSession).not.toHaveBeenCalled()
   })
 })
 

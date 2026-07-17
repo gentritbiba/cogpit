@@ -42,6 +42,7 @@ export type UserContent = string | ContentBlock[]
 
 interface BaseMessage {
   type: string
+  [key: string]: unknown
   parentUuid?: string | null
   isSidechain?: boolean
   cwd?: string

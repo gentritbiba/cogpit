@@ -4,6 +4,7 @@ import { computeNetDiff, type EditOp } from "@/lib/diffUtils"
 import { authFetch } from "@/lib/auth"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
+import { isCodexDirName } from "@/lib/sessionSource"
 
 interface FileChange {
   turnIndex: number
@@ -17,6 +18,7 @@ const bgAgentCache = new Map<string, ToolCall[]>()
 export function useFileChangesData(session: ParsedSession) {
   const { sessionSource } = useSessionContext()
   const dirName = sessionSource?.dirName
+  const isCodexSession = isCodexDirName(dirName)
 
   // Stable cache key: total tool call count across all turns (cheaper than session object identity)
   const turnCount = session.turns.length
@@ -31,18 +33,21 @@ export function useFileChangesData(session: ParsedSession) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cheap proxy deps to avoid full array comparison
   }, [turnCount, lastTurnToolCallCount])
 
-  // Identify background agents that need their JSONL fetched for file changes
+  // Identify Claude background agents and completed Codex child rollouts whose
+  // file operations live only in their own JSONL.
   const bgAgentsToLoad = useMemo(() => {
     const agents: Array<{ agentId: string; turnIndex: number }> = []
     for (let turnIndex = 0; turnIndex < session.turns.length; turnIndex++) {
       for (const msg of session.turns[turnIndex].subAgentActivity) {
-        if (msg.isBackground && msg.toolCalls.length === 0) {
+        const codexAgentFinished = isCodexSession &&
+          (msg.status === "completed" || msg.status === "failed" || msg.status === "interrupted")
+        if ((msg.isBackground || codexAgentFinished) && msg.toolCalls.length === 0) {
           agents.push({ agentId: msg.agentId, turnIndex })
         }
       }
     }
     return agents
-  }, [session.turns, totalToolCallCount]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session.turns, totalToolCallCount, isCodexSession]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch background agent JSONL files to extract their tool calls
   const [bgToolCalls, setBgToolCalls] = useState<Map<string, ToolCall[]>>(new Map())
@@ -124,9 +129,9 @@ export function useFileChangesData(session: ParsedSession) {
             changes.push({ turnIndex, toolCall: tc, agentId: msg.agentId })
           }
         }
-        // For background agents: use fetched tool calls from their JSONL files
-        // Only process each background agent once to avoid duplication across turns
-        if (msg.isBackground && msg.toolCalls.length === 0 && !processedBgAgents.has(msg.agentId)) {
+        // Use fetched tool calls for Claude background agents and Codex child
+        // rollouts. Process each agent once to avoid duplication across turns.
+        if ((msg.isBackground || isCodexSession) && msg.toolCalls.length === 0 && !processedBgAgents.has(msg.agentId)) {
           processedBgAgents.add(msg.agentId)
           const fetched = bgToolCalls.get(msg.agentId)
           if (fetched) {
@@ -139,7 +144,7 @@ export function useFileChangesData(session: ParsedSession) {
     }
     return changes
     // eslint-disable-next-line react-hooks/exhaustive-deps -- totalToolCallCount is an intentional cache-busting key
-  }, [totalToolCallCount, session.turns, bgToolCalls])
+  }, [totalToolCallCount, session.turns, bgToolCalls, isCodexSession])
 
   // Fetch actual file contents from disk for line number resolution
   const filePaths = useMemo(() => {
@@ -215,6 +220,7 @@ export function useFileChangesData(session: ParsedSession) {
 
 /** A single edit/write operation with its before/after strings. */
 export interface IndividualEdit {
+  id: string
   oldString: string
   newString: string
   toolName: "Edit" | "Write"
@@ -321,6 +327,7 @@ export function buildGroupedFiles(
       if (fc.agentId) lastSubAgentId = fc.agentId
 
       edits.push({
+        id: fc.toolCall.id,
         oldString: op.oldString,
         newString: op.newString,
         toolName: fc.toolCall.name as "Edit" | "Write",

@@ -62,6 +62,7 @@ export async function prefetchSession(
       data.byteOffset,
       data.hasMore,
       agentKindFromDirName(dirName),
+      data.totalSize,
     )
   } catch {
     // Best-effort: ignore network or parse failures. The real fetch on click
@@ -70,4 +71,3 @@ export async function prefetchSession(
     inflight.delete(key)
   }
 }
-

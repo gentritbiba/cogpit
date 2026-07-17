@@ -53,3 +53,25 @@ describe("UserMessage — teammate-message rendering", () => {
     expect(screen.queryByText("Show raw")).toBeNull()
   })
 })
+
+describe("UserMessage — image attachments", () => {
+  it("renders base64 image blocks as clickable thumbnails", () => {
+    render(
+      <UserMessage
+        content={[
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/png", data: "cG5n" },
+          },
+          { type: "text", text: "check this" },
+        ]}
+        timestamp=""
+      />,
+    )
+
+    const thumbnail = screen.getByAltText("Attached image 1")
+    expect(thumbnail).toHaveAttribute("src", "data:image/png;base64,cG5n")
+    fireEvent.click(thumbnail)
+    expect(screen.getByAltText("Image 1")).toBeInTheDocument()
+  })
+})

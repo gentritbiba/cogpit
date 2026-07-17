@@ -148,7 +148,20 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     expect(MockEventSource.instances).toHaveLength(1)
-    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl")
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=15")
+  })
+
+  it("passes an explicit snapshot byte offset to the watcher", () => {
+    const source: SessionSource = {
+      dirName: "my-project",
+      fileName: "session.jsonl",
+      rawText: "stale snapshot",
+      watchOffset: 4096,
+    }
+
+    renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    expect(getLastEventSource().url).toBe("/api/watch/my-project/session.jsonl?offset=4096")
   })
 
   it("sets sseState to connecting initially", () => {
@@ -378,7 +391,7 @@ describe("useLiveSession", () => {
     // Old ES should be closed, new one created
     expect(firstES.closed).toBe(true)
     expect(MockEventSource.instances).toHaveLength(2)
-    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl")
+    expect(getLastEventSource().url).toBe("/api/watch/dir2/b.jsonl?offset=2")
   })
 
   it("encodes dirName and fileName in URL", () => {
@@ -391,7 +404,7 @@ describe("useLiveSession", () => {
     renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     expect(getLastEventSource().url).toBe(
-      "/api/watch/dir%20with%20spaces/file%20name.jsonl"
+      "/api/watch/dir%20with%20spaces/file%20name.jsonl?offset=2"
     )
   })
 

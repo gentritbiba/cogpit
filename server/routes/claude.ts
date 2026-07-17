@@ -57,7 +57,6 @@ export function registerClaudeRoutes(use: UseFn) {
             await continueCodexExecution(
               codexAppServer,
               sessionId,
-              sessionPath,
               {
                 cwd: resolvedCwd,
                 message,

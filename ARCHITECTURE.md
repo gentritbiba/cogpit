@@ -38,6 +38,10 @@
    - Dynamically allocates port (0 = any available) in production for non-networked mode
    - Registers custom menu (removes conflicting shortcuts)
 
+4. **Performance Metrics**
+   - `app.getAppMetrics()` supplies per-process CPU, memory, and wakeup data through the `performance:get-snapshot` IPC handler
+   - `electron/preload.ts` exposes the read-only `window.electronPerformance.getSnapshot()` bridge to the renderer
+
 ### Electron Server (`electron/server.ts`)
 
 The Express server handles:
@@ -51,6 +55,10 @@ All routes are **dual-registered**:
 2. `electron/server.ts` — Express server (both: `bun run electron:dev` and built app)
 
 If registered in only one place, the route works in dev but not in production, or vice versa.
+
+### Performance Monitoring Pipeline
+
+`server/lib/activityMonitor.ts` keeps short rolling samples for server CPU, memory, event-loop utilization, open streams, file activity, and normalized API request rates. `GET /api/performance` returns that server snapshot. When the header's `PowerMonitor` dialog is open, it polls this route and, in Electron, the preload performance bridge every two seconds; polling stops when the dialog closes.
 
 ---
 
@@ -123,6 +131,7 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 |-------|--------|---------|
 | `/api/config` | GET/POST | Configuration (`.claude` path, network settings, terminal app) |
 | `/api/projects` | GET | List projects in `.claude/projects/` |
+| `/api/codex-subagents` | GET | List Codex child rollouts across projects for global browsing |
 | `/api/projects/:dir` | GET | List sessions in a project (with preview, team info) |
 | `/api/sessions/:dir/:file` | GET | Load full JSONL session data |
 | `/api/watch/:dir/:file` | GET (SSE) | Live stream for active session |
@@ -149,6 +158,7 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/scripts/processes` | GET | List all managed processes |
 | `/api/scripts/output` | GET | SSE stream for process output (query: `id=processId`) |
 | `/api/usage` | GET | Token usage tracking |
+| `/api/performance` | GET | Server CPU, memory, event-loop, stream, file, and API activity snapshot |
 | `/api/notify` | POST | Receive Claude Code hook payloads, display system notifications with click-to-navigate |
 | `/api/project-files` | GET | List project files with search ranking (query: `cwd`, `q`, `limit`) |
 | `/api/project-file` | GET/PUT | Read/write individual file with optimistic concurrency (query: `cwd`, `path`; body: mtime-based conflict check) |
@@ -356,6 +366,8 @@ if (block.kind === "background_agent") {
 - **Markdown rendering:** Final message includes syntax highlighting, links, and image support
 - **Navigation:** "Open chat" button navigates to the full sub-agent session (same as clicking
   the sub-agent badge in the sidebar); click app header "Back" button to return to parent session
+- **Session context:** `AgentContextBar` summarizes delegated-agent status and tasks above the timeline, even when StatsPanel is closed
+- **Global Codex discovery:** The session browser's Subagents view uses `/api/codex-subagents` to list child rollouts across projects and open their full transcripts
 
 **Files:** `src/components/timeline/SubAgentPanel.tsx`, `src/components/timeline/BackgroundAgentPanel.tsx`
 

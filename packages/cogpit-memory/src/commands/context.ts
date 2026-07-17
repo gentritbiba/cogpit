@@ -353,7 +353,6 @@ export async function getAgentTurnDetail(
 ): Promise<object> {
   const jsonlPath = await findJsonlPath(sessionId)
   if (!jsonlPath) return { error: "Session not found" }
-  const content = await readFile(jsonlPath, "utf-8")
 
   const subagentFile = await findSubagentFile(jsonlPath, agentId)
   if (!subagentFile) return { error: "Agent not found" }

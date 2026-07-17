@@ -16,12 +16,29 @@ import { installSkill } from "./commands/install-skill"
 
 export interface CLICommand {
   command: string
-  args: Record<string, any>
+  args: CLIArguments
+}
+
+export interface CLIArguments {
+  query?: string
+  session?: string
+  maxAge?: string
+  limit?: number
+  sessionLimit?: number
+  hitsPerSession?: number
+  caseSensitive?: boolean
+  sessionId?: string
+  turnIndex?: number
+  agentId?: string
+  cwd?: string
+  current?: boolean
+  subcommand?: string
+  global?: boolean
 }
 
 export function parseArgs(argv: string[]): CLICommand {
   const command = argv[0]
-  const args: Record<string, any> = {}
+  const args: CLIArguments = {}
 
   switch (command) {
     case "search": {
@@ -88,28 +105,30 @@ async function main() {
   let result: unknown
 
   switch (cmd.command) {
-    case "search":
+    case "search": {
       if (!cmd.args.query) {
         console.error(JSON.stringify({ error: "Usage: cogpit-memory search <query>" }))
         process.exit(1)
       }
-      result = await searchSessions(cmd.args.query, {
+      const searchResult = await searchSessions(cmd.args.query, {
         sessionId: cmd.args.session,
         maxAge: cmd.args.maxAge,
         limit: cmd.args.limit,
         caseSensitive: cmd.args.caseSensitive,
       })
       // --session-limit: cap unique sessions, --hits-per-session: trim hits per session
-      if (result && !("error" in result) && (cmd.args.sessionLimit || cmd.args.hitsPerSession)) {
-        const sl = cmd.args.sessionLimit ?? result.results.length
+      if ("results" in searchResult && (cmd.args.sessionLimit || cmd.args.hitsPerSession)) {
+        const sl = cmd.args.sessionLimit ?? searchResult.results.length
         const hpp = cmd.args.hitsPerSession ?? Infinity
-        result.results = result.results.slice(0, sl).map(sr => ({
+        searchResult.results = searchResult.results.slice(0, sl).map(sr => ({
           ...sr,
           hits: sr.hits.slice(0, hpp),
         }))
-        result.returnedHits = result.results.reduce((n, sr) => n + sr.hits.length, 0)
+        searchResult.returnedHits = searchResult.results.reduce((n, sr) => n + sr.hits.length, 0)
       }
+      result = searchResult
       break
+    }
 
     case "context":
       if (!cmd.args.sessionId) {

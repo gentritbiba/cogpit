@@ -143,10 +143,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     fetchData()
   }, [fetchData])
 
-  useEffect(() => {
-    const interval = setInterval(() => fetchData(), 10000)
-    return () => clearInterval(interval)
-  }, [fetchData])
+  // Session inventory is intentionally not polled. Scanning every project and
+  // spawning `ps` on a timer consumed a full CPU core in bursts. New-session
+  // lifecycle events and the refresh button call fetchData explicitly.
 
   const procBySession = useMemo(
     () => buildProcMap(processes),

@@ -1,5 +1,7 @@
 import { computeStats } from "./sessionStats"
 import type {
+  ContentBlock,
+  ImageBlock,
   ParsedSession,
   SubAgentMessage,
   ThinkingBlock,
@@ -21,6 +23,7 @@ interface CodexMetadata {
   cwd: string
   model: string
   slug: string
+  name: string
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
   firstUserMessage: string
   lastUserMessage: string
@@ -36,6 +39,7 @@ interface CodexMetadata {
 }
 
 const SKIP_PROMPT_PREFIXES = [
+  "# AGENTS.md instructions for ",
   "<environment_context>",
   "<permissions instructions>",
   "<collaboration_mode>",
@@ -75,6 +79,53 @@ function extractMessageText(payload: Record<string, unknown> | undefined, blockT
     .map((block) => block.text as string)
     .join("\n")
     .trim()
+}
+
+const CODEX_IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/is
+
+function parseImageDataUrl(value: unknown): ImageBlock | null {
+  if (typeof value !== "string") return null
+  const match = CODEX_IMAGE_DATA_URL.exec(value)
+  if (!match?.[1] || !match[2]) return null
+  return {
+    type: "image",
+    source: {
+      type: "base64",
+      media_type: match[1].toLowerCase(),
+      data: match[2],
+    },
+  }
+}
+
+function extractEventMessageImages(payload: Record<string, unknown>): ImageBlock[] {
+  if (!Array.isArray(payload.images)) return []
+  return payload.images
+    .map(parseImageDataUrl)
+    .filter((image): image is ImageBlock => image !== null)
+}
+
+function extractResponseMessageImages(payload: Record<string, unknown>): ImageBlock[] {
+  if (!Array.isArray(payload.content)) return []
+  return payload.content
+    .filter((block): block is Record<string, unknown> => (
+      isObject(block) && block.type === "input_image"
+    ))
+    .map((block) => parseImageDataUrl(block.image_url))
+    .filter((image): image is ImageBlock => image !== null)
+}
+
+function buildCodexUserContent(
+  message: string,
+  images: ImageBlock[],
+  localImages: string[] = [],
+): string | ContentBlock[] {
+  const imageSuffix = localImages.map((path) => `\n![image](<${path}>)`).join("")
+  const text = message + imageSuffix
+  if (images.length === 0) return text
+  return [
+    ...images,
+    ...(text ? [{ type: "text" as const, text }] : []),
+  ]
 }
 
 function normalizeFunctionName(rawName: string): string {
@@ -632,8 +683,11 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       const localImages = (Array.isArray(payload.local_images) ? payload.local_images : []).filter(
         (p): p is string => typeof p === "string" && p.length > 0,
       )
-      const imageSuffix = localImages.map((p) => `\n![image](<${p}>)`).join("")
-      current.userMessage = payload.message + imageSuffix
+      current.userMessage = buildCodexUserContent(
+        payload.message,
+        extractEventMessageImages(payload),
+        localImages,
+      )
       current.timestamp = current.timestamp || timestamp
       lastTurnTimestamp = timestamp
       continue
@@ -716,7 +770,8 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
 
     if (payload.type === "message" && payload.role === "user" && current.userMessage === null) {
       const text = normalizePromptText(extractMessageText(payload, "input_text"))
-      if (text) current.userMessage = text
+      const images = extractResponseMessageImages(payload)
+      if (text || images.length > 0) current.userMessage = buildCodexUserContent(text, images)
       continue
     }
 

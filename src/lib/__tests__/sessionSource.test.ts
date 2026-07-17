@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest"
 import {
   agentKindFromDirName,
   encodeCodexDirName,
+  encodeClaudeDirName,
   findClaudeProjectDirNameForCwd,
   getResumeCommand,
   inferSessionSourceKind,
   isCodexDirName,
   projectDirNameForAgent,
+  projectDirNameForNewFolder,
 } from "@/lib/sessionSource"
 
 describe("sessionSource", () => {
@@ -31,6 +33,12 @@ describe("sessionSource", () => {
   it("encodes cwd values into codex dir names", () => {
     expect(encodeCodexDirName("/tmp/project")).toMatch(/^codex__/)
     expect(isCodexDirName(encodeCodexDirName("/tmp/project"))).toBe(true)
+  })
+
+  it("encodes new folder paths for the selected provider", () => {
+    expect(encodeClaudeDirName("/tmp/my-project/")).toBe("-tmp-my-project")
+    expect(projectDirNameForNewFolder("/tmp/project", "claude")).toBe("-tmp-project")
+    expect(projectDirNameForNewFolder("/tmp/project", "codex")).toBe(encodeCodexDirName("/tmp/project"))
   })
 
   it("maps a Claude project dir to the selected agent kind", () => {

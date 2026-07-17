@@ -2,6 +2,7 @@ import { readdir, stat, open, appendFile } from "node:fs/promises"
 import { join } from "node:path"
 import { watch } from "node:fs"
 import { randomUUID } from "node:crypto"
+import { recordActivity } from "./lib/activityMonitor"
 
 // ── Subagent JSONL watcher ───────────────────────────────────────────
 // Claude Code doesn't reliably write agent_progress to the parent JSONL
@@ -56,6 +57,7 @@ export function watchSubagents(
         const buf = Buffer.alloc(s.size - offset)
         const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
         fileOffsets.set(filePath, s.size)
+        recordActivity("Subagent JSONL reads", { bytes: bytesRead })
 
         const text = buf.subarray(0, bytesRead).toString("utf-8")
         const lines = text.split("\n").filter(Boolean)
@@ -131,8 +133,12 @@ export function watchSubagents(
 
   async function scanDir() {
     if (closed) return
+    recordActivity("Subagent directory scans")
     try {
       const files = await readdir(subagentsDir)
+      if (files.length > 0) {
+        recordActivity("Subagent files checked", { count: files.length })
+      }
       for (const f of files) {
         if (f.startsWith("agent-") && f.endsWith(".jsonl")) {
           await processAgentFile(join(subagentsDir, f), f)
@@ -153,8 +159,10 @@ export function watchSubagents(
     // directory doesn't exist yet — poller will pick up changes
   }
 
-  // Poll as fallback (subagents dir may be created after we start watching)
-  pollTimer = setInterval(scanDir, 500)
+  // Poll only as a fallback (subagents dir may be created after we start
+  // watching). fs.watch remains immediate when the directory already exists;
+  // a two-second fallback avoids four unnecessary scans out of every five.
+  pollTimer = setInterval(scanDir, 2_000)
 
   // Initial scan
   scanDir()

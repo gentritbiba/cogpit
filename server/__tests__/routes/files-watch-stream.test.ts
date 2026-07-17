@@ -156,4 +156,37 @@ describe("/api/watch stream-bus forwarding", () => {
     expect(events.some((e) => e.type === "stream_snapshot")).toBe(false)
     closeConnection()
   })
+
+  it("replays lines written after the client snapshot offset", async () => {
+    const line = '{"n":1}\n'
+    mockStat.mockResolvedValue({ size: Buffer.byteLength(line), mtimeMs: Date.now() })
+    mockOpen.mockResolvedValue({
+      read: vi.fn(async (buffer: Buffer) => {
+        buffer.write(line)
+        return { bytesRead: Buffer.byteLength(line) }
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    })
+
+    const { frames, closeConnection } = await connect(`/codex__proj/${SESSION}.jsonl?offset=0`)
+    const events = parseFrames(frames)
+    expect(events).toContainEqual({ type: "lines", lines: [line.trimEnd()] })
+    closeConnection()
+  })
+
+  it("keeps the original end-of-file baseline when no offset is supplied", async () => {
+    const line = '{"existing":true}\n'
+    mockStat.mockResolvedValue({ size: Buffer.byteLength(line), mtimeMs: Date.now() })
+
+    const { frames, closeConnection } = await connect(`/codex__proj/${SESSION}.jsonl`)
+    const events = parseFrames(frames)
+
+    expect(events).toContainEqual({
+      type: "init",
+      offset: Buffer.byteLength(line),
+      recentlyActive: true,
+    })
+    expect(mockOpen).not.toHaveBeenCalled()
+    closeConnection()
+  })
 })

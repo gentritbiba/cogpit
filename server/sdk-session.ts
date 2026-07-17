@@ -60,6 +60,11 @@ interface PendingPermission extends PermissionRequestData {
   resolve: (result: PermissionResult) => void
 }
 
+interface PendingUserQuestion {
+  input: Record<string, unknown>
+  resolve: (result: PermissionResult) => void
+}
+
 export type PermissionDecision = "allow" | "allow_always" | "deny"
 
 export type ImageAttachment = { data: string; mediaType: string }
@@ -69,6 +74,8 @@ export interface SDKSessionState {
   cwd: string
   /** Permission requests awaiting user decision — canUseTool is blocked on the `resolve` promise */
   pendingPermissions: Map<string, PendingPermission>
+  /** AskUserQuestion requests awaiting an answers object from the dashboard. */
+  pendingUserQuestions: Map<string, PendingUserQuestion>
   /** Tools the user approved "always for this session" — canUseTool auto-allows these */
   sessionAllowedTools: Set<string>
   running: boolean
@@ -104,7 +111,9 @@ export const sdkSessions = new Map<string, SDKSessionState>()
 // ── Attach the sub-agent file watcher once the JSONL path is known ──
 
 export function attachSubagentWatcher(state: SDKSessionState): void {
-  if (state.subagentWatcher || !state.jsonlPath) return
+  // A path lookup can finish after a short query has already completed. Never
+  // attach a permanent poller to an idle session in that race.
+  if (state.subagentWatcher || !state.jsonlPath || !state.running) return
   state.subagentWatcher = watchSubagents(
     state.jsonlPath,
     state.sessionId,
@@ -116,6 +125,28 @@ export function attachSubagentWatcher(state: SDKSessionState): void {
 
 function makeCanUseTool(state: SDKSessionState): CanUseTool {
   return (toolName, input, options) => {
+    // AskUserQuestion is a tool invocation, not a permission request. The SDK
+    // waits for this callback before it can produce the tool result, so a
+    // normal follow-up message cannot answer it. Keep its resolver separate
+    // from the permission bar and complete it through resolveUserQuestion().
+    if (toolName === "AskUserQuestion") {
+      const toolUseId = options.toolUseID
+      return new Promise<PermissionResult>((resolve) => {
+        const pending: PendingUserQuestion = {
+          input,
+          resolve,
+        }
+        state.pendingUserQuestions.set(toolUseId, pending)
+
+        const onAbort = () => {
+          if (state.pendingUserQuestions.delete(toolUseId)) {
+            resolve({ behavior: "deny", message: "Session aborted", interrupt: true })
+          }
+        }
+        options.signal?.addEventListener("abort", onAbort, { once: true })
+      })
+    }
+
     if (state.sessionAllowedTools.has(toolName)) {
       return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
     }
@@ -313,6 +344,9 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   state.abort = new AbortController()
   state.running = true
   state.stderr = ""
+  // Idle sessions keep their resolved JSONL path. Reattach only for the active
+  // query; the finally block below always releases the watcher again.
+  attachSubagentWatcher(state)
 
   const queryOpts = buildQueryOptions(state, opts)
 
@@ -341,6 +375,8 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         state.onResult = null
       }
     } finally {
+      state.subagentWatcher?.close()
+      state.subagentWatcher = null
       state.running = false
       state.activeQuery = null
       state.abort = null
@@ -355,6 +391,10 @@ function rejectAllPending(state: SDKSessionState, reason: string): void {
     pending.resolve({ behavior: "deny", message: reason })
   }
   state.pendingPermissions.clear()
+  for (const pending of state.pendingUserQuestions.values()) {
+    pending.resolve({ behavior: "deny", message: reason, interrupt: true })
+  }
+  state.pendingUserQuestions.clear()
 }
 
 // ── Helper: build an SDKUserMessage from text + optional images ──────
@@ -413,6 +453,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     sessionId: opts.sessionId,
     cwd: opts.cwd,
     pendingPermissions: new Map(),
+    pendingUserQuestions: new Map(),
     sessionAllowedTools: new Set(),
     running: false,
     abort: null,
@@ -697,6 +738,57 @@ export function resolvePermission(
   applyDecision(state, pending, behavior)
 
   return { found: true, toolName: pending.toolName }
+}
+
+export type UserQuestionAnswers = Record<string, string> | string[] | string
+
+function normalizeUserQuestionAnswers(
+  input: Record<string, unknown>,
+  answers: UserQuestionAnswers,
+): Record<string, string> | null {
+  if (typeof answers === "object" && answers !== null && !Array.isArray(answers)) {
+    const entries = Object.entries(answers)
+    if (entries.some(([, value]) => typeof value !== "string")) return null
+    return Object.fromEntries(entries) as Record<string, string>
+  }
+
+  const questions = Array.isArray(input.questions)
+    ? input.questions.filter((question): question is Record<string, unknown> => (
+      typeof question === "object" && question !== null
+    ))
+    : []
+  const values = Array.isArray(answers) ? answers : [answers]
+  const normalized: Record<string, string> = {}
+  for (let index = 0; index < values.length; index += 1) {
+    const question = questions[index]?.question
+    const answer = values[index]
+    if (typeof question === "string" && typeof answer === "string") {
+      normalized[question] = answer
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null
+}
+
+/** Resolve the blocked AskUserQuestion tool with the SDK's expected input shape. */
+export function resolveUserQuestion(
+  sessionId: string,
+  toolUseId: string,
+  answers: UserQuestionAnswers,
+): { found: boolean } {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return { found: false }
+
+  const pending = state.pendingUserQuestions.get(toolUseId)
+  if (!pending) return { found: false }
+  const normalized = normalizeUserQuestionAnswers(pending.input, answers)
+  if (!normalized) return { found: false }
+
+  state.pendingUserQuestions.delete(toolUseId)
+  pending.resolve({
+    behavior: "allow",
+    updatedInput: { ...pending.input, answers: normalized },
+  })
+  return { found: true }
 }
 
 // ── Resolve all pending permission requests ──────────────────────────
