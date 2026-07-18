@@ -158,11 +158,13 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/scripts/processes` | GET | List all managed processes |
 | `/api/scripts/output` | GET | SSE stream for process output (query: `id=processId`) |
 | `/api/usage` | GET | Token usage tracking |
-| `/api/performance` | GET | Server CPU, memory, event-loop, stream, file, and API activity snapshot |
+| `/api/performance` | GET | Server CPU, memory, event-loop, stream, file, and API activity snapshot; optionally includes system-wide process snapshot (best-effort, does not fail if unavailable) |
 | `/api/notify` | POST | Receive Claude Code hook payloads, display system notifications with click-to-navigate |
 | `/api/project-files` | GET | List project files with search ranking (query: `cwd`, `q`, `limit`) |
 | `/api/project-file` | GET/PUT | Read/write individual file with optimistic concurrency (query: `cwd`, `path`; body: mtime-based conflict check) |
 | `/api/git-status` | GET | Branch info, ahead/behind counts, and per-file working-tree/index status (query: `cwd`) |
+| `/api/system-processes` | GET | System-wide process snapshot: agent-related processes (Claude, headless browsers, scripts) classified by kind with leak detection (orphaned, hot, suspicious); top 20 sorted by leak risk |
+| `/api/system-processes/kill` | POST | Kill suspected leaked processes (body: `{pids: number[]}`) — whitelist-checked against current scan to prevent targeting Cogpit/live sessions |
 
 ---
 

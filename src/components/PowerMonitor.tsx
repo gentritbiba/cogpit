@@ -23,12 +23,14 @@ import { Separator } from "@/components/ui/separator"
 import { HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { authFetch } from "@/lib/auth"
+import { formatAge } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type {
   ActivityMetric,
   ElectronPerformanceSnapshot,
   ElectronProcessMetric,
   ServerPerformanceSnapshot,
+  SystemProcessMetric,
 } from "@/lib/performanceTypes"
 
 const POLL_INTERVAL_MS = 2_000
@@ -55,6 +57,45 @@ function formatBytesPerSecond(value: number): string | null {
   return `${value.toFixed(0)} B/s`
 }
 
+function SystemProcessRow({ metric, onKill }: { metric: SystemProcessMetric; onKill?: (pid: number) => void }) {
+  return (
+    <div className="flex items-start gap-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-medium">{metric.label}</span>
+          <Badge variant="outline">PID {metric.pid}</Badge>
+          {metric.suspectedLeak && <Badge variant="destructive">possible leak</Badge>}
+          {metric.orphaned && !metric.suspectedLeak && <Badge variant="secondary">orphaned</Badge>}
+        </div>
+        <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={metric.command}>
+          {metric.command}
+        </p>
+      </div>
+      {metric.suspectedLeak && onKill && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 text-destructive hover:bg-destructive/10"
+          onClick={() => onKill(metric.pid)}
+        >
+          Kill
+        </Button>
+      )}
+      <div className="shrink-0 text-right">
+        <div className={cn(
+          "font-mono text-sm font-semibold tabular-nums",
+          metric.cpuPercent >= 20 && "text-destructive",
+        )}>
+          {formatCpu(metric.cpuPercent)}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {formatMemory(metric.memoryMb)} · {formatAge(metric.ageSeconds)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function processHint(metric: ElectronProcessMetric): string {
   if (metric.name === "Server") return "API, file watching, session streams, and agent I/O"
   if (metric.name === "Renderer") return "React rendering, markdown, layout, and animations"
@@ -63,7 +104,12 @@ function processHint(metric: ElectronProcessMetric): string {
   return metric.type
 }
 
-function diagnosis(totalCpu: number, hottest?: ElectronProcessMetric): string {
+function diagnosis(totalCpu: number, hottest?: ElectronProcessMetric, systemLeaks = 0): string {
+  if (systemLeaks > 0) {
+    return systemLeaks === 1
+      ? '1 agent process outside Cogpit looks leaked — it drains the battery even while Cogpit itself is idle. See "Agent processes" below.'
+      : `${systemLeaks} agent processes outside Cogpit look leaked — they drain the battery even while Cogpit itself is idle. See "Agent processes" below.`
+  }
   if (totalCpu < 5) return "Cogpit is currently idle. Leave this open while the power spike happens."
   if (!hottest) return "The server is active. The lists below show its busiest recent work."
   if (hottest.name === "Server") {
@@ -220,7 +266,23 @@ export function PowerMonitor() {
     ? processes.reduce((sum, metric) => sum + metric.cpuPercent, 0)
     : serverSnapshot?.cpuPercent ?? 0
   const hottest = processes[0]
-  const status = totalCpu >= 80 ? "High" : totalCpu >= 15 ? "Active" : "Idle"
+  const systemProcesses = serverSnapshot?.system?.processes ?? []
+  const systemLeaks = serverSnapshot?.system?.suspectedLeakCount ?? 0
+  const status = systemLeaks > 0 || totalCpu >= 80 ? "High" : totalCpu >= 15 ? "Active" : "Idle"
+
+  const handleKillProcess = async (pid: number) => {
+    try {
+      await authFetch("/api/system-processes/kill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pids: [pid] }),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 1_000))
+    } catch {
+      // Best-effort; the refresh below shows the real state.
+    }
+    void refresh()
+  }
 
   const handleCopy = () => {
     copy(JSON.stringify({
@@ -271,14 +333,14 @@ export function PowerMonitor() {
 
           <Separator />
 
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea className="min-h-0 min-w-0 flex-1">
             <div className="flex flex-col gap-4 p-5">
               {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
               <Card size="sm">
                 <CardHeader>
                   <CardTitle>Current load</CardTitle>
-                  <CardDescription>{diagnosis(totalCpu, hottest)}</CardDescription>
+                  <CardDescription>{diagnosis(totalCpu, hottest, systemLeaks)}</CardDescription>
                   <CardAction>
                     <span className={cn(
                       "font-mono text-lg font-semibold tabular-nums",
@@ -317,6 +379,27 @@ export function PowerMonitor() {
                   )}
                 </CardContent>
               </Card>
+
+              {systemProcesses.length > 0 && (
+                <Card size="sm">
+                  <CardHeader>
+                    <CardTitle>Agent processes</CardTitle>
+                    <CardDescription>
+                      Claude sessions, browsers, and scripts running system-wide. macOS bills
+                      their energy to the app that spawned them, so a leaked one drains the
+                      battery while the numbers above look idle.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {systemProcesses.map((metric, index) => (
+                      <div key={metric.pid}>
+                        {index > 0 && <Separator />}
+                        <SystemProcessRow metric={metric} onKill={(pid) => void handleKillProcess(pid)} />
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <Card size="sm">

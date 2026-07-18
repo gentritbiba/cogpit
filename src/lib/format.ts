@@ -66,6 +66,13 @@ export function formatRelativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
+/** Format a process age in seconds as "2d 3h", "3h 4m", or "5m". */
+export function formatAge(seconds: number): string {
+  if (seconds >= 86400) return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`
+  if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+  return `${Math.max(1, Math.floor(seconds / 60))}m`
+}
+
 /**
  * Get the duration of a turn in ms.
  * Prefers `turn.durationMs` (set by Claude Code's turn_duration system message).

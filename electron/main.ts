@@ -50,7 +50,7 @@ async function createWindow(port: number) {
     trafficLightPosition: { x: 16, y: 14 },
     backgroundColor: "#09090b",
     webPreferences: {
-      preload: join(__dirname, "../preload/preload.js"),
+      preload: join(__dirname, "../preload/preload.cjs"),
       sandbox: true,
       contextIsolation: true,
       // Session I/O lives in the utility process, so hidden windows can safely

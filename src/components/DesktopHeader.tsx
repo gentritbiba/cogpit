@@ -23,6 +23,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
+import { LeakIndicator } from "@/components/LeakIndicator"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
@@ -157,6 +158,8 @@ export const DesktopHeader = memo(function DesktopHeader({
       <div className="flex-1" />
 
       <TokenUsageIndicator agentKind={activeAgentKind} />
+
+      <LeakIndicator />
 
       <NetworkStatus
         networkUrl={networkUrl}

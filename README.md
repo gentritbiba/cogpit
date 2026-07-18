@@ -67,6 +67,9 @@ Per-turn token usage (uncached input, cached input, cache creation, and output),
 ### Power & Activity Monitor
 Open the header monitor to inspect Cogpit's CPU, memory, event-loop, file/stream, and API activity. The desktop app also breaks usage down by Electron process, and the monitor polls only while it is open.
 
+### Process Leak Monitor
+Automatically detect and clean up leaked agent processes: orphaned Claude sessions, hot headless browsers, and abandoned scripts that drain battery or hog CPU. The header indicator shows active leaks with severity (CPU%, age); one-click cleanup kills only suspected leaks. Two-sweep confirmation prevents accidental kills of transient processes. Desktop notifications announce automatic cleanup.
+
 ### Undo / Redo with Branching
 Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.
 

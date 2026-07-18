@@ -26,6 +26,10 @@ export default defineConfig({
       outDir: "out/preload",
       lib: {
         entry: "electron/preload.ts",
+        // The BrowserWindow uses sandbox: true, which only supports CJS
+        // preload scripts. The package is ESM, so without this the build
+        // emits preload.mjs — which the sandboxed renderer cannot load.
+        formats: ["cjs"],
       },
     },
   },
