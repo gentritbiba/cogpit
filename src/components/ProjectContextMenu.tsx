@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { ContextMenu } from "@base-ui/react/context-menu"
 import { Pencil } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,6 +19,8 @@ interface ProjectContextMenuProps {
   children: React.ReactNode
   projectLabel: string
   customName?: string
+  /** Extra classes for the trigger wrapper (e.g. sticky positioning). */
+  className?: string
   onRename: (name: string) => void
 }
 
@@ -25,6 +28,7 @@ export function ProjectContextMenu({
   children,
   projectLabel,
   customName,
+  className,
   onRename,
 }: ProjectContextMenuProps) {
   const [showRename, setShowRename] = useState(false)
@@ -41,7 +45,7 @@ export function ProjectContextMenu({
   return (
     <>
       <ContextMenu.Root>
-        <ContextMenu.Trigger render={<div className="w-full" />}>{children}</ContextMenu.Trigger>
+        <ContextMenu.Trigger render={<div className={cn("w-full", className)} />}>{children}</ContextMenu.Trigger>
         <ContextMenu.Portal>
           <ContextMenu.Positioner>
             <ContextMenu.Popup className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1 z-50">

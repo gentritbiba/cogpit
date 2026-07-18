@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useId, memo } from "react"
-import { Loader2, RefreshCw, Activity, AlertTriangle, FolderOpen, ChevronRight, Plus, Search, X } from "lucide-react"
+import { Loader2, RefreshCw, Activity, AlertTriangle, ChevronDown, ChevronRight, ChevronUp, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
-import { shortPath, dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { SessionRow } from "./SessionRow"
 import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
@@ -14,8 +14,12 @@ import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useIsMobile } from "@/hooks/useIsMobile"
+import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { countLiveSessions } from "./liveSessionSummary"
+import { groupByProject, projectGroupKey, visibleRowCount } from "./sessionListView"
+import { classifyAttention } from "./attentionGroups"
+import { AttentionStrip } from "./AttentionStrip"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -49,30 +53,6 @@ function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> 
   return map
 }
 
-/** Resolve a project grouping key from a raw filesystem path — worktree paths map to their parent. */
-function projectGroupKey(rawPath: string): string {
-  const wt = parseWorktreePath(rawPath)
-  return shortPath(wt ? wt.parentPath : rawPath, 2)
-}
-
-/** Resolve the grouping key for a session. */
-function sessionGroupKey(s: ActiveSessionInfo): string {
-  return projectGroupKey(s.cwd ?? dirNameToPath(s.dirName))
-}
-
-/** Group sessions by project path for compact display, sorted newest-first. */
-function groupByProject(sessions: ActiveSessionInfo[]): Map<string, ActiveSessionInfo[]> {
-  const sorted = sortSessionsByRecency(sessions)
-  const groups = new Map<string, ActiveSessionInfo[]>()
-  for (const s of sorted) {
-    const key = sessionGroupKey(s)
-    const list = groups.get(key)
-    if (list) list.push(s)
-    else groups.set(key, [s])
-  }
-  return groups
-}
-
 export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
@@ -83,6 +63,16 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  // Per-project collapse choices, persisted so the user's arrangement survives
+  // reloads. Groups without an entry fall back to smart defaults (live groups
+  // and the most recent few stay open).
+  const [collapsedGroups, setCollapsedGroups] = useLocalStorage<Record<string, boolean>>(
+    "live-sessions-collapsed-projects",
+    {},
+  )
+  const toggleGroupCollapsed = useCallback((key: string, collapsed: boolean) => {
+    setCollapsedGroups((prev) => ({ ...prev, [key]: collapsed }))
+  }, [setCollapsedGroups])
   // Tracks sessions that transitioned to "completed" during this browser session
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
   const prevStatusRef = useRef<Map<string, string> | null>(null)
@@ -143,9 +133,11 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     fetchData()
   }, [fetchData])
 
-  // Session inventory is intentionally not polled. Scanning every project and
-  // spawning `ps` on a timer consumed a full CPU core in bursts. New-session
-  // lifecycle events and the refresh button call fetchData explicitly.
+  // Session inventory is not polled unconditionally — scanning every project
+  // and spawning `ps` on a timer consumed a full CPU core in bursts. Besides
+  // lifecycle events and the refresh button, we refresh on window focus, and
+  // poll gently ONLY while the attention strip has live work and the tab is
+  // visible (see effects below).
 
   const procBySession = useMemo(
     () => buildProcMap(processes),
@@ -180,6 +172,32 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   // Group sessions by project path
   const grouped = useMemo(() => groupByProject(filteredSessions), [filteredSessions])
+
+  // Cross-project triage for the attention strip (independent of search)
+  const attention = useMemo(
+    () => classifyAttention(sessions, procBySession, newlyCompleted),
+    [sessions, procBySession, newlyCompleted]
+  )
+  const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
+  const showAttentionStrip = !searchQuery.trim() && hasAttention
+
+  // Refresh the inventory when the window regains focus — the moment the user
+  // comes back to Cogpit is exactly when the strip must be accurate.
+  useEffect(() => {
+    const onFocus = () => fetchData()
+    window.addEventListener("focus", onFocus)
+    return () => window.removeEventListener("focus", onFocus)
+  }, [fetchData])
+
+  // Gentle live polling: only while something is running or waiting, and only
+  // while the tab is visible. Idle dashboards cost nothing.
+  useEffect(() => {
+    if (!hasAttention) return
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchData()
+    }, 20_000)
+    return () => clearInterval(interval)
+  }, [hasAttention, fetchData])
 
   // Derive pending session's project path once (used for group matching)
   const pendingProjectPath = useMemo(() => {
@@ -398,13 +416,41 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             </div>
           )}
 
+          {/* Attention strip — cross-project triage: who needs me, who's working */}
+          {showAttentionStrip && (
+            <div className="flex flex-col gap-2 pt-1.5">
+              <AttentionStrip
+                groups={attention}
+                activeSessionKey={activeSessionKey}
+                procBySession={procBySession}
+                killingPids={killingPids}
+                sessionNames={sessionNames}
+                projectNames={projectNames}
+                onSelectSession={handleSelectSession}
+                onKill={handleKill}
+                onResumeSession={handleResumeSession}
+                onPrefetchSession={onPrefetchSession}
+              />
+              <div className="flex items-center gap-1.5 px-0.5 pt-1">
+                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground/50">
+                  PROJECTS
+                </span>
+                <div className="h-px flex-1 bg-border/40" />
+              </div>
+            </div>
+          )}
+
           {/* Grouped sessions by project — pending session is placed inside its matching group */}
-          {[...grouped.entries()].map(([projectPath, projectSessions], idx) => (
+          {[...grouped.entries()].map(([projectPath, projectSessions], idx) => {
+            const liveCount = countLiveSessions(projectSessions, procBySession)
+            return (
             <ProjectGroup
               key={projectPath}
               projectPath={projectPath}
               sessions={projectSessions}
-              defaultCollapsed={idx >= 3}
+              liveCount={liveCount}
+              collapsed={collapsedGroups[projectPath] ?? (idx >= 3 && liveCount === 0)}
+              onToggleCollapsed={toggleGroupCollapsed}
               forceExpand={!!searchQuery.trim()}
               activeSessionKey={activeSessionKey}
               procBySession={procBySession}
@@ -424,7 +470,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               onPrefetchSession={onPrefetchSession}
               onResumeSession={handleResumeSession}
             />
-          ))}
+            )
+          })}
 
           {/* Pending session in a new group if no matching project group exists yet */}
           {pendingProjectPath && !grouped.has(pendingProjectPath) && pendingSession && (
@@ -432,6 +479,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               key={`pending-${pendingProjectPath}`}
               projectPath={pendingProjectPath}
               sessions={[]}
+              liveCount={0}
+              collapsed={false}
+              onToggleCollapsed={toggleGroupCollapsed}
               activeSessionKey={activeSessionKey}
               procBySession={procBySession}
               killingPids={killingPids}
@@ -469,7 +519,9 @@ function ProjectGroup({
   newlyCompleted,
   sessionNames,
   projectNames,
-  defaultCollapsed = false,
+  liveCount,
+  collapsed,
+  onToggleCollapsed,
   forceExpand = false,
   onSelectSession,
   onKill,
@@ -491,7 +543,9 @@ function ProjectGroup({
   newlyCompleted: Set<string>
   sessionNames: Record<string, string>
   projectNames: Record<string, string>
-  defaultCollapsed?: boolean
+  liveCount: number
+  collapsed: boolean
+  onToggleCollapsed: (key: string, collapsed: boolean) => void
   forceExpand?: boolean
   onSelectSession: (dirName: string, fileName: string) => void
   onKill: (pid: number, e: React.MouseEvent) => void
@@ -507,7 +561,6 @@ function ProjectGroup({
 }) {
   const sessionGroupId = useId()
   const hasPending = !!pendingSession
-  const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const isCollapsed = (forceExpand || hasPending) ? false : collapsed
 
   // Agent-team grouping: teammate sessions nest under their lead session
@@ -540,11 +593,20 @@ function ProjectGroup({
     })
   }
 
-  // Each row is ~32px; show 5 visible, rest scrollable
+  // Progressive disclosure instead of a nested scrollbar: show the first few
+  // rows, then a "Show N more" row. Live sessions always stay visible.
   const VISIBLE_COUNT = 5
-  const ROW_HEIGHT = 32
+  const [showAll, setShowAll] = useState(false)
   const totalCount = sessions.length + (hasPending ? 1 : 0)
-  const needsScroll = totalCount > VISIBLE_COUNT
+  const collapsedLimit = visibleRowCount(
+    topLevelSessions,
+    procBySession,
+    Math.max(1, VISIBLE_COUNT - (hasPending ? 1 : 0)),
+  )
+  const expandRows = forceExpand || showAll
+  const visibleTopLevel = expandRows ? topLevelSessions : topLevelSessions.slice(0, collapsedLimit)
+  const hiddenCount = topLevelSessions.length - visibleTopLevel.length
+  const canShowLess = showAll && !forceExpand && topLevelSessions.length > collapsedLimit
 
   // Resolve dirName — prefer a non-worktree session so custom name lookup works
   const dirName = (sessions.find(s => !parseWorktreePath(s.cwd ?? dirNameToPath(s.dirName)))?.dirName
@@ -585,16 +647,17 @@ function ProjectGroup({
 
   return (
     <div className="flex flex-col">
-      {/* Collapsible group header */}
+      {/* Collapsible group header — sticky so the current project stays visible while scrolling */}
       <ProjectContextMenu
         projectLabel={projectPath}
         customName={customProjectName}
+        className="sticky top-0 z-20 elevation-1"
         onRename={(name) => { if (dirName && onRenameProject) onRenameProject(dirName, name) }}
       >
         <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
           <button
             type="button"
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={() => onToggleCollapsed(projectPath, !collapsed)}
             disabled={forceExpand}
             aria-expanded={!isCollapsed}
             aria-controls={sessionGroupId}
@@ -605,13 +668,21 @@ function ProjectGroup({
               "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
               !isCollapsed && "rotate-90"
             )} />
-            <FolderOpen className="size-3 text-muted-foreground/60 shrink-0" />
             <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
               {customProjectName || projectPath}
             </span>
             {customProjectName && (
               <span className="text-[10px] text-muted-foreground/40 truncate">
                 {projectPath}
+              </span>
+            )}
+            {liveCount > 0 && (
+              <span
+                className="flex items-center gap-1 shrink-0 text-[10px] font-medium text-green-400"
+                aria-label={`${liveCount} live sessions`}
+              >
+                <span className="size-1.5 rounded-full bg-green-400 animate-pulse" aria-hidden="true" />
+                {liveCount}
               </span>
             )}
             <span className="text-[10px] text-muted-foreground/40 shrink-0">
@@ -640,20 +711,16 @@ function ProjectGroup({
         </div>
       </ProjectContextMenu>
 
-      {/* Session rows — left border + scrollable when > 5 */}
+      {/* Session rows — first few visible, rest behind "Show N more" (no nested scrollbar) */}
       {!isCollapsed && (
         <div
           id={sessionGroupId}
-          className={cn(
-            "flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1",
-            needsScroll && "overflow-y-auto scrollbar-thin"
-          )}
-          style={needsScroll ? { maxHeight: VISIBLE_COUNT * ROW_HEIGHT } : undefined}
+          className="flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1"
         >
           {hasPending && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
           )}
-          {topLevelSessions.map((s) => {
+          {visibleTopLevel.map((s) => {
             const rawPath = s.cwd ?? dirNameToPath(s.dirName)
             const wt = parseWorktreePath(rawPath)
             const teammates = teammatesByLead.get(s.sessionId)
@@ -676,6 +743,26 @@ function ProjectGroup({
               </div>
             )
           })}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
+            >
+              <ChevronDown className="size-2.5" />
+              Show {hiddenCount} more
+            </button>
+          )}
+          {canShowLess && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
+            >
+              <ChevronUp className="size-2.5" />
+              Show less
+            </button>
+          )}
         </div>
       )}
     </div>

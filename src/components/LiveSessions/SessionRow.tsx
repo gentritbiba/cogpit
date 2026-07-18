@@ -1,19 +1,15 @@
-import { useEffect, useRef, useState } from "react"
-import { X, MessageSquare, Cpu, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import { X, MessageSquare, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
-import {
-  formatFileSize,
-  formatRelativeTime,
-  truncate,
-} from "@/lib/format"
+import { formatRelativeTime } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
 import type { SessionStatus } from "@/lib/sessionStatus"
 import { resolveTurnCount, turnCountColor } from "@/lib/turnCountCache"
-
-/** Hover dwell before we warm the session cache — long enough to ignore casual mouse passes. */
-const HOVER_PREFETCH_MS = 120
+import { SessionPreview, isIdleStatus, getStatusColor } from "./SessionPreview"
+import { sessionTitle } from "./sessionListView"
+import { useHoverPrefetch } from "./useHoverPrefetch"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -108,44 +104,34 @@ export function SessionRow({
   const hasProcess = proc !== undefined
   const isNativeLive = s.isActive === true
   const isLive = hasProcess || isNativeLive
+  const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus)
   const isDeferred = s.agentStatus === "deferred"
   const [resuming, setResuming] = useState(false)
   const statusLabel = isLive
-    ? (isNativeLive && isIdleStatus(s.agentStatus)
+    ? (isNativeIdle
         ? "Running"
         : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Running")
     : null
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
+  // Left-edge status dot: amber = needs attention, pulsing green = working,
+  // solid green = live but idle/done. Recent (dead) sessions get no dot.
+  const statusDot = isDeferred
+    ? "bg-amber-400"
+    : isLive
+      ? isIdleStatus(s.agentStatus)
+        ? "bg-green-400"
+        : "bg-green-400 animate-pulse"
+      : null
   const isTeammate = !!(s.teamName && s.agentName)
-  // Teammate sessions rarely have readable prompts (they start with a
-  // teammate-message envelope) — their member name is the clearest label
-  const title = customName || truncate(
-    s.aiTitle || (isTeammate ? s.agentName! : "") || s.lastUserMessage || s.firstUserMessage || s.slug || s.sessionId,
-    50
-  )
+  const title = sessionTitle(s, customName)
 
-  // Hover-intent prefetch: warm the session cache if the cursor dwells on the
-  // row for HOVER_PREFETCH_MS. Fires on focus too so keyboard users benefit.
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handleHoverStart = () => {
-    if (!onPrefetchSession) return
-    if (isActiveSession) return
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => {
-      onPrefetchSession(s.dirName, s.fileName)
-    }, HOVER_PREFETCH_MS)
-  }
-  const handleHoverEnd = () => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current)
-      hoverTimerRef.current = null
-    }
-  }
-  // Cancel any in-flight hover timer if the row unmounts mid-dwell so we don't
-  // fire prefetches against a no-longer-visible sidebar.
-  useEffect(() => () => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-  }, [])
+  // Hover-intent prefetch: warm the session cache after a short dwell. Fires
+  // on focus too so keyboard users benefit.
+  const { onHoverStart: handleHoverStart, onHoverEnd: handleHoverEnd } = useHoverPrefetch(
+    onPrefetchSession && !isActiveSession
+      ? () => onPrefetchSession(s.dirName, s.fileName)
+      : undefined,
+  )
 
   const handleResume = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -179,6 +165,11 @@ export function SessionRow({
             cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
           )}
         />}>
+          {/* Status dot — fixed-width slot so titles stay aligned when there's no dot */}
+          <span className="flex w-1.5 shrink-0 items-center justify-center" aria-hidden="true">
+            {statusDot && <span className={cn("size-1.5 rounded-full", statusDot)} />}
+          </span>
+
           {/* Title */}
           <span className="text-xs leading-tight truncate flex-1 text-foreground">
             {title}
@@ -198,10 +189,10 @@ export function SessionRow({
               data-session-live-state
               className={cn(
                 "flex items-center rounded px-1 py-px text-[9px] font-medium shrink-0",
-                isNativeLive && isIdleStatus(s.agentStatus)
+                isNativeIdle
                   ? "bg-blue-500/10 text-blue-400"
                   : "bg-muted/60",
-                !(isNativeLive && isIdleStatus(s.agentStatus)) && getStatusColor(s.agentStatus),
+                !isNativeIdle && getStatusColor(s.agentStatus),
               )}
             >
               {statusLabel}
@@ -287,35 +278,14 @@ export function SessionRow({
             </button>
           )}
       </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[220px]">
-        <div className="flex flex-col gap-0.5 text-[11px]">
-          {statusLabel && (
-            <span className={cn("font-medium", getStatusColor(s.agentStatus))}>
-              {statusLabel}
-            </span>
-          )}
-          {isTeammate && (
-            <span className="flex items-center gap-1 text-violet-400">
-              <Users className="size-2.5" />
-              {s.agentName} · {s.teamName}
-            </span>
-          )}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
-            {s.gitBranch && (
-              <span className="flex items-center gap-0.5">
-                <GitBranch className="size-2.5" />
-                {s.gitBranch}
-              </span>
-            )}
-            <span>{formatFileSize(s.size)}</span>
-            {hasProcess && (
-              <span className="flex items-center gap-0.5 text-green-500">
-                <Cpu className="size-2.5" />
-                {proc.memMB} MB
-              </span>
-            )}
-          </div>
-        </div>
+      <TooltipContent side="right" className="max-w-[280px]">
+        <SessionPreview
+          session={s}
+          proc={proc}
+          statusLabel={statusLabel}
+          customName={customName}
+          worktreeName={worktreeName}
+        />
       </TooltipContent>
     </Tooltip>
   )
@@ -343,15 +313,4 @@ function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
   if (isActive) return "border-l-2 border-l-blue-500 rounded-l-none"
   if (isNewlyCompleted) return "border-l-2 border-l-green-500 rounded-l-none"
   return "hover:bg-white/[0.03]"
-}
-
-function isIdleStatus(status?: SessionStatus): boolean {
-  return status === "idle" || status === "completed"
-}
-
-function getStatusColor(status?: SessionStatus): string {
-  if (isIdleStatus(status)) return "text-green-400"
-  if (status === "thinking") return "text-amber-400"
-  if (status === "deferred") return "text-amber-400"
-  return "text-blue-400"
 }
