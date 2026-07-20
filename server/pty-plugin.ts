@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 import { getConfig } from "./config"
 import { isLocalRequest, validateSessionToken } from "./helpers"
+import { handleHubUpgrade } from "./hub/proxy"
 import { PtySessionManager } from "./pty-server"
 
 export function ptyPlugin(): Plugin {
@@ -16,6 +17,7 @@ export function ptyPlugin(): Plugin {
       server.httpServer!.on(
         "upgrade",
         (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+          if (handleHubUpgrade(req, socket, head)) return
           const url = new URL(req.url || "/", "http://localhost")
           if (url.pathname !== "/__pty") return
 

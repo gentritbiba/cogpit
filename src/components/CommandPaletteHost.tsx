@@ -7,6 +7,7 @@ import {
 } from "@/components/CommandPalette"
 import { usePty } from "@/contexts/PtyContext"
 import { authFetch } from "@/lib/auth"
+import { isRemoteDeviceActive } from "@/lib/device"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
@@ -130,8 +131,8 @@ export function CommandPaletteHost({
           ? handleOpenIntegratedTerminal
           : undefined
       }
-      onOpenProjectInEditor={terminalCwd ? handleOpenProjectInEditor : undefined}
-      onRevealProject={terminalCwd ? handleRevealProject : undefined}
+      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() ? handleOpenProjectInEditor : undefined}
+      onRevealProject={terminalCwd && !isRemoteDeviceActive() ? handleRevealProject : undefined}
       onCopyProjectPath={terminalCwd ? handleCopyProjectPath : undefined}
     />
   )

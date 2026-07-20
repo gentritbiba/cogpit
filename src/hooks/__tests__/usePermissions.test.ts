@@ -6,9 +6,19 @@ import {
   PERMISSIONS_STORAGE_KEY,
 } from "@/lib/permissions"
 
+function setPath(pathname: string) {
+  Object.defineProperty(window, "location", {
+    value: { pathname },
+    writable: true,
+    configurable: true,
+  })
+}
+
 beforeEach(() => {
   localStorage.clear()
   vi.clearAllMocks()
+  // Default to the local device unless a test opts into a remote scope.
+  setPath("/")
 })
 
 describe("usePermissions", () => {
@@ -181,6 +191,70 @@ describe("usePermissions", () => {
       const stored = JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!)
       expect(stored.mode).toBe("plan")
       expect(stored.allowedTools).toEqual(["Read"])
+    })
+  })
+
+  // ── Per-device scoping ────────────────────────────────────────────────────
+  describe("device scoping", () => {
+    const REMOTE_KEY = `${PERMISSIONS_STORAGE_KEY}::dev_x`
+
+    it("uses the unscoped key for the local device", () => {
+      setPath("/")
+      const { result } = renderHook(() => usePermissions())
+
+      act(() => result.current.setMode("plan"))
+
+      expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).not.toBeNull()
+      expect(localStorage.getItem(REMOTE_KEY)).toBeNull()
+    })
+
+    it("a fresh remote scope falls back to DEFAULT_PERMISSIONS, not the local value", () => {
+      // Local device has an aggressive stored config...
+      localStorage.setItem(
+        PERMISSIONS_STORAGE_KEY,
+        JSON.stringify({ mode: "bypassPermissions", allowedTools: ["Bash"], disallowedTools: [] })
+      )
+
+      // ...but a never-seen remote device must start from safe defaults.
+      setPath("/d/dev_x/")
+      const { result } = renderHook(() => usePermissions())
+
+      expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
+      // The remote scope must NOT inherit local bypassPermissions.
+      expect(result.current.config.mode).toBe("default")
+      // The fresh remote scope must not have been written from the local value.
+      expect(localStorage.getItem(REMOTE_KEY)).toBeNull()
+      // The local (unscoped) value is left untouched.
+      expect(
+        JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode
+      ).toBe("bypassPermissions")
+    })
+
+    it("persists remote-device changes under the scoped key only", () => {
+      setPath("/d/dev_x/")
+      const { result } = renderHook(() => usePermissions())
+
+      act(() => result.current.setMode("plan"))
+
+      expect(JSON.parse(localStorage.getItem(REMOTE_KEY)!).mode).toBe("plan")
+      expect(localStorage.getItem(PERMISSIONS_STORAGE_KEY)).toBeNull()
+    })
+
+    it("loads an existing remote scope independently of local", () => {
+      localStorage.setItem(
+        PERMISSIONS_STORAGE_KEY,
+        JSON.stringify({ mode: "acceptEdits", allowedTools: [], disallowedTools: [] })
+      )
+      localStorage.setItem(
+        REMOTE_KEY,
+        JSON.stringify({ mode: "plan", allowedTools: ["Read"], disallowedTools: [] })
+      )
+
+      setPath("/d/dev_x/")
+      const { result } = renderHook(() => usePermissions())
+
+      expect(result.current.config.mode).toBe("plan")
+      expect(result.current.config.allowedTools).toEqual(["Read"])
     })
   })
 })

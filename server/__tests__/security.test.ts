@@ -1,7 +1,20 @@
 // @vitest-environment node
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import { randomBytes, createHash } from "node:crypto"
-import { hashPassword, verifyPassword, isPasswordHashed } from "../security"
+import {
+  hashPassword,
+  verifyPassword,
+  isPasswordHashed,
+  authMiddleware,
+  createSessionToken,
+  revokeAllSessions,
+} from "../security"
+import { getConfig } from "../config"
+
+vi.mock("../config", () => ({ getConfig: vi.fn() }))
+
+const mockedGetConfig = vi.mocked(getConfig)
 
 describe("hashPassword", () => {
   it("produces a string starting with the $sha256$ prefix", () => {
@@ -90,5 +103,165 @@ describe("isPasswordHashed", () => {
     // e.g. "pass:word" — colon not at position 32, so not confused with legacy hash
     expect(isPasswordHashed("pass:word")).toBe(false)
     expect(isPasswordHashed("user:pass")).toBe(false)
+  })
+})
+
+// ── authMiddleware path protection ──────────────────────────────────────
+//
+// Pins which URL prefixes require auth for remote clients. /hub/* is the
+// multi-device reverse proxy: if it ever falls through as "public", every
+// registered device becomes reachable without a token, and the SPA fallback
+// hides the mistake by answering 200 HTML instead of 401.
+
+describe("authMiddleware path protection", () => {
+  const REMOTE_IP = "192.168.1.100"
+
+  beforeEach(() => {
+    revokeAllSessions()
+    // Network access must be enabled, otherwise the middleware short-circuits
+    // to 403 ("Network access is disabled") before reaching the token check.
+    mockedGetConfig.mockReturnValue({
+      claudeDir: "/tmp/claude",
+      networkAccess: true,
+      networkPassword: hashPassword("networkpassword123"),
+    })
+  })
+
+  function mockReq(ip: string, url: string, authHeader?: string): IncomingMessage {
+    return {
+      socket: { remoteAddress: ip },
+      url,
+      headers: authHeader ? { authorization: authHeader } : {},
+    } as unknown as IncomingMessage
+  }
+
+  function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
+    let body = ""
+    let statusCode = 200
+    const res = {
+      get statusCode() { return statusCode },
+      set statusCode(v: number) { statusCode = v },
+      setHeader: vi.fn(),
+      end: (data?: string) => { body = data || "" },
+    } as unknown as ServerResponse
+    return { res, get body() { return body }, get statusCode() { return statusCode } }
+  }
+
+  function run(url: string, opts: { ip?: string; authHeader?: string } = {}) {
+    const req = mockReq(opts.ip ?? REMOTE_IP, url, opts.authHeader)
+    const mock = mockRes()
+    const next = vi.fn()
+    authMiddleware(req, mock.res, next)
+    return { next, get statusCode() { return mock.statusCode }, get body() { return mock.body } }
+  }
+
+  // ── /hub/* is protected (new) ──
+
+  it("rejects a remote /hub/*/api/* request with no token", () => {
+    const r = run("/hub/dev_abc123/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+    expect(r.body).toContain("Authentication required")
+  })
+
+  it("rejects a remote /hub/*/__pty request with no token", () => {
+    const r = run("/hub/dev_abc123/__pty")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("does not let the /hub/ prefix smuggle a public path past auth", () => {
+    // PUBLIC_PATHS is matched on the whole path, so a proxied /api/hello
+    // still requires a hub token — the exemption is local-only.
+    const r = run("/hub/dev_abc123/api/hello")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  // ── case-variant prefixes must not bypass auth (Express routes case-insensitively) ──
+
+  it("rejects a remote /HUB/*/api/* request with no token (case-variant bypass)", () => {
+    const r = run("/HUB/dev_abc123/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("rejects a remote /API/* request with no token (case-variant bypass)", () => {
+    const r = run("/API/config")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("rejects a remote /__PTY request with no token (case-variant bypass)", () => {
+    const r = run("/__PTY")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("allows a remote /hub/* request carrying a valid token", () => {
+    const token = createSessionToken(REMOTE_IP)
+    const r = run("/hub/dev_abc123/api/projects", { authHeader: `Bearer ${token}` })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("blocks a remote /hub/* request when network access is disabled", () => {
+    mockedGetConfig.mockReturnValue(null)
+    const r = run("/hub/dev_abc123/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Network access is disabled")
+  })
+
+  // ── /api/hello is public (new) ──
+
+  it("allows a remote /api/hello request with no token", () => {
+    const r = run("/api/hello")
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("allows a remote /api/hello request with a query string", () => {
+    const r = run("/api/hello?probe=1")
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  // ── existing behaviour, unchanged ──
+
+  it("allows local requests without auth", () => {
+    const r = run("/api/projects", { ip: "127.0.0.1" })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("allows local /hub/* requests without auth", () => {
+    const r = run("/hub/dev_abc123/api/projects", { ip: "127.0.0.1" })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("rejects a remote /api/* request with no token", () => {
+    const r = run("/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("rejects a remote /__pty request with no token", () => {
+    const r = run("/__pty")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("allows a remote /api/* request carrying a valid token", () => {
+    const token = createSessionToken(REMOTE_IP)
+    const r = run("/api/projects", { authHeader: `Bearer ${token}` })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("allows /api/auth/verify for remote clients", () => {
+    const r = run("/api/auth/verify")
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("allows non-API paths for remote clients", () => {
+    expect(run("/index.html").next).toHaveBeenCalledOnce()
+    expect(run("/assets/app.js").next).toHaveBeenCalledOnce()
+    expect(run("/d/dev_abc123/some-session").next).toHaveBeenCalledOnce()
   })
 })

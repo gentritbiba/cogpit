@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { authFetch, isRemoteClient, getToken } from "@/lib/auth"
+import { authFetch, hubFetch, isRemoteClient, getToken } from "@/lib/auth"
 import type { AppConfig } from "@/contexts/AppContext"
 import type { AgentKind } from "@/lib/sessionSource"
 
@@ -8,10 +8,16 @@ interface NetworkState {
   disabled: boolean
 }
 
-/** Fetch network info and return parsed state. */
+/**
+ * Fetch network info and return parsed state.
+ *
+ * Uses {@link hubFetch}, never {@link authFetch}: the NetworkStatus header shows
+ * the hub's own LAN URL. Routing this through the active remote device would
+ * report that device's URL instead of the hub the browser is actually on.
+ */
 async function fetchNetworkInfo(): Promise<NetworkState> {
   try {
-    const res = await authFetch("/api/network-info")
+    const res = await hubFetch("/api/network-info")
     const data = (await res.json()) as { enabled: boolean; url?: string }
     return {
       url: data.enabled && data.url ? data.url : null,

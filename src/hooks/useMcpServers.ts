@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
 
 export interface McpServer {
   name: string
@@ -20,9 +21,11 @@ function connectedNames(servers: McpServer[]): Set<string> {
   return new Set(servers.filter(s => s.status === "connected").map(s => s.name))
 }
 
+// Storage keys are device-scoped (computed lazily at each access) so one
+// device's MCP selection can never govern another device's session spawn.
 function loadSavedSelection(key: string): string[] | null {
   try {
-    const stored = localStorage.getItem(STORAGE_PREFIX + key)
+    const stored = localStorage.getItem(deviceScopedKey(STORAGE_PREFIX + key))
     if (stored) return JSON.parse(stored)
   } catch { /* ignore */ }
   return null
@@ -30,7 +33,7 @@ function loadSavedSelection(key: string): string[] | null {
 
 function saveSelection(key: string, selected: string[]): void {
   try {
-    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(selected))
+    localStorage.setItem(deviceScopedKey(STORAGE_PREFIX + key), JSON.stringify(selected))
   } catch { /* ignore */ }
 }
 

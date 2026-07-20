@@ -1,8 +1,11 @@
-import { readFile, writeFile, stat, readdir } from "node:fs/promises"
+import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { hashPassword, isPasswordHashed } from "./password-utils"
+
+// config.local.json may hold a hashed network password; keep it owner-only.
+const CONFIG_FILE_MODE = 0o600
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const PROJECT_ROOT = resolve(__dirname, "..")
@@ -33,8 +36,64 @@ export interface AppConfig {
 
 let cachedConfig: AppConfig | null = null
 
+/**
+ * In-memory only network credentials derived from the environment
+ * (COGPIT_NETWORK_PASSWORD / COGPIT_NETWORK_PASSWORD_FILE) on a headless box.
+ *
+ * These are merged into the value returned by getConfig() so auth works, but
+ * are NEVER part of cachedConfig and are stripped by saveConfig so they can
+ * never leak to disk (systemd LoadCredential / secret-manager friendly).
+ */
+interface EnvNetworkOverride {
+  /** Already hashed with hashPassword(). */
+  networkPassword: string
+}
+
+let envOverride: EnvNetworkOverride | null = null
+
+/**
+ * Apply an in-memory network password sourced from the environment. Hashes the
+ * plaintext once and keeps only the hash. Enabling network access this way is
+ * intentionally ephemeral: it lives in process memory and never touches disk.
+ */
+export function applyEnvNetworkOverrides(opts: { password: string }): void {
+  envOverride = { networkPassword: hashPassword(opts.password) }
+}
+
+/** Clear the in-memory env override (primarily for tests). */
+export function clearEnvNetworkOverrides(): void {
+  envOverride = null
+}
+
+/** True when an env-derived network override is currently active. */
+export function hasEnvNetworkOverride(): boolean {
+  return envOverride !== null
+}
+
 export function getConfig(): AppConfig | null {
-  return cachedConfig
+  if (!cachedConfig || !envOverride) return cachedConfig
+  // Merge the env override into the returned view only. cachedConfig itself is
+  // never mutated, so nothing here can be round-tripped back to disk.
+  return {
+    ...cachedConfig,
+    networkAccess: true,
+    networkPassword: envOverride.networkPassword,
+  }
+}
+
+/**
+ * Remove any credentials that originated from the in-memory env override before
+ * persisting. A user-set password is freshly hashed (different salt) and never
+ * matches the override, so genuine user changes are preserved.
+ */
+function stripEnvOverride(config: AppConfig): AppConfig {
+  if (!envOverride) return config
+  if (config.networkPassword && config.networkPassword === envOverride.networkPassword) {
+    const clean: AppConfig = { ...config, networkAccess: false }
+    delete clean.networkPassword
+    return clean
+  }
+  return config
 }
 
 async function detectCodexOnlyConfig(): Promise<AppConfig | null> {
@@ -100,8 +159,14 @@ export async function loadConfig(): Promise<AppConfig | null> {
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
-  await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8")
-  cachedConfig = config
+  const toPersist = stripEnvOverride(config)
+  // Pass mode at creation so a brand-new file is never briefly world-readable;
+  // the chmod after still re-locks a pre-existing file (writeFile's mode only
+  // applies when the file is created). Mirrors the registry.ts pattern.
+  await writeFile(CONFIG_PATH, JSON.stringify(toPersist, null, 2), { encoding: "utf-8", mode: CONFIG_FILE_MODE })
+  // Lock down the file: it can contain a hashed network password.
+  await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
+  cachedConfig = toPersist
 }
 
 interface ValidationResult {

@@ -17,8 +17,10 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
+import { useDevices } from "@/hooks/useDevices"
 
 interface PreviewTask {
   id: string
@@ -83,7 +85,8 @@ function loadZoom(): number {
 }
 
 function projectUrlKey(cwd: string): string {
-  return `cogpit-preview-url:${cwd}`
+  // Device-scoped so each device remembers its own preview URL for a project.
+  return deviceScopedKey(`cogpit-preview-url:${cwd}`)
 }
 
 export function normalizePreviewUrl(value: string): string | null {
@@ -103,9 +106,8 @@ export function normalizePreviewUrl(value: string): string | null {
   }
 }
 
-function urlForPort(port: number): string {
-  const host = window.location.hostname || "localhost"
-  return `http://${host}:${port}/`
+function urlForPort(port: number, host: string): string {
+  return `http://${host || "localhost"}:${port}/`
 }
 
 export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
@@ -122,6 +124,17 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
 
+  // When a remote device is active, detected servers run on that device's host;
+  // otherwise fall back to the current (local) origin.
+  const { activeDevice } = useDevices()
+  const previewHost = activeDevice?.host ?? (window.location.hostname || "localhost")
+  const activeDeviceId = activeDevice?.id
+
+  // Restore the persisted URL for the current device + project. Depends on the
+  // active device so a switch (which changes the scoped storage key) re-reads
+  // under the right key. We reset url/draft to the newly-restored value up front
+  // so a stale URL from the previous device can't survive the switch — including
+  // being picked up by the port-discovery effect's `current || discovered`.
   useEffect(() => {
     let stored = ""
     try {
@@ -133,7 +146,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
     setUrl(validated)
     setDraft(validated)
     setUrlError(null)
-  }, [cwd])
+  }, [cwd, activeDeviceId])
 
   useEffect(() => {
     let cancelled = false
@@ -148,7 +161,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
           .flatMap((task) => task.ports.filter((port) => task.portStatus[port]))
           .at(0)
         if (firstPort) {
-          const discoveredUrl = urlForPort(firstPort)
+          const discoveredUrl = urlForPort(firstPort, previewHost)
           setUrl((current) => current || discoveredUrl)
           setDraft((current) => current || discoveredUrl)
         }
@@ -162,7 +175,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [cwd])
+  }, [cwd, previewHost])
 
   useEffect(() => {
     if (!url) return
@@ -338,7 +351,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
               variant="outline"
               size="sm"
               className="h-6 px-2 font-mono text-[10px]"
-              onClick={() => navigate(urlForPort(port))}
+              onClick={() => navigate(urlForPort(port, previewHost))}
               aria-label={`Open localhost:${port} preview`}
             >
               :{port}

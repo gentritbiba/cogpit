@@ -5,12 +5,21 @@ import {
   setToken,
   clearToken,
   authFetch,
+  hubFetch,
   authUrl,
 } from "@/lib/auth"
 
 function setHostname(hostname: string) {
   Object.defineProperty(window, "location", {
     value: { hostname },
+    writable: true,
+    configurable: true,
+  })
+}
+
+function setLocation(hostname: string, pathname: string) {
+  Object.defineProperty(window, "location", {
+    value: { hostname, pathname },
     writable: true,
     configurable: true,
   })
@@ -95,14 +104,117 @@ describe("auth", () => {
   // ── authFetch ───────────────────────────────────────────────────────────
 
   describe("authFetch", () => {
-    it("passes through to fetch for local clients", async () => {
+    it("passes through to fetch for local clients (no token, with client header)", async () => {
       setHostname("localhost")
       const mockResponse = new Response("ok", { status: 200 })
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse)
 
       const res = await authFetch("/api/test")
-      expect(fetchSpy).toHaveBeenCalledWith("/api/test", undefined)
+      const [url, init] = fetchSpy.mock.calls[0]
+      expect(url).toBe("/api/test")
+      const headers = init?.headers as Headers
+      // No bearer token for a local client, but the CSRF guard header is set.
+      expect(headers.get("Authorization")).toBeNull()
+      expect(headers.get("X-Cogpit-Client")).toBe("1")
       expect(res).toBe(mockResponse)
+    })
+
+    it("always sets X-Cogpit-Client for remote clients", async () => {
+      setHostname("example.com")
+      setToken("tok")
+      const mockResponse = new Response("ok", { status: 200 })
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse)
+
+      await authFetch("/api/data")
+      const [, init] = fetchSpy.mock.calls[0]
+      const headers = init?.headers as Headers
+      expect(headers.get("X-Cogpit-Client")).toBe("1")
+    })
+
+    it("applies the device prefix when the URL carries /d/<id>", async () => {
+      setLocation("example.com", "/d/dev_x/")
+      setToken("tok")
+      const mockResponse = new Response("ok", { status: 200 })
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse)
+
+      await authFetch("/api/data")
+      expect(fetchSpy.mock.calls[0][0]).toBe("/hub/dev_x/api/data")
+    })
+
+    it("does not prefix /api/hub/* even on a remote device", async () => {
+      setLocation("example.com", "/d/dev_x/")
+      setToken("tok")
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"))
+
+      await authFetch("/api/hub/devices")
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/hub/devices")
+    })
+
+    it("does not prefix URLs on the local device", async () => {
+      setLocation("localhost", "/-Users-foo/sess")
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"))
+
+      await authFetch("/api/data")
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/data")
+    })
+
+    it("dispatches cogpit-device-unreachable on 502 with X-Cogpit-Device and still returns the response", async () => {
+      setLocation("localhost", "/d/dev_x/")
+      const mockResponse = new Response("bad gateway", {
+        status: 502,
+        headers: { "X-Cogpit-Device": "dev_x" },
+      })
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse)
+
+      const handler = vi.fn()
+      window.addEventListener("cogpit-device-unreachable", handler as EventListener)
+
+      const res = await authFetch("/api/data")
+      expect(res.status).toBe(502)
+      expect(handler).toHaveBeenCalledOnce()
+      const evt = handler.mock.calls[0][0] as CustomEvent
+      expect(evt.detail).toEqual({ deviceId: "dev_x" })
+
+      window.removeEventListener("cogpit-device-unreachable", handler as EventListener)
+    })
+
+    it("does not dispatch cogpit-device-unreachable on a 502 without the device header", async () => {
+      setHostname("localhost")
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("x", { status: 502 }))
+      const handler = vi.fn()
+      window.addEventListener("cogpit-device-unreachable", handler as EventListener)
+
+      const res = await authFetch("/api/data")
+      expect(res.status).toBe(502)
+      expect(handler).not.toHaveBeenCalled()
+
+      window.removeEventListener("cogpit-device-unreachable", handler as EventListener)
+    })
+  })
+
+  // ── hubFetch ──────────────────────────────────────────────────────────
+
+  describe("hubFetch", () => {
+    it("never applies the device prefix, even on a remote device", async () => {
+      setLocation("example.com", "/d/dev_x/")
+      setToken("tok")
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"))
+
+      await hubFetch("/api/network-info")
+      // authFetch would route this to /hub/dev_x/api/network-info; hubFetch keeps it hub-local.
+      expect(fetchSpy.mock.calls[0][0]).toBe("/api/network-info")
+    })
+
+    it("still injects the bearer token and client header for remote clients", async () => {
+      setLocation("example.com", "/d/dev_x/")
+      setToken("secret")
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"))
+
+      await hubFetch("/api/network-info")
+      const [, init] = fetchSpy.mock.calls[0]
+      const headers = init?.headers as Headers
+      expect(headers.get("Authorization")).toBe("Bearer secret")
+      expect(headers.get("X-Cogpit-Client")).toBe("1")
     })
 
     it("rejects with auth-required event when remote and no token", async () => {

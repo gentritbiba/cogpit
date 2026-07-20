@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { PreviewPanel, normalizePreviewUrl } from "@/components/PreviewPanel"
 
-const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
-vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+const mocks = vi.hoisted(() => ({ authFetch: vi.fn(), hubFetch: vi.fn() }))
+vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch, hubFetch: mocks.hubFetch }))
 
 describe("normalizePreviewUrl", () => {
   it("adds http to host-and-port input and rejects non-web protocols", () => {
@@ -25,6 +25,8 @@ describe("PreviewPanel", () => {
         preview: "Vite dev server",
       }],
     })
+    // PreviewPanel reads the active device via useDevices → hubFetch.
+    mocks.hubFetch.mockResolvedValue({ ok: true, json: async () => ({ devices: [] }) })
   })
 
   it("discovers a listening development server and opens its preview", async () => {
@@ -75,5 +77,38 @@ describe("PreviewPanel", () => {
 
     fireEvent.keyDown(window, { key: "0", metaKey: true })
     expect(screen.getByRole("button", { name: "Reset preview zoom" })).toHaveTextContent("100%")
+  })
+
+  describe("device scoping", () => {
+    const originalLocation = window.location
+
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    it("does not restore another device's saved preview URL", async () => {
+      // The local device saved a preview URL under the bare (un-scoped) key.
+      localStorage.setItem("cogpit-preview-url:/workspace/cogpit", "http://localhost:4321/")
+
+      // Activate a remote device — the scoped key differs, so the local URL is
+      // invisible and must not leak into the remote device's preview.
+      Object.defineProperty(window, "location", {
+        value: { pathname: "/d/dev_x/", hostname: "localhost" },
+        writable: true,
+        configurable: true,
+      })
+
+      render(<PreviewPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+      // Wait for port discovery so any restore has settled.
+      await screen.findByRole("button", { name: "Open localhost:5173 preview" })
+
+      const input = screen.getByRole("textbox", { name: "Preview URL" }) as HTMLInputElement
+      expect(input.value).not.toBe("http://localhost:4321/")
+    })
   })
 })

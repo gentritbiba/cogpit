@@ -36,12 +36,15 @@ export const KNOWN_TOOLS = [
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"
 
 export function buildPermissionArgs(config: PermissionsConfig): string[] {
-  if (!config.mode || config.mode === "bypassPermissions") {
+  // Only an explicit bypassPermissions mode yields the skip flag. A missing or
+  // falsy mode is NOT a bypass — it is treated as "default" (fail safe).
+  if (config.mode === "bypassPermissions") {
     return ["--dangerously-skip-permissions"]
   }
 
   const args: string[] = []
 
+  const mode = config.mode || "default"
   const modeMap: Record<string, string> = {
     default: "default",
     plan: "plan",
@@ -49,16 +52,16 @@ export function buildPermissionArgs(config: PermissionsConfig): string[] {
     dontAsk: "dontAsk",
     auto: "auto",
   }
-  const mapped = modeMap[config.mode]
+  const mapped = modeMap[mode]
   if (mapped) {
     args.push("--permission-mode", mapped)
   }
 
-  for (const tool of config.allowedTools) {
+  for (const tool of config.allowedTools ?? []) {
     args.push("--allowedTools", tool)
   }
 
-  for (const tool of config.disallowedTools) {
+  for (const tool of config.disallowedTools ?? []) {
     args.push("--disallowedTools", tool)
   }
 

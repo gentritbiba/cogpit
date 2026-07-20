@@ -4,14 +4,16 @@ import { renderHook, act, waitFor } from "@testing-library/react"
 // Mock auth module
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
+  hubFetch: vi.fn(),
   isRemoteClient: vi.fn(() => false),
   getToken: vi.fn(() => null),
 }))
 
 import { useAppConfig } from "@/hooks/useAppConfig"
-import { authFetch, isRemoteClient, getToken } from "@/lib/auth"
+import { authFetch, hubFetch, isRemoteClient, getToken } from "@/lib/auth"
 
 const mockAuthFetch = vi.mocked(authFetch)
+const mockHubFetch = vi.mocked(hubFetch)
 const mockIsRemoteClient = vi.mocked(isRemoteClient)
 const mockGetToken = vi.mocked(getToken)
 
@@ -22,7 +24,25 @@ Object.defineProperty(window, "location", {
   writable: true,
 })
 
+/**
+ * Mock the hub-scoped network-info endpoint. Uses mockImplementation (not
+ * mockResolvedValue) so every call gets a FRESH Response — refreshNetwork runs
+ * more than once and a reused Response body can only be read a single time.
+ */
+function mockNetworkInfo(body: { enabled: boolean; url?: string }) {
+  mockHubFetch.mockImplementation(
+    async () => new Response(JSON.stringify(body), { status: 200 }),
+  )
+}
+
+/** Default hub-scoped network-info response (disabled). */
+function mockNetworkDisabled() {
+  mockNetworkInfo({ enabled: false })
+}
+
 function mockConfigResponse(claudeDir: string | null = "/home/user/.claude") {
+  // /api/config is intentionally per-device → authFetch. /api/network-info is
+  // hub-local → hubFetch (see mockNetworkDisabled / per-test overrides).
   mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString()
     if (url.includes("/api/config")) {
@@ -31,20 +51,17 @@ function mockConfigResponse(claudeDir: string | null = "/home/user/.claude") {
         { status: 200 }
       )
     }
-    if (url.includes("/api/network-info")) {
-      return new Response(
-        JSON.stringify({ enabled: false }),
-        { status: 200 }
-      )
-    }
     return new Response("not found", { status: 404 })
   })
+  mockNetworkDisabled()
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   mockIsRemoteClient.mockReturnValue(false)
   mockGetToken.mockReturnValue(null)
+  // network-info goes through hubFetch; default to disabled unless a test overrides.
+  mockNetworkDisabled()
   reloadMock.mockClear()
 })
 
@@ -236,17 +253,8 @@ describe("useAppConfig", () => {
         expect(result.current.configLoading).toBe(false)
       })
 
-      // Now mock network-info to return enabled
-      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString()
-        if (url.includes("/api/network-info")) {
-          return new Response(
-            JSON.stringify({ enabled: true, url: "http://192.168.1.5:19384" }),
-            { status: 200 }
-          )
-        }
-        return new Response("not found", { status: 404 })
-      })
+      // Now mock network-info (hub-scoped) to return enabled
+      mockNetworkInfo({ enabled: true, url: "http://192.168.1.5:19384" })
 
       act(() => result.current.handleConfigSaved("/home/user/.claude"))
 
@@ -303,14 +311,9 @@ describe("useAppConfig", () => {
         if (url.includes("/api/config")) {
           return new Response(JSON.stringify({ claudeDir: "/test" }), { status: 200 })
         }
-        if (url.includes("/api/network-info")) {
-          return new Response(
-            JSON.stringify({ enabled: true, url: "https://example.com:3000" }),
-            { status: 200 }
-          )
-        }
         return new Response("not found", { status: 404 })
       })
+      mockNetworkInfo({ enabled: true, url: "https://example.com:3000" })
 
       const { result } = renderHook(() => useAppConfig())
 
@@ -326,11 +329,9 @@ describe("useAppConfig", () => {
         if (url.includes("/api/config")) {
           return new Response(JSON.stringify({ claudeDir: "/test" }), { status: 200 })
         }
-        if (url.includes("/api/network-info")) {
-          return new Response(JSON.stringify({ enabled: false }), { status: 200 })
-        }
         return new Response("not found", { status: 404 })
       })
+      // hubFetch defaults to disabled (beforeEach)
 
       const { result } = renderHook(() => useAppConfig())
 
@@ -349,11 +350,9 @@ describe("useAppConfig", () => {
         if (url.includes("/api/config")) {
           return new Response(JSON.stringify({ claudeDir: "/test" }), { status: 200 })
         }
-        if (url.includes("/api/network-info")) {
-          throw new Error("Network error")
-        }
         return new Response("not found", { status: 404 })
       })
+      mockHubFetch.mockRejectedValue(new Error("Network error"))
 
       const { result } = renderHook(() => useAppConfig())
 
@@ -363,6 +362,33 @@ describe("useAppConfig", () => {
       // Should fallback gracefully
       expect(result.current.networkUrl).toBeNull()
       expect(result.current.networkAccessDisabled).toBe(false)
+    })
+
+    it("fetches network-info from the hub, never the active device", async () => {
+      // authFetch device-prefixes to the active remote device; hubFetch always
+      // targets the hub. network-info is the hub's own LAN URL, so it must go
+      // through hubFetch — otherwise the header shows the remote box's URL.
+      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString()
+        if (url.includes("/api/config")) {
+          return new Response(JSON.stringify({ claudeDir: "/test" }), { status: 200 })
+        }
+        return new Response("not found", { status: 404 })
+      })
+      mockNetworkInfo({ enabled: true, url: "http://hub.local:19384" })
+
+      const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => {
+        expect(result.current.networkUrl).toBe("http://hub.local:19384")
+      })
+
+      expect(mockHubFetch).toHaveBeenCalledWith("/api/network-info")
+      const authTouchedNetwork = mockAuthFetch.mock.calls.some(([input]) => {
+        const url = typeof input === "string" ? input : String(input)
+        return url.includes("/api/network-info")
+      })
+      expect(authTouchedNetwork).toBe(false)
     })
   })
 
@@ -428,14 +454,9 @@ describe("useAppConfig", () => {
         if (url.includes("/api/config")) {
           return new Response(JSON.stringify({ claudeDir: "/test" }), { status: 200 })
         }
-        if (url.includes("/api/network-info")) {
-          return new Response(
-            JSON.stringify({ enabled: true }),
-            { status: 200 }
-          )
-        }
         return new Response("not found", { status: 404 })
       })
+      mockNetworkInfo({ enabled: true })
 
       const { result } = renderHook(() => useAppConfig())
 

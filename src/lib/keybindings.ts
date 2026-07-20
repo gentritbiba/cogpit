@@ -18,6 +18,16 @@ export type KeybindingCommand =
   | "previewResetZoom"
   | "projectFiles"
   | "projectFileSave"
+  | "device.switch.1"
+  | "device.switch.2"
+  | "device.switch.3"
+  | "device.switch.4"
+  | "device.switch.5"
+  | "device.switch.6"
+  | "device.switch.7"
+  | "device.switch.8"
+  | "device.switch.9"
+  | "device.cycle"
 
 export interface KeybindingShortcut {
   key: string
@@ -170,6 +180,78 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     description: "Open the theme selector",
     group: "Tools",
     defaultShortcut: { key: "s", platformChord: true },
+  },
+  // Multi-device switching. 1 = this machine, then remote devices in registry
+  // order. (mod+1..9 is browser-reserved, so these use mod+shift.)
+  {
+    command: "device.switch.1",
+    label: "Switch to device 1",
+    description: "Jump to this machine (the local device)",
+    group: "General",
+    defaultShortcut: { key: "1", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.2",
+    label: "Switch to device 2",
+    description: "Jump to the 2nd device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "2", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.3",
+    label: "Switch to device 3",
+    description: "Jump to the 3rd device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "3", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.4",
+    label: "Switch to device 4",
+    description: "Jump to the 4th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "4", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.5",
+    label: "Switch to device 5",
+    description: "Jump to the 5th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "5", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.6",
+    label: "Switch to device 6",
+    description: "Jump to the 6th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "6", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.7",
+    label: "Switch to device 7",
+    description: "Jump to the 7th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "7", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.8",
+    label: "Switch to device 8",
+    description: "Jump to the 8th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "8", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.switch.9",
+    label: "Switch to device 9",
+    description: "Jump to the 9th device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "9", modKey: true, shiftKey: true },
+  },
+  {
+    command: "device.cycle",
+    label: "Cycle devices",
+    description: "Switch to the next device in the switcher",
+    group: "General",
+    defaultShortcut: { key: "0", modKey: true, shiftKey: true },
   },
 ] as const
 
@@ -358,4 +440,39 @@ export function findKeybindingConflict(
     definition.command !== except
     && shortcutSignatures(getKeybinding(definition.command)).some((value) => signatures.has(value)),
   ) ?? null
+}
+
+// ── Multi-device switching helpers ───────────────────────────────────────────
+
+/** The nine "switch to device N" commands, ordered 1 → 9. */
+export const DEVICE_SWITCH_COMMANDS = [
+  "device.switch.1",
+  "device.switch.2",
+  "device.switch.3",
+  "device.switch.4",
+  "device.switch.5",
+  "device.switch.6",
+  "device.switch.7",
+  "device.switch.8",
+  "device.switch.9",
+] as const satisfies readonly KeybindingCommand[]
+
+export const DEVICE_CYCLE_COMMAND: KeybindingCommand = "device.cycle"
+
+/**
+ * If `event` matches one of the device-switch shortcuts, return its 1-based
+ * index (1 = local machine, 2..9 = remote devices in registry order); otherwise
+ * null. Intended for the App-level keydown handler that performs the switch —
+ * these registry entries have no dispatcher of their own yet.
+ */
+export function matchDeviceSwitchIndex(event: KeyboardEvent): number | null {
+  for (let index = 0; index < DEVICE_SWITCH_COMMANDS.length; index++) {
+    if (matchesKeybinding(DEVICE_SWITCH_COMMANDS[index], event)) return index + 1
+  }
+  return null
+}
+
+/** Whether `event` matches the "cycle to next device" shortcut. */
+export function matchDeviceCycle(event: KeyboardEvent): boolean {
+  return matchesKeybinding(DEVICE_CYCLE_COMMAND, event)
 }

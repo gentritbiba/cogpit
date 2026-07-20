@@ -100,6 +100,17 @@ Edit project files securely: read and write to any file in your project with opt
 ### Network Access
 Access Cogpit from your phone or tablet on the same LAN. Password-protected with rate-limited auth. Full feature parity with the local client.
 
+### Multi-Device Hub
+Register other machines and control them from one Cogpit window. A device switcher in the header (and at the top of the mobile UI) lets you jump between "This machine" and any registered remote — with `⌘⇧1–9` / `Ctrl+Shift+1–9` to jump and `⌘⇧0` to cycle. You always see one machine at a time; switching restores exactly where you left off on that device. Your browser never leaves the hub, which reverse-proxies traffic to each device so there's nothing to configure per-origin.
+
+A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` and network password; a live probe tells you if it's reachable, needs a password, has network access disabled, or is running an older version. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active.
+
+Headless boxes become addable with one command:
+```bash
+COGPIT_HOST=0.0.0.0 COGPIT_NETWORK_PASSWORD='your-long-passphrase' bun server/standalone.ts
+```
+The password is read from the environment only (never written to disk); `cogpit-server` refuses to bind to a non-loopback address without one. Set `COGPIT_DEVICE_NAME` to label the device in the switcher, or pass the password via `COGPIT_NETWORK_PASSWORD_FILE` (e.g. systemd `LoadCredential`). On start it prints the exact `host:port` to enter in the hub.
+
 ### Theming
 Dark, Deep OLED, and Light themes with a Malewicz-inspired elevation system, glassmorphism effects, and gradient borders.
 

@@ -26,6 +26,7 @@ import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { LeakIndicator } from "@/components/LeakIndicator"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
+import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -160,6 +161,8 @@ export const DesktopHeader = memo(function DesktopHeader({
       <TokenUsageIndicator agentKind={activeAgentKind} />
 
       <LeakIndicator />
+
+      <DeviceSwitcher />
 
       <NetworkStatus
         networkUrl={networkUrl}

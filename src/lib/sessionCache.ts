@@ -1,4 +1,5 @@
 import type { ParsedSession } from "@/lib/types"
+import { getActiveDeviceId } from "@/lib/device"
 
 export interface CacheEntry {
   parsed: ParsedSession
@@ -16,8 +17,11 @@ export interface CacheEntry {
 
 const MAX_ENTRIES = 5
 
+// Device-scoped so cross-device dirName collisions are impossible and switching
+// back to a device keeps its entries warm. This module is a singleton that
+// survives the DeviceRoot remount, so the prefix is the only isolation.
 function makeKey(dirName: string, fileName: string): string {
-  return `${dirName}/${fileName}`
+  return `${getActiveDeviceId()}:${dirName}/${fileName}`
 }
 
 class SessionCache {

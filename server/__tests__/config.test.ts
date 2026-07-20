@@ -7,6 +7,7 @@ vi.mock("node:fs/promises", () => ({
   writeFile: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(),
+  chmod: vi.fn(),
 }))
 
 vi.mock("node:os", () => ({
@@ -18,7 +19,7 @@ vi.mock("../password-utils", () => ({
   isPasswordHashed: vi.fn(),
 }))
 
-import { readFile, writeFile, stat, readdir } from "node:fs/promises"
+import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { hashPassword, isPasswordHashed } from "../password-utils"
 import { resolve, join } from "node:path"
 
@@ -26,6 +27,7 @@ const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedStat = vi.mocked(stat)
 const mockedReaddir = vi.mocked(readdir)
+const mockedChmod = vi.mocked(chmod)
 const mockedHashPassword = vi.mocked(hashPassword)
 const mockedIsPasswordHashed = vi.mocked(isPasswordHashed)
 
@@ -244,7 +246,7 @@ describe("saveConfig", () => {
     vi.clearAllMocks()
   })
 
-  it("writes config as formatted JSON", async () => {
+  it("writes config as formatted JSON with owner-only mode at creation", async () => {
     const { saveConfig } = await import("../config")
     mockedWriteFile.mockResolvedValueOnce(undefined)
 
@@ -252,8 +254,103 @@ describe("saveConfig", () => {
     await saveConfig(config)
 
     expect(mockedWriteFile).toHaveBeenCalledOnce()
-    const [, content, encoding] = mockedWriteFile.mock.calls[0]
-    expect(encoding).toBe("utf-8")
+    const [, content, options] = mockedWriteFile.mock.calls[0]
+    // Mode is passed at creation so a brand-new config.local.json is never even
+    // briefly world-readable (writeFile's mode only applies on file creation).
+    expect(options).toEqual({ encoding: "utf-8", mode: 0o600 })
     expect(JSON.parse(content as string)).toEqual(config)
+  })
+
+  it("chmods the config file to 0600 after writing (may hold a password)", async () => {
+    const { saveConfig } = await import("../config")
+    mockedWriteFile.mockResolvedValueOnce(undefined)
+
+    await saveConfig({ claudeDir: "/home/.claude" })
+
+    expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
+  })
+})
+
+// ── env network override (COGPIT_NETWORK_PASSWORD*) ─────────────────────
+
+describe("env network override", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockedWriteFile.mockResolvedValue(undefined)
+    // Deterministic hash for the env-derived password.
+    mockedHashPassword.mockReturnValue("$sha256$env:hash")
+  })
+
+  afterEach(async () => {
+    const { clearEnvNetworkOverrides } = await import("../config")
+    clearEnvNetworkOverrides()
+  })
+
+  it("is visible in getConfig() as networkAccess + hashed password", async () => {
+    const { loadConfig, getConfig, applyEnvNetworkOverrides } = await import("../config")
+    // Base config on disk has no network access.
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({ claudeDir: "/home/.claude" }))
+    await loadConfig()
+
+    applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
+
+    const merged = getConfig()
+    expect(merged?.networkAccess).toBe(true)
+    expect(merged?.networkPassword).toBe("$sha256$env:hash")
+    expect(mockedHashPassword).toHaveBeenCalledWith("a-strong-passphrase")
+  })
+
+  it("is NEVER persisted, even when the merged view is saved back (POST /api/config vector)", async () => {
+    const { loadConfig, getConfig, applyEnvNetworkOverrides, saveConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({ claudeDir: "/home/.claude" }))
+    await loadConfig()
+    applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
+
+    // Persist exactly what a naive route would: the merged config from getConfig().
+    await saveConfig(getConfig()!)
+
+    const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
+    expect(written.networkPassword).toBeUndefined()
+    expect(written.networkAccess).not.toBe(true)
+    // The env override is still active for the live process, just not on disk.
+    expect(getConfig()?.networkPassword).toBe("$sha256$env:hash")
+  })
+
+  it("does not leak env creds when saving an unrelated config", async () => {
+    const { applyEnvNetworkOverrides, saveConfig } = await import("../config")
+    applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
+
+    await saveConfig({ claudeDir: "/home/.claude" })
+
+    const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
+    expect(written).toEqual({ claudeDir: "/home/.claude" })
+  })
+
+  it("still persists a user-set password (different hash) while an override is active", async () => {
+    const { applyEnvNetworkOverrides, saveConfig } = await import("../config")
+    applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
+
+    // A real user password is freshly hashed by the route (different salt/value).
+    await saveConfig({
+      claudeDir: "/home/.claude",
+      networkAccess: true,
+      networkPassword: "$sha256$user:hash",
+    })
+
+    const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
+    expect(written.networkPassword).toBe("$sha256$user:hash")
+    expect(written.networkAccess).toBe(true)
+  })
+
+  it("leaves getConfig() untouched when no override is applied", async () => {
+    const { loadConfig, getConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(
+      JSON.stringify({ claudeDir: "/home/.claude", networkAccess: false }),
+    )
+    await loadConfig()
+
+    const cfg = getConfig()
+    expect(cfg?.networkAccess).toBe(false)
+    expect(cfg?.networkPassword).toBeUndefined()
   })
 })

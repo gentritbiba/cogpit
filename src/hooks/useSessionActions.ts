@@ -9,6 +9,7 @@ import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
 import { agentKindFromDirName } from "@/lib/sessionSource"
 import { sessionCache } from "@/lib/sessionCache"
+import { getActiveDeviceId } from "@/lib/device"
 
 interface TailResponse {
   headerLines: string[]
@@ -84,22 +85,32 @@ async function loadSessionTailCached(
   if (cached) {
     return { parsed: cached.parsed, source: cached.source }
   }
+  // Snapshot the active device BEFORE the network round-trip. The cache key is
+  // device-scoped and computed at set-time; if the user switches devices while
+  // this tail-load is in flight, caching now would write device B's data under
+  // device A's key (or vice-versa).
+  const deviceId = getActiveDeviceId()
   const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
     dirName,
     fileName,
     workerParse,
     errorLabel,
   )
-  sessionCache.set(
-    dirName,
-    fileName,
-    parsed,
-    source.rawText,
-    byteOffset,
-    hasMore,
-    agentKindFromDirName(dirName),
-    source.watchOffset,
-  )
+  // Only populate the cache if we're still on the same device. On a mid-flight
+  // switch we skip the write but still return the parsed data so the caller can
+  // render what it fetched.
+  if (getActiveDeviceId() === deviceId) {
+    sessionCache.set(
+      dirName,
+      fileName,
+      parsed,
+      source.rawText,
+      byteOffset,
+      hasMore,
+      agentKindFromDirName(dirName),
+      source.watchOffset,
+    )
+  }
   return { parsed, source }
 }
 

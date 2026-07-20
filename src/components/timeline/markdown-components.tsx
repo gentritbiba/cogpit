@@ -2,6 +2,7 @@ import { useState } from "react"
 import type { Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import type { PluggableList } from "unified"
+import { authUrl } from "@/lib/auth"
 import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 
@@ -19,10 +20,17 @@ function isLocalImagePath(src: string | undefined): boolean {
   return IMAGE_EXTENSIONS.has(src.slice(dot).toLowerCase())
 }
 
-/** Rewrite local image paths to go through the API proxy */
+/**
+ * Rewrite local image paths to go through the API proxy. `authUrl` applies the
+ * active device prefix and appends the auth token for remote clients — fixing a
+ * pre-existing bug where remote <img> loads were token-less (and so 401'd) and
+ * routing the request to the active device via the hub proxy. Only the proxy
+ * URL is wrapped; external/data URLs pass through untouched so the token is
+ * never leaked to a third-party host.
+ */
 function resolveImageSrc(src: string | undefined): string | undefined {
   if (!src) return src
-  if (isLocalImagePath(src)) return `/api/local-file?path=${encodeURIComponent(src)}`
+  if (isLocalImagePath(src)) return authUrl(`/api/local-file?path=${encodeURIComponent(src)}`)
   return src
 }
 

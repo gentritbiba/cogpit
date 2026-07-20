@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { deviceScopedKey } from "@/lib/device"
 
 interface ProjectNamesResult {
   names: Record<string, string>
@@ -7,9 +8,11 @@ interface ProjectNamesResult {
 
 const STORAGE_KEY = "project-custom-names"
 
+// Keys are device-scoped (computed lazily) so custom project names never bleed
+// between devices — the same dirName can be renamed differently per device.
 function loadNames(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(deviceScopedKey(STORAGE_KEY))
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -17,12 +20,25 @@ function loadNames(): Record<string, string> {
 }
 
 function saveNames(names: Record<string, string>): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(names))
+  localStorage.setItem(deviceScopedKey(STORAGE_KEY), JSON.stringify(names))
 }
 
 // Module-level store shared across all hook instances
 let currentNames: Record<string, string> = loadNames()
 const listeners = new Set<() => void>()
+
+// The active device can change without a full page reload (in-app switch). The
+// module-level snapshot is read once at import, so re-load it for the new
+// device's scoped key and notify subscribers — otherwise a rename would merge
+// the previous device's names into the new device's storage.
+if (typeof window !== "undefined") {
+  window.addEventListener("cogpit-device-changed", () => {
+    currentNames = loadNames()
+    for (const listener of listeners) {
+      listener()
+    }
+  })
+}
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)

@@ -5,10 +5,20 @@ import {
   DEFAULT_PERMISSIONS,
   PERMISSIONS_STORAGE_KEY,
 } from "@/lib/permissions"
+import { deviceScopedKey } from "@/lib/device"
+
+// Permissions are per-device: the local device keeps the unscoped key; a remote
+// device gets its own scoped key. A fresh remote scope has no stored value and
+// falls back to explicit DEFAULT_PERMISSIONS — it NEVER inherits the local
+// device's stored value (e.g. a local bypassPermissions must not leak to a
+// remote machine).
+function storageKey(): string {
+  return deviceScopedKey(PERMISSIONS_STORAGE_KEY)
+}
 
 function loadFromStorage(): PermissionsConfig {
   try {
-    const raw = localStorage.getItem(PERMISSIONS_STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey())
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
       const storedMode = (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode
@@ -23,7 +33,7 @@ function loadFromStorage(): PermissionsConfig {
         disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
       }
       if (migratedMode !== storedMode) {
-        localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(migrated))
+        localStorage.setItem(storageKey(), JSON.stringify(migrated))
       }
       return migrated
     }
@@ -34,7 +44,7 @@ function loadFromStorage(): PermissionsConfig {
 }
 
 function saveToStorage(config: PermissionsConfig): void {
-  localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify(config))
+  localStorage.setItem(storageKey(), JSON.stringify(config))
 }
 
 export function usePermissions() {

@@ -163,11 +163,18 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
 
 // ── Auth middleware ──────────────────────────────────────────────────
 
-const PUBLIC_PATHS = new Set(["/api/auth/verify"])
+const PUBLIC_PATHS = new Set(["/api/auth/verify", "/api/hello"])
 
 function isPublicPath(url: string): boolean {
-  if (PUBLIC_PATHS.has(url.split("?")[0])) return true
-  if (!url.startsWith("/api/") && !url.startsWith("/__pty")) return true
+  const path = url.split("?")[0]
+  if (PUBLIC_PATHS.has(path)) return true
+  // Express routes case-insensitively, so a case-variant prefix (/HUB, /API,
+  // /__PTY) would still reach the protected handlers while a case-sensitive
+  // prefix check treated it as public — an unauthenticated remote shell for
+  // every registered device. Lowercase before comparing so it can't slip past.
+  // /hub/* is the multi-device reverse proxy — protected exactly like /api/*.
+  const lower = path.toLowerCase()
+  if (!lower.startsWith("/api/") && !lower.startsWith("/__pty") && !lower.startsWith("/hub/")) return true
   return false
 }
 

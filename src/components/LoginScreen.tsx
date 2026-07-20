@@ -33,8 +33,10 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
 
       const data = await res.json()
       if (res.ok && data.valid) {
-        // Store the session token returned by the server (not the raw password)
-        setToken(data.token || password)
+        // Store the session token returned by the server (never the raw
+        // password). Local logins return { valid: true } without a token —
+        // they still proceed, just with nothing to persist.
+        if (data.token) setToken(data.token)
         onAuthenticated()
       } else {
         setError(data.error || "Invalid password")

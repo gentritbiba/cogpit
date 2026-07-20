@@ -16,6 +16,7 @@ import { EditDiffView } from "./EditDiffView"
 import { highlightCode, getLangFromPath } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { authFetch } from "@/lib/auth"
+import { isRemoteDeviceActive } from "@/lib/device"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
@@ -556,7 +557,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       {skillMeta && !isCompactMobile && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground/60 font-mono">
           <span>source: {skillMeta.source}</span>
-          {skillMeta.filePath && (
+          {skillMeta.filePath && !isRemoteDeviceActive() && (
             <button
               onClick={(e) => {
                 e.stopPropagation()

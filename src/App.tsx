@@ -9,6 +9,7 @@ import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
 import { MobileNav } from "@/components/MobileNav"
+import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { GoalBar } from "@/components/GoalBar"
 import { ProcessPanel } from "@/components/ProcessPanel"
@@ -60,6 +61,7 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { isRemoteDeviceActive } from "@/lib/device"
 import { getFastServiceTierOption, isUltracodeCapableModel, normalizeEffortForAgent, supportsImageInput } from "@/lib/utils"
 import { useModelOptions } from "@/hooks/useModelOptions"
 import {
@@ -218,6 +220,8 @@ export default function App() {
   }, [pendingPath, state.pendingDirName])
 
   const handleOpenTerminal = useCallback(() => {
+    // Would open a terminal window on the remote machine's screen, not here
+    if (isRemoteDeviceActive()) { console.warn("[open-terminal] unavailable for remote devices"); return }
     // Prefer the real cwd; send dirName so the server can resolve authoritatively
     const projectPath = state.session?.cwd ?? pendingPath ?? undefined
     const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
@@ -232,6 +236,7 @@ export default function App() {
   }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
 
   const handleMcpAuth = useCallback((_serverName: string) => {
+    if (isRemoteDeviceActive()) { console.warn("[mcp-auth] unavailable for remote devices"); return }
     const projectPath = state.session?.cwd ?? pendingPath ?? undefined
     const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
     if (!projectPath && !dirName) return
@@ -1202,6 +1207,9 @@ export default function App() {
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
         <UpdateBanner />
+        <div className="flex items-center gap-2 border-b border-border/40 bg-elevation-0 px-3 py-1">
+          <DeviceSwitcher />
+        </div>
         <main ref={swipeRef} className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
             <SessionBrowser
@@ -1501,7 +1509,7 @@ export default function App() {
                 <div className="flex-1 flex flex-col items-center justify-center gap-1">
                   <p className="text-sm text-muted-foreground">New session — type your first message below</p>
                   <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
-                  <div className="flex items-center gap-1 mt-2">
+                  {!isRemoteDeviceActive() && <div className="flex items-center gap-1 mt-2">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1529,7 +1537,7 @@ export default function App() {
                       <FolderSearch className="size-3" />
                       Reveal
                     </Button>
-                  </div>
+                  </div>}
                 </div>
               )}
               <SessionInputFooter>{chatInputNode}</SessionInputFooter>

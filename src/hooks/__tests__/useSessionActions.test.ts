@@ -20,14 +20,21 @@ vi.mock("@/lib/sessionCache", () => ({
   },
 }))
 
+// Mock device module so we can drive getActiveDeviceId for mid-flight switches
+vi.mock("@/lib/device", () => ({
+  getActiveDeviceId: vi.fn(() => "local"),
+}))
+
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
+import { getActiveDeviceId } from "@/lib/device"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockSessionCache = vi.mocked(sessionCache)
+const mockGetActiveDeviceId = vi.mocked(getActiveDeviceId)
 
 function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
   return {
@@ -83,6 +90,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Default: cache miss
   vi.mocked(sessionCache.get).mockReturnValue(undefined)
+  // Default: stay on the local device across a fetch
+  mockGetActiveDeviceId.mockReturnValue("local")
 })
 
 describe("useSessionActions", () => {
@@ -249,6 +258,33 @@ describe("useSessionActions", () => {
         false,
         expect.anything(),
         200,
+      )
+    })
+
+    it("skips the cache write when the active device changes mid-flight but still loads the session", async () => {
+      const session = makeParsedSession()
+      const opts = makeDefaultOpts(session)
+      mockAuthFetch.mockResolvedValue(
+        new Response(makeTailResponse(), { status: 200 })
+      )
+
+      // loadSessionTailCached snapshots the device before the fetch, then
+      // re-reads it before the cache set. Simulate a switch between the two.
+      mockGetActiveDeviceId
+        .mockReturnValueOnce("device-a") // snapshot before authFetch
+        .mockReturnValueOnce("device-b") // guard before sessionCache.set
+
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      await act(async () => {
+        await result.current.handleDashboardSelect("my-dir", "session.jsonl")
+      })
+
+      // No cross-device cache poisoning…
+      expect(mockSessionCache.set).not.toHaveBeenCalled()
+      // …but the fetched session still renders.
+      expect(opts.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOAD_SESSION" })
       )
     })
   })

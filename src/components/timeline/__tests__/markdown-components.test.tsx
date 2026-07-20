@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import ReactMarkdown from "react-markdown"
-import { authFetch } from "@/lib/auth"
+import { authFetch, authUrl } from "@/lib/auth"
 import { markdownComponents, parseLocalFileHref } from "../markdown-components"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn().mockResolvedValue({ ok: true }),
+  // Identity by default; real authUrl applies the device prefix + token.
+  authUrl: vi.fn((url: string) => url),
 }))
+
+const mockedAuthUrl = vi.mocked(authUrl)
 
 describe("markdown file links", () => {
   beforeEach(() => {
@@ -64,5 +68,41 @@ describe("markdown file links", () => {
     expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank")
     expect(authFetch).not.toHaveBeenCalled()
     open.mockRestore()
+  })
+})
+
+describe("markdown images", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockedAuthUrl.mockImplementation((url: string) => url)
+  })
+
+  it("routes local image paths through authUrl (device prefix + token)", () => {
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![shot](/tmp/screenshot.png)"}
+      </ReactMarkdown>,
+    )
+
+    const img = screen.getByRole("img", { name: "shot" }) as HTMLImageElement
+    // authUrl wraps the /api/local-file proxy URL.
+    expect(mockedAuthUrl).toHaveBeenCalledWith(
+      "/api/local-file?path=%2Ftmp%2Fscreenshot.png"
+    )
+    expect(img.getAttribute("src")).toBe(
+      "/api/local-file?path=%2Ftmp%2Fscreenshot.png"
+    )
+  })
+
+  it("does not route external/data image URLs through authUrl (no token leak)", () => {
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![remote](https://cdn.example.com/pic.png)"}
+      </ReactMarkdown>,
+    )
+
+    const img = screen.getByRole("img", { name: "remote" }) as HTMLImageElement
+    expect(mockedAuthUrl).not.toHaveBeenCalled()
+    expect(img.getAttribute("src")).toBe("https://cdn.example.com/pic.png")
   })
 })

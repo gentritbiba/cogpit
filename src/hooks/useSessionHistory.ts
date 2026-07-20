@@ -1,4 +1,5 @@
 import { useRef, useCallback } from "react"
+import { deviceScopedKey } from "@/lib/device"
 
 interface HistoryEntry {
   dirName: string
@@ -8,9 +9,15 @@ interface HistoryEntry {
 const STORAGE_KEY = "cogpit-session-history"
 const MAX_HISTORY = 50
 
+// Per-device history: the local device keeps the bare key; remote devices get a
+// device-scoped key so their session lists never bleed into one another.
+function storageKey(): string {
+  return deviceScopedKey(STORAGE_KEY)
+}
+
 function loadHistory(): HistoryEntry[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey())
     if (!raw) return []
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) return parsed.slice(0, MAX_HISTORY)
@@ -20,7 +27,7 @@ function loadHistory(): HistoryEntry[] {
 
 function saveHistory(entries: HistoryEntry[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+    localStorage.setItem(storageKey(), JSON.stringify(entries))
   } catch { /* quota exceeded or unavailable */ }
 }
 

@@ -2,6 +2,7 @@ import type { ParsedSession } from "./types"
 import { authFetch } from "./auth"
 import { sessionCache } from "./sessionCache"
 import { agentKindFromDirName } from "./sessionSource"
+import { getActiveDeviceId } from "./device"
 
 interface TailResponse {
   headerLines: string[]
@@ -14,8 +15,10 @@ interface TailResponse {
 /** Keys currently being fetched — de-duplicates concurrent prefetch calls. */
 const inflight = new Set<string>()
 
+// Device-scoped to match sessionCache — a concurrent prefetch for the same
+// (dirName, fileName) on a different device must not de-dup against this one.
 function makeKey(dirName: string, fileName: string): string {
-  return `${dirName}/${fileName}`
+  return `${getActiveDeviceId()}:${dirName}/${fileName}`
 }
 
 /**
@@ -38,6 +41,12 @@ export async function prefetchSession(
   if (inflight.has(key)) return
   if (sessionCache.get(dirName, fileName)) return
 
+  // Snapshot the active device BEFORE the network round-trip. The cache key is
+  // device-scoped and computed at set-time; if the user switches devices while
+  // this prefetch is in flight, writing now would poison device B's cache with
+  // device A's session (or vice-versa).
+  const deviceId = getActiveDeviceId()
+
   inflight.add(key)
   try {
     const res = await authFetch(
@@ -53,6 +62,9 @@ export async function prefetchSession(
     const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
     const text = [...data.headerLines, ...uniqueTail].join("\n")
     const parsed = await workerParse(text)
+
+    // Device changed mid-flight — discard rather than cache under the wrong key.
+    if (getActiveDeviceId() !== deviceId) return
 
     sessionCache.set(
       dirName,

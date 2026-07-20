@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { authFetch } from "@/lib/auth"
+import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 
 function ValidationStatus({ status, error }: { status: string; error: string | null }) {
@@ -53,6 +54,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [path, setPath] = useState(currentPath)
   const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, reset, save } = useConfigValidation()
+  // Editing a remote device's network access through the proxy could rotate its
+  // password or disable its network access — either one locks this hub out.
+  const remoteDevice = isRemoteDeviceActive()
 
   // Network access state
   const [networkAccess, setNetworkAccess] = useState(false)
@@ -95,7 +99,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           setEditorApp(editor)
           setInitialEditorApp(editor)
           // Fetch connected devices if network is active
-          if (access && data?.networkPassword) {
+          if (access && data?.networkPassword && !remoteDevice) {
             authFetch("/api/connected-devices")
               .then((r) => r.json())
               .then((d) => setConnectedDevices(d?.devices || []))
@@ -106,7 +110,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
         })
         .catch(() => {})
     }
-  }, [open, currentPath, reset])
+  }, [open, currentPath, reset, remoteDevice])
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,9 +124,11 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const handleSave = useCallback(async () => {
     setSaving(true)
     const result = await save(path, {
-      networkAccess,
+      // Remote device: echo its current setting untouched — omitting the field
+      // would disable its network access server-side and cut this hub off.
+      networkAccess: remoteDevice ? initialNetworkAccess : networkAccess,
       // Only send password if user typed one (blank = keep existing)
-      networkPassword: networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
+      networkPassword: !remoteDevice && networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
       terminalApp: terminalApp.trim() || undefined,
       editorApp: editorApp.trim() || undefined,
     })
@@ -130,7 +136,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, terminalApp, editorApp, save, onSaved])
+  }, [path, networkAccess, networkPassword, terminalApp, editorApp, save, onSaved, remoteDevice, initialNetworkAccess])
 
   const MIN_PASSWORD_LENGTH = 12
 
@@ -140,13 +146,13 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
     // Check if anything actually changed
     const pathChanged = status === "valid"
-    const networkChanged = networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0)
+    const networkChanged = !remoteDevice && (networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0))
     const terminalChanged = terminalApp !== initialTerminalApp
     const editorChanged = editorApp !== initialEditorApp
     if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged) return false
 
     // Validate password requirements when network is enabled
-    if (networkAccess) {
+    if (!remoteDevice && networkAccess) {
       const passwordTooShort = networkPassword.length > 0 && networkPassword.length < MIN_PASSWORD_LENGTH
       const needsPassword = !hasExistingPassword && networkPassword.length === 0
       if (passwordTooShort || needsPassword) return false
@@ -217,8 +223,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             />
           </div>
 
-          {/* Network Access */}
-          <NetworkAccessSection
+          {/* Network Access — hidden for remote devices: changing it through the
+              proxy would revoke the very sessions this hub depends on */}
+          {!remoteDevice && <NetworkAccessSection
             networkAccess={networkAccess}
             setNetworkAccess={setNetworkAccess}
             networkPassword={networkPassword}
@@ -229,7 +236,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             initialNetworkAccess={initialNetworkAccess}
             connectedDevices={connectedDevices}
             minPasswordLength={MIN_PASSWORD_LENGTH}
-          />
+          />}
         </div>
 
         <DialogFooter>

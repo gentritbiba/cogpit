@@ -40,6 +40,10 @@ import { registerAskUserRoutes } from "../server/routes/ask-user"
 import { registerModelRoutes } from "../server/routes/models"
 import { registerCodexRuntimeRoutes } from "../server/routes/codex-runtime"
 import { registerPerformanceRoutes } from "../server/routes/performance"
+import { registerHelloRoutes } from "../server/routes/hello"
+import { registerDeviceRoutes } from "../server/routes/devices"
+import { initDeviceRegistry } from "../server/hub/registry"
+import { createHubProxyHandler, handleHubUpgrade } from "../server/hub/proxy"
 import { codexAppServer } from "../server/codex-app-server"
 import { PtySessionManager } from "../server/pty-server"
 
@@ -48,6 +52,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   // Configure paths for Electron
   setConfigPath(join(userDataDir, "config.local.json"))
   await loadConfig()
+  await initDeviceRegistry(userDataDir)
   refreshDirs()
   // Override undo dir to writable location
   dirs.UNDO_DIR = join(userDataDir, "undo-history")
@@ -63,7 +68,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   // ── Guard middleware ────────────────────────────────────────────
   // Note: refreshDirs() and dirs.UNDO_DIR are set once at startup above (not per-request)
   app.use("/api", (req, res, next) => {
-    if (req.path.startsWith("/config") || req.path.startsWith("/notify")) return next()
+    if (req.path.startsWith("/config") || req.path.startsWith("/notify") || req.path.startsWith("/hello")) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
       return
@@ -73,6 +78,9 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
 
   // ── API routes (shared with Vite server) ───────────────────────
   const use = app.use.bind(app)
+  registerHelloRoutes(use, { mode: process.versions.electron ? "electron" : "standalone" })
+  registerDeviceRoutes(use)
+  app.use("/hub", createHubProxyHandler())
   registerPerformanceRoutes(use)
   registerConfigRoutes(use)
   registerProjectRoutes(use)
@@ -138,6 +146,7 @@ export async function createAppServer(staticDir: string, userDataDir: string) {
   const ptyManager = new PtySessionManager(wss)
 
   httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    if (handleHubUpgrade(req, socket, head)) return
     const url = new URL(req.url || "/", "http://localhost")
     if (url.pathname === "/__pty") {
       // Auth check for remote WebSocket connections

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { SessionRow } from "./SessionRow"
@@ -66,8 +67,10 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // Per-project collapse choices, persisted so the user's arrangement survives
   // reloads. Groups without an entry fall back to smart defaults (live groups
   // and the most recent few stay open).
+  // Device-scoped: DeviceRoot remounts on device change, so computing the key
+  // once at mount is sufficient — each device gets its own collapse state.
   const [collapsedGroups, setCollapsedGroups] = useLocalStorage<Record<string, boolean>>(
-    "live-sessions-collapsed-projects",
+    deviceScopedKey("live-sessions-collapsed-projects"),
     {},
   )
   const toggleGroupCollapsed = useCallback((key: string, collapsed: boolean) => {

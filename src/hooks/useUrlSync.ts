@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
 import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
+import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -16,6 +17,13 @@ interface UseUrlSyncOpts {
 //   /{dirName}                 → project sessions list
 //   /{dirName}/{sessionId}     → viewing a specific session
 //   /team/{teamName}           → team view
+//
+// A remote device carries a leading "/d/:deviceId" segment in front of any of
+// the above (e.g. "/d/dev_x/-Users-foo/sess"). Device identity itself is owned
+// by DeviceRoot; this hook simply strips the prefix before parsing and prepends
+// it when emitting. Unprefixed paths always mean the local device. "d" can never
+// collide with a real dirName (claude dirNames start with "-", codex with
+// "codex__").
 
 interface ParsedUrl {
   type: "home" | "session" | "project" | "team"
@@ -23,6 +31,27 @@ interface ParsedUrl {
   /** sessionId (UUID) — we append .jsonl to get the fileName for the API */
   sessionId?: string
   teamName?: string
+}
+
+/** "" for the local device, "/d/<id>" for a remote device. */
+function devicePathPrefix(): string {
+  const id = getActiveDeviceId()
+  return id === LOCAL_DEVICE_ID ? "" : `/d/${id}`
+}
+
+/** The home path for the active device: "/" local, "/d/<id>/" remote. */
+function deviceHomePath(): string {
+  const prefix = devicePathPrefix()
+  return prefix ? `${prefix}/` : "/"
+}
+
+/**
+ * Strip a leading "/d/<id>" device segment, returning the remainder for the
+ * existing scheme to parse. Non-prefixed paths pass through unchanged.
+ */
+function stripDevicePrefix(pathname: string): string {
+  const match = /^\/d\/[^/]+(\/.*)?$/.exec(pathname)
+  return match ? match[1] || "/" : pathname
 }
 
 function sessionIdFromFileName(fileName: string): string {
@@ -36,24 +65,28 @@ function fileNameFromSessionId(sessionId: string): string {
 }
 
 function stateToPath(state: SessionState): string {
+  const prefix = devicePathPrefix()
   if (state.mainView === "teams" && state.selectedTeam) {
-    return `/team/${encodeURIComponent(state.selectedTeam)}`
+    return `${prefix}/team/${encodeURIComponent(state.selectedTeam)}`
   }
   if (state.sessionSource) {
     const { dirName, fileName } = state.sessionSource
     const sessionId = sessionIdFromFileName(fileName)
-    return `/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`
+    return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`
   }
   if (state.pendingDirName) {
-    return `/${encodeURIComponent(state.pendingDirName)}`
+    return `${prefix}/${encodeURIComponent(state.pendingDirName)}`
   }
   if (state.dashboardProject) {
-    return `/${encodeURIComponent(state.dashboardProject)}`
+    return `${prefix}/${encodeURIComponent(state.dashboardProject)}`
   }
-  return "/"
+  return deviceHomePath()
 }
 
-function parsePath(pathname: string): ParsedUrl {
+function parsePath(rawPathname: string): ParsedUrl {
+  // Device identity is owned by DeviceRoot — parse the remainder of the path.
+  const pathname = stripDevicePrefix(rawPathname)
+
   // Team routes are prefixed to avoid ambiguity
   const teamMatch = pathname.match(/^\/team\/([^/]+)$/)
   if (teamMatch) {
@@ -108,8 +141,10 @@ export function useUrlSync({
           )
           if (!res.ok) {
             dispatch({ type: "GO_HOME", isMobile })
-            window.history.replaceState(null, "", "/")
-            lastPushedRef.current = "/"
+            const home = deviceHomePath()
+            window.history.replaceState(null, "", home)
+            lastPushedRef.current = home
+            saveLastPath(getActiveDeviceId(), home)
             return
           }
           const text = await res.text()
@@ -141,6 +176,10 @@ export function useUrlSync({
     if (initialLoadDone.current) return
     initialLoadDone.current = true
 
+    // Remember the entry path so switching away and back restores it (incl.
+    // deep links, whose URL never changes and so would otherwise never save).
+    saveLastPath(getActiveDeviceId(), window.location.pathname)
+
     const parsed = parsePath(window.location.pathname)
     if (parsed.type !== "home") {
       loadFromUrl(parsed)
@@ -155,6 +194,7 @@ export function useUrlSync({
     if (newPath !== lastPushedRef.current) {
       window.history.pushState(null, "", newPath)
       lastPushedRef.current = newPath
+      saveLastPath(getActiveDeviceId(), newPath)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync URL-relevant state fields
   }, [state.sessionSource, state.pendingDirName, state.mainView, state.selectedTeam, state.dashboardProject])
@@ -164,6 +204,7 @@ export function useUrlSync({
     const handlePopstate = () => {
       const parsed = parsePath(window.location.pathname)
       lastPushedRef.current = window.location.pathname
+      saveLastPath(getActiveDeviceId(), window.location.pathname)
       loadFromUrl(parsed)
     }
 

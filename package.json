@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Control center for Claude Code and OpenAI Codex agent sessions",
   "license": "MIT",
   "author": {

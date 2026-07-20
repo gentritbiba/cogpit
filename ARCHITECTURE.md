@@ -165,6 +165,16 @@ All routes are registered in **both** `server/api-plugin.ts` (Vite) and `electro
 | `/api/git-status` | GET | Branch info, ahead/behind counts, and per-file working-tree/index status (query: `cwd`) |
 | `/api/system-processes` | GET | System-wide process snapshot: agent-related processes (Claude, headless browsers, scripts) classified by kind with leak detection (orphaned, hot, suspicious); top 20 sorted by leak risk |
 | `/api/system-processes/kill` | POST | Kill suspected leaked processes (body: `{pids: number[]}`) — whitelist-checked against current scan to prevent targeting Cogpit/live sessions |
+| `/api/hello` | GET | Public device-identity handshake: `{app, version, hubApi, mode, name, instanceId, networkAccess, configured}`. Powers add-device probe, health/version display, and self-add rejection. Exempt from auth and the NOT_CONFIGURED guard. |
+| `/api/hub/devices` | GET/POST | List registered devices / add one (probe + verify + persist). Passwords never serialized back. |
+| `/api/hub/devices/probe` | POST | Reachability/classification probe of a `{host, port}` (UNREACHABLE / NOT_COGPIT / LEGACY_NO_HELLO / SELF_ADD / ok). Host-validated against SSRF. |
+| `/api/hub/devices/:id` | PATCH/DELETE | Rename/re-point / remove a device |
+| `/api/hub/devices/:id/test` | POST | Re-probe + auth check; updates runtime status |
+| `/hub/:deviceId/*` | ALL | Reverse proxy to a registered device (HTTP + `/__pty` WS upgrade). Strips the prefix, injects the device's session token, maps device auth failures to typed 502s. Auth-protected like `/api/*`. |
+
+### Multi-Device Hub (`server/hub/`)
+
+A Cogpit instance can act as a **hub** that proxies to other devices so one UI controls many machines (one active at a time). Server pieces (`server/hub/`): `registry.ts` (persists `devices.local.json` at mode 0600, opaque `dev_*` ids, SSRF host validation), `device-client.ts` (per-device session-token minting with single-flight + ≥5s spacing to respect the device's 5/min/IP auth rate limit), `proxy.ts` (`createHubProxyHandler()` for HTTP + `handleHubUpgrade()` for the PTY WebSocket). All are registered in **both** server shells; the WS upgrade branch additionally lives in `server/pty-plugin.ts` (dev). Client side: `src/lib/device.ts` (active-device state, `/d/:deviceId` URL scheme, device-scoped cache keys) and `src/components/DeviceRoot.tsx` (keyed remount on switch). Headless devices are bootstrapped via `COGPIT_NETWORK_PASSWORD` (in-memory only) with a fail-closed refusal to bind non-loopback without one — see `server/lib/standalone-bootstrap.ts`.
 
 ---
 

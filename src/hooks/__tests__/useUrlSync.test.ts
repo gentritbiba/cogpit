@@ -38,6 +38,7 @@ describe("useUrlSync", () => {
 
   beforeEach(() => {
     vi.resetAllMocks()
+    sessionStorage.clear()
     // Reset URL to root
     window.history.replaceState(null, "", "/")
   })
@@ -260,5 +261,173 @@ describe("useUrlSync", () => {
     unmount()
     // Reset URL for next test
     window.history.replaceState(null, "", "/")
+  })
+
+  // ── Device-scoped URLs (/d/:deviceId) ────────────────────────────────────
+  describe("/d/:deviceId prefix", () => {
+    it("parses a deep link /d/<id>/<dirName>/<sessionId> against the remainder", async () => {
+      window.history.replaceState(null, "", "/d/dev_x/-Users-foo/uuid")
+
+      mockedAuthFetch.mockResolvedValueOnce({
+        ok: true,
+        text: async () => '{"type":"user"}\n',
+      } as Response)
+      mockedParseSession.mockReturnValueOnce({ turns: [] } as unknown as ParsedSession)
+
+      renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      // The device segment is stripped; the API call targets the remainder only.
+      await vi.waitFor(() => {
+        expect(mockedAuthFetch).toHaveBeenCalledWith(
+          "/api/sessions/-Users-foo/uuid.jsonl"
+        )
+        expect(dispatch).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "LOAD_SESSION" })
+        )
+      })
+    })
+
+    it("treats /d/<id>/ as the device home (no session load)", () => {
+      window.history.replaceState(null, "", "/d/dev_x/")
+
+      renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      expect(dispatch).not.toHaveBeenCalled()
+    })
+
+    it("parses a project-only device path /d/<id>/<dirName>", async () => {
+      window.history.replaceState(null, "", "/d/dev_x/-Users-foo")
+
+      renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "SET_DASHBOARD_PROJECT", dirName: "-Users-foo" })
+        )
+      })
+    })
+
+    it("parses a device-scoped team path /d/<id>/team/<name>", async () => {
+      window.history.replaceState(null, "", "/d/dev_x/team/alpha")
+
+      renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "SELECT_TEAM", teamName: "alpha" })
+        )
+      })
+    })
+
+    it("emits a /d/<id>-prefixed path and remembers it when a remote device is active", () => {
+      window.history.replaceState(null, "", "/d/dev_x/")
+      const pushStateSpy = vi.spyOn(window.history, "pushState")
+
+      const state = makeState({
+        sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
+      })
+
+      renderHook(() =>
+        useUrlSync({
+          state,
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/d/dev_x/proj-a/sess-1")
+      expect(sessionStorage.getItem("cogpit-last-path::dev_x")).toBe(
+        "/d/dev_x/proj-a/sess-1"
+      )
+      pushStateSpy.mockRestore()
+    })
+
+    it("keeps unprefixed dirName routes local (no device swallowed)", async () => {
+      // A claude dirName starts with "-", a codex one with "codex__" — neither
+      // collides with the "/d/" prefix, so these stay on the local device.
+      window.history.replaceState(null, "", "/-Users-foo/uuid")
+
+      mockedAuthFetch.mockResolvedValueOnce({
+        ok: true,
+        text: async () => '{"type":"user"}\n',
+      } as Response)
+      mockedParseSession.mockReturnValueOnce({ turns: [] } as unknown as ParsedSession)
+
+      renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(mockedAuthFetch).toHaveBeenCalledWith(
+          "/api/sessions/-Users-foo/uuid.jsonl"
+        )
+      })
+    })
+
+    it("restores device context on popstate to a /d/<id> deep link", async () => {
+      window.history.replaceState(null, "", "/")
+
+      const { unmount } = renderHook(() =>
+        useUrlSync({
+          state: makeState(),
+          dispatch,
+          isMobile: false,
+          resetTurnCount,
+          scrollToBottomInstant,
+        })
+      )
+
+      window.history.pushState(null, "", "/d/dev_x/-Users-foo")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+
+      await vi.waitFor(() => {
+        expect(dispatch).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "SET_DASHBOARD_PROJECT", dirName: "-Users-foo" })
+        )
+      })
+
+      unmount()
+      window.history.replaceState(null, "", "/")
+    })
   })
 })

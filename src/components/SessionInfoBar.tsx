@@ -22,6 +22,7 @@ import { parseSubAgentPath, projectName } from "@/lib/format"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { ContextBadge, HeaderIconButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
+import { isRemoteDeviceActive } from "@/lib/device"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { Spinner } from "@/components/ui/Spinner"
@@ -235,7 +236,7 @@ function SessionActions({
           className="text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
         />
       )}
-      {hasProject && (
+      {hasProject && !isRemoteDeviceActive() && (
         <>
           <HeaderIconButton
             icon={Code2}
@@ -251,7 +252,7 @@ function SessionActions({
           />
         </>
       )}
-      {onOpenTerminal && (
+      {onOpenTerminal && !isRemoteDeviceActive() && (
         <HeaderIconButton
           icon={TerminalSquare}
           label="Open terminal in project"

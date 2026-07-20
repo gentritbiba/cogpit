@@ -73,4 +73,36 @@ describe("buildPermissionArgs", () => {
     }
     expect(buildPermissionArgs(config)).toEqual([])
   })
+
+  // ── missing-mode footgun (security) ──────────────────────────────────
+  // A missing or falsy mode must NEVER produce --dangerously-skip-permissions.
+  // It fails safe to --permission-mode default. Only an explicit
+  // bypassPermissions mode yields the skip flag.
+
+  it("treats a missing mode as default, NOT bypass", () => {
+    expect(buildPermissionArgs({} as PermissionsConfig)).toEqual([
+      "--permission-mode",
+      "default",
+    ])
+  })
+
+  it("treats an empty-string mode as default, NOT bypass", () => {
+    const config = { mode: "", allowedTools: [], disallowedTools: [] } as unknown as PermissionsConfig
+    expect(buildPermissionArgs(config)).toEqual(["--permission-mode", "default"])
+  })
+
+  it("still appends tools when the mode is missing", () => {
+    const config = {
+      allowedTools: ["Bash"],
+      disallowedTools: ["Write"],
+    } as unknown as PermissionsConfig
+    expect(buildPermissionArgs(config)).toEqual([
+      "--permission-mode",
+      "default",
+      "--allowedTools",
+      "Bash",
+      "--disallowedTools",
+      "Write",
+    ])
+  })
 })

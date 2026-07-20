@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useMcpServers } from "../useMcpServers"
 
@@ -490,6 +490,54 @@ describe("useMcpServers", () => {
       const parsed = JSON.parse(result.current.mcpConfigJson!)
       expect(parsed.mcpServers).toHaveProperty("clickup")
       expect(parsed.mcpServers).not.toHaveProperty("figma")
+    })
+  })
+
+  describe("device scoping", () => {
+    function setPath(pathname: string) {
+      Object.defineProperty(window, "location", {
+        value: { pathname },
+        writable: true,
+        configurable: true,
+      })
+    }
+
+    afterEach(() => {
+      setPath("/")
+    })
+
+    it("a fresh remote device does not see the local device's saved selection", async () => {
+      // Local device saved only clickup for this project (bare, un-scoped key).
+      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+
+      // Activate a remote device — storage keys are now scoped to it.
+      setPath("/d/dev_x/")
+
+      mockServerResponse([
+        { name: "clickup", status: "connected" },
+        { name: "figma", status: "connected" },
+      ])
+
+      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
+
+      await vi.waitFor(() => {
+        expect(result.current.servers.length).toBe(2)
+      })
+
+      // The bare-key local selection is invisible on the remote device, so it
+      // auto-selects all connected servers rather than inheriting ["clickup"].
+      expect(result.current.selectedServers).toEqual(expect.arrayContaining(["clickup", "figma"]))
+      expect(result.current.selectedServers).toHaveLength(2)
+
+      // Persisting on the remote device writes under the device-scoped key only,
+      // leaving the local device's stored selection untouched.
+      act(() => result.current.toggleServer("figma"))
+      expect(
+        JSON.parse(localStorage.getItem("cogpit:mcpSelection:test-dir::dev_x") || "null"),
+      ).toEqual(["clickup"])
+      expect(
+        JSON.parse(localStorage.getItem("cogpit:mcpSelection:test-dir") || "null"),
+      ).toEqual(["clickup"])
     })
   })
 })

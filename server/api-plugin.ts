@@ -1,4 +1,5 @@
 import type { Plugin } from "vite"
+import { fileURLToPath } from "node:url"
 import { loadConfig, getConfig } from "./config"
 import { refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { registerConfigRoutes } from "./routes/config"
@@ -34,6 +35,10 @@ import { registerModelRoutes } from "./routes/models"
 import { registerCodexRuntimeRoutes } from "./routes/codex-runtime"
 import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
 import { registerPerformanceRoutes } from "./routes/performance"
+import { registerHelloRoutes } from "./routes/hello"
+import { registerDeviceRoutes } from "./routes/devices"
+import { initDeviceRegistry } from "./hub/registry"
+import { createHubProxyHandler } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
 
 export function sessionApiPlugin(): Plugin {
@@ -50,6 +55,8 @@ export function sessionApiPlugin(): Plugin {
       loadConfig().then(() => {
         refreshDirs()
       })
+      // Device registry lives next to config.local.json (project root in dev)
+      void initDeviceRegistry(fileURLToPath(new URL("..", import.meta.url)))
 
       // Security middleware (before all routes)
       server.middlewares.use(securityHeaders)
@@ -60,7 +67,7 @@ export function sessionApiPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = req.url || ""
         // Allow config endpoints through without guard
-        if (url.startsWith("/api/config") || url.startsWith("/api/notify")) return next()
+        if (url.startsWith("/api/config") || url.startsWith("/api/notify") || url.startsWith("/api/hello")) return next()
         // Allow non-API requests through (HTML, JS, CSS)
         if (!url.startsWith("/api/")) return next()
         // Block data APIs when not configured
@@ -74,6 +81,9 @@ export function sessionApiPlugin(): Plugin {
       })
 
       const use = server.middlewares.use.bind(server.middlewares)
+      registerHelloRoutes(use, { mode: "dev" })
+      registerDeviceRoutes(use)
+      server.middlewares.use("/hub", createHubProxyHandler())
       registerPerformanceRoutes(use)
       registerConfigRoutes(use)
       registerProjectRoutes(use)
