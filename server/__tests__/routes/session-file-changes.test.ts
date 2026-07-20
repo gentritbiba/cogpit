@@ -370,6 +370,161 @@ describe("parseSessionFileChanges", () => {
     expect(aChange?.hasEdit).toBe(true)
     expect(bChange?.hasWrite).toBe(true)
   })
+
+  it("parses modern Codex exec-wrapped patches with structured output", async () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: src/app.ts",
+      "@@",
+      "-const x = 1",
+      "+const x = 2",
+      "*** End Patch",
+    ].join("\n")
+    const execInput = [
+      `const patch = ${JSON.stringify(patchInput)};`,
+      "const result = await tools.apply_patch(patch);",
+      "text(result);",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      JSON.stringify({
+        type: "session_meta",
+        timestamp: "2024-01-01T00:00:00.000Z",
+        payload: { id: "modern-codex", cwd: "/home/user/project" },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:01.000Z",
+        payload: { type: "user_message", message: "Fix it" },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-modern-patch",
+          name: "exec",
+          input: execInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-modern-patch",
+          output: [
+            { type: "input_text", text: "Script completed\nOutput:\n" },
+            { type: "input_text", text: "{}" },
+          ],
+        },
+      }),
+    )
+
+    const { changes } = await parseSessionFileChanges(jsonl, true)
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      filePath: "/home/user/project/src/app.ts",
+      hasEdit: true,
+      isError: false,
+      toolCallIds: ["call-modern-patch:patch-0"],
+      content: {
+        originalStr: "const x = 1",
+        currentStr: "const x = 2",
+      },
+    })
+  })
+
+  it("attributes a failed nested patch without tainting an earlier file change", async () => {
+    const firstPatch = [
+      "*** Begin Patch",
+      "*** Update File: src/a.ts",
+      "@@",
+      "-old a",
+      "+new a",
+      "*** End Patch",
+    ].join("\n")
+    const secondPatch = [
+      "*** Begin Patch",
+      "*** Update File: src/b.ts",
+      "@@",
+      "-old b",
+      "+new b",
+      "*** End Patch",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      JSON.stringify({ type: "session_meta", payload: { id: "s1", cwd: "/project" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "fix" } }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-two-patches",
+          name: "exec",
+          input: [
+            `await tools.apply_patch(${JSON.stringify(firstPatch)});`,
+            `await tools.apply_patch(${JSON.stringify(secondPatch)});`,
+          ].join("\n"),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-two-patches",
+          output: JSON.stringify({
+            output: "apply_patch failed to apply /project/src/b.ts",
+            metadata: { exit_code: 1 },
+          }),
+        },
+      }),
+    )
+
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes.find((change) => change.filePath === "/project/src/a.ts")?.isError).toBe(false)
+    expect(changes.find((change) => change.filePath === "/project/src/b.ts")?.isError).toBe(true)
+  })
+
+  it("marks later nested file changes unexecuted after an earlier patch fails", async () => {
+    const makePatch = (file: string) => [
+      "*** Begin Patch",
+      `*** Update File: src/${file}.ts`,
+      "@@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      JSON.stringify({ type: "session_meta", payload: { id: "s1", cwd: "/project" } }),
+      JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "fix" } }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-first-fails",
+          name: "exec",
+          input: [
+            `await tools.apply_patch(${JSON.stringify(makePatch("a"))});`,
+            `await tools.apply_patch(${JSON.stringify(makePatch("b"))});`,
+          ].join("\n"),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-first-fails",
+          output: JSON.stringify({
+            output: "apply_patch failed to apply /project/src/a.ts",
+            metadata: { exit_code: 1 },
+          }),
+        },
+      }),
+    )
+
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes.find((change) => change.filePath === "/project/src/a.ts")?.isError).toBe(true)
+    expect(changes.find((change) => change.filePath === "/project/src/b.ts")?.isError).toBe(true)
+  })
 })
 
 // ── HTTP route tests ──────────────────────────────────────────────────────────

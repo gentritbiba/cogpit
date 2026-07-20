@@ -306,7 +306,133 @@ function inferToolError(output: string | null): boolean {
   if (!output) return false
   const exitMatch = output.match(/Process exited with code (\d+)/)
   if (exitMatch) return exitMatch[1] !== "0"
-  return /\b(error|failed|exception)\b/i.test(output)
+  const withoutSuccessSummaries = output
+    .replace(/\b0\s+(?:fail(?:ed|ures?)?|errors?)\b/gi, "")
+    .replace(/\bno\s+(?:failures?|errors?)\b/gi, "")
+  return /\b(error|failed|exception)\b/i.test(withoutSuccessSummaries)
+}
+
+interface JsStringLiteral {
+  endIndex: number
+  value: string
+}
+
+const JS_SIMPLE_ESCAPES: Readonly<Record<string, string>> = {
+  "0": "\0",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+}
+
+function readJsStringLiteral(source: string, startIndex: number): JsStringLiteral | null {
+  const quote = source[startIndex]
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null
+
+  let value = ""
+  let index = startIndex + 1
+  while (index < source.length) {
+    const char = source[index]
+    if (char === quote) return { endIndex: index + 1, value }
+    if (char !== "\\") {
+      value += char
+      index++
+      continue
+    }
+
+    index++
+    if (index >= source.length) return null
+    const escaped = source[index]
+    if (escaped in JS_SIMPLE_ESCAPES) {
+      value += JS_SIMPLE_ESCAPES[escaped]
+      index++
+      continue
+    }
+    if (escaped === "\n") {
+      index++
+      continue
+    }
+    if (escaped === "\r") {
+      index += source[index + 1] === "\n" ? 2 : 1
+      continue
+    }
+    if (escaped === "x" && /^[0-9a-fA-F]{2}$/.test(source.slice(index + 1, index + 3))) {
+      value += String.fromCharCode(Number.parseInt(source.slice(index + 1, index + 3), 16))
+      index += 3
+      continue
+    }
+    if (escaped === "u") {
+      const braced = source.slice(index + 1).match(/^\{([0-9a-fA-F]+)\}/)
+      if (braced) {
+        const codePoint = Number.parseInt(braced[1], 16)
+        if (Number.isFinite(codePoint) && codePoint <= 0x10ffff) {
+          value += String.fromCodePoint(codePoint)
+          index += braced[0].length + 1
+          continue
+        }
+      }
+      const hex = source.slice(index + 1, index + 5)
+      if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+        value += String.fromCharCode(Number.parseInt(hex, 16))
+        index += 5
+        continue
+      }
+    }
+
+    value += escaped
+    index++
+  }
+
+  return null
+}
+
+function isApplyPatchText(value: string): boolean {
+  return value.includes("*** Begin Patch") && value.includes("*** End Patch")
+}
+
+/** Extract patch payloads passed to nested `tools.apply_patch(...)` calls in Codex exec scripts. */
+export function extractApplyPatchInputs(execSource: string): string[] {
+  if (!execSource.includes("apply_patch") || !execSource.includes("*** Begin Patch")) return []
+
+  const assignedPatches = new Map<string, string>()
+  for (let index = 0; index < execSource.length; index++) {
+    const literal = readJsStringLiteral(execSource, index)
+    if (!literal) continue
+    if (isApplyPatchText(literal.value)) {
+      const assignment = execSource
+        .slice(0, index)
+        .match(/(?:^|[;\n])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/)
+      if (assignment) assignedPatches.set(assignment[1], literal.value)
+    }
+    index = literal.endIndex - 1
+  }
+
+  const patches: string[] = []
+  const seen = new Set<string>()
+  const applyCall = /\btools\s*\.\s*apply_patch\s*\(/g
+  let match: RegExpExecArray | null
+  while ((match = applyCall.exec(execSource)) !== null) {
+    let argumentIndex = match.index + match[0].length
+    while (/\s/.test(execSource[argumentIndex] ?? "")) argumentIndex++
+
+    const literal = readJsStringLiteral(execSource, argumentIndex)
+    const identifier = literal
+      ? null
+      : execSource.slice(argumentIndex).match(/^([A-Za-z_$][\w$]*)/)
+    const patch = literal?.value ?? (identifier ? assignedPatches.get(identifier[1]) : undefined)
+    if (!patch || !isApplyPatchText(patch) || seen.has(patch)) continue
+    seen.add(patch)
+    patches.push(patch)
+  }
+
+  return patches
+}
+
+function resolveCodexPatchPath(filePath: string, cwd: string): string {
+  if (!cwd || filePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(filePath)) return filePath
+  return `${cwd.replace(/[\\/]+$/, "")}/${filePath.replace(/^\.\//, "")}`
 }
 
 /** Parse a Codex apply_patch string into per-file Edit/Write tool calls. */
@@ -314,24 +440,29 @@ export function parseApplyPatch(
   patchText: string,
   callId: string,
   timestamp: string,
+  cwd = "",
 ): ToolCall[] {
   const toolCalls: ToolCall[] = []
   // Split into per-file sections
-  const filePattern = /\*\*\*\s+(Update File|Add File|Delete File):\s*(.+)/g
-  const sections: Array<{ action: string; filePath: string; startIdx: number }> = []
+  const filePattern = /^\*\*\*\s+(Update File|Add File|Delete File):\s*(.+)$/gm
+  const sections: Array<{ action: string; filePath: string; headerIdx: number; startIdx: number }> = []
   let match: RegExpExecArray | null
   while ((match = filePattern.exec(patchText)) !== null) {
     sections.push({
       action: match[1],
       filePath: match[2].trim(),
+      headerIdx: match.index,
       startIdx: match.index + match[0].length,
     })
   }
 
   for (let i = 0; i < sections.length; i++) {
     const section = sections[i]
-    const endIdx = i + 1 < sections.length ? sections[i + 1].startIdx - sections[i + 1].filePath.length - 20 : patchText.length
+    const endIdx = i + 1 < sections.length ? sections[i + 1].headerIdx : patchText.length
     const body = patchText.slice(section.startIdx, endIdx)
+    const movedTo = body.match(/^\*\*\*\s+Move to:\s*(.+)$/m)?.[1]?.trim()
+    const sourcePath = resolveCodexPatchPath(section.filePath, cwd)
+    const filePath = resolveCodexPatchPath(movedTo || section.filePath, cwd)
 
     // Parse hunks between @@ markers
     const hunkBodies = body.split(/^@@.*$/m).filter((s) => s.trim())
@@ -357,7 +488,7 @@ export function parseApplyPatch(
       toolCalls.push({
         id: fileId,
         name: "Write",
-        input: { file_path: section.filePath, content: newLines.join("\n") },
+        input: { file_path: filePath, content: newLines.join("\n") },
         result: null,
         isError: false,
         timestamp,
@@ -366,7 +497,7 @@ export function parseApplyPatch(
       toolCalls.push({
         id: fileId,
         name: "Edit",
-        input: { file_path: section.filePath, old_string: oldLines.join("\n"), new_string: "" },
+        input: { file_path: filePath, old_string: oldLines.join("\n"), new_string: "" },
         result: null,
         isError: false,
         timestamp,
@@ -377,7 +508,8 @@ export function parseApplyPatch(
         id: fileId,
         name: "Edit",
         input: {
-          file_path: section.filePath,
+          file_path: filePath,
+          ...(movedTo ? { old_path: sourcePath } : {}),
           old_string: oldLines.join("\n"),
           new_string: newLines.join("\n"),
         },
@@ -389,6 +521,23 @@ export function parseApplyPatch(
   }
 
   return toolCalls
+}
+
+/** Normalize direct and exec-wrapped Codex apply_patch calls into file tool calls. */
+export function parseCodexToolPatches(
+  toolName: string,
+  rawInput: string,
+  callId: string,
+  timestamp: string,
+  cwd = "",
+): ToolCall[] {
+  if (toolName === "apply_patch") {
+    return parseApplyPatch(rawInput, callId, timestamp, cwd)
+  }
+
+  return extractApplyPatchInputs(rawInput).flatMap((patch, patchIndex) =>
+    parseApplyPatch(patch, `${callId}:patch-${patchIndex}`, timestamp, cwd)
+  )
 }
 
 /** Normalize Codex update_plan input to TodoWrite format. */
@@ -404,18 +553,84 @@ function normalizePlanToTodos(input: Record<string, unknown>): Record<string, un
   return { todos }
 }
 
-/** Parse Codex custom_tool_call output JSON. */
-function parseCustomToolOutput(output: string | null): { text: string; isError: boolean } {
-  if (!output) return { text: "", isError: false }
+function extractCustomToolOutputText(output: unknown): string {
+  if (typeof output === "string") return output
+  if (!Array.isArray(output)) return ""
+  return output
+    .filter((block): block is Record<string, unknown> => isObject(block) && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("")
+}
+
+/** Parse Codex custom_tool_call output JSON or structured content blocks. */
+export function parseCustomToolOutput(output: unknown): { text: string; isError: boolean } {
+  const rawOutput = extractCustomToolOutputText(output)
+  if (!rawOutput) return { text: "", isError: false }
   try {
-    const parsed = JSON.parse(output) as Record<string, unknown>
-    const text = typeof parsed.output === "string" ? parsed.output : output
+    const parsed = JSON.parse(rawOutput) as Record<string, unknown>
+    const text = typeof parsed.output === "string" ? parsed.output : rawOutput
     const meta = isObject(parsed.metadata) ? parsed.metadata : null
     const isError = meta ? (meta.exit_code !== 0 && meta.exit_code !== undefined) : inferToolError(text)
     return { text, isError }
   } catch {
-    return { text: output, isError: inferToolError(output) }
+    return { text: rawOutput, isError: inferToolError(rawOutput) }
   }
+}
+
+/** Attribute an exec-wrapper patch failure without tainting earlier successful patch calls. */
+export function findFailedNestedPatchCallIds(
+  output: string,
+  wrapperIsError: boolean,
+  calls: readonly ToolCall[],
+): Set<string> {
+  if (!wrapperIsError
+    || !/(?:apply[_ ]patch|invalid patch|invalid context|failed to (?:apply|find)|could not apply)/i.test(output)) {
+    return new Set()
+  }
+
+  const groups = new Map<number, ToolCall[]>()
+  for (const call of calls) {
+    const patchIndex = call.id.match(/:patch-(\d+)(?::file-\d+)?$/)?.[1]
+    if (patchIndex === undefined) continue
+    const index = Number(patchIndex)
+    const group = groups.get(index) ?? []
+    group.push(call)
+    groups.set(index, group)
+  }
+  if (groups.size === 0) return new Set(calls.map((call) => call.id))
+
+  const normalizedOutput = output.toLowerCase().replaceAll("\\", "/")
+  const mentionedGroups = new Set<number>()
+  for (const [index, group] of groups) {
+    if (group.some((call) => {
+      const filePath = String(call.input.file_path ?? "").toLowerCase().replaceAll("\\", "/")
+      if (!filePath) return false
+      const segments = filePath.split("/").filter(Boolean)
+      const suffix = segments.slice(-2).join("/")
+      return normalizedOutput.includes(filePath)
+        || (suffix.includes("/") && normalizedOutput.includes(suffix))
+    })) {
+      mentionedGroups.add(index)
+    }
+  }
+
+  for (const match of normalizedOutput.matchAll(/\bpatch\s*(?:#|-)?\s*(\d+)\b/g)) {
+    const index = Number(match[1])
+    if (groups.has(index)) mentionedGroups.add(index)
+  }
+
+  // Exec scripts run nested calls sequentially. If the aggregate error does
+  // not identify a patch, attribute it to the final call that could have failed.
+  if (mentionedGroups.size === 0) mentionedGroups.add(Math.max(...groups.keys()))
+
+  const firstFailedIndex = Math.min(...mentionedGroups)
+  for (const index of groups.keys()) {
+    if (index >= firstFailedIndex) mentionedGroups.add(index)
+  }
+
+  return new Set(
+    [...mentionedGroups].flatMap((index) => groups.get(index)?.map((call) => call.id) ?? []),
+  )
 }
 
 function createTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
@@ -560,8 +775,8 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
   const metadata = extractMetadataFromRecords(records)
   const turns: Turn[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
-  // apply_patch parent callId → per-file synthetic tool call IDs
-  const patchCallIds = new Map<string, string[]>()
+  // apply_patch parent callId → synthetic per-file tool calls
+  const patchCallIds = new Map<string, { calls: ToolCall[]; direct: boolean }>()
   // spawn_agent call tracking
   const spawnAgentCalls = new Map<string, {
     callId: string
@@ -938,24 +1153,21 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
       continue
     }
 
-    // Handle custom_tool_call (apply_patch, exec_command)
+    // Handle custom_tool_call (direct apply_patch, exec wrappers, exec_command)
     if (payload.type === "custom_tool_call" && typeof payload.call_id === "string") {
       const name = typeof payload.name === "string" ? payload.name : "tool"
       const rawInput = typeof payload.input === "string" ? payload.input : ""
+      const callId = payload.call_id as string
+      const perFileCalls = rawInput
+        ? parseCodexToolPatches(name, rawInput, callId, timestamp, metadata.cwd)
+        : []
 
-      if (name === "apply_patch" && rawInput) {
-        // Split into per-file Edit/Write tool calls
-        const perFileCalls = parseApplyPatch(rawInput, payload.call_id as string, timestamp)
-        for (const tc of perFileCalls) {
-          pendingToolCalls.set(tc.id, tc)
-          appendToolCall(current, tc, timestamp)
-        }
-        // Track the parent call_id to apply results later
-        patchCallIds.set(payload.call_id as string, perFileCalls.map((tc) => tc.id))
-      } else {
-        // exec_command or other custom tools
+      // Keep the modern exec wrapper visible because it may contain commands or
+      // other nested tools in addition to apply_patch. Direct apply_patch keeps
+      // its legacy presentation as file calls only.
+      if (name !== "apply_patch") {
         const toolCall: ToolCall = {
-          id: payload.call_id,
+          id: callId,
           name: name === "exec_command" ? "Bash" : name,
           input: parseToolInput(rawInput),
           result: null,
@@ -965,33 +1177,46 @@ export function parseCodexSession(jsonlText: string): ParsedSession {
         pendingToolCalls.set(toolCall.id, toolCall)
         appendToolCall(current, toolCall, timestamp)
       }
+
+      for (const tc of perFileCalls) {
+        pendingToolCalls.set(tc.id, tc)
+        appendToolCall(current, tc, timestamp)
+      }
+      if (perFileCalls.length > 0) {
+        patchCallIds.set(callId, {
+          calls: perFileCalls,
+          direct: name === "apply_patch",
+        })
+      }
       continue
     }
 
     if (payload.type === "custom_tool_call_output" && typeof payload.call_id === "string") {
       const callId = payload.call_id as string
-      const output = typeof payload.output === "string" ? payload.output : null
-      const { text, isError } = parseCustomToolOutput(output)
+      const { text, isError } = parseCustomToolOutput(payload.output)
 
       // Check if this is an apply_patch result (maps to multiple per-file calls)
-      const fileCallIds = patchCallIds.get(callId)
-      if (fileCallIds) {
-        for (const id of fileCallIds) {
-          const tc = pendingToolCalls.get(id)
+      const patchCalls = patchCallIds.get(callId)
+      if (patchCalls) {
+        const failedIds = patchCalls.direct && isError
+          ? new Set(patchCalls.calls.map((call) => call.id))
+          : findFailedNestedPatchCallIds(text, isError, patchCalls.calls)
+        for (const patchCall of patchCalls.calls) {
+          const tc = pendingToolCalls.get(patchCall.id)
           if (tc) {
             tc.result = text
-            tc.isError = isError
-            pendingToolCalls.delete(id)
+            tc.isError = failedIds.has(tc.id)
+            pendingToolCalls.delete(tc.id)
           }
         }
         patchCallIds.delete(callId)
-      } else {
-        const toolCall = pendingToolCalls.get(callId)
-        if (toolCall) {
-          toolCall.result = text
-          toolCall.isError = isError
-          pendingToolCalls.delete(callId)
-        }
+      }
+
+      const toolCall = pendingToolCalls.get(callId)
+      if (toolCall) {
+        toolCall.result = text
+        toolCall.isError = isError
+        pendingToolCalls.delete(callId)
       }
       continue
     }

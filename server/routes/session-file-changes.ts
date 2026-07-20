@@ -2,7 +2,11 @@ import type { UseFn } from "../helpers"
 import { findJsonlPath, readFile, sendJson, stat } from "../helpers"
 import type { ToolUseBlock } from "../../src/lib/types"
 import { computeNetDiff, type EditOp } from "../../src/lib/diffUtils"
-import { parseApplyPatch } from "../../src/lib/codex"
+import {
+  findFailedNestedPatchCallIds,
+  parseCustomToolOutput,
+  parseCodexToolPatches,
+} from "../../src/lib/codex"
 
 export interface ComputedFileChange {
   filePath: string
@@ -46,6 +50,8 @@ export async function parseSessionFileChanges(
   const toolCallDetails = new Map<string, { filePath: string; isEdit: boolean; oldString: string; newString: string }>()
   // toolCallId → error flag (populated from tool_result blocks)
   const resultMap = new Map<string, boolean>()
+  // Parent custom tool call → synthetic per-file patch call IDs.
+  const patchCallIds = new Map<string, { calls: ReturnType<typeof parseCodexToolPatches>; direct: boolean }>()
   // Bash rm paths: { path, turnIndex, isDir }
   const rmPaths: Array<{ path: string; turnIndex: number; isDir: boolean }> = []
 
@@ -82,13 +88,16 @@ export async function parseSessionFileChanges(
 
       if (obj.type !== "response_item") continue
 
-      // Handle apply_patch (custom_tool_call)
-      if (payload.type === "custom_tool_call" && payload.name === "apply_patch") {
+      // Handle both legacy top-level apply_patch calls and modern Codex exec
+      // scripts that invoke tools.apply_patch internally.
+      if (payload.type === "custom_tool_call") {
         const callId = typeof payload.call_id === "string" ? payload.call_id : ""
+        const toolName = typeof payload.name === "string" ? payload.name : ""
         const rawInput = typeof payload.input === "string" ? payload.input : ""
-        if (!callId || !rawInput) continue
-
-        const perFileCalls = parseApplyPatch(rawInput, callId, "")
+        const perFileCalls = callId && rawInput
+          ? parseCodexToolPatches(toolName, rawInput, callId, "", cwd)
+          : []
+        const fileCallIds: string[] = []
         for (const tc of perFileCalls) {
           const filePath = String(tc.input.file_path ?? "")
           if (!filePath) continue
@@ -98,6 +107,7 @@ export async function parseSessionFileChanges(
           const newString = isEdit ? String(tc.input.new_string ?? "") : String(tc.input.content ?? "")
 
           toolCallDetails.set(tc.id, { filePath, isEdit, oldString, newString })
+          fileCallIds.push(tc.id)
 
           let accum = fileMap.get(filePath)
           if (!accum) {
@@ -109,21 +119,20 @@ export async function parseSessionFileChanges(
           else accum.hasWrite = true
           accum.ops.push({ oldString, newString, isWrite: !isEdit })
         }
+        if (fileCallIds.length > 0) {
+          patchCallIds.set(callId, { calls: perFileCalls, direct: toolName === "apply_patch" })
+        }
       }
 
       // Handle custom_tool_call_output — check for errors
       if (payload.type === "custom_tool_call_output" && typeof payload.call_id === "string") {
-        const output = typeof payload.output === "string" ? payload.output : null
-        if (output) {
-          try {
-            const parsed = JSON.parse(output) as Record<string, unknown>
-            const meta = typeof parsed.metadata === "object" && parsed.metadata !== null
-              ? parsed.metadata as Record<string, unknown>
-              : null
-            if (meta && meta.exit_code !== 0 && meta.exit_code !== undefined) {
-              resultMap.set(payload.call_id, true)
-            }
-          } catch { /* skip */ }
+        const patchCalls = patchCallIds.get(payload.call_id)
+        if (patchCalls) {
+          const { text, isError: wrapperIsError } = parseCustomToolOutput(payload.output)
+          const failedIds = patchCalls.direct && wrapperIsError
+            ? new Set(patchCalls.calls.map((call) => call.id))
+            : findFailedNestedPatchCallIds(text, wrapperIsError, patchCalls.calls)
+          for (const call of patchCalls.calls) resultMap.set(call.id, failedIds.has(call.id))
         }
       }
 

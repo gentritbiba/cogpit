@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { parseCodexSession, isCodexSessionText, extractCodexMetadataFromLines, parseApplyPatch } from "@/lib/codex"
+import {
+  extractApplyPatchInputs,
+  extractCodexMetadataFromLines,
+  isCodexSessionText,
+  parseApplyPatch,
+  parseCodexSession,
+  parseCodexToolPatches,
+} from "@/lib/codex"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -593,6 +600,211 @@ describe("parseCodexSession", () => {
     expect(turn.toolCalls[1].input.file_path).toBe("/home/user/project/b.ts")
   })
 
+  it("promotes exec-wrapped apply_patch calls into visible file edits", () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: src/app.ts",
+      "@@",
+      "-const x = 1",
+      "+const x = 2",
+      "*** End Patch",
+    ].join("\n")
+    const execInput = [
+      `const patch = ${JSON.stringify(patchInput)};`,
+      "const result = await tools.apply_patch(patch);",
+      "text(result);",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Fix the file"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-exec-patch",
+          name: "exec",
+          input: execInput,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-exec-patch",
+          output: [
+            { type: "input_text", text: "Script completed\nWall time 0.0 seconds\nOutput:\n1 pass\n0 fail\n" },
+            { type: "input_text", text: "{}" },
+          ],
+        },
+      }),
+    ].join("\n")
+
+    const turn = parseCodexSession(text).turns[0]
+    expect(turn.toolCalls).toHaveLength(2)
+    expect(turn.toolCalls[0]).toMatchObject({
+      id: "call-exec-patch",
+      name: "exec",
+      isError: false,
+    })
+    expect(turn.toolCalls[0].result).toContain("Script completed")
+    expect(turn.toolCalls[1]).toMatchObject({
+      id: "call-exec-patch:patch-0",
+      name: "Edit",
+      isError: false,
+      input: {
+        file_path: "/home/user/project/src/app.ts",
+        old_string: "const x = 1",
+        new_string: "const x = 2",
+      },
+    })
+    expect(turn.toolCalls[1].result).toContain("Script completed")
+  })
+
+  it("keeps successful nested patches visible when a later exec step fails", () => {
+    const patchInput = [
+      "*** Begin Patch",
+      "*** Update File: src/app.ts",
+      "@@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Patch and test"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-patch-test",
+          name: "exec",
+          input: `const patch = ${JSON.stringify(patchInput)};\nawait tools.apply_patch(patch);`,
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-patch-test",
+          output: [{ type: "input_text", text: "Script completed\nOutput:\nTests failed" }],
+        },
+      }),
+    ].join("\n")
+
+    const [execCall, editCall] = parseCodexSession(text).turns[0].toolCalls
+    expect(execCall.isError).toBe(true)
+    expect(editCall.name).toBe("Edit")
+    expect(editCall.isError).toBe(false)
+  })
+
+  it("attributes a nested patch failure without tainting an earlier patch", () => {
+    const firstPatch = [
+      "*** Begin Patch",
+      "*** Update File: src/a.ts",
+      "@@",
+      "-old a",
+      "+new a",
+      "*** End Patch",
+    ].join("\n")
+    const secondPatch = [
+      "*** Begin Patch",
+      "*** Update File: src/b.ts",
+      "@@",
+      "-old b",
+      "+new b",
+      "*** End Patch",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Patch both files"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-two-patches",
+          name: "exec",
+          input: [
+            `await tools.apply_patch(${JSON.stringify(firstPatch)});`,
+            `await tools.apply_patch(${JSON.stringify(secondPatch)});`,
+          ].join("\n"),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-two-patches",
+          output: JSON.stringify({
+            output: "apply_patch failed to apply /home/user/project/src/b.ts",
+            metadata: { exit_code: 1 },
+          }),
+        },
+      }),
+    ].join("\n")
+
+    const [, firstEdit, secondEdit] = parseCodexSession(text).turns[0].toolCalls
+    expect(firstEdit).toMatchObject({
+      id: "call-two-patches:patch-0",
+      isError: false,
+    })
+    expect(secondEdit).toMatchObject({
+      id: "call-two-patches:patch-1",
+      isError: true,
+    })
+  })
+
+  it("marks later nested patches unexecuted after an earlier patch fails", () => {
+    const makePatch = (file: string) => [
+      "*** Begin Patch",
+      `*** Update File: src/${file}.ts`,
+      "@@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n")
+    const text = [
+      sessionMeta(),
+      turnContext(),
+      userMessage("Patch both files"),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "call-first-fails",
+          name: "exec",
+          input: [
+            `await tools.apply_patch(${JSON.stringify(makePatch("a"))});`,
+            `await tools.apply_patch(${JSON.stringify(makePatch("b"))});`,
+          ].join("\n"),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "call-first-fails",
+          output: JSON.stringify({
+            output: "apply_patch failed to apply /home/user/project/src/a.ts",
+            metadata: { exit_code: 1 },
+          }),
+        },
+      }),
+    ].join("\n")
+
+    const [, firstEdit, secondEdit] = parseCodexSession(text).turns[0].toolCalls
+    expect(firstEdit.isError).toBe(true)
+    expect(secondEdit.isError).toBe(true)
+  })
+
   it("parses Add File in apply_patch as Write tool call", () => {
     const patchInput = [
       "*** Begin Patch",
@@ -1068,5 +1280,45 @@ describe("parseApplyPatch", () => {
   it("returns empty array for empty patch", () => {
     const calls = parseApplyPatch("", "call-4", "ts")
     expect(calls).toHaveLength(0)
+  })
+
+  it("resolves relative paths and records move destinations", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: src/old.ts",
+      "*** Move to: src/new.ts",
+      "@@",
+      "-old",
+      "+new",
+      "*** End Patch",
+    ].join("\n")
+
+    const calls = parseApplyPatch(patch, "call-move", "ts", "/workspace")
+    expect(calls[0].input).toMatchObject({
+      file_path: "/workspace/src/new.ts",
+      old_path: "/workspace/src/old.ts",
+      old_string: "old",
+      new_string: "new",
+    })
+  })
+})
+
+describe("extractApplyPatchInputs", () => {
+  it("extracts assigned and inline patches passed to the nested tool", () => {
+    const first = "*** Begin Patch\n*** Add File: a.ts\n+one\n*** End Patch"
+    const second = "*** Begin Patch\n*** Add File: b.ts\n+two\n*** End Patch"
+    const source = [
+      `const patch = ${JSON.stringify(first)};`,
+      "await tools.apply_patch(patch);",
+      `await tools.apply_patch(${JSON.stringify(second)});`,
+    ].join("\n")
+
+    expect(extractApplyPatchInputs(source)).toEqual([first, second])
+    expect(parseCodexToolPatches("exec", source, "call-exec", "ts", "/workspace")).toHaveLength(2)
+  })
+
+  it("ignores patch-looking strings that are not passed to apply_patch", () => {
+    const patch = "*** Begin Patch\n*** Add File: ignored.ts\n+x\n*** End Patch"
+    expect(extractApplyPatchInputs(`const example = ${JSON.stringify(patch)};\ntext(example);`)).toEqual([])
   })
 })
