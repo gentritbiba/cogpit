@@ -147,6 +147,14 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
       })
     }
 
+    // In bypassPermissions mode the CLI normally never consults canUseTool for
+    // regular tools — the callback is registered only so AskUserQuestion (above)
+    // has somewhere to route its answers. If the CLI ever does call it, auto-
+    // allow instead of queuing an invisible permission request.
+    if (state.permissionMode === "bypassPermissions") {
+      return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
+    }
+
     if (state.sessionAllowedTools.has(toolName)) {
       return Promise.resolve<PermissionResult>({ behavior: "allow", updatedInput: input })
     }
@@ -201,7 +209,12 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     permissionMode: (state.permissionMode || "default") as PermissionMode,
     allowedTools: state.allowedTools.length > 0 ? state.allowedTools : undefined,
     disallowedTools: state.disallowedTools.length > 0 ? state.disallowedTools : undefined,
-    canUseTool: isBypass ? undefined : makeCanUseTool(state),
+    // Always registered, even in bypassPermissions: AskUserQuestion can only
+    // deliver answers through this callback. Without it the CLI errors the
+    // tool instantly ("Answer questions?") and the dashboard shows a dead
+    // question bar that swallows input. Regular tools still auto-allow in
+    // bypass mode (see makeCanUseTool).
+    canUseTool: makeCanUseTool(state),
     effort: effort as Options["effort"],
     enableFileCheckpointing: true,
     persistSession: true,

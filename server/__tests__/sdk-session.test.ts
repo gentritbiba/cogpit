@@ -251,6 +251,54 @@ describe("sdk-session AskUserQuestion handling", () => {
     })
     expect(sdkSessions.get("question-1")?.pendingUserQuestions.size).toBe(0)
   })
+
+  it("registers canUseTool in bypassPermissions mode and still blocks AskUserQuestion", async () => {
+    // Regression: canUseTool used to be omitted in bypass mode, so the CLI
+    // errored AskUserQuestion instantly ("Answer questions?") and the
+    // dashboard showed a dead question bar that swallowed all input.
+    const { createSDKSession, resolveUserQuestion, sdkSessions } = await loadModule()
+    createSDKSession({
+      sessionId: "question-bypass",
+      cwd: "/tmp",
+      message: "hi",
+      permissionMode: "bypassPermissions",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    expect(captured[0].options.canUseTool).toBeDefined()
+
+    const input = {
+      questions: [{ question: "Which option?", options: [{ label: "A" }, { label: "B" }] }],
+    }
+    const resultPromise = captured[0].options.canUseTool!("AskUserQuestion", input, {
+      toolUseID: "tool-question-bypass",
+    })
+
+    expect(sdkSessions.get("question-bypass")?.pendingUserQuestions.size).toBe(1)
+    expect(resolveUserQuestion("question-bypass", "tool-question-bypass", { "Which option?": "A" }))
+      .toEqual({ found: true })
+    await expect(resultPromise).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: { ...input, answers: { "Which option?": "A" } },
+    })
+  })
+
+  it("auto-allows regular tools via canUseTool in bypassPermissions mode", async () => {
+    const { createSDKSession, sdkSessions } = await loadModule()
+    createSDKSession({
+      sessionId: "bypass-regular",
+      cwd: "/tmp",
+      message: "hi",
+      permissionMode: "bypassPermissions",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    const input = { command: "ls" }
+    await expect(captured[0].options.canUseTool!("Bash", input, { toolUseID: "tool-bash-1" }))
+      .resolves.toEqual({ behavior: "allow", updatedInput: input })
+    // Must not queue a visible permission request in bypass mode
+    expect(sdkSessions.get("bypass-regular")?.pendingPermissions.size).toBe(0)
+  })
 })
 
 describe("sdk-session subagent watcher lifecycle", () => {

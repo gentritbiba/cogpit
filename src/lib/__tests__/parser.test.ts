@@ -1266,6 +1266,42 @@ describe("detectPendingInteraction", () => {
     expect(detectPendingInteraction(session)).toBeNull()
   })
 
+  it("returns null for errored AskUserQuestion when the agent continued afterwards", () => {
+    // Real-world case: in bypass mode (before canUseTool was always
+    // registered) the CLI errored the tool instantly and the agent fell back
+    // to asking in plain text. The question is dead — showing the bar would
+    // hijack the input into an unanswerable question.
+    const session = makeSessionWithLastToolCall(
+      "AskUserQuestion",
+      { questions: [{ question: "Q?", options: [{ label: "A" }] }] },
+      "Answer questions?",
+      true
+    )
+    const turn = session.turns[0]
+    turn.contentBlocks = [
+      { kind: "tool_calls", toolCalls: turn.toolCalls },
+      { kind: "text", text: ["The question dialog didn't go through, so plain text it is:"] },
+    ]
+    expect(detectPendingInteraction(session)).toBeNull()
+  })
+
+  it("still detects errored AskUserQuestion when nothing follows it (waiting prompt)", () => {
+    // Terminal sessions serialize a *waiting* prompt as an error tool_result
+    // with the prompt title and nothing after it — that one is answerable.
+    const session = makeSessionWithLastToolCall(
+      "AskUserQuestion",
+      { questions: [{ question: "Q?", options: [{ label: "A" }] }] },
+      "Answer questions?",
+      true
+    )
+    const turn = session.turns[0]
+    turn.contentBlocks = [
+      { kind: "text", text: ["Let me ask you something."] },
+      { kind: "tool_calls", toolCalls: turn.toolCalls },
+    ]
+    expect(detectPendingInteraction(session)).not.toBeNull()
+  })
+
   it("returns null for AskUserQuestion with empty questions array", () => {
     const session = makeSessionWithLastToolCall(
       "AskUserQuestion",

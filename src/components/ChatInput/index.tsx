@@ -162,12 +162,13 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         toolUseId: interaction.toolUseId,
         answers: { [question.question]: answer },
       }),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({})) as { error?: string }
-      throw new Error(data.error ?? "Failed to submit answer")
-    }
-  }, [pendingInteraction, session?.sessionId])
+    }).catch(() => null)
+
+    // The question may no longer be answerable server-side (tool already
+    // errored, session restarted, …). Never swallow the user's text — deliver
+    // it as a regular message instead so the input can't appear frozen.
+    if (!res || !res.ok) onSend(answer)
+  }, [pendingInteraction, session?.sessionId, onSend])
 
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
     setText(`/${suggestion.name} `)

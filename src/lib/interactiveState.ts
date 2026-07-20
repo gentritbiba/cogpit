@@ -38,6 +38,22 @@ export function isStuckInteractiveLoop(turns: Turn[], toolName: string): boolean
 }
 
 /**
+ * Check whether the turn contains assistant content (text/thinking/tool calls)
+ * chronologically after the block holding the given tool call — meaning the
+ * agent already moved past it and the prompt is no longer answerable.
+ */
+function agentContinuedAfterToolCall(turn: Turn, toolCallId: string): boolean {
+  const blocks = turn.contentBlocks
+  const blockIndex = blocks.findIndex(
+    (block) => block.kind === "tool_calls" && block.toolCalls.some((tc) => tc.id === toolCallId),
+  )
+  if (blockIndex === -1) return false
+  return blocks.slice(blockIndex + 1).some(
+    (block) => block.kind === "text" || block.kind === "thinking" || block.kind === "tool_calls",
+  )
+}
+
+/**
  * Detect if the session is waiting for user interaction (plan approval or
  * AskUserQuestion). Returns the interaction state or null.
  */
@@ -59,6 +75,12 @@ export function detectPendingInteraction(session: ParsedSession): PendingInterac
 
   // Suppress if the agent is stuck re-calling the same interactive tool
   if (isStuckInteractiveLoop(turns, name)) return null
+
+  // If the tool call errored and the agent kept going (more assistant content
+  // after it in the same turn), the prompt is dead — e.g. AskUserQuestion
+  // failed instantly and the agent fell back to plain text. A genuinely
+  // pending prompt blocks the turn, so nothing can follow it.
+  if (lastToolCall.isError && agentContinuedAfterToolCall(lastTurn, lastToolCall.id)) return null
 
   const input = lastToolCall.input as Record<string, unknown>
 
