@@ -43,7 +43,7 @@ const ACTIVE_STATUSES = new Set(["thinking", "tool_use", "processing"])
 // ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
 export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) {
-  const { state: { activeTurnIndex, activeToolCallId, expandAll } } = useAppContext()
+  const { state: { activeTurnIndex, activeToolCallId, expandAll }, isMobile } = useAppContext()
   const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
 
   const isAgentActive = isLive && session !== null && index === session.turns.length - 1
@@ -72,6 +72,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       isAgentActive={isAgentActive}
       isTurnDone={isTurnDone}
       isSubAgentView={isSubAgentView}
+      isMobile={isMobile}
       cwd={cwd}
       skillMetadata={skillMetadata}
       onRestoreToHere={isSubAgentView ? undefined : undoRedo.requestUndo}
@@ -94,6 +95,7 @@ interface TurnSectionInnerProps {
   isAgentActive: boolean
   isTurnDone: boolean
   isSubAgentView: boolean
+  isMobile: boolean
   cwd: string
   skillMetadata: Map<string, SkillMeta>
   onRestoreToHere?: (turnIndex: number) => void
@@ -112,6 +114,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   isAgentActive,
   isTurnDone,
   isSubAgentView,
+  isMobile,
   cwd,
   skillMetadata,
   onRestoreToHere,
@@ -142,7 +145,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
     <div
       ref={ref}
       className={cn(
-        "group relative py-5 px-4",
+        "group relative",
+        isMobile ? "px-1 py-3" : "px-4 py-5",
         isActive && "ring-1 ring-blue-500/30",
       )}
     >
@@ -151,19 +155,24 @@ const TurnSectionInner = memo(function TurnSectionInner({
         turn={turn}
         branchCount={branchCount}
         isTurnDone={isTurnDone}
+        isMobile={isMobile}
         onRestoreToHere={onRestoreToHere}
         onOpenBranches={onOpenBranches}
       />
 
       {isNear ? (
-        <div ref={contentRef} className="space-y-3">
+        <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
           {turn.userMessage && (
-            <div className={cn("rounded-2xl p-3", isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user)}>
+            <div className={cn(
+              isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
+              isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
+            )}>
               <UserMessage
                 content={turn.userMessage}
                 timestamp={turn.timestamp}
                 onEditCommand={onEditCommand}
                 onExpandCommand={onExpandCommand}
+                compact={isMobile}
               />
             </div>
           )}
@@ -175,6 +184,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
             activeToolCallId={activeToolCallId}
             isAgentActive={isAgentActive}
             isSubAgentView={isSubAgentView}
+            isMobile={isMobile}
             skillMetadata={skillMetadata}
           />
 
@@ -202,6 +212,7 @@ function TurnHeader({
   turn,
   branchCount,
   isTurnDone,
+  isMobile,
   onRestoreToHere,
   onOpenBranches,
 }: {
@@ -209,6 +220,7 @@ function TurnHeader({
   turn: Turn
   branchCount: number
   isTurnDone: boolean
+  isMobile: boolean
   onRestoreToHere?: (turnIndex: number) => void
   onOpenBranches?: (turnIndex: number) => void
 }) {
@@ -216,20 +228,30 @@ function TurnHeader({
   const durationMs = isTurnDone ? getTurnDuration(turn) : null
 
   return (
-    <div className="flex items-center gap-2 mb-4">
-      <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
-        {index + 1}
-      </div>
+    <div className={cn("flex items-center", isMobile ? "mb-2 gap-1.5" : "mb-4 gap-2")}>
+      {isMobile ? (
+        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+          Turn {index + 1}
+        </span>
+      ) : (
+        <div className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/50 bg-elevation-2 font-mono text-[10px] text-muted-foreground">
+          {index + 1}
+        </div>
+      )}
       <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
-      {turn.timestamp && (
+      {!isMobile && turn.timestamp && (
         <span className="text-[10px] text-muted-foreground/40">
           {new Date(turn.timestamp).toLocaleTimeString()}
         </span>
       )}
       {onRestoreToHere && (
         <button
+          type="button"
           onClick={() => onRestoreToHere(index)}
-          className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] text-muted-foreground hover:text-amber-400 ml-auto"
+          className={cn(
+            "ml-auto flex items-center gap-1 text-[10px] text-muted-foreground transition-opacity hover:text-amber-400",
+            isMobile ? "rounded-md p-1 opacity-60" : "opacity-0 group-hover:opacity-100",
+          )}
           title="Undo this turn and all after it"
         >
           <RotateCcw className="size-3" />
@@ -287,6 +309,7 @@ function ContentBlocks({
   activeToolCallId,
   isAgentActive,
   isSubAgentView,
+  isMobile,
   skillMetadata,
 }: {
   blocks: TurnContentBlock[]
@@ -295,6 +318,7 @@ function ContentBlocks({
   activeToolCallId: string | null
   isAgentActive: boolean
   isSubAgentView: boolean
+  isMobile: boolean
   skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
@@ -310,7 +334,7 @@ function ContentBlocks({
       // Single tool_calls group with no thinking → render as orphan tool calls
       if (items.length === 1 && items[0].kind === "tool_calls") {
         elements.push(
-          <div key={`tools-${i}`} className="border-l-2 border-border/40 pl-3 ml-1">
+          <div key={`tools-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -323,7 +347,7 @@ function ContentBlocks({
       // Mixed or multiple items → grouped collapsible
       } else {
         elements.push(
-          <div key={`activity-${i}`} className="border-l-2 border-border/40 pl-3 ml-1">
+          <div key={`activity-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -352,9 +376,10 @@ function ContentBlocks({
               model={model}
               tokenUsage={null}
               timestamp={block.timestamp}
+              compact={isMobile}
             />
             {hasFollowingActivity && (
-              <div className="mt-1.5 border-l-2 border-border/40 pl-3 ml-1">
+              <div className={cn("mt-1.5 border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
@@ -378,14 +403,14 @@ function ContentBlocks({
         <div
           key={`queued-prompt-${block.timestamp ?? "untimed"}-${block.content}`}
           className={cn(
-            "rounded-2xl p-3",
+            isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
             isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
           )}
         >
           <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-blue-400/70">
             Sent while Claude was working
           </div>
-          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} />
+          <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact={isMobile} />
         </div>
       )
       i++
@@ -394,7 +419,7 @@ function ContentBlocks({
 
     if (block.kind === "sub_agent") {
       elements.push(
-        <div key={`agent-${i}`} className="border-l-2 border-indigo-500/30 pl-3 ml-1">
+        <div key={`agent-${i}`} className={cn("border-l-2 border-indigo-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
           <SubAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -404,7 +429,7 @@ function ContentBlocks({
 
     if (block.kind === "background_agent") {
       elements.push(
-        <div key={`bg-agent-${i}`} className="border-l-2 border-violet-500/30 pl-3 ml-1">
+        <div key={`bg-agent-${i}`} className={cn("border-l-2 border-violet-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )

@@ -8,7 +8,7 @@ import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { Dashboard } from "@/components/Dashboard"
-import { MobileNav } from "@/components/MobileNav"
+import { MobileNav, type MobileTab } from "@/components/MobileNav"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { GoalBar } from "@/components/GoalBar"
@@ -328,6 +328,7 @@ export default function App() {
 
   // Mobile file changes bottom sheet
   const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
   // Whether to actually show the file changes panel (toggle on + has changes)
   const showFileChangesPanel = hasFileChanges && panels.showFileChanges
@@ -670,6 +671,10 @@ export default function App() {
     workerParse,
     onBeforeSwitch: handlePreSessionSwitch,
   })
+  const changeMobileTab = (tab: MobileTab) => {
+    setMobileSearchOpen(false)
+    actions.handleMobileTabChange(tab)
+  }
 
   const goHome = actions.handleGoHome
   const handleOpenPaletteProject = useCallback((dirName: string) => {
@@ -1095,6 +1100,7 @@ export default function App() {
         chatInputRef.current?.focus()
       }}
       onUpdateStatus={processPanel.updateProcessStatus}
+      mobile={isMobile}
     />
   )
 
@@ -1118,6 +1124,7 @@ export default function App() {
       sessionSource={state.sessionSource}
       backgroundAgents={backgroundAgents}
       onLoadSession={handlers.handleLoadSessionScrollAware}
+      mobile={isMobile}
     />
   )
 
@@ -1139,41 +1146,56 @@ export default function App() {
 
   const isNewSession = !!state.pendingDirName && !state.session
 
+  const goalBarNode = currentAgentKind && state.session ? (
+    <GoalBar
+      agentKind={currentAgentKind}
+      session={state.session}
+      onSendCommand={claudeChat.sendMessage}
+    />
+  ) : null
+
+  const chatInputSettingsNode = (
+    <ChatInputSettings
+      agentKind={currentAgentKind ?? "claude"}
+      onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
+      selectedModel={selectedModel}
+      onModelChange={setSelectedModel}
+      selectedEffort={effectiveEffort}
+      onEffortChange={setSelectedEffort}
+      fastModeEnabled={fastModeActive}
+      onFastModeEnabledChange={fastModeAvailable ? setFastModeEnabled : undefined}
+      isNewSession={isNewSession}
+      worktreeEnabled={worktreeEnabled}
+      onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
+      ultracodeEnabled={ultracodeActive}
+      onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
+      onApplySettings={handlers.handleApplySettings}
+      activeModelId={state.session?.model}
+      mcpServers={supportsMcp ? mcpData.servers : undefined}
+      selectedMcpServers={supportsMcp ? mcpData.selectedServers : undefined}
+      onToggleMcpServer={supportsMcp ? mcpData.toggleServer : undefined}
+      onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
+      mcpLoading={supportsMcp ? mcpData.loading : undefined}
+      onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
+      permissionMode={perms.config.mode}
+      onPermissionModeChange={perms.setMode}
+      mobileExtra={isMobile ? goalBarNode : undefined}
+      mobile={isMobile}
+    />
+  )
+
   const chatInputNode = (
     <div className="shrink-0 bg-elevation-1">
-      {currentAgentKind && state.session && (
-        <GoalBar
-          agentKind={currentAgentKind}
-          session={state.session}
-          onSendCommand={claudeChat.sendMessage}
-        />
-      )}
-      <ChatInput ref={chatInputRef} allowImages={imageInputAvailable} agentKind={currentAgentKind} projectCwd={currentCwd} />
-      <ChatInputSettings
-        agentKind={currentAgentKind ?? "claude"}
-        onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
-        selectedModel={selectedModel}
-        onModelChange={setSelectedModel}
-        selectedEffort={effectiveEffort}
-        onEffortChange={setSelectedEffort}
-        fastModeEnabled={fastModeActive}
-        onFastModeEnabledChange={fastModeAvailable ? setFastModeEnabled : undefined}
-        isNewSession={isNewSession}
-        worktreeEnabled={worktreeEnabled}
-        onWorktreeEnabledChange={isNewSession && supportsWorktrees ? setWorktreeEnabled : undefined}
-        ultracodeEnabled={ultracodeActive}
-        onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
-        onApplySettings={handlers.handleApplySettings}
-        activeModelId={state.session?.model}
-        mcpServers={supportsMcp ? mcpData.servers : undefined}
-        selectedMcpServers={supportsMcp ? mcpData.selectedServers : undefined}
-        onToggleMcpServer={supportsMcp ? mcpData.toggleServer : undefined}
-        onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
-        mcpLoading={supportsMcp ? mcpData.loading : undefined}
-        onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
-        permissionMode={perms.config.mode}
-        onPermissionModeChange={perms.setMode}
+      {!isMobile && goalBarNode}
+      <ChatInput
+        ref={chatInputRef}
+        allowImages={imageInputAvailable}
+        agentKind={currentAgentKind}
+        projectCwd={currentCwd}
+        compact={isMobile}
+        leadingAccessory={isMobile ? chatInputSettingsNode : undefined}
       />
+      {!isMobile && chatInputSettingsNode}
     </div>
   )
 
@@ -1207,9 +1229,11 @@ export default function App() {
       <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
         {backgroundServers}
         <UpdateBanner />
-        <div className="flex items-center gap-2 border-b border-border/40 bg-elevation-0 px-3 py-1">
-          <DeviceSwitcher />
-        </div>
+        {!(state.mobileTab === "chat" && state.session && state.mainView !== "teams") && (
+          <div className="flex h-10 shrink-0 items-center border-b border-border/40 bg-elevation-0 px-1.5">
+            <DeviceSwitcher compact />
+          </div>
+        )}
         <main ref={swipeRef} className="flex flex-1 min-h-0 overflow-hidden">
           {state.mobileTab === "sessions" && (
             <SessionBrowser
@@ -1255,12 +1279,17 @@ export default function App() {
                     hasFileChanges={hasFileChanges}
                     onShowWorkflows={handleShowWorkflows}
                     workflowCount={workflowBadgeCount}
+                    onSearch={() => setMobileSearchOpen(true)}
+                    expandAll={state.expandAll}
+                    onToggleExpandAll={handleToggleExpandAll}
                   />
-                  <SessionStatusBar
-                    session={state.session}
-                    thinkingEnabled={state.session.turns.some((t) => t.thinking.length > 0)}
+                  <ChatArea
+                    searchInputRef={searchInputRef}
+                    hasMore={chunkedSession.hasMore}
+                    onLoadMore={chunkedSession.loadMore}
+                    mobileSearchOpen={mobileSearchOpen}
+                    onMobileSearchClose={() => setMobileSearchOpen(false)}
                   />
-                  <ChatArea searchInputRef={searchInputRef} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
                 </div>
               ) : state.pendingDirName ? (
                 <div className="flex flex-1 min-h-0 flex-col">
@@ -1337,7 +1366,7 @@ export default function App() {
           )}
         </main>
 
-        {processPanelNode}
+        {state.mobileTab === "chat" && processPanelNode}
         {workflowsPanelNode}
         {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && (
           <>
@@ -1348,10 +1377,8 @@ export default function App() {
 
         <MobileNav
           activeTab={state.mobileTab}
-          onTabChange={actions.handleMobileTabChange}
+          onTabChange={changeMobileTab}
           hasTeam={!!teamContext}
-          hasFileChanges={hasFileChanges}
-          onShowFileChanges={() => setShowMobileFileChanges(true)}
         />
 
         {undoConfirmDialog}

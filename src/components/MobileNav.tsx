@@ -1,6 +1,6 @@
 import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
-import { MessageSquare, FolderOpen, BarChart3, Users, FileCode2 } from "lucide-react"
+import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -20,8 +20,6 @@ interface MobileNavProps {
   activeTab: MobileTab
   onTabChange: (tab: MobileTab) => void
   hasTeam: boolean
-  hasFileChanges?: boolean
-  onShowFileChanges?: () => void
 }
 
 const TAB_DEFINITIONS: TabDefinition[] = [
@@ -35,8 +33,6 @@ export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
   hasTeam,
-  hasFileChanges,
-  onShowFileChanges,
 }: MobileNavProps) {
   const { session, isLive } = useSessionContext()
   const hasSession = session !== null
@@ -47,50 +43,39 @@ export const MobileNav = memo(function MobileNav({
   })
 
   return (
-    <nav className="flex shrink-0 items-stretch border-t border-border/50 bg-elevation-1 depth-mid pb-[env(safe-area-inset-bottom)]" role="tablist" aria-label="Navigation">
+    <nav
+      className="flex shrink-0 items-stretch border-t border-border/40 bg-elevation-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      aria-label="Navigation"
+    >
       {visibleTabs.map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
         return (
           <button
             key={tab.id}
-            role="tab"
-            aria-selected={isActive}
+            type="button"
+            aria-current={isActive ? "page" : undefined}
             aria-label={tab.label}
+            title={tab.label}
             onClick={() => { hapticLight(); onTabChange(tab.id) }}
             className={cn(
-              "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
-              "active:scale-95 active:bg-elevation-2",
-              isActive ? "text-blue-400" : "text-muted-foreground",
+              "flex min-h-11 flex-1 items-center justify-center transition-colors duration-150",
+              "active:bg-elevation-2",
+              isActive ? "text-primary" : "text-muted-foreground",
             )}
           >
-            <div className="relative">
-              {isActive && (
-                <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-blue-400" />
-              )}
-              <Icon className="size-5" />
+            <div className={cn(
+              "relative flex size-8 items-center justify-center rounded-xl transition-colors",
+              isActive && "bg-primary/10",
+            )}>
+              <Icon className="size-[18px]" />
               {tab.id === "chat" && isLive && (
                 <LiveIndicator className="absolute -right-1 -top-1" />
               )}
             </div>
-            <span className="text-[10px] font-medium">{tab.label}</span>
           </button>
         )
       })}
-      {hasFileChanges && onShowFileChanges && (
-        <button
-          aria-label="File changes"
-          onClick={() => { hapticLight(); onShowFileChanges() }}
-          className={cn(
-            "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors duration-150 min-h-[56px]",
-            "active:scale-95 active:bg-elevation-2",
-            "text-amber-400",
-          )}
-        >
-          <FileCode2 className="size-5" />
-          <span className="text-[10px] font-medium">Files</span>
-        </button>
-      )}
     </nav>
   )
 })

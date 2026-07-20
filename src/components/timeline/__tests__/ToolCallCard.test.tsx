@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest"
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { getToolSummary, ToolCallCard } from "../ToolCallCard"
 import type { ToolCall } from "@/lib/types"
@@ -24,11 +24,13 @@ vi.mock("@/lib/shiki", () => ({
 }))
 
 // Mock window.matchMedia — required by useIsMobile
+let mobileViewport = false
+
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
+      matches: mobileViewport,
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -410,5 +412,64 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     await waitFor(() => {
       expect(screen.getByText("Session not found")).toBeTruthy()
     })
+  })
+})
+
+describe("ToolCallCard mobile AskUserQuestion rendering", () => {
+  const questions = [
+    { question: "What should we do next?", options: [{ label: "Continue" }, { label: "Pause" }] },
+  ]
+
+  function makeAskUserQuestionCall(result: string | null): ToolCall {
+    return {
+      id: "mobile-question-id",
+      name: "AskUserQuestion",
+      input: { questions },
+      result,
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+  }
+
+  beforeEach(() => {
+    mobileViewport = true
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    })
+  })
+
+  afterEach(() => {
+    mobileViewport = false
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+    })
+  })
+
+  it("renders a completed question as a compact human-labeled row and expands it on tap", () => {
+    const toolCall = makeAskUserQuestionCall("User chose Continue")
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+
+    expect(screen.getByText("Question")).toBeTruthy()
+    expect(screen.queryByText("Input")).toBeNull()
+    expect(screen.queryByText("Result")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Question tool call" }))
+
+    expect(screen.getByText("Input")).toBeTruthy()
+    expect(screen.getByText("Result")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Expand Question tool call" })).toBeNull()
+  })
+
+  it("keeps a live active question expanded and actionable", () => {
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    expect(screen.getByText("Question")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Expand Question tool call" })).toBeNull()
+    expect(screen.getByText("Continue")).toBeTruthy()
+    expect(screen.getByText("Pause")).toBeTruthy()
+    expect(screen.getByText("Send answer")).toBeTruthy()
   })
 })

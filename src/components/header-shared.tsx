@@ -72,6 +72,7 @@ interface ContextBadgeProps {
   rawMessages: readonly RawMessage[]
   showRemaining?: boolean
   showTooltip?: boolean
+  warnOnly?: boolean
 }
 
 function getContextColors(pctLeft: number): {
@@ -96,11 +97,13 @@ export const ContextBadge = memo(function ContextBadge({
   rawMessages,
   showRemaining = false,
   showTooltip = false,
+  warnOnly = false,
 }: ContextBadgeProps) {
   const ctx = getContextUsage(rawMessages)
   if (!ctx) return null
 
   const pctLeft = Math.max(0, 100 - ctx.percent)
+  if (warnOnly && pctLeft >= 30) return null
   const remaining = Math.max(0, ctx.compactAt - ctx.used)
   const colors = getContextColors(pctLeft)
 

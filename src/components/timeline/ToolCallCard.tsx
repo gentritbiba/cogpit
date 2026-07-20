@@ -161,6 +161,7 @@ function ToggleButton({
   const Chevron = isOpen ? ChevronDown : ChevronRight
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         "text-[10px] flex items-center gap-0.5 transition-colors",
@@ -469,8 +470,17 @@ interface ToolCallCardProps {
   skillMetadata?: Map<string, SkillMeta>
 }
 
-/** Low-signal tools that are collapsed to a single line on mobile by default. */
-const COMPACT_MOBILE_TOOLS = new Set(["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Task", "Agent", "EnterPlanMode", "ExitPlanMode", "Monitor", "CronList", "ToolSearch"])
+const MOBILE_TOOL_LABELS: Record<string, string> = {
+  AskUserQuestion: "Question",
+  Bash: "Command",
+  exec: "Command",
+  Task: "Agent",
+  WebFetch: "Fetch",
+  WebSearch: "Search",
+  EnterPlanMode: "Plan mode",
+  ExitPlanMode: "Plan review",
+  ToolSearch: "Tool search",
+}
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
   const { session } = useSessionContext()
@@ -479,9 +489,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const [resultOpen, setResultOpen] = useState(false)
   const [resultExpanded, setResultExpanded] = useState(false)
   const [diffOpen, setDiffOpen] = useState(false)
-  // On mobile, low-signal tools are collapsed to a single line by default
+  // Historical tool calls are one-line rows on mobile. Live tools remain open
+  // so questions, approvals, and streaming output stay actionable.
   const [mobileExpanded, setMobileExpanded] = useState(false)
-  const isCompactMobile = isMobile && COMPACT_MOBILE_TOOLS.has(toolCall.name) && !expandAll && !mobileExpanded
+  const isHistoricalTool = toolCall.result !== null || !isAgentActive
+  const isCompactMobile = isMobile && isHistoricalTool && !expandAll && !mobileExpanded
+  const displayName = isMobile ? (MOBILE_TOOL_LABELS[toolCall.name] ?? toolCall.name) : toolCall.name
 
   const showInput = expandAll || inputOpen
   const showResult = expandAll || resultOpen
@@ -514,37 +527,64 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   return (
     <div
       className={cn(
-        "py-1.5",
-        toolCall.isError && "bg-red-950/10 rounded-md px-2",
-        isCompactMobile && "cursor-pointer active:bg-white/[0.03] rounded-sm",
+        isCompactMobile ? "py-1" : "py-1.5",
+        toolCall.isError && !isCompactMobile && "rounded-md bg-red-950/10 px-2",
       )}
-      onClick={isCompactMobile ? handleCompactTap : undefined}
     >
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
+      {isCompactMobile ? (
+        <button
+          type="button"
+          className="flex w-full items-center gap-1.5 rounded-sm text-left active:bg-white/[0.03]"
+          onClick={handleCompactTap}
+          aria-label={`Expand ${displayName} tool call`}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className={cn(
+                "h-4 shrink-0 px-1 py-0 font-mono text-[10px]",
+                getToolBadgeStyle(toolCall.name),
+              )}
+              title={toolCall.name}
+            >
+              {displayName}
+            </Badge>
+            {summary && (
+              <span className="truncate font-mono text-[11px] text-muted-foreground">
+                {summary}
+              </span>
+            )}
+          </div>
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" />
+          <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
+        </button>
+      ) : (
+        <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")}>
+        <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
           <Badge
             variant="outline"
             className={cn(
-              "text-[11px] px-1.5 py-0 h-5 font-mono shrink-0",
+              "shrink-0 px-1.5 py-0 font-mono",
+              isMobile ? "h-4 text-[10px]" : "h-5 text-[11px]",
               getToolBadgeStyle(toolCall.name)
             )}
+            title={toolCall.name}
           >
-            {toolCall.name}
+            {displayName}
           </Badge>
           {summary && (
-            <span className="text-xs text-muted-foreground truncate font-mono">
+            <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
               {summary}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Hide timestamp on mobile compact mode to save space */}
-          {toolCall.timestamp && !isCompactMobile && (
+          {toolCall.timestamp && !isMobile && (
             <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
               {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </span>
           )}
-          {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && (
+          {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
             <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
           )}
           {toolCall.outputReplacedByHook && (
@@ -553,12 +593,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
       </div>
+      )}
 
       {skillMeta && !isCompactMobile && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground/60 font-mono">
           <span>source: {skillMeta.source}</span>
           {skillMeta.filePath && !isRemoteDeviceActive() && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation()
                 authFetch("/api/open-in-editor", {
@@ -659,6 +701,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           )}
           {isLongResult && (
             <button
+              type="button"
               onClick={() => setResultExpanded(!resultExpanded)}
               className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
             >

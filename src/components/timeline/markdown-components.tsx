@@ -234,7 +234,7 @@ export const markdownComponents: Components = {
   // ── Paragraph ──────────────────────────────────────────────────────────────
   p({ children }) {
     return (
-      <p className="my-2 leading-relaxed text-foreground/90 first:mt-0 last:mb-0">
+      <p className="my-1.5 leading-[1.55] text-foreground/90 first:mt-0 last:mb-0 md:my-2 md:leading-relaxed">
         {children}
       </p>
     )
@@ -243,7 +243,7 @@ export const markdownComponents: Components = {
   // ── Blockquote ─────────────────────────────────────────────────────────────
   blockquote({ children }) {
     return (
-      <blockquote className="my-3 pl-4 border-l-[3px] border-blue-400/40 bg-blue-500/5 rounded-r-md py-2 pr-3 text-foreground/80 [&>p]:my-1">
+      <blockquote className="my-2 rounded-r-md border-l-[3px] border-blue-400/40 bg-blue-500/5 py-1.5 pl-3 pr-2.5 text-foreground/80 [&>p]:my-1 md:my-3 md:py-2 md:pl-4 md:pr-3">
         {children}
       </blockquote>
     )
@@ -252,21 +252,21 @@ export const markdownComponents: Components = {
   // ── Lists ──────────────────────────────────────────────────────────────────
   ul({ children }) {
     return (
-      <ul className="my-2 pl-6 space-y-1 list-disc marker:text-muted-foreground/50 [&_ul]:my-1 [&_ol]:my-1">
+      <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:space-y-1 md:pl-6">
         {children}
       </ul>
     )
   },
   ol({ children }) {
     return (
-      <ol className="my-2 pl-6 space-y-1 list-decimal marker:text-muted-foreground/50 [&_ul]:my-1 [&_ol]:my-1">
+      <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:space-y-1 md:pl-6">
         {children}
       </ol>
     )
   },
   li({ children }) {
     return (
-      <li className="text-foreground/90 leading-relaxed pl-1">
+      <li className="pl-1 leading-[1.55] text-foreground/90 md:leading-relaxed">
         {children}
       </li>
     )

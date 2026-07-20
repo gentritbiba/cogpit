@@ -11,7 +11,10 @@ interface AgentContextBarProps {
   sessionSource?: { dirName: string; fileName: string } | null
   backgroundAgents?: BgAgent[]
   onLoadSession?: (dirName: string, fileName: string) => void
+  mobile?: boolean
 }
+
+const EMPTY_BACKGROUND_AGENTS: BgAgent[] = []
 
 type AgentStatus = "running" | "done" | "failed" | "seen"
 
@@ -158,8 +161,9 @@ function formatDuration(durationMs: number | undefined): string | null {
 export function AgentContextBar({
   session,
   sessionSource,
-  backgroundAgents = [],
+  backgroundAgents = EMPTY_BACKGROUND_AGENTS,
   onLoadSession,
+  mobile = false,
 }: AgentContextBarProps): React.ReactElement | null {
   const [expanded, setExpanded] = useState(false)
   const streamingOverlay = useStreamingOverlay()
@@ -171,6 +175,7 @@ export function AgentContextBar({
   if (agents.length === 0) return null
 
   const activeCount = agents.filter((agent) => agent.status === "running").length
+  const featuredAgent = agents.find((agent) => agent.status === "running") ?? agents[0]
   const parentSessionId = sessionSource?.fileName.match(/^([^/]+)\.jsonl$/)?.[1] ?? null
 
   const openAgent = (agent: AgentContextItem) => {
@@ -188,13 +193,19 @@ export function AgentContextBar({
   }
 
   return (
-    <div className="shrink-0 border-b border-border/40 bg-elevation-1 px-3 py-1.5">
+    <div className={cn(
+      "shrink-0 border-b border-border/40 bg-elevation-1",
+      mobile ? "px-2 py-1" : "px-3 py-1.5",
+    )}>
       <button
         type="button"
         aria-expanded={expanded}
         aria-controls="agent-context-details"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full min-w-0 items-center gap-2 text-left text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        className={cn(
+          "flex w-full min-w-0 items-center text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+          mobile ? "h-6 gap-1.5" : "gap-2",
+        )}
       >
         {expanded ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
         <Users className="size-3 shrink-0 text-cyan-400" />
@@ -203,14 +214,21 @@ export function AgentContextBar({
           {agents.length}
         </span>
         {activeCount > 0 && <span className="text-emerald-400">{activeCount} active</span>}
-        <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-          {agents.map((agent) => (
-            <span key={agent.agentId} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-elevation-2 px-1.5 py-0.5 text-[10px]">
-              <span className={cn("size-1.5 shrink-0 rounded-full", agent.status === "running" ? "animate-pulse bg-emerald-400" : agent.status === "failed" ? "bg-red-400" : "bg-muted-foreground/50")} />
-              <span className="max-w-32 truncate">{agentLabel(agent)}</span>
-            </span>
-          ))}
-        </div>
+        {mobile && featuredAgent ? (
+          <span className="ml-auto flex min-w-0 items-center gap-1 truncate text-[10px]">
+            <span className={cn("size-1.5 shrink-0 rounded-full", featuredAgent.status === "running" ? "animate-pulse bg-emerald-400" : featuredAgent.status === "failed" ? "bg-red-400" : "bg-muted-foreground/50")} />
+            <span className="truncate">{agentLabel(featuredAgent)}</span>
+          </span>
+        ) : (
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+            {agents.map((agent) => (
+              <span key={agent.agentId} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-elevation-2 px-1.5 py-0.5 text-[10px]">
+                <span className={cn("size-1.5 shrink-0 rounded-full", agent.status === "running" ? "animate-pulse bg-emerald-400" : agent.status === "failed" ? "bg-red-400" : "bg-muted-foreground/50")} />
+                <span className="max-w-32 truncate">{agentLabel(agent)}</span>
+              </span>
+            ))}
+          </div>
+        )}
       </button>
 
       {expanded && (

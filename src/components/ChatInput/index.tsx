@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef } from "react"
+import { useState, useRef, useCallback, useEffect, useMemo, memo, useImperativeHandle, forwardRef, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
@@ -30,6 +30,10 @@ interface ChatInputProps {
   allowImages?: boolean
   agentKind?: AgentKind | null
   projectCwd?: string | null
+  /** Mobile-only control placed at the leading edge of the composer. */
+  leadingAccessory?: ReactNode
+  /** Enables the compact mobile composer treatment. */
+  compact?: boolean
 }
 
 /**
@@ -73,10 +77,11 @@ function autoResize(el: HTMLTextAreaElement | null, currentlyMultiline: boolean)
   return needsMultiline
 }
 
-function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean, hasPermissionRequests?: boolean, isSteering?: boolean): string {
+function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConnected: boolean, hasPermissionRequests?: boolean, isSteering?: boolean, compact?: boolean): string {
   if (hasPermissionRequests) return "Resolve approval to continue..."
   if (isPlanApproval) return "Provide feedback to request changes..."
   if (isUserQuestion) return "Type a custom response..."
+  if (compact) return isSteering ? "Steer…" : "Message…"
   if (isSteering) return "Steer the active turn… (Enter to send)"
   if (isConnected) return "Message... (Enter to send)"
   return "Send a message... (Enter to send)"
@@ -89,7 +94,7 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
   return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
 }
 
-export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd }, ref) {
+export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, compact = false }, ref) {
   const {
     session,
     isLive,
@@ -256,7 +261,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   return (
     <div
-      className={cn("border-border/50 bg-elevation-1 pt-2.5 pb-0 relative", isDragOver && "ring-2 ring-blue-500/50 ring-inset")}
+      className={cn(
+        "relative border-border/50 bg-elevation-1 pb-0",
+        compact ? "px-2 pt-1.5" : "pt-2.5",
+        isDragOver && "ring-2 ring-blue-500/50 ring-inset",
+      )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -311,10 +320,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}
 
         <div className={cn(
-          "relative bg-elevation-2 border rounded-3xl chat-input-3d overflow-hidden",
+          "relative overflow-hidden border bg-elevation-2 chat-input-3d",
+          compact ? "rounded-2xl" : "rounded-3xl",
           getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
           "focus-within:ring-2",
-          isMultiline || hasPermissions ? "flex flex-col" : "flex items-end"
         )}>
           {hasPermissions && (
             <PermissionRequestBar
@@ -324,29 +333,45 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
               onRespondAll={respondAllPermissions}
             />
           )}
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            onFocus={() => {
-              // On mobile, scroll textarea into view after virtual keyboard opens
-              setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
-            }}
-            placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering)}
-            rows={1}
-            className={cn(
-              "w-full resize-none bg-transparent pl-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none",
-              isMultiline ? "py-3 pr-4" : "py-2.5 pr-2"
-            )}
-          />
           <div className={cn(
-            "flex items-center shrink-0",
-            isMultiline ? "px-2 pb-2 justify-end" : "pr-1.5 pb-1.5"
+            "grid min-w-0 items-end",
+            isMultiline ? "grid-cols-[1fr_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]",
           )}>
-            <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
-            <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
+            {leadingAccessory && (
+              <div className={cn(
+                "flex shrink-0 items-center",
+                isMultiline ? "col-start-1 row-start-2 pl-0.5 pb-0.5" : "col-start-1 row-start-1",
+              )}>
+                {leadingAccessory}
+              </div>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onFocus={() => {
+                // On mobile, scroll textarea into view after virtual keyboard opens
+                setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
+              }}
+              placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
+              rows={1}
+              className={cn(
+                "w-full resize-none bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none",
+                isMultiline
+                  ? cn("col-span-2 row-start-1", compact ? "py-2.5 pr-3" : "py-3 pr-4")
+                  : cn("col-start-2 row-start-1", compact ? "py-2 pr-1" : "py-2.5 pr-2"),
+                compact ? "pl-2 text-[13px]" : "pl-4 text-sm",
+              )}
+            />
+            <div className={cn(
+              "flex shrink-0 items-center justify-end",
+              isMultiline ? "col-start-2 row-start-2 px-1.5 pb-1.5" : "col-start-3 row-start-1 pr-1.5 pb-1.5",
+            )}>
+              <InputToolbar isPlanApproval={isPlanApproval} isUserQuestion={isUserQuestion} elapsedSec={elapsedSec} />
+              <ActionButtons hasContent={hasContent} onSubmit={handleSubmit} submitLabel={isSteering ? "Steer active turn" : "Send message"} />
+            </div>
           </div>
         </div>
         {status === "error" && error && <ErrorBanner error={error} />}

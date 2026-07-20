@@ -260,9 +260,10 @@ interface UserMessageProps {
   timestamp: string
   onEditCommand?: (commandName: string) => void
   onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
+  compact?: boolean
 }
 
-export const UserMessage = memo(function UserMessage({ content, timestamp, onEditCommand, onExpandCommand }: UserMessageProps) {
+export const UserMessage = memo(function UserMessage({ content, timestamp, onEditCommand, onExpandCommand, compact = false }: UserMessageProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [commandExpanded, setCommandExpanded] = useState(false)
@@ -407,7 +408,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {visibleText && (
-          <div className="max-w-none text-sm break-words overflow-hidden">
+          <div className={cn("max-w-none break-words overflow-hidden", compact ? "text-[13px] leading-[1.55]" : "text-sm")}>
             <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{visibleText}</ReactMarkdown>
           </div>
         )}
@@ -427,7 +428,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             )}
           </button>
         )}
-        {timestamp && (
+        {!compact && timestamp && (
           <div className="flex items-center mt-1.5 ml-auto">
             <span className="text-[10px] text-muted-foreground/50">
               {new Date(timestamp).toLocaleTimeString()}

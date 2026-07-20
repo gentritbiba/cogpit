@@ -11,6 +11,7 @@ import {
 import type { TokenUsage } from "@/lib/types"
 import { shortenModel, formatTokenCount } from "@/lib/format"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { cn } from "@/lib/utils"
 
 // ── Token usage tooltip ──────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ interface AssistantTextProps {
   model: string | null
   tokenUsage: TokenUsage | null
   timestamp?: string
+  compact?: boolean
 }
 
 export const AssistantText = memo(function AssistantText({
@@ -59,6 +61,7 @@ export const AssistantText = memo(function AssistantText({
   model,
   tokenUsage,
   timestamp,
+  compact = false,
 }: AssistantTextProps) {
   const markdownText = useMemo(() => preprocessImagePaths(text), [text])
   const [copied, copy] = useCopyWithFeedback()
@@ -67,7 +70,7 @@ export const AssistantText = memo(function AssistantText({
 
   return (
     <div className="group">
-      <div className="mb-1 flex min-h-6 items-center justify-end gap-1.5">
+      {!compact && <div className="mb-1 flex min-h-6 items-center justify-end gap-1.5">
         {tokenUsage && <TokenUsageBadge usage={tokenUsage} />}
         {model && (
           <span className="text-[10px] text-muted-foreground/40">
@@ -90,8 +93,8 @@ export const AssistantText = memo(function AssistantText({
         >
           {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
         </Button>
-      </div>
-      <div className="text-sm break-words overflow-hidden">
+      </div>}
+      <div className={cn("break-words overflow-hidden", compact ? "text-[13px] leading-[1.55]" : "text-sm")}>
         <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
       </div>
     </div>

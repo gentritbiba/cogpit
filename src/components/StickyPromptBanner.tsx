@@ -144,26 +144,24 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
   if (!promptText || !stickyTurn || stickyTurn.userMsgVisible) return null
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       aria-label={`Scroll to turn ${stickyTurn.index + 1} prompt`}
       className={cn(
         "absolute inset-x-0 top-0 z-20",
-        "bg-blue-950 border-b border-blue-500/20",
-        "px-3 py-1.5 flex items-center gap-2 cursor-pointer",
-        "transition-colors duration-200 hover:bg-blue-900"
+        "flex cursor-pointer items-center gap-1.5 border-b border-border/40 bg-elevation-2/95 px-2 py-1 backdrop-blur",
+        "transition-colors duration-200 hover:bg-elevation-3",
+        "md:gap-2 md:border-blue-500/20 md:bg-blue-950 md:px-3 md:py-1.5 md:hover:bg-blue-900",
       )}
       onClick={scrollToPrompt}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") scrollToPrompt() }}
     >
-      <span className="text-[11px] font-medium text-blue-400/80 shrink-0">
+      <span className="shrink-0 text-[10px] font-medium text-muted-foreground md:text-[11px] md:text-blue-400/80">
         Turn {stickyTurn.index + 1}
       </span>
-      <span className="text-xs text-blue-100/70 truncate min-w-0">
+      <span className="min-w-0 truncate text-[11px] text-foreground/70 md:text-xs md:text-blue-100/70">
         {promptText}
       </span>
-      <ChevronUp className="size-3 text-blue-400/60 shrink-0 ml-auto" />
-    </div>
+      <ChevronUp className="ml-auto size-3 shrink-0 text-muted-foreground md:text-blue-400/60" />
+    </button>
   )
 })

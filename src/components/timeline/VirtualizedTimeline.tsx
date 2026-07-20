@@ -120,7 +120,7 @@ export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
   }, [activeTurnIndex])
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-1 md:gap-3">
       {filteredTurns.map(({ turn, index }) => (
         <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
           <div ref={setTurnRef(index)} data-turn-index={index}>

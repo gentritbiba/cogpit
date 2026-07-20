@@ -110,11 +110,13 @@ function ProcessTab({
   isActive,
   onClick,
   onClose,
+  mobile,
 }: {
   process: ProcessEntry
   isActive: boolean
   onClick: () => void
   onClose: () => void
+  mobile: boolean
 }) {
   return (
     <div
@@ -129,7 +131,8 @@ function ProcessTab({
       }}
       title={process.source ?? process.name}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-medium transition-colors shrink-0",
+        "inline-flex shrink-0 items-center rounded-full text-[10px] font-medium transition-colors",
+        mobile ? "gap-1 px-1.5 py-0.5" : "gap-1.5 px-2.5 py-0.5",
         isActive
           ? "bg-elevation-2 text-foreground border border-border"
           : "text-muted-foreground hover:text-foreground hover:bg-elevation-2 border border-transparent"
@@ -146,6 +149,7 @@ function ProcessTab({
 
       <span className={cn(
         "inline-flex items-center rounded px-1 py-px text-[9px] border",
+        mobile && "hidden",
         TYPE_STYLES[process.type]
       )}>
         {process.type}
@@ -191,6 +195,7 @@ interface ProcessPanelProps {
   onRequestTerminal?: () => void
   onAddTerminalContext?: (text: string) => void
   onUpdateStatus?: (id: string, status: ProcessEntry["status"]) => void
+  mobile?: boolean
 }
 
 export const ProcessPanel = memo(function ProcessPanel({
@@ -203,6 +208,7 @@ export const ProcessPanel = memo(function ProcessPanel({
   onRequestTerminal,
   onAddTerminalContext,
   onUpdateStatus,
+  mobile = false,
 }: ProcessPanelProps) {
   const pty = usePty()
   const [height, setHeight] = useState(loadHeight)
@@ -251,7 +257,7 @@ export const ProcessPanel = memo(function ProcessPanel({
 
   return (
     <div className="flex shrink-0 flex-col border-t border-border/70 bg-elevation-0">
-      {!collapsed && activeProcess && (
+      {!mobile && !collapsed && activeProcess && (
         <div
           className="h-1 cursor-row-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors"
           onPointerDown={onPointerDown}
@@ -261,7 +267,10 @@ export const ProcessPanel = memo(function ProcessPanel({
         />
       )}
 
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-elevation-1 px-3">
+      <div className={cn(
+        "flex shrink-0 items-center border-b border-border bg-elevation-1",
+        mobile ? "h-7 gap-1 px-2" : "h-8 gap-2 px-3",
+      )}>
         <button
           type="button"
           className="flex items-center gap-1.5 hover:text-foreground transition-colors"
@@ -274,10 +283,10 @@ export const ProcessPanel = memo(function ProcessPanel({
           ) : (
             <ChevronDown className="size-3 text-muted-foreground" />
           )}
-          <span className="text-[11px] font-medium text-muted-foreground">Processes</span>
+          <span className={cn("text-[11px] font-medium text-muted-foreground", mobile && "sr-only")}>Processes</span>
         </button>
 
-        <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar ml-2">
+        <div className={cn("flex flex-1 items-center gap-1 overflow-x-auto no-scrollbar", !mobile && "ml-2")}>
           {processList.map((proc) => (
             <ProcessTab
               key={proc.id}
@@ -285,13 +294,14 @@ export const ProcessPanel = memo(function ProcessPanel({
               isActive={proc.id === activeProcessId}
               onClick={() => onSetActive(proc.id)}
               onClose={() => handleClose(proc)}
+              mobile={mobile}
             />
           ))}
         </div>
       </div>
 
       {!collapsed && activeProcess && (
-        <div className="flex flex-col" style={{ height }}>
+        <div className="flex flex-col" style={{ height: mobile ? "min(36dvh, 260px)" : height }}>
           {activeProcess.type === "task" ? (
             <ProcessOutput
               key={activeProcess.id}

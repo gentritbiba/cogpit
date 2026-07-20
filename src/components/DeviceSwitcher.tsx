@@ -34,12 +34,13 @@ function StatusDot({ state }: { state: PublicDevice["runtime"]["authState"] }) {
   )
 }
 
-export function DeviceSwitcher() {
+export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
   const { devices, activeDeviceId, activeDevice, refresh, testDevice } = useDevices()
   const [dialogMode, setDialogMode] = useState<null | "add" | "manage">(null)
 
   const activeName = activeDevice?.name ?? "This machine"
   const activeIsRemote = activeDeviceId !== LOCAL_DEVICE_ID
+  const menuItemClass = cn(MENU_ITEM_CLASS, compact && "min-h-10")
 
   // Probe every device once when the dropdown opens — the only probing that
   // happens; there is no background polling.
@@ -61,12 +62,15 @@ export function DeviceSwitcher() {
             <button
               type="button"
               aria-label="Switch device"
-              className="mr-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-elevation-2 hover:text-foreground"
+              className={cn(
+                "flex items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-elevation-2 hover:text-foreground",
+                compact ? "h-10 max-w-[120px] gap-1" : "mr-1 gap-1.5 py-1",
+              )}
             />
           }
         >
           {activeIsRemote ? <Server className="size-3 text-blue-400" /> : <Laptop className="size-3" />}
-          <span className="max-w-[140px] truncate">{activeName}</span>
+          <span className={cn("truncate", compact ? "max-w-[88px]" : "max-w-[140px]")}>{activeName}</span>
           <ChevronDown className="size-3 opacity-60" />
         </Menu.Trigger>
 
@@ -78,7 +82,7 @@ export function DeviceSwitcher() {
               </div>
 
               <Menu.Item
-                className={MENU_ITEM_CLASS}
+                className={menuItemClass}
                 onClick={() => switchDevice(LOCAL_DEVICE_ID)}
               >
                 <Laptop className="size-4 shrink-0 text-muted-foreground" />
@@ -93,7 +97,7 @@ export function DeviceSwitcher() {
                 return (
                   <Menu.Item
                     key={device.id}
-                    className={MENU_ITEM_CLASS}
+                    className={menuItemClass}
                     onClick={() => switchDevice(device.id)}
                   >
                     <StatusDot state={device.runtime.authState} />
@@ -125,12 +129,12 @@ export function DeviceSwitcher() {
 
               <div className="my-1 h-px bg-border/40" />
 
-              <Menu.Item className={MENU_ITEM_CLASS} onClick={() => setDialogMode("add")}>
+              <Menu.Item className={menuItemClass} onClick={() => setDialogMode("add")}>
                 <Plus className="size-4 shrink-0 text-muted-foreground" />
                 <span>Add device…</span>
               </Menu.Item>
               {devices.length > 0 && (
-                <Menu.Item className={MENU_ITEM_CLASS} onClick={() => setDialogMode("manage")}>
+                <Menu.Item className={menuItemClass} onClick={() => setDialogMode("manage")}>
                   <Settings2 className="size-4 shrink-0 text-muted-foreground" />
                   <span>Manage devices…</span>
                 </Menu.Item>
