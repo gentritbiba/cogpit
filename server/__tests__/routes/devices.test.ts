@@ -269,6 +269,25 @@ describe("POST /api/hub/devices/probe", () => {
     expect(JSON.parse(res._getData())).toMatchObject({ ok: false, code: "NOT_COGPIT" })
   })
 
+  it("probes over https with a 443 default port when tls is set", async () => {
+    const fetchFn = mockFetch()
+    fetchFn.mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+
+    const { res } = await drive("POST", "/probe", { host: "cogpit.example.com", tls: true })
+
+    expect(JSON.parse(res._getData())).toEqual({ ok: true, hello: helloOk })
+    expect(fetchFn).toHaveBeenCalledWith("https://cogpit.example.com:443/api/hello", expect.anything())
+  })
+
+  it("keeps an explicit port when tls is set", async () => {
+    const fetchFn = mockFetch()
+    fetchFn.mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+
+    await drive("POST", "/probe", { host: "cogpit.example.com", port: 8443, tls: true })
+
+    expect(fetchFn).toHaveBeenCalledWith("https://cogpit.example.com:8443/api/hello", expect.anything())
+  })
+
   it("returns SELF_ADD when the device is this hub", async () => {
     const fetchFn = mockFetch()
     fetchFn.mockResolvedValueOnce(fakeResponse({ json: { app: "cogpit", instanceId: "self-instance" } }))
@@ -321,6 +340,25 @@ describe("POST /api/hub/devices", () => {
     expect(body.device.password).toBeUndefined()
     expect(mockedAddDevice).toHaveBeenCalledWith(expect.objectContaining({ auth: "password", password: "pw" }))
     expect(mockedSetDeviceRuntime).toHaveBeenCalledWith("dev_new", expect.objectContaining({ authState: "ok" }))
+  })
+
+  it("probes, verifies, and saves a tls device over https", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedAddDevice.mockReturnValue({
+      id: "dev_tls", name: "remote-mac", host: "cogpit.example.com", port: 443,
+      tls: true, auth: "password", password: "pw", addedAt: 123,
+    } as never)
+
+    const { res } = await drive("POST", "/", { host: "cogpit.example.com", tls: true, password: "pw" })
+
+    expect(res._getStatus()).toBe(201)
+    expect(fetchFn).toHaveBeenNthCalledWith(1, "https://cogpit.example.com:443/api/hello", expect.anything())
+    expect(fetchFn).toHaveBeenNthCalledWith(2, "https://cogpit.example.com:443/api/auth/verify", expect.anything())
+    expect(mockedAddDevice).toHaveBeenCalledWith(expect.objectContaining({ tls: true, port: 443 }))
+    expect(JSON.parse(res._getData()).device.tls).toBe(true)
   })
 
   it("surfaces BAD_PASSWORD from the device", async () => {
@@ -421,6 +459,21 @@ describe("PATCH /api/hub/devices/:id", () => {
     expect(mockedValidateDeviceHost).toHaveBeenCalledWith("10.0.0.9", true)
     expect(fetchFn).toHaveBeenCalledWith("http://10.0.0.9:19384/api/hello", expect.anything())
     expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ host: "10.0.0.9" }))
+  })
+
+  it("re-probes over https and patches tls on a tls change", async () => {
+    const fetchFn = mockFetch()
+    fetchFn.mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "cogpit.example.com", port: 443, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { tls: true })
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(fetchFn).toHaveBeenCalledWith("https://cogpit.example.com:443/api/hello", expect.anything())
+    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ tls: true }))
   })
 
   it("surfaces a bad password when re-verifying on password change", async () => {
@@ -528,6 +581,21 @@ describe("POST /api/hub/devices/:id/test", () => {
     const { res } = await drive("POST", "/dev_1/test")
 
     expect(JSON.parse(res._getData())).toMatchObject({ ok: false, reachable: false, authState: "unknown" })
+  })
+
+  it("tests a tls device over https", async () => {
+    const fetchFn = mockFetch()
+    fetchFn.mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+    mockedGetDevice.mockReturnValue({
+      id: "dev_tls", name: "mac", host: "cogpit.example.com", port: 443, tls: true,
+      auth: "password", password: "pw", addedAt: 1,
+    } as never)
+    mockedGetDeviceToken.mockResolvedValue("tok")
+
+    const { res } = await drive("POST", "/dev_tls/test")
+
+    expect(JSON.parse(res._getData())).toMatchObject({ ok: true, reachable: true })
+    expect(fetchFn).toHaveBeenCalledWith("https://cogpit.example.com:443/api/hello", expect.anything())
   })
 
   it("skips the token mint for auth:none tunnel devices", async () => {

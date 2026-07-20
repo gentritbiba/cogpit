@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest"
 import http, { type IncomingMessage, type ServerResponse } from "node:http"
+import { request as httpsRequest } from "node:https"
+import { EventEmitter } from "node:events"
 import type { AddressInfo } from "node:net"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -11,6 +13,12 @@ import { createHubProxyHandler, handleHubUpgrade } from "../../hub/proxy"
 import { initDeviceRegistry, addDevice, type HubDevice } from "../../hub/registry"
 import { getConfig } from "../../config"
 import { createSessionToken, revokeAllSessions } from "../../security"
+
+// TLS devices must route through node:https. A real https upstream would need
+// a trusted cert (validation is deliberately strict), so the https module is
+// mocked; the http-based e2e tests below never touch it.
+vi.mock("node:https", () => ({ request: vi.fn() }))
+const mockedHttpsRequest = vi.mocked(httpsRequest)
 
 // getConfig gates the hub-side WS upgrade auth for remote clients. Local e2e
 // tests connect over loopback and skip it entirely; only the auth-branch tests
@@ -500,5 +508,78 @@ describe("handleHubUpgrade — hub-side auth", () => {
     const { req, socket, writes } = fakeUpgrade(`/hub/dev_x/__pty?token=${token}`)
     expect(handleHubUpgrade(req, socket, Buffer.alloc(0))).toBe(true)
     expect(writes.join("")).toContain("HTTP/1.1 401")
+  })
+})
+
+// ── TLS devices route through node:https ─────────────────────────────
+
+describe("tls devices", () => {
+  /** Capture https.request options and fail the connect after listeners wire up. */
+  function captureHttpsRequests(): Array<Record<string, unknown>> {
+    const options: Array<Record<string, unknown>> = []
+    mockedHttpsRequest.mockImplementation(((opts: Record<string, unknown>) => {
+      options.push(opts)
+      const req = new EventEmitter() as EventEmitter & {
+        setTimeout: (ms: number) => void
+        destroy: () => void
+        end: (body?: unknown) => void
+      }
+      req.setTimeout = vi.fn()
+      req.destroy = vi.fn()
+      req.end = vi.fn(() => {
+        queueMicrotask(() => req.emit("error", new Error("connect failed")))
+      })
+      return req
+    }) as never)
+    return options
+  }
+
+  function fakeLocalUpgrade(url: string) {
+    const socket = {
+      write: () => true,
+      destroy: () => {},
+      get destroyed() { return false },
+    } as never
+    const req = { url, headers: {}, socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage
+    return { req, socket }
+  }
+
+  beforeEach(() => {
+    mockedHttpsRequest.mockReset()
+  })
+
+  it("dispatches over node:https and maps a connect failure to a typed 502", async () => {
+    const options = captureHttpsRequests()
+    const device = await addDevice({ name: "Edge", host: "device.example.com", port: 443, tls: true, auth: "none" })
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/hello"))
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toMatchObject({ code: "DEVICE_UNREACHABLE" })
+    expect(options[0]).toMatchObject({ hostname: "device.example.com", port: 443 })
+  })
+
+  it("upgrades over node:https and omits :443 from the Host header", async () => {
+    const options = captureHttpsRequests()
+    const device = await addDevice({ name: "Edge", host: "device.example.com", port: 443, tls: true, auth: "none" })
+    const { req, socket } = fakeLocalUpgrade(`/hub/${device.id}/__pty`)
+
+    expect(handleHubUpgrade(req, socket, Buffer.alloc(0))).toBe(true)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(options).toHaveLength(1)
+    expect((options[0].headers as Record<string, unknown>).host).toBe("device.example.com")
+  })
+
+  it("keeps an explicit non-443 port in the upgrade Host header", async () => {
+    const options = captureHttpsRequests()
+    const device = await addDevice({ name: "Edge8443", host: "device.example.com", port: 8443, tls: true, auth: "none" })
+    const { req, socket } = fakeLocalUpgrade(`/hub/${device.id}/__pty`)
+
+    expect(handleHubUpgrade(req, socket, Buffer.alloc(0))).toBe(true)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect((options[0].headers as Record<string, unknown>).host).toBe("device.example.com:8443")
   })
 })

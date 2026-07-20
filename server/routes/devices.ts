@@ -20,7 +20,13 @@ import {
 } from "../hub/device-client"
 
 const DEFAULT_PORT = 19384
+const DEFAULT_TLS_PORT = 443
 const PROBE_TIMEOUT_MS = 3000
+
+/** Base URL for a device, honoring its http/https scheme. */
+function deviceOrigin(host: string, port: number, tls: boolean): string {
+  return `${tls ? "https" : "http"}://${host}:${port}`
+}
 
 // ── Probe (device /api/hello handshake) ──────────────────────────────────
 
@@ -53,12 +59,12 @@ function isCogpitHello(value: unknown): value is HelloPayload {
 }
 
 /** GET the device's `/api/hello` and classify the response. */
-async function probeDevice(host: string, port: number, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
+async function probeDevice(host: string, port: number, tls: boolean, timeoutMs = PROBE_TIMEOUT_MS): Promise<ProbeResult> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   let res: Awaited<ReturnType<typeof fetch>>
   try {
-    res = await fetch(`http://${host}:${port}/api/hello`, {
+    res = await fetch(`${deviceOrigin(host, port, tls)}/api/hello`, {
       signal: controller.signal,
       headers: { accept: "application/json" },
     })
@@ -116,6 +122,7 @@ const AUTH_MESSAGES: Record<AuthCode, string> = {
 async function verifyDevicePassword(
   host: string,
   port: number,
+  tls: boolean,
   password: string,
   timeoutMs = PROBE_TIMEOUT_MS,
 ): Promise<AuthResult> {
@@ -123,7 +130,7 @@ async function verifyDevicePassword(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   let res: Awaited<ReturnType<typeof fetch>>
   try {
-    res = await fetch(`http://${host}:${port}/api/auth/verify`, {
+    res = await fetch(`${deviceOrigin(host, port, tls)}/api/auth/verify`, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -155,9 +162,9 @@ async function verifyDevicePassword(
 
 // ── Small utilities ──────────────────────────────────────────────────────
 
-function normalizePort(value: unknown): number {
+function normalizePort(value: unknown, tls: boolean): number {
   const n = typeof value === "number" ? value : parseInt(String(value ?? ""), 10)
-  return Number.isInteger(n) && n > 0 && n < 65536 ? n : DEFAULT_PORT
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : tls ? DEFAULT_TLS_PORT : DEFAULT_PORT
 }
 
 function readString(value: unknown): string | undefined {
@@ -205,8 +212,9 @@ async function handleProbe(req: IncomingMessage, res: ServerResponse): Promise<v
   if (hostError) {
     return sendJson(res, 400, { error: hostError, code: "INVALID_HOST" })
   }
-  const port = normalizePort(body.port)
-  const result = await probeDevice(host, port)
+  const tls = body.tls === true
+  const port = normalizePort(body.port, tls)
+  const result = await probeDevice(host, port, tls)
   if (result.ok) {
     return sendJson(res, 200, { ok: true, hello: result.hello })
   }
@@ -219,7 +227,8 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
   if (!body || !host) {
     return sendJson(res, 400, { error: "host is required", code: "BAD_REQUEST" })
   }
-  const port = normalizePort(body.port)
+  const tls = body.tls === true
+  const port = normalizePort(body.port, tls)
   const allowLocalTunnel = body.allowLocalTunnel === true
   const password = readString(body.password)
   const name = readString(body.name)
@@ -229,7 +238,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
     return sendJson(res, 400, { error: hostError, code: "INVALID_HOST" })
   }
 
-  const probe = await probeDevice(host, port)
+  const probe = await probeDevice(host, port, tls)
   if (!probe.ok) {
     return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
       error: PROBE_MESSAGES[probe.code],
@@ -239,7 +248,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
 
   let auth: "password" | "none"
   if (password) {
-    const verify = await verifyDevicePassword(host, port, password)
+    const verify = await verifyDevicePassword(host, port, tls, password)
     if (!verify.ok) {
       return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
         error: AUTH_MESSAGES[verify.code],
@@ -261,6 +270,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
     name: name || readString(probe.hello.name) || host,
     host,
     port,
+    tls,
     auth,
     password,
   })
@@ -283,14 +293,17 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   if (newName) patch.name = newName
 
   const newHost = readString(body.host)
-  const newPort = body.port !== undefined ? normalizePort(body.port) : undefined
+  const newTls = typeof body.tls === "boolean" ? body.tls : undefined
+  const tls = newTls ?? device.tls === true
+  const newPort = body.port !== undefined ? normalizePort(body.port, tls) : undefined
   const newPassword = readString(body.password)
 
   const host = newHost ?? device.host
   const port = newPort ?? device.port
   const hostChanged = !!newHost && newHost !== device.host
   const portChanged = newPort !== undefined && newPort !== device.port
-  const sensitiveChanged = hostChanged || portChanged || !!newPassword
+  const tlsChanged = newTls !== undefined && newTls !== (device.tls === true)
+  const sensitiveChanged = hostChanged || portChanged || tlsChanged || !!newPassword
 
   if (hostChanged) {
     const hostError = validateDeviceHost(newHost, device.auth === "none")
@@ -300,12 +313,13 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
     patch.host = newHost
   }
   if (portChanged) patch.port = newPort
+  if (tlsChanged) patch.tls = newTls
 
   if (sensitiveChanged) {
     // Any credential-affecting change invalidates the cached device token so
     // the next request re-mints against the new host/password.
     invalidateDeviceToken(id)
-    const probe = await probeDevice(host, port)
+    const probe = await probeDevice(host, port, tls)
     if (!probe.ok) {
       return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
         error: PROBE_MESSAGES[probe.code],
@@ -313,7 +327,7 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
       })
     }
     if (newPassword) {
-      const verify = await verifyDevicePassword(host, port, newPassword)
+      const verify = await verifyDevicePassword(host, port, tls, newPassword)
       if (!verify.ok) {
         return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
           error: AUTH_MESSAGES[verify.code],
@@ -345,7 +359,7 @@ async function handleTest(id: string, res: ServerResponse): Promise<void> {
     return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
   }
 
-  const probe = await probeDevice(device.host, device.port)
+  const probe = await probeDevice(device.host, device.port, device.tls === true)
   if (!probe.ok) {
     setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
     return sendJson(res, 200, {

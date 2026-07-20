@@ -1,4 +1,5 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse, type ClientRequest, type IncomingHttpHeaders, type OutgoingHttpHeaders } from "node:http"
+import { request as httpsRequest } from "node:https"
 import type { Duplex } from "node:stream"
 
 import { getDevice, type HubDevice } from "./registry"
@@ -219,7 +220,8 @@ function dispatch(
   }
 
   function attempt(token: string | null, allowRetry: boolean): void {
-    const proxyReq = httpRequest({
+    const requestFn = device.tls ? httpsRequest : httpRequest
+    const proxyReq = requestFn({
       hostname: device.host,
       port: device.port,
       method,
@@ -389,14 +391,17 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       if (lower === "host" || lower === "authorization") continue
       headers[key] = value
     }
-    headers["host"] = `${device.host}:${device.port}`
+    // Omit the default https port: TLS-terminating proxies (e.g. Cloudflare)
+    // route on an exact Host match.
+    headers["host"] = device.tls && device.port === 443 ? device.host : `${device.host}:${device.port}`
     return headers
   }
 
   const attemptUpgrade = (tok: string | null, allowRetry: boolean): void => {
     // auth:"none" devices read no token; password devices carry it in the query.
     const devicePath = tok ? `/__pty?token=${encodeURIComponent(tok)}` : "/__pty"
-    const proxyReq = httpRequest({
+    const requestFn = device.tls ? httpsRequest : httpRequest
+    const proxyReq = requestFn({
       hostname: device.host,
       port: device.port,
       method: "GET",

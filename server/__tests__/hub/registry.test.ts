@@ -56,6 +56,22 @@ describe("addDevice", () => {
     const { id } = await addDevice({ name: "Tunnel", host: "10.0.0.9", auth: "none", password: "ignored" })
     expect(getDevice(id)?.password).toBeUndefined()
   })
+
+  it("defaults the port to 443 for tls devices and persists the tls flag", async () => {
+    const { id } = await addDevice({ name: "Edge", host: "cogpit.example.com", tls: true, auth: "password", password: "hunter2secret" })
+    const device = getDevice(id)
+    expect(device?.port).toBe(443)
+    expect(device?.tls).toBe(true)
+
+    await initDeviceRegistry(dir)
+    expect(getDevice(id)?.tls).toBe(true)
+  })
+
+  it("does not serialize tls for plain-http devices", async () => {
+    await addDevice({ name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret" })
+    const onDisk = await readFile(join(dir, "devices.local.json"), "utf-8")
+    expect(onDisk).not.toContain("tls")
+  })
 })
 
 // ── listDevices ──────────────────────────────────────────────────────

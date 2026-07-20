@@ -31,6 +31,7 @@ import packageJson from "../../package.json"
 
 const HUB_VERSION = packageJson.version
 const DEFAULT_PORT = 19384
+const DEFAULT_TLS_PORT = 443
 const PROBE_DEBOUNCE_MS = 450
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || "")
@@ -45,12 +46,18 @@ interface DevicesDialogProps {
   onClose: () => void
 }
 
-/** Split a "host" or "host:port" entry (tolerating a pasted http(s):// prefix). */
-export function parseHostPort(input: string): { host: string; port?: number } {
-  const noScheme = input.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "")
+/**
+ * Split a "host" or "host:port" entry. A pasted `https://` prefix marks the
+ * device as TLS (default port 443); a pasted `http://` prefix is just dropped.
+ */
+export function parseHostPort(input: string): { host: string; port?: number; tls?: true } {
+  const trimmed = input.trim()
+  const tls = /^https:\/\//i.test(trimmed)
+  const noScheme = trimmed.replace(/^https?:\/\//i, "").replace(/\/.*$/, "")
   const match = /^(.+):(\d+)$/.exec(noScheme)
-  if (match) return { host: match[1], port: Number(match[2]) }
-  return { host: noScheme }
+  const host = match ? match[1] : noScheme
+  const port = match ? Number(match[2]) : undefined
+  return tls ? { host, port, tls: true } : { host, port }
 }
 
 type ProbeTone = "ok" | "warn" | "info" | "error"
@@ -195,7 +202,7 @@ function DeviceRow({ device, hubVersion, onRename, onRemove, onTest }: DeviceRow
           </div>
         )}
         <span className="truncate font-mono text-[11px] text-muted-foreground">
-          {device.host}:{device.port}
+          {device.tls ? "https://" : ""}{device.host}:{device.port}
         </span>
       </div>
 
@@ -294,7 +301,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
   }, [open, initialMode])
 
   const runProbe = useCallback(async () => {
-    const { host, port } = parseHostPort(hostInput)
+    const { host, port, tls } = parseHostPort(hostInput)
     if (!host) {
       setProbeState(null)
       setProbing(false)
@@ -302,9 +309,9 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
     }
     const seq = ++probeSeq.current
     setProbing(true)
-    const result = await probe(host, port, allowLocalTunnel)
+    const result = await probe(host, port, allowLocalTunnel, tls)
     if (seq !== probeSeq.current) return // a newer probe superseded this one
-    setProbeState(probeMessage(result, host, port ?? DEFAULT_PORT))
+    setProbeState(probeMessage(result, host, port ?? (tls ? DEFAULT_TLS_PORT : DEFAULT_PORT)))
     setProbing(false)
   }, [hostInput, probe, allowLocalTunnel])
 
@@ -328,7 +335,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
   }, [submitting, hostInput, allowLocalTunnel, password, probeState])
 
   async function handleSubmit() {
-    const { host, port } = parseHostPort(hostInput)
+    const { host, port, tls } = parseHostPort(hostInput)
     if (!host) return
     setSubmitting(true)
     setSubmitError(null)
@@ -336,6 +343,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
       name: name.trim() || undefined,
       host,
       port,
+      tls,
       password: allowLocalTunnel ? undefined : password || undefined,
       allowLocalTunnel,
     })
@@ -415,7 +423,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
               value={hostInput}
               onChange={(event) => setHostInput(event.target.value)}
               onBlur={() => void runProbe()}
-              placeholder="192.168.1.42 or my-mac.local:19384"
+              placeholder="192.168.1.42, my-mac.local:19384 or https://cogpit.example.com"
               spellCheck={false}
               autoComplete="off"
             />

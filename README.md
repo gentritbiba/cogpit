@@ -103,7 +103,7 @@ Access Cogpit from your phone or tablet on the same LAN. Password-protected with
 ### Multi-Device Hub
 Register other machines and control them from one Cogpit window. A device switcher in the header (and at the top of the mobile UI) lets you jump between "This machine" and any registered remote — with `⌘⇧1–9` / `Ctrl+Shift+1–9` to jump and `⌘⇧0` to cycle. You always see one machine at a time; switching restores exactly where you left off on that device. Your browser never leaves the hub, which reverse-proxies traffic to each device so there's nothing to configure per-origin.
 
-A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` and network password; a live probe tells you if it's reachable, needs a password, has network access disabled, or is running an older version. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active.
+A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` (or `https://host:port` for TLS-terminating proxies) and network password; a live probe tells you if it's reachable, needs a password, has network access disabled, or is running an older version. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active.
 
 Headless boxes become addable with one command:
 ```bash

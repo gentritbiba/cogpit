@@ -100,6 +100,15 @@ describe("getDeviceToken — single-flight", () => {
     expect((init as RequestInit).method).toBe("POST")
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer hunter2secret" })
   })
+
+  it("mints over https for a tls device", async () => {
+    mockFetch.mockResolvedValue(okResponse("tok1"))
+    const device = makeDevice({ host: "cogpit.example.com", port: 443, tls: true })
+
+    await getDeviceToken(device)
+
+    expect(mockFetch.mock.calls[0][0]).toBe("https://cogpit.example.com:443/api/auth/verify")
+  })
 })
 
 // ── Cache reuse ──────────────────────────────────────────────────────

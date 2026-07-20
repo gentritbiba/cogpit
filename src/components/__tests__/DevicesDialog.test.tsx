@@ -43,6 +43,13 @@ describe("parseHostPort", () => {
     expect(parseHostPort("http://my-mac.local/")).toEqual({ host: "my-mac.local" })
     expect(parseHostPort("  box  ")).toEqual({ host: "box" })
   })
+
+  it("marks a pasted https:// URL as tls", () => {
+    expect(parseHostPort("https://cogpit.example.com/")).toEqual({ host: "cogpit.example.com", tls: true })
+    expect(parseHostPort("https://box:8443")).toEqual({ host: "box", port: 8443, tls: true })
+    // http stays plain — no tls flag
+    expect(parseHostPort("http://box:19384")).toEqual({ host: "box", port: 19384 })
+  })
 })
 
 describe("probeMessage", () => {
@@ -79,6 +86,23 @@ describe("DevicesDialog", () => {
     await user.tab() // blur → immediate probe
 
     expect(await screen.findByText(/Can't reach 192\.168\.1\.9:19384/)).toBeInTheDocument()
+  })
+
+  it("probes an https URL with tls and defaults the shown port to 443", async () => {
+    routeHub({ probe: { ok: false, code: "UNREACHABLE", error: "x" } })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="add" onClose={vi.fn()} />)
+
+    await user.click(screen.getByLabelText("Host"))
+    await user.paste("https://cogpit.example.com")
+    await user.tab() // blur → immediate probe
+
+    expect(await screen.findByText(/Can't reach cogpit\.example\.com:443/)).toBeInTheDocument()
+    const probeCall = mocks.hubFetch.mock.calls.find(([url]) => url === "/api/hub/devices/probe")
+    expect(JSON.parse((probeCall![1] as RequestInit).body as string)).toMatchObject({
+      host: "cogpit.example.com",
+      tls: true,
+    })
   })
 
   it("adds a device, then switches to it and closes", async () => {

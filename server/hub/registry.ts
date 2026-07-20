@@ -23,8 +23,10 @@ export interface HubDevice {
   id: string
   name: string
   host: string
-  /** device HTTP port, defaults to 19384 */
+  /** device HTTP port, defaults to 19384 (443 when tls) */
   port: number
+  /** reach the device over https (e.g. behind a TLS-terminating proxy); only stored when true */
+  tls?: boolean
   auth: "password" | "none"
   /** only present for auth === "password"; never serialized by listDevices */
   password?: string
@@ -44,13 +46,15 @@ export interface AddDeviceInput {
   name: string
   host: string
   port?: number
+  tls?: boolean
   auth: "password" | "none"
   password?: string
 }
 
-export type UpdateDeviceInput = Partial<Pick<HubDevice, "name" | "host" | "port" | "auth" | "password">>
+export type UpdateDeviceInput = Partial<Pick<HubDevice, "name" | "host" | "port" | "tls" | "auth" | "password">>
 
 const DEFAULT_PORT = 19384
+const DEFAULT_TLS_PORT = 443
 
 // ── Module state ─────────────────────────────────────────────────────
 
@@ -70,6 +74,7 @@ function normalizeDevice(entry: unknown): HubDevice | null {
     name: typeof e.name === "string" ? e.name : e.host,
     host: e.host,
     port: typeof e.port === "number" && Number.isFinite(e.port) ? e.port : DEFAULT_PORT,
+    tls: e.tls === true ? true : undefined,
     auth,
     password: auth === "password" && typeof e.password === "string" ? e.password : undefined,
     addedAt: typeof e.addedAt === "number" ? e.addedAt : 0,
@@ -155,7 +160,8 @@ export async function addDevice(input: AddDeviceInput): Promise<HubDevice> {
     id: `dev_${randomBytes(8).toString("hex")}`,
     name: input.name,
     host: input.host,
-    port: input.port ?? DEFAULT_PORT,
+    port: input.port ?? (input.tls ? DEFAULT_TLS_PORT : DEFAULT_PORT),
+    tls: input.tls ? true : undefined,
     auth: input.auth,
     password: input.auth === "password" ? input.password : undefined,
     addedAt: Date.now(),
@@ -174,6 +180,7 @@ export async function updateDevice(id: string, patch: UpdateDeviceInput): Promis
   if (patch.name !== undefined) next.name = patch.name
   if (patch.host !== undefined) next.host = patch.host
   if (patch.port !== undefined) next.port = patch.port
+  if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
   if (patch.auth !== undefined) next.auth = patch.auth
   if (patch.password !== undefined) next.password = patch.password
   // A device switched to token-less auth must not keep a stale password.

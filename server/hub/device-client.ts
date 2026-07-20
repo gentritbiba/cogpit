@@ -114,7 +114,7 @@ async function mint(device: HubDevice): Promise<string> {
   const record: AttemptRecord = { at: Date.now() }
   lastAttempt.set(id, record)
 
-  const url = `http://${device.host}:${device.port}/api/auth/verify`
+  const url = `${device.tls ? "https" : "http"}://${device.host}:${device.port}/api/auth/verify`
 
   let res: Response
   try {

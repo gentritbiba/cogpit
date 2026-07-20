@@ -29,6 +29,8 @@ export interface PublicDevice {
   name: string
   host: string
   port: number
+  /** device is reached over https; absent for plain-http devices */
+  tls?: boolean
   auth: "password" | "none"
   addedAt: number
   runtime: DeviceRuntime
@@ -40,6 +42,7 @@ export interface DeviceSummary {
   name: string
   host: string
   port: number
+  tls?: boolean
   auth: "password" | "none"
   addedAt: number
 }
@@ -54,6 +57,7 @@ export interface AddDeviceInput {
   name?: string
   host: string
   port?: number
+  tls?: boolean
   password?: string
   allowLocalTunnel?: boolean
 }
@@ -62,6 +66,7 @@ export interface UpdateDeviceInput {
   name?: string
   host?: string
   port?: number
+  tls?: boolean
   password?: string
 }
 
@@ -87,7 +92,7 @@ export interface UseDevices {
   activeDevice: PublicDevice | undefined
   loading: boolean
   refresh: () => Promise<void>
-  probe: (host: string, port?: number, allowLocalTunnel?: boolean) => Promise<ProbeResult>
+  probe: (host: string, port?: number, allowLocalTunnel?: boolean, tls?: boolean) => Promise<ProbeResult>
   addDevice: (input: AddDeviceInput) => Promise<MutationResult>
   updateDevice: (id: string, patch: UpdateDeviceInput) => Promise<MutationResult>
   removeDevice: (id: string) => Promise<RemoveResult>
@@ -176,7 +181,7 @@ export function useDevices(): UseDevices {
     [devices, activeDeviceId],
   )
 
-  const probe = useCallback(async (host: string, port?: number, allowLocalTunnel?: boolean): Promise<ProbeResult> => {
+  const probe = useCallback(async (host: string, port?: number, allowLocalTunnel?: boolean, tls?: boolean): Promise<ProbeResult> => {
     try {
       const res = await hubFetch("/api/hub/devices/probe", {
         method: "POST",
@@ -184,7 +189,7 @@ export function useDevices(): UseDevices {
         // The server validates the probe host too; forward the tunnel opt-in so
         // a legitimate loopback tunnel isn't rejected as SSRF. Undefined is
         // dropped by JSON.stringify and the server defaults it to false.
-        body: JSON.stringify({ host, port, allowLocalTunnel }),
+        body: JSON.stringify({ host, port, allowLocalTunnel, tls }),
       })
       const data = await readJson(res)
       if (data?.ok === true && data.hello) {
