@@ -6,16 +6,102 @@ import {
   stat,
   open,
   watch,
-  resolve,
 } from "../helpers"
-import { readdir } from "node:fs/promises"
-import type { UseFn } from "../helpers"
+import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { StringDecoder } from "node:string_decoder"
+import type { UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
+const TASK_OUTPUT_BASES = ["/private/tmp", "/tmp"] as const
+const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
+const SESSION_READ_CHUNK_BYTES = 256 * 1024
+let canonicalTaskOutputBases: Promise<string[]> | null = null
+
+async function getCanonicalTaskOutputBases(): Promise<string[]> {
+  canonicalTaskOutputBases ??= Promise.all(
+    TASK_OUTPUT_BASES.map(async (base) => {
+      try {
+        return await realpath(base)
+      } catch {
+        return resolve(base)
+      }
+    }),
+  ).then((bases) => [...new Set(bases)])
+  return canonicalTaskOutputBases
+}
+
+async function canonicalizeIncludingMissing(path: string): Promise<string | null> {
+  const missingSegments: string[] = []
+  let cursor = path
+
+  while (true) {
+    let cursorInfo
+    try {
+      cursorInfo = await lstat(cursor)
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== "ENOENT") return null
+      const parent = dirname(cursor)
+      if (parent === cursor) return null
+      missingSegments.unshift(basename(cursor))
+      cursor = parent
+      continue
+    }
+
+    let canonicalCursor: string
+    try {
+      canonicalCursor = await realpath(cursor)
+    } catch {
+      // A broken symlink has an lstat result but no canonical destination.
+      return null
+    }
+
+    if (missingSegments.length > 0) {
+      try {
+        const canonicalInfo = cursorInfo.isSymbolicLink()
+          ? await fsStat(canonicalCursor)
+          : cursorInfo
+        if (!canonicalInfo.isDirectory()) return null
+      } catch {
+        return null
+      }
+    }
+
+    return resolve(canonicalCursor, ...missingSegments)
+  }
+}
+
+function isTaskOutputDescendant(base: string, candidate: string): boolean {
+  const child = relative(base, candidate)
+  if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+    return false
+  }
+  const [namespace, ...rest] = child.split(sep)
+  return namespace.startsWith("claude-")
+    && namespace.length > "claude-".length
+    && rest.length > 0
+}
+
+/** Resolve a task-output path without allowing symlink escapes from a claude-* temp tree. */
+export async function resolveTaskOutputPath(outputPath: string): Promise<string | null> {
+  const lexicalPath = resolve(outputPath)
+  if (!TASK_OUTPUT_BASES.some((base) => isTaskOutputDescendant(resolve(base), lexicalPath))) {
+    return null
+  }
+
+  const canonicalPath = await canonicalizeIncludingMissing(lexicalPath)
+  if (!canonicalPath) return null
+  const bases = await getCanonicalTaskOutputBases()
+  return bases.some((base) => isTaskOutputDescendant(base, canonicalPath))
+    ? canonicalPath
+    : null
+}
+
 export function registerFileWatchRoutes(use: UseFn) {
   // GET /api/task-output?path=<outputFile> - SSE stream of background task output
-  use("/api/task-output", (req, res, next) => {
+  use("/api/task-output", async (req, res, next) => {
     if (req.method !== "GET") return next()
 
     const url = new URL(req.url || "/", "http://localhost")
@@ -28,13 +114,13 @@ export function registerFileWatchRoutes(use: UseFn) {
       res.end(JSON.stringify({ error: "path query param required" }))
       return
     }
+    const requestedOutputPath = outputPath
 
-    // Security: only allow reading from /private/tmp/claude-* or /tmp/claude-*
-    const resolved = resolve(outputPath)
-    if (
-      !resolved.startsWith("/private/tmp/claude-") &&
-      !resolved.startsWith("/tmp/claude-")
-    ) {
+    // Security: only allow canonical descendants of /private/tmp/claude-* or
+    // /tmp/claude-*. Revalidate before every read because the output file may
+    // not exist yet when the stream is opened.
+    const resolved = await resolveTaskOutputPath(requestedOutputPath)
+    if (!resolved) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied - only task output files allowed" }))
       return
@@ -49,32 +135,54 @@ export function registerFileWatchRoutes(use: UseFn) {
     const endTaskOutputStream = beginActivity("Open task output streams")
 
     let offset = 0
+    let decoder = new StringDecoder("utf8")
+    let closed = false
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     let watcherReady = false
+    let readInFlight: Promise<void> | null = null
 
-    // Read existing content first, then watch for changes
-    async function readAndSend() {
-      recordActivity("Task output checks")
-      try {
-        const s = await stat(resolved)
-        if (s.size <= offset) return
+    // Serialize reads so fs.watch and the fallback poller cannot emit the same
+    // range twice. Drain large output in bounded chunks rather than allocating
+    // the full unread file in one Buffer.
+    function readAndSend(): Promise<void> {
+      if (readInFlight) return readInFlight
+      readInFlight = (async () => {
+        while (!closed) {
+          recordActivity("Task output checks")
+          try {
+            const currentPath = await resolveTaskOutputPath(requestedOutputPath)
+            if (!currentPath) return
+            const s = await stat(currentPath)
+            if (s.size < offset) {
+              offset = 0
+              decoder = new StringDecoder("utf8")
+            }
+            if (s.size <= offset) return
 
-        const fh = await open(resolved, "r")
-        try {
-          const buf = Buffer.alloc(s.size - offset)
-          const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
-          offset = s.size
-          recordActivity("Task output reads", { bytes: bytesRead })
-          const text = buf.subarray(0, bytesRead).toString("utf-8")
-          if (text) {
-            res.write(`data: ${JSON.stringify({ type: "output", text })}\n\n`)
+            const bytesToRead = Math.min(s.size - offset, TASK_OUTPUT_READ_CHUNK_BYTES)
+            const fh = await open(currentPath, "r")
+            try {
+              const buf = Buffer.alloc(bytesToRead)
+              const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+              if (bytesRead <= 0) return
+              offset += bytesRead
+              recordActivity("Task output reads", { bytes: bytesRead })
+              const text = decoder.write(buf.subarray(0, bytesRead))
+              if (text) {
+                res.write(`data: ${JSON.stringify({ type: "output", text })}\n\n`)
+              }
+            } finally {
+              await fh.close()
+            }
+          } catch {
+            // file may not exist yet or be temporarily unavailable
+            return
           }
-        } finally {
-          await fh.close()
         }
-      } catch {
-        // file may not exist yet or be temporarily unavailable
-      }
+      })().finally(() => {
+        readInFlight = null
+      })
+      return readInFlight
     }
 
     // Initial read of existing content
@@ -103,6 +211,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     }, 15000)
 
     req.on("close", () => {
+      closed = true
       endTaskOutputStream()
       watcher?.close()
       if (debounceTimer) clearTimeout(debounceTimer)
@@ -135,6 +244,7 @@ export function registerFileWatchRoutes(use: UseFn) {
       res.end(JSON.stringify({ error: "Access denied" }))
       return
     }
+    const sessionFilePath = filePath
 
     // SSE headers
     res.writeHead(200, {
@@ -152,72 +262,87 @@ export function registerFileWatchRoutes(use: UseFn) {
     let throttleTimer: ReturnType<typeof setTimeout> | null = null
     let trailingTimer: ReturnType<typeof setTimeout> | null = null
     let remainder = "" // partial line buffer
-    const THROTTLE_MS = 150
-
-    async function flushNewLines() {
-      if (!initialized) return
-      recordActivity("Session file checks")
-      try {
-        const s = await stat(filePath)
-        if (s.size < offset) {
-          // File was truncated (e.g. by undo). Reset to current size.
-          offset = s.size
-          remainder = ""
-          return
-        }
-        if (s.size <= offset) {
-          // No new bytes on disk, but remainder may hold a complete line
-          if (remainder) {
-            try {
-              JSON.parse(remainder)
-              const line = remainder
-              remainder = ""
-              res.write(
-                `data: ${JSON.stringify({ type: "lines", lines: [line] })}\n\n`
-              )
-            } catch {
-              // Not valid JSON yet -- still a partial line, keep waiting
-            }
-          }
-          return
-        }
-
-        const fh = await open(filePath, "r")
-        try {
-          const buf = Buffer.alloc(s.size - offset)
-          const { bytesRead } = await fh.read(
-            buf,
-            0,
-            buf.length,
-            offset
-          )
-          offset = s.size
-          recordActivity("Session JSONL reads", { bytes: bytesRead })
-
-          const raw = remainder + buf.subarray(0, bytesRead).toString("utf-8")
-          const rawParts = raw.split("\n")
-
-          // Last element may be a partial line (no trailing \n)
-          remainder = rawParts.pop() || ""
-
-          const lines = rawParts.filter((l) => l.trim())
-          if (lines.length > 0) {
-            res.write(
-              `data: ${JSON.stringify({ type: "lines", lines })}\n\n`
-            )
-          }
-        } finally {
-          await fh.close()
-        }
-      } catch {
-        // file temporarily unavailable during writes
-      }
-    }
-
+    let decoder = new StringDecoder("utf8")
+    let flushInFlight: Promise<void> | null = null
+    let flushRequested = false
     let watcher: ReturnType<typeof watch> | null = null
     let pollTimer: ReturnType<typeof setInterval> | null = null
     let heartbeat: ReturnType<typeof setInterval> | null = null
     let closed = false
+    const THROTTLE_MS = 150
+
+    function flushNewLines(): Promise<void> {
+      if (!initialized || closed) return Promise.resolve()
+      if (flushInFlight) {
+        flushRequested = true
+        return flushInFlight
+      }
+
+      flushInFlight = (async () => {
+        while (!closed) {
+          recordActivity("Session file checks")
+          try {
+            const s = await stat(sessionFilePath)
+            if (s.size < offset) {
+              // File was truncated (e.g. by undo). Reset to current size.
+              offset = s.size
+              remainder = ""
+              decoder = new StringDecoder("utf8")
+              return
+            }
+            if (s.size <= offset) {
+              // No new bytes on disk, but remainder may hold a complete line.
+              if (remainder) {
+                try {
+                  JSON.parse(remainder)
+                  const line = remainder
+                  remainder = ""
+                  res.write(
+                    `data: ${JSON.stringify({ type: "lines", lines: [line] })}\n\n`,
+                  )
+                } catch {
+                  // Not valid JSON yet -- still a partial line, keep waiting.
+                }
+              }
+              return
+            }
+
+            const bytesToRead = Math.min(s.size - offset, SESSION_READ_CHUNK_BYTES)
+            const fh = await open(sessionFilePath, "r")
+            try {
+              const buf = Buffer.alloc(bytesToRead)
+              const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+              if (bytesRead <= 0) return
+              offset += bytesRead
+              recordActivity("Session JSONL reads", { bytes: bytesRead })
+
+              const raw = remainder + decoder.write(buf.subarray(0, bytesRead))
+              const rawParts = raw.split("\n")
+
+              // Last element may be a partial line (no trailing \n).
+              remainder = rawParts.pop() || ""
+
+              const lines = rawParts.filter((line) => line.trim())
+              if (lines.length > 0) {
+                res.write(`data: ${JSON.stringify({ type: "lines", lines })}\n\n`)
+              }
+            } finally {
+              await fh.close()
+            }
+          } catch {
+            // File temporarily unavailable during writes.
+            return
+          }
+        }
+      })().finally(() => {
+        flushInFlight = null
+        if (flushRequested && !closed) {
+          flushRequested = false
+          void flushNewLines()
+        }
+      })
+      return flushInFlight
+    }
 
     // ── Token-level streaming (SDK-driven sessions only) ───────────────
     // The stream bus carries partial-message events published by
@@ -256,7 +381,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // its snapshot byte offset, replay anything written between that snapshot
     // and this connection. Without this, a line written in that race window
     // is skipped and the UI stays one response behind until the next write.
-    stat(filePath)
+    stat(sessionFilePath)
       .then((s) => {
         if (!hasRequestedOffset) offset = s.size
         else if (offset > s.size) offset = s.size
@@ -278,7 +403,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // final write after activity stops.
     let watcherHealthy = false
     try {
-      watcher = watch(filePath, () => {
+      watcher = watch(sessionFilePath, () => {
         if (closed) return
         recordActivity("Session file events")
         if (trailingTimer) clearTimeout(trailingTimer)
@@ -309,7 +434,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // "acompact-<hash>" and writes to <sessionId>/subagents/agent-acompact-*.jsonl.
     // Nothing is written to the parent JSONL until compaction finishes,
     // so we poll the subagents dir and send a synthetic SSE event.
-    const sessionDir = filePath.replace(/\.jsonl$/, "")
+    const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
     const subagentsDir = sessionDir + "/subagents"
     let compactingSignalSent = false
 

@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto"
+import type { Stats } from "node:fs"
 import { readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
 import type { IncomingMessage } from "node:http"
-import type { UseFn } from "../helpers"
-import { isWithinDir, sendJson } from "../helpers"
+import { sendJson, type UseFn } from "../http"
+import { isWithinDir } from "../helpers"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024
 
 interface ResolvedProjectFile {
   absolutePath: string
-  info: Awaited<ReturnType<typeof stat>>
+  info: Stats
 }
 
 interface ProjectFileWriteBody {

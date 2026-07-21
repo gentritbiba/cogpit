@@ -145,6 +145,45 @@ describe("useWorktrees", () => {
     expect(result.current.loading).toBe(false)
   })
 
+  it("ignores a stale response after the project changes", async () => {
+    let resolveFirst!: (response: Response) => void
+    let resolveSecond!: (response: Response) => void
+    const firstResponse = new Promise<Response>((resolve) => { resolveFirst = resolve })
+    const secondResponse = new Promise<Response>((resolve) => { resolveSecond = resolve })
+    mockedAuthFetch
+      .mockReturnValueOnce(firstResponse)
+      .mockReturnValueOnce(secondResponse)
+
+    const { result, rerender } = renderHook(
+      (props: { dirName: string }) => useWorktrees(props.dirName),
+      { initialProps: { dirName: "project-a" } },
+    )
+
+    rerender({ dirName: "project-b" })
+    expect(result.current.worktrees).toEqual([])
+    expect(result.current.loading).toBe(true)
+
+    await act(async () => {
+      resolveSecond({
+        ok: true,
+        json: () => Promise.resolve([{ name: "project-b-worktree" }]),
+      } as unknown as Response)
+      await secondResponse
+    })
+
+    expect(result.current.worktrees).toEqual([{ name: "project-b-worktree" }])
+
+    await act(async () => {
+      resolveFirst({
+        ok: true,
+        json: () => Promise.resolve([{ name: "stale-project-a-worktree" }]),
+      } as unknown as Response)
+      await firstResponse
+    })
+
+    expect(result.current.worktrees).toEqual([{ name: "project-b-worktree" }])
+  })
+
   it("refetch function triggers a new fetch", async () => {
     mockedAuthFetch.mockResolvedValue({
       ok: true,

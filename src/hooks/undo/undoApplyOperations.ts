@@ -4,7 +4,6 @@
 
 import type { ParsedSession, UndoState, Branch } from "@/lib/types"
 import type { SessionSource } from "../useLiveSession"
-import { authFetch } from "@/lib/auth"
 import {
   buildUndoOperations,
   buildRedoFromArchived,
@@ -14,51 +13,26 @@ import {
   type FileOperation,
 } from "@/lib/undo-engine"
 import { findCutoffLine, type UndoConfirmState } from "./undoHelpers"
+import type { UndoSessionMutation } from "../../../shared/contracts/undo"
 
 /** Sentinel error to abort confirm-apply without setting an error message. */
 export class ApplyAbort extends Error { constructor() { super("abort") } }
 
-async function tryApplyOps(
-  ops: FileOperation[],
-  applyOperations: (ops: FileOperation[]) => Promise<boolean>,
-): Promise<void> {
-  if (ops.length === 0) return
-  const success = await applyOperations(ops)
-  if (!success) throw new ApplyAbort()
+interface TransactionCheckpoint {
+  sessionId: string
+  userMessageId: string
+  cwd: string
 }
 
-async function truncateJsonl(
-  sessionSource: SessionSource,
-  keepLines: number,
-  setApplyError: (e: string) => void,
-): Promise<void> {
-  const res = await authFetch("/api/undo/truncate-jsonl", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dirName: sessionSource.dirName, fileName: sessionSource.fileName, keepLines }),
-  })
-  if (!res.ok) {
-    setApplyError("Failed to truncate session file")
-    throw new ApplyAbort()
-  }
+export interface UndoTransaction {
+  operations: FileOperation[]
+  sessionSource: SessionSource
+  sessionMutation: UndoSessionMutation
+  state: UndoState
+  checkpoint?: TransactionCheckpoint
 }
 
-async function appendJsonl(
-  sessionSource: SessionSource,
-  lines: string[],
-  setApplyError: (e: string) => void,
-): Promise<void> {
-  if (lines.length === 0) return
-  const res = await authFetch("/api/undo/append-jsonl", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dirName: sessionSource.dirName, fileName: sessionSource.fileName, lines }),
-  })
-  if (!res.ok) {
-    setApplyError("Failed to append session data")
-    throw new ApplyAbort()
-  }
-}
+export type CommitUndoTransaction = (transaction: UndoTransaction) => Promise<void>
 
 export async function applyUndo(
   confirmState: UndoConfirmState,
@@ -66,58 +40,50 @@ export async function applyUndo(
   sessionSource: SessionSource,
   state: UndoState,
   freshRawText: string,
-  applyOperations: (ops: FileOperation[]) => Promise<boolean>,
-  saveUndoState: (s: UndoState) => Promise<void>,
+  commitTransaction: CommitUndoTransaction,
   setApplyError: (e: string) => void,
 ): Promise<void> {
   const effectiveTarget = confirmState.targetTurnIndex
-
-  // TODO: If file revert succeeds but JSONL truncation fails, we're in a
-  // half-applied state. Consider reordering (truncate first) or adding rollback.
   const ops = buildUndoOperations(session.turns, session.turns.length - 1, effectiveTarget)
-  let restoredWithNativeCheckpoint = false
-  if (session.agentKind === "claude") {
-    const rewindTarget = session.turns[effectiveTarget + 1]?.id
-    if (rewindTarget) {
-      try {
-        const response = await authFetch(
-          `/api/claude/checkpoints/${encodeURIComponent(session.sessionId)}/rewind`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userMessageId: rewindTarget, cwd: session.cwd }),
-          },
-        )
-        if (response.ok) {
-          const result = await response.json() as { canRewind?: boolean }
-          restoredWithNativeCheckpoint = result.canRewind === true
-        }
-      } catch {
-        // Older Claude runtimes do not expose SDK checkpoint controls. The
-        // existing deterministic Edit/Write reversal remains the fallback.
-      }
-    }
-  }
-  if (!restoredWithNativeCheckpoint) await tryApplyOps(ops, applyOperations)
-
-  // Archive undone turns + truncate JSONL
   const keepTurnCount = effectiveTarget + 1
   const allLines = freshRawText.split("\n").filter(Boolean)
   const cutoffLine = findCutoffLine(allLines, keepTurnCount)
   const removedJsonlLines = allLines.slice(cutoffLine)
 
-  if (removedJsonlLines.length === 0) return
+  if (removedJsonlLines.length === 0) {
+    setApplyError("Unable to locate the selected turn in the current session file")
+    throw new ApplyAbort()
+  }
 
   const { retained, scooped } = collectChildBranches(state.branches, effectiveTarget)
   const branch = createBranch(session.turns, effectiveTarget, removedJsonlLines, scooped)
-  await truncateJsonl(sessionSource, cutoffLine, setApplyError)
-
-  await saveUndoState({
+  const nextState: UndoState = {
     ...state,
     currentTurnIndex: effectiveTarget,
     totalTurns: keepTurnCount,
     branches: [...retained, branch],
     activeBranchId: null,
+  }
+  const rewindTarget = session.agentKind === "claude"
+    ? session.turns[effectiveTarget + 1]?.id
+    : undefined
+
+  await commitTransaction({
+    operations: ops,
+    sessionSource,
+    sessionMutation: {
+      type: "truncate",
+      keepLines: cutoffLine,
+      expectedLineCount: allLines.length,
+    },
+    state: nextState,
+    ...(rewindTarget ? {
+      checkpoint: {
+        sessionId: session.sessionId,
+        userMessageId: rewindTarget,
+        cwd: session.cwd,
+      },
+    } : {}),
   })
 }
 
@@ -126,27 +92,18 @@ export async function applyRedo(
   sessionSource: SessionSource,
   state: UndoState,
   branch: Branch,
-  applyOperations: (ops: FileOperation[]) => Promise<boolean>,
-  saveUndoState: (s: UndoState) => Promise<void>,
-  setApplyError: (e: string) => void,
+  freshRawText: string,
+  commitTransaction: CommitUndoTransaction,
 ): Promise<void> {
   const isPartial = confirmState.redoUpToArchiveIndex !== undefined
     && confirmState.redoUpToArchiveIndex < branch.turns.length - 1
   const upToIdx = confirmState.redoUpToArchiveIndex ?? branch.turns.length - 1
   const redoTurnCount = upToIdx + 1
 
-  // 1. Apply file changes
   const ops = buildRedoFromArchived(branch.turns, upToIdx)
-  await tryApplyOps(ops, applyOperations)
-
-  // 2. Determine which JSONL lines to append
   const cutoff = isPartial ? findCutoffLine(branch.jsonlLines, redoTurnCount) : branch.jsonlLines.length
   const linesToAppend = branch.jsonlLines.slice(0, cutoff)
   const remainingLines = branch.jsonlLines.slice(cutoff)
-
-  await appendJsonl(sessionSource, linesToAppend, setApplyError)
-
-  // 3. Update state -- restore child branches that are now in range
   const children = branch.childBranches ?? []
   let newBranches: Branch[]
   if (isPartial && remainingLines.length > 0) {
@@ -172,12 +129,23 @@ export async function applyRedo(
     ]
   }
 
-  await saveUndoState({
+  const nextState: UndoState = {
     ...state,
     currentTurnIndex: state.currentTurnIndex + redoTurnCount,
     totalTurns: state.totalTurns + redoTurnCount,
     branches: newBranches,
     activeBranchId: null,
+  }
+  const currentLines = freshRawText.split("\n").filter(Boolean)
+  await commitTransaction({
+    operations: ops,
+    sessionSource,
+    sessionMutation: {
+      type: "append",
+      lines: linesToAppend,
+      expectedLineCount: currentLines.length,
+    },
+    state: nextState,
   })
 }
 
@@ -187,47 +155,88 @@ export async function applyBranchSwitch(
   state: UndoState,
   branch: Branch,
   freshRawText: string,
-  applyOperations: (ops: FileOperation[]) => Promise<boolean>,
-  saveUndoState: (s: UndoState) => Promise<void>,
-  setApplyError: (e: string) => void,
+  confirmState: UndoConfirmState,
+  commitTransaction: CommitUndoTransaction,
 ): Promise<void> {
   let updatedBranches = [...state.branches]
+  let sessionLines = freshRawText.split("\n").filter(Boolean)
+  const operations: FileOperation[] = []
 
   // If we have turns past the branch point, undo + archive them first
   if (session.turns.length > branch.branchPointTurnIndex + 1) {
     const undoOps = buildUndoOperations(
       session.turns, session.turns.length - 1, branch.branchPointTurnIndex,
     )
-    await tryApplyOps(undoOps, applyOperations)
+    operations.push(...undoOps)
 
     const { retained, scooped } = collectChildBranches(updatedBranches, branch.branchPointTurnIndex)
     updatedBranches = retained
 
     const keepTurnCount = branch.branchPointTurnIndex + 1
-    const allLines = freshRawText.split("\n").filter(Boolean)
-    const cutoffLine = findCutoffLine(allLines, keepTurnCount)
-    const removedJsonlLines = allLines.slice(cutoffLine)
+    const cutoffLine = findCutoffLine(sessionLines, keepTurnCount)
+    const removedJsonlLines = sessionLines.slice(cutoffLine)
 
     if (removedJsonlLines.length > 0) {
       const currentBranch = createBranch(session.turns, branch.branchPointTurnIndex, removedJsonlLines, scooped)
       updatedBranches = [...updatedBranches, currentBranch]
-      await truncateJsonl(sessionSource, cutoffLine, setApplyError)
+      sessionLines = sessionLines.slice(0, cutoffLine)
     }
   }
 
-  // Apply target branch's file changes + append JSONL
-  const redoOps = buildRedoFromArchived(branch.turns)
-  await tryApplyOps(redoOps, applyOperations)
-  await appendJsonl(sessionSource, branch.jsonlLines, setApplyError)
+  const upToIdx = confirmState.branchTurnIndex ?? branch.turns.length - 1
+  const redoTurnCount = upToIdx + 1
+  const isPartial = upToIdx < branch.turns.length - 1
+  const redoOps = buildRedoFromArchived(branch.turns, upToIdx)
+  operations.push(...redoOps)
+  const jsonlCutoff = isPartial
+    ? findCutoffLine(branch.jsonlLines, redoTurnCount)
+    : branch.jsonlLines.length
+  const restoredJsonlLines = branch.jsonlLines.slice(0, jsonlCutoff)
+  const remainingJsonlLines = branch.jsonlLines.slice(jsonlCutoff)
 
-  await saveUndoState({
+  const children = branch.childBranches ?? []
+  let targetReplacement: Branch[]
+  if (isPartial && remainingJsonlLines.length > 0) {
+    const { restored, remaining } = splitChildBranches(
+      children,
+      branch.branchPointTurnIndex,
+      redoTurnCount,
+    )
+    targetReplacement = [
+      {
+        ...branch,
+        branchPointTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
+        turns: branch.turns.slice(redoTurnCount),
+        jsonlLines: remainingJsonlLines,
+        label: branch.turns[redoTurnCount]?.userMessage || branch.label,
+        childBranches: remaining.length > 0 ? remaining : undefined,
+      },
+      ...restored,
+    ]
+  } else {
+    targetReplacement = children
+  }
+
+  const nextState: UndoState = {
     ...state,
-    currentTurnIndex: branch.branchPointTurnIndex + branch.turns.length,
-    totalTurns: branch.branchPointTurnIndex + 1 + branch.turns.length,
+    currentTurnIndex: branch.branchPointTurnIndex + redoTurnCount,
+    totalTurns: branch.branchPointTurnIndex + 1 + redoTurnCount,
     branches: [
       ...updatedBranches.filter((b) => b.id !== branch.id),
-      ...(branch.childBranches ?? []),
+      ...targetReplacement,
     ],
     activeBranchId: null,
+  }
+
+  await commitTransaction({
+    operations,
+    sessionSource,
+    sessionMutation: {
+      type: "splice",
+      keepLines: sessionLines.length,
+      lines: restoredJsonlLines,
+      expectedLineCount: freshRawText.split("\n").filter(Boolean).length,
+    },
+    state: nextState,
   })
 }

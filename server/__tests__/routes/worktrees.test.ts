@@ -5,27 +5,50 @@ vi.mock("../../helpers", () => ({
   dirs: { PROJECTS_DIR: "/tmp/test-projects" },
   isWithinDir: vi.fn(),
   readdir: vi.fn(),
-  readFile: vi.fn(),
   open: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
 
 vi.mock("node:child_process", () => ({
-  execFileSync: vi.fn(),
+  execFile: vi.fn(),
 }))
 
-vi.mock("node:fs", () => ({
-  statSync: vi.fn(() => ({ birthtime: new Date("2025-01-01") })),
+vi.mock("node:fs/promises", () => ({
+  stat: vi.fn(async () => ({ birthtime: new Date("2025-01-01") })),
 }))
 
 import { isWithinDir, readdir } from "../../helpers"
-import { execFileSync } from "node:child_process"
+import { execFile } from "node:child_process"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerWorktreeRoutes } from "../../routes/worktrees"
+import { readFirstJsonLine, SESSION_HEADER_BYTES } from "../../routes/worktrees/worktreeUtils"
+import {
+  mapWithConcurrency,
+  runWorktreeCommand,
+  WORKTREE_COMMAND_MAX_BUFFER,
+  WORKTREE_COMMAND_TIMEOUT_MS,
+  WORKTREE_NETWORK_TIMEOUT_MS,
+} from "../../routes/worktrees/worktreeIo"
 
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedReaddir = vi.mocked(readdir)
-const mockedExecFileSync = vi.mocked(execFileSync)
+const mockedExecFile = vi.mocked(execFile)
+
+type CommandResult = (command: unknown, args: unknown) => string
+type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void
+
+function mockCommandResults(getResult: CommandResult): void {
+  mockedExecFile.mockImplementation(((...callArgs: unknown[]) => {
+    const [command, args] = callArgs
+    const callback = callArgs.at(-1) as ExecCallback
+    try {
+      callback(null, getResult(command, args), "")
+    } catch (error) {
+      callback(error as Error, "", "")
+    }
+    return {} as ReturnType<typeof execFile>
+  }) as unknown as typeof execFile)
+}
 
 /**
  * Creates mock req/res objects. When body is provided, the req will emit
@@ -90,7 +113,7 @@ describe("GET /api/worktrees/:dirName", () => {
   it("returns worktree list for a project", async () => {
     mockedIsWithinDir.mockReturnValue(true)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       // git rev-parse --git-common-dir
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
@@ -133,7 +156,7 @@ describe("GET /api/worktrees/:dirName", () => {
   it("returns empty array when project is not a git repo", async () => {
     mockedIsWithinDir.mockReturnValue(true)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) throw new Error("not a git repo")
       return ""
@@ -185,7 +208,7 @@ describe("GET /api/worktrees/:dirName", () => {
     vi.mocked(open).mockResolvedValue(mockFh as any)
     mockedReaddir.mockResolvedValue(["session1.jsonl"] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("symbolic-ref")) throw new Error("no remote")
@@ -212,11 +235,17 @@ describe("GET /api/worktrees/:dirName", () => {
     expect(data).toHaveLength(1)
     expect(data[0].name).toBe("fix-auth")
 
+    for (const [buffer, offset, length, position] of mockFh.read.mock.calls) {
+      expect(buffer).toHaveLength(4096)
+      expect([offset, length, position]).toEqual([0, 4096, 0])
+    }
+
     // Verify --git-common-dir was called (not --show-toplevel)
-    expect(mockedExecFileSync).toHaveBeenCalledWith(
+    expect(mockedExecFile).toHaveBeenCalledWith(
       "git",
       ["rev-parse", "--git-common-dir"],
-      expect.any(Object)
+      expect.any(Object),
+      expect.any(Function),
     )
   })
 })
@@ -249,7 +278,7 @@ describe("DELETE /api/worktrees/:dirName/:worktreeName", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       return "" as any
@@ -280,7 +309,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       return "" as any
@@ -299,7 +328,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       return "" as any
@@ -322,7 +351,7 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("push")) return ""
@@ -341,6 +370,51 @@ describe("POST /api/worktrees/:dirName/create-pr", () => {
     expect(res.statusCode).toBe(200)
     const data = JSON.parse(res._getData())
     expect(data.url).toBe("https://github.com/owner/repo/pull/1")
+
+    expect(mockedExecFile).toHaveBeenCalledWith(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--title",
+        "Fix auth",
+        "--head",
+        "worktree-fix-auth",
+        "--body",
+        "",
+      ],
+      expect.any(Object),
+      expect.any(Function),
+    )
+
+    const networkCalls = mockedExecFile.mock.calls.filter(([command, args]) => {
+      const commandArgs = args as string[]
+      return (command === "git" && commandArgs.includes("push")) || command === "gh"
+    })
+    expect(networkCalls).toHaveLength(2)
+    for (const call of networkCalls) {
+      expect(call[2]).toMatchObject({ timeout: WORKTREE_NETWORK_TIMEOUT_MS })
+    }
+  })
+
+  it("rejects request bodies larger than the route limit", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReaddir.mockResolvedValue([] as any)
+    mockCommandResults((cmd: unknown, args: unknown) => {
+      const commandArgs = args as string[]
+      if (cmd === "git" && commandArgs.includes("--git-common-dir")) return "/repo/.git\n"
+      return ""
+    })
+
+    const oversizedBody = JSON.stringify({
+      worktreeName: "fix-auth",
+      body: "x".repeat(65 * 1024),
+    })
+    const { req, res } = createMockReqRes("POST", "/my-project/create-pr", oversizedBody)
+    await handler(req as any, res as any, vi.fn())
+
+    expect(res.statusCode).toBe(413)
+    expect(JSON.parse(res._getData())).toEqual({ error: "Request body too large" })
   })
 })
 
@@ -359,12 +433,12 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    const { statSync } = await import("node:fs")
-    const mockedStatSync = vi.mocked(statSync)
+    const { stat } = await import("node:fs/promises")
+    const mockedStat = vi.mocked(stat)
     // Old birthtime (stale)
-    mockedStatSync.mockReturnValue({ birthtime: new Date("2024-01-01") } as any)
+    mockedStat.mockResolvedValue({ birthtime: new Date("2024-01-01") } as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("worktree") && a.includes("--porcelain")) {
@@ -398,11 +472,11 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    const { statSync } = await import("node:fs")
-    const mockedStatSync = vi.mocked(statSync)
-    mockedStatSync.mockReturnValue({ birthtime: new Date("2024-01-01") } as any)
+    const { stat } = await import("node:fs/promises")
+    const mockedStat = vi.mocked(stat)
+    mockedStat.mockResolvedValue({ birthtime: new Date("2024-01-01") } as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("--porcelain")) {
@@ -434,7 +508,7 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("--porcelain")) return ""
@@ -458,11 +532,11 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    const { statSync } = await import("node:fs")
-    const mockedStatSync = vi.mocked(statSync)
-    mockedStatSync.mockReturnValue({ birthtime: new Date("2024-01-01") } as any)
+    const { stat } = await import("node:fs/promises")
+    const mockedStat = vi.mocked(stat)
+    mockedStat.mockResolvedValue({ birthtime: new Date("2024-01-01") } as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       if (cmd === "git" && a.includes("worktree") && a.includes("--porcelain")) {
@@ -496,7 +570,7 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     mockedIsWithinDir.mockReturnValue(true)
     mockedReaddir.mockResolvedValue([] as any)
 
-    mockedExecFileSync.mockImplementation((cmd: unknown, args: unknown) => {
+    mockCommandResults((cmd: unknown, args: unknown) => {
       const a = args as string[]
       if (cmd === "git" && a.includes("--git-common-dir")) return "/repo/.git\n"
       return "" as any
@@ -513,5 +587,105 @@ describe("POST /api/worktrees/:dirName/cleanup", () => {
     expect(res.statusCode).toBe(400)
     const data = JSON.parse(res._getData())
     expect(data.error).toBe("Invalid JSON body")
+  })
+})
+
+describe("worktree I/O bounds", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("runs commands asynchronously with explicit output, timeout, and prompt bounds", async () => {
+    mockCommandResults(() => "ok\n")
+
+    await expect(runWorktreeCommand("git", ["status"], { cwd: "/repo" })).resolves.toBe("ok\n")
+
+    expect(mockedExecFile).toHaveBeenCalledWith(
+      "git",
+      ["status"],
+      expect.objectContaining({
+        cwd: "/repo",
+        encoding: "utf-8",
+        maxBuffer: WORKTREE_COMMAND_MAX_BUFFER,
+        timeout: WORKTREE_COMMAND_TIMEOUT_MS,
+        windowsHide: true,
+        env: expect.objectContaining({
+          GCM_INTERACTIVE: "Never",
+          GH_PROMPT_DISABLED: "1",
+          GIT_TERMINAL_PROMPT: "0",
+        }),
+      }),
+      expect.any(Function),
+    )
+  })
+
+  it("leaves the event loop responsive while a command is pending", async () => {
+    let completeCommand: ExecCallback | undefined
+    mockedExecFile.mockImplementationOnce(((...callArgs: unknown[]) => {
+      completeCommand = callArgs.at(-1) as ExecCallback
+      return {} as ReturnType<typeof execFile>
+    }) as unknown as typeof execFile)
+
+    let settled = false
+    const command = runWorktreeCommand("git", ["status"], { cwd: "/repo" })
+      .then((output) => {
+        settled = true
+        return output
+      })
+
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(settled).toBe(false)
+
+    completeCommand?.(null, "ready\n", "")
+    await expect(command).resolves.toBe("ready\n")
+  })
+
+  it("reads only a fixed-size JSONL header", async () => {
+    const header = JSON.stringify({ cwd: "/repo", gitBranch: "worktree-fix-auth" })
+    const read = vi.fn(async (buffer: Buffer, offset: number, length: number) => {
+      Buffer.from(`${header}\n${"x".repeat(10_000)}`).copy(buffer, offset, 0, length)
+      return { bytesRead: Math.min(length, Buffer.byteLength(header) + 1 + 10_000) }
+    })
+    const close = vi.fn(async () => undefined)
+    const { open } = await import("../../helpers")
+    vi.mocked(open).mockResolvedValue({ read, close } as any)
+
+    await expect(readFirstJsonLine("/sessions/session.jsonl")).resolves.toEqual({
+      cwd: "/repo",
+      gitBranch: "worktree-fix-auth",
+    })
+    expect(read).toHaveBeenCalledWith(
+      expect.objectContaining({ byteLength: SESSION_HEADER_BYTES }),
+      0,
+      SESSION_HEADER_BYTES,
+      0,
+    )
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it("caps concurrent work without changing output ordering", async () => {
+    let active = 0
+    let maxActive = 0
+    let started = 0
+    let releaseFirstWave: (() => void) | undefined
+    const firstWave = new Promise<void>((resolve) => {
+      releaseFirstWave = resolve
+    })
+
+    const pending = mapWithConcurrency([0, 1, 2, 3, 4, 5], 3, async (value) => {
+      active += 1
+      started += 1
+      maxActive = Math.max(maxActive, active)
+      if (started <= 3) await firstWave
+      active -= 1
+      return value * 2
+    })
+
+    await vi.waitFor(() => expect(started).toBe(3))
+    expect(maxActive).toBe(3)
+    releaseFirstWave?.()
+
+    await expect(pending).resolves.toEqual([0, 2, 4, 6, 8, 10])
+    expect(maxActive).toBe(3)
   })
 })

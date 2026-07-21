@@ -1,4 +1,9 @@
-import type { UseFn } from "../helpers"
+import {
+  HttpBodyError,
+  readJsonBody,
+  sendJson,
+  type UseFn,
+} from "../http"
 import { getConfig, getDirs } from "../config"
 import { execFile } from "node:child_process"
 import { stat, writeFile, unlink, readdir, open } from "node:fs/promises"
@@ -181,54 +186,84 @@ function getGitHeadContent(filePath: string): Promise<string> {
   })
 }
 
+interface ActionRequest {
+  path?: string
+  dirName?: string
+  command?: unknown
+  mode?: unknown
+  line?: unknown
+  column?: unknown
+}
+
+async function readActionRequest(
+  req: Parameters<typeof readJsonBody>[0],
+  res: Parameters<typeof sendJson>[0],
+): Promise<ActionRequest | null> {
+  try {
+    const body = await readJsonBody<ActionRequest | null>(req)
+    if (body === null) throw new HttpBodyError("Invalid JSON body", 400)
+    return body
+  } catch (error) {
+    if (!(error instanceof HttpBodyError)) throw error
+    sendJson(res, error.statusCode, { error: error.message })
+    return null
+  }
+}
+
+async function resolveExistingActionPath(
+  body: ActionRequest,
+  res: Parameters<typeof sendJson>[0],
+): Promise<string | null> {
+  const path = await resolveActionPath(body)
+  if (!path) {
+    sendJson(res, 400, { error: "path or dirName required" })
+    return null
+  }
+
+  try {
+    await stat(path)
+    return path
+  } catch {
+    sendJson(res, 400, { error: "Path does not exist" })
+    return null
+  }
+}
+
+function detectedMacTerminalApp(): string {
+  const termProgram = process.env.TERM_PROGRAM?.toLowerCase()
+  if (termProgram === "ghostty") return "Ghostty"
+  if (termProgram === "iterm.app") return "iTerm"
+  if (termProgram === "warpterminal") return "Warp"
+  if (termProgram === "alacritty") return "Alacritty"
+  if (termProgram === "kitty") return "kitty"
+  return "Terminal"
+}
+
 export function registerEditorRoutes(use: UseFn) {
   // POST /api/reveal-in-folder — reveal a path in the OS file manager (Finder / Explorer / etc.)
   // Body: { path?: string, dirName?: string }
   use("/api/reveal-in-folder", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-    req.on("end", async () => {
-      res.setHeader("Content-Type", "application/json")
+    const body = await readActionRequest(req, res)
+    if (!body) return
+    const path = await resolveExistingActionPath(body, res)
+    if (!path) return
 
-      try {
-        const parsed = JSON.parse(body)
-        const path = await resolveActionPath(parsed)
-        if (!path) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "path or dirName required" }))
-          return
-        }
-
-        try {
-          await stat(path)
-        } catch {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Path does not exist" }))
-          return
-        }
-
-        const os = platform()
-        try {
-          if (os === "darwin") {
-            await openWithEditor("open", ["-R", path])
-          } else if (os === "win32") {
-            await openWithEditor("explorer", [`/select,${path}`])
-          } else {
-            // Linux: open the parent directory (no universal "select" flag)
-            await openWithEditor("xdg-open", [dirname(path)])
-          }
-          res.end(JSON.stringify({ success: true }))
-        } catch {
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: "Failed to reveal path in file manager" }))
-        }
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+    const os = platform()
+    try {
+      if (os === "darwin") {
+        await openWithEditor("open", ["-R", path])
+      } else if (os === "win32") {
+        await openWithEditor("explorer", [`/select,${path}`])
+      } else {
+        // Linux: open the parent directory (no universal "select" flag)
+        await openWithEditor("xdg-open", [dirname(path)])
       }
-    })
+      sendJson(res, 200, { success: true })
+    } catch {
+      sendJson(res, 500, { error: "Failed to reveal path in file manager" })
+    }
   })
 
   // POST /api/open-terminal — open the user's default terminal at a directory
@@ -236,84 +271,44 @@ export function registerEditorRoutes(use: UseFn) {
   use("/api/open-terminal", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-    req.on("end", async () => {
-      res.setHeader("Content-Type", "application/json")
+    const body = await readActionRequest(req, res)
+    if (!body) return
+    const path = await resolveExistingActionPath(body, res)
+    if (!path) return
 
-      try {
-        const parsed = JSON.parse(body)
-        const path = await resolveActionPath(parsed)
-        if (!path) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "path or dirName required" }))
-          return
-        }
+    // Optional command to run in the terminal (e.g. "claude /mcp")
+    // Sanitize: only allow alphanumeric, spaces, slashes, hyphens, dots, underscores, colons
+    const rawCommand = typeof body.command === "string" ? body.command : undefined
+    const command = rawCommand && /^[a-zA-Z0-9 /\-._:]+$/.test(rawCommand) ? rawCommand : undefined
+    const os = platform()
+    const configuredTerminal = getConfig()?.terminalApp
 
-        // Optional command to run in the terminal (e.g. "claude /mcp")
-        // Sanitize: only allow alphanumeric, spaces, slashes, hyphens, dots, underscores, colons
-        const rawCommand = typeof parsed.command === "string" ? parsed.command : undefined
-        const command = rawCommand && /^[a-zA-Z0-9 /\-._:]+$/.test(rawCommand) ? rawCommand : undefined
-
-        try {
-          await stat(path)
-        } catch {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Path does not exist" }))
-          return
-        }
-
-        const os = platform()
-        try {
-          // If a command is provided on macOS, use osascript with the user's terminal
-          if (command && os === "darwin") {
-            const escapedPath = path.replace(/'/g, "'\\''")
-            const escapedCmd = command.replace(/'/g, "'\\''")
-            const configuredTerminal = getConfig()?.terminalApp
-            const tp = process.env.TERM_PROGRAM?.toLowerCase()
-            const termApp = configuredTerminal
-              || (tp === "ghostty" ? "Ghostty"
-                : tp === "iterm.app" ? "iTerm"
-                : tp === "warpterminal" ? "Warp"
-                : tp === "alacritty" ? "Alacritty"
-                : tp === "kitty" ? "kitty"
-                : "Terminal")
-            const script = `tell application "${termApp}"
+    try {
+      // If a command is provided on macOS, use osascript with the user's terminal
+      if (command && os === "darwin") {
+        const escapedPath = path.replace(/'/g, "'\\''")
+        const escapedCmd = command.replace(/'/g, "'\\''")
+        const termApp = configuredTerminal || detectedMacTerminalApp()
+        const script = `tell application "${termApp}"
   activate
   do script "cd '${escapedPath}' && ${escapedCmd}"
 end tell`
-            await openWithEditor("osascript", ["-e", script])
-          } else {
-            const configuredTerminal = getConfig()?.terminalApp
-            if (configuredTerminal) {
-              const { cmd, args } = terminalCommand(configuredTerminal, path)
-              await openWithEditor(cmd, args)
-            } else if (os === "darwin") {
-              const tp = process.env.TERM_PROGRAM?.toLowerCase()
-              const termApp = tp === "ghostty" ? "Ghostty"
-                : tp === "iterm.app" ? "iTerm"
-                : tp === "warpterminal" ? "Warp"
-                : tp === "alacritty" ? "Alacritty"
-                : tp === "kitty" ? "kitty"
-                : "Terminal"
-              const { cmd, args } = terminalCommand(termApp, path)
-              await openWithEditor(cmd, args)
-            } else if (os === "win32") {
-              await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
-            } else {
-              await openWithEditor("x-terminal-emulator", ["--working-directory", path])
-            }
-          }
-          res.end(JSON.stringify({ success: true }))
-        } catch {
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: "Failed to open terminal" }))
-        }
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        await openWithEditor("osascript", ["-e", script])
+      } else if (configuredTerminal) {
+        const { cmd, args } = terminalCommand(configuredTerminal, path)
+        await openWithEditor(cmd, args)
+      } else if (os === "darwin") {
+        const { cmd, args } = terminalCommand(detectedMacTerminalApp(), path)
+        await openWithEditor(cmd, args)
+      } else if (os === "win32") {
+        await openWithEditor("cmd.exe", ["/c", "start", "cmd", "/K", `cd /d "${path}"`])
+      } else {
+        await openWithEditor("x-terminal-emulator", ["--working-directory", path])
       }
-    })
+      sendJson(res, 200, { success: true })
+    } catch {
+      sendJson(res, 500, { error: "Failed to open terminal" })
+    }
   })
 
   // POST /api/open-in-editor — open a file or project in the user's default code editor
@@ -323,93 +318,65 @@ end tell`
   use("/api/open-in-editor", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-    req.on("end", async () => {
-      res.setHeader("Content-Type", "application/json")
+    const body = await readActionRequest(req, res)
+    if (!body) return
+    const path = await resolveExistingActionPath(body, res)
+    if (!path) return
+
+    const mode = body.mode ?? "file"
+    const line = Number.isInteger(body.line) && Number(body.line) > 0 ? Number(body.line) : undefined
+    const column = Number.isInteger(body.column) && Number(body.column) > 0 ? Number(body.column) : undefined
+    const editor = await resolveEditor(getConfig()?.editorApp)
+
+    if (mode === "diff") {
+      // diff mode: only supported for editors with --diff flag (cursor, code, windsurf)
+      const editorName = editor ? basename(editor).toLowerCase() : ""
+      const diffEditor = editor && DIFF_CAPABLE.has(editorName) ? editor : null
+      if (!diffEditor) {
+        return sendJson(res, 422, { error: "Diff view requires Cursor or VS Code" })
+      }
+
+      let originalContent: string
+      try {
+        originalContent = await getGitHeadContent(path)
+      } catch {
+        return sendJson(res, 422, { error: "File is not tracked by git or has no commits" })
+      }
+
+      const tmpFile = join(tmpdir(), `cogpit-diff-${randomBytes(4).toString("hex")}-${basename(path)}`)
+      await writeFile(tmpFile, originalContent, "utf8")
 
       try {
-        const parsed = JSON.parse(body)
-        const { mode = "file" } = parsed
-        const line = Number.isInteger(parsed.line) && parsed.line > 0 ? parsed.line : undefined
-        const column = Number.isInteger(parsed.column) && parsed.column > 0 ? parsed.column : undefined
-        const path = await resolveActionPath(parsed)
-        if (!path) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "path or dirName required" }))
-          return
-        }
-
-        // Validate the path exists
-        try {
-          await stat(path)
-        } catch {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Path does not exist" }))
-          return
-        }
-
-        const editor = await resolveEditor(getConfig()?.editorApp)
-
-        if (mode === "diff") {
-          // diff mode: only supported for editors with --diff flag (cursor, code, windsurf)
-          const editorName = editor ? basename(editor).toLowerCase() : ""
-          const diffEditor = editor && DIFF_CAPABLE.has(editorName) ? editor : null
-          if (!diffEditor) {
-            res.statusCode = 422
-            res.end(JSON.stringify({ error: "Diff view requires Cursor or VS Code" }))
-            return
-          }
-
-          let originalContent: string
-          try {
-            originalContent = await getGitHeadContent(path)
-          } catch {
-            res.statusCode = 422
-            res.end(JSON.stringify({ error: "File is not tracked by git or has no commits" }))
-            return
-          }
-
-          const tmpFile = join(tmpdir(), `cogpit-diff-${randomBytes(4).toString("hex")}-${basename(path)}`)
-          await writeFile(tmpFile, originalContent, "utf8")
-
-          try {
-            await openWithEditor(diffEditor, ["--diff", tmpFile, path])
-            res.end(JSON.stringify({ success: true, editor: diffEditor, mode: "diff" }))
-          } catch {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: `Failed to open diff in ${diffEditor}` }))
-          } finally {
-            // Clean up temp file after a short delay (editor needs time to read it)
-            setTimeout(() => unlink(tmpFile).catch(() => {}), 10_000)
-          }
-          return
-        }
-
-        // mode === "file": open file/folder
-        if (editor) {
-          try {
-            await openWithEditor(editor, editorOpenArgs(editor, path, line, column))
-            res.end(JSON.stringify({ success: true, editor }))
-          } catch {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: `Failed to open ${editor}` }))
-          }
-        } else {
-          // Fallback: OS default
-          const cmd = platform() === "darwin" ? "open" : platform() === "win32" ? "explorer" : "xdg-open"
-          try {
-            await openWithEditor(cmd, [path])
-            res.end(JSON.stringify({ success: true, editor: cmd }))
-          } catch {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: "No editor found and OS open failed" }))
-          }
-        }
+        await openWithEditor(diffEditor, ["--diff", tmpFile, path])
+        sendJson(res, 200, { success: true, editor: diffEditor, mode: "diff" })
       } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
+        sendJson(res, 500, { error: `Failed to open diff in ${diffEditor}` })
+      } finally {
+        // Clean up temp file after a short delay (editor needs time to read it)
+        setTimeout(() => unlink(tmpFile).catch(() => {}), 10_000)
       }
-    })
+      return
+    }
+
+    // mode === "file": open file/folder
+    if (editor) {
+      try {
+        await openWithEditor(editor, editorOpenArgs(editor, path, line, column))
+        sendJson(res, 200, { success: true, editor })
+      } catch {
+        sendJson(res, 500, { error: `Failed to open ${editor}` })
+      }
+      return
+    }
+
+    // Fallback: OS default
+    const os = platform()
+    const cmd = os === "darwin" ? "open" : os === "win32" ? "explorer" : "xdg-open"
+    try {
+      await openWithEditor(cmd, [path])
+      sendJson(res, 200, { success: true, editor: cmd })
+    } catch {
+      sendJson(res, 500, { error: "No editor found and OS open failed" })
+    }
   })
 }

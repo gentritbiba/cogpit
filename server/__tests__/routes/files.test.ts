@@ -17,6 +17,7 @@ const mockedLstat = vi.mocked(lstat)
 
 
 import type { UseFn, Middleware } from "../../helpers"
+import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerFileRoutes } from "../../routes/files"
 
 function createMockReqRes(method: string, url: string, body?: string) {
@@ -55,7 +56,7 @@ function createMockReqRes(method: string, url: string, body?: string) {
     for (const h of endHandlers) h()
   }
 
-  return { req, res, next, sendBody }
+  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
 }
 
 describe("file routes", () => {
@@ -72,7 +73,7 @@ describe("file routes", () => {
 
   describe("POST /api/check-files-exist", () => {
     it("calls next for non-POST methods", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const { req, res, next } = createMockReqRes("GET", "/api/check-files-exist")
 
       await handler(req, res, next)
@@ -81,7 +82,7 @@ describe("file routes", () => {
     })
 
     it("returns empty deleted array for empty input", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({ files: [], dirs: [] })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
 
@@ -96,7 +97,7 @@ describe("file routes", () => {
     })
 
     it("returns empty deleted for files that exist", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({ files: ["/existing/file.txt"] })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
       mockedStat.mockResolvedValueOnce({ isDirectory: () => false } as unknown as Stats)
@@ -112,7 +113,7 @@ describe("file routes", () => {
     })
 
     it("rejects invalid JSON body", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", "not-json")
 
       await handler(req, res, next)
@@ -126,7 +127,7 @@ describe("file routes", () => {
     })
 
     it("skips empty string file entries", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({ files: ["", ""], dirs: [] })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
 
@@ -141,7 +142,7 @@ describe("file routes", () => {
     })
 
     it("handles missing files and dirs fields gracefully", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({})
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
 
@@ -156,7 +157,7 @@ describe("file routes", () => {
     })
 
     it("skips directories that still exist on disk", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({ dirs: ["/home/user/existing-dir"] })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
       mockedLstat.mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
@@ -172,7 +173,7 @@ describe("file routes", () => {
     })
 
     it("skips empty and non-string dir entries", async () => {
-      const handler = handlers.get("/api/check-files-exist")
+      const handler = getRouteHandler(handlers, "/api/check-files-exist")
       const body = JSON.stringify({ dirs: ["", null] })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/api/check-files-exist", body)
 

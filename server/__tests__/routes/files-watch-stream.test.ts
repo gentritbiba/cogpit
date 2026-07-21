@@ -189,4 +189,97 @@ describe("/api/watch stream-bus forwarding", () => {
     expect(mockOpen).not.toHaveBeenCalled()
     closeConnection()
   })
+
+  it("bounds replay reads and preserves UTF-8 split across chunks", async () => {
+    const chunkBytes = 256 * 1024
+    const line = `${"a".repeat(chunkBytes - 1)}🙂`
+    const source = Buffer.from(`${line}\n`)
+    const readSizes: number[] = []
+    mockStat.mockResolvedValue({ size: source.length, mtimeMs: Date.now() })
+    mockOpen.mockImplementation(async () => ({
+      read: vi.fn(
+        async (buffer: Buffer, _bufferOffset: number, length: number, position: number) => {
+          readSizes.push(buffer.length)
+          const bytesRead = source.copy(buffer, 0, position, position + length)
+          return { bytesRead }
+        },
+      ),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+
+    const { frames, closeConnection } = await connect(
+      `/codex__proj/${SESSION}.jsonl?offset=0`,
+    )
+    await vi.waitFor(() => {
+      const replayedLines = parseFrames(frames)
+        .filter((event) => event.type === "lines")
+        .flatMap((event) => event.lines as string[])
+      expect(replayedLines).toEqual([line])
+    })
+
+    expect(readSizes.length).toBeGreaterThan(1)
+    expect(Math.max(...readSizes)).toBeLessThanOrEqual(chunkBytes)
+    closeConnection()
+  })
+})
+
+describe("/api/task-output streaming", () => {
+  it("serializes and bounds reads while delivering the complete output", async () => {
+    const totalBytes = 300_000
+    const readSizes: number[] = []
+    mockStat.mockResolvedValue({ size: totalBytes, mtimeMs: Date.now() })
+    mockOpen.mockImplementation(async () => ({
+      read: vi.fn(async (buffer: Buffer) => {
+        readSizes.push(buffer.length)
+        buffer.fill("x")
+        return { bytesRead: buffer.length }
+      }),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(
+      `/?path=${encodeURIComponent("/tmp/claude-cogpit-test/task.output")}`,
+    )
+    await handler(harness.req as never, harness.res as never, harness.next)
+    await vi.waitFor(() => expect(readSizes.reduce((sum, size) => sum + size, 0)).toBe(totalBytes))
+
+    expect(readSizes.length).toBeGreaterThan(1)
+    expect(Math.max(...readSizes)).toBeLessThanOrEqual(256 * 1024)
+    expect(harness.frames.length).toBe(readSizes.length)
+    harness.closeConnection()
+  })
+
+  it("preserves a UTF-8 character split across read chunks", async () => {
+    const chunkBytes = 256 * 1024
+    const source = Buffer.concat([
+      Buffer.alloc(chunkBytes - 1, "a"),
+      Buffer.from("🙂"),
+      Buffer.from("z"),
+    ])
+    mockStat.mockResolvedValue({ size: source.length, mtimeMs: Date.now() })
+    mockOpen.mockImplementation(async () => ({
+      read: vi.fn(
+        async (buffer: Buffer, _bufferOffset: number, length: number, position: number) => {
+          const bytesRead = source.copy(buffer, 0, position, position + length)
+          return { bytesRead }
+        },
+      ),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(
+      `/?path=${encodeURIComponent("/tmp/claude-cogpit-test/utf8.output")}`,
+    )
+    await handler(harness.req as never, harness.res as never, harness.next)
+    await vi.waitFor(() => {
+      const text = parseFrames(harness.frames)
+        .filter((event) => event.type === "output")
+        .map((event) => event.text)
+        .join("")
+      expect(text).toBe(source.toString("utf8"))
+    })
+    harness.closeConnection()
+  })
 })

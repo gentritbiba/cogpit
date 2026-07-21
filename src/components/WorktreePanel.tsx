@@ -24,7 +24,7 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible"
-import type { WorktreeInfo } from "../../server/helpers"
+import type { WorktreeInfo } from "../../shared/contracts/worktrees"
 
 interface WorktreePanelProps {
   open: boolean

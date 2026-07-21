@@ -4,7 +4,7 @@ import {
   lstat,
   join,
 } from "../helpers"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 
 export function registerFileRoutes(use: UseFn) {

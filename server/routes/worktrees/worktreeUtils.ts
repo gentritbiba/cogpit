@@ -1,6 +1,12 @@
-import { execFileSync } from "node:child_process"
 import { resolve, dirname } from "node:path"
 import { readdir, open, join } from "../../helpers"
+import {
+  mapWithConcurrency,
+  runWorktreeCommand,
+  SESSION_HEADER_CONCURRENCY,
+} from "./worktreeIo"
+
+export const SESSION_HEADER_BYTES = 4096
 
 export interface WorktreeRaw {
   path: string
@@ -33,28 +39,41 @@ export function parseWorktreeList(output: string): WorktreeRaw[] {
   return worktrees
 }
 
+/** Read only the bounded JSONL header needed by worktree discovery. */
+export async function readFirstJsonLine(filePath: string): Promise<Record<string, unknown> | null> {
+  const fileHandle = await open(filePath, "r")
+  try {
+    const buffer = Buffer.alloc(SESSION_HEADER_BYTES)
+    const { bytesRead } = await fileHandle.read(buffer, 0, SESSION_HEADER_BYTES, 0)
+    const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n", 1)[0]
+    if (!firstLine) return null
+    const value: unknown = JSON.parse(firstLine)
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null
+  } finally {
+    await fileHandle.close()
+  }
+}
+
 export async function resolveProjectPath(projectDir: string, dirName: string): Promise<string> {
   try {
     const files = await readdir(projectDir)
-    for (const f of files.filter((f: string) => f.endsWith(".jsonl"))) {
-      try {
-        const fh = await open(join(projectDir, f), "r")
+    const sessionFiles = files.filter((file: string) => file.endsWith(".jsonl"))
+    const headers = await mapWithConcurrency(
+      sessionFiles,
+      SESSION_HEADER_CONCURRENCY,
+      async (file) => {
         try {
-          const buf = Buffer.alloc(4096)
-          const { bytesRead } = await fh.read(buf, 0, 4096, 0)
-          const firstLine = buf.subarray(0, bytesRead).toString("utf-8").split("\n")[0]
-          if (firstLine) {
-            const parsed = JSON.parse(firstLine)
-            if (parsed.cwd) {
-              return parsed.cwd
-            }
-          }
-        } finally {
-          await fh.close()
+          return await readFirstJsonLine(join(projectDir, file))
+        } catch {
+          return null
         }
-      } catch {
-        continue
-      }
+      },
+    )
+
+    for (const header of headers) {
+      if (typeof header?.cwd === "string" && header.cwd) return header.cwd
     }
   } catch {
     // projectDir might not exist yet
@@ -62,12 +81,11 @@ export async function resolveProjectPath(projectDir: string, dirName: string): P
   return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
-export function getMainWorktreeRoot(projectPath: string): string | null {
+export async function getMainWorktreeRoot(projectPath: string): Promise<string | null> {
   try {
-    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+    const commonDir = (await runWorktreeCommand("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectPath,
-      encoding: "utf-8",
-    }).trim()
+    })).trim()
     // --git-common-dir returns the path to the shared .git directory.
     // From main repo: ".git" (relative). From worktree: absolute or relative path to main .git.
     // Resolving it and taking dirname gives the main repo root.
@@ -77,12 +95,11 @@ export function getMainWorktreeRoot(projectPath: string): string | null {
   }
 }
 
-export function getDefaultBranch(gitRoot: string): string {
+export async function getDefaultBranch(gitRoot: string): Promise<string> {
   try {
-    const ref = execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+    const ref = (await runWorktreeCommand("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
       cwd: gitRoot,
-      encoding: "utf-8",
-    }).trim()
+    })).trim()
     return ref.replace("refs/remotes/origin/", "")
   } catch {
     return "main"

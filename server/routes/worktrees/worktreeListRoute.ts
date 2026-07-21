@@ -1,20 +1,183 @@
-import { execFileSync } from "node:child_process"
-import { statSync } from "node:fs"
+import { stat } from "node:fs/promises"
 import type { ServerResponse } from "node:http"
 import {
   dirs,
   isWithinDir,
   readdir,
-  readFile,
   join,
 } from "../../helpers"
-import type { WorktreeInfo, FileChange } from "../../helpers"
+import type { FileChange, WorktreeInfo } from "../../../shared/contracts/worktrees"
 import {
   parseWorktreeList,
   resolveProjectPath,
   getMainWorktreeRoot,
   getDefaultBranch,
+  readFirstJsonLine,
 } from "./worktreeUtils"
+import type { WorktreeRaw } from "./worktreeUtils"
+import {
+  mapWithConcurrency,
+  runWorktreeCommand,
+  SESSION_HEADER_CONCURRENCY,
+  WORKTREE_SCAN_CONCURRENCY,
+} from "./worktreeIo"
+
+async function loadSessionBranches(projectDir: string): Promise<Map<string, string[]>> {
+  const sessionBranches = new Map<string, string[]>()
+
+  try {
+    const files = await readdir(projectDir)
+    const sessionFiles = files.filter((file: string) => file.endsWith(".jsonl"))
+    const headers = await mapWithConcurrency(
+      sessionFiles,
+      SESSION_HEADER_CONCURRENCY,
+      async (file) => {
+        try {
+          return {
+            file,
+            header: await readFirstJsonLine(join(projectDir, file)),
+          }
+        } catch {
+          return { file, header: null }
+        }
+      },
+    )
+
+    for (const { file, header } of headers) {
+      if (typeof header?.gitBranch !== "string" || !header.gitBranch) continue
+      const sessionId = file.slice(0, -".jsonl".length)
+      const existing = sessionBranches.get(header.gitBranch) ?? []
+      existing.push(sessionId)
+      sessionBranches.set(header.gitBranch, existing)
+    }
+  } catch {
+    // Project directory may not exist yet.
+  }
+
+  return sessionBranches
+}
+
+function mergeNumstat(changedFiles: FileChange[], seen: Set<string>, output: string): void {
+  for (const line of output.trim().split("\n")) {
+    if (!line) continue
+    const [additions, deletions, filePath] = line.split("\t")
+    if (!filePath || seen.has(filePath)) continue
+    seen.add(filePath)
+    changedFiles.push({
+      path: filePath,
+      status: "M",
+      additions: Number.parseInt(additions, 10) || 0,
+      deletions: Number.parseInt(deletions, 10) || 0,
+    })
+  }
+}
+
+async function loadChangedFiles(worktreePath: string, defaultBranch: string): Promise<FileChange[]> {
+  const changedFiles: FileChange[] = []
+
+  try {
+    const committedOutput = await runWorktreeCommand(
+      "git",
+      ["diff", "--numstat", `${defaultBranch}..HEAD`],
+      { cwd: worktreePath },
+    )
+    const uncommittedOutput = await runWorktreeCommand(
+      "git",
+      ["diff", "--numstat"],
+      { cwd: worktreePath },
+    )
+
+    const seen = new Set<string>()
+    mergeNumstat(changedFiles, seen, committedOutput)
+    mergeNumstat(changedFiles, seen, uncommittedOutput)
+
+    try {
+      const added = new Set(
+        (await runWorktreeCommand(
+          "git",
+          ["diff", "--diff-filter=A", "--name-only", `${defaultBranch}..HEAD`],
+          { cwd: worktreePath },
+        )).trim().split("\n").filter(Boolean),
+      )
+      const deleted = new Set(
+        (await runWorktreeCommand(
+          "git",
+          ["diff", "--diff-filter=D", "--name-only", `${defaultBranch}..HEAD`],
+          { cwd: worktreePath },
+        )).trim().split("\n").filter(Boolean),
+      )
+      for (const file of changedFiles) {
+        if (added.has(file.path)) file.status = "A"
+        if (deleted.has(file.path)) file.status = "D"
+      }
+    } catch {
+      // Preserve numstat data if status classification fails.
+    }
+  } catch {
+    // A partially unavailable worktree has no diff summary.
+  }
+
+  return changedFiles
+}
+
+async function buildWorktreeInfo(
+  worktree: WorktreeRaw,
+  defaultBranch: string,
+  sessionBranches: ReadonlyMap<string, string[]>,
+): Promise<WorktreeInfo> {
+  const name = worktree.branch.replace("worktree-", "")
+
+  let isDirty = false
+  try {
+    const status = await runWorktreeCommand("git", ["status", "--porcelain"], {
+      cwd: worktree.path,
+    })
+    isDirty = status.trim().length > 0
+  } catch {
+    // Keep the best-effort default.
+  }
+
+  let commitsAhead = 0
+  try {
+    const count = await runWorktreeCommand(
+      "git",
+      ["rev-list", "--count", `${defaultBranch}..HEAD`],
+      { cwd: worktree.path },
+    )
+    commitsAhead = Number.parseInt(count.trim(), 10) || 0
+  } catch {
+    // Keep the best-effort default.
+  }
+
+  let headMessage = ""
+  try {
+    headMessage = (await runWorktreeCommand("git", ["log", "-1", "--format=%s"], {
+      cwd: worktree.path,
+    })).trim()
+  } catch {
+    // Keep the best-effort default.
+  }
+
+  let createdAt = ""
+  try {
+    createdAt = (await stat(worktree.path)).birthtime.toISOString()
+  } catch {
+    // Keep the best-effort default.
+  }
+
+  return {
+    name,
+    path: worktree.path,
+    branch: worktree.branch,
+    head: worktree.head?.slice(0, 7) || "",
+    headMessage,
+    isDirty,
+    commitsAhead,
+    linkedSessions: sessionBranches.get(worktree.branch) || [],
+    createdAt,
+    changedFiles: await loadChangedFiles(worktree.path, defaultBranch),
+  }
+}
 
 export async function handleWorktreeList(
   dirName: string,
@@ -29,7 +192,7 @@ export async function handleWorktreeList(
   }
 
   const projectPath = await resolveProjectPath(projectDir, dirName)
-  const gitRoot = getMainWorktreeRoot(projectPath)
+  const gitRoot = await getMainWorktreeRoot(projectPath)
 
   if (!gitRoot) {
     res.setHeader("Content-Type", "application/json")
@@ -38,134 +201,20 @@ export async function handleWorktreeList(
   }
 
   try {
-    const rawOutput = execFileSync("git", ["worktree", "list", "--porcelain"], {
+    const rawOutput = await runWorktreeCommand("git", ["worktree", "list", "--porcelain"], {
       cwd: gitRoot,
-      encoding: "utf-8",
     })
 
     const rawWorktrees = parseWorktreeList(rawOutput)
-    const defaultBranch = getDefaultBranch(gitRoot)
-
-    // Load session metadata for linking
-    const sessionBranches = new Map<string, string[]>()
-    try {
-      const files = await readdir(projectDir)
-      for (const f of files.filter((f: string) => f.endsWith(".jsonl"))) {
-        try {
-          const content = await readFile(join(projectDir, f), "utf-8")
-          const firstLine = content.split("\n")[0]
-          if (firstLine) {
-            const parsed = JSON.parse(firstLine)
-            if (parsed.gitBranch) {
-              const sessionId = f.replace(".jsonl", "")
-              const existing = sessionBranches.get(parsed.gitBranch) || []
-              existing.push(sessionId)
-              sessionBranches.set(parsed.gitBranch, existing)
-            }
-          }
-        } catch { continue }
-      }
-    } catch { /* project dir may not exist */ }
-
-    const worktrees: WorktreeInfo[] = rawWorktrees.map((wt) => {
-      const name = wt.branch.replace("worktree-", "")
-
-      let isDirty = false
-      try {
-        const status = execFileSync("git", ["status", "--porcelain"], {
-          cwd: wt.path,
-          encoding: "utf-8",
-        })
-        isDirty = status.trim().length > 0
-      } catch { /* */ }
-
-      let commitsAhead = 0
-      try {
-        const count = execFileSync(
-          "git",
-          ["rev-list", "--count", `${defaultBranch}..HEAD`],
-          { cwd: wt.path, encoding: "utf-8" }
-        )
-        commitsAhead = parseInt(count.trim(), 10) || 0
-      } catch { /* */ }
-
-      let headMessage = ""
-      try {
-        headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
-          cwd: wt.path,
-          encoding: "utf-8",
-        }).trim()
-      } catch { /* */ }
-
-      let createdAt = ""
-      try {
-        const stat = statSync(wt.path)
-        createdAt = stat.birthtime.toISOString()
-      } catch { /* */ }
-
-      const changedFiles: FileChange[] = []
-      try {
-        // Get diff stats against default branch
-        const diffOutput = execFileSync(
-          "git",
-          ["diff", "--numstat", `${defaultBranch}..HEAD`],
-          { cwd: wt.path, encoding: "utf-8" }
-        )
-        // Also get uncommitted changes
-        const uncommittedOutput = execFileSync(
-          "git",
-          ["diff", "--numstat"],
-          { cwd: wt.path, encoding: "utf-8" }
-        )
-
-        const seen = new Set<string>()
-        for (const output of [diffOutput, uncommittedOutput]) {
-          for (const line of output.trim().split("\n")) {
-            if (!line) continue
-            const [add, del, filePath] = line.split("\t")
-            if (!filePath || seen.has(filePath)) continue
-            seen.add(filePath)
-            changedFiles.push({
-              path: filePath,
-              status: "M",
-              additions: parseInt(add, 10) || 0,
-              deletions: parseInt(del, 10) || 0,
-            })
-          }
-        }
-
-        // Detect added/deleted files via --diff-filter
-        try {
-          const added = execFileSync(
-            "git",
-            ["diff", "--diff-filter=A", "--name-only", `${defaultBranch}..HEAD`],
-            { cwd: wt.path, encoding: "utf-8" }
-          ).trim().split("\n").filter(Boolean)
-          const deleted = execFileSync(
-            "git",
-            ["diff", "--diff-filter=D", "--name-only", `${defaultBranch}..HEAD`],
-            { cwd: wt.path, encoding: "utf-8" }
-          ).trim().split("\n").filter(Boolean)
-          for (const f of changedFiles) {
-            if (added.includes(f.path)) f.status = "A"
-            if (deleted.includes(f.path)) f.status = "D"
-          }
-        } catch { /* */ }
-      } catch { /* */ }
-
-      return {
-        name,
-        path: wt.path,
-        branch: wt.branch,
-        head: wt.head?.slice(0, 7) || "",
-        headMessage,
-        isDirty,
-        commitsAhead,
-        linkedSessions: sessionBranches.get(wt.branch) || [],
-        createdAt,
-        changedFiles,
-      }
-    })
+    const [defaultBranch, sessionBranches] = await Promise.all([
+      getDefaultBranch(gitRoot),
+      loadSessionBranches(projectDir),
+    ])
+    const worktrees = await mapWithConcurrency(
+      rawWorktrees,
+      WORKTREE_SCAN_CONCURRENCY,
+      (worktree) => buildWorktreeInfo(worktree, defaultBranch, sessionBranches),
+    )
 
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify(worktrees))

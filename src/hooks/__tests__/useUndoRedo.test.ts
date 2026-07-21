@@ -6,7 +6,6 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 // Mock authFetch before importing useUndoRedo
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
-  getToken: vi.fn(() => null),
   isRemoteClient: vi.fn(() => false),
 }))
 
@@ -27,7 +26,14 @@ vi.mock("@/lib/undo-engine", () => ({
     branches: [],
     activeBranchId: null,
   })),
-  createBranch: vi.fn(),
+  createBranch: vi.fn(() => ({
+    id: "created-branch",
+    createdAt: "2025-01-15T10:00:00Z",
+    branchPointTurnIndex: 2,
+    label: "created branch",
+    turns: [],
+    jsonlLines: [],
+  })),
   collectChildBranches: vi.fn(() => ({ retained: [], scooped: [] })),
   splitChildBranches: vi.fn(() => ({ restored: [], remaining: [] })),
 }))
@@ -70,6 +76,7 @@ function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): Par
     gitBranch: "main",
     cwd: "/project",
     slug: "test",
+    name: "",
     model: "claude-opus-4-6-20250115",
     turns: Array.from({ length: turnCount }, () => makeTurn()),
     stats: {
@@ -134,7 +141,7 @@ function setupMockFetch(undoStateResponse: UndoState | null = null) {
         { status: undoStateResponse ? 200 : 404 }
       )
     }
-    if (url.includes("/api/undo/apply")) {
+    if (url.includes("/api/undo/transaction")) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     }
     if (url.includes("/api/undo/truncate-jsonl")) {
@@ -144,7 +151,13 @@ function setupMockFetch(undoStateResponse: UndoState | null = null) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     }
     if (url.includes("/api/sessions/")) {
-      return new Response("line1\nline2\nline3", { status: 200 })
+      return new Response(
+        Array.from({ length: 5 }, (_, index) => JSON.stringify({
+          type: "user",
+          message: { role: "user", content: `turn ${index}` },
+        })).join("\n"),
+        { status: 200 },
+      )
     }
     if (url.includes("/api/stop-session")) {
       return new Response(JSON.stringify({ success: true }), { status: 200 })
@@ -742,17 +755,23 @@ describe("useUndoRedo", () => {
 
       // Make buildUndoOperations return ops for BOTH calls (requestUndo + confirmApply)
       mockBuildUndo.mockReturnValue([
-        { type: "revert-edit", filePath: "a.ts", oldString: "new", newString: "old" },
-      ] as FileOperation[])
+        { type: "reverse-edit", filePath: "a.ts", oldString: "new", newString: "old", turnIndex: 4 },
+      ] satisfies FileOperation[])
       mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString()
         if (url.includes("/api/undo-state/")) {
           return new Response("null", { status: 404 })
         }
         if (url.includes("/api/sessions/")) {
-          return new Response("line1\nline2", { status: 200 })
+          return new Response(
+            Array.from({ length: 5 }, (_, index) => JSON.stringify({
+              type: "user",
+              message: { role: "user", content: `turn ${index}` },
+            })).join("\n"),
+            { status: 200 },
+          )
         }
-        if (url.includes("/api/undo/apply")) {
+        if (url.includes("/api/undo/transaction")) {
           return new Response(JSON.stringify({ error: "File not found" }), { status: 500 })
         }
         return new Response("ok", { status: 200 })

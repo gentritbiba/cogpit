@@ -7,7 +7,6 @@ import {
   buildUndoOperations,
   buildRedoFromArchived,
   createEmptyUndoState,
-  type FileOperation,
 } from "@/lib/undo-engine"
 import { buildSummary, type UndoConfirmState } from "./undo/undoHelpers"
 import {
@@ -15,6 +14,7 @@ import {
   applyUndo,
   applyRedo,
   applyBranchSwitch,
+  type UndoTransaction,
 } from "./undo/undoApplyOperations"
 
 export type { UndoConfirmState } from "./undo/undoHelpers"
@@ -90,37 +90,32 @@ export function useUndoRedo(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when sessionId changes, not on every session object update
   }, [session?.sessionId])
 
-  // Save undo state to server
-  const saveUndoState = useCallback(async (state: UndoState) => {
-    setUndoState(state)
+  const commitUndoTransaction = useCallback(async (transaction: UndoTransaction) => {
     try {
-      await authFetch(`/api/undo-state/${encodeURIComponent(state.sessionId)}`, {
+      const response = await authFetch("/api/undo/transaction", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(state),
+        body: JSON.stringify({
+          operations: transaction.operations,
+          session: {
+            dirName: transaction.sessionSource.dirName,
+            fileName: transaction.sessionSource.fileName,
+            mutation: transaction.sessionMutation,
+          },
+          state: transaction.state,
+          checkpoint: transaction.checkpoint,
+        }),
       })
-    } catch (err) {
-      console.error("Failed to save undo state:", err)
-    }
-  }, [])
-
-  // Apply file operations via server
-  const applyOperations = useCallback(async (operations: FileOperation[]): Promise<boolean> => {
-    try {
-      const res = await authFetch("/api/undo/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operations }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setApplyError(data.error || "Operation failed")
-        return false
+      const result = await response.json().catch(() => null) as { error?: string } | null
+      if (!response.ok) {
+        setApplyError(result?.error || "Undo transaction failed")
+        throw new ApplyAbort()
       }
-      return true
+      setUndoState(transaction.state)
     } catch (err) {
+      if (err instanceof ApplyAbort) throw err
       setApplyError(String(err))
-      return false
+      throw new ApplyAbort()
     }
   }, [])
 
@@ -246,15 +241,15 @@ export function useUndoRedo(
       const freshRawText = await freshRes.text()
 
       if (confirmState.type === "undo") {
-        await applyUndo(confirmState, session, sessionSource, state, freshRawText, applyOperations, saveUndoState, setApplyError)
+        await applyUndo(confirmState, session, sessionSource, state, freshRawText, commitUndoTransaction, setApplyError)
       } else if (confirmState.type === "redo") {
         const branch = branches.find((b) => b.id === confirmState.branchId)
         if (!branch) { setConfirmState(null); return }
-        await applyRedo(confirmState, sessionSource, state, branch, applyOperations, saveUndoState, setApplyError)
+        await applyRedo(confirmState, sessionSource, state, branch, freshRawText, commitUndoTransaction)
       } else if (confirmState.type === "branch-switch") {
         const branch = branches.find((b) => b.id === confirmState.branchId)
         if (!branch) { setConfirmState(null); return }
-        await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, applyOperations, saveUndoState, setApplyError)
+        await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, confirmState, commitUndoTransaction)
       }
 
       // Kill the persistent Claude process so it restarts fresh from the
@@ -278,7 +273,7 @@ export function useUndoRedo(
     } finally {
       setIsApplying(false)
     }
-  }, [confirmState, session, sessionSource, undoState, branches, applyOperations, saveUndoState, onReloadSession])
+  }, [confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
 
   const confirmCancel = useCallback(() => {
     setConfirmState(null)
