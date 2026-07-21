@@ -68,6 +68,7 @@ describe("useSessionBrowser list cache", () => {
 
     const { result } = renderHook(() => useSessionBrowser({
       sessionId: null,
+      workerParse: vi.fn(),
       onLoadSession: vi.fn(),
     }))
 
@@ -96,6 +97,7 @@ describe("useSessionBrowser list cache", () => {
 
     const { result } = renderHook(() => useSessionBrowser({
       sessionId: null,
+      workerParse: vi.fn(),
       onLoadSession: vi.fn(),
     }))
 
@@ -132,6 +134,7 @@ describe("useSessionBrowser list cache", () => {
 
     const { result } = renderHook(() => useSessionBrowser({
       sessionId: null,
+      workerParse: vi.fn(),
       onLoadSession: vi.fn(),
     }))
 
@@ -163,6 +166,7 @@ describe("useSessionBrowser list cache", () => {
 
     const { result } = renderHook(() => useSessionBrowser({
       sessionId: null,
+      workerParse: vi.fn(),
       onLoadSession: vi.fn(),
     }))
 
@@ -185,6 +189,7 @@ describe("useSessionBrowser list cache", () => {
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) => useSessionBrowser({
         sessionId,
+        workerParse: vi.fn(),
         onLoadSession: vi.fn(),
       }),
       { initialProps: { sessionId: null as string | null } },

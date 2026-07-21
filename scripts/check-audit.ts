@@ -35,6 +35,10 @@ const targets: AuditTarget[] = [
     cwd: repoRoot,
     acceptedFindings: new Map([
       ["@babel/core:1123528", "low"],
+      // Windows-only path traversal in serve-static; fixed only in the 2.x
+      // major, which @modelcontextprotocol/sdk still pins out of (^1.19.9).
+      // Cogpit ships no Windows builds and never imports serve-static.
+      ["@hono/node-server:1124006", "moderate"],
       ["ip-address:1118827", "moderate"],
     ]),
   },

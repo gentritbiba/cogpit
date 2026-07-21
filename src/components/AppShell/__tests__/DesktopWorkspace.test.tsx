@@ -208,6 +208,7 @@ function makeProps(
       onBeforeSessionSwitch: vi.fn(),
       liveSessionsRefreshRef: { current: null },
       onPrefetchSession: vi.fn(),
+      workerParse: vi.fn(),
     },
     sessionView: {
       searchInputRef: { current: null },
