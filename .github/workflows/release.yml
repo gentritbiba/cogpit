@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+  # Dry-run the release pipeline (quality + all platform builds, timings and
+  # artifacts included) without publishing — publish/AUR only run on v* tags.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -86,6 +89,9 @@ jobs:
 
   publish:
     needs: [quality, build]
+    # Skipped on workflow_dispatch dry-runs; update-aur* chain off publish and
+    # skip with it.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
