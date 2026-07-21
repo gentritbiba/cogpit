@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import * as React from "react"
 import { SessionRow } from "../LiveSessions/SessionRow"
-import type { ActiveSessionInfo } from "../LiveSessions/SessionRow"
+import type { ActiveSessionInfo } from "../LiveSessions/types"
 
 // SessionRow uses Tooltip from base-ui — provide simple pass-through components
 // so tests don't need to wire up full portal infrastructure.

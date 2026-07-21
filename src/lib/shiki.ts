@@ -6,7 +6,12 @@
  * All themes and languages are dynamically imported to keep the
  * initial bundle small.
  */
-import { createHighlighterCore, type HighlighterCore, type ThemedToken } from "shiki/core"
+import {
+  createHighlighterCore,
+  type HighlighterCore,
+  type LanguageInput,
+  type ThemedToken,
+} from "shiki/core"
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript"
 
 export type { ThemedToken } from "shiki/core"
@@ -60,7 +65,7 @@ export function getHighlighter(): Promise<HighlighterCore> {
       ])
       const hl = await createHighlighterCore({
         themes: [themeDark, themeLight],
-        langs: defaultLangs as Parameters<HighlighterCore["loadLanguage"]>[0][],
+        langs: defaultLangs as LanguageInput[],
         engine: createJavaScriptRegexEngine(),
       })
       for (const id of DEFAULT_LANG_IDS) loadedLangs.add(id)

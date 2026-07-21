@@ -11,6 +11,7 @@ function makeSession(turnCount: number): ParsedSession {
     gitBranch: "main",
     cwd: "/tmp",
     slug: "test",
+    name: "",
     model: "opus",
     turns: Array.from({ length: turnCount }, (_, i) => ({
       id: `t${i}`,

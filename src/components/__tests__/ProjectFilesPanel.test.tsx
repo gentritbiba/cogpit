@@ -100,7 +100,7 @@ describe("ProjectFilesPanel", () => {
     render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} onAddToPrompt={onAddToPrompt} />)
 
     await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
-    const editor = await screen.findByRole("textbox", { name: "Editing src/App.tsx" })
+    const editor = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Editing src/App.tsx" })
     editor.setSelectionRange(0, 11)
     fireEvent.select(editor)
     await user.click(screen.getByRole("button", { name: "Add selected lines to prompt" }))

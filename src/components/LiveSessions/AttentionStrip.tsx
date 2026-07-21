@@ -4,7 +4,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, dirNameToPath } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
 import { sessionTitle, projectGroupKey } from "./sessionListView"

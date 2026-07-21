@@ -1,30 +1,34 @@
-import { useState, useEffect, useCallback, useMemo, useRef, useId, memo } from "react"
-import { Loader2, RefreshCw, Activity, AlertTriangle, ChevronDown, ChevronRight, ChevronUp, Plus, Search, X } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
+import { Loader2, RefreshCw, Activity, AlertTriangle, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
-import { deviceScopedKey } from "@/lib/device"
-import { dirNameToPath, parseWorktreePath } from "@/lib/format"
+import { deviceScopedKey, getActiveDeviceId } from "@/lib/device"
+import { dirNameToPath } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
-import { SessionRow } from "./SessionRow"
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 import { usePty } from "@/contexts/PtyContext"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
-import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { countLiveSessions } from "./liveSessionSummary"
-import { groupByProject, projectGroupKey, visibleRowCount } from "./sessionListView"
+import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
+import { ProjectGroupList } from "./ProjectGroupList"
+import {
+  readCachedList,
+  sessionListCacheKeys,
+  writeCachedList,
+} from "@/lib/sessionListCache"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
-export type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+export type { ActiveSessionInfo, RunningProcess } from "./types"
 
 interface LiveSessionsProps {
   activeSessionKey: string | null
@@ -58,8 +62,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
-  const [sessions, setSessions] = useState<ActiveSessionInfo[]>([])
-  const [processes, setProcesses] = useState<RunningProcess[]>([])
+  const [mountedDeviceId] = useState(getActiveDeviceId)
+  const [initialCachedData] = useState(() => ({
+    sessions: readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
+    processes: readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
+  }))
+  const [sessions, setSessions] = useState<ActiveSessionInfo[]>(initialCachedData.sessions)
+  const [processes, setProcesses] = useState<RunningProcess[]>(initialCachedData.processes)
   const [loading, setLoading] = useState(false)
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -80,24 +89,48 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
   const prevStatusRef = useRef<Map<string, string> | null>(null)
   const sessionsRef = useRef(sessions)
-  sessionsRef.current = sessions
   const abortRef = useRef<AbortController | null>(null)
+  const timeoutHandlesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const mountedRef = useRef(false)
 
-  // Expose imperative refresh so parent can force a data fetch (e.g. after session finalization)
-  const fetchDataRef = useRef<typeof fetchData | null>(null)
+  const scheduleTimeout = useCallback((callback: () => void, delay: number) => {
+    if (!mountedRef.current) return
+    const handle = setTimeout(() => {
+      timeoutHandlesRef.current.delete(handle)
+      if (mountedRef.current) callback()
+    }, delay)
+    timeoutHandlesRef.current.add(handle)
+  }, [])
+
   useEffect(() => {
-    if (refreshRef) {
-      refreshRef.current = () => fetchDataRef.current?.()
-    }
+    const timeoutHandles = timeoutHandlesRef.current
+    mountedRef.current = true
     return () => {
-      if (refreshRef) refreshRef.current = null
+      mountedRef.current = false
+      abortRef.current?.abort()
+      abortRef.current = null
+      for (const handle of timeoutHandles) clearTimeout(handle)
+      timeoutHandles.clear()
     }
-  }, [refreshRef])
+  }, [])
+
+  // Event handlers read the latest committed inventory. Keeping this write in
+  // an effect avoids leaking values from a render that React later discards.
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
 
   const fetchData = useCallback(async () => {
+    if (!mountedRef.current || getActiveDeviceId() !== mountedDeviceId) return
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
+    const isCurrentRequest = () => (
+      mountedRef.current
+      && !ac.signal.aborted
+      && abortRef.current === ac
+      && getActiveDeviceId() === mountedDeviceId
+    )
 
     setLoading(true)
     try {
@@ -105,7 +138,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         authFetch("/api/active-sessions", { signal: ac.signal }),
         authFetch("/api/running-processes", { signal: ac.signal }),
       ])
-      if (ac.signal.aborted) return
+      if (!isCurrentRequest()) return
       if (!sessRes.ok || !procRes.ok) {
         throw new Error("Failed to fetch live data")
       }
@@ -113,22 +146,32 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         sessRes.json(),
         procRes.json(),
       ])
-      if (ac.signal.aborted) return
-      setSessions(sessData)
-      setProcesses(procData)
+      if (!isCurrentRequest()) return
+      const nextSessions = Array.isArray(sessData) ? sessData as ActiveSessionInfo[] : []
+      const nextProcesses = Array.isArray(procData) ? procData as RunningProcess[] : []
+      setSessions(nextSessions)
+      setProcesses(nextProcesses)
+      writeCachedList(sessionListCacheKeys.activeSessions, nextSessions)
+      writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
       setFetchError(null)
     } catch (err) {
-      if (ac.signal.aborted) return
+      if (!isCurrentRequest()) return
       setFetchError(err instanceof Error ? err.message : "Failed to load data")
     } finally {
-      if (!ac.signal.aborted) {
-        setLoading(false)
-      }
+      if (isCurrentRequest()) setLoading(false)
+      if (abortRef.current === ac) abortRef.current = null
     }
-  }, [])
+  }, [mountedDeviceId])
 
-  // Keep fetchDataRef in sync so the imperative refresh always calls the latest version
-  fetchDataRef.current = fetchData
+  // Expose imperative refresh so a parent can force a data fetch (for example,
+  // after session finalization). The callback is installed only after commit.
+  useEffect(() => {
+    if (!refreshRef) return
+    refreshRef.current = fetchData
+    return () => {
+      if (refreshRef.current === fetchData) refreshRef.current = null
+    }
+  }, [fetchData, refreshRef])
 
   const isMobile = useIsMobile()
 
@@ -286,16 +329,16 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pid }),
       })
-      setTimeout(() => fetchData(), 1500)
+      scheduleTimeout(fetchData, 1500)
     } catch { /* ignore */ }
-    setTimeout(() => {
+    scheduleTimeout(() => {
       setKillingPids(prev => {
         const next = new Set(prev)
         next.delete(pid)
         return next
       })
     }, 2000)
-  }, [fetchData])
+  }, [fetchData, scheduleTimeout])
 
   const handleSelectSession = useCallback((dirName: string, fileName: string) => {
     const match = sessionsRef.current.find((s) => s.dirName === dirName && s.fileName === fileName)
@@ -312,8 +355,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   const handleDeleteSession = useCallback((s: ActiveSessionInfo) => {
     onDeleteSession?.(s.dirName, s.fileName)
-    setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
-  }, [onDeleteSession])
+    const next = sessionsRef.current.filter((x) => x.sessionId !== s.sessionId)
+    sessionsRef.current = next
+    setSessions(next)
+    if (getActiveDeviceId() === mountedDeviceId) {
+      writeCachedList(sessionListCacheKeys.activeSessions, next)
+    }
+  }, [mountedDeviceId, onDeleteSession])
 
   /**
    * Spawn `claude -p --resume <sessionId>` in a PTY terminal so the user can
@@ -331,8 +379,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       metadata: { type: "terminal" },
     })
     // Refresh sessions after a brief delay to pick up any status change
-    setTimeout(() => fetchData(), 3000)
-  }, [pty, fetchData])
+    scheduleTimeout(fetchData, 3000)
+  }, [pty, fetchData, scheduleTimeout])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -443,344 +491,33 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             </div>
           )}
 
-          {/* Grouped sessions by project — pending session is placed inside its matching group */}
-          {[...grouped.entries()].map(([projectPath, projectSessions], idx) => {
-            const liveCount = countLiveSessions(projectSessions, procBySession)
-            return (
-            <ProjectGroup
-              key={projectPath}
-              projectPath={projectPath}
-              sessions={projectSessions}
-              liveCount={liveCount}
-              collapsed={collapsedGroups[projectPath] ?? (idx >= 3 && liveCount === 0)}
-              onToggleCollapsed={toggleGroupCollapsed}
-              forceExpand={!!searchQuery.trim()}
-              activeSessionKey={activeSessionKey}
-              procBySession={procBySession}
-              killingPids={killingPids}
-              newlyCompleted={newlyCompleted}
-              sessionNames={sessionNames}
-              projectNames={projectNames}
-              onSelectSession={handleSelectSession}
-              onKill={handleKill}
-              onDuplicateSession={onDuplicateSession}
-              onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
-              onRenameSession={renameSession}
-              onRenameProject={renameProject}
-              onNewSession={onNewSession}
-              creatingSession={creatingSession}
-              pendingSession={pendingProjectPath === projectPath ? pendingSession : undefined}
-              onPrefetchSession={onPrefetchSession}
-              onResumeSession={handleResumeSession}
-            />
-            )
-          })}
-
-          {/* Pending session in a new group if no matching project group exists yet */}
-          {pendingProjectPath && !grouped.has(pendingProjectPath) && pendingSession && (
-            <ProjectGroup
-              key={`pending-${pendingProjectPath}`}
-              projectPath={pendingProjectPath}
-              sessions={[]}
-              liveCount={0}
-              collapsed={false}
-              onToggleCollapsed={toggleGroupCollapsed}
-              activeSessionKey={activeSessionKey}
-              procBySession={procBySession}
-              killingPids={killingPids}
-              newlyCompleted={newlyCompleted}
-              sessionNames={sessionNames}
-              projectNames={projectNames}
-              onSelectSession={handleSelectSession}
-              onKill={handleKill}
-              onDuplicateSession={onDuplicateSession}
-              onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
-              onRenameSession={renameSession}
-              onRenameProject={renameProject}
-              onNewSession={onNewSession}
-              creatingSession={creatingSession}
-              pendingSession={pendingSession}
-              onPrefetchSession={onPrefetchSession}
-              onResumeSession={handleResumeSession}
-            />
-          )}
+          <ProjectGroupList
+            grouped={grouped}
+            pendingProjectPath={pendingProjectPath}
+            pendingSession={pendingSession}
+            collapsedGroups={collapsedGroups}
+            searchQuery={searchQuery}
+            activeSessionKey={activeSessionKey}
+            procBySession={procBySession}
+            killingPids={killingPids}
+            newlyCompleted={newlyCompleted}
+            sessionNames={sessionNames}
+            projectNames={projectNames}
+            onToggleCollapsed={toggleGroupCollapsed}
+            onSelectSession={handleSelectSession}
+            onKill={handleKill}
+            onDuplicateSession={onDuplicateSession}
+            onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
+            onRenameSession={renameSession}
+            onRenameProject={renameProject}
+            onNewSession={onNewSession}
+            creatingSession={creatingSession}
+            onPrefetchSession={onPrefetchSession}
+            onResumeSession={handleResumeSession}
+          />
 
         </div>
       </ScrollArea>
     </div>
   )
 })
-
-// -- Collapsible project group --
-
-function ProjectGroup({
-  projectPath,
-  sessions,
-  activeSessionKey,
-  procBySession,
-  killingPids,
-  newlyCompleted,
-  sessionNames,
-  projectNames,
-  liveCount,
-  collapsed,
-  onToggleCollapsed,
-  forceExpand = false,
-  onSelectSession,
-  onKill,
-  onDuplicateSession,
-  onDeleteSession,
-  onRenameSession,
-  onRenameProject,
-  onNewSession,
-  creatingSession,
-  pendingSession,
-  onPrefetchSession,
-  onResumeSession,
-}: {
-  projectPath: string
-  sessions: ActiveSessionInfo[]
-  activeSessionKey: string | null
-  procBySession: Map<string, RunningProcess>
-  killingPids: Set<number>
-  newlyCompleted: Set<string>
-  sessionNames: Record<string, string>
-  projectNames: Record<string, string>
-  liveCount: number
-  collapsed: boolean
-  onToggleCollapsed: (key: string, collapsed: boolean) => void
-  forceExpand?: boolean
-  onSelectSession: (dirName: string, fileName: string) => void
-  onKill: (pid: number, e: React.MouseEvent) => void
-  onDuplicateSession?: (dirName: string, fileName: string) => void
-  onDeleteSession?: (session: ActiveSessionInfo) => void
-  onRenameSession?: (sessionId: string, name: string) => void
-  onRenameProject?: (dirName: string, name: string) => void
-  onNewSession?: (dirName: string, cwd?: string) => void
-  creatingSession?: boolean
-  pendingSession?: PendingSessionInfo | null
-  onPrefetchSession?: (dirName: string, fileName: string) => void
-  onResumeSession?: (sessionId: string, cwd?: string) => void
-}) {
-  const sessionGroupId = useId()
-  const hasPending = !!pendingSession
-  const isCollapsed = (forceExpand || hasPending) ? false : collapsed
-
-  // Agent-team grouping: teammate sessions nest under their lead session
-  // when the lead is present in this project group; orphans render flat.
-  const { topLevelSessions, teammatesByLead } = useMemo(() => {
-    const ids = new Set(sessions.map((s) => s.sessionId))
-    const teammatesByLead = new Map<string, ActiveSessionInfo[]>()
-    const topLevelSessions: ActiveSessionInfo[] = []
-    for (const s of sessions) {
-      const lead = s.teamLeadSessionId
-      if (lead && lead !== s.sessionId && ids.has(lead)) {
-        const list = teammatesByLead.get(lead)
-        if (list) list.push(s)
-        else teammatesByLead.set(lead, [s])
-      } else {
-        topLevelSessions.push(s)
-      }
-    }
-    return { topLevelSessions, teammatesByLead }
-  }, [sessions])
-
-  // Per-lead collapse state for nested teammate groups (default expanded)
-  const [collapsedTeams, setCollapsedTeams] = useState<Set<string>>(new Set())
-  const toggleTeamCollapse = (leadId: string) => {
-    setCollapsedTeams((prev) => {
-      const next = new Set(prev)
-      if (next.has(leadId)) next.delete(leadId)
-      else next.add(leadId)
-      return next
-    })
-  }
-
-  // Progressive disclosure instead of a nested scrollbar: show the first few
-  // rows, then a "Show N more" row. Live sessions always stay visible.
-  const VISIBLE_COUNT = 5
-  const [showAll, setShowAll] = useState(false)
-  const totalCount = sessions.length + (hasPending ? 1 : 0)
-  const collapsedLimit = visibleRowCount(
-    topLevelSessions,
-    procBySession,
-    Math.max(1, VISIBLE_COUNT - (hasPending ? 1 : 0)),
-  )
-  const expandRows = forceExpand || showAll
-  const visibleTopLevel = expandRows ? topLevelSessions : topLevelSessions.slice(0, collapsedLimit)
-  const hiddenCount = topLevelSessions.length - visibleTopLevel.length
-  const canShowLess = showAll && !forceExpand && topLevelSessions.length > collapsedLimit
-
-  // Resolve dirName — prefer a non-worktree session so custom name lookup works
-  const dirName = (sessions.find(s => !parseWorktreePath(s.cwd ?? dirNameToPath(s.dirName)))?.dirName
-    ?? sessions[0]?.dirName ?? pendingSession?.dirName)
-  const customProjectName = dirName ? projectNames[dirName] : undefined
-
-  // Render one session row. worktreeName is passed only for top-level rows —
-  // nested teammate rows never show a worktree badge. teamToggle renders the
-  // collapse chip on lead rows that have nested teammates.
-  function renderSessionRow(
-    sess: ActiveSessionInfo,
-    worktreeName?: string,
-    teamToggle?: { count: number; collapsed: boolean; onToggle: () => void },
-  ) {
-    return (
-      <SessionRow
-        key={`${sess.dirName}/${sess.fileName}`}
-        session={sess}
-        isActiveSession={activeSessionKey === `${sess.dirName}/${sess.fileName}`}
-        proc={procBySession.get(sess.sessionId)}
-        killingPids={killingPids}
-        isNewlyCompleted={newlyCompleted.has(sess.sessionId)}
-        customName={sessionNames[sess.sessionId]}
-        worktreeName={worktreeName}
-        teammateCount={teamToggle?.count}
-        teammatesCollapsed={teamToggle?.collapsed}
-        onToggleTeammates={teamToggle?.onToggle}
-        onSelectSession={onSelectSession}
-        onKill={onKill}
-        onDuplicateSession={onDuplicateSession}
-        onDeleteSession={onDeleteSession}
-        onRenameSession={onRenameSession}
-        onPrefetchSession={onPrefetchSession}
-        onResumeSession={onResumeSession}
-      />
-    )
-  }
-
-  return (
-    <div className="flex flex-col">
-      {/* Collapsible group header — sticky so the current project stays visible while scrolling */}
-      <ProjectContextMenu
-        projectLabel={projectPath}
-        customName={customProjectName}
-        className="sticky top-0 z-20 elevation-1"
-        onRename={(name) => { if (dirName && onRenameProject) onRenameProject(dirName, name) }}
-      >
-        <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
-          <button
-            type="button"
-            onClick={() => onToggleCollapsed(projectPath, !collapsed)}
-            disabled={forceExpand}
-            aria-expanded={!isCollapsed}
-            aria-controls={sessionGroupId}
-            title={forceExpand ? "Groups stay expanded while searching" : undefined}
-            className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
-          >
-            <ChevronRight className={cn(
-              "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
-              !isCollapsed && "rotate-90"
-            )} />
-            <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
-              {customProjectName || projectPath}
-            </span>
-            {customProjectName && (
-              <span className="text-[10px] text-muted-foreground/40 truncate">
-                {projectPath}
-              </span>
-            )}
-            {liveCount > 0 && (
-              <span
-                className="flex items-center gap-1 shrink-0 text-[10px] font-medium text-green-400"
-                aria-label={`${liveCount} live sessions`}
-              >
-                <span className="size-1.5 rounded-full bg-green-400 animate-pulse" aria-hidden="true" />
-                {liveCount}
-              </span>
-            )}
-            <span className="text-[10px] text-muted-foreground/40 shrink-0">
-              {totalCount}
-            </span>
-          </button>
-          {onNewSession && sessions.length > 0 && (
-            <button
-              type="button"
-              className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
-              disabled={creatingSession}
-              onClick={(e) => {
-                e.stopPropagation()
-                const first = sessions[0]
-                onNewSession(first.dirName, first.cwd ?? undefined)
-              }}
-              aria-label={`New session in ${projectPath}`}
-            >
-              {creatingSession ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Plus className="size-3" />
-              )}
-            </button>
-          )}
-        </div>
-      </ProjectContextMenu>
-
-      {/* Session rows — first few visible, rest behind "Show N more" (no nested scrollbar) */}
-      {!isCollapsed && (
-        <div
-          id={sessionGroupId}
-          className="flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1"
-        >
-          {hasPending && (
-            <PendingSessionRow firstMessage={pendingSession.firstMessage} />
-          )}
-          {visibleTopLevel.map((s) => {
-            const rawPath = s.cwd ?? dirNameToPath(s.dirName)
-            const wt = parseWorktreePath(rawPath)
-            const teammates = teammatesByLead.get(s.sessionId)
-            if (!teammates) return renderSessionRow(s, wt?.worktreeName)
-            // Lead session with teammates — nest the agents it spawned below
-            // it, collapsible via the chip on the lead row
-            const teamCollapsed = collapsedTeams.has(s.sessionId)
-            return (
-              <div key={`${s.dirName}/${s.fileName}`} className="flex flex-col gap-px">
-                {renderSessionRow(s, wt?.worktreeName, {
-                  count: teammates.length,
-                  collapsed: teamCollapsed,
-                  onToggle: () => toggleTeamCollapse(s.sessionId),
-                })}
-                {!teamCollapsed && (
-                  <div className="flex flex-col gap-px ml-3 border-l border-violet-500/30 pl-1">
-                    {teammates.map((t) => renderSessionRow(t))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          {hiddenCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowAll(true)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
-            >
-              <ChevronDown className="size-2.5" />
-              Show {hiddenCount} more
-            </button>
-          )}
-          {canShowLess && (
-            <button
-              type="button"
-              onClick={() => setShowAll(false)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
-            >
-              <ChevronUp className="size-2.5" />
-              Show less
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// -- Pending session placeholder --
-
-function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
-  return (
-    <div className="relative w-full flex items-center gap-1.5 rounded-r-md px-2 py-1 text-left border-l-2 border-l-blue-500 rounded-l-none">
-      <Loader2 className="size-2.5 animate-spin text-blue-400 shrink-0" />
-      <span className="text-xs leading-tight truncate flex-1 text-foreground">
-        {firstMessage || "New session"}
-      </span>
-    </div>
-  )
-}

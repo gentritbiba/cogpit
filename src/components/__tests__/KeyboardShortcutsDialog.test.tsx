@@ -37,4 +37,22 @@ describe("KeyboardShortcutsDialog", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Toggle integrated terminal")
     expect(getKeybinding("commandPalette")).toMatchObject({ key: "k", modKey: true })
   })
+
+  it("starts each open cycle with fresh search and recording state", async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    const view = render(<KeyboardShortcutsDialog open onOpenChange={onOpenChange} />)
+
+    await user.type(screen.getByRole("textbox", { name: "Search keyboard shortcuts" }), "palette")
+    await user.click(screen.getByRole("button", { name: "Change shortcut for Open command palette" }))
+
+    expect(screen.getByRole("textbox", { name: "Search keyboard shortcuts" })).toHaveValue("palette")
+    expect(screen.getByText("Press keys…")).toBeInTheDocument()
+
+    view.rerender(<KeyboardShortcutsDialog open={false} onOpenChange={onOpenChange} />)
+    view.rerender(<KeyboardShortcutsDialog open onOpenChange={onOpenChange} />)
+
+    expect(screen.getByRole("textbox", { name: "Search keyboard shortcuts" })).toHaveValue("")
+    expect(screen.queryByText("Press keys…")).not.toBeInTheDocument()
+  })
 })

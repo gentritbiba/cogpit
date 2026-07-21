@@ -7,7 +7,7 @@ import {
   visibleRowCount,
   UNKNOWN_PROJECT_LABEL,
 } from "../sessionListView"
-import type { ActiveSessionInfo, RunningProcess } from "../SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionInfo {
   return {

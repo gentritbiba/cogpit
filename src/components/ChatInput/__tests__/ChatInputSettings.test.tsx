@@ -204,4 +204,87 @@ describe("ChatInputSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: /Enable full access/i }))
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
   })
+
+  it("supports keyboard navigation and restores focus when a dropdown closes", async () => {
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession={false}
+      />,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Opus" })
+    fireEvent.click(trigger)
+
+    const selected = screen.getByRole("menuitemradio", { name: /Opus \(default\)/i })
+    await vi.waitFor(() => expect(selected).toHaveFocus())
+
+    fireEvent.keyDown(document, { key: "ArrowDown" })
+    expect(screen.getByRole("menuitemradio", { name: /^Fable$/i })).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it("closes a portaled dropdown when clicking outside it", () => {
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession={false}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Opus" }))
+    expect(screen.getByRole("menu", { name: "Model" })).toBeInTheDocument()
+
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+  })
+
+  it("preserves MCP toggle, refresh, and authentication interactions", () => {
+    const onToggleMcpServer = vi.fn()
+    const onRefreshMcpServers = vi.fn()
+    const onMcpAuth = vi.fn()
+
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+        mcpServers={[
+          { name: "filesystem", status: "connected" },
+          { name: "github", status: "needs_auth" },
+        ]}
+        selectedMcpServers={[]}
+        onToggleMcpServer={onToggleMcpServer}
+        onRefreshMcpServers={onRefreshMcpServers}
+        onMcpAuth={onMcpAuth}
+      />,
+    )
+
+    const trigger = screen.getByRole("button", { name: "MCPs 0/1" })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh MCP server status" }))
+    expect(onRefreshMcpServers).toHaveBeenCalledOnce()
+    expect(screen.getByRole("menu", { name: "MCP servers" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "filesystem" }))
+    expect(onToggleMcpServer).toHaveBeenCalledWith("filesystem")
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /^githubNeeds auth$/i }))
+    expect(onMcpAuth).toHaveBeenCalledWith("github")
+    expect(screen.queryByRole("menu", { name: "MCP servers" })).not.toBeInTheDocument()
+  })
 })

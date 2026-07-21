@@ -26,6 +26,7 @@ const mockParsedSession: ParsedSession = {
   gitBranch: "main",
   cwd: "/tmp",
   slug: "test",
+  name: "",
   model: "opus",
   turns: [],
   stats: {

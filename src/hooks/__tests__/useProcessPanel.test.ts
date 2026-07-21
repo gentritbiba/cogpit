@@ -219,7 +219,7 @@ describe("useProcessPanel", () => {
   it("saves and restores state when switching sessions", () => {
     const { result, rerender } = renderHook(
       (props: { sessionId: string | null }) => useProcessPanel(props.sessionId),
-      { initialProps: { sessionId: "session-A" } }
+      { initialProps: { sessionId: "session-A" as string | null } }
     )
 
     act(() => {
@@ -245,7 +245,7 @@ describe("useProcessPanel", () => {
   it("resets state when switching to null session", () => {
     const { result, rerender } = renderHook(
       (props: { sessionId: string | null }) => useProcessPanel(props.sessionId),
-      { initialProps: { sessionId: "session-A" } }
+      { initialProps: { sessionId: "session-A" as string | null } }
     )
 
     act(() => {

@@ -46,6 +46,17 @@ async function parseServerResponse(res: Response): Promise<McpResponse | null> {
   }
 }
 
+async function fetchServerResponse(url: string, signal: AbortSignal): Promise<McpResponse | null> {
+  try {
+    const response = await authFetch(url, { signal })
+    if (signal.aborted) return null
+    const parsed = await parseServerResponse(response)
+    return signal.aborted ? null : parsed
+  } catch {
+    return null
+  }
+}
+
 /**
  * Resolve the initial selection for a given storage key and server list.
  * Tries session-specific key first, then project-level fallback, then auto-selects all connected.
@@ -93,6 +104,7 @@ export function useMcpServers(
   const [selectedServers, setSelectedServers] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const refreshRequestRef = useRef<AbortController | null>(null)
   const dirNameRef = useRef(dirName)
   dirNameRef.current = dirName
 
@@ -107,6 +119,8 @@ export function useMcpServers(
   // Fetch servers from backend when cwd changes
   useEffect(() => {
     if (!cwd) return
+    const controller = new AbortController()
+    refreshRequestRef.current?.abort()
 
     // Reset state immediately to prevent stale data from old project showing
     setServers([])
@@ -116,25 +130,25 @@ export function useMcpServers(
     setLoaded(false)
     fetchedCwdRef.current = cwd
 
-    authFetch(`/api/mcp-servers?cwd=${encodeURIComponent(cwd)}`)
-      .then(async (res) => {
-        // Guard: if cwd changed while fetching, discard stale response
-        if (fetchedCwdRef.current !== cwd) return
-
-        const parsed = await parseServerResponse(res)
-        if (!parsed) return
+    void fetchServerResponse(
+      `/api/mcp-servers?cwd=${encodeURIComponent(cwd)}`,
+      controller.signal,
+    ).then((parsed) => {
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd || !parsed) return
 
         setServers(parsed.servers)
         setConfigs(parsed.configs)
         setSelectedServers(resolveSelection(storageKeyRef.current, dirNameRef.current, parsed.servers))
       })
-      .catch(() => { /* ignore */ })
       .finally(() => {
-        if (fetchedCwdRef.current !== cwd) return
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd) return
         setLoading(false)
         setLoaded(true)
       })
+    return () => controller.abort()
   }, [cwd])
+
+  useEffect(() => () => refreshRequestRef.current?.abort(), [])
 
   // When session changes (storageKey changes), reload that session's saved MCP selection.
   // This handles switching between sessions within the same project (cwd stays the same).
@@ -162,13 +176,15 @@ export function useMcpServers(
 
   const refresh = useCallback(() => {
     if (!cwd) return
+    refreshRequestRef.current?.abort()
+    const controller = new AbortController()
+    refreshRequestRef.current = controller
     setLoading(true)
-    authFetch(`/api/mcp-servers?cwd=${encodeURIComponent(cwd)}&refresh=1`)
-      .then(async (res) => {
-        if (fetchedCwdRef.current !== cwd) return
-
-        const parsed = await parseServerResponse(res)
-        if (!parsed) return
+    void fetchServerResponse(
+      `/api/mcp-servers?cwd=${encodeURIComponent(cwd)}&refresh=1`,
+      controller.signal,
+    ).then((parsed) => {
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd || !parsed) return
 
         setServers(parsed.servers)
         setConfigs(parsed.configs)
@@ -182,8 +198,10 @@ export function useMcpServers(
           return next
         })
       })
-      .catch(() => { /* ignore */ })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (controller.signal.aborted || refreshRequestRef.current !== controller) return
+        setLoading(false)
+      })
   }, [cwd])
 
   // Compute MCP config JSON for --strict-mcp-config --mcp-config

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
@@ -27,6 +27,7 @@ const mockParsedSession: ParsedSession = {
   gitBranch: "main",
   cwd: "/tmp",
   slug: "test",
+  name: "",
   model: "opus",
   turns: [
     {
@@ -95,8 +96,8 @@ class MockEventSource {
 describe("useLiveSession", () => {
   const onUpdate = vi.fn()
   let rafCallbacks: Array<() => void> = []
-  let workerParse: ReturnType<typeof vi.fn>
-  let workerAppend: ReturnType<typeof vi.fn>
+  let workerParse: Mock<(text: string) => Promise<ParsedSession>>
+  let workerAppend: Mock<(existing: ParsedSession, newText: string) => Promise<ParsedSession>>
 
   beforeEach(() => {
     vi.resetAllMocks()

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { renderHook, act } from "@testing-library/react"
+import { renderHook, act, waitFor } from "@testing-library/react"
 import { useMcpServers } from "../useMcpServers"
 
 // Mock authFetch
@@ -42,7 +42,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -57,7 +57,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -78,7 +78,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -95,7 +95,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -113,7 +113,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -131,7 +131,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -157,7 +157,7 @@ describe("useMcpServers", () => {
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
     expect(result.current.loaded).toBe(false)
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.loaded).toBe(true)
     })
     expect(result.current.servers.length).toBe(1)
@@ -168,7 +168,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.loaded).toBe(true)
     })
     expect(result.current.servers).toEqual([])
@@ -189,7 +189,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -210,13 +210,13 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(1)
     })
 
     act(() => result.current.refresh())
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
 
@@ -234,7 +234,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.servers.length).toBe(2)
     })
 
@@ -246,7 +246,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.loading).toBe(false)
     })
 
@@ -262,7 +262,7 @@ describe("useMcpServers", () => {
 
     const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.loading).toBe(false)
     })
 
@@ -285,7 +285,7 @@ describe("useMcpServers", () => {
         { initialProps: { sessionFileName: "session-a.jsonl" as string | undefined } },
       )
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
       expect(result.current.selectedServers).toEqual(["clickup"])
@@ -294,7 +294,7 @@ describe("useMcpServers", () => {
       rerender({ sessionFileName: "session-b.jsonl" })
 
       // Should auto-select all connected servers, NOT keep session A's selection
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.selectedServers).toEqual(expect.arrayContaining(["clickup", "figma"]))
       })
       expect(result.current.selectedServers).toHaveLength(2)
@@ -316,7 +316,7 @@ describe("useMcpServers", () => {
         { initialProps: { sessionFileName: "session-a.jsonl" as string | undefined } },
       )
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
       expect(result.current.selectedServers).toEqual(["figma"])
@@ -324,7 +324,7 @@ describe("useMcpServers", () => {
       // Switch to session B (no saved selection → should inherit project default)
       rerender({ sessionFileName: "session-b.jsonl" })
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.selectedServers).toEqual(["clickup"])
       })
     })
@@ -342,7 +342,7 @@ describe("useMcpServers", () => {
         { initialProps: { cwd: "/project-a" } },
       )
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
       expect(result.current.selectedServers).toEqual(["clickup", "figma"])
@@ -359,7 +359,7 @@ describe("useMcpServers", () => {
       expect(result.current.selectedServers).toEqual([])
 
       // Then load new data
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(1)
       })
       expect(result.current.servers[0].name).toBe("slack")
@@ -377,7 +377,7 @@ describe("useMcpServers", () => {
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
       expect(result.current.selectedServers).toEqual(["clickup"])
@@ -390,7 +390,7 @@ describe("useMcpServers", () => {
 
       act(() => result.current.refresh())
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.filter(s => s.status === "connected")).toHaveLength(2)
       })
 
@@ -406,7 +406,7 @@ describe("useMcpServers", () => {
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
       expect(result.current.selectedServers).toEqual(["clickup", "figma"])
@@ -419,7 +419,7 @@ describe("useMcpServers", () => {
 
       act(() => result.current.refresh())
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.find(s => s.name === "figma")?.status).toBe("error")
       })
 
@@ -447,7 +447,7 @@ describe("useMcpServers", () => {
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
 
@@ -477,7 +477,7 @@ describe("useMcpServers", () => {
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
 
@@ -520,7 +520,7 @@ describe("useMcpServers", () => {
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(result.current.servers.length).toBe(2)
       })
 

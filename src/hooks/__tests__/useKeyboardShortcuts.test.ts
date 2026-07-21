@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
+import type { ChatInputHandle } from "@/components/ChatInput"
 import type { SessionAction } from "@/hooks/useSessionState"
 import type { RefObject, Dispatch } from "react"
 
@@ -8,7 +9,7 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
   return {
     isMobile: false,
     searchInputRef: { current: null } as RefObject<HTMLInputElement | null>,
-    chatInputRef: { current: null } as RefObject<{ focus: () => void } | null>,
+    chatInputRef: { current: null } as RefObject<ChatInputHandle | null>,
     dispatch: vi.fn() as Dispatch<SessionAction>,
     onToggleSidebar: vi.fn(),
     onToggleRightSidebar: vi.fn(),
@@ -218,7 +219,7 @@ describe("useKeyboardShortcuts", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
         current: { focus: focusMock },
-      } as unknown as RefObject<{ focus: () => void } | null>
+      } as unknown as RefObject<ChatInputHandle | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 
@@ -230,7 +231,7 @@ describe("useKeyboardShortcuts", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
         current: { focus: focusMock },
-      } as unknown as RefObject<{ focus: () => void } | null>
+      } as unknown as RefObject<ChatInputHandle | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 
@@ -248,7 +249,7 @@ describe("useKeyboardShortcuts", () => {
       const focusMock = vi.fn()
       const chatInputRef = {
         current: { focus: focusMock },
-      } as unknown as RefObject<{ focus: () => void } | null>
+      } as unknown as RefObject<ChatInputHandle | null>
       const opts = createOpts({ chatInputRef })
       renderHook(() => useKeyboardShortcuts(opts))
 

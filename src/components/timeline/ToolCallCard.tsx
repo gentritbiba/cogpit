@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo, useCallback } from "react"
+import { useState, useMemo, memo, useCallback } from "react"
 import {
   CheckCircle,
   XCircle,
@@ -13,13 +13,17 @@ import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
-import { highlightCode, getLangFromPath } from "@/lib/shiki"
-import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { authFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
+import { AskUserAnswerForm } from "./AskUserAnswerForm"
+import {
+  JsonResultHighlighted,
+  ReadResultHighlighted,
+  tryPrettyJson,
+} from "./ToolCallResult"
 
 /**
  * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
@@ -193,272 +197,6 @@ function StatusIcon({
     return <Loader2 className="w-4 h-4 text-blue-400" />
   }
   return null
-}
-
-// ── Shared highlighted code block ─────────────────────────────────────
-
-type TokenLine = Array<{ content: string; color?: string }>
-
-const CODE_BLOCK_CLASS =
-  "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]"
-
-/** Shared hook: highlight code and return tokens, cancelling stale requests. */
-function useHighlightedTokens(code: string, lang: string | null, isDark: boolean): TokenLine[] | null {
-  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
-
-  useEffect(() => {
-    if (!lang) {
-      setTokens(null)
-      return
-    }
-    let cancelled = false
-    highlightCode(code, lang, isDark).then((r) => {
-      if (!cancelled) setTokens(r)
-    })
-    return () => { cancelled = true }
-  }, [code, lang, isDark])
-
-  return tokens
-}
-
-/** Renders a list of lines with optional token-based syntax highlighting. */
-function HighlightedCodeBlock({
-  lines,
-  tokens,
-  lineNums,
-}: {
-  lines: string[]
-  tokens: TokenLine[] | null
-  lineNums?: string[]
-}): React.ReactElement {
-  return (
-    <pre className={CODE_BLOCK_CLASS}>
-      <code className="block">
-        {lines.map((line, i) => {
-          const tokenLine = tokens?.[i]
-          return (
-            <span key={i} className="block">
-              {lineNums?.[i] && (
-                <span className="inline-block w-10 text-right mr-2 text-muted-foreground/30 select-none">
-                  {lineNums[i]}
-                </span>
-              )}
-              {tokenLine
-                ? tokenLine.map((token, j) => (
-                    <span key={j} style={{ color: token.color }}>
-                      {token.content}
-                    </span>
-                  ))
-                : line || "\u00A0"
-              }
-            </span>
-          )
-        })}
-      </code>
-    </pre>
-  )
-}
-
-// ── Syntax-highlighted Read result ─────────────────────────────────────
-
-/** Regex to match the `cat -n` line-number prefix: spaces + number + arrow */
-const LINE_PREFIX_RE = /^(\s*\d+)→(.*)$/
-
-function parseReadResult(text: string): { lineNums: string[]; codeLines: string[] } {
-  const lines = text.split("\n")
-  const lineNums: string[] = []
-  const codeLines: string[] = []
-  for (const line of lines) {
-    const m = line.match(LINE_PREFIX_RE)
-    if (m) {
-      lineNums.push(m[1])
-      codeLines.push(m[2])
-    } else {
-      lineNums.push("")
-      codeLines.push(line)
-    }
-  }
-  return { lineNums, codeLines }
-}
-
-function ReadResultHighlighted({
-  result,
-  filePath,
-  expanded,
-}: {
-  result: string
-  filePath: string
-  expanded: boolean
-}): React.ReactElement {
-  const isDark = useIsDarkMode()
-  const lang = getLangFromPath(filePath)
-
-  const slicedResult = expanded ? result : result.slice(0, 500)
-  const { lineNums, codeLines } = useMemo(() => parseReadResult(slicedResult), [slicedResult])
-  const code = useMemo(() => codeLines.join("\n"), [codeLines])
-  const tokens = useHighlightedTokens(code, lang, isDark)
-
-  return <HighlightedCodeBlock lines={codeLines} tokens={tokens} lineNums={lineNums} />
-}
-
-// ── JSON result with syntax highlighting ─────────────────────────────────
-
-/** Try to parse a string as JSON. Returns the pretty-printed string or null. */
-function tryPrettyJson(text: string): string | null {
-  const trimmed = text.trim()
-  if (trimmed[0] !== "{" && trimmed[0] !== "[") return null
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
-  } catch {
-    return null
-  }
-}
-
-function JsonResultHighlighted({
-  result,
-  expanded,
-  alreadyPretty,
-}: {
-  result: string
-  expanded: boolean
-  alreadyPretty?: boolean
-}): React.ReactElement {
-  const isDark = useIsDarkMode()
-
-  const pretty = useMemo(() => alreadyPretty ? result : (tryPrettyJson(result) ?? result), [result, alreadyPretty])
-  const sliced = expanded ? pretty : pretty.slice(0, 2000)
-  const lines = useMemo(() => sliced.split("\n"), [sliced])
-  const tokens = useHighlightedTokens(sliced, "json", isDark)
-
-  return <HighlightedCodeBlock lines={lines} tokens={tokens} />
-}
-
-// ── AskUserQuestion inline answer form ─────────────────────────────────────
-
-interface AskUserQuestion {
-  question: string
-  header?: string
-  options?: Array<{ label: string; description?: string }>
-  multiSelect?: boolean
-  type?: string
-}
-
-function AskUserAnswerForm({
-  toolCall,
-  sessionId,
-}: {
-  toolCall: ToolCall
-  sessionId: string
-}): React.ReactElement | null {
-  const questions = (toolCall.input.questions as AskUserQuestion[] | undefined) ?? []
-  const [answers, setAnswers] = useState<Record<string, string>>(() => (
-    Object.fromEntries(questions.map((question) => [question.question, ""]))
-  ))
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  if (questions.length === 0) return null
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitting(true)
-    setError(null)
-    try {
-      const res = await authFetch("/api/ask-user-answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, toolUseId: toolCall.id, answers }),
-      })
-      if (res.ok) {
-        setSubmitted(true)
-      } else {
-        const data = await res.json() as { error?: string }
-        setError(data.error ?? "Failed to submit answer")
-      }
-    } catch {
-      setError("Network error")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <form
-      onSubmit={(e) => { void handleSubmit(e) }}
-      className={cn(
-        "mt-2 rounded-md border border-pink-500/30 bg-pink-500/5 p-2.5 space-y-2",
-        submitted && "opacity-50 pointer-events-none",
-      )}
-    >
-      {questions.map((q, i) => {
-        const isMultipleChoice = q.options && q.options.length > 0
-        return (
-          <div key={i} className="space-y-1">
-            {(q.header || q.question) && (
-              <div className="text-[11px] text-pink-300">
-                {q.header && <span className="font-medium mr-1">{q.header}</span>}
-                {q.question}
-              </div>
-            )}
-            {isMultipleChoice ? (
-              <div className="flex flex-wrap gap-1.5">
-                {q.options!.map((opt, oi) => (
-                  <button
-                    key={oi}
-                    type="button"
-                    onClick={() => {
-                      const current = answers[q.question] ?? ""
-                      const selected = q.multiSelect
-                        ? current.split(", ").filter(Boolean)
-                        : []
-                      const nextValue = q.multiSelect
-                        ? selected.includes(opt.label)
-                          ? selected.filter((label) => label !== opt.label).join(", ")
-                          : [...selected, opt.label].join(", ")
-                        : opt.label
-                      const next = { ...answers, [q.question]: nextValue }
-                      setAnswers(next)
-                    }}
-                    className={cn(
-                      "text-[11px] px-2 py-0.5 rounded border transition-colors",
-                      (q.multiSelect
-                        ? (answers[q.question] ?? "").split(", ").includes(opt.label)
-                        : answers[q.question] === opt.label)
-                        ? "border-pink-500/60 bg-pink-500/20 text-pink-200"
-                        : "border-pink-500/20 text-pink-400 hover:bg-pink-500/10",
-                    )}
-                    title={opt.description}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <textarea
-                value={answers[q.question] ?? ""}
-                onChange={(e) => {
-                  const next = { ...answers, [q.question]: e.target.value }
-                  setAnswers(next)
-                }}
-                rows={2}
-                className="w-full text-[11px] font-mono bg-elevation-2 border border-pink-500/20 rounded p-1.5 text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:border-pink-500/50"
-                placeholder="Type your answer..."
-              />
-            )}
-          </div>
-        )
-      })}
-      {error && <p className="text-[10px] text-red-400">{error}</p>}
-      <button
-        type="submit"
-        disabled={submitting || submitted}
-        className="text-[11px] px-2.5 py-1 rounded border border-pink-500/40 bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 transition-colors disabled:opacity-50"
-      >
-        {submitted ? "Sent" : submitting ? "Sending..." : "Send answer"}
-      </button>
-    </form>
-  )
 }
 
 // ── Main component ───────────────────────────────────────────────────────

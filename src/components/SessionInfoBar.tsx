@@ -1,4 +1,4 @@
-import { memo } from "react"
+import { forwardRef, memo } from "react"
 import { Menu } from "@base-ui/react/menu"
 import {
   FolderOpen,
@@ -15,6 +15,7 @@ import {
   Search,
   ChevronsDownUp,
   ChevronsUpDown,
+  type LucideProps,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -32,9 +33,17 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
+import type { RawMessage } from "@/lib/types"
 
 const MOBILE_MENU_ITEM_CLASS =
   "flex min-h-10 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-xs text-foreground outline-none transition-colors data-highlighted:bg-elevation-2"
+
+const HeaderSpinnerIcon = forwardRef<SVGSVGElement, LucideProps>(function HeaderSpinnerIcon(
+  props,
+  ref,
+) {
+  return <Spinner ref={ref} {...props} />
+})
 
 interface SessionInfoBarProps {
   creatingSession: boolean
@@ -71,6 +80,9 @@ export const SessionInfoBar = memo(function SessionInfoBar({
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const isSubAgentView = subAgentInfo !== null
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
+  const claudeRawMessages = (
+    session.agentKind === "codex" ? [] : session.rawMessages
+  ) as readonly RawMessage[]
 
   if (isMobile) {
     const handleNewSession = () => {
@@ -95,7 +107,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
 
         <DeviceSwitcher compact />
         <span className="h-4 w-px shrink-0 bg-border/40" aria-hidden="true" />
-        <ContextBadge rawMessages={session.rawMessages} warnOnly />
+        <ContextBadge rawMessages={claudeRawMessages} warnOnly />
 
         <span className="min-w-0 flex-1 truncate text-center text-[11px] font-medium text-muted-foreground">
           {session.cwd ? projectName(session.cwd) : "Session"}
@@ -208,7 +220,7 @@ export const SessionInfoBar = memo(function SessionInfoBar({
       )}
 
       <ContextBadge
-        rawMessages={session.rawMessages}
+        rawMessages={claudeRawMessages}
         showRemaining
         showTooltip={!isMobile}
       />
@@ -291,7 +303,7 @@ function SessionActions({
   return (
     <>
       <HeaderIconButton
-        icon={creatingSession ? Spinner : Plus}
+        icon={creatingSession ? HeaderSpinnerIcon : Plus}
         label="New session in this project"
         onClick={handleNewSession}
         disabled={creatingSession}

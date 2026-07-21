@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { Keyboard, RotateCcw, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -31,21 +31,22 @@ interface KeyboardShortcutsDialogProps {
 const modifierKeys = new Set(["Alt", "Control", "Meta", "Shift"])
 
 export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcutsDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <KeyboardShortcutsDialogContent key={open ? "open" : "closed"} />
+    </Dialog>
+  )
+}
+
+function KeyboardShortcutsDialogContent() {
   const [query, setQuery] = useState("")
   const [recording, setRecording] = useState<KeybindingCommand | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [bindings, setBindings] = useState(getResolvedKeybindings)
 
   useEffect(() => {
-    if (!open) return
-    setQuery("")
-    setRecording(null)
-    setConflict(null)
-    setBindings(getResolvedKeybindings())
-  }, [open])
-
-  useEffect(() => {
     if (!recording) return
+    const recordingCommand = recording
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault()
@@ -59,12 +60,12 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
       event.preventDefault()
       event.stopPropagation()
       const shortcut = shortcutFromKeyboardEvent(event)
-      const duplicate = findKeybindingConflict(shortcut, recording)
+      const duplicate = findKeybindingConflict(shortcut, recordingCommand)
       if (duplicate) {
         setConflict(`Already assigned to “${duplicate.label}”.`)
         return
       }
-      setKeybinding(recording, shortcut)
+      setKeybinding(recordingCommand, shortcut)
       setBindings(getResolvedKeybindings())
       setRecording(null)
       setConflict(null)
@@ -73,21 +74,19 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
     return () => window.removeEventListener("keydown", handleKeyDown, true)
   }, [recording])
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
-    if (!normalized) return KEYBINDING_DEFINITIONS
-    return KEYBINDING_DEFINITIONS.filter((definition) =>
-      `${definition.label} ${definition.description} ${definition.group}`
-        .toLowerCase()
-        .includes(normalized),
-    )
-  }, [query])
+  const normalizedQuery = query.trim().toLowerCase()
+  const filtered = normalizedQuery
+    ? KEYBINDING_DEFINITIONS.filter((definition) =>
+        `${definition.label} ${definition.description} ${definition.group}`
+          .toLowerCase()
+          .includes(normalizedQuery),
+      )
+    : KEYBINDING_DEFINITIONS
 
   const groups = ["General", "View", "Tools"] as const
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0" showCloseButton={false}>
+    <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0" showCloseButton={false}>
         <DialogHeader className="p-4 pb-3">
           <DialogTitle className="flex items-center gap-2">
             <Keyboard aria-hidden="true" className="size-4" />
@@ -184,7 +183,6 @@ export function KeyboardShortcutsDialog({ open, onOpenChange }: KeyboardShortcut
             })}
           </div>
         </ScrollArea>
-      </DialogContent>
-    </Dialog>
+    </DialogContent>
   )
 }

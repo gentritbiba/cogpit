@@ -1,5 +1,5 @@
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /** Why a session is asking for the user's attention. */
 export type AttentionReason = "permission" | "waiting" | "done"

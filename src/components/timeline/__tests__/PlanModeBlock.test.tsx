@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeAll } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import { PlanModeBlock } from "../PlanModeBlock"
 import type { ToolCall } from "@/lib/types"
+import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
 // Mock useSessionContext — required by ToolCallCard
 vi.mock("@/contexts/SessionContext", () => ({
@@ -176,8 +177,8 @@ describe("PlanModeBlock", () => {
   })
 
   it("forwards skillMetadata to embedded ToolCallCards (Skill tool shows source label)", () => {
-    const skillMeta = new Map([
-      ["my-skill", { name: "my-skill", filePath: "/path/to/SKILL.md" } as import("@/hooks/useSkillMetadata").SkillMeta],
+    const skillMeta = new Map<string, SkillMeta>([
+      ["my-skill", { source: "project", filePath: "/path/to/SKILL.md" }],
     ])
 
     const skillCall = makeToolCall({
@@ -205,7 +206,7 @@ describe("PlanModeBlock", () => {
     expect(screen.getByText("Skill")).toBeInTheDocument()
   })
 
-  it("forwards expandAll=true to embedded ToolCallCards (inputs auto-expanded)", () => {
+  it("forwards expandAll=true to embedded ToolCallCards (inputs auto-expanded)", async () => {
     const call = makeToolCall({
       id: "tc_expand_1",
       name: "Read",
@@ -224,7 +225,9 @@ describe("PlanModeBlock", () => {
 
     // Expand the tool calls section
     const callsButton = screen.getByText("1 call during planning")
-    fireEvent.click(callsButton)
+    await act(async () => {
+      fireEvent.click(callsButton)
+    })
 
     // With expandAll=true the ToolCallCard renders inputs expanded by default
     // Verify the file_path input is visible without further interaction

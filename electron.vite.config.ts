@@ -50,6 +50,14 @@ export default defineConfig({
         },
       }),
       tailwindcss(),
+      {
+        // electron-vite forces "./" for production renderers, but Cogpit always
+        // serves this renderer over HTTP. Override the preset after it runs so
+        // assets still load when /:project/:session is refreshed directly.
+        name: "cogpit:root-renderer-base",
+        enforce: "post",
+        config: () => ({ base: "/" }),
+      },
     ],
     resolve: {
       alias: {

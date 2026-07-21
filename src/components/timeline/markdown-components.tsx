@@ -1,7 +1,6 @@
 import { useState } from "react"
-import type { Components } from "react-markdown"
+import type { Components, Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
-import type { PluggableList } from "unified"
 import { authUrl } from "@/lib/auth"
 import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
@@ -347,4 +346,4 @@ export const markdownComponents: Components = {
   },
 }
 
-export const markdownPlugins: PluggableList = [remarkGfm]
+export const markdownPlugins: NonNullable<Options["remarkPlugins"]> = [remarkGfm]

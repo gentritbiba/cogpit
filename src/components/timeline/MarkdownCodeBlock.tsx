@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type HTMLAttributes } from "react"
+import { useState, useEffect, useRef, type HTMLAttributes } from "react"
 import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { highlightCode } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
@@ -35,7 +35,7 @@ function getLangDisplay(lang: string): string {
 function parseLang(className: string | undefined): string | null {
   if (!className) return null
   const match = className.match(/language-(\S+)/)
-  return match ? match[1] : null
+  return match?.[1] ?? null
 }
 
 // ── Copy button ─────────────────────────────────────────────────────────────
@@ -43,24 +43,32 @@ function parseLang(className: string | undefined): string | null {
 function CopyButton({ text }: { text: string }): React.ReactElement {
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const copyRequestRef = useRef(0)
 
   useEffect(() => {
     return () => {
+      copyRequestRef.current += 1
       if (timerRef.current) clearTimeout(timerRef.current)
     }
   }, [])
 
-  const handleCopy = useCallback(() => {
+  function handleCopy() {
+    const requestId = ++copyRequestRef.current
     copyToClipboard(text).then((ok) => {
-      if (ok) {
+      if (ok && requestId === copyRequestRef.current) {
+        if (timerRef.current) clearTimeout(timerRef.current)
         setCopied(true)
-        timerRef.current = setTimeout(() => setCopied(false), 2000)
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          setCopied(false)
+        }, 2000)
       }
     })
-  }, [text])
+  }
 
   return (
     <button
+      type="button"
       onClick={handleCopy}
       className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-white/5"
       title="Copy code"
@@ -119,6 +127,11 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
 
 type TokenLine = Array<{ content: string; color?: string }>
 
+interface HighlightedTokens {
+  key: string
+  lines: TokenLine[] | null
+}
+
 function HighlightedCodeBlock({
   code,
   lang,
@@ -126,27 +139,26 @@ function HighlightedCodeBlock({
 }: {
   code: string
   lang: string | null
-} & HTMLAttributes<HTMLElement>): React.ReactElement {
+} & Omit<HTMLAttributes<HTMLElement>, "lang">): React.ReactElement {
   const isDark = useIsDarkMode()
-  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
+  const [highlighted, setHighlighted] = useState<HighlightedTokens | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const lines = code.split("\n")
   const lineCount = lines.length
   const isLong = lineCount > 30
+  const highlightKey = lang ? `${lang}\u0000${isDark ? "dark" : "light"}\u0000${code}` : null
+  const tokens = highlighted?.key === highlightKey ? highlighted.lines : null
 
   useEffect(() => {
-    if (!lang) {
-      setTokens(null)
-      return
-    }
+    if (!lang || !highlightKey) return
     let cancelled = false
     highlightCode(code, lang, isDark).then((result) => {
-      if (!cancelled) setTokens(result)
+      if (!cancelled) setHighlighted({ key: highlightKey, lines: result })
     })
     return () => {
       cancelled = true
     }
-  }, [code, lang, isDark])
+  }, [code, lang, isDark, highlightKey])
 
   const Chevron = collapsed ? ChevronRight : ChevronDown
 
@@ -156,6 +168,7 @@ function HighlightedCodeBlock({
         <div className="flex items-center gap-2">
           {isLong && (
             <button
+              type="button"
               onClick={() => setCollapsed(!collapsed)}
               className="text-muted-foreground hover:text-foreground transition-colors"
               aria-label={collapsed ? "Expand code" : "Collapse code"}
@@ -204,6 +217,7 @@ function HighlightedCodeBlock({
 
       {collapsed && (
         <button
+          type="button"
           onClick={() => setCollapsed(false)}
           className="w-full px-3 py-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-2/30 transition-colors text-left"
           aria-label={`Expand ${lineCount} lines of code`}

@@ -58,13 +58,15 @@ export function useSkillMetadata(cwd: string): Map<string, SkillMeta> {
     }
 
     fetchedCwdRef.current = cwd
+    const controller = new AbortController()
 
-    authFetch(`/api/slash-suggestions?cwd=${encodeURIComponent(cwd)}`)
+    authFetch(`/api/slash-suggestions?cwd=${encodeURIComponent(cwd)}`, { signal: controller.signal })
       .then(async (res) => {
-        if (fetchedCwdRef.current !== cwd) return
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd) return
         if (!res.ok) return
 
         const data = await res.json() as { suggestions: SlashSuggestionRaw[] }
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd) return
         const map = new Map<string, SkillMeta>()
         for (const s of data.suggestions ?? []) {
           if (s.type === "skill") {
@@ -79,6 +81,7 @@ export function useSkillMetadata(cwd: string): Map<string, SkillMeta> {
         setMetadata(map)
       })
       .catch(() => { /* ignore fetch errors */ })
+    return () => controller.abort()
   }, [cwd])
 
   return metadata

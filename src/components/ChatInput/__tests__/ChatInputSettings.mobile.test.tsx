@@ -63,4 +63,84 @@ describe("ChatInputSettings mobile", () => {
     expect(onPermissionModeChange).toHaveBeenCalledWith("plan")
     expect(onFastModeEnabledChange).toHaveBeenCalledWith(true)
   })
+
+  it("keeps advanced worktree, Ultracode, and MCP actions available", async () => {
+    const user = userEvent.setup()
+    const onWorktreeEnabledChange = vi.fn()
+    const onUltracodeEnabledChange = vi.fn()
+    const onToggleMcpServer = vi.fn()
+    const onRefreshMcpServers = vi.fn()
+    const onMcpAuth = vi.fn()
+
+    render(
+      <ChatInputSettings
+        mobile
+        agentKind="claude"
+        selectedModel="fable"
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+        worktreeEnabled={false}
+        onWorktreeEnabledChange={onWorktreeEnabledChange}
+        ultracodeEnabled={false}
+        onUltracodeEnabledChange={onUltracodeEnabledChange}
+        mcpServers={[
+          { name: "filesystem", status: "connected" },
+          { name: "github", status: "needs_auth" },
+        ]}
+        selectedMcpServers={[]}
+        onToggleMcpServer={onToggleMcpServer}
+        onRefreshMcpServers={onRefreshMcpServers}
+        onMcpAuth={onMcpAuth}
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Session controls" }))
+    const sheet = await screen.findByRole("dialog", { name: "Session controls" })
+
+    await user.click(within(sheet).getByRole("button", { name: "Worktree" }))
+    await user.click(within(sheet).getByRole("button", { name: "Ultracode" }))
+    await user.click(within(sheet).getByRole("button", { name: /Refresh MCP status/i }))
+    await user.click(within(sheet).getByRole("button", { name: /filesystem/i }))
+    await user.click(within(sheet).getByRole("button", { name: /github/i }))
+
+    expect(onWorktreeEnabledChange).toHaveBeenCalledWith(true)
+    expect(onUltracodeEnabledChange).toHaveBeenCalledWith(true)
+    expect(onRefreshMcpServers).toHaveBeenCalledOnce()
+    expect(onToggleMcpServer).toHaveBeenCalledWith("filesystem")
+    expect(onMcpAuth).toHaveBeenCalledWith("github")
+  })
+
+  it("closes the sheet and confirms before enabling full access", async () => {
+    const user = userEvent.setup()
+    const onPermissionModeChange = vi.fn()
+
+    render(
+      <ChatInputSettings
+        mobile
+        agentKind="codex"
+        selectedModel="gpt-5.6-sol"
+        onModelChange={vi.fn()}
+        selectedEffort="medium"
+        onEffortChange={vi.fn()}
+        permissionMode="default"
+        onPermissionModeChange={onPermissionModeChange}
+        isNewSession
+      />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Session controls" }))
+    const sheet = await screen.findByRole("dialog", { name: "Session controls" })
+    fireEvent.change(within(sheet).getByRole("combobox", { name: "Access policy" }), {
+      target: { value: "bypassPermissions" },
+    })
+
+    expect(onPermissionModeChange).not.toHaveBeenCalled()
+    expect(screen.queryByRole("dialog", { name: "Session controls" })).not.toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: /Enable full access/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: /Enable full access/i }))
+    expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
+  })
 })

@@ -2,7 +2,7 @@ import { Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
 import type { SessionStatus } from "@/lib/sessionStatus"
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 export function isIdleStatus(status?: SessionStatus): boolean {
   return status === "idle" || status === "completed"

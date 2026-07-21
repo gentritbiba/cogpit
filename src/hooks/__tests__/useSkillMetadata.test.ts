@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook } from "@testing-library/react"
+import { renderHook, waitFor } from "@testing-library/react"
 
 // Mock authFetch before importing the hook
 vi.mock("@/lib/auth", () => ({
@@ -46,7 +46,7 @@ describe("useSkillMetadata", () => {
 
     const { result } = renderHook(() => useSkillMetadata(uniqueCwd))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.size).toBe(2)
     })
 
@@ -70,7 +70,7 @@ describe("useSkillMetadata", () => {
 
     const { result } = renderHook(() => useSkillMetadata(uniqueCwd))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.has("commit")).toBe(true)
     })
 
@@ -90,7 +90,7 @@ describe("useSkillMetadata", () => {
 
     const { result, rerender } = renderHook(() => useSkillMetadata(uniqueCwd))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(result.current.size).toBe(1)
     })
 
@@ -108,7 +108,7 @@ describe("useSkillMetadata", () => {
     const { result } = renderHook(() => useSkillMetadata(uniqueCwd))
 
     // Should remain empty without throwing
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
@@ -121,7 +121,7 @@ describe("useSkillMetadata", () => {
 
     const { result } = renderHook(() => useSkillMetadata(uniqueCwd))
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 

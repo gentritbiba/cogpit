@@ -1,6 +1,6 @@
 import { shortPath, dirNameToPath, parseWorktreePath, truncate } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /**
  * Best display title for a session. Teammate sessions rarely have readable

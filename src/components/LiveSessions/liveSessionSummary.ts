@@ -1,4 +1,4 @@
-import type { ActiveSessionInfo, RunningProcess } from "./SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /**
  * Count sessions that are actually running. File recency is intentionally not

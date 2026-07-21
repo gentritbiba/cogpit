@@ -1,8 +1,15 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useEffectEvent } from "react"
 import { authFetch } from "@/lib/auth"
 import { parseSession } from "@/lib/parser"
 import type { ParsedSession } from "@/lib/types"
 import type { View, ProjectInfo, SessionInfo, CodexSubagentInfo } from "./types"
+import {
+  readCachedList,
+  readCachedSessionPage,
+  sessionListCacheKeys,
+  writeCachedList,
+  writeCachedSessionPage,
+} from "@/lib/sessionListCache"
 
 // ── Return type ────────────────────────────────────────────────────────────
 
@@ -29,6 +36,90 @@ interface UseSessionBrowserReturn {
   handleLoadMoreSessions: () => void
 }
 
+interface ViewSelection {
+  view: View
+  sessionId: string | null
+}
+
+interface SessionSource {
+  dirName: string
+  fileName: string
+  rawText: string
+}
+
+type LoadSessionHandler = (session: ParsedSession, source: SessionSource) => void
+
+type RequestOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string }
+
+async function settleRequest<T>(
+  request: Promise<T>,
+  fallbackError: string,
+): Promise<RequestOutcome<T>> {
+  try {
+    return { ok: true, value: await request }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : fallbackError,
+    }
+  }
+}
+
+async function fetchSuccessfulResponse(url: string, failureMessage: string): Promise<Response> {
+  const response = await authFetch(url)
+  if (!response.ok) throw new Error(`${failureMessage} (${response.status})`)
+  return response
+}
+
+async function fetchParsedSession(
+  dirName: string,
+  fileName: string,
+  failureMessage: string,
+): Promise<{ session: ParsedSession; rawText: string }> {
+  const response = await fetchSuccessfulResponse(
+    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`,
+    failureMessage,
+  )
+  const rawText = await response.text()
+  return { session: parseSession(rawText), rawText }
+}
+
+async function fetchProjectsList(): Promise<ProjectInfo[]> {
+  const response = await fetchSuccessfulResponse("/api/projects", "Failed to load projects")
+  const data: unknown = await response.json()
+  const projects = Array.isArray(data) ? data as ProjectInfo[] : []
+  writeCachedList(sessionListCacheKeys.projects, projects)
+  return projects
+}
+
+async function fetchSessionsPage(
+  project: ProjectInfo,
+  page: number,
+  cacheResult: boolean,
+): Promise<{ sessions: SessionInfo[]; total: number }> {
+  const response = await fetchSuccessfulResponse(
+    `/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`,
+    "Failed to load sessions",
+  )
+  const data = await response.json() as { sessions?: unknown; total?: unknown }
+  const sessions = Array.isArray(data.sessions) ? data.sessions as SessionInfo[] : []
+  const total = typeof data.total === "number" ? data.total : sessions.length
+  if (cacheResult) writeCachedSessionPage(project.dirName, { sessions, total })
+  return { sessions, total }
+}
+
+async function loadParsedSession(
+  dirName: string,
+  fileName: string,
+  failureMessage: string,
+  onLoadSession: LoadSessionHandler,
+): Promise<void> {
+  const loaded = await fetchParsedSession(dirName, fileName, failureMessage)
+  onLoadSession(loaded.session, { dirName, fileName, rawText: loaded.rawText })
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────────
 
 export function useSessionBrowser({
@@ -39,136 +130,139 @@ export function useSessionBrowser({
   onBeforeLoad,
 }: {
   sessionId: string | null
-  onLoadSession: (
-    session: ParsedSession,
-    source: { dirName: string; fileName: string; rawText: string }
-  ) => void
+  onLoadSession: LoadSessionHandler
   onDeleteSession?: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   /** Called before fetching a new session to free connections held by the current session. */
   onBeforeLoad?: () => void
 }): UseSessionBrowserReturn {
-  const [view, setView] = useState<View>(sessionId ? "detail" : "projects")
-  const [projects, setProjects] = useState<ProjectInfo[]>([])
+  const [viewSelection, setViewSelection] = useState<ViewSelection>(() => ({
+    view: sessionId ? "detail" : "projects",
+    sessionId,
+  }))
+  const view = sessionId && sessionId !== viewSelection.sessionId
+    ? "detail"
+    : viewSelection.view
+  function setView(nextView: View): void {
+    setViewSelection({ view: nextView, sessionId })
+  }
+  const [projects, setProjects] = useState<ProjectInfo[]>(
+    () => readCachedList<ProjectInfo>(sessionListCacheKeys.projects) ?? [],
+  )
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [sessionsPage, setSessionsPage] = useState(1)
   const [selectedProject, setSelectedProject] = useState<ProjectInfo | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [pendingRequestCount, setPendingRequestCount] = useState(0)
+  const isLoading = pendingRequestCount > 0
   const [searchFilter, setSearchFilter] = useState("")
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [detailOrigin, setDetailOrigin] = useState<Exclude<View, "detail">>("projects")
 
+  async function runRequest<T>(
+    request: Promise<T>,
+    fallbackError: string,
+  ): Promise<RequestOutcome<T>> {
+    setPendingRequestCount((count) => count + 1)
+    setFetchError(null)
+
+    const outcome = await settleRequest(request, fallbackError)
+    if (!outcome.ok) setFetchError(outcome.error)
+    setPendingRequestCount((count) => Math.max(0, count - 1))
+    return outcome
+  }
+
   // Load projects on mount
-  const loadProjects = useCallback(async () => {
-    setIsLoading(true)
-    setFetchError(null)
-    try {
-      const res = await authFetch("/api/projects")
-      if (!res.ok) throw new Error(`Failed to load projects (${res.status})`)
-      const data = await res.json()
-      setProjects(data)
-    } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load projects")
-    } finally {
-      setIsLoading(false)
+  async function loadProjects(): Promise<void> {
+    const outcome = await runRequest(fetchProjectsList(), "Failed to load projects")
+    if (outcome.ok) setProjects(outcome.value)
+  }
+
+  const loadProjectsOnMount = useEffectEvent(() => {
+    void loadProjects()
+  })
+
+  useEffect(() => {
+    let active = true
+    queueMicrotask(() => {
+      if (active) loadProjectsOnMount()
+    })
+    return () => {
+      active = false
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- Effect Events must be omitted from dependency arrays.
 
-  useEffect(() => {
-    loadProjects()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When session changes externally, switch to detail view
-  useEffect(() => {
-    if (sessionId) setView("detail")
-  }, [sessionId])
-
-  const loadSessions = useCallback(async (project: ProjectInfo, page = 1, append = false) => {
-    setIsLoading(true)
-    setFetchError(null)
+  async function loadSessions(project: ProjectInfo, page = 1, append = false): Promise<void> {
     if (!append) {
       setSelectedProject(project)
+      const cached = readCachedSessionPage<SessionInfo>(project.dirName)
+      if (cached) {
+        setSessions(cached.sessions)
+        setSessionsTotal(cached.total)
+        setSessionsPage(1)
+        setView("sessions")
+      }
     }
-    try {
-      const res = await authFetch(`/api/sessions/${encodeURIComponent(project.dirName)}?page=${page}&limit=20`)
-      if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
-      const data = await res.json()
-      if (append) {
-        setSessions((prev) => [...prev, ...data.sessions])
-      } else {
-        setSessions(data.sessions)
-      }
-      setSessionsTotal(data.total)
-      setSessionsPage(page)
-      if (!append) setView("sessions")
-    } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Failed to load sessions")
-    } finally {
-      setIsLoading(false)
+
+    const outcome = await runRequest(
+      fetchSessionsPage(project, page, !append),
+      "Failed to load sessions",
+    )
+    if (!outcome.ok) return
+
+    if (append) {
+      setSessions((previous) => [...previous, ...outcome.value.sessions])
+    } else {
+      setSessions(outcome.value.sessions)
     }
-  }, [])
+    setSessionsTotal(outcome.value.total)
+    setSessionsPage(page)
+    if (!append) setView("sessions")
+  }
 
-  const loadSessionFile = useCallback(
-    async (project: ProjectInfo, session: SessionInfo) => {
-      onBeforeLoad?.()
-      setIsLoading(true)
-      setFetchError(null)
-      try {
-        const res = await authFetch(
-          `/api/sessions/${encodeURIComponent(project.dirName)}/${encodeURIComponent(session.fileName)}`
-        )
-        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
-        const text = await res.text()
-        const parsed = parseSession(text)
-        onLoadSession(parsed, {
-          dirName: project.dirName,
-          fileName: session.fileName,
-          rawText: text,
-        })
-        setDetailOrigin("sessions")
-        setView("detail")
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load session")
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [onLoadSession, onBeforeLoad]
-  )
+  async function openSession(
+    dirName: string,
+    fileName: string,
+    origin: Exclude<View, "detail">,
+    failureMessage: string,
+  ): Promise<void> {
+    onBeforeLoad?.()
+    const outcome = await runRequest(
+      loadParsedSession(dirName, fileName, failureMessage, onLoadSession),
+      failureMessage,
+    )
+    if (!outcome.ok) return
 
-  const loadLiveSession = useCallback(
-    async (dirName: string, fileName: string) => {
-      onBeforeLoad?.()
-      setIsLoading(true)
-      setFetchError(null)
-      try {
-        const res = await authFetch(
-          `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
-        )
-        if (!res.ok) throw new Error(`Failed to load session (${res.status})`)
-        const text = await res.text()
-        const parsed = parseSession(text)
-        onLoadSession(parsed, { dirName, fileName, rawText: text })
-        setDetailOrigin("projects")
-        setView("detail")
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load session")
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [onLoadSession, onBeforeLoad]
-  )
+    setDetailOrigin(origin)
+    setView("detail")
+  }
 
-  const showSubagents = useCallback(() => {
+  function loadSessionFile(project: ProjectInfo, session: SessionInfo): Promise<void> {
+    return openSession(
+      project.dirName,
+      session.fileName,
+      "sessions",
+      "Failed to load session",
+    )
+  }
+
+  function loadLiveSession(dirName: string, fileName: string): Promise<void> {
+    return openSession(
+      dirName,
+      fileName,
+      "projects",
+      "Failed to load session",
+    )
+  }
+
+  function showSubagents(): void {
     setSelectedProject(null)
     setSearchFilter("")
     setFetchError(null)
     setView("subagents")
-  }, [])
+  }
 
-  const handleBack = useCallback(() => {
+  function handleBack(): void {
     if (view === "detail") {
       setView(detailOrigin === "sessions" && !selectedProject ? "projects" : detailOrigin)
     } else if (view === "sessions" || view === "subagents") {
@@ -179,64 +273,36 @@ export function useSessionBrowser({
       setSessionsPage(1)
     }
     setSearchFilter("")
-  }, [view, selectedProject, detailOrigin])
+  }
 
-  const handleSelectSession = useCallback(
-    (s: SessionInfo) => {
-      if (selectedProject) loadSessionFile(selectedProject, s)
-    },
-    [selectedProject, loadSessionFile]
-  )
+  function handleSelectSession(session: SessionInfo): void {
+    if (selectedProject) void loadSessionFile(selectedProject, session)
+  }
 
-  const handleSelectSubagent = useCallback(
-    async (agent: CodexSubagentInfo) => {
-      onBeforeLoad?.()
-      setIsLoading(true)
-      setFetchError(null)
-      try {
-        const res = await authFetch(
-          `/api/sessions/${encodeURIComponent(agent.dirName)}/${encodeURIComponent(agent.fileName)}`
-        )
-        if (!res.ok) throw new Error(`Failed to load subagent (${res.status})`)
-        const text = await res.text()
-        const parsed = parseSession(text)
-        onLoadSession(parsed, {
-          dirName: agent.dirName,
-          fileName: agent.fileName,
-          rawText: text,
-        })
-        setDetailOrigin("subagents")
-        setView("detail")
-      } catch (err) {
-        setFetchError(err instanceof Error ? err.message : "Failed to load subagent")
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    [onLoadSession, onBeforeLoad]
-  )
+  function handleSelectSubagent(agent: CodexSubagentInfo): void {
+    void openSession(
+      agent.dirName,
+      agent.fileName,
+      "subagents",
+      "Failed to load subagent",
+    )
+  }
 
-  const handleDeleteSession = useCallback(
-    (s: SessionInfo) => {
-      if (!selectedProject || !onDeleteSession) return
-      onDeleteSession(selectedProject.dirName, s.fileName)
-      setSessions((prev) => prev.filter((x) => x.fileName !== s.fileName))
-      setSessionsTotal((prev) => prev - 1)
-    },
-    [selectedProject, onDeleteSession]
-  )
+  function handleDeleteSession(session: SessionInfo): void {
+    if (!selectedProject || !onDeleteSession) return
+    onDeleteSession(selectedProject.dirName, session.fileName)
+    setSessions((previous) => previous.filter((item) => item.fileName !== session.fileName))
+    setSessionsTotal((total) => total - 1)
+  }
 
-  const handleDuplicateSession = useCallback(
-    (s: SessionInfo) => {
-      if (!selectedProject || !onDuplicateSession) return
-      onDuplicateSession(selectedProject.dirName, s.fileName)
-    },
-    [selectedProject, onDuplicateSession]
-  )
+  function handleDuplicateSession(session: SessionInfo): void {
+    if (!selectedProject || !onDuplicateSession) return
+    onDuplicateSession(selectedProject.dirName, session.fileName)
+  }
 
-  const handleLoadMoreSessions = useCallback(() => {
-    if (selectedProject) loadSessions(selectedProject, sessionsPage + 1, true)
-  }, [selectedProject, sessionsPage, loadSessions])
+  function handleLoadMoreSessions(): void {
+    if (selectedProject) void loadSessions(selectedProject, sessionsPage + 1, true)
+  }
 
   return {
     view,

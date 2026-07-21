@@ -38,6 +38,7 @@ function makeSession(turns: Turn[]): ParsedSession {
     gitBranch: "main",
     cwd: "/test",
     slug: "test",
+    name: "",
     model: "claude-3",
     turns,
     stats: {

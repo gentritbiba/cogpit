@@ -20,7 +20,7 @@ export const PendingTurnPreview = memo(function PendingTurnPreview({
       </div>
 
       <div className="rounded-lg bg-blue-500/[0.06] border border-blue-500/10 p-3">
-        <UserMessage content={message} />
+        <UserMessage content={message} timestamp="" />
       </div>
     </div>
   )

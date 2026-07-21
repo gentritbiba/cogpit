@@ -122,7 +122,14 @@ function SessionCard({
           {customName || session.slug || truncate(session.sessionId, 16)}
         </span>
         {session.branchedFrom && (
-          <Copy className="size-2.5 text-purple-400 shrink-0" title="Duplicated session" />
+          <span
+            role="img"
+            aria-label="Duplicated session"
+            title="Duplicated session"
+            className="shrink-0"
+          >
+            <Copy aria-hidden="true" className="size-2.5 text-purple-400" />
+          </span>
         )}
         {session.model && (
           <Badge

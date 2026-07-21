@@ -5,7 +5,9 @@ import { useDevices } from "@/hooks/useDevices"
 const mocks = vi.hoisted(() => ({ hubFetch: vi.fn() }))
 vi.mock("@/lib/auth", () => ({ hubFetch: mocks.hubFetch }))
 
-function json(body: unknown, { ok = true, status = ok ? 200 : 400 } = {}) {
+function json(body: unknown, options: { ok?: boolean; status?: number } = {}) {
+  const ok = options.ok ?? true
+  const status = options.status ?? (ok ? 200 : 400)
   return { ok, status, json: async () => body }
 }
 

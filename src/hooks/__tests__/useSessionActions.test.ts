@@ -5,7 +5,6 @@ import { renderHook, act } from "@testing-library/react"
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
   isRemoteClient: vi.fn(() => false),
-  getToken: vi.fn(() => null),
 }))
 
 // Mock sessionCache module
@@ -31,6 +30,7 @@ import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceId } from "@/lib/device"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
+import type { TeamMember } from "@/lib/team-types"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockSessionCache = vi.mocked(sessionCache)
@@ -43,6 +43,7 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
     gitBranch: "main",
     cwd: "/test",
     slug: "test",
+    name: "",
     model: "claude-3",
     turns: [],
     stats: {
@@ -61,7 +62,7 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
   }
 }
 
-function makeDefaultOpts(session?: ParsedSession) {
+function makeDefaultOpts(session?: ParsedSession): Parameters<typeof useSessionActions>[0] {
   const parsedSession = session ?? makeParsedSession()
   const workerParse = vi.fn(() => Promise.resolve(parsedSession))
   return {
@@ -71,6 +72,29 @@ function makeDefaultOpts(session?: ParsedSession) {
     scrollToBottomInstant: vi.fn(),
     resetTurnCount: vi.fn(),
     workerParse,
+  }
+}
+
+function makeTeamContext(teamName: string): SessionTeamContext {
+  return {
+    teamName,
+    config: {
+      name: teamName,
+      createdAt: 0,
+      leadAgentId: "lead",
+      members: [],
+    },
+    currentMemberName: null,
+  }
+}
+
+function makeTeamMember(name: string, cwd = "/dir"): TeamMember {
+  return {
+    agentId: name.toLowerCase(),
+    name,
+    agentType: "general-purpose",
+    joinedAt: 0,
+    cwd,
   }
 }
 
@@ -377,11 +401,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({
-          name: "Bob",
-          dir: "/some/dir",
-          active: true,
-        })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Bob", "/some/dir"))
       })
 
       expect(mockAuthFetch).not.toHaveBeenCalled()
@@ -390,11 +410,7 @@ describe("useSessionActions", () => {
 
     it("fetches team member session via tail endpoint and dispatches SWITCH_TEAM_MEMBER", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = {
-        teamName: "my-team",
-        members: [],
-        activeMember: null,
-      } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("my-team")
 
       mockAuthFetch
         .mockResolvedValueOnce(
@@ -410,11 +426,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({
-          name: "Bob",
-          dir: "/some/dir",
-          active: true,
-        })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Bob", "/some/dir"))
       })
 
       expect(opts.dispatch).toHaveBeenCalledWith({
@@ -443,7 +455,7 @@ describe("useSessionActions", () => {
 
     it("sets loadError when first fetch fails", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       mockAuthFetch.mockResolvedValueOnce(
         new Response("error", { status: 404 })
@@ -452,11 +464,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({
-          name: "Bob",
-          dir: "/dir",
-          active: true,
-        })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Bob"))
       })
 
       expect(result.current.loadError).toBe("Failed to find session for Bob")
@@ -468,7 +476,7 @@ describe("useSessionActions", () => {
 
     it("sets loadError when content fetch fails", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       mockAuthFetch
         .mockResolvedValueOnce(
@@ -484,11 +492,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({
-          name: "Alice",
-          dir: "/dir",
-          active: true,
-        })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
       // Error label from loadSessionTailCached — mentions the member session being loaded.
@@ -498,7 +502,7 @@ describe("useSessionActions", () => {
     it("second team-member switch to same session is a cache hit (no network)", async () => {
       const session = makeParsedSession()
       const opts = makeDefaultOpts(session)
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       // First switch: lookup + tail fetch.
       mockAuthFetch
@@ -512,7 +516,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
       // After the first switch, simulate a cache hit on the same session.
@@ -530,7 +534,7 @@ describe("useSessionActions", () => {
       )
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
       // Exactly one fetch (the member lookup) — no tail fetch for the cached session.
@@ -542,18 +546,14 @@ describe("useSessionActions", () => {
 
     it("sets loadError on network exception and still clears loading", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       mockAuthFetch.mockRejectedValue(new Error("Timeout"))
 
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({
-          name: "Alice",
-          dir: "/dir",
-          active: true,
-        })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
       expect(result.current.loadError).toBe("Timeout")
@@ -629,7 +629,7 @@ describe("useSessionActions", () => {
 
     it("dispatches SELECT_TEAM using teamContext.teamName", () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "dev-team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("dev-team")
 
       const { result } = renderHook(() => useSessionActions(opts))
 
@@ -704,7 +704,7 @@ describe("useSessionActions", () => {
   describe("handleTeamMemberSwitch error recovery", () => {
     it("clears loadError on next successful handleTeamMemberSwitch", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       // First call fails
       mockAuthFetch.mockResolvedValueOnce(
@@ -714,7 +714,7 @@ describe("useSessionActions", () => {
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({ name: "Bob", dir: "/dir", active: true })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Bob"))
       })
       expect(result.current.loadError).not.toBeNull()
 
@@ -729,7 +729,7 @@ describe("useSessionActions", () => {
         )
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({ name: "Alice", dir: "/dir", active: true })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Alice"))
       })
 
       expect(result.current.loadError).toBeNull()
@@ -737,14 +737,14 @@ describe("useSessionActions", () => {
 
     it("handles non-Error exceptions in handleTeamMemberSwitch", async () => {
       const opts = makeDefaultOpts()
-      opts.teamContext = { teamName: "team", members: [], activeMember: null } as unknown as SessionTeamContext
+      opts.teamContext = makeTeamContext("team")
 
       mockAuthFetch.mockRejectedValue("some string error")
 
       const { result } = renderHook(() => useSessionActions(opts))
 
       await act(async () => {
-        await result.current.handleTeamMemberSwitch({ name: "Bob", dir: "/dir", active: true })
+        await result.current.handleTeamMemberSwitch(makeTeamMember("Bob"))
       })
 
       expect(result.current.loadError).toBe("Failed to switch team member")

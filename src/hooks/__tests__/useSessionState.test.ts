@@ -14,6 +14,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
     gitBranch: "main",
     cwd: "/project",
     slug: "test",
+    name: "",
     model: "claude-opus-4-6-20250115",
     turns: [],
     stats: {

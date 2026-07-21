@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { classifyAttention, workingChip } from "../attentionGroups"
-import type { ActiveSessionInfo, RunningProcess } from "../SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionInfo {
   return {

@@ -1,28 +1,19 @@
-import { useState, useEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
-import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, TerminalSquare, Code2, FolderSearch, Bot } from "lucide-react"
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
+import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { SessionBrowser } from "@/components/SessionBrowser"
-import { StatsPanel } from "@/components/StatsPanel"
 import { AgentContextBar } from "@/components/AgentContextBar"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
-import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
-import { Dashboard } from "@/components/Dashboard"
-import { MobileNav, type MobileTab } from "@/components/MobileNav"
-import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
 import { GoalBar } from "@/components/GoalBar"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
 import { SetupScreen } from "@/components/SetupScreen"
-import { DesktopHeader } from "@/components/DesktopHeader"
-import { SessionInfoBar } from "@/components/SessionInfoBar"
-import { SessionStatusBar } from "@/components/SessionStatusBar"
-import { ChatArea } from "@/components/ChatArea"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
-import { UpdateBanner } from "@/components/UpdateBanner"
+import { DesktopAppShell } from "@/components/AppShell/DesktopAppShell"
+import { MobileAppShell } from "@/components/AppShell/MobileAppShell"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { useSessionWorkflows } from "@/hooks/useSessionWorkflows"
@@ -39,47 +30,32 @@ import { usePermissions } from "@/hooks/usePermissions"
 import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
-import { useProcessPanel } from "@/hooks/useProcessPanel"
-import { useNewSession } from "@/hooks/useNewSession"
 import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useMcpServers } from "@/hooks/useMcpServers"
-import { shortcutLabel } from "@/lib/keybindings"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
 import { useBackgroundAgents } from "@/hooks/useBackgroundAgents"
 import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
-import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useChunkedSession } from "@/hooks/useChunkedSession"
+import { useComposerSettings } from "@/hooks/useComposerSettings"
+import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
+import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
 import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
-import { hapticLight } from "@/lib/haptics"
 import { detectPendingInteraction } from "@/lib/parser"
-import { dirNameToPath, shortPath, parseSubAgentPath } from "@/lib/format"
+import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
-import { isRemoteDeviceActive } from "@/lib/device"
-import { getFastServiceTierOption, isUltracodeCapableModel, normalizeEffortForAgent, supportsImageInput } from "@/lib/utils"
-import { useModelOptions } from "@/hooks/useModelOptions"
 import {
   agentKindFromDirName,
-  findClaudeProjectDirNameForCwd,
-  isCodexDirName,
-  projectDirNameForAgent,
-  projectDirNameForNewFolder,
 } from "@/lib/sessionSource"
-import type { AgentKind } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable"
-import { HoverRevealPanel } from "@/components/HoverRevealPanel"
+import type { PanelSize } from "react-resizable-panels"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
@@ -87,40 +63,7 @@ import { PtyProvider } from "@/contexts/PtyContext"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
-const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then(m => ({ default: m.ConfigBrowser })))
-const ConfigDialog = lazy(() => import("@/components/ConfigDialog").then(m => ({ default: m.ConfigDialog })))
-const ProjectSwitcherModal = lazy(() => import("@/components/ProjectSwitcherModal").then(m => ({ default: m.ProjectSwitcherModal })))
-const TeamsDashboard = lazy(() => import("@/components/TeamsDashboard").then(m => ({ default: m.TeamsDashboard })))
 const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
-const ThemeSelectorModal = lazy(() => import("@/components/ThemeSelectorModal").then(m => ({ default: m.ThemeSelectorModal })))
-const WorktreePanel = lazy(() => import("@/components/WorktreePanel").then(m => ({ default: m.WorktreePanel })))
-const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then(m => ({ default: m.MobileFileChanges })))
-const CommandPaletteHost = lazy(() => import("@/components/CommandPaletteHost").then(m => ({ default: m.CommandPaletteHost })))
-const KeyboardShortcutsDialog = lazy(() => import("@/components/KeyboardShortcutsDialog").then(m => ({ default: m.KeyboardShortcutsDialog })))
-const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then(m => ({ default: m.PreviewPanel })))
-const ProjectFilesPanel = lazy(() => import("@/components/ProjectFilesPanel").then(m => ({ default: m.ProjectFilesPanel })))
-
-const MOBILE_TAB_ORDER = ["sessions", "chat", "stats", "teams"] as const
-
-/** Shared footer for the chat input — ensures consistent max-width in both new and active sessions. */
-function SessionInputFooter({ floating, children }: { floating?: boolean, children: React.ReactNode }) {
-  if (floating) {
-    return (
-      <div className="absolute bottom-0 left-0 right-0 z-20 flex justify-center pointer-events-none">
-        <div className="w-full max-w-3xl px-3 pt-6 bg-gradient-to-t from-elevation-1 from-80% to-transparent pointer-events-auto">
-          {children}
-        </div>
-      </div>
-    )
-  }
-  return (
-    <div className="w-full flex justify-center shrink-0">
-      <div className="w-full max-w-3xl px-3">
-        {children}
-      </div>
-    </div>
-  )
-}
 
 export default function App() {
   const config = useAppConfig()
@@ -157,12 +100,6 @@ export default function App() {
   const chatInputRef = useRef<ChatInputHandle>(null)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
-  const [rightWorkspace, setRightWorkspace] = useState<{
-    kind: "preview" | "project-files"
-    cwd: string
-  } | null>(null)
-  const [launchTerminalRequest, setLaunchTerminalRequest] = useState(0)
-
   // Stable callbacks
   const handleSidebarTabChange = useCallback(
     (tab: "live" | "browse" | "teams") => dispatch({ type: "SET_SIDEBAR_TAB", tab }),
@@ -182,19 +119,15 @@ export default function App() {
     ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
   const supportsWorktrees = currentAgentKind === "claude"
   const supportsMcp = currentAgentKind === "claude"
-  const availableModelOptions = useModelOptions(currentAgentKind ?? "claude")
-
   const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
-  const suggestionsRef = useRef(slashSuggestions.suggestions)
-  suggestionsRef.current = slashSuggestions.suggestions
 
   const handleEditCommand = useCallback((commandName: string) => {
-    const match = suggestionsRef.current.find((s) => s.name === commandName)
+    const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
     dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
-  }, [dispatch])
+  }, [dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
-    const match = suggestionsRef.current.find((s) => s.name === commandName)
+    const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
     if (!match?.filePath) return null
     try {
       const res = await authFetch("/api/expand-command", {
@@ -208,69 +141,31 @@ export default function App() {
     } catch {
       return null
     }
-  }, [])
+  }, [slashSuggestions.suggestions])
 
-  /** Fire-and-forget POST to an action endpoint with path + dirName resolution. */
-  const postAction = useCallback((endpoint: string) => {
-    authFetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: pendingPath || undefined, dirName: state.pendingDirName || undefined }),
-    }).catch(() => {})
-  }, [pendingPath, state.pendingDirName])
-
-  const handleOpenTerminal = useCallback(() => {
-    // Would open a terminal window on the remote machine's screen, not here
-    if (isRemoteDeviceActive()) { console.warn("[open-terminal] unavailable for remote devices"); return }
-    // Prefer the real cwd; send dirName so the server can resolve authoritatively
-    const projectPath = state.session?.cwd ?? pendingPath ?? undefined
-    const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
-    if (!projectPath && !dirName) { console.warn("[open-terminal] no project path available"); return }
-    authFetch("/api/open-terminal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, dirName }),
-    }).then((res) => {
-      if (!res.ok) res.json().then((d) => console.error("[open-terminal]", d.error)).catch(() => {})
-    }).catch((err) => console.error("[open-terminal] fetch failed:", err))
-  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
-
-  const handleMcpAuth = useCallback((_serverName: string) => {
-    if (isRemoteDeviceActive()) { console.warn("[mcp-auth] unavailable for remote devices"); return }
-    const projectPath = state.session?.cwd ?? pendingPath ?? undefined
-    const dirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? undefined
-    if (!projectPath && !dirName) return
-    authFetch("/api/open-terminal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, dirName, command: "claude /mcp" }),
-    }).catch((err) => console.error("[mcp-auth] open-terminal failed:", err))
-  }, [state.session?.cwd, pendingPath, state.sessionSource?.dirName, state.pendingDirName, state.dashboardProject])
-
-  // Process panel state (unified: scripts + tasks + terminals)
-  const processPanel = useProcessPanel(state.session?.sessionId)
-
-  const handleToggleIntegratedTerminal = useCallback(() => {
-    const terminals = [...processPanel.processes.values()].filter((entry) => entry.type === "terminal")
-    const terminal = terminals.at(-1)
-    if (!terminal) {
-      if (state.session?.cwd ?? pendingPath) {
-        setLaunchTerminalRequest((request) => request + 1)
-      }
-      return
-    }
-    if (processPanel.activeProcessId === terminal.id && !processPanel.collapsed) {
-      processPanel.toggleCollapse()
-    } else {
-      processPanel.setActive(terminal.id)
-    }
-  }, [pendingPath, processPanel, state.session?.cwd])
-
-  const handleNewIntegratedTerminal = useCallback(() => {
-    if (state.session?.cwd ?? pendingPath) {
-      setLaunchTerminalRequest((request) => request + 1)
-    }
-  }, [pendingPath, state.session?.cwd])
+  // Project-scoped process panel, terminal/editor actions, and right workspace.
+  const {
+    processPanel,
+    currentCwd,
+    showPreview,
+    showProjectFiles,
+    launchTerminalRequest,
+    postProjectAction,
+    handleOpenTerminal,
+    handleMcpAuth,
+    handleToggleIntegratedTerminal,
+    handleNewIntegratedTerminal,
+    handleTogglePreview,
+    handleToggleProjectFiles,
+    closeRightWorkspace,
+  } = useProjectWorkspace({
+    sessionId: state.session?.sessionId,
+    sessionCwd: state.session?.cwd,
+    pendingPath,
+    sessionDirName: state.sessionSource?.dirName,
+    pendingDirName: state.pendingDirName,
+    dashboardProject: state.dashboardProject,
+  })
 
   // TODO progress from session's TodoWrite tool calls
   const todoProgress = useTodoProgress(state.session ?? null)
@@ -323,15 +218,13 @@ export default function App() {
 
   // Track whether the file changes panel has been collapsed via drag
   const [fileChangesCollapsed, setFileChangesCollapsed] = useState(false)
-  const handleFileChangesPanelCollapse = useCallback(() => setFileChangesCollapsed(true), [])
-  const handleFileChangesPanelExpand = useCallback(() => setFileChangesCollapsed(false), [])
+  const handleFileChangesPanelResize = useCallback((size: PanelSize) => {
+    setFileChangesCollapsed(size.asPercentage === 0)
+  }, [])
 
   // Mobile file changes bottom sheet
   const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
-
-  // Whether to actually show the file changes panel (toggle on + has changes)
-  const showFileChangesPanel = hasFileChanges && panels.showFileChanges
 
   // Force-show file changes panel when a file is clicked in TurnChangedFiles
   const setShowFileChanges = panels.setShowFileChanges
@@ -349,15 +242,10 @@ export default function App() {
   }, [setShowFileChanges, isMobile])
 
   // Detect pending interactive prompts (plan approval, user questions)
-  const pendingInteractionRef = useRef<ReturnType<typeof detectPendingInteraction>>(null)
-  const pendingInteraction = useMemo(() => {
-    const next = state.session ? detectPendingInteraction(state.session) : null
-    if (JSON.stringify(next) === JSON.stringify(pendingInteractionRef.current)) {
-      return pendingInteractionRef.current
-    }
-    pendingInteractionRef.current = next
-    return next
-  }, [state.session])
+  const pendingInteraction = useMemo(
+    () => state.session ? detectPendingInteraction(state.session) : null,
+    [state.session],
+  )
 
   // Live session streaming — wrapped in startTransition so React can
   // interrupt these low-priority renders to process user interactions (clicks).
@@ -388,63 +276,30 @@ export default function App() {
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
   const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
 
-  // Model override (empty = use session default)
-  const [selectedModel, setSelectedModel] = useState("")
-  const [modelFallbackNotice, setModelFallbackNotice] = useState<string | null>(null)
-  const lastClaudeFallbackRef = useRef<string | null>(null)
-
-  const handleCodexModelRejected = useCallback((rejectedModel: string) => {
-    setSelectedModel((current) => current === rejectedModel ? "" : current)
-    setModelFallbackNotice(
-      `${rejectedModel} is unavailable for this account. Cogpit retried the turn with Codex's default model.`,
-    )
-  }, [])
-
-  // Thinking effort level
-  // Empty means "use the selected model's recommended default". Codex's live
-  // catalog currently recommends Medium for GPT-5.6; Claude falls back to High.
-  const [selectedEffort, setSelectedEffort] = useState("")
-  const [fastModeEnabled, setFastModeEnabled] = useState(false)
-  // Ultracode: xhigh effort + standing dynamic-workflow orchestration. Claude
-  // only, and only meaningful on xhigh-capable models.
-  const [ultracodeEnabled, setUltracodeEnabled] = useState(false)
-  const ultracodeAvailable = isUltracodeCapableModel(
-    currentAgentKind ?? "claude",
-    selectedModel || state.session?.model,
-  )
-  const ultracodeActive = ultracodeEnabled && ultracodeAvailable
-  // Ultracode pins effort to xhigh; otherwise use the user's selection.
-  const effectiveEffort = ultracodeActive
-    ? "xhigh"
-    : normalizeEffortForAgent(currentAgentKind ?? "claude", selectedEffort, selectedModel)
-  const fastModeAvailable = !!getFastServiceTierOption(currentAgentKind ?? "claude", selectedModel)
-  const fastModeActive = fastModeAvailable && fastModeEnabled
-  const imageInputAvailable = supportsImageInput(currentAgentKind ?? "claude", selectedModel)
+  const {
+    selectedModel,
+    setSelectedModel,
+    setSelectedEffort,
+    effectiveEffort,
+    fastModeAvailable,
+    fastModeActive,
+    setFastModeEnabled,
+    ultracodeAvailable,
+    ultracodeActive,
+    setUltracodeEnabled,
+    imageInputAvailable,
+    modelFallbackNotice,
+    dismissModelFallbackNotice,
+    handleCodexModelRejected,
+  } = useComposerSettings({
+    agentKind: currentAgentKind,
+    session: state.session,
+    sessionSource: state.sessionSource,
+    pendingDirName: state.pendingDirName,
+    isLive,
+  })
 
   // MCP server selection
-  const currentCwd = state.session?.cwd ?? pendingPath ?? undefined
-  const showPreview = Boolean(
-    currentCwd && rightWorkspace?.kind === "preview" && rightWorkspace.cwd === currentCwd,
-  )
-  const showProjectFiles = Boolean(
-    currentCwd && rightWorkspace?.kind === "project-files" && rightWorkspace.cwd === currentCwd,
-  )
-  const handleTogglePreview = useCallback(() => {
-    if (!currentCwd) return
-    setRightWorkspace((current) =>
-      current?.kind === "preview" && current.cwd === currentCwd
-        ? null
-        : { kind: "preview", cwd: currentCwd },
-    )
-  }, [currentCwd])
-  const handleToggleProjectFiles = useCallback(() => {
-    if (!currentCwd) return
-    setRightWorkspace((current) =>
-      current?.kind === "project-files" && current.cwd === currentCwd
-        ? null
-        : { kind: "project-files", cwd: currentCwd },
-    )
-  }, [currentCwd])
   const mcpData = useMcpServers(
     supportsMcp ? currentCwd : undefined,
     supportsMcp ? (currentDirName ?? undefined) : undefined,
@@ -465,34 +320,28 @@ export default function App() {
     }
   }, [showWorkflows, hasWorkflowToolCalls, setShowWorkflows])
 
-  // New session creation (lazy — no backend call until first message)
-  // Declared before usePtyChat because it provides the onCreateSession callback.
-  const sessionFinalizedRef = useRef<((parsed: ParsedSession) => void) | null>(null)
-  const liveSessionsRefreshRef = useRef<(() => void) | null>(null)
-  const [pendingFirstMessage, setPendingFirstMessage] = useState<string | null>(null)
+  // New-session launch is lazy: the backend is not called until first submit.
   const {
     creatingSession,
     createError,
     clearCreateError,
-    handleNewSession,
     createAndSend,
     cancelCreation,
     worktreeEnabled,
     setWorktreeEnabled,
-    // worktreeName and setWorktreeName omitted — ChatInputSettings only uses the toggle
-  } = useNewSession({
+    sessionFinalizedRef,
+    liveSessionsRefreshRef,
+    pendingSessionInfo,
+    pendingAgentKindChange,
+    handleStartNewSession,
+    handleStartNewFolder,
+  } = useProjectSessionLaunch({
     permissionsConfig: perms.config,
     dispatch,
     isMobile,
-    onSessionFinalized: (parsed) => {
-      sessionFinalizedRef.current?.(parsed)
-      // Force Live & Recent to refresh so the new session appears.
-      // Two refreshes: one quick to pick up the session early, one later
-      // in case the active-sessions API hadn't indexed it yet.
-      setTimeout(() => liveSessionsRefreshRef.current?.(), 300)
-      setTimeout(() => liveSessionsRefreshRef.current?.(), 2000)
-    },
-    onCreateStarted: setPendingFirstMessage,
+    defaultAgentKind: config.defaultAgentKind,
+    pendingDirName: state.pendingDirName,
+    pendingCwd: state.pendingCwd,
     onCodexModelRejected: handleCodexModelRejected,
     model: selectedModel,
     effort: effectiveEffort,
@@ -500,88 +349,6 @@ export default function App() {
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
   })
-
-  const [pendingAgentSource, setPendingAgentSource] = useState<{
-    claudeDirName: string
-    cwd: string | null
-  } | null>(null)
-  const claudeProjectDirCacheRef = useRef(new Map<string, string | null>())
-
-  const resolveClaudeProjectDirName = useCallback(async (cwd: string): Promise<string | null> => {
-    const cache = claudeProjectDirCacheRef.current
-    if (cache.has(cwd)) {
-      return cache.get(cwd) ?? null
-    }
-
-    try {
-      const res = await authFetch("/api/projects")
-      if (!res.ok) {
-        cache.set(cwd, null)
-        return null
-      }
-      const projects = await res.json() as Array<{ dirName: string; path: string }>
-      const match = findClaudeProjectDirNameForCwd(projects, cwd)
-      cache.set(cwd, match)
-      return match
-    } catch {
-      cache.set(cwd, null)
-      return null
-    }
-  }, [])
-
-  const handleStartNewSession = useCallback(async (dirName: string, cwd?: string) => {
-    const normalizedCwd = cwd ?? null
-    if (!normalizedCwd) {
-      setPendingAgentSource(null)
-      handleNewSession(dirName)
-      return
-    }
-
-    const claudeDirName = isCodexDirName(dirName)
-      ? await resolveClaudeProjectDirName(normalizedCwd)
-      : dirName
-
-    setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
-    handleNewSession(dirName, normalizedCwd)
-  }, [handleNewSession, resolveClaudeProjectDirName])
-
-  const handleStartNewFolder = useCallback((cwd: string) => {
-    const dirName = projectDirNameForNewFolder(cwd, config.defaultAgentKind)
-    void handleStartNewSession(dirName, cwd)
-  }, [config.defaultAgentKind, handleStartNewSession])
-
-  const handlePendingSessionAgentChange = useCallback((agentKind: AgentKind) => {
-    const pending = pendingAgentSource
-    if (!pending?.cwd) return
-    const nextDirName = projectDirNameForAgent(pending.claudeDirName, pending.cwd, agentKind)
-    handleNewSession(nextDirName, pending.cwd)
-  }, [pendingAgentSource, handleNewSession])
-
-  // Build the pending session info for the Live & Recent placeholder
-  const pendingSessionInfo = useMemo(() => {
-    if (!creatingSession || !state.pendingDirName) return null
-    return {
-      dirName: state.pendingDirName,
-      cwd: state.pendingCwd,
-      firstMessage: pendingFirstMessage ?? undefined,
-    }
-  }, [creatingSession, state.pendingDirName, state.pendingCwd, pendingFirstMessage])
-
-  // Clear pending first message when we leave the pending state
-  useEffect(() => {
-    if (!state.pendingDirName) {
-      setPendingFirstMessage(null)
-      setPendingAgentSource(null)
-    }
-  }, [state.pendingDirName])
-
-  useEffect(() => {
-    if (!selectedModel) return
-    if (!state.sessionSource && !state.pendingDirName) return
-    if (!availableModelOptions.some((option) => option.value === selectedModel)) {
-      setSelectedModel("")
-    }
-  }, [availableModelOptions, selectedModel, state.sessionSource, state.pendingDirName])
 
   // Active agent chat
   const claudeChat = usePtyChat({
@@ -634,6 +401,8 @@ export default function App() {
   })
 
   const chatScrollRef = scroll.chatScrollRef
+  const resetFinalizedSessionTurnCount = scroll.resetTurnCount
+  const scrollFinalizedSessionToBottom = scroll.scrollToBottomInstant
 
   const handleTodosExpandedChange = useCallback((expanded: boolean) => {
     setTodosExpanded(expanded)
@@ -646,12 +415,22 @@ export default function App() {
     })
   }, [chatScrollRef])
 
-  // Wire up the session finalized ref now that scroll is available
-  sessionFinalizedRef.current = (_parsed) => {
-    // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
-    scroll.resetTurnCount(0)
-    scroll.scrollToBottomInstant()
-  }
+  // Wire up the session-finalized bridge now that scroll is available. A layout
+  // effect keeps render pure and installs the latest callback before user input
+  // or passive effects can finalize a newly-created session.
+  useLayoutEffect(() => {
+    const handleSessionFinalized = (_parsed: ParsedSession) => {
+      // Reset to 0 so useChatScroll detects "new turns" and clears pendingMessage
+      resetFinalizedSessionTurnCount(0)
+      scrollFinalizedSessionToBottom()
+    }
+    sessionFinalizedRef.current = handleSessionFinalized
+    return () => {
+      if (sessionFinalizedRef.current === handleSessionFinalized) {
+        sessionFinalizedRef.current = null
+      }
+    }
+  }, [resetFinalizedSessionTurnCount, scrollFinalizedSessionToBottom, sessionFinalizedRef])
 
   // Pre-session-switch cleanup: abort in-flight send-message and session creation
   // requests to free HTTP connections before fetching the new session data.
@@ -671,10 +450,6 @@ export default function App() {
     workerParse,
     onBeforeSwitch: handlePreSessionSwitch,
   })
-  const changeMobileTab = (tab: MobileTab) => {
-    setMobileSearchOpen(false)
-    actions.handleMobileTabChange(tab)
-  }
 
   const goHome = actions.handleGoHome
   const handleOpenPaletteProject = useCallback((dirName: string) => {
@@ -741,8 +516,17 @@ export default function App() {
     }
   }, [mcpData.loaded, mcpHasRestrictions, hasSettingsChanges, handleApplySettings, state.session?.sessionId])
 
-  // Wire reconnect handler now that reloadSession is available
-  reconnectHandlerRef.current = handlers.reloadSession
+  // Wire the reconnect bridge after reloadSession is available. Layout timing
+  // guarantees useLiveSession's passive EventSource effect observes the latest
+  // committed handler, without leaking a discarded render through the ref.
+  useLayoutEffect(() => {
+    reconnectHandlerRef.current = handlers.reloadSession
+    return () => {
+      if (reconnectHandlerRef.current === handlers.reloadSession) {
+        reconnectHandlerRef.current = null
+      }
+    }
+  }, [handlers.reloadSession])
 
   // Undo/redo system
   const undoRedo = useUndoRedo(state.session, state.sessionSource, handlers.reloadSession)
@@ -783,11 +567,6 @@ export default function App() {
 
   // Kill-all handler
   const { killing, handleKillAll } = useKillAll()
-
-  // Active session key for sidebar highlighting
-  const activeSessionKey = state.sessionSource
-    ? `${state.sessionSource.dirName}/${state.sessionSource.fileName}`
-    : null
 
   // Navigate back to parent session when viewing a sub-agent
   // Team members also live under subagents/ but are NOT read-only subagent views —
@@ -840,37 +619,6 @@ export default function App() {
     const timer = setTimeout(clearActiveError, 8000)
     return () => clearTimeout(timer)
   }, [activeError, clearActiveError])
-
-  useEffect(() => {
-    if (!modelFallbackNotice) return
-    const timer = setTimeout(() => setModelFallbackNotice(null), 12_000)
-    return () => clearTimeout(timer)
-  }, [modelFallbackNotice])
-
-  useEffect(() => {
-    if (!isLive || state.session?.agentKind !== "claude") return
-    const rawMessages = state.session.rawMessages
-    let fallback: (typeof rawMessages)[number] | undefined
-    for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
-      const message = rawMessages[index]
-      if (message.type === "system" && message.subtype === "model_refusal_fallback") {
-        fallback = message
-        break
-      }
-    }
-    if (!fallback) return
-    const identity = typeof fallback.uuid === "string"
-      ? fallback.uuid
-      : `${String(fallback.original_model)}:${String(fallback.fallback_model)}:${String(fallback.request_id)}`
-    if (lastClaudeFallbackRef.current === identity) return
-    lastClaudeFallbackRef.current = identity
-    const original = typeof fallback.original_model === "string" ? fallback.original_model : "Fable"
-    const replacement = typeof fallback.fallback_model === "string" ? fallback.fallback_model : "Opus"
-    const explanation = typeof fallback.api_refusal_explanation === "string"
-      ? ` ${fallback.api_refusal_explanation}`
-      : ""
-    setModelFallbackNotice(`${original} could not handle this request, so Claude continued with ${replacement}.${explanation}`)
-  }, [isLive, state.session?.agentKind, state.session?.rawMessages])
 
   // ─── Build context values ──────────────────────────────────────────────────
 
@@ -956,34 +704,19 @@ export default function App() {
     scroll,
   ])
 
-  // ─── MOBILE: Swipe navigation between tabs ─────────────────────────────────
-  const mobileVisibleTabs = useMemo(() =>
-    MOBILE_TAB_ORDER.filter((t) => {
-      if (t === "stats" && !state.session && !state.pendingDirName) return false
-      if (t === "teams" && !teamContext) return false
-      return true
-    }),
-    [state.session, state.pendingDirName, teamContext],
-  )
-  const swipeRef = useSwipeNavigation<HTMLElement>({
-    enabled: isMobile,
-    onSwipeLeft: () => {
-      const idx = mobileVisibleTabs.indexOf(state.mobileTab as typeof mobileVisibleTabs[number])
-      if (idx < mobileVisibleTabs.length - 1) {
-        hapticLight()
-        actions.handleMobileTabChange(mobileVisibleTabs[idx + 1])
-      }
-    },
-    onSwipeRight: () => {
-      const idx = mobileVisibleTabs.indexOf(state.mobileTab as typeof mobileVisibleTabs[number])
-      if (idx > 0) {
-        hapticLight()
-        actions.handleMobileTabChange(mobileVisibleTabs[idx - 1])
-      }
-    },
-  })
-
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
+  if (!networkAuth.authChecked) {
+    return (
+      <div
+        className="dark flex h-dvh items-center justify-center bg-elevation-0"
+        role="status"
+        aria-label="Checking authentication"
+      >
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
   if (!networkAuth.authenticated) {
     return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
   }
@@ -1049,7 +782,7 @@ export default function App() {
     <div role="status" className="fixed bottom-4 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3 px-3 py-2 depth-high toast-enter">
       <AlertTriangle className="size-3.5 shrink-0 text-amber-400" />
       <span className="flex-1 text-xs text-amber-300">{modelFallbackNotice}</span>
-      <button type="button" onClick={() => setModelFallbackNotice(null)} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss model notice">
+      <button type="button" onClick={dismissModelFallbackNotice} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss model notice">
         <X className="size-3.5" />
       </button>
     </div>
@@ -1157,7 +890,7 @@ export default function App() {
   const chatInputSettingsNode = (
     <ChatInputSettings
       agentKind={currentAgentKind ?? "claude"}
-      onAgentKindChange={isNewSession && pendingAgentSource?.cwd ? handlePendingSessionAgentChange : undefined}
+      onAgentKindChange={isNewSession ? pendingAgentKindChange : undefined}
       selectedModel={selectedModel}
       onModelChange={setSelectedModel}
       selectedEffort={effectiveEffort}
@@ -1226,175 +959,55 @@ export default function App() {
       <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider value={streamingOverlay}>
-      <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
-        {backgroundServers}
-        <UpdateBanner />
-        {!(state.mobileTab === "chat" && state.session && state.mainView !== "teams") && (
-          <div className="flex h-10 shrink-0 items-center border-b border-border/40 bg-elevation-0 px-1.5">
-            <DeviceSwitcher compact />
-          </div>
-        )}
-        <main ref={swipeRef} className="flex flex-1 min-h-0 overflow-hidden">
-          {state.mobileTab === "sessions" && (
-            <SessionBrowser
-              sessionId={state.session?.sessionId ?? null}
-              activeSessionKey={activeSessionKey}
-              onLoadSession={actions.handleLoadSession}
-              sidebarTab={state.sidebarTab}
-              onSidebarTabChange={handleSidebarTabChange}
-              onSelectTeam={actions.handleSelectTeam}
-              onNewSession={handleStartNewSession}
-              creatingSession={creatingSession}
-              pendingSession={pendingSessionInfo}
-              onDuplicateSession={handlers.handleDuplicateSessionByPath}
-              onDeleteSession={handlers.handleDeleteSession}
-              onBeforeSessionSwitch={handlePreSessionSwitch}
-              liveSessionsRefreshRef={liveSessionsRefreshRef}
-              onPrefetchSession={prefetchSession}
-              isMobile
-            />
-          )}
-
-          {state.mobileTab === "chat" && (
-            <div className="flex flex-1 min-h-0 flex-col min-w-0">
-              {state.mainView === "teams" && state.selectedTeam ? (
-                <Suspense fallback={null}>
-                  <TeamsDashboard
-                    teamName={state.selectedTeam}
-                    onBack={actions.handleBackFromTeam}
-                    onOpenSession={actions.handleOpenSessionFromTeam}
-                  />
-                </Suspense>
-              ) : state.session ? (
-                <div className="flex flex-1 min-h-0 flex-col">
-                  {teamMembersBar}
-                  {agentContextBar}
-                  <SessionInfoBar
-                    creatingSession={creatingSession}
-                    onNewSession={handleStartNewSession}
-                    onDuplicateSession={handlers.handleDuplicateSession}
-                    onOpenTerminal={handleOpenTerminal}
-                    onBackToMain={isSubAgentView ? handleBackToMain : undefined}
-                    onShowFileChanges={() => setShowMobileFileChanges(true)}
-                    hasFileChanges={hasFileChanges}
-                    onShowWorkflows={handleShowWorkflows}
-                    workflowCount={workflowBadgeCount}
-                    onSearch={() => setMobileSearchOpen(true)}
-                    expandAll={state.expandAll}
-                    onToggleExpandAll={handleToggleExpandAll}
-                  />
-                  <ChatArea
-                    searchInputRef={searchInputRef}
-                    hasMore={chunkedSession.hasMore}
-                    onLoadMore={chunkedSession.loadMore}
-                    mobileSearchOpen={mobileSearchOpen}
-                    onMobileSearchClose={() => setMobileSearchOpen(false)}
-                  />
-                </div>
-              ) : state.pendingDirName ? (
-                <div className="flex flex-1 min-h-0 flex-col">
-                  {pendingPreviewList.length > 0 ? (
-                    <div className="flex-1 overflow-y-auto px-1 py-3">
-                      {pendingPreviewList}
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                      <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                      <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
-                      <div className="flex items-center gap-1 mt-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                          onClick={handleOpenTerminal}
-                        >
-                          <TerminalSquare className="size-3" />
-                          Terminal
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Dashboard
-                  onSelectSession={actions.handleDashboardSelect}
-                  onNewSession={handleStartNewSession}
-                  creatingSession={creatingSession}
-                  selectedProjectDirName={state.dashboardProject}
-                  onSelectProject={handleSelectProject}
-                  onDuplicateSession={handlers.handleDuplicateSessionByPath}
-                  onDeleteSession={handlers.handleDeleteSession}
-                />
-              )}
-            </div>
-          )}
-
-          {state.mobileTab === "stats" && state.session && (
-            <StatsPanel
-              onJumpToTurn={handlers.handleMobileJumpToTurn}
-              onToggleServer={processPanel.handleToggleServer}
-              onServersChanged={processPanel.handleServersChanged}
-              onLoadSession={handlers.handleLoadSessionScrollAware}
-              backgroundAgents={backgroundAgents}
-            />
-          )}
-
-          {state.mobileTab === "teams" && (
-            <div className="flex flex-1 min-h-0 flex-col min-w-0">
-              {state.selectedTeam ? (
-                <Suspense fallback={null}>
-                  <TeamsDashboard
-                    teamName={state.selectedTeam}
-                    onBack={actions.handleBackFromTeam}
-                    onOpenSession={actions.handleOpenSessionFromTeam}
-                  />
-                </Suspense>
-              ) : (
-                <SessionBrowser
-                  sessionId={state.session?.sessionId ?? null}
-                  activeSessionKey={activeSessionKey}
-                  onLoadSession={actions.handleLoadSession}
-                  sidebarTab="teams"
-                  onSidebarTabChange={handleSidebarTabChange}
-                  onSelectTeam={actions.handleSelectTeam}
-                  isMobile
-                  teamsOnly
-                  onBeforeSessionSwitch={handlePreSessionSwitch}
-                />
-              )}
-            </div>
-          )}
-        </main>
-
-        {state.mobileTab === "chat" && processPanelNode}
-        {workflowsPanelNode}
-        {state.mobileTab === "chat" && (state.session || state.pendingDirName) && state.mainView !== "teams" && (
-          <>
-            {todoProgress && <TodoProgressPanel progress={todoProgress} />}
-            {subAgentReadOnlyNode || chatInputNode}
-          </>
-        )}
-
-        <MobileNav
-          activeTab={state.mobileTab}
-          onTabChange={changeMobileTab}
-          hasTeam={!!teamContext}
+        <MobileAppShell
+          navigation={{
+            actions,
+            handlers,
+            creatingSession,
+            pendingSession: pendingSessionInfo,
+            onSidebarTabChange: handleSidebarTabChange,
+            onStartNewSession: handleStartNewSession,
+            onSelectProject: handleSelectProject,
+            onBeforeSessionSwitch: handlePreSessionSwitch,
+            liveSessionsRefreshRef,
+            onPrefetchSession: prefetchSession,
+          }}
+          sessionView={{
+            searchInputRef,
+            teamMembersBar,
+            agentContextBar,
+            hasTeam: Boolean(teamContext),
+            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            pendingComposer: chatInputNode,
+            pendingTurns: pendingPreviewList,
+            todoProgress: todoProgress && <TodoProgressPanel progress={todoProgress} />,
+            hasMoreTurns: chunkedSession.hasMore,
+            onLoadMoreTurns: chunkedSession.loadMore,
+            onBackToMain: handleBackToMain,
+            onShowWorkflows: handleShowWorkflows,
+            onToggleExpandAll: handleToggleExpandAll,
+            workflowCount: workflowBadgeCount,
+            pendingPath,
+          }}
+          project={{
+            processPanel,
+            backgroundAgents,
+            hasFileChanges,
+            onOpenTerminal: handleOpenTerminal,
+          }}
+          chrome={{
+            backgroundServers,
+            processPanel: processPanelNode,
+            workflowsPanel: workflowsPanelNode,
+            undoDialog: undoConfirmDialog,
+            branchModal,
+            status: errorToast || modelFallbackToast || sseIndicator,
+            fileChangesOpen: showMobileFileChanges,
+            onFileChangesOpenChange: setShowMobileFileChanges,
+            searchOpen: mobileSearchOpen,
+            onSearchOpenChange: setMobileSearchOpen,
+          }}
         />
-
-        {undoConfirmDialog}
-        {branchModal}
-        {errorToast || modelFallbackToast || sseIndicator}
-        {state.session && (
-          <Suspense fallback={null}>
-            <MobileFileChanges
-              open={showMobileFileChanges}
-              onClose={() => setShowMobileFileChanges(false)}
-              session={state.session}
-              sessionChangeKey={state.sessionChangeKey}
-            />
-          </Suspense>
-        )}
-      </div>
       </StreamingOverlayProvider>
       </SessionProvider>
       </PtyProvider>
@@ -1408,333 +1021,77 @@ export default function App() {
     <PtyProvider>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider value={streamingOverlay}>
-    <div className={`${themeCtx.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
-      {backgroundServers}
-      <UpdateBanner />
-      <DesktopHeader
-        showSidebar={panels.showSidebar}
-        showStats={panels.showStats}
-        showWorktrees={supportsWorktrees && panels.showWorktrees}
-        showFileChanges={panels.showFileChanges}
-        hasFileChanges={hasFileChanges}
-        killing={killing}
-        onGoHome={actions.handleGoHome}
-        onToggleSidebar={panels.handleToggleSidebar}
-        onToggleStats={panels.handleToggleStats}
-        onToggleWorktrees={supportsWorktrees ? panels.handleToggleWorktrees : undefined}
-        onToggleFileChanges={panels.handleToggleFileChanges}
-        showConfig={state.mainView === "config"}
-        onToggleConfig={panels.handleToggleConfig}
-        onKillAll={handleKillAll}
-        onOpenSettings={config.openConfigDialog}
-        onOpenCommandPalette={handleOpenCommandPalette}
-        commandPaletteShortcut={shortcutLabel("commandPalette")}
-      />
-
-      <div className="relative flex flex-1 min-h-0 overflow-hidden">
-        <HoverRevealPanel
-          side="left"
-          visible={panels.showSidebar && state.mainView !== "config"}
-          enabled={state.mainView !== "config"}
-        >
-          <SessionBrowser
-            sessionId={state.session?.sessionId ?? null}
-            activeSessionKey={activeSessionKey}
-            onLoadSession={actions.handleLoadSession}
-            sidebarTab={state.sidebarTab}
-            onSidebarTabChange={handleSidebarTabChange}
-            onSelectTeam={actions.handleSelectTeam}
-            onNewSession={handleStartNewSession}
-            creatingSession={creatingSession}
-            pendingSession={pendingSessionInfo}
-            onDuplicateSession={handlers.handleDuplicateSessionByPath}
-            onDeleteSession={handlers.handleDeleteSession}
-            onBeforeSessionSwitch={handlePreSessionSwitch}
-            liveSessionsRefreshRef={liveSessionsRefreshRef}
-            projectDir={state.session?.cwd ?? state.pendingCwd ?? null}
-            onScriptStarted={processPanel.addProcess}
-            onPrefetchSession={prefetchSession}
-          />
-        </HoverRevealPanel>
-
-        <main className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
-          {state.mainView === "config" ? (
-            <Suspense fallback={null}>
-              <ConfigBrowser
-                projectPath={
-                  state.session?.cwd
-                  ?? pendingPath
-                  ?? (state.sessionSource?.dirName ? dirNameToPath(state.sessionSource.dirName) : null)
-                  ?? (state.dashboardProject ? dirNameToPath(state.dashboardProject) : null)
-                }
-                initialFilePath={state.configFilePath}
-              />
-            </Suspense>
-          ) : state.mainView === "teams" && state.selectedTeam ? (
-            <Suspense fallback={null}>
-              <TeamsDashboard
-                teamName={state.selectedTeam}
-                onBack={actions.handleBackFromTeam}
-                onOpenSession={actions.handleOpenSessionFromTeam}
-              />
-            </Suspense>
-          ) : state.session ? (
-            <div className="flex flex-1 min-h-0">
-              <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
-                <ResizablePanel defaultSize={showFileChangesPanel ? 70 : 100} minSize="500px">
-                  <div className="relative h-full min-h-0 flex flex-col">
-                    {teamMembersBar}
-                    {agentContextBar}
-                    <SessionInfoBar
-                      creatingSession={creatingSession}
-                      onNewSession={handleStartNewSession}
-                      onDuplicateSession={handlers.handleDuplicateSession}
-                      onOpenTerminal={handleOpenTerminal}
-                      onBackToMain={isSubAgentView ? handleBackToMain : undefined}
-                      onShowWorkflows={handleShowWorkflows}
-                      workflowCount={workflowBadgeCount}
-                    />
-                    <SessionStatusBar
-                      session={state.session}
-                      thinkingEnabled={state.session.turns.some((t) => t.thinking.length > 0)}
-                    />
-                    <ChatArea searchInputRef={searchInputRef} hasTodos={!!todoProgress && todosExpanded} hasMore={chunkedSession.hasMore} onLoadMore={chunkedSession.loadMore} />
-                    <SessionInputFooter floating>
-                      {todoProgress && <TodoProgressPanel progress={todoProgress} expanded={todosExpanded} onExpandedChange={handleTodosExpandedChange} />}
-                      {subAgentReadOnlyNode || chatInputNode}
-                    </SessionInputFooter>
-                  </div>
-                </ResizablePanel>
-
-                {showFileChangesPanel && (
-                  <>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel
-                      defaultSize={30}
-                      minSize={0}
-                      collapsible
-                      onCollapse={handleFileChangesPanelCollapse}
-                      onExpand={handleFileChangesPanelExpand}
-                    >
-                      {!fileChangesCollapsed && (
-                        <FileChangesPanel session={state.session} sessionChangeKey={state.sessionChangeKey} />
-                      )}
-                    </ResizablePanel>
-                  </>
-                )}
-              </ResizablePanelGroup>
-            </div>
-          ) : state.pendingDirName ? (
-            <div className="flex flex-1 min-h-0 flex-col min-w-0">
-              {pendingPreviewList.length > 0 ? (
-                <div className="flex-1 overflow-y-auto px-4 py-6">
-                  <div className="mx-auto max-w-3xl">
-                    {pendingPreviewList}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                  <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                  <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
-                  {!isRemoteDeviceActive() && <div className="flex items-center gap-1 mt-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                      onClick={handleOpenTerminal}
-                    >
-                      <TerminalSquare className="size-3" />
-                      Terminal
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                      onClick={() => postAction("/api/open-in-editor")}
-                    >
-                      <Code2 className="size-3" />
-                      Open
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                      onClick={() => postAction("/api/reveal-in-folder")}
-                    >
-                      <FolderSearch className="size-3" />
-                      Reveal
-                    </Button>
-                  </div>}
-                </div>
-              )}
-              <SessionInputFooter>{chatInputNode}</SessionInputFooter>
-            </div>
-          ) : (
-            <Dashboard
-              onSelectSession={actions.handleDashboardSelect}
-              onNewSession={handleStartNewSession}
-              creatingSession={creatingSession}
-              selectedProjectDirName={state.dashboardProject}
-              onSelectProject={handleSelectProject}
-              onDuplicateSession={handlers.handleDuplicateSessionByPath}
-              onDeleteSession={handlers.handleDeleteSession}
-            />
-          )}
-        </main>
-
-        <HoverRevealPanel
-          side="right"
-          visible={!showPreview && !showProjectFiles && panels.showStats && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
-          enabled={!showPreview && !showProjectFiles && !!state.session && state.mainView !== "teams" && state.mainView !== "config"}
-        >
-          <StatsPanel
-            onJumpToTurn={actions.handleJumpToTurn}
-            onToggleServer={processPanel.handleToggleServer}
-            onServersChanged={processPanel.handleServersChanged}
-            searchInputRef={searchInputRef}
-            onLoadSession={handlers.handleLoadSessionScrollAware}
-            backgroundAgents={backgroundAgents}
-          />
-        </HoverRevealPanel>
-
-        {showPreview && currentCwd && (
-          <Suspense fallback={null}>
-            <PreviewPanel cwd={currentCwd} onClose={() => setRightWorkspace(null)} />
-          </Suspense>
-        )}
-
-        {showProjectFiles && currentCwd && (
-          <Suspense fallback={null}>
-            <ProjectFilesPanel
-              cwd={currentCwd}
-              onClose={() => setRightWorkspace(null)}
-              onAddToPrompt={({ path, text, startLine, endLine, comment }) => {
-                let context = `@${path}`
-                if (text) {
-                  const fence = text.includes("```") ? "````" : "```"
-                  const lines = startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`
-                  context = `${comment ? `Review request: ${comment}\n` : ""}${path} (${lines})\n${fence}\n${text}\n${fence}`
-                }
-                const current = chatInputRef.current?.getText().trimEnd() ?? ""
-                chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
-                chatInputRef.current?.focus()
-              }}
-            />
-          </Suspense>
-        )}
-
-      </div>
-
-      <Suspense fallback={null}>
-        <WorktreePanel
-          open={supportsWorktrees && panels.showWorktrees}
-          onOpenChange={panels.setShowWorktrees}
-          worktrees={worktreeData.worktrees}
-          loading={worktreeData.loading}
-          dirName={currentDirName}
-          onRefetch={worktreeData.refetch}
-          onOpenSession={(sessionId) => {
-            // sessionId is a JSONL filename without extension; navigate to it
-            if (currentDirName) {
-              actions.handleDashboardSelect(currentDirName, `${sessionId}.jsonl`)
-            }
-            panels.setShowWorktrees(false)
+        <DesktopAppShell
+          navigation={{
+            panels,
+            actions,
+            handlers,
+            creatingSession,
+            pendingSession: pendingSessionInfo,
+            onSidebarTabChange: handleSidebarTabChange,
+            onStartNewSession: handleStartNewSession,
+            onStartNewFolder: handleStartNewFolder,
+            onSelectProject: handleSelectProject,
+            onOpenPaletteProject: handleOpenPaletteProject,
+            onBeforeSessionSwitch: handlePreSessionSwitch,
+            liveSessionsRefreshRef,
+            onPrefetchSession: prefetchSession,
+          }}
+          sessionView={{
+            searchInputRef,
+            chatInputRef,
+            teamMembersBar,
+            agentContextBar,
+            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            pendingComposer: chatInputNode,
+            pendingTurns: pendingPreviewList,
+            todoProgress,
+            todosExpanded,
+            onTodosExpandedChange: handleTodosExpandedChange,
+            hasMoreTurns: chunkedSession.hasMore,
+            onLoadMoreTurns: chunkedSession.loadMore,
+            onBackToMain: handleBackToMain,
+            onShowWorkflows: handleShowWorkflows,
+            workflowCount: workflowBadgeCount,
+            fileChangesCollapsed,
+            onFileChangesPanelResize: handleFileChangesPanelResize,
+          }}
+          project={{
+            processPanel,
+            worktrees: worktreeData,
+            backgroundAgents,
+            supportsWorktrees,
+            hasFileChanges,
+            currentCwd,
+            showPreview,
+            showProjectFiles,
+            launchTerminalRequest,
+            onOpenTerminal: handleOpenTerminal,
+            onTogglePreview: handleTogglePreview,
+            onToggleProjectFiles: handleToggleProjectFiles,
+            onCloseRightWorkspace: closeRightWorkspace,
+            onPostProjectAction: postProjectAction,
+          }}
+          chrome={{
+            backgroundServers,
+            processPanel: processPanelNode,
+            workflowsPanel: workflowsPanelNode,
+            undoDialog: undoConfirmDialog,
+            branchModal,
+            status: errorToast || modelFallbackToast || sseIndicator,
+            killing,
+            onKillAll: handleKillAll,
+            commandPaletteOpen: showCommandPalette,
+            onCommandPaletteOpenChange: setShowCommandPalette,
+            onOpenCommandPalette: handleOpenCommandPalette,
+            onFocusComposer: handleFocusComposer,
+            onExpandAll: handleExpandAll,
+            onCollapseAll: handleCollapseAll,
+            keyboardShortcutsOpen: showKeyboardShortcuts,
+            onKeyboardShortcutsOpenChange: setShowKeyboardShortcuts,
           }}
         />
-      </Suspense>
-
-      {processPanelNode}
-      {workflowsPanelNode}
-      {undoConfirmDialog}
-      {branchModal}
-
-      <Suspense fallback={null}>
-        <ConfigDialog
-          open={config.showConfigDialog}
-          currentPath={config.claudeDir ?? ""}
-          onClose={config.handleCloseConfigDialog}
-          onSaved={config.handleConfigSaved}
-        />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <ProjectSwitcherModal
-          open={panels.showProjectSwitcher}
-          onClose={panels.handleCloseProjectSwitcher}
-          onNewSession={handleStartNewSession}
-          onNewFolder={handleStartNewFolder}
-          defaultAgentKind={config.defaultAgentKind}
-          currentProjectDirName={state.sessionSource?.dirName ?? state.pendingDirName ?? null}
-          currentProjectCwd={state.session?.cwd ?? state.pendingCwd ?? null}
-        />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <ThemeSelectorModal
-          open={panels.showThemeSelector}
-          onClose={panels.handleCloseThemeSelector}
-          currentTheme={themeCtx.theme}
-          onSelectTheme={themeCtx.setTheme}
-          onPreviewTheme={themeCtx.setPreview}
-        />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <CommandPaletteHost
-          open={showCommandPalette}
-          onOpenChange={setShowCommandPalette}
-          onGoHome={actions.handleGoHome}
-          onNewSession={panels.handleOpenProjectSwitcher}
-          onOpenProject={handleOpenPaletteProject}
-          onOpenSession={actions.handleDashboardSelect}
-          onToggleSidebar={panels.handleToggleSidebar}
-          onToggleStats={panels.handleToggleStats}
-          onToggleFileChanges={panels.handleToggleFileChanges}
-          onToggleWorktrees={panels.handleToggleWorktrees}
-          onOpenConfig={panels.handleToggleConfig}
-          onOpenSettings={config.openConfigDialog}
-          onOpenKeyboardShortcuts={() => setShowKeyboardShortcuts(true)}
-          onTogglePreview={currentCwd ? handleTogglePreview : undefined}
-          onToggleProjectFiles={currentCwd ? handleToggleProjectFiles : undefined}
-          onOpenTheme={panels.handleToggleThemeSelector}
-          onOpenTerminal={handleOpenTerminal}
-          onFocusComposer={handleFocusComposer}
-          onExpandAll={handleExpandAll}
-          onCollapseAll={handleCollapseAll}
-          canFocusComposer={Boolean(state.session || state.pendingDirName)}
-          canOpenTerminal={Boolean(
-            state.session?.cwd
-            ?? pendingPath
-            ?? state.sessionSource?.dirName
-            ?? state.pendingDirName
-            ?? state.dashboardProject
-          )}
-          hasSession={Boolean(state.session)}
-          hasFileChanges={hasFileChanges}
-          supportsWorktrees={supportsWorktrees}
-          showSidebar={panels.showSidebar}
-          showStats={panels.showStats}
-          showProjectFiles={showProjectFiles}
-          showFileChanges={panels.showFileChanges}
-          showWorktrees={panels.showWorktrees}
-          showConfig={state.mainView === "config"}
-          currentProjectDirName={currentDirName}
-          projectCwd={state.session?.cwd ?? pendingPath ?? null}
-          onProcessStarted={processPanel.addProcess}
-          launchTerminalRequest={launchTerminalRequest}
-        />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <KeyboardShortcutsDialog
-          open={showKeyboardShortcuts}
-          onOpenChange={setShowKeyboardShortcuts}
-        />
-      </Suspense>
-
-      {errorToast || modelFallbackToast || sseIndicator}
-    </div>
-    </StreamingOverlayProvider>
+      </StreamingOverlayProvider>
       </SessionProvider>
     </PtyProvider>
     </AppProvider>

@@ -3,6 +3,13 @@ import { authFetch } from "@/lib/auth"
 import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
+import {
+  readCachedList,
+  readCachedSessionPage,
+  sessionListCacheKeys,
+  writeCachedList,
+  writeCachedSessionPage,
+} from "@/lib/sessionListCache"
 
 interface ProjectInfo {
   dirName: string
@@ -64,9 +71,13 @@ export const Dashboard = memo(function Dashboard({
   onDuplicateSession,
   onDeleteSession,
 }: DashboardProps) {
-  const [projects, setProjects] = useState<ProjectInfo[]>([])
-  const [activeSessions, setActiveSessions] = useState<ActiveSessionInfo[]>([])
-  const [loading, setLoading] = useState(true)
+  const [initialCachedData] = useState(() => ({
+    projects: readCachedList<ProjectInfo>(sessionListCacheKeys.projects),
+    activeSessions: readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions),
+  }))
+  const [projects, setProjects] = useState<ProjectInfo[]>(initialCachedData.projects ?? [])
+  const [activeSessions, setActiveSessions] = useState<ActiveSessionInfo[]>(initialCachedData.activeSessions ?? [])
+  const [loading, setLoading] = useState(initialCachedData.projects === undefined)
   const [refreshing, setRefreshing] = useState(false)
 
   const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -76,7 +87,8 @@ export const Dashboard = memo(function Dashboard({
   const [searchFilter, setSearchFilter] = useState("")
   const [fetchError, setFetchError] = useState<string | null>(null)
 
-  const loadedForDirName = useRef<string | null>(null)
+  const sessionRequestGeneration = useRef(0)
+  const sessionAbortController = useRef<AbortController | null>(null)
 
   const fetchDashboard = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -90,8 +102,12 @@ export const Dashboard = memo(function Dashboard({
       }
       const projectsData = await projectsRes.json()
       const sessionsData = await sessionsRes.json()
-      setProjects(Array.isArray(projectsData) ? projectsData : [])
-      setActiveSessions(Array.isArray(sessionsData) ? sessionsData : [])
+      const nextProjects = Array.isArray(projectsData) ? projectsData as ProjectInfo[] : []
+      const nextActiveSessions = Array.isArray(sessionsData) ? sessionsData as ActiveSessionInfo[] : []
+      setProjects(nextProjects)
+      setActiveSessions(nextActiveSessions)
+      writeCachedList(sessionListCacheKeys.projects, nextProjects)
+      writeCachedList(sessionListCacheKeys.activeSessions, nextActiveSessions)
       setFetchError(null)
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : "Failed to load data")
@@ -106,40 +122,72 @@ export const Dashboard = memo(function Dashboard({
   }, [fetchDashboard])
 
   const fetchSessions = useCallback(async (dirName: string, page = 1, append = false) => {
+    const requestGeneration = ++sessionRequestGeneration.current
+    sessionAbortController.current?.abort()
+    const controller = new AbortController()
+    sessionAbortController.current = controller
+    const isCurrentRequest = () => requestGeneration === sessionRequestGeneration.current
+
     setSessionsLoading(true)
     setFetchError(null)
-    if (!append) setSessions([])
+    if (!append) {
+      const cached = readCachedSessionPage<SessionInfo>(dirName)
+      if (cached) {
+        setSessions(cached.sessions)
+        setSessionsTotal(cached.total)
+        setSessionsPage(1)
+      } else {
+        setSessions([])
+      }
+    }
     try {
-      const res = await authFetch(`/api/sessions/${encodeURIComponent(dirName)}?page=${page}&limit=20`)
+      const res = await authFetch(
+        `/api/sessions/${encodeURIComponent(dirName)}?page=${page}&limit=20`,
+        { signal: controller.signal },
+      )
       if (!res.ok) throw new Error(`Failed to load sessions (${res.status})`)
       const data = await res.json()
-      setSessions((prev) => append ? [...prev, ...data.sessions] : data.sessions)
-      setSessionsTotal(data.total)
+      if (!isCurrentRequest()) return
+      const nextSessions = Array.isArray(data.sessions) ? data.sessions as SessionInfo[] : []
+      const total = typeof data.total === "number" ? data.total : nextSessions.length
+      setSessions((prev) => append ? [...prev, ...nextSessions] : nextSessions)
+      setSessionsTotal(total)
       setSessionsPage(page)
-      loadedForDirName.current = dirName
+      if (!append) {
+        writeCachedSessionPage(dirName, { sessions: nextSessions, total })
+      }
     } catch (err) {
+      if (!isCurrentRequest() || controller.signal.aborted) return
       setFetchError(err instanceof Error ? err.message : "Failed to load sessions")
     } finally {
-      setSessionsLoading(false)
+      if (isCurrentRequest()) {
+        sessionAbortController.current = null
+        setSessionsLoading(false)
+      }
     }
   }, [])
 
   // Load sessions when selectedProjectDirName changes
   useEffect(() => {
     if (!selectedProjectDirName) {
-      if (loadedForDirName.current) {
-        setSessions([])
-        setSessionsTotal(0)
-        setSessionsPage(1)
-        setSearchFilter("")
-        loadedForDirName.current = null
-      }
+      sessionRequestGeneration.current += 1
+      sessionAbortController.current?.abort()
+      sessionAbortController.current = null
+      setSessions([])
+      setSessionsTotal(0)
+      setSessionsPage(1)
+      setSearchFilter("")
+      setSessionsLoading(false)
       return
     }
-    if (loadedForDirName.current === selectedProjectDirName) return
     setSearchFilter("")
-    fetchSessions(selectedProjectDirName)
+    void fetchSessions(selectedProjectDirName)
   }, [selectedProjectDirName, fetchSessions])
+
+  useEffect(() => () => {
+    sessionRequestGeneration.current += 1
+    sessionAbortController.current?.abort()
+  }, [])
 
   const selectedProject = useMemo(() => {
     if (!selectedProjectDirName) return null
@@ -202,9 +250,8 @@ export const Dashboard = memo(function Dashboard({
         onBack={handleBack}
         onRetryFetch={() => {
           setFetchError(null)
-          loadedForDirName.current = null
           if (selectedProjectDirName) {
-            fetchSessions(selectedProjectDirName)
+            void fetchSessions(selectedProjectDirName)
           }
         }}
         loadMoreSessions={loadMoreSessions}

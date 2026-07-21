@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { countLiveSessions } from "../liveSessionSummary"
-import type { ActiveSessionInfo, RunningProcess } from "../SessionRow"
+import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 function session(sessionId: string, agentStatus: ActiveSessionInfo["agentStatus"]): ActiveSessionInfo {
   return {

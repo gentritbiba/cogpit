@@ -14,13 +14,3 @@ export function hapticLight(): void {
 export function hapticMedium(): void {
   if (canVibrate) navigator.vibrate(20)
 }
-
-/** Heavy tap — destructive actions, confirmations */
-export function hapticHeavy(): void {
-  if (canVibrate) navigator.vibrate([30, 50, 30])
-}
-
-/** Success pattern — task complete, session created */
-export function hapticSuccess(): void {
-  if (canVibrate) navigator.vibrate([10, 50, 20])
-}
