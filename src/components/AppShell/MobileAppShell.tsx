@@ -166,6 +166,7 @@ export function MobileAppShell({
                 isMobile
                 teamsOnly
                 onBeforeSessionSwitch={navigation.onBeforeSessionSwitch}
+                workerParse={navigation.workerParse}
               />
             )}
           </div>

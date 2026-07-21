@@ -1,6 +1,7 @@
 import { useState, useEffect, useEffectEvent } from "react"
 import { authFetch } from "@/lib/auth"
-import { parseSession } from "@/lib/parser"
+import { loadSessionTailCached } from "@/lib/sessionLoader"
+import type { SessionSource } from "@/hooks/useLiveSession"
 import type { ParsedSession } from "@/lib/types"
 import type { View, ProjectInfo, SessionInfo, CodexSubagentInfo } from "./types"
 import {
@@ -41,12 +42,6 @@ interface ViewSelection {
   sessionId: string | null
 }
 
-interface SessionSource {
-  dirName: string
-  fileName: string
-  rawText: string
-}
-
 type LoadSessionHandler = (session: ParsedSession, source: SessionSource) => void
 
 type RequestOutcome<T> =
@@ -73,19 +68,6 @@ async function fetchSuccessfulResponse(url: string, failureMessage: string): Pro
   return response
 }
 
-async function fetchParsedSession(
-  dirName: string,
-  fileName: string,
-  failureMessage: string,
-): Promise<{ session: ParsedSession; rawText: string }> {
-  const response = await fetchSuccessfulResponse(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`,
-    failureMessage,
-  )
-  const rawText = await response.text()
-  return { session: parseSession(rawText), rawText }
-}
-
 async function fetchProjectsList(): Promise<ProjectInfo[]> {
   const response = await fetchSuccessfulResponse("/api/projects", "Failed to load projects")
   const data: unknown = await response.json()
@@ -110,26 +92,35 @@ async function fetchSessionsPage(
   return { sessions, total }
 }
 
+/**
+ * Open a session bottom-first: last ~30 turns via the tail endpoint, parsed in
+ * the worker and cached in `sessionCache`. Older turns load on scroll-up via
+ * `useChunkedSession`, which reads the same cache entry.
+ */
 async function loadParsedSession(
   dirName: string,
   fileName: string,
-  failureMessage: string,
+  errorLabel: string,
+  workerParse: (text: string) => Promise<ParsedSession>,
   onLoadSession: LoadSessionHandler,
 ): Promise<void> {
-  const loaded = await fetchParsedSession(dirName, fileName, failureMessage)
-  onLoadSession(loaded.session, { dirName, fileName, rawText: loaded.rawText })
+  const { parsed, source } = await loadSessionTailCached(dirName, fileName, workerParse, errorLabel)
+  onLoadSession(parsed, source)
 }
 
 // ── Hook ───────────────────────────────────────────────────────────────────
 
 export function useSessionBrowser({
   sessionId,
+  workerParse,
   onLoadSession,
   onDeleteSession,
   onDuplicateSession,
   onBeforeLoad,
 }: {
   sessionId: string | null
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: (text: string) => Promise<ParsedSession>
   onLoadSession: LoadSessionHandler
   onDeleteSession?: (dirName: string, fileName: string) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
@@ -224,12 +215,12 @@ export function useSessionBrowser({
     dirName: string,
     fileName: string,
     origin: Exclude<View, "detail">,
-    failureMessage: string,
+    errorLabel: "session" | "subagent",
   ): Promise<void> {
     onBeforeLoad?.()
     const outcome = await runRequest(
-      loadParsedSession(dirName, fileName, failureMessage, onLoadSession),
-      failureMessage,
+      loadParsedSession(dirName, fileName, errorLabel, workerParse, onLoadSession),
+      `Failed to load ${errorLabel}`,
     )
     if (!outcome.ok) return
 
@@ -242,7 +233,7 @@ export function useSessionBrowser({
       project.dirName,
       session.fileName,
       "sessions",
-      "Failed to load session",
+      "session",
     )
   }
 
@@ -251,7 +242,7 @@ export function useSessionBrowser({
       dirName,
       fileName,
       "projects",
-      "Failed to load session",
+      "session",
     )
   }
 
@@ -284,7 +275,7 @@ export function useSessionBrowser({
       agent.dirName,
       agent.fileName,
       "subagents",
-      "Failed to load subagent",
+      "subagent",
     )
   }
 

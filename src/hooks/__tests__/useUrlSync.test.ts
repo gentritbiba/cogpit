@@ -1,22 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 
-vi.mock("@/lib/auth", () => ({
-  authFetch: vi.fn(),
+vi.mock("@/lib/sessionLoader", () => ({
+  loadSessionTailCached: vi.fn(),
 }))
 
-vi.mock("@/lib/parser", () => ({
-  parseSession: vi.fn(),
-}))
-
-import { authFetch } from "@/lib/auth"
-import { parseSession } from "@/lib/parser"
+import { loadSessionTailCached } from "@/lib/sessionLoader"
 import type { ParsedSession } from "@/lib/types"
 import { useUrlSync } from "../useUrlSync"
 import type { SessionState } from "../useSessionState"
 
-const mockedAuthFetch = vi.mocked(authFetch)
-const mockedParseSession = vi.mocked(parseSession)
+const mockedLoadTail = vi.mocked(loadSessionTailCached)
 
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
   return {
@@ -31,10 +25,31 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
   } as SessionState
 }
 
+function loadedSession(dirName: string, fileName: string) {
+  return {
+    parsed: { turns: [{ index: 0 }] } as unknown as ParsedSession,
+    source: { dirName, fileName, rawText: "", watchOffset: 100 },
+  }
+}
+
 describe("useUrlSync", () => {
   const dispatch = vi.fn()
   const resetTurnCount = vi.fn()
   const scrollToBottomInstant = vi.fn()
+  const workerParse = vi.fn()
+
+  function renderUrlSync(state: SessionState = makeState()) {
+    return renderHook(() =>
+      useUrlSync({
+        state,
+        dispatch,
+        isMobile: false,
+        resetTurnCount,
+        scrollToBottomInstant,
+        workerParse,
+      })
+    )
+  }
 
   beforeEach(() => {
     vi.resetAllMocks()
@@ -44,15 +59,7 @@ describe("useUrlSync", () => {
   })
 
   it("does not load from URL when at root path", () => {
-    renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync()
 
     // No session load dispatched for root path
     expect(dispatch).not.toHaveBeenCalled()
@@ -61,26 +68,23 @@ describe("useUrlSync", () => {
   it("loads session from URL on mount when path has session", async () => {
     window.history.replaceState(null, "", "/my-project/session-123")
 
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: true,
-      text: async () => '{"type":"user"}\n',
-    } as Response)
-    mockedParseSession.mockReturnValueOnce({ turns: [{ index: 0 }] } as unknown as ParsedSession)
+    mockedLoadTail.mockResolvedValueOnce(loadedSession("my-project", "session-123.jsonl"))
 
-    renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync()
 
-    // Wait for async load
+    // Wait for async load — tail-loaded via the shared session loader
     await vi.waitFor(() => {
+      expect(mockedLoadTail).toHaveBeenCalledWith(
+        "my-project",
+        "session-123.jsonl",
+        workerParse,
+        "session",
+      )
       expect(dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "LOAD_SESSION" })
+        expect.objectContaining({
+          type: "LOAD_SESSION",
+          source: expect.objectContaining({ watchOffset: 100 }),
+        })
       )
     })
   })
@@ -88,15 +92,7 @@ describe("useUrlSync", () => {
   it("dispatches SET_DASHBOARD_PROJECT for project-only path", async () => {
     window.history.replaceState(null, "", "/my-project")
 
-    renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync()
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(
@@ -108,15 +104,7 @@ describe("useUrlSync", () => {
   it("dispatches SELECT_TEAM for team path", async () => {
     window.history.replaceState(null, "", "/team/my-team")
 
-    renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync()
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(
@@ -125,23 +113,12 @@ describe("useUrlSync", () => {
     })
   })
 
-  it("dispatches GO_HOME when session fetch fails", async () => {
+  it("dispatches GO_HOME when session load fails", async () => {
     window.history.replaceState(null, "", "/proj/bad-session")
 
-    mockedAuthFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-    } as Response)
+    mockedLoadTail.mockRejectedValueOnce(new Error("Failed to load session (404)"))
 
-    renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync()
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(
@@ -157,15 +134,7 @@ describe("useUrlSync", () => {
       sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
     })
 
-    renderHook(() =>
-      useUrlSync({
-        state,
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync(state)
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/proj-a/sess-1")
     pushStateSpy.mockRestore()
@@ -179,15 +148,7 @@ describe("useUrlSync", () => {
       selectedTeam: "alpha-team",
     })
 
-    renderHook(() =>
-      useUrlSync({
-        state,
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync(state)
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/team/alpha-team")
     pushStateSpy.mockRestore()
@@ -200,15 +161,7 @@ describe("useUrlSync", () => {
       dashboardProject: "my-project",
     })
 
-    renderHook(() =>
-      useUrlSync({
-        state,
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync(state)
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/my-project")
     pushStateSpy.mockRestore()
@@ -221,15 +174,7 @@ describe("useUrlSync", () => {
       pendingDirName: "pending-project",
     })
 
-    renderHook(() =>
-      useUrlSync({
-        state,
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    renderUrlSync(state)
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/pending-project")
     pushStateSpy.mockRestore()
@@ -238,15 +183,7 @@ describe("useUrlSync", () => {
   it("handles popstate event (browser back/forward)", async () => {
     window.history.replaceState(null, "", "/")
 
-    const { unmount } = renderHook(() =>
-      useUrlSync({
-        state: makeState(),
-        dispatch,
-        isMobile: false,
-        resetTurnCount,
-        scrollToBottomInstant,
-      })
-    )
+    const { unmount } = renderUrlSync()
 
     // Simulate navigating to a team URL then pressing "back"
     window.history.pushState(null, "", "/team/test-team")
@@ -268,26 +205,17 @@ describe("useUrlSync", () => {
     it("parses a deep link /d/<id>/<dirName>/<sessionId> against the remainder", async () => {
       window.history.replaceState(null, "", "/d/dev_x/-Users-foo/uuid")
 
-      mockedAuthFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => '{"type":"user"}\n',
-      } as Response)
-      mockedParseSession.mockReturnValueOnce({ turns: [] } as unknown as ParsedSession)
+      mockedLoadTail.mockResolvedValueOnce(loadedSession("-Users-foo", "uuid.jsonl"))
 
-      renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync()
 
-      // The device segment is stripped; the API call targets the remainder only.
+      // The device segment is stripped; the load targets the remainder only.
       await vi.waitFor(() => {
-        expect(mockedAuthFetch).toHaveBeenCalledWith(
-          "/api/sessions/-Users-foo/uuid.jsonl"
+        expect(mockedLoadTail).toHaveBeenCalledWith(
+          "-Users-foo",
+          "uuid.jsonl",
+          workerParse,
+          "session",
         )
         expect(dispatch).toHaveBeenCalledWith(
           expect.objectContaining({ type: "LOAD_SESSION" })
@@ -298,15 +226,7 @@ describe("useUrlSync", () => {
     it("treats /d/<id>/ as the device home (no session load)", () => {
       window.history.replaceState(null, "", "/d/dev_x/")
 
-      renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync()
 
       expect(dispatch).not.toHaveBeenCalled()
     })
@@ -314,15 +234,7 @@ describe("useUrlSync", () => {
     it("parses a project-only device path /d/<id>/<dirName>", async () => {
       window.history.replaceState(null, "", "/d/dev_x/-Users-foo")
 
-      renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync()
 
       await vi.waitFor(() => {
         expect(dispatch).toHaveBeenCalledWith(
@@ -334,15 +246,7 @@ describe("useUrlSync", () => {
     it("parses a device-scoped team path /d/<id>/team/<name>", async () => {
       window.history.replaceState(null, "", "/d/dev_x/team/alpha")
 
-      renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync()
 
       await vi.waitFor(() => {
         expect(dispatch).toHaveBeenCalledWith(
@@ -359,15 +263,7 @@ describe("useUrlSync", () => {
         sessionSource: { dirName: "proj-a", fileName: "sess-1.jsonl", rawText: "" },
       })
 
-      renderHook(() =>
-        useUrlSync({
-          state,
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync(state)
 
       expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/d/dev_x/proj-a/sess-1")
       expect(sessionStorage.getItem("cogpit-last-path::dev_x")).toBe(
@@ -381,25 +277,16 @@ describe("useUrlSync", () => {
       // collides with the "/d/" prefix, so these stay on the local device.
       window.history.replaceState(null, "", "/-Users-foo/uuid")
 
-      mockedAuthFetch.mockResolvedValueOnce({
-        ok: true,
-        text: async () => '{"type":"user"}\n',
-      } as Response)
-      mockedParseSession.mockReturnValueOnce({ turns: [] } as unknown as ParsedSession)
+      mockedLoadTail.mockResolvedValueOnce(loadedSession("-Users-foo", "uuid.jsonl"))
 
-      renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      renderUrlSync()
 
       await vi.waitFor(() => {
-        expect(mockedAuthFetch).toHaveBeenCalledWith(
-          "/api/sessions/-Users-foo/uuid.jsonl"
+        expect(mockedLoadTail).toHaveBeenCalledWith(
+          "-Users-foo",
+          "uuid.jsonl",
+          workerParse,
+          "session",
         )
       })
     })
@@ -407,15 +294,7 @@ describe("useUrlSync", () => {
     it("restores device context on popstate to a /d/<id> deep link", async () => {
       window.history.replaceState(null, "", "/")
 
-      const { unmount } = renderHook(() =>
-        useUrlSync({
-          state: makeState(),
-          dispatch,
-          isMobile: false,
-          resetTurnCount,
-          scrollToBottomInstant,
-        })
-      )
+      const { unmount } = renderUrlSync()
 
       window.history.pushState(null, "", "/d/dev_x/-Users-foo")
       window.dispatchEvent(new PopStateEvent("popstate"))

@@ -56,5 +56,5 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     )
   }
 
-  return <NonVirtualTimeline filteredTurns={filteredTurns} />
+  return <NonVirtualTimeline filteredTurns={filteredTurns} hasMore={hasMore} onLoadMore={onLoadMore} />
 })

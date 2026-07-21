@@ -1,16 +1,7 @@
 import type { ParsedSession } from "./types"
-import { authFetch } from "./auth"
 import { sessionCache } from "./sessionCache"
-import { agentKindFromDirName } from "./sessionSource"
+import { loadSessionTailCached } from "./sessionLoader"
 import { getActiveDeviceId } from "./device"
-
-interface TailResponse {
-  headerLines: string[]
-  tailLines: string[]
-  byteOffset: number
-  totalSize: number
-  hasMore: boolean
-}
 
 /** Keys currently being fetched — de-duplicates concurrent prefetch calls. */
 const inflight = new Set<string>()
@@ -41,41 +32,10 @@ export async function prefetchSession(
   if (inflight.has(key)) return
   if (sessionCache.get(dirName, fileName)) return
 
-  // Snapshot the active device BEFORE the network round-trip. The cache key is
-  // device-scoped and computed at set-time; if the user switches devices while
-  // this prefetch is in flight, writing now would poison device B's cache with
-  // device A's session (or vice-versa).
-  const deviceId = getActiveDeviceId()
-
   inflight.add(key)
   try {
-    const res = await authFetch(
-      `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`
-    )
-    if (!res.ok) return
-    const data = (await res.json()) as TailResponse
-
-    // Another visit may have populated the cache while we were fetching.
-    if (sessionCache.get(dirName, fileName)) return
-
-    const headerSet = new Set(data.headerLines)
-    const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
-    const text = [...data.headerLines, ...uniqueTail].join("\n")
-    const parsed = await workerParse(text)
-
-    // Device changed mid-flight — discard rather than cache under the wrong key.
-    if (getActiveDeviceId() !== deviceId) return
-
-    sessionCache.set(
-      dirName,
-      fileName,
-      parsed,
-      text,
-      data.byteOffset,
-      data.hasMore,
-      agentKindFromDirName(dirName),
-      data.totalSize,
-    )
+    // loadSessionTailCached owns the device-switch guard and cache population.
+    await loadSessionTailCached(dirName, fileName, workerParse, "session prefetch")
   } catch {
     // Best-effort: ignore network or parse failures. The real fetch on click
     // will surface any persistent error to the user.

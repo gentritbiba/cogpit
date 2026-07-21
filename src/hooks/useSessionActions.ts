@@ -7,17 +7,7 @@ import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"
 import { authFetch } from "@/lib/auth"
 import { cacheTurnCount } from "@/lib/turnCountCache"
-import { agentKindFromDirName } from "@/lib/sessionSource"
-import { sessionCache } from "@/lib/sessionCache"
-import { getActiveDeviceId } from "@/lib/device"
-
-interface TailResponse {
-  headerLines: string[]
-  tailLines: string[]
-  byteOffset: number
-  totalSize: number
-  hasMore: boolean
-}
+import { loadSessionTailCached } from "@/lib/sessionLoader"
 
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
@@ -29,89 +19,6 @@ interface UseSessionActionsOpts {
   /** Called before fetching a new session to free connections held by the
    *  current session (e.g. long-lived send-message POST, session creation). */
   onBeforeSwitch?: () => void
-}
-
-/** Fetch the tail of a session file and parse it via worker. Uses the ?tail=30 endpoint. */
-async function fetchTailAndParse(
-  dirName: string,
-  fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
-  errorLabel: string,
-): Promise<{
-  parsed: ParsedSession
-  source: SessionSource
-  byteOffset: number
-  hasMore: boolean
-}> {
-  const res = await authFetch(
-    `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}?tail=30`
-  )
-  if (!res.ok) throw new Error(`Failed to load ${errorLabel} (${res.status})`)
-  const data: TailResponse = await res.json()
-
-  // Combine header + tail lines, deduplicating overlap for small files
-  const headerSet = new Set(data.headerLines)
-  const uniqueTail = data.tailLines.filter((l) => !headerSet.has(l))
-  const text = [...data.headerLines, ...uniqueTail].join("\n")
-
-  const parsed = await workerParse(text)
-
-  return {
-    parsed,
-    source: {
-      dirName,
-      fileName,
-      rawText: text,
-      agentKind: agentKindFromDirName(dirName),
-      watchOffset: data.totalSize,
-    },
-    byteOffset: data.byteOffset,
-    hasMore: data.hasMore,
-  }
-}
-
-/**
- * Resolve a session via the cache or the tail endpoint and populate the cache.
- * Use this for every load path (dashboard, team, team-member) so switches are
- * always bottom-first and cached — the biggest win for session-switch latency.
- */
-async function loadSessionTailCached(
-  dirName: string,
-  fileName: string,
-  workerParse: (text: string) => Promise<ParsedSession>,
-  errorLabel: string,
-): Promise<{ parsed: ParsedSession; source: SessionSource }> {
-  const cached = sessionCache.get(dirName, fileName)
-  if (cached) {
-    return { parsed: cached.parsed, source: cached.source }
-  }
-  // Snapshot the active device BEFORE the network round-trip. The cache key is
-  // device-scoped and computed at set-time; if the user switches devices while
-  // this tail-load is in flight, caching now would write device B's data under
-  // device A's key (or vice-versa).
-  const deviceId = getActiveDeviceId()
-  const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
-    dirName,
-    fileName,
-    workerParse,
-    errorLabel,
-  )
-  // Only populate the cache if we're still on the same device. On a mid-flight
-  // switch we skip the write but still return the parsed data so the caller can
-  // render what it fetched.
-  if (getActiveDeviceId() === deviceId) {
-    sessionCache.set(
-      dirName,
-      fileName,
-      parsed,
-      source.rawText,
-      byteOffset,
-      hasMore,
-      agentKindFromDirName(dirName),
-      source.watchOffset,
-    )
-  }
-  return { parsed, source }
 }
 
 export function useSessionActions({

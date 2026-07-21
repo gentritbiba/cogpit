@@ -85,9 +85,11 @@ export const SessionBrowser = memo(function SessionBrowser({
   projectDir,
   onScriptStarted,
   onPrefetchSession,
+  workerParse,
 }: SessionBrowserProps): React.ReactElement {
   const browser = useSessionBrowser({
     sessionId,
+    workerParse,
     onLoadSession,
     onDeleteSession,
     onDuplicateSession,

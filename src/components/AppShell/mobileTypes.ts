@@ -1,4 +1,5 @@
 import type { MutableRefObject, ReactNode, RefObject } from "react"
+import type { ParsedSession } from "@/lib/types"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useProcessPanel } from "@/hooks/useProcessPanel"
@@ -38,6 +39,8 @@ export interface MobileNavigation {
   onBeforeSessionSwitch: () => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
   onPrefetchSession: (dirName: string, fileName: string) => void
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: (text: string) => Promise<ParsedSession>
 }
 
 export interface MobileSessionView {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
-import { parseSession } from "@/lib/parser"
-import { authFetch } from "@/lib/auth"
+import type { ParsedSession } from "@/lib/types"
+import { loadSessionTailCached } from "@/lib/sessionLoader"
 import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
 
 interface UseUrlSyncOpts {
@@ -10,6 +10,8 @@ interface UseUrlSyncOpts {
   isMobile: boolean
   resetTurnCount: (count: number) => void
   scrollToBottomInstant: () => void
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: (text: string) => Promise<ParsedSession>
 }
 
 // ── URL scheme ──────────────────────────────────────────────────────────────
@@ -125,6 +127,7 @@ export function useUrlSync({
   isMobile,
   resetTurnCount,
   scrollToBottomInstant,
+  workerParse,
 }: UseUrlSyncOpts) {
   const skipNextPushRef = useRef(false)
   const lastPushedRef = useRef(window.location.pathname)
@@ -136,10 +139,12 @@ export function useUrlSync({
       try {
         if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
           const fileName = fileNameFromSessionId(parsed.sessionId)
-          const res = await authFetch(
-            `/api/sessions/${encodeURIComponent(parsed.dirName)}/${encodeURIComponent(fileName)}`
-          )
-          if (!res.ok) {
+          let loaded: Awaited<ReturnType<typeof loadSessionTailCached>>
+          try {
+            // Bottom-first tail load (worker parse + cache) — same pipeline as
+            // every other open path, so deep-links open instantly too.
+            loaded = await loadSessionTailCached(parsed.dirName, fileName, workerParse, "session")
+          } catch {
             dispatch({ type: "GO_HOME", isMobile })
             const home = deviceHomePath()
             window.history.replaceState(null, "", home)
@@ -147,15 +152,13 @@ export function useUrlSync({
             saveLastPath(getActiveDeviceId(), home)
             return
           }
-          const text = await res.text()
-          const session = parseSession(text)
           dispatch({
             type: "LOAD_SESSION",
-            session,
-            source: { dirName: parsed.dirName, fileName, rawText: text },
+            session: loaded.parsed,
+            source: loaded.source,
             isMobile,
           })
-          resetTurnCount(session.turns.length)
+          resetTurnCount(loaded.parsed.turns.length)
           scrollToBottomInstant()
         } else if (parsed.type === "project" && parsed.dirName) {
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: parsed.dirName })
@@ -168,7 +171,7 @@ export function useUrlSync({
         skipNextPushRef.current = false
       }
     },
-    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant]
+    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse]
   )
 
   // On mount: if URL has a path, load the corresponding session/team

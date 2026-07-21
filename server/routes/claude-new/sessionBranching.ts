@@ -50,6 +50,36 @@ function findTruncationLine(
   return null
 }
 
+/**
+ * Find the JSONL line where the turn AFTER the turn containing the message
+ * with `turnUuid` starts. Unlike index-based truncation, this stays correct
+ * when the client has only a tail of the session loaded (its turn indexes
+ * don't match file order). Returns:
+ *  - a line index → truncate there (keep through the target turn)
+ *  - "keep-all"   → uuid found in the last turn (no truncation needed)
+ *  - null         → uuid not found (caller falls back to index-based cut)
+ */
+function findTruncationLineByUuid(
+  lines: string[],
+  turnUuid: string,
+  isTurnBoundary: (obj: Record<string, unknown>) => boolean,
+): number | "keep-all" | null {
+  let sawTarget = false
+  for (let i = 0; i < lines.length; i++) {
+    try {
+      const obj = JSON.parse(lines[i]) as Record<string, unknown>
+      if (!sawTarget) {
+        if (obj.uuid === turnUuid) sawTarget = true
+        continue
+      }
+      if (isTurnBoundary(obj)) return i
+    } catch {
+      /* skip malformed */
+    }
+  }
+  return sawTarget ? "keep-all" : null
+}
+
 function isClaudeTurnBoundary(obj: Record<string, unknown>): boolean {
   if (obj.type !== "user" || obj.isMeta) return false
   const message = obj.message
@@ -82,7 +112,7 @@ export function registerBranchSessionRoute(use: UseFn) {
     })
     req.on("end", async () => {
       try {
-        const { dirName, fileName, turnIndex } = JSON.parse(body)
+        const { dirName, fileName, turnIndex, turnUuid } = JSON.parse(body)
 
         if (!dirName || !fileName) {
           res.statusCode = 400
@@ -106,9 +136,23 @@ export function registerBranchSessionRoute(use: UseFn) {
           return
         }
 
-        if (turnIndex != null) {
+        if (turnIndex != null || typeof turnUuid === "string") {
           const boundary = isCodexDirName(dirName) ? isCodexTurnBoundary : isClaudeTurnBoundary
-          const truncLine = findTruncationLine(lines, turnIndex, boundary)
+          // Prefer the uuid cut — exact regardless of how much of the session
+          // the client had loaded. Fall back to the index cut when the uuid is
+          // absent or unmatched (Codex turns have no stable uuids).
+          let truncLine: number | null = null
+          let resolvedByUuid = false
+          if (typeof turnUuid === "string" && turnUuid) {
+            const byUuid = findTruncationLineByUuid(lines, turnUuid, boundary)
+            if (byUuid !== null) {
+              resolvedByUuid = true
+              truncLine = byUuid === "keep-all" ? null : byUuid
+            }
+          }
+          if (!resolvedByUuid && turnIndex != null) {
+            truncLine = findTruncationLine(lines, turnIndex, boundary)
+          }
           if (truncLine !== null) {
             lines = lines.slice(0, truncLine)
           }

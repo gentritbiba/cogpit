@@ -94,7 +94,7 @@ function RedoSection() {
 
 // ── Non-virtualized timeline ─────────────────────────────────────────────────
 
-export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
+export function NonVirtualTimeline({ filteredTurns, hasMore, onLoadMore }: TimelineInnerProps) {
   const { state: { activeTurnIndex } } = useAppContext()
   const { undoRedo } = useSessionContext()
 
@@ -121,6 +121,18 @@ export function NonVirtualTimeline({ filteredTurns }: TimelineInnerProps) {
 
   return (
     <div className="flex flex-col gap-1 md:gap-3">
+      {hasMore && onLoadMore && (
+        // Below the virtualization threshold there is no scroll-up trigger, so
+        // sessions whose loaded tail parses to only a few (large) turns still
+        // need a way to reach older history.
+        <button
+          type="button"
+          onClick={onLoadMore}
+          className="self-center py-2 px-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Load older turns
+        </button>
+      )}
       {filteredTurns.map(({ turn, index }) => (
         <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
           <div ref={setTurnRef(index)} data-turn-index={index}>

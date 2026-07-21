@@ -3,7 +3,7 @@ import type { ParsedSession } from "@/lib/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
-  sessionCache: { get: vi.fn(() => undefined), set: vi.fn() },
+  sessionCache: { get: vi.fn(() => undefined), set: vi.fn(), evict: vi.fn() },
 }))
 vi.mock("@/lib/device", () => ({ getActiveDeviceId: vi.fn(() => "local") }))
 

@@ -1,4 +1,5 @@
 import type { ParsedSession } from "@/lib/types"
+import type { SessionSource } from "@/hooks/useLiveSession"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
 // ── API types ──────────────────────────────────────────────────────────────
@@ -55,10 +56,9 @@ export interface SessionBrowserProps {
   sessionId: string | null
   /** "dirName/fileName" key identifying the currently loaded session */
   activeSessionKey: string | null
-  onLoadSession: (
-    session: ParsedSession,
-    source: { dirName: string; fileName: string; rawText: string }
-  ) => void
+  onLoadSession: (session: ParsedSession, source: SessionSource) => void
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: (text: string) => Promise<ParsedSession>
   sidebarTab: "live" | "browse" | "teams"
   onSidebarTabChange: (tab: "live" | "browse" | "teams") => void
   onSelectTeam?: (teamName: string) => void

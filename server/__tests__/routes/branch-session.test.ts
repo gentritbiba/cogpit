@@ -319,6 +319,92 @@ describe("POST /api/branch-session", () => {
     expect(writtenLines).toHaveLength(4)
   })
 
+  it("truncates at turnUuid when provided, ignoring a mismatched turnIndex", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    const sourceContent = buildJsonl(3)
+    mockedReadFile.mockResolvedValue(sourceContent as never)
+    mockedWriteFile.mockResolvedValue(undefined as never)
+
+    // Simulates a tail-loaded client: its local turnIndex (0) does NOT match
+    // the file-order turn, but the boundary uuid (u1 = file turn 1) does.
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "my-project",
+        fileName: "original-session-id.jsonl",
+        turnIndex: 0,
+        turnUuid: "u1",
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(res.body).toBeTruthy()
+      expect(res.statusCode).toBe(200)
+    })
+
+    // uuid cut wins: keep turns 0 and 1 (4 lines), not just turn 0 (2 lines)
+    const writtenContent = mockedWriteFile.mock.calls[0][1] as string
+    const writtenLines = writtenContent.trim().split("\n")
+    expect(writtenLines).toHaveLength(4)
+  })
+
+  it("keeps all lines when turnUuid belongs to the last turn", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    const sourceContent = buildJsonl(3)
+    mockedReadFile.mockResolvedValue(sourceContent as never)
+    mockedWriteFile.mockResolvedValue(undefined as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "my-project",
+        fileName: "original-session-id.jsonl",
+        turnIndex: 0,
+        turnUuid: "u2",
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(res.body).toBeTruthy()
+      expect(res.statusCode).toBe(200)
+    })
+
+    // uuid resolved to the last turn → no truncation; index fallback unused
+    const writtenContent = mockedWriteFile.mock.calls[0][1] as string
+    const writtenLines = writtenContent.trim().split("\n")
+    expect(writtenLines).toHaveLength(6)
+  })
+
+  it("falls back to turnIndex when turnUuid matches no line", async () => {
+    mockedIsWithinDir.mockReturnValue(true)
+    const sourceContent = buildJsonl(3)
+    mockedReadFile.mockResolvedValue(sourceContent as never)
+    mockedWriteFile.mockResolvedValue(undefined as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "my-project",
+        fileName: "original-session-id.jsonl",
+        turnIndex: 0,
+        turnUuid: "queued-synthetic-id",
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(res.body).toBeTruthy()
+      expect(res.statusCode).toBe(200)
+    })
+
+    // unmatched uuid → index cut applies: keep only turn 0
+    const writtenContent = mockedWriteFile.mock.calls[0][1] as string
+    const writtenLines = writtenContent.trim().split("\n")
+    expect(writtenLines).toHaveLength(2)
+  })
+
   it("branches Codex sessions with rollout naming and metadata", async () => {
     mockedIsCodexDirName.mockReturnValue(true)
     mockedResolveSessionFilePath.mockResolvedValue(

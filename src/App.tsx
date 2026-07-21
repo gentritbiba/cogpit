@@ -93,6 +93,19 @@ export default function App() {
     onPrependTurns: handlePrependTurns,
   })
 
+  // While in-session search is active, hydrate the full transcript in the
+  // background: sessions open bottom-first (tail only), so without this a
+  // search would silently miss turns that haven't been scroll-loaded yet.
+  // Each loadMore prepends a chunk → re-render → this effect re-fires until
+  // the cache reports no more chunks.
+  const { loadMore: loadMoreTurns } = chunkedSession
+  const searchHydrationActive = Boolean(state.searchQuery) && chunkedSession.hasMore
+  const loadedTurnCount = state.session?.turns.length ?? 0
+  useEffect(() => {
+    if (!searchHydrationActive) return
+    void loadMoreTurns()
+  }, [searchHydrationActive, loadMoreTurns, loadedTurnCount])
+
   // Panel/sidebar toggle state
   const panels = usePanelState(state, dispatch)
 
@@ -464,6 +477,7 @@ export default function App() {
     isMobile,
     resetTurnCount: scroll.resetTurnCount,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
+    workerParse,
   })
 
   // MRU session history for Ctrl+Tab switching
@@ -497,6 +511,7 @@ export default function App() {
     mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
+    workerParse,
   })
 
   // Auto-apply MCP settings ONLY when data first loads (loaded: false→true).
@@ -971,6 +986,7 @@ export default function App() {
             onBeforeSessionSwitch: handlePreSessionSwitch,
             liveSessionsRefreshRef,
             onPrefetchSession: prefetchSession,
+            workerParse,
           }}
           sessionView={{
             searchInputRef,
@@ -1036,6 +1052,7 @@ export default function App() {
             onBeforeSessionSwitch: handlePreSessionSwitch,
             liveSessionsRefreshRef,
             onPrefetchSession: prefetchSession,
+            workerParse,
           }}
           sessionView={{
             searchInputRef,

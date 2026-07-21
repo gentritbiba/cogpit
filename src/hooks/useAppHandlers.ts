@@ -7,8 +7,8 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "./useLiveSession"
 import type { SessionAction } from "./useSessionState"
-import { parseSession } from "@/lib/parser"
 import { authFetch } from "@/lib/auth"
+import { loadSessionTailCached, loadSessionTailFresh } from "@/lib/sessionLoader"
 import { parseSubAgentPath } from "@/lib/format"
 import { agentKindFromDirName } from "@/lib/sessionSource"
 import type { PermissionsConfig } from "@/lib/permissions"
@@ -35,6 +35,8 @@ interface AppHandlersDeps {
   mcpConfig: string | null
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: (text: string) => Promise<ParsedSession>
 }
 
 interface AppliedSettings {
@@ -90,24 +92,24 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     ultracode, setUltracode,
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
+    workerParse,
   } = deps
 
   // ── Session reload ─────────────────────────────────────────────────────────
   const reloadSession = useCallback(async () => {
     if (!state.sessionSource) return
     const { dirName, fileName } = state.sessionSource
-    const res = await authFetch(
-      `/api/sessions/${encodeURIComponent(dirName)}/${encodeURIComponent(fileName)}`
-    )
-    if (!res.ok) return
-    const rawText = await res.text()
-    const newSession = parseSession(rawText)
-    dispatch({
-      type: "RELOAD_SESSION_CONTENT",
-      session: newSession,
-      source: { dirName, fileName, rawText },
-    })
-  }, [state.sessionSource, dispatch])
+    try {
+      // Fresh (cache-invalidating) tail load: reload exists because the file
+      // changed on disk (rewind, compaction), so cached turns would be stale.
+      const { parsed, source } = await loadSessionTailFresh(
+        dirName, fileName, workerParse, "session",
+      )
+      dispatch({ type: "RELOAD_SESSION_CONTENT", session: parsed, source })
+    } catch {
+      // keep the current session on failure — matches the old silent return
+    }
+  }, [state.sessionSource, dispatch, workerParse])
 
   // ── Branch modal ───────────────────────────────────────────────────────────
   const [branchModalTurn, setBranchModalTurn] = useState<number | null>(null)
@@ -124,22 +126,16 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
       })
       if (!res.ok) return
       const data = await res.json()
-      const contentRes = await authFetch(
-        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      // The server owns the copy — open the new session bottom-first like any
+      // other path instead of reading the whole file back.
+      const { parsed, source } = await loadSessionTailCached(
+        data.dirName, data.fileName, workerParse, "session",
       )
-      if (!contentRes.ok) return
-      const rawText = await contentRes.text()
-      const newSession = parseSession(rawText)
-      dispatch({
-        type: "LOAD_SESSION",
-        session: newSession,
-        source: { dirName: data.dirName, fileName: data.fileName, rawText },
-        isMobile,
-      })
+      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
     } catch {
       // silently fail
     }
-  }, [dispatch, isMobile])
+  }, [dispatch, isMobile, workerParse])
 
   // ── Duplicate the current session ──────────────────────────────────────────
   const handleDuplicateSession = useCallback(() => {
@@ -164,30 +160,28 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const handleBranchFromHere = useCallback(async (turnIndex: number) => {
     if (!state.sessionSource) return
     const { dirName, fileName } = state.sessionSource
+    // turnIndex counts LOADED turns, which on a tail-loaded session differ from
+    // file-order turns. Send the turn's boundary-message uuid so the server can
+    // cut at the exact turn regardless of how much of the session is loaded.
+    // Synthetic ids (queued turns, uuid-less messages) won't match any line —
+    // the server falls back to turnIndex for those.
+    const turnUuid = state.session?.turns[turnIndex]?.id
     try {
       const res = await authFetch("/api/branch-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dirName, fileName, turnIndex }),
+        body: JSON.stringify({ dirName, fileName, turnIndex, turnUuid }),
       })
       if (!res.ok) return
       const data = await res.json()
-      const contentRes = await authFetch(
-        `/api/sessions/${encodeURIComponent(data.dirName)}/${encodeURIComponent(data.fileName)}`
+      const { parsed, source } = await loadSessionTailCached(
+        data.dirName, data.fileName, workerParse, "session",
       )
-      if (!contentRes.ok) return
-      const rawText = await contentRes.text()
-      const newSession = parseSession(rawText)
-      dispatch({
-        type: "LOAD_SESSION",
-        session: newSession,
-        source: { dirName: data.dirName, fileName: data.fileName, rawText },
-        isMobile,
-      })
+      dispatch({ type: "LOAD_SESSION", session: parsed, source, isMobile })
     } catch {
       // silently fail
     }
-  }, [state.sessionSource, dispatch, isMobile])
+  }, [state.sessionSource, state.session, dispatch, isMobile, workerParse])
 
   // ── Mobile jump to turn ────────────────────────────────────────────────────
   const handleMobileJumpToTurn = useCallback((index: number, toolCallId?: string) => {

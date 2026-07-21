@@ -37,6 +37,8 @@ interface ShellNavigation {
   onBeforeSessionSwitch: () => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
   onPrefetchSession: (dirName: string, fileName: string) => void
+  /** Off-main-thread session parser from App's `useParserWorker`. */
+  workerParse: ComponentProps<typeof SessionBrowser>["workerParse"]
 }
 
 interface PrimarySessionBrowserProps {
@@ -77,6 +79,7 @@ export function PrimarySessionBrowser({
       projectDir={projectDir}
       onScriptStarted={onScriptStarted}
       onPrefetchSession={navigation.onPrefetchSession}
+      workerParse={navigation.workerParse}
       isMobile={mobile}
     />
   )
