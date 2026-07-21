@@ -109,7 +109,7 @@ export function resetDynamicModelOptions() {
   modelOptionListeners.forEach((listener) => listener())
 }
 
-export const DEFAULT_EFFORT = "high"
+const DEFAULT_EFFORT = "high"
 
 // Claude Code CLI (v2.1.111+) and Codex both support xhigh effort.
 const EFFORT_OPTIONS: readonly EffortOption[] = [

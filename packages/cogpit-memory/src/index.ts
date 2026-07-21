@@ -9,7 +9,13 @@
 
 // Core
 export { SearchIndex, type IndexStats, type SearchHit } from "./lib/search-index"
-export { parseSession, parseSessionAppend, getUserMessageText, getUserMessageImages } from "./lib/parser"
+export {
+  parseSession,
+  parseSessionAppend,
+  getUserMessageText,
+  getUserMessageImages,
+  type ParseSessionOptions,
+} from "./lib/parser"
 export { DEFAULT_DB_PATH, dirs } from "./lib/dirs"
 
 // Commands

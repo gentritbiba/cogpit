@@ -7,6 +7,7 @@ import {
   parseCodexSession,
   parseCodexToolPatches,
 } from "@/lib/codex"
+import { parseCodexSession as parseCanonicalCodexSession } from "../../../shared/session/codex"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -343,6 +344,29 @@ describe("parseCodexSession", () => {
     expect(session.turns).toHaveLength(1)
     expect(session.turns[0].userMessage).toBe("Hello")
     expect(session.turns[0].assistantText).toEqual(["Hi there!"])
+  })
+
+  it("honors the index-only contract through the canonical implementation and facade", () => {
+    const full = parseCanonicalCodexSession(TOOL_USE_SESSION)
+    const indexOnly = parseCanonicalCodexSession(TOOL_USE_SESSION, { skipStats: true })
+
+    expect(parseCodexSession).toBe(parseCanonicalCodexSession)
+    expect(parseCodexSession(TOOL_USE_SESSION, { skipStats: true })).toEqual(indexOnly)
+    expect(indexOnly.turns).toEqual(full.turns)
+    expect(indexOnly.rawMessages).toEqual([])
+    expect(indexOnly.stats).toEqual({
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCostUSD: 0,
+      toolCallCounts: {},
+      errorCount: 0,
+      totalDurationMs: 0,
+      turnCount: full.turns.length,
+    })
+    expect(full.rawMessages.length).toBeGreaterThan(0)
+    expect(full.stats.toolCallCounts).toEqual({ bash: 1 })
   })
 
   it("parses a multi-turn session", () => {

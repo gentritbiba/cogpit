@@ -23,6 +23,7 @@ export {
   encodeClaudeDirName,
   buildClaudePermArgs,
   buildClaudeModelArgs,
+  buildClaudeEffortArgs,
   getClaudeResumeCommand,
 } from "./claude"
 

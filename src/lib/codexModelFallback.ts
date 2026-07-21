@@ -1,4 +1,4 @@
-export function isCodexSelectedModelError(message: string | null | undefined): boolean {
+function isCodexSelectedModelError(message: string | null | undefined): boolean {
   if (!message) return false
   const lower = message.toLowerCase()
   return (
@@ -11,7 +11,7 @@ export function isCodexSelectedModelError(message: string | null | undefined): b
   )
 }
 
-export async function readErrorMessage(
+async function readErrorMessage(
   res: Response,
   fallback: string
 ): Promise<string> {

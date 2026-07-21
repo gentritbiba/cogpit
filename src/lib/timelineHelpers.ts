@@ -36,17 +36,6 @@ export function matchesSearch(turn: Turn, query: string): boolean {
   return false
 }
 
-/** Collect consecutive tool_calls blocks starting at `startIndex`. */
-export function collectToolCalls(blocks: TurnContentBlock[], startIndex: number): { toolCalls: ToolCall[]; nextIndex: number } {
-  const toolCalls: ToolCall[] = []
-  let j = startIndex
-  while (j < blocks.length && blocks[j].kind === "tool_calls") {
-    toolCalls.push(...(blocks[j] as { kind: "tool_calls"; toolCalls: ToolCall[] }).toolCalls)
-    j++
-  }
-  return { toolCalls, nextIndex: j }
-}
-
 /** Human-readable label for a count of tool calls. */
 export function toolCallCountLabel(count: number): string {
   return `${count} tool call${count !== 1 ? "s" : ""}`

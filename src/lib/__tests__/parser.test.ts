@@ -47,6 +47,33 @@ describe("parseSession", () => {
     expect(session.turns[0].durationMs).toBe(1500)
   })
 
+  it("keeps default parsing identical when options are omitted", () => {
+    const jsonl = simpleSession()
+    expect(parseSession(jsonl, { skipStats: false })).toEqual(parseSession(jsonl))
+  })
+
+  it("supports the index-only skipStats contract without changing parsed turns", () => {
+    const jsonl = toolUseSession()
+    const full = parseSession(jsonl)
+    const indexOnly = parseSession(jsonl, { skipStats: true })
+
+    expect(indexOnly.turns).toEqual(full.turns)
+    expect(indexOnly.rawMessages).toEqual([])
+    expect(indexOnly.stats).toEqual({
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCostUSD: 0,
+      toolCallCounts: {},
+      errorCount: 0,
+      totalDurationMs: 0,
+      turnCount: full.turns.length,
+    })
+    expect(full.rawMessages.length).toBeGreaterThan(0)
+    expect(full.stats.toolCallCounts).toEqual({ Read: 1, Edit: 1 })
+  })
+
   it("returns empty turns for empty input", () => {
     const session = parseSession("")
     expect(session.turns).toHaveLength(0)
@@ -254,6 +281,7 @@ not valid json
     ].join("\n")
 
     const session = parseSession(codexJsonl)
+    const indexOnly = parseSession(codexJsonl, { skipStats: true })
 
     expect(session.sessionId).toBe("019d0004-3322-7b61-a208-4c7af4565667")
     expect(session.version).toBe("0.115.0")
@@ -277,6 +305,19 @@ not valid json
     expect(session.turns[0].tokenUsage?.input_tokens).toBe(100)
     expect(session.turns[0].tokenUsage?.output_tokens).toBe(25)
     expect(session.turns[0].durationMs).toBeGreaterThan(0)
+    expect(indexOnly.turns).toEqual(session.turns)
+    expect(indexOnly.rawMessages).toEqual([])
+    expect(indexOnly.stats).toEqual({
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCostUSD: 0,
+      toolCallCounts: {},
+      errorCount: 0,
+      totalDurationMs: 0,
+      turnCount: session.turns.length,
+    })
   })
 
   it("extracts session metadata", () => {
@@ -1127,6 +1168,7 @@ describe("detectPendingInteraction", () => {
       gitBranch: "",
       cwd: "",
       slug: "",
+      name: "",
       model: "",
       turns: [
         {
@@ -1174,6 +1216,7 @@ describe("detectPendingInteraction", () => {
       gitBranch: "",
       cwd: "",
       slug: "",
+      name: "",
       model: "",
       turns: [],
       stats: {
@@ -1342,13 +1385,14 @@ describe("detectPendingInteraction", () => {
       gitBranch: "",
       cwd: "",
       slug: "",
+      name: "",
       model: "",
       turns: turnDefs.map((t) => ({
         id: t.id,
-        userMessage: "yes" as string | null | (string | { type: string })[],
-        contentBlocks: [] as { type: string; text?: string }[],
-        thinking: [] as { text: string; isSummary?: boolean }[],
-        assistantText: [] as string[],
+        userMessage: "yes",
+        contentBlocks: [],
+        thinking: [],
+        assistantText: [],
         toolCalls: [
           { id: `tc_${t.id}`, name: t.tool, input: {}, result: t.result, isError: t.isError, timestamp: "" },
         ],

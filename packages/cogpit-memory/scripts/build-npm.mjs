@@ -8,12 +8,16 @@
  * - Keeps better-sqlite3 external (native module, can't be bundled)
  */
 import { build } from "esbuild"
+import { mkdirSync, rmSync } from "node:fs"
+
+rmSync("dist", { recursive: true, force: true })
+mkdirSync("dist", { recursive: true })
 
 const shared = {
   bundle: true,
   platform: "node",
   format: "cjs",
-  target: "node18",
+  target: "node20",
   alias: { "bun:sqlite": "./src/lib/sqlite-node-shim.ts" },
   external: ["better-sqlite3"],
   sourcemap: false,
