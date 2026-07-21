@@ -98,7 +98,17 @@ export class PtySessionManager {
   }
 
   private handleSpawn(ws: WebSocket, msg: Record<string, unknown>): void {
-    const id = (msg.id as string) || randomUUID()
+    const id = typeof msg.id === "string" && msg.id.length > 0
+      ? msg.id
+      : randomUUID()
+    if (this.sessions.has(id)) {
+      ws.send(JSON.stringify({
+        type: "error",
+        id,
+        message: "Session ID already exists",
+      }))
+      return
+    }
     const name = (msg.name as string) || `Terminal ${this.sessions.size + 1}`
     const cwd = (msg.cwd as string) || homedir()
     const cols = (msg.cols as number) || 80

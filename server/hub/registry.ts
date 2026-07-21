@@ -1,6 +1,7 @@
-import { readFile, writeFile, chmod } from "node:fs/promises"
+import { readFile, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
+import { writeOwnerOnlyJson } from "../atomicJsonFile"
 
 /**
  * Multi-device hub registry.
@@ -61,6 +62,7 @@ const DEFAULT_TLS_PORT = 443
 let registryPath: string | null = null
 const devices = new Map<string, HubDevice>()
 const runtimes = new Map<string, DeviceRuntime>()
+let registryOperationQueue: Promise<void> = Promise.resolve()
 
 // ── Persistence ──────────────────────────────────────────────────────
 
@@ -81,13 +83,57 @@ function normalizeDevice(entry: unknown): HubDevice | null {
   }
 }
 
-async function persist(): Promise<void> {
-  if (!registryPath) return
-  const payload = JSON.stringify([...devices.values()], null, 2)
-  // mode on writeFile only applies when the file is created; chmod after
-  // every write guarantees an already-existing file stays locked to 0600.
-  await writeFile(registryPath, payload, { mode: 0o600 })
-  await chmod(registryPath, 0o600)
+function enqueueRegistryOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = registryOperationQueue.then(operation)
+  // A rejected persistence attempt belongs to its caller. Keep a handled tail
+  // so later operations still run rather than inheriting the rejection.
+  registryOperationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
+function replaceDevices(nextDevices: ReadonlyMap<string, HubDevice>): void {
+  devices.clear()
+  for (const [id, device] of nextDevices) devices.set(id, device)
+}
+
+async function persist(
+  filePath: string | null,
+  snapshot: readonly HubDevice[],
+): Promise<void> {
+  if (!filePath) return
+  await writeOwnerOnlyJson(filePath, snapshot)
+}
+
+interface DeviceMutation<T> {
+  changed: boolean
+  value: T
+  commitRuntime?: () => void
+}
+
+function commitDeviceMutation<T>(
+  mutate: (draft: Map<string, HubDevice>) => DeviceMutation<T>,
+): Promise<T> {
+  return enqueueRegistryOperation(async () => {
+    // Clone records as well as the map so an existing device reference cannot
+    // change the candidate while its atomic write is in flight.
+    const draft = new Map(
+      [...devices].map(([id, device]) => [id, { ...device }]),
+    )
+    const mutation = mutate(draft)
+    if (!mutation.changed) return mutation.value
+
+    // The durable snapshot is created inside the serialized queue turn. Live
+    // state changes only after persistence succeeds, so rejection implicitly
+    // rolls the mutation back by discarding this draft.
+    const snapshot = [...draft.values()].map((device) => ({ ...device }))
+    await persist(registryPath, snapshot)
+    replaceDevices(draft)
+    mutation.commitRuntime?.()
+    return mutation.value
+  })
 }
 
 /**
@@ -95,29 +141,39 @@ async function persist(): Promise<void> {
  * corrupt file yields an empty registry rather than throwing.
  */
 export async function initDeviceRegistry(dir: string): Promise<void> {
-  registryPath = join(dir, "devices.local.json")
-  devices.clear()
-  runtimes.clear()
+  await enqueueRegistryOperation(async () => {
+    const nextRegistryPath = join(dir, "devices.local.json")
+    const loadedDevices = new Map<string, HubDevice>()
 
-  let raw: string
-  try {
-    raw = await readFile(registryPath, "utf-8")
-  } catch {
-    // Missing file (first run) or unreadable → start empty.
-    return
-  }
+    let raw: string | null = null
+    try {
+      const contents = await readFile(nextRegistryPath, "utf-8")
+      // Existing installations may predate owner-only creation. Refuse to load
+      // credentials unless the registry can be repaired to owner-only mode.
+      await chmod(nextRegistryPath, 0o600)
+      raw = contents
+    } catch {
+      // Missing file (first run) or unreadable → start empty.
+    }
 
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      for (const entry of parsed) {
-        const device = normalizeDevice(entry)
-        if (device) devices.set(device.id, device)
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            const device = normalizeDevice(entry)
+            if (device) loadedDevices.set(device.id, device)
+          }
+        }
+      } catch {
+        // Corrupt JSON → start empty rather than crashing the shell.
       }
     }
-  } catch {
-    // Corrupt JSON → start empty rather than crashing the shell.
-  }
+
+    registryPath = nextRegistryPath
+    replaceDevices(loadedDevices)
+    runtimes.clear()
+  })
 }
 
 // ── Runtime status ───────────────────────────────────────────────────
@@ -156,46 +212,57 @@ export function listDevices(): PublicDevice[] {
 // ── Mutations ────────────────────────────────────────────────────────
 
 export async function addDevice(input: AddDeviceInput): Promise<HubDevice> {
-  const device: HubDevice = {
-    id: `dev_${randomBytes(8).toString("hex")}`,
-    name: input.name,
-    host: input.host,
-    port: input.port ?? (input.tls ? DEFAULT_TLS_PORT : DEFAULT_PORT),
-    tls: input.tls ? true : undefined,
-    auth: input.auth,
-    password: input.auth === "password" ? input.password : undefined,
-    addedAt: Date.now(),
-  }
-  devices.set(device.id, device)
-  runtimes.set(device.id, { authState: "unknown" })
-  await persist()
-  return device
+  return commitDeviceMutation((draft) => {
+    const device: HubDevice = {
+      id: `dev_${randomBytes(8).toString("hex")}`,
+      name: input.name,
+      host: input.host,
+      port: input.port ?? (input.tls ? DEFAULT_TLS_PORT : DEFAULT_PORT),
+      tls: input.tls ? true : undefined,
+      auth: input.auth,
+      password: input.auth === "password" ? input.password : undefined,
+      addedAt: Date.now(),
+    }
+    draft.set(device.id, device)
+    return {
+      changed: true,
+      value: device,
+      commitRuntime: () => runtimes.set(device.id, { authState: "unknown" }),
+    }
+  })
 }
 
 export async function updateDevice(id: string, patch: UpdateDeviceInput): Promise<HubDevice | undefined> {
-  const existing = devices.get(id)
-  if (!existing) return undefined
+  return commitDeviceMutation((draft) => {
+    const existing = draft.get(id)
+    if (!existing) return { changed: false, value: undefined }
 
-  const next: HubDevice = { ...existing }
-  if (patch.name !== undefined) next.name = patch.name
-  if (patch.host !== undefined) next.host = patch.host
-  if (patch.port !== undefined) next.port = patch.port
-  if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
-  if (patch.auth !== undefined) next.auth = patch.auth
-  if (patch.password !== undefined) next.password = patch.password
-  // A device switched to token-less auth must not keep a stale password.
-  if (next.auth === "none") next.password = undefined
+    const next: HubDevice = { ...existing }
+    if (patch.name !== undefined) next.name = patch.name
+    if (patch.host !== undefined) next.host = patch.host
+    if (patch.port !== undefined) next.port = patch.port
+    if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
+    if (patch.auth !== undefined) next.auth = patch.auth
+    if (patch.password !== undefined) next.password = patch.password
+    // A device switched to token-less auth must not keep a stale password.
+    if (next.auth === "none") next.password = undefined
 
-  devices.set(id, next)
-  await persist()
-  return next
+    draft.set(id, next)
+    return { changed: true, value: next }
+  })
 }
 
 export async function removeDevice(id: string): Promise<boolean> {
-  const existed = devices.delete(id)
-  runtimes.delete(id)
-  if (existed) await persist()
-  return existed
+  return commitDeviceMutation((draft) => {
+    if (!draft.delete(id)) return { changed: false, value: false }
+    return {
+      changed: true,
+      value: true,
+      commitRuntime: () => {
+        runtimes.delete(id)
+      },
+    }
+  })
 }
 
 // ── Host validation ──────────────────────────────────────────────────

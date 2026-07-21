@@ -6,16 +6,14 @@ vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
   hubFetch: vi.fn(),
   isRemoteClient: vi.fn(() => false),
-  getToken: vi.fn(() => null),
 }))
 
 import { useAppConfig } from "@/hooks/useAppConfig"
-import { authFetch, hubFetch, isRemoteClient, getToken } from "@/lib/auth"
+import { authFetch, hubFetch, isRemoteClient } from "@/lib/auth"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockHubFetch = vi.mocked(hubFetch)
 const mockIsRemoteClient = vi.mocked(isRemoteClient)
-const mockGetToken = vi.mocked(getToken)
 
 // Mock window.location.reload
 const reloadMock = vi.fn()
@@ -59,7 +57,6 @@ function mockConfigResponse(claudeDir: string | null = "/home/user/.claude") {
 beforeEach(() => {
   vi.clearAllMocks()
   mockIsRemoteClient.mockReturnValue(false)
-  mockGetToken.mockReturnValue(null)
   // network-info goes through hubFetch; default to disabled unless a test overrides.
   mockNetworkDisabled()
   reloadMock.mockClear()
@@ -67,20 +64,19 @@ beforeEach(() => {
 
 describe("useAppConfig", () => {
   describe("initial loading", () => {
-    it("starts in loading state", () => {
+    it("starts in loading state", async () => {
       mockConfigResponse()
       const { result } = renderHook(() => useAppConfig())
       // configLoading is initially true
       expect(result.current.configLoading).toBe(true)
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
     })
 
     it("loads config successfully", async () => {
       mockConfigResponse("/home/user/.claude")
       const { result } = renderHook(() => useAppConfig())
 
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
       expect(result.current.claudeDir).toBe("/home/user/.claude")
       expect(result.current.configError).toBeNull()
     })
@@ -114,9 +110,7 @@ describe("useAppConfig", () => {
 
       const { result } = renderHook(() => useAppConfig())
 
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
       expect(result.current.claudeDir).toBeNull()
     })
 
@@ -161,34 +155,22 @@ describe("useAppConfig", () => {
       expect(result.current.configError).toBe("Network error")
     })
 
-    it("stays in loading state for remote client without token", () => {
+    it("uses the HttpOnly browser session for remote clients", async () => {
       mockIsRemoteClient.mockReturnValue(true)
-      mockGetToken.mockReturnValue(null)
-
-      const { result } = renderHook(() => useAppConfig())
-      // Should stay in loading because effect returns early
-      expect(result.current.configLoading).toBe(true)
-    })
-
-    it("loads config for remote client with token", async () => {
-      mockIsRemoteClient.mockReturnValue(true)
-      mockGetToken.mockReturnValue("valid-token")
       mockConfigResponse("/remote/.claude")
 
       const { result } = renderHook(() => useAppConfig())
-
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
+      await waitFor(() => expect(result.current.configLoading).toBe(false))
       expect(result.current.claudeDir).toBe("/remote/.claude")
     })
   })
 
   describe("showConfigDialog", () => {
-    it("starts with dialog closed", () => {
+    it("starts with dialog closed", async () => {
       mockConfigResponse()
       const { result } = renderHook(() => useAppConfig())
       expect(result.current.showConfigDialog).toBe(false)
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
     })
 
     it("opens config dialog", async () => {
@@ -197,6 +179,7 @@ describe("useAppConfig", () => {
 
       act(() => result.current.openConfigDialog())
       expect(result.current.showConfigDialog).toBe(true)
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
     })
 
     it("closes config dialog", async () => {
@@ -208,6 +191,7 @@ describe("useAppConfig", () => {
 
       act(() => result.current.handleCloseConfigDialog())
       expect(result.current.showConfigDialog).toBe(false)
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
     })
   })
 
@@ -216,9 +200,8 @@ describe("useAppConfig", () => {
       mockConfigResponse()
       const { result } = renderHook(() => useAppConfig())
 
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
+      mockNetworkInfo({ enabled: true, url: "http://reload-check.local" })
 
       act(() => result.current.openConfigDialog())
       act(() => result.current.handleConfigSaved("/new/path/.claude"))
@@ -226,22 +209,23 @@ describe("useAppConfig", () => {
       expect(result.current.claudeDir).toBe("/new/path/.claude")
       expect(result.current.showConfigDialog).toBe(false)
       expect(reloadMock).toHaveBeenCalled()
+      await waitFor(() => expect(result.current.networkUrl).toBe("http://reload-check.local"))
     })
 
     it("does not reload for network-only changes (same path)", async () => {
       mockConfigResponse("/home/user/.claude")
       const { result } = renderHook(() => useAppConfig())
 
-      await waitFor(() => {
-        expect(result.current.configLoading).toBe(false)
-      })
+      await waitFor(() => expect(result.current.networkAccessDisabled).toBe(true))
       expect(result.current.claudeDir).toBe("/home/user/.claude")
+      mockNetworkInfo({ enabled: true, url: "http://network-refresh.local" })
 
       act(() => result.current.openConfigDialog())
       act(() => result.current.handleConfigSaved("/home/user/.claude"))
 
       expect(result.current.showConfigDialog).toBe(false)
       expect(reloadMock).not.toHaveBeenCalled()
+      await waitFor(() => expect(result.current.networkUrl).toBe("http://network-refresh.local"))
     })
 
     it("re-fetches network info for network-only changes", async () => {
@@ -383,7 +367,10 @@ describe("useAppConfig", () => {
         expect(result.current.networkUrl).toBe("http://hub.local:19384")
       })
 
-      expect(mockHubFetch).toHaveBeenCalledWith("/api/network-info")
+      expect(mockHubFetch).toHaveBeenCalledWith(
+        "/api/network-info",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
       const authTouchedNetwork = mockAuthFetch.mock.calls.some(([input]) => {
         const url = typeof input === "string" ? input : String(input)
         return url.includes("/api/network-info")

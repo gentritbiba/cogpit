@@ -549,7 +549,7 @@ describe("POST /api/hub/devices/:id/test", () => {
     mockedGetDevice.mockReturnValue({
       id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384, auth: "password", password: "pw", addedAt: 1,
     } as never)
-    mockedGetDeviceToken.mockRejectedValue(new DeviceAuthError("bad"))
+    mockedGetDeviceToken.mockRejectedValue(new DeviceAuthError("dev_1", "bad"))
 
     const { res } = await drive("POST", "/dev_1/test")
 
@@ -576,7 +576,7 @@ describe("POST /api/hub/devices/:id/test", () => {
     mockedGetDevice.mockReturnValue({
       id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384, auth: "password", password: "pw", addedAt: 1,
     } as never)
-    mockedGetDeviceToken.mockRejectedValue(new DeviceUnreachableError("down"))
+    mockedGetDeviceToken.mockRejectedValue(new DeviceUnreachableError("dev_1", "down"))
 
     const { res } = await drive("POST", "/dev_1/test")
 

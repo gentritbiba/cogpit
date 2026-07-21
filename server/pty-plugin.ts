@@ -2,8 +2,7 @@ import type { Plugin, ViteDevServer } from "vite"
 import { WebSocketServer } from "ws"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
-import { getConfig } from "./config"
-import { isLocalRequest, validateSessionToken } from "./helpers"
+import { websocketUpgradeRejection } from "./security"
 import { handleHubUpgrade } from "./hub/proxy"
 import { PtySessionManager } from "./pty-server"
 
@@ -21,15 +20,12 @@ export function ptyPlugin(): Plugin {
           const url = new URL(req.url || "/", "http://localhost")
           if (url.pathname !== "/__pty") return
 
-          // Auth check for remote WebSocket connections
-          if (!isLocalRequest(req)) {
-            const cfg = getConfig()
-            const token = url.searchParams.get("token")
-            if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !validateSessionToken(token)) {
-              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
-              socket.destroy()
-              return
-            }
+          const rejection = websocketUpgradeRejection(req, url)
+          if (rejection) {
+            const reason = rejection === 401 ? "Unauthorized" : "Forbidden"
+            socket.write(`HTTP/1.1 ${rejection} ${reason}\r\n\r\n`)
+            socket.destroy()
+            return
           }
 
           wss.handleUpgrade(req, socket, head, (ws) => {

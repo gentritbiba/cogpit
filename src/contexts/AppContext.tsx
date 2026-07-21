@@ -34,6 +34,7 @@ export interface ThemeContext {
 
 export interface NetworkAuth {
   isRemote: boolean
+  authChecked: boolean
   authenticated: boolean
   handleAuthenticated: () => void
   logout: () => void

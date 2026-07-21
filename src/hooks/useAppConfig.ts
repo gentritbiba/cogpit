@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react"
-import { authFetch, hubFetch, isRemoteClient, getToken } from "@/lib/auth"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { authFetch, hubFetch } from "@/lib/auth"
 import type { AppConfig } from "@/contexts/AppContext"
 import type { AgentKind } from "@/lib/sessionSource"
 
@@ -15,9 +15,9 @@ interface NetworkState {
  * the hub's own LAN URL. Routing this through the active remote device would
  * report that device's URL instead of the hub the browser is actually on.
  */
-async function fetchNetworkInfo(): Promise<NetworkState> {
+async function fetchNetworkInfo(signal?: AbortSignal): Promise<NetworkState> {
   try {
-    const res = await hubFetch("/api/network-info")
+    const res = await hubFetch("/api/network-info", { signal })
     const data = (await res.json()) as { enabled: boolean; url?: string }
     return {
       url: data.enabled && data.url ? data.url : null,
@@ -54,17 +54,25 @@ export function useAppConfig(): AppConfig {
   const [networkAccessDisabled, setNetworkAccessDisabled] = useState(false)
   // Bump to re-fetch config (e.g. after authentication)
   const [fetchKey, setFetchKey] = useState(0)
+  const networkRequestRef = useRef<AbortController | null>(null)
+  const retryRequestRef = useRef<AbortController | null>(null)
 
   const refreshNetwork = useCallback(async () => {
-    const info = await fetchNetworkInfo()
+    networkRequestRef.current?.abort()
+    const controller = new AbortController()
+    networkRequestRef.current = controller
+    const info = await fetchNetworkInfo(controller.signal)
+    if (controller.signal.aborted || networkRequestRef.current !== controller) return
     setNetworkUrl(info.url)
     setNetworkAccessDisabled(info.disabled)
   }, [])
 
-  useEffect(() => {
-    // Remote clients without a token: stay in loading state until they authenticate
-    if (isRemoteClient() && !getToken()) return
+  useEffect(() => () => {
+    networkRequestRef.current?.abort()
+    retryRequestRef.current?.abort()
+  }, [])
 
+  useEffect(() => {
     const controller = new AbortController()
     setConfigLoading(true)
     setConfigError(null)
@@ -109,18 +117,26 @@ export function useAppConfig(): AppConfig {
   const openConfigDialog = useCallback(() => setShowConfigDialog(true), [])
 
   const retryConfig = useCallback(() => {
+    retryRequestRef.current?.abort()
+    const controller = new AbortController()
+    retryRequestRef.current = controller
     setConfigLoading(true)
     setConfigError(null)
-    fetchConfig()
+    fetchConfig(controller.signal)
       .then((snapshot) => {
+        if (controller.signal.aborted || retryRequestRef.current !== controller) return
         setClaudeDir(snapshot.claudeDir)
         setDefaultAgentKind(snapshot.defaultAgentKind)
       })
       .catch((err) => {
+        if (controller.signal.aborted || retryRequestRef.current !== controller) return
         setClaudeDir(null)
         setConfigError(err instanceof Error ? err.message : "Failed to load configuration")
       })
-      .finally(() => setConfigLoading(false))
+      .finally(() => {
+        if (controller.signal.aborted || retryRequestRef.current !== controller) return
+        setConfigLoading(false)
+      })
   }, [])
 
   return {

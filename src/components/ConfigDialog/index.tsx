@@ -138,7 +138,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     setSaving(false)
   }, [path, networkAccess, networkPassword, terminalApp, editorApp, save, onSaved, remoteDevice, initialNetworkAccess])
 
-  const MIN_PASSWORD_LENGTH = 12
+  const MIN_PASSWORD_LENGTH = 16
 
   function computeCanSave(): boolean {
     // Block save while path is being validated or is invalid

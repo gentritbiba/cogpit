@@ -1,10 +1,12 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { Stats, Dirent } from "node:fs"
 
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  rename: vi.fn(),
+  unlink: vi.fn(),
   stat: vi.fn(),
   readdir: vi.fn(),
   chmod: vi.fn(),
@@ -16,19 +18,22 @@ vi.mock("node:os", () => ({
 
 vi.mock("../password-utils", () => ({
   hashPassword: vi.fn(),
+  isMalformedPasswordHash: vi.fn(),
   isPasswordHashed: vi.fn(),
 }))
 
 import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
-import { hashPassword, isPasswordHashed } from "../password-utils"
+import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "../password-utils"
 import { resolve, join } from "node:path"
+import { asReaddirMock } from "./http-fixtures"
 
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
 const mockedStat = vi.mocked(stat)
-const mockedReaddir = vi.mocked(readdir)
+const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedChmod = vi.mocked(chmod)
 const mockedHashPassword = vi.mocked(hashPassword)
+const mockedIsMalformedPasswordHash = vi.mocked(isMalformedPasswordHash)
 const mockedIsPasswordHashed = vi.mocked(isPasswordHashed)
 
 // ── getDirs ─────────────────────────────────────────────────────────────
@@ -123,6 +128,7 @@ describe("loadConfig", () => {
     expect(config!.networkPassword).toBe("$sha256$abc:def")
     // Should NOT have written back to disk
     expect(mockedWriteFile).not.toHaveBeenCalled()
+    expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
   })
 
   it("migrates plaintext password to hashed on first read and writes back to disk", async () => {
@@ -171,6 +177,20 @@ describe("loadConfig", () => {
     const config = await loadConfig()
     expect(config).not.toBeNull()
     expect(config!.networkPassword).toBeUndefined()
+    expect(mockedHashPassword).not.toHaveBeenCalled()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("fails closed without rewriting a malformed versioned password hash", async () => {
+    const { loadConfig } = await import("../config")
+    mockedIsMalformedPasswordHash.mockReturnValueOnce(true)
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/.claude",
+      networkAccess: true,
+      networkPassword: "$scrypt$future-format",
+    }))
+
+    await expect(loadConfig()).resolves.toBeNull()
     expect(mockedHashPassword).not.toHaveBeenCalled()
     expect(mockedWriteFile).not.toHaveBeenCalled()
   })
@@ -316,14 +336,37 @@ describe("env network override", () => {
     expect(getConfig()?.networkPassword).toBe("$sha256$env:hash")
   })
 
+  it("preserves an existing disk credential while an env override is active", async () => {
+    const { loadConfig, getConfig, applyEnvNetworkOverrides, saveConfig } = await import("../config")
+    mockedIsPasswordHashed.mockReturnValueOnce(true)
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/.claude",
+      networkAccess: true,
+      networkPassword: "$sha256$persisted:hash",
+      terminalApp: "Terminal",
+    }))
+    await loadConfig()
+    applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
+
+    await saveConfig({ ...getConfig()!, terminalApp: "iTerm" })
+
+    const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
+    expect(written.networkAccess).toBe(true)
+    expect(written.networkPassword).toBe("$sha256$persisted:hash")
+    expect(written.terminalApp).toBe("iTerm")
+    expect(getConfig()?.networkPassword).toBe("$sha256$env:hash")
+  })
+
   it("does not leak env creds when saving an unrelated config", async () => {
-    const { applyEnvNetworkOverrides, saveConfig } = await import("../config")
+    const { applyEnvNetworkOverrides, loadConfig, saveConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({ claudeDir: "/home/.claude" }))
+    await loadConfig()
     applyEnvNetworkOverrides({ password: "a-strong-passphrase" })
 
     await saveConfig({ claudeDir: "/home/.claude" })
 
     const written = JSON.parse(mockedWriteFile.mock.calls.at(-1)![1] as string)
-    expect(written).toEqual({ claudeDir: "/home/.claude" })
+    expect(written).toEqual({ claudeDir: "/home/.claude", networkAccess: false })
   })
 
   it("still persists a user-set password (different hash) while an override is active", async () => {

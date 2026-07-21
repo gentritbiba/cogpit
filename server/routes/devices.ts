@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import type { UseFn } from "../helpers"
-import { sendJson } from "../helpers"
+import { sendJson, type UseFn } from "../http"
 import { getInstanceId } from "./hello"
 import {
   getDevice,

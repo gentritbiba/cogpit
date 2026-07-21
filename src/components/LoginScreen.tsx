@@ -2,7 +2,7 @@ import { useState, useCallback } from "react"
 import { Eye, EyeOff, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { setToken } from "@/lib/auth"
+import { clearToken } from "@/lib/auth"
 import { Spinner } from "@/components/ui/Spinner"
 
 interface LoginScreenProps {
@@ -25,18 +25,21 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     try {
       const res = await fetch("/api/auth/verify", {
         method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: {
           "Authorization": `Bearer ${password}`,
           "Content-Type": "application/json",
+          "X-Cogpit-Client": "1",
         },
       })
 
-      const data = await res.json()
+      const data = await res.json() as { valid?: boolean; error?: string }
       if (res.ok && data.valid) {
-        // Store the session token returned by the server (never the raw
-        // password). Local logins return { valid: true } without a token —
-        // they still proceed, just with nothing to persist.
-        if (data.token) setToken(data.token)
+        // The server stores the session in an HttpOnly cookie. Scrub any token
+        // left behind by an older build, then remove the password from memory.
+        clearToken()
+        setPassword("")
         onAuthenticated()
       } else {
         setError(data.error || "Invalid password")
@@ -67,12 +70,14 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
+            autoComplete="current-password"
             className="pr-10 bg-elevation-1 border-border/70 focus:border-border"
             autoFocus
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}

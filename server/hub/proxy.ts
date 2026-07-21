@@ -4,8 +4,8 @@ import type { Duplex } from "node:stream"
 
 import { getDevice, type HubDevice } from "./registry"
 import { getDeviceToken, invalidateDeviceToken, DeviceAuthError, DeviceUnreachableError } from "./device-client"
-import { isLocalRequest, validateSessionToken } from "../security"
-import { getConfig } from "../config"
+import { websocketUpgradeRejection } from "../security"
+import type { NextFn } from "../http"
 
 /**
  * Multi-device hub reverse proxy.
@@ -35,7 +35,14 @@ const CONNECT_WATCHDOG_MS = 7000
 /** Stripped from the request we send to the device (recomputed or hub-specific). */
 const OUTBOUND_STRIP = new Set([
   "authorization",
+  "cookie",
   "host",
+  "origin",
+  "referer",
+  "sec-fetch-dest",
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "sec-fetch-user",
   "connection",
   "upgrade",
   "keep-alive",
@@ -56,6 +63,9 @@ const RESPONSE_STRIP = new Set([
   "trailer",
   "proxy-authenticate",
   "proxy-authorization",
+  // A downstream device must never be able to mint or overwrite the hub's
+  // origin-scoped browser session cookie.
+  "set-cookie",
 ])
 
 // ── Small helpers ────────────────────────────────────────────────────
@@ -124,8 +134,6 @@ function filterResponseHeaders(incoming: IncomingHttpHeaders): OutgoingHttpHeade
 }
 
 // ── HTTP proxy handler ───────────────────────────────────────────────
-
-type NextFn = (err?: unknown) => void
 
 /**
  * Connect/Express-style middleware compatible with both `app.use("/hub", h)`
@@ -341,15 +349,13 @@ export function handleHubUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
 
   const deviceId = match[1]
 
-  // Hub-side auth FIRST — identical semantics to the existing /__pty branch.
-  if (!isLocalRequest(req)) {
-    const cfg = getConfig()
-    const token = url.searchParams.get("token")
-    if (!cfg?.networkAccess || !cfg?.networkPassword || !token || !validateSessionToken(token)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n")
-      socket.destroy()
-      return true
-    }
+  // Hub-side trust check FIRST — identical semantics to the local /__pty branch.
+  const rejection = websocketUpgradeRejection(req, url)
+  if (rejection) {
+    const reason = rejection === 401 ? "Unauthorized" : "Forbidden"
+    socket.write(`HTTP/1.1 ${rejection} ${reason}\r\n\r\n`)
+    socket.destroy()
+    return true
   }
 
   const device = getDevice(deviceId)
@@ -388,7 +394,14 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       // The device authenticates from the query param only; the hub host/token
       // must be rewritten. Everything else (connection/upgrade + sec-websocket-*)
       // passes through so the WS handshake completes.
-      if (lower === "host" || lower === "authorization") continue
+      if (
+        lower === "host"
+        || lower === "authorization"
+        || lower === "cookie"
+        || lower === "origin"
+        || lower === "referer"
+        || lower.startsWith("sec-fetch-")
+      ) continue
       headers[key] = value
     }
     // Omit the default https port: TLS-terminating proxies (e.g. Cloudflare)
@@ -417,6 +430,7 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
       // Splice: replay the device's 101 to the client, then bridge both ways.
       const statusLine = `HTTP/1.1 101 ${proxyRes.statusMessage || "Switching Protocols"}\r\n`
       const headerLines = Object.entries(proxyRes.headers)
+        .filter(([key, value]) => value !== undefined && key.toLowerCase() !== "set-cookie")
         .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
         .join("\r\n")
       socket.write(statusLine + headerLines + "\r\n\r\n")
@@ -425,7 +439,9 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
 
       proxySocket.pipe(socket)
       socket.pipe(proxySocket)
-      socket.setKeepAlive(true, 30000)
+      if ("setKeepAlive" in socket && typeof socket.setKeepAlive === "function") {
+        socket.setKeepAlive(true, 30000)
+      }
       proxySocket.setKeepAlive(true, 30000)
 
       const teardown = (): void => {

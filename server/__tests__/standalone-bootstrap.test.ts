@@ -5,6 +5,7 @@ import {
   resolveEnvPassword,
   isLoopbackHost,
   shouldFailClosed,
+  hasUsableNetworkCredentials,
   firstNonInternalIPv4,
   resolveAdvertisedHost,
   buildBootBanner,
@@ -93,6 +94,24 @@ describe("shouldFailClosed", () => {
   it("never fails closed on loopback (password optional)", () => {
     expect(shouldFailClosed("127.0.0.1", false)).toBe(false)
     expect(shouldFailClosed("localhost", false)).toBe(false)
+  })
+})
+
+describe("hasUsableNetworkCredentials", () => {
+  it("accepts an environment password without persisted settings", () => {
+    expect(hasUsableNetworkCredentials("environment-password", null)).toBe(true)
+  })
+
+  it("requires both persisted network access and a password", () => {
+    expect(hasUsableNetworkCredentials(null, {
+      networkAccess: true,
+      networkPassword: "hashed",
+    })).toBe(true)
+    expect(hasUsableNetworkCredentials(null, {
+      networkAccess: false,
+      networkPassword: "hashed",
+    })).toBe(false)
+    expect(hasUsableNetworkCredentials(null, { networkAccess: true })).toBe(false)
   })
 })
 

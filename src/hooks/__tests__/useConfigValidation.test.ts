@@ -5,7 +5,6 @@ import { renderHook, act } from "@testing-library/react"
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
   isRemoteClient: vi.fn(() => false),
-  getToken: vi.fn(() => null),
 }))
 
 import { useConfigValidation } from "@/hooks/useConfigValidation"

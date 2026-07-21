@@ -177,6 +177,41 @@ describe("createHubProxyHandler — request rewriting", () => {
     expect(seen.headers.authorization).not.toContain("CLIENT_HUB_TOKEN")
   })
 
+  it("does not forward the hub cookie or browser-origin metadata to a device", async () => {
+    const target = track(await makeTarget((_req, res) => res.end("ok")))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/echo"), {
+      headers: {
+        Cookie: "__Host-cogpit_session=HUB_SECRET",
+        Origin: `http://127.0.0.1:${hub.port}`,
+        Referer: `http://127.0.0.1:${hub.port}/dashboard`,
+        "Sec-Fetch-Site": "same-origin",
+      },
+    })
+    expect(res.status).toBe(200)
+
+    const seen = target.requests.at(-1)!
+    expect(seen.headers.cookie).toBeUndefined()
+    expect(seen.headers.origin).toBeUndefined()
+    expect(seen.headers.referer).toBeUndefined()
+    expect(seen.headers["sec-fetch-site"]).toBeUndefined()
+  })
+
+  it("strips Set-Cookie from downstream device responses", async () => {
+    const target = track(await makeTarget((_req, res) => {
+      res.writeHead(200, { "Set-Cookie": "__Host-cogpit_session=DEVICE_TOKEN; Path=/; Secure" })
+      res.end("ok")
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/thing"))
+    expect(res.status).toBe(200)
+    expect(res.headers.get("set-cookie")).toBeNull()
+  })
+
   it("stamps X-Cogpit-Device on a successful response", async () => {
     const target = track(await makeTarget((_req, res) => res.end("ok")))
     const device = await passwordDevice(target.port)
@@ -361,8 +396,10 @@ describe("handleHubUpgrade", () => {
     wss.on("connection", (ws) => {
       ws.on("message", (m) => ws.send(`echo:${m}`))
     })
+    let deviceUpgradeHeaders: http.IncomingHttpHeaders | null = null
     const targetServer = http.createServer((_req, res) => res.end())
     targetServer.on("upgrade", (req, socket, head) => {
+      deviceUpgradeHeaders = req.headers
       const u = new URL(req.url || "/", "http://localhost")
       if (u.pathname === "/__pty") wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
       else socket.destroy()
@@ -373,7 +410,12 @@ describe("handleHubUpgrade", () => {
     const device = await addDevice({ name: "Tunnel", host: "127.0.0.1", port: targetPort, auth: "none" })
     const hub = track(await makeHub())
 
-    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__pty`)
+    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__pty`, {
+      headers: {
+        Cookie: "__Host-cogpit_session=HUB_SECRET",
+        Origin: `http://127.0.0.1:${hub.port}`,
+      },
+    })
     try {
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => resolve())
@@ -384,6 +426,48 @@ describe("handleHubUpgrade", () => {
         ws.send("ping")
       })
       expect(reply).toBe("echo:ping")
+      const forwardedHeaders = deviceUpgradeHeaders as unknown as http.IncomingHttpHeaders
+      expect(forwardedHeaders.cookie).toBeUndefined()
+      expect(forwardedHeaders.origin).toBeUndefined()
+    } finally {
+      ws.close()
+      wss.close()
+    }
+  })
+
+  it("strips a downstream Set-Cookie header from the WebSocket handshake", async () => {
+    const wss = new WebSocketServer({ noServer: true })
+    wss.on("headers", (headers) => {
+      headers.push("Set-Cookie: __Host-cogpit_session=DEVICE_TOKEN; Path=/; Secure")
+    })
+    const targetServer = http.createServer((_req, res) => res.end())
+    targetServer.on("upgrade", (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
+    })
+    openServers.push(targetServer)
+    const targetPort = await listen(targetServer)
+
+    const device = await addDevice({
+      name: "Cookie Tunnel",
+      host: "127.0.0.1",
+      port: targetPort,
+      auth: "none",
+    })
+    const hub = track(await makeHub())
+    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__pty`)
+
+    try {
+      const upgradeHeaders = new Promise<http.IncomingHttpHeaders>((resolve) => {
+        ws.once("upgrade", (response) => resolve(response.headers))
+      })
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve())
+        ws.once("error", reject)
+      })
+
+      const headers = await upgradeHeaders
+      expect(headers["set-cookie"]).toBeUndefined()
+      expect(headers["sec-websocket-accept"]).toBeTypeOf("string")
     } finally {
       ws.close()
       wss.close()
@@ -540,7 +624,11 @@ describe("tls devices", () => {
       destroy: () => {},
       get destroyed() { return false },
     } as never
-    const req = { url, headers: {}, socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage
+    const req = {
+      url,
+      headers: { host: "127.0.0.1:19384", origin: "http://127.0.0.1:19384" },
+      socket: { remoteAddress: "127.0.0.1" },
+    } as unknown as IncomingMessage
     return { req, socket }
   }
 

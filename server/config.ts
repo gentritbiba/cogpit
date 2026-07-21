@@ -1,8 +1,9 @@
-import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
+import { readFile, stat, readdir, chmod } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
-import { hashPassword, isPasswordHashed } from "./password-utils"
+import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
+import { writeOwnerOnlyJson } from "./atomicJsonFile"
 
 // config.local.json may hold a hashed network password; keep it owner-only.
 const CONFIG_FILE_MODE = 0o600
@@ -65,11 +66,6 @@ export function clearEnvNetworkOverrides(): void {
   envOverride = null
 }
 
-/** True when an env-derived network override is currently active. */
-export function hasEnvNetworkOverride(): boolean {
-  return envOverride !== null
-}
-
 export function getConfig(): AppConfig | null {
   if (!cachedConfig || !envOverride) return cachedConfig
   // Merge the env override into the returned view only. cachedConfig itself is
@@ -88,9 +84,13 @@ export function getConfig(): AppConfig | null {
  */
 function stripEnvOverride(config: AppConfig): AppConfig {
   if (!envOverride) return config
-  if (config.networkPassword && config.networkPassword === envOverride.networkPassword) {
-    const clean: AppConfig = { ...config, networkAccess: false }
-    delete clean.networkPassword
+  if (!config.networkPassword || config.networkPassword === envOverride.networkPassword) {
+    const clean: AppConfig = {
+      ...config,
+      networkAccess: cachedConfig?.networkAccess,
+      networkPassword: cachedConfig?.networkPassword,
+    }
+    if (!clean.networkPassword) delete clean.networkPassword
     return clean
   }
   return config
@@ -132,14 +132,26 @@ export async function loadConfig(): Promise<AppConfig | null> {
     if (parsed.claudeDir && typeof parsed.claudeDir === "string") {
       let networkPassword: string | undefined = parsed.networkPassword || undefined
 
+      // A corrupt or future versioned credential is not plaintext. Preserve the
+      // file and fail closed so loading cannot re-hash the encoded bytes and
+      // silently make the real password unrecoverable.
+      if (networkPassword && isMalformedPasswordHash(networkPassword)) {
+        throw new Error("Unsupported or malformed network password hash")
+      }
+
       // Migrate plaintext password to hashed form on first read.
       // Empty/missing passwords are left as-is; already-hashed values are skipped.
       if (networkPassword && !isPasswordHashed(networkPassword)) {
         networkPassword = hashPassword(networkPassword)
         // Write the hashed password back to disk so migration only happens once.
         const migrated = { ...parsed, networkPassword }
-        await writeFile(CONFIG_PATH, JSON.stringify(migrated, null, 2), "utf-8")
+        await writeOwnerOnlyJson(CONFIG_PATH, migrated, CONFIG_FILE_MODE)
       }
+
+      // Existing installations may predate the owner-only creation mode used
+      // by saveConfig(). Re-apply it on every successful read so an old file
+      // containing a password cannot remain group/world-readable indefinitely.
+      await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
 
       cachedConfig = {
         claudeDir: parsed.claudeDir,
@@ -160,12 +172,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
 
 export async function saveConfig(config: AppConfig): Promise<void> {
   const toPersist = stripEnvOverride(config)
-  // Pass mode at creation so a brand-new file is never briefly world-readable;
-  // the chmod after still re-locks a pre-existing file (writeFile's mode only
-  // applies when the file is created). Mirrors the registry.ts pattern.
-  await writeFile(CONFIG_PATH, JSON.stringify(toPersist, null, 2), { encoding: "utf-8", mode: CONFIG_FILE_MODE })
-  // Lock down the file: it can contain a hashed network password.
-  await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
+  await writeOwnerOnlyJson(CONFIG_PATH, toPersist, CONFIG_FILE_MODE)
   cachedConfig = toPersist
 }
 

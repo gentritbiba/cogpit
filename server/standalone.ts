@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Standalone server entry point for headless environments.
- * Reuses the same createAppServer() that Electron uses,
- * but without any Electron dependencies.
+ * Applies standalone bootstrap policy, then delegates to the shared server
+ * composition through a server-owned adapter.
  */
 import { join } from "node:path"
 import { homedir, hostname, networkInterfaces } from "node:os"
 import { mkdirSync, existsSync } from "node:fs"
-import { createAppServer } from "../electron/server"
+import { createStandaloneAppServer } from "./standalone-app-server"
 import {
   setConfigPath,
   loadConfig,
@@ -18,6 +18,7 @@ import {
 import { validatePasswordStrength } from "./security"
 import {
   resolveEnvPassword,
+  hasUsableNetworkCredentials,
   shouldFailClosed,
   buildBootBanner,
   resolveDeviceName,
@@ -33,8 +34,8 @@ const staticDir = join(import.meta.dirname, "../dist")
 // Ensure data directory exists
 mkdirSync(dataDir, { recursive: true })
 
-// ── Config bootstrap (before createAppServer so we can fail closed) ────────
-// createAppServer() re-runs setConfigPath()+loadConfig() with this same path,
+// ── Config bootstrap (before server composition so we can fail closed) ────────
+// Server composition re-runs setConfigPath()+loadConfig() with this same path,
 // which is harmless; doing it here first lets us synthesize a first-run config
 // and enforce the security invariants below before ever binding a socket.
 const configPath = join(dataDir, "config.local.json")
@@ -74,8 +75,8 @@ if (envPassword) {
 }
 
 // ── Fail closed: never bind a passwordless server off loopback ─────────────
-const hasNetworkPassword = !!envPassword || !!getConfig()?.networkPassword
-if (shouldFailClosed(host, hasNetworkPassword)) {
+const hasNetworkCredentials = hasUsableNetworkCredentials(envPassword, getConfig())
+if (shouldFailClosed(host, hasNetworkCredentials)) {
   console.error(
     [
       `Refusing to bind ${host}:${port} without a network password.`,
@@ -91,7 +92,7 @@ if (shouldFailClosed(host, hasNetworkPassword)) {
   process.exit(1)
 }
 
-const { httpServer } = await createAppServer(staticDir, dataDir)
+const { httpServer, dispose } = await createStandaloneAppServer(staticDir, dataDir)
 
 httpServer.listen(port, host, () => {
   const deviceName = resolveDeviceName(process.env, hostname())
@@ -104,9 +105,18 @@ httpServer.listen(port, host, () => {
 })
 
 // Graceful shutdown
+let shuttingDown = false
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
+  process.on(signal, async () => {
+    if (shuttingDown) return
+    shuttingDown = true
     console.log(`\nReceived ${signal}, shutting down...`)
-    httpServer.close(() => process.exit(0))
+    try {
+      await dispose()
+      process.exit(0)
+    } catch (error) {
+      console.error("Failed to shut down cleanly:", error)
+      process.exit(1)
+    }
   })
 }

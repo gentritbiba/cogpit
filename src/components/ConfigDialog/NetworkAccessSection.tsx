@@ -60,6 +60,7 @@ export function NetworkAccessSection({
         <button
           type="button"
           role="switch"
+          aria-label="Network Access"
           aria-checked={networkAccess}
           onClick={() => setNetworkAccess(!networkAccess)}
           className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
@@ -101,7 +102,8 @@ export function NetworkAccessSection({
             </p>
           )}
           <p className="text-[11px] text-muted-foreground">
-            Requires app restart to take effect. Port: 19384
+            Requires app restart. Remote browsers need an HTTPS reverse proxy;
+            port 19384 remains available to Cogpit hubs and device clients.
           </p>
         </div>
       )}

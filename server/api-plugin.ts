@@ -1,62 +1,33 @@
 import type { Plugin } from "vite"
 import { fileURLToPath } from "node:url"
+import { registerApiRoutes } from "./api-routes"
 import { loadConfig, getConfig } from "./config"
-import { refreshDirs, cleanupProcesses, authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
-import { registerConfigRoutes } from "./routes/config"
-import { registerProjectRoutes } from "./routes/projects"
-import { registerClaudeRoutes } from "./routes/claude"
-import { registerClaudeNewRoutes } from "./routes/claude-new"
-import { registerClaudeManageRoutes } from "./routes/claude-manage"
-import { registerPortRoutes } from "./routes/ports"
-import { registerTeamRoutes } from "./routes/teams"
-import { registerTeamSessionRoutes } from "./routes/team-session"
-import { registerWorkflowRoutes } from "./routes/workflows"
-import { registerUndoRoutes } from "./routes/undo"
-import { registerFileRoutes } from "./routes/files"
-import { registerFileWatchRoutes } from "./routes/files-watch"
-import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
-import { registerSessionContextRoutes } from "./routes/session-context"
-import { registerEditorRoutes } from "./routes/editor"
-import { registerWorktreeRoutes } from "./routes/worktrees"
-import { registerUsageRoutes } from "./routes/usage"
-import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
-import { registerConfigBrowserRoutes } from "./routes/config-browser"
-import { registerLocalFileRoutes } from "./routes/local-file"
-import { registerFileContentRoutes } from "./routes/file-content"
-import { registerProjectFileRoutes } from "./routes/project-files"
-import { registerProjectFileContentRoutes } from "./routes/project-file"
-import { registerGitStatusRoutes } from "./routes/git-status"
-import { registerMcpRoutes } from "./routes/mcp"
-import { registerNotifyRoutes } from "./routes/notify"
-import { registerScriptRoutes } from "./routes/scripts"
-import { registerPermissionRoutes } from "./routes/permissions"
-import { registerAskUserRoutes } from "./routes/ask-user"
-import { registerModelRoutes } from "./routes/models"
-import { registerCodexRuntimeRoutes } from "./routes/codex-runtime"
-import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
-import { registerPerformanceRoutes } from "./routes/performance"
-import { registerHelloRoutes } from "./routes/hello"
-import { registerDeviceRoutes } from "./routes/devices"
+import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { cleanupProcesses } from "./processRegistry"
+import { refreshDirs } from "./sessionPaths"
 import { initDeviceRegistry } from "./hub/registry"
-import { createHubProxyHandler } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
 
 export function sessionApiPlugin(): Plugin {
   return {
     name: "session-api",
-    configureServer(server) {
+    async configureServer(server) {
       // Kill all active child processes when the server shuts down
       server.httpServer?.on("close", () => {
-        cleanupProcesses()
-        void codexAppServer.shutdown()
+        void Promise.all([
+          cleanupProcesses(),
+          codexAppServer.shutdown(),
+        ])
       })
 
-      // Load config on startup
-      loadConfig().then(() => {
-        refreshDirs()
-      })
-      // Device registry lives next to config.local.json (project root in dev)
-      void initDeviceRegistry(fileURLToPath(new URL("..", import.meta.url)))
+      // Vite awaits async configureServer hooks. Complete initialization before
+      // registering middleware so the first request observes the same ready
+      // config/registry state as Electron and standalone composition.
+      await Promise.all([
+        loadConfig(),
+        initDeviceRegistry(fileURLToPath(new URL("..", import.meta.url))),
+      ])
+      refreshDirs()
 
       // Security middleware (before all routes)
       server.middlewares.use(securityHeaders)
@@ -81,42 +52,7 @@ export function sessionApiPlugin(): Plugin {
       })
 
       const use = server.middlewares.use.bind(server.middlewares)
-      registerHelloRoutes(use, { mode: "dev" })
-      registerDeviceRoutes(use)
-      server.middlewares.use("/hub", createHubProxyHandler())
-      registerPerformanceRoutes(use)
-      registerConfigRoutes(use)
-      registerProjectRoutes(use)
-      registerClaudeRoutes(use)
-      registerClaudeNewRoutes(use)
-      registerClaudeManageRoutes(use)
-      registerPortRoutes(use)
-      registerTeamRoutes(use)
-      registerTeamSessionRoutes(use)
-      registerWorkflowRoutes(use)
-      registerUndoRoutes(use)
-      registerFileRoutes(use)
-      registerFileWatchRoutes(use)
-      registerSessionFileChangesRoutes(use)
-      registerSessionContextRoutes(use)
-      registerEditorRoutes(use)
-      registerWorktreeRoutes(use)
-      registerUsageRoutes(use)
-      registerSlashSuggestionRoutes(use)
-      registerConfigBrowserRoutes(use)
-      registerLocalFileRoutes(use)
-      registerFileContentRoutes(use)
-      registerProjectFileRoutes(use)
-      registerProjectFileContentRoutes(use)
-      registerGitStatusRoutes(use)
-      registerMcpRoutes(use)
-      registerNotifyRoutes(use)
-      registerScriptRoutes(use)
-      registerPermissionRoutes(use)
-      registerAskUserRoutes(use)
-      registerModelRoutes(use)
-      registerCodexRuntimeRoutes(use)
-      registerClaudeRuntimeRoutes(use)
+      registerApiRoutes(use, { mode: "dev" })
     },
   }
 }

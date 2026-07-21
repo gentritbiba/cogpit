@@ -55,6 +55,14 @@ export function shouldFailClosed(host: string, hasNetworkPassword: boolean): boo
   return !isLoopbackHost(host) && !hasNetworkPassword
 }
 
+/** A persisted password is usable remotely only when network access is on. */
+export function hasUsableNetworkCredentials(
+  envPassword: string | null,
+  config: { networkAccess?: boolean; networkPassword?: string } | null,
+): boolean {
+  return !!envPassword || !!(config?.networkAccess && config.networkPassword)
+}
+
 // ── Boot banner ──────────────────────────────────────────────────────────
 
 type InterfaceMap = Record<string, NetworkInterfaceInfo[] | undefined>

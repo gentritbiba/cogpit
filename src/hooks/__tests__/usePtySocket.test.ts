@@ -25,12 +25,12 @@ class MockWebSocket {
   }
 }
 
-function setLocation(pathname: string) {
+function setLocation(pathname: string, hostname = "localhost") {
   Object.defineProperty(window, "location", {
     value: {
       pathname,
       host: "example.host:19384",
-      hostname: "localhost", // local client → no token appended
+      hostname,
       protocol: "http:",
     },
     writable: true,
@@ -66,6 +66,17 @@ describe("usePtySocket buildWsUrl", () => {
     expect(MockWebSocket.instances[0]?.url).toBe(
       "ws://example.host:19384/hub/dev_x/__pty"
     )
+  })
+
+  it("never places a browser session token in the WebSocket URL", () => {
+    localStorage.setItem("cogpit-network-token", "must-not-leak")
+    setLocation("/d/dev_x/", "mb.cogpit.dev")
+    renderHook(() => usePtySocket())
+
+    expect(MockWebSocket.instances[0]?.url).toBe(
+      "ws://example.host:19384/hub/dev_x/__pty"
+    )
+    expect(MockWebSocket.instances[0]?.url).not.toContain("token=")
   })
 
   it("tears the socket down on unmount (device switch remounts App)", () => {

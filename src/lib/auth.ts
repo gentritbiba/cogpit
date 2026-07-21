@@ -2,24 +2,61 @@
 
 import { withBase } from "./device"
 
-const TOKEN_KEY = "cogpit-network-token"
+const LEGACY_TOKEN_KEY = "cogpit-network-token"
+const LOCAL_HOSTNAMES = new Set([
+  "localhost",
+  "127.0.0.1",
+  "::1",
+  "0:0:0:0:0:0:0:1",
+])
 
 export function isRemoteClient(): boolean {
-  const host = window.location.hostname
-  return host !== "localhost" && host !== "127.0.0.1" && host !== "::1"
-}
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token)
-  window.dispatchEvent(new Event("cogpit-auth-changed"))
+  const hostname = window.location.hostname.toLowerCase()
+  const host = hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname
+  return !LOCAL_HOSTNAMES.has(host)
 }
 
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
+  try {
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    sessionStorage.removeItem(LEGACY_TOKEN_KEY)
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+}
+
+// Remove tokens written by older releases as soon as the hardened client
+// loads. Session credentials must never be readable by page JavaScript.
+if (typeof window !== "undefined") clearToken()
+
+export async function checkAuthSession(): Promise<boolean> {
+  if (!isRemoteClient()) return true
+  try {
+    const response = await fetch("/api/auth/session", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "X-Cogpit-Client": "1" },
+    })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+export async function logoutSession(): Promise<void> {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "X-Cogpit-Client": "1" },
+    })
+  } finally {
+    clearToken()
+  }
 }
 
 /**
@@ -27,9 +64,8 @@ export function clearToken(): void {
  *
  * - Always sends `X-Cogpit-Client: 1` (drive-by-localhost CSRF guard; the hub
  *   requires it on state-changing `/hub/*` requests).
- * - Remote clients inject the bearer token and treat a 401 as "re-auth" (clear
- *   token + `cogpit-auth-required`). Local clients pass responses through
- *   untouched, exactly as before.
+ * - Browser credentials stay in an HttpOnly same-origin cookie. A 401 emits
+ *   `cogpit-auth-required`; JavaScript never reads or attaches the token.
  * - A `502` carrying `X-Cogpit-Device` means the hub could not reach that remote
  *   device; dispatch `cogpit-device-unreachable` (banner signal) and still
  *   return the response.
@@ -50,18 +86,10 @@ function requestWithAuth(
   }
 
   const headers = new Headers(init?.headers)
+  headers.delete("Authorization")
   headers.set("X-Cogpit-Client", "1")
 
-  if (remote) {
-    const token = getToken()
-    if (!token) {
-      window.dispatchEvent(new Event("cogpit-auth-required"))
-      return Promise.reject(new Error("Authentication required"))
-    }
-    headers.set("Authorization", `Bearer ${token}`)
-  }
-
-  return fetch(input, { ...init, headers }).then((res) => {
+  return fetch(input, { ...init, headers, credentials: "same-origin" }).then((res) => {
     if (remote && res.status === 401) {
       clearToken()
       window.dispatchEvent(new Event("cogpit-auth-required"))
@@ -80,9 +108,9 @@ function requestWithAuth(
 }
 
 /**
- * Wrapper around fetch that injects the auth token for remote clients and routes
- * string `/api/*` URLs to the active device. For local clients on the local
- * device this is a transparent passthrough (plus the `X-Cogpit-Client` header).
+ * Wrapper around fetch that includes the browser session cookie and routes
+ * string `/api/*` URLs to the active device. The `X-Cogpit-Client` header is
+ * always present as the mutation-source guard.
  */
 export function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   return requestWithAuth(input, init, true)
@@ -98,17 +126,10 @@ export function hubFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
 }
 
 /**
- * Append auth token to a URL for EventSource (which can't set headers). Routes
- * `/api/*` URLs to the active device first.
+ * Route URLs to the active device. EventSource, images, and WebSockets receive
+ * the same-origin HttpOnly cookie automatically, so credentials never enter
+ * query strings.
  */
 export function authUrl(url: string): string {
-  url = withBase(url)
-  if (!isRemoteClient()) return url
-  const token = getToken()
-  if (!token) {
-    window.dispatchEvent(new Event("cogpit-auth-required"))
-    return url
-  }
-  const sep = url.includes("?") ? "&" : "?"
-  return `${url}${sep}token=${encodeURIComponent(token)}`
+  return withBase(url)
 }

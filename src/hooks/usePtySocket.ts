@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react"
-import { isRemoteClient, getToken } from "@/lib/auth"
 import { devicePrefix } from "@/lib/device"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -64,14 +63,7 @@ export function usePtySocket() {
       // ("/hub/<id>/__pty"); "" for the local device. On a device switch, App
       // remounts (DeviceRoot key) which unmounts this hook and tears the socket
       // down — no in-place reconnect logic needed here.
-      let url = `${protocol}//${window.location.host}${devicePrefix()}/__pty`
-      if (isRemoteClient()) {
-        const token = getToken()
-        if (token) {
-          url += `?token=${encodeURIComponent(token)}`
-        }
-      }
-      return url
+      return `${protocol}//${window.location.host}${devicePrefix()}/__pty`
     }
 
     function connect() {

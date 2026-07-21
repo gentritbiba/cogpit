@@ -1,10 +1,17 @@
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import {
   refreshDirs,
-  isLocalRequest,
+  isTrustedDirectLocalRequest,
+  hasTrustedMutationSource,
+  canIssueBrowserSession,
   isRateLimited,
   createSessionToken,
-  verifyPassword,
+  getRequestSessionToken,
+  setBrowserSessionCookie,
+  clearBrowserSessionCookie,
+  revokeSessionToken,
+  verifyPasswordAsync,
+  needsPasswordRehash,
   hashPassword,
   validatePasswordStrength,
   revokeAllSessions,
@@ -13,6 +20,22 @@ import {
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
+
+const MAX_CONCURRENT_PASSWORD_VERIFICATIONS = 2
+let activePasswordVerifications = 0
+
+async function verifyRemotePassword(
+  password: string,
+  stored: string,
+): Promise<"valid" | "invalid" | "busy"> {
+  if (activePasswordVerifications >= MAX_CONCURRENT_PASSWORD_VERIFICATIONS) return "busy"
+  activePasswordVerifications += 1
+  try {
+    return await verifyPasswordAsync(password, stored) ? "valid" : "invalid"
+  } finally {
+    activePasswordVerifications -= 1
+  }
+}
 
 function getLanIp(): string | null {
   const ifaces = networkInterfaces()
@@ -48,13 +71,31 @@ export function registerConfigRoutes(use: UseFn) {
   })
 
   // POST /api/auth/verify — public endpoint, validates password and issues session token
-  use("/api/auth/verify", (req, res, next) => {
+  use("/api/auth/verify", async (req, res, next) => {
     if (req.method !== "POST") return next()
     res.setHeader("Content-Type", "application/json")
+    res.setHeader("Cache-Control", "no-store")
 
-    // Local requests always pass
-    if (isLocalRequest(req)) {
+    // Direct local clients do not need a network password. Requests forwarded
+    // by a loopback reverse proxy remain remote and must authenticate below.
+    if (isTrustedDirectLocalRequest(req)) {
       res.end(JSON.stringify({ valid: true }))
+      return
+    }
+
+    if (!hasTrustedMutationSource(req)) {
+      res.statusCode = 403
+      res.end(JSON.stringify({ valid: false, error: "Untrusted request source" }))
+      return
+    }
+
+    const browserLogin = req.headers["x-cogpit-client"] === "1"
+    if (browserLogin && !canIssueBrowserSession(req)) {
+      res.statusCode = 426
+      res.end(JSON.stringify({
+        valid: false,
+        error: "Secure HTTPS is required for remote browser access",
+      }))
       return
     }
 
@@ -81,15 +122,73 @@ export function registerConfigRoutes(use: UseFn) {
       return
     }
 
-    if (!verifyPassword(password, config.networkPassword)) {
+    const verification = await verifyRemotePassword(password, config.networkPassword)
+    if (verification === "busy") {
+      res.statusCode = 429
+      res.end(JSON.stringify({ valid: false, error: "Authentication is busy. Try again shortly." }))
+      return
+    }
+    if (verification === "invalid") {
       res.statusCode = 401
       res.end(JSON.stringify({ valid: false, error: "Invalid password" }))
       return
     }
 
+    const strengthError = validatePasswordStrength(password)
+    if (strengthError) {
+      res.statusCode = 403
+      res.end(JSON.stringify({
+        valid: false,
+        error: `${strengthError}. Update it from the local Cogpit app.`,
+      }))
+      return
+    }
+
+    // Upgrade historical SHA-256/plaintext credentials after a successful
+    // login. Failure to persist the upgrade must not invalidate a correct
+    // password; the existing credential remains usable and can retry later.
+    if (needsPasswordRehash(config.networkPassword)) {
+      try {
+        await saveConfig({
+          ...config,
+          networkPassword: hashPassword(password),
+        })
+      } catch {
+        // Best-effort migration; authentication itself already succeeded.
+      }
+    }
+
     // Issue a session token instead of letting client reuse the password
     const sessionToken = createSessionToken(req.socket.remoteAddress || "unknown", req.headers["user-agent"])
-    res.end(JSON.stringify({ valid: true, token: sessionToken }))
+    if (browserLogin) {
+      setBrowserSessionCookie(res, sessionToken)
+      res.end(JSON.stringify({ valid: true }))
+    } else {
+      // Machine clients cannot use HttpOnly cookies and retain the documented
+      // bearer-token contract. Browser callers never receive the token body.
+      res.end(JSON.stringify({ valid: true, token: sessionToken }))
+    }
+  })
+
+  // GET /api/auth/session — protected by authMiddleware; lets the browser
+  // restore its UI state without exposing the HttpOnly token to JavaScript.
+  use("/api/auth/session", (req, res, next) => {
+    if (req.method !== "GET") return next()
+    res.setHeader("Content-Type", "application/json")
+    res.setHeader("Cache-Control", "no-store")
+    res.end(JSON.stringify({ authenticated: true }))
+  })
+
+  // POST /api/auth/logout — revoke only the current session and expire the
+  // browser cookie. Password changes still revoke every session below.
+  use("/api/auth/logout", (req, res, next) => {
+    if (req.method !== "POST") return next()
+    const token = getRequestSessionToken(req)
+    if (token) revokeSessionToken(token)
+    clearBrowserSessionCookie(res)
+    res.setHeader("Content-Type", "application/json")
+    res.setHeader("Cache-Control", "no-store")
+    res.end(JSON.stringify({ valid: true }))
   })
 
   // GET /api/connected-devices — list active remote sessions
@@ -132,6 +231,7 @@ export function registerConfigRoutes(use: UseFn) {
         networkAccess: config.networkAccess || false,
         networkPassword: config.networkPassword ? "set" : null,
         terminalApp: config.terminalApp || null,
+        editorApp: config.editorApp || null,
       } : null))
       return
     }
@@ -202,6 +302,7 @@ export function registerConfigRoutes(use: UseFn) {
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,
+            editorApp: parsed.editorApp || undefined,
           })
           refreshDirs()
 
