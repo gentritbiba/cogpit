@@ -15,7 +15,10 @@ asar: true
 asarUnpack:
   # Native Claude CLI binary spawned by the agent SDK — must live outside asar
   - node_modules/@anthropic-ai/claude-agent-sdk-*/**
-compression: maximum
+# "maximum" made the Linux packaging step take ~7 min per target in CI
+# (compression-bound); "normal" is 2-4x faster for a few percent larger
+# artifacts. Measured 2026-07-21 on the v1.1.3/v1.1.4 release runs.
+compression: normal
 
 files:
   - out/**/*
@@ -69,6 +72,11 @@ linux:
   category: Development
 
 pacman:
+  # fpm defaults to xz, which is the slowest part of the pacman CI job.
+  # zstd is what Arch itself ships — ~5-10x faster to create, near-equal size.
+  fpm:
+    - "--pacman-compression"
+    - "zstd"
   depends:
     - c-ares
     - gcc-libs

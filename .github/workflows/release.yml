@@ -16,7 +16,9 @@ jobs:
     uses: ./.github/workflows/quality.yml
 
   build:
-    needs: quality
+    # Intentionally NOT gated on quality: builds and quality run in parallel
+    # (saves the full quality duration off the release critical path).
+    # `publish` requires BOTH, so no artifact ships without a green quality run.
     permissions:
       contents: read
     strategy:
@@ -52,6 +54,17 @@ jobs:
         with:
           node-version: 20
 
+      # Electron + electron-builder binary downloads (~100MB per run otherwise)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: electron-${{ runner.os }}-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -72,7 +85,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [quality, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
