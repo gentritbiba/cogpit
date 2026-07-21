@@ -13,12 +13,9 @@ Test files follow the pattern `src/**/__tests__/*.test.ts` and `server/__tests__
 
 ## Adding New API Routes
 
-Every new route must be registered in **both** places:
-
-1. `server/api-plugin.ts` — Vite dev server (used during `bun run dev`)
-2. `electron/server.ts` — Electron/production Express server (e.g. port 19384)
-
-Registering in only one means the route works in dev but not in the built app, or vice versa.
+Define the route module under `server/routes/` and register it once in
+`server/api-routes.ts`. Vite, Electron, and standalone composition consume that
+canonical ordered registry.
 
 ## External Session API (cogpit-sessions skill)
 
@@ -35,7 +32,7 @@ See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **cogpit** (4958 symbols, 12841 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **cogpit** (5504 symbols, 14121 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

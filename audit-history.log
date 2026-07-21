@@ -4,6 +4,15 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-07-21 15:17 UTC — Modular Architecture and Hardened Authentication
+- **File:** `audit-history/audit-20260721T151730Z-69d5d05.md`
+- **Status:** PASS
+- **Scope:** Canonical architecture, shared session core, server composition,
+  browser authentication, CI ratchets, and `cogpit-memory` package contracts
+- **Risk:** CRITICAL aggregate GitNexus scope (203 files / 429 symbols / 150 flows)
+- **Verification:** 2,600 tests; lint, strict types, architecture, duplication,
+  audit, sync, web/Electron builds, and package contracts pass
+
 ### 2026-04-17 18:31 — Session Switching Performance + Sub-Agent UI Redesign + SDK Live Updates (PLACEHOLDER)
 - **File:** `audit-history/audit-20260417-1831-PLACEHOLDER.txt`
 - **Status:** DOCUMENTATION UPDATED
@@ -198,4 +207,3 @@ Chronological record of all documentation audits for the agent-window project.
 - **Tests:** 1029/1029 passing
 - **Risk:** LOW
 - **Doc updates:** ARCHITECTURE.md and AGENT_INTEGRATION.md updated
-

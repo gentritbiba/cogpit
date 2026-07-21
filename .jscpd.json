@@ -1,0 +1,14 @@
+{
+  "path": ["shared", "src", "server", "electron"],
+  "ignore": [
+    "**/__tests__/**",
+    "**/*.test.*",
+    "**/dist/**",
+    "**/out/**"
+  ],
+  "minLines": 5,
+  "minTokens": 50,
+  "threshold": 1.55,
+  "reporters": ["console"],
+  "absolute": true
+}

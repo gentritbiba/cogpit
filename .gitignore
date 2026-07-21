@@ -8,6 +8,8 @@ audit-history/
 test-results/
 /out
 /release
+/coverage
 .worktrees/
 process-state.json
 packages/cogpit-memory/cogpit-memory
+.claude/deployments.md

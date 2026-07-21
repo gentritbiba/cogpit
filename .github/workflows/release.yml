@@ -6,10 +6,19 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  ARCHLINUX_IMAGE: archlinux:base@sha256:fe6972d4dc1f660c0c10f4c41b2de8986bab89e7e2955378f8beadb8ebcd7433 # base-20260712.0.555161
 
 jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+
   build:
+    needs: quality
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -20,7 +29,7 @@ jobs:
             pattern: "release/*.dmg"
           - os: ubuntu-latest
             name: Linux (AppImage)
-            cmd: bun run electron:package -- --linux AppImage --x64 --publish always
+            cmd: bun run electron:package -- --linux AppImage --x64 --publish never
             pattern: "release/*.AppImage"
           - os: ubuntu-latest
             name: Linux (pacman)
@@ -31,18 +40,20 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          bun-version: latest
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Install Linux build deps
         if: matrix.os == 'ubuntu-latest'
@@ -52,21 +63,22 @@ jobs:
         run: ${{ matrix.cmd }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ matrix.name }}
           path: ${{ matrix.pattern }}
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
@@ -74,8 +86,29 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f | head -20
 
+      - name: Verify release artifact manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          for extension in dmg AppImage pacman; do
+            if ! find artifacts -maxdepth 1 -type f -name "*.${extension}" -print -quit | grep -q .; then
+              echo "Missing required .${extension} release artifact" >&2
+              exit 1
+            fi
+          done
+
+          if find artifacts -maxdepth 1 -type f \
+            ! -name "*.dmg" \
+            ! -name "*.AppImage" \
+            ! -name "*.pacman" \
+            -print -quit | grep -q .; then
+            echo "Release artifact manifest contains an unexpected file type" >&2
+            find artifacts -maxdepth 1 -type f -print >&2
+            exit 1
+          fi
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: artifacts/*
           generate_release_notes: true
@@ -87,9 +120,13 @@ jobs:
   update-aur:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
@@ -131,8 +168,8 @@ jobs:
       - name: Generate .SRCINFO
         run: |
           cd aur-repo
-          docker run --rm -v "$PWD:/pkg" archlinux:base bash -c \
-            "pacman -Sy --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
+          docker run --rm -v "$PWD:/pkg" "$ARCHLINUX_IMAGE" bash -c \
+            "pacman -Syu --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
 
       - name: Push to AUR
         run: |
@@ -147,9 +184,13 @@ jobs:
   update-aur-server:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Extract version from tag
         id: version
@@ -179,8 +220,8 @@ jobs:
       - name: Generate .SRCINFO
         run: |
           cd aur-repo
-          docker run --rm -v "$PWD:/pkg" archlinux:base bash -c \
-            "pacman -Sy --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
+          docker run --rm -v "$PWD:/pkg" "$ARCHLINUX_IMAGE" bash -c \
+            "pacman -Syu --noconfirm pacman-contrib && useradd -m builder && chown -R builder:builder /pkg && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
 
       - name: Push to AUR
         run: |

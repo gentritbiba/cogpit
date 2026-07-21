@@ -1,6 +1,9 @@
 # cogpit-memory
 
-CLI tool that gives any AI assistant memory of past [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions. Retrieve conversation history, tool usage, thinking blocks, sub-agent activity, and full-text search across all sessions.
+CLI tool that gives any AI assistant memory of past Claude Code and Codex
+sessions. Browse either provider's conversation history, tool usage, thinking
+blocks, and sub-agent activity. Cross-session FTS search currently indexes
+Claude Code history.
 
 All output is JSON to stdout — designed for programmatic consumption by AI agents.
 
@@ -120,13 +123,24 @@ FTS5 trigram search is sublinear — doubling the index size does not double que
 
 ## How It Works
 
-cogpit-memory reads Claude Code's JSONL session files from `~/.claude/projects/`. It parses the conversation structure (turns, tool calls, thinking blocks, sub-agents) and provides a layered drill-down interface.
+Session discovery and context commands read Claude Code JSONL history from
+`~/.claude/projects/` and Codex JSONL history from `~/.codex/sessions/`. The
+shared parser normalizes each provider into the same conversation structure
+(turns, tool calls, thinking blocks, and sub-agents) for layered drill-down.
 
-For search, it maintains an FTS5 trigram index at `~/.claude/cogpit-memory/search-index.db`. The trigram tokenizer enables substring matching (not just whole-word) — searching for `"auth"` matches `"authentication"`, `"OAuth"`, and `"AuthProvider"`.
+Cross-session search currently builds its FTS5 trigram index from the Claude
+project tree and stores it at `~/.claude/cogpit-memory/search-index.db`. The
+trigram tokenizer enables substring matching (not just whole-word) — searching
+for `"auth"` matches `"authentication"`, `"OAuth"`, and `"AuthProvider"`.
 
 ## Development
 
-Requires [Bun](https://bun.sh) for development (source uses `bun:sqlite`). The npm build uses `better-sqlite3` for Node.js compatibility via an esbuild alias.
+The npm package requires Node.js 20 or newer. Development requires [Bun](https://bun.sh) because the source uses `bun:sqlite`; the npm build substitutes `better-sqlite3` through an esbuild alias.
+
+The session parser under `src/lib/` is generated from Cogpit's canonical
+`shared/session/` implementation. Edit the shared copy, then run
+`bun run sync-cogpit-memory` from the Cogpit repository root. CI runs
+`bun run check:cogpit-memory-sync` and rejects drift.
 
 ```bash
 # Run tests (82 tests)
@@ -137,6 +151,9 @@ bun run build
 
 # Build for npm (Node.js, uses better-sqlite3)
 bun run build:npm
+
+# Verify built CommonJS, declarations, public exports, CLI, and npm tarball
+bun run test:contracts
 ```
 
 ## Agent Skill
