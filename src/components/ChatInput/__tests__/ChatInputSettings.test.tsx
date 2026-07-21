@@ -181,7 +181,7 @@ describe("ChatInputSettings", () => {
     expect(onPermissionModeChange).toHaveBeenCalledWith("auto")
   })
 
-  it("requires a separate confirmation dialog before enabling full access", () => {
+  it("enables full access directly without a confirmation dialog", () => {
     const onPermissionModeChange = vi.fn()
     render(
       <ChatInputSettings
@@ -198,10 +198,8 @@ describe("ChatInputSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Workspace" }))
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Full access/ }))
-    expect(onPermissionModeChange).not.toHaveBeenCalled()
 
-    expect(screen.getByRole("dialog", { name: /Enable full access/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /Enable full access/i }))
+    expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
   })
 

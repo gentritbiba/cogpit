@@ -1,59 +1,10 @@
 import { createPortal } from "react-dom"
-import { useState } from "react"
 import { ChevronDown, Shield } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PermissionMode } from "@/lib/permissions"
 import type { AgentKind } from "@/lib/sessionSource"
-import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { getPermissionModeOptions } from "./permissionOptions"
 import { MENU_OFFSET_STYLE, useDropdownState } from "./useDropdownState"
-
-interface FullAccessDialogProps {
-  agentKind: AgentKind
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onConfirm: () => void
-}
-
-export function FullAccessDialog({
-  agentKind,
-  open,
-  onOpenChange,
-  onConfirm,
-}: FullAccessDialogProps) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-red-900/40 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-red-300">Enable full access?</DialogTitle>
-          <DialogDescription>
-            Cogpit will run {agentKind === "codex" ? "Codex" : "Claude"} with no sandbox or approval checks. Commands can read or change anything your user account can access.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            className="bg-red-600 text-white hover:bg-red-500"
-            onClick={onConfirm}
-          >
-            Enable full access
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 interface PermissionDropdownProps {
   agentKind: AgentKind
@@ -69,16 +20,10 @@ export function PermissionDropdown({
   autoAvailable = false,
 }: PermissionDropdownProps) {
   const { open, setOpen, triggerRef, menuRef, menuPos, closeAndFocus } = useDropdownState()
-  const [confirmingFullAccess, setConfirmingFullAccess] = useState(false)
   const options = getPermissionModeOptions(agentKind, autoAvailable)
   const current = options.find((option) => option.value === mode) ?? options[0]
 
   const chooseMode = (nextMode: PermissionMode) => {
-    if (nextMode === "bypassPermissions" && mode !== "bypassPermissions") {
-      setConfirmingFullAccess(true)
-      setOpen(false)
-      return
-    }
     onChange(nextMode)
     closeAndFocus()
   }
@@ -143,17 +88,6 @@ export function PermissionDropdown({
         </div>,
         document.body,
       )}
-
-      <FullAccessDialog
-        agentKind={agentKind}
-        open={confirmingFullAccess}
-        onOpenChange={setConfirmingFullAccess}
-        onConfirm={() => {
-          onChange("bypassPermissions")
-          setConfirmingFullAccess(false)
-          requestAnimationFrame(() => triggerRef.current?.focus())
-        }}
-      />
     </>
   )
 }

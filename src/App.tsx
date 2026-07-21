@@ -41,6 +41,8 @@ import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useParserWorker } from "@/hooks/useParserWorker"
 import { useChunkedSession } from "@/hooks/useChunkedSession"
 import { useComposerSettings } from "@/hooks/useComposerSettings"
+import { useSessionConfigSync } from "@/hooks/useSessionConfigSync"
+import type { SessionConfig } from "@/lib/sessionConfig"
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
 import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
 import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
@@ -285,6 +287,7 @@ export default function App() {
 
   // Permissions management
   const perms = usePermissions()
+  const permsSetMode = perms.setMode
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
   const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
@@ -292,7 +295,10 @@ export default function App() {
   const {
     selectedModel,
     setSelectedModel,
+    selectedEffort,
     setSelectedEffort,
+    fastModeEnabled,
+    ultracodeEnabled,
     effectiveEffort,
     fastModeAvailable,
     fastModeActive,
@@ -310,6 +316,27 @@ export default function App() {
     sessionSource: state.sessionSource,
     pendingDirName: state.pendingDirName,
     isLive,
+  })
+
+  // Session-specific config shared across all Cogpit clients: hydrate the
+  // composer controls from the server-side store when a session opens, and
+  // persist every change back so other devices/browsers see the same state.
+  useSessionConfigSync({
+    sessionKey: state.sessionSource?.fileName ?? null,
+    values: {
+      model: selectedModel,
+      effort: selectedEffort,
+      fastMode: fastModeEnabled,
+      ultracode: ultracodeEnabled,
+      permissionMode: perms.config.mode,
+    },
+    onHydrate: useCallback((config: SessionConfig) => {
+      if (config.model !== undefined) setSelectedModel(config.model)
+      if (config.effort !== undefined) setSelectedEffort(config.effort)
+      if (config.fastMode !== undefined) setFastModeEnabled(config.fastMode)
+      if (config.ultracode !== undefined) setUltracodeEnabled(config.ultracode)
+      if (config.permissionMode) permsSetMode(config.permissionMode)
+    }, [setSelectedModel, setSelectedEffort, setFastModeEnabled, setUltracodeEnabled, permsSetMode]),
   })
 
   // MCP server selection

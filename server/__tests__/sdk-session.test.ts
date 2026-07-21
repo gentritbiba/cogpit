@@ -728,3 +728,76 @@ describe("sdk-session stream bus wiring", () => {
     expect(state.pendingTaskCalls.has("toolu_nested")).toBe(false)
   })
 })
+
+describe("sdk-session mid-turn permission mode change", () => {
+  function addPending(
+    state: { pendingPermissions: Map<string, unknown> },
+    requestId: string,
+    toolName: string,
+  ) {
+    const resolve = vi.fn()
+    state.pendingPermissions.set(requestId, {
+      requestId,
+      toolName,
+      input: { file_path: "/tmp/x" },
+      toolUseId: requestId,
+      timestamp: Date.now(),
+      resolve,
+    })
+    return resolve
+  }
+
+  it("switching to bypassPermissions auto-allows every pending approval", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-1", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+
+    const state = sdkSessions.get("perm-live-1")!
+    const bashResolve = addPending(state, "req-bash", "Bash")
+    const editResolve = addPending(state, "req-edit", "Edit")
+
+    await updateSDKSession("perm-live-1", { permissionMode: "bypassPermissions" })
+
+    expect(bashResolve).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    expect(editResolve).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    expect(state.pendingPermissions.size).toBe(0)
+    expect(setPermissionModeSpy).toHaveBeenCalledWith("bypassPermissions")
+    releaseHeldQuery?.()
+  })
+
+  it("switching to acceptEdits auto-allows only pending edit approvals", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-2", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+
+    const state = sdkSessions.get("perm-live-2")!
+    const bashResolve = addPending(state, "req-bash", "Bash")
+    const writeResolve = addPending(state, "req-write", "Write")
+
+    await updateSDKSession("perm-live-2", { permissionMode: "acceptEdits" })
+
+    expect(writeResolve).toHaveBeenCalledWith(expect.objectContaining({ behavior: "allow" }))
+    expect(bashResolve).not.toHaveBeenCalled()
+    expect(state.pendingPermissions.size).toBe(1)
+    expect(state.pendingPermissions.has("req-bash")).toBe(true)
+    releaseHeldQuery?.()
+  })
+
+  it("an unrelated mode change leaves pending approvals untouched", async () => {
+    const { createSDKSession, updateSDKSession, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    createSDKSession({ sessionId: "perm-live-3", cwd: "/tmp", message: "first" })
+    await waitUntil(() => captured.length === 1)
+
+    const state = sdkSessions.get("perm-live-3")!
+    const bashResolve = addPending(state, "req-bash", "Bash")
+
+    await updateSDKSession("perm-live-3", { permissionMode: "plan" })
+
+    expect(bashResolve).not.toHaveBeenCalled()
+    expect(state.pendingPermissions.size).toBe(1)
+    releaseHeldQuery?.()
+  })
+})

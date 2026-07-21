@@ -17,6 +17,7 @@ export const dirs = {
   TEAMS_DIR: "",
   TASKS_DIR: "",
   UNDO_DIR: "",
+  SESSION_CONFIG_DIR: "",
 }
 
 export const CODEX_HOME_DIR = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
@@ -60,6 +61,7 @@ export function refreshDirs(): boolean {
   dirs.TEAMS_DIR = configuredDirs.TEAMS_DIR
   dirs.TASKS_DIR = configuredDirs.TASKS_DIR
   dirs.UNDO_DIR = configuredDirs.UNDO_DIR
+  dirs.SESSION_CONFIG_DIR = configuredDirs.SESSION_CONFIG_DIR
   return true
 }
 

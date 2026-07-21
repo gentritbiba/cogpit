@@ -26,6 +26,7 @@ import { registerProjectFileContentRoutes } from "./routes/project-file"
 import { registerProjectFileRoutes } from "./routes/project-files"
 import { registerProjectRoutes } from "./routes/projects"
 import { registerScriptRoutes } from "./routes/scripts"
+import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
@@ -84,6 +85,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("files", registerFileRoutes),
   apiRoute("files-watch", registerFileWatchRoutes),
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
+  apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),

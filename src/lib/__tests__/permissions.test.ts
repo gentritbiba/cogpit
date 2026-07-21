@@ -7,8 +7,8 @@ import {
 } from "../permissions"
 
 describe("DEFAULT_PERMISSIONS", () => {
-  it("defaults to the approval-aware workspace mode", () => {
-    expect(DEFAULT_PERMISSIONS.mode).toBe("default")
+  it("defaults to full access", () => {
+    expect(DEFAULT_PERMISSIONS.mode).toBe("bypassPermissions")
   })
 
   it("has empty allowedTools and disallowedTools", () => {

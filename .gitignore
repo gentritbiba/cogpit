@@ -4,6 +4,7 @@ dist
 config.local.json
 **/.DS_Store
 undo-history/
+session-config/
 audit-history/
 test-results/
 /out

@@ -215,5 +215,6 @@ export function getDirs(claudeDir: string) {
     TEAMS_DIR: join(claudeDir, "teams"),
     TASKS_DIR: join(claudeDir, "tasks"),
     UNDO_DIR: join(PROJECT_ROOT, "undo-history"),
+    SESSION_CONFIG_DIR: join(PROJECT_ROOT, "session-config"),
   }
 }

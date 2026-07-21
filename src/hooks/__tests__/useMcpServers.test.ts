@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 import { useMcpServers } from "../useMcpServers"
 
@@ -7,9 +7,29 @@ vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
 }))
 
+// Selections persist in the server-side session config store; mock it with an
+// in-memory map so tests control saved state per key.
+const { configStore } = vi.hoisted(() => ({
+  configStore: new Map<string, { mcpServers?: string[] }>(),
+}))
+vi.mock("@/lib/sessionConfig", () => ({
+  fetchSessionConfig: vi.fn(async (key: string) => configStore.get(key) ?? null),
+  saveSessionConfig: vi.fn((key: string, patch: { mcpServers?: string[] }) => {
+    configStore.set(key, { ...configStore.get(key), ...patch })
+  }),
+}))
+
 import { authFetch } from "@/lib/auth"
 
 const mockFetch = authFetch as unknown as ReturnType<typeof vi.fn>
+
+function setSavedSelection(key: string, selection: string[]) {
+  configStore.set(key, { mcpServers: selection })
+}
+
+function getSavedSelection(key: string): string[] | null {
+  return configStore.get(key)?.mcpServers ?? null
+}
 
 const MOCK_CONFIGS = {
   clickup: { command: "npx", args: ["-y", "mcp-clickup"] },
@@ -31,7 +51,7 @@ function mockServerResponse(
 describe("useMcpServers", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.clear()
+    configStore.clear()
   })
 
   it("fetches servers and auto-selects connected ones", async () => {
@@ -49,7 +69,7 @@ describe("useMcpServers", () => {
     expect(result.current.selectedServers).toEqual(["clickup"])
   })
 
-  it("persists selection to localStorage", async () => {
+  it("persists selection to the session config store", async () => {
     mockServerResponse([
       { name: "clickup", status: "connected" },
       { name: "figma", status: "connected" },
@@ -64,12 +84,11 @@ describe("useMcpServers", () => {
     act(() => result.current.toggleServer("figma"))
     expect(result.current.selectedServers).toEqual(["clickup"])
 
-    const stored = JSON.parse(localStorage.getItem("cogpit:mcpSelection:test-dir") || "null")
-    expect(stored).toEqual(["clickup"])
+    expect(getSavedSelection("test-dir")).toEqual(["clickup"])
   })
 
-  it("loads saved selection from localStorage", async () => {
-    localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["figma"]))
+  it("loads saved selection from the session config store", async () => {
+    setSavedSelection("test-dir", ["figma"])
 
     mockServerResponse([
       { name: "clickup", status: "connected" },
@@ -86,7 +105,7 @@ describe("useMcpServers", () => {
   })
 
   it("returns mcpConfigJson with only selected server configs", async () => {
-    localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+    setSavedSelection("test-dir", ["clickup"])
 
     mockServerResponse([
       { name: "clickup", status: "connected" },
@@ -122,7 +141,7 @@ describe("useMcpServers", () => {
   })
 
   it("returns empty mcpServers config when 0 selected", async () => {
-    localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify([]))
+    setSavedSelection("test-dir", [])
 
     mockServerResponse([
       { name: "clickup", status: "connected" },
@@ -180,7 +199,7 @@ describe("useMcpServers", () => {
   })
 
   it("toggleServer adds a server when not selected", async () => {
-    localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+    setSavedSelection("test-dir", ["clickup"])
 
     mockServerResponse([
       { name: "clickup", status: "connected" },
@@ -225,7 +244,7 @@ describe("useMcpServers", () => {
   })
 
   it("filters out saved servers that are no longer connected", async () => {
-    localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup", "figma"]))
+    setSavedSelection("test-dir", ["clickup", "figma"])
 
     mockServerResponse([
       { name: "clickup", status: "connected" },
@@ -272,7 +291,7 @@ describe("useMcpServers", () => {
   describe("session switch selection", () => {
     it("resets to auto-select-all when switching to a session with no saved selection", async () => {
       // Session A has custom selection
-      localStorage.setItem("cogpit:mcpSelection:session-a.jsonl", JSON.stringify(["clickup"]))
+      setSavedSelection("session-a.jsonl", ["clickup"])
 
       mockServerResponse([
         { name: "clickup", status: "connected" },
@@ -302,7 +321,7 @@ describe("useMcpServers", () => {
 
     it("inherits project-level selection when switching to session with no saved selection", async () => {
       // Project-level default: only clickup
-      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+      setSavedSelection("test-dir", ["clickup"])
 
       mockServerResponse([
         { name: "clickup", status: "connected" },
@@ -310,7 +329,7 @@ describe("useMcpServers", () => {
       ])
 
       // Start with session A (has its own selection)
-      localStorage.setItem("cogpit:mcpSelection:session-a.jsonl", JSON.stringify(["figma"]))
+      setSavedSelection("session-a.jsonl", ["figma"])
       const { result, rerender } = renderHook(
         ({ sessionFileName }) => useMcpServers("/test/path", "test-dir", sessionFileName),
         { initialProps: { sessionFileName: "session-a.jsonl" as string | undefined } },
@@ -443,7 +462,7 @@ describe("useMcpServers", () => {
       })
 
       // Save selection with only clickup (not mystery)
-      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
+      setSavedSelection("test-dir", ["clickup"])
 
       const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
 
@@ -493,51 +512,4 @@ describe("useMcpServers", () => {
     })
   })
 
-  describe("device scoping", () => {
-    function setPath(pathname: string) {
-      Object.defineProperty(window, "location", {
-        value: { pathname },
-        writable: true,
-        configurable: true,
-      })
-    }
-
-    afterEach(() => {
-      setPath("/")
-    })
-
-    it("a fresh remote device does not see the local device's saved selection", async () => {
-      // Local device saved only clickup for this project (bare, un-scoped key).
-      localStorage.setItem("cogpit:mcpSelection:test-dir", JSON.stringify(["clickup"]))
-
-      // Activate a remote device — storage keys are now scoped to it.
-      setPath("/d/dev_x/")
-
-      mockServerResponse([
-        { name: "clickup", status: "connected" },
-        { name: "figma", status: "connected" },
-      ])
-
-      const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined))
-
-      await waitFor(() => {
-        expect(result.current.servers.length).toBe(2)
-      })
-
-      // The bare-key local selection is invisible on the remote device, so it
-      // auto-selects all connected servers rather than inheriting ["clickup"].
-      expect(result.current.selectedServers).toEqual(expect.arrayContaining(["clickup", "figma"]))
-      expect(result.current.selectedServers).toHaveLength(2)
-
-      // Persisting on the remote device writes under the device-scoped key only,
-      // leaving the local device's stored selection untouched.
-      act(() => result.current.toggleServer("figma"))
-      expect(
-        JSON.parse(localStorage.getItem("cogpit:mcpSelection:test-dir::dev_x") || "null"),
-      ).toEqual(["clickup"])
-      expect(
-        JSON.parse(localStorage.getItem("cogpit:mcpSelection:test-dir") || "null"),
-      ).toEqual(["clickup"])
-    })
-  })
 })

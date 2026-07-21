@@ -44,7 +44,7 @@ describe("usePermissions", () => {
       expect(result.current.config.disallowedTools).toEqual(["Bash"])
     })
 
-    it("migrates the legacy bypass default to the safe workspace mode", () => {
+    it("keeps a stored bypass mode (full access is a first-class choice)", () => {
       localStorage.setItem(PERMISSIONS_STORAGE_KEY, JSON.stringify({
         mode: "bypassPermissions",
         allowedTools: [],
@@ -53,8 +53,7 @@ describe("usePermissions", () => {
 
       const { result } = renderHook(() => usePermissions())
 
-      expect(result.current.config.mode).toBe("default")
-      expect(JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode).toBe("default")
+      expect(result.current.config.mode).toBe("bypassPermissions")
     })
 
     it("falls back to DEFAULT_PERMISSIONS for malformed JSON", () => {
@@ -209,25 +208,23 @@ describe("usePermissions", () => {
     })
 
     it("a fresh remote scope falls back to DEFAULT_PERMISSIONS, not the local value", () => {
-      // Local device has an aggressive stored config...
+      // Local device has its own stored config...
       localStorage.setItem(
         PERMISSIONS_STORAGE_KEY,
-        JSON.stringify({ mode: "bypassPermissions", allowedTools: ["Bash"], disallowedTools: [] })
+        JSON.stringify({ mode: "plan", allowedTools: ["Bash"], disallowedTools: [] })
       )
 
-      // ...but a never-seen remote device must start from safe defaults.
+      // ...but a never-seen remote device must start from the defaults.
       setPath("/d/dev_x/")
       const { result } = renderHook(() => usePermissions())
 
       expect(result.current.config).toEqual(DEFAULT_PERMISSIONS)
-      // The remote scope must NOT inherit local bypassPermissions.
-      expect(result.current.config.mode).toBe("default")
       // The fresh remote scope must not have been written from the local value.
       expect(localStorage.getItem(REMOTE_KEY)).toBeNull()
       // The local (unscoped) value is left untouched.
       expect(
         JSON.parse(localStorage.getItem(PERMISSIONS_STORAGE_KEY)!).mode
-      ).toBe("bypassPermissions")
+      ).toBe("plan")
     })
 
     it("persists remote-device changes under the scoped key only", () => {

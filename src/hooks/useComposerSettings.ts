@@ -108,7 +108,10 @@ export function useComposerSettings({
   return {
     selectedModel,
     setSelectedModel,
+    selectedEffort,
     setSelectedEffort,
+    fastModeEnabled,
+    ultracodeEnabled,
     effectiveEffort,
     fastModeAvailable,
     fastModeActive,

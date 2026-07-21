@@ -17,7 +17,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import { FullAccessDialog } from "./PermissionDropdown"
 import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
 import type { CommonSettingsControlProps, DropdownOption, McpServer } from "./types"
@@ -330,8 +329,6 @@ function MobileAdvancedControls({
 interface MobileChatInputSettingsProps extends CommonSettingsControlProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  pendingPermission: PermissionMode | null
-  onPendingPermissionChange: (mode: PermissionMode | null) => void
   catalogOptions: readonly ModelOption[]
   mobileExtra?: ReactNode
 }
@@ -339,8 +336,6 @@ interface MobileChatInputSettingsProps extends CommonSettingsControlProps {
 export function MobileChatInputSettings({
   open,
   onOpenChange,
-  pendingPermission,
-  onPendingPermissionChange,
   agentKind,
   onAgentKindChange,
   selectedModel,
@@ -381,11 +376,6 @@ export function MobileChatInputSettings({
   ].filter(Boolean).join(" · ")
 
   const changeMobilePermission = (nextMode: PermissionMode) => {
-    if (nextMode === "bypassPermissions" && permissionMode !== "bypassPermissions") {
-      onOpenChange(false)
-      onPendingPermissionChange(nextMode)
-      return
-    }
     if (onPermissionModeChange) {
       changeAndApply(() => onPermissionModeChange(nextMode))
     }
@@ -484,20 +474,6 @@ export function MobileChatInputSettings({
           </div>
         </SheetContent>
       </Sheet>
-
-      <FullAccessDialog
-        agentKind={agentKind}
-        open={pendingPermission === "bypassPermissions"}
-        onOpenChange={(dialogOpen) => {
-          if (!dialogOpen) onPendingPermissionChange(null)
-        }}
-        onConfirm={() => {
-          if (onPermissionModeChange) {
-            changeAndApply(() => onPermissionModeChange("bypassPermissions"))
-          }
-          onPendingPermissionChange(null)
-        }}
-      />
     </>
   )
 }

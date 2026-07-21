@@ -81,7 +81,6 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   mobile = false,
 }: ChatInputSettingsProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [mobilePendingPermission, setMobilePendingPermission] = useState<PermissionMode | null>(null)
 
   /** Apply a setting change and auto-apply to the active session if applicable. */
   const changeAndApply = useCallback((apply: () => void) => {
@@ -161,8 +160,6 @@ export const ChatInputSettings = memo(function ChatInputSettings({
         {...commonSettingsProps}
         open={mobileOpen}
         onOpenChange={setMobileOpen}
-        pendingPermission={mobilePendingPermission}
-        onPendingPermissionChange={setMobilePendingPermission}
         catalogOptions={catalogOptions}
         mobileExtra={mobileExtra}
       />

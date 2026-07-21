@@ -112,7 +112,7 @@ describe("ChatInputSettings mobile", () => {
     expect(onMcpAuth).toHaveBeenCalledWith("github")
   })
 
-  it("closes the sheet and confirms before enabling full access", async () => {
+  it("enables full access directly without a confirmation dialog", async () => {
     const user = userEvent.setup()
     const onPermissionModeChange = vi.fn()
 
@@ -136,11 +136,7 @@ describe("ChatInputSettings mobile", () => {
       target: { value: "bypassPermissions" },
     })
 
-    expect(onPermissionModeChange).not.toHaveBeenCalled()
-    expect(screen.queryByRole("dialog", { name: "Session controls" })).not.toBeInTheDocument()
-    expect(screen.getByRole("dialog", { name: /Enable full access/i })).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: /Enable full access/i }))
+    expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")
   })
 })

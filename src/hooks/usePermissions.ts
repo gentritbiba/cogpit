@@ -9,9 +9,8 @@ import { deviceScopedKey } from "@/lib/device"
 
 // Permissions are per-device: the local device keeps the unscoped key; a remote
 // device gets its own scoped key. A fresh remote scope has no stored value and
-// falls back to explicit DEFAULT_PERMISSIONS — it NEVER inherits the local
-// device's stored value (e.g. a local bypassPermissions must not leak to a
-// remote machine).
+// falls back to explicit DEFAULT_PERMISSIONS — it never inherits the local
+// device's stored value.
 function storageKey(): string {
   return deviceScopedKey(PERMISSIONS_STORAGE_KEY)
 }
@@ -21,21 +20,11 @@ function loadFromStorage(): PermissionsConfig {
     const raw = localStorage.getItem(storageKey())
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PermissionsConfig>
-      const storedMode = (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode
-      // Older Cogpit builds defaulted to YOLO/bypass. Never carry that legacy
-      // choice into the new provider-aware safety model without confirmation.
-      const migratedMode = storedMode === "bypassPermissions"
-        ? DEFAULT_PERMISSIONS.mode
-        : storedMode
-      const migrated = {
-        mode: migratedMode,
+      return {
+        mode: (parsed.mode as PermissionMode) || DEFAULT_PERMISSIONS.mode,
         allowedTools: Array.isArray(parsed.allowedTools) ? parsed.allowedTools : [],
         disallowedTools: Array.isArray(parsed.disallowedTools) ? parsed.disallowedTools : [],
       }
-      if (migratedMode !== storedMode) {
-        localStorage.setItem(storageKey(), JSON.stringify(migrated))
-      }
-      return migrated
     }
   } catch {
     // corrupted storage

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
-import { deviceScopedKey } from "@/lib/device"
+import { fetchSessionConfig, saveSessionConfig } from "@/lib/sessionConfig"
 
 export interface McpServer {
   name: string
@@ -14,27 +14,21 @@ interface McpResponse {
   configs: McpConfigs
 }
 
-const STORAGE_PREFIX = "cogpit:mcpSelection:"
-
 /** Extract the set of connected server names from a server list. */
 function connectedNames(servers: McpServer[]): Set<string> {
   return new Set(servers.filter(s => s.status === "connected").map(s => s.name))
 }
 
-// Storage keys are device-scoped (computed lazily at each access) so one
-// device's MCP selection can never govern another device's session spawn.
-function loadSavedSelection(key: string): string[] | null {
-  try {
-    const stored = localStorage.getItem(deviceScopedKey(STORAGE_PREFIX + key))
-    if (stored) return JSON.parse(stored)
-  } catch { /* ignore */ }
-  return null
+// Selections live in the server-side session config store, so every Cogpit
+// client (any browser or device) sees the same per-session MCP state, and
+// remote devices are inherently scoped to their own server.
+async function loadSavedSelection(key: string): Promise<string[] | null> {
+  const config = await fetchSessionConfig(key)
+  return Array.isArray(config?.mcpServers) ? config.mcpServers : null
 }
 
 function saveSelection(key: string, selected: string[]): void {
-  try {
-    localStorage.setItem(deviceScopedKey(STORAGE_PREFIX + key), JSON.stringify(selected))
-  } catch { /* ignore */ }
+  saveSessionConfig(key, { mcpServers: selected })
 }
 
 async function parseServerResponse(res: Response): Promise<McpResponse | null> {
@@ -61,17 +55,17 @@ async function fetchServerResponse(url: string, signal: AbortSignal): Promise<Mc
  * Resolve the initial selection for a given storage key and server list.
  * Tries session-specific key first, then project-level fallback, then auto-selects all connected.
  */
-function resolveSelection(
+async function resolveSelection(
   storageKey: string | null,
   dirName: string | undefined,
   servers: McpServer[],
-): string[] {
+): Promise<string[]> {
   const connected = connectedNames(servers)
   if (connected.size === 0) return []
 
   // Try session-specific saved selection
   if (storageKey) {
-    const saved = loadSavedSelection(storageKey)
+    const saved = await loadSavedSelection(storageKey)
     if (saved) {
       return saved.filter(name => connected.has(name))
     }
@@ -79,7 +73,7 @@ function resolveSelection(
 
   // Try project-level fallback (when storageKey is session-specific)
   if (dirName && storageKey !== dirName) {
-    const projectSaved = loadSavedSelection(dirName)
+    const projectSaved = await loadSavedSelection(dirName)
     if (projectSaved) {
       return projectSaved.filter(name => connected.has(name))
     }
@@ -133,12 +127,14 @@ export function useMcpServers(
     void fetchServerResponse(
       `/api/mcp-servers?cwd=${encodeURIComponent(cwd)}`,
       controller.signal,
-    ).then((parsed) => {
+    ).then(async (parsed) => {
         if (controller.signal.aborted || fetchedCwdRef.current !== cwd || !parsed) return
 
         setServers(parsed.servers)
         setConfigs(parsed.configs)
-        setSelectedServers(resolveSelection(storageKeyRef.current, dirNameRef.current, parsed.servers))
+        const selection = await resolveSelection(storageKeyRef.current, dirNameRef.current, parsed.servers)
+        if (controller.signal.aborted || fetchedCwdRef.current !== cwd) return
+        setSelectedServers(selection)
       })
       .finally(() => {
         if (controller.signal.aborted || fetchedCwdRef.current !== cwd) return
@@ -159,7 +155,12 @@ export function useMcpServers(
     // Skip if no storageKey
     if (!storageKey) return
 
-    setSelectedServers(resolveSelection(storageKey, dirName, servers))
+    let cancelled = false
+    void resolveSelection(storageKey, dirName, servers).then((selection) => {
+      if (cancelled || storageKeyRef.current !== storageKey) return
+      setSelectedServers(selection)
+    })
+    return () => { cancelled = true }
   }, [storageKey]) // eslint-disable-line react-hooks/exhaustive-deps
   // Intentionally exclude `servers` and `dirName` — we only want this to fire
   // on session switches, NOT when servers change (that's handled by the cwd effect).

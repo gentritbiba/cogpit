@@ -630,6 +630,24 @@ async function pushSessionUpdates(
   return applied
 }
 
+// Switching permission mode mid-turn must take effect immediately: approvals
+// the user is currently being asked for are re-evaluated under the new mode so
+// the turn continues without further clicks. bypassPermissions allows
+// everything pending; acceptEdits allows pending file edits.
+const EDIT_TOOL_NAMES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
+
+function autoResolvePendingForMode(state: SDKSessionState, changes: AppliedSessionUpdates): void {
+  if (!changes.permissionModeChanged) return
+  const allowAll = state.permissionMode === "bypassPermissions"
+  const allowEdits = state.permissionMode === "acceptEdits"
+  if (!allowAll && !allowEdits) return
+  for (const [requestId, pending] of [...state.pendingPermissions]) {
+    if (!allowAll && !EDIT_TOOL_NAMES.has(pending.toolName)) continue
+    state.pendingPermissions.delete(requestId)
+    applyDecision(state, pending, "allow")
+  }
+}
+
 export async function updateSDKSession(
   sessionId: string,
   updates: SDKSessionUpdates,
@@ -637,6 +655,7 @@ export async function updateSDKSession(
   const state = sdkSessions.get(sessionId)
   if (!state) return { found: false, appliedLive: [], staged: Object.keys(updates) }
   const changes = applySessionUpdates(state, updates)
+  autoResolvePendingForMode(state, changes)
   let appliedLive: string[] = []
   try {
     appliedLive = await pushSessionUpdates(state, changes)
@@ -661,6 +680,7 @@ export function sendSDKMessage(
   if (!state) return null
 
   const changes = applySessionUpdates(state, updates)
+  autoResolvePendingForMode(state, changes)
 
   if (state.running && state.activeQuery) {
     const q = state.activeQuery
