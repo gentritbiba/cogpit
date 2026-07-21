@@ -4,7 +4,7 @@ import type {
   SystemProcessKind,
   SystemProcessMetric,
   SystemProcessesSnapshot,
-} from "../../src/lib/performanceTypes"
+} from "../../shared/contracts/performance"
 
 /**
  * System-wide view of agent-related processes (Claude sessions, headless

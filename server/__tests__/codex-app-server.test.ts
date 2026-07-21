@@ -20,13 +20,13 @@ class FakeCodexProcess
   readonly stderr = new PassThrough()
   readonly messages: JsonObject[] = []
   killed = false
+  ignoreSigterm = false
   readonly kill = vi.fn((signal?: NodeJS.Signals | number) => {
     this.killed = true
-    this.emit(
-      "close",
-      null,
-      typeof signal === "string" ? signal : "SIGTERM",
-    )
+    const resolvedSignal = typeof signal === "string" ? signal : "SIGTERM"
+    if (resolvedSignal !== "SIGTERM" || !this.ignoreSigterm) {
+      this.emit("close", null, resolvedSignal)
+    }
     return true
   })
 
@@ -644,5 +644,36 @@ describe("CodexAppServer shutdown", () => {
       "has been shut down",
     )
     expect(harness.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it("waits for the grace period and force-kills a SIGTERM-resistant child", async () => {
+    vi.useFakeTimers()
+    const harness = createHarness()
+    const child = await initialize(harness)
+    child.ignoreSigterm = true
+    let settled = false
+
+    const shutdown = harness.server.shutdown().then(() => { settled = true })
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM")
+    await vi.advanceTimersByTimeAsync(2_999)
+    expect(settled).toBe(false)
+    expect(child.kill).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await shutdown
+
+    expect(child.kill.mock.calls.map(([signal]) => signal)).toEqual(["SIGTERM", "SIGKILL"])
+    expect(settled).toBe(true)
+  })
+
+  it("returns one shared promise to concurrent shutdown callers", async () => {
+    const harness = createHarness()
+    await initialize(harness)
+
+    const first = harness.server.shutdown()
+    const second = harness.server.shutdown()
+
+    expect(second).toBe(first)
+    await first
   })
 })

@@ -13,7 +13,7 @@
  * files re-read and re-scanned per poll for nothing.)
  */
 
-import type { SessionStatusInfo } from "../../src/lib/sessionStatus"
+import type { SessionStatusInfo } from "../../shared/session/sessionStatus"
 
 export type SessionMeta = Awaited<ReturnType<typeof import("../sessionMetadata").getSessionMeta>>
 
@@ -30,6 +30,7 @@ export const SESSION_META_TTL_MS = 600_000
 const MAX_ENTRIES = 1000
 
 const cache = new Map<string, CachedMeta>()
+const inFlight = new Map<string, Promise<CachedMeta>>()
 
 /**
  * Return cached metadata for `filePath` if the entry exists, is not expired,
@@ -62,6 +63,35 @@ export function setCachedSessionMeta(filePath: string, value: CachedMeta): void 
   }
 }
 
+/**
+ * Return cached metadata or share one loader across concurrent callers for the
+ * same file revision. This avoids duplicate full-file parsing on home load.
+ */
+export function getOrLoadSessionMeta(
+  filePath: string,
+  mtimeMs: number,
+  load: () => Promise<Pick<CachedMeta, "meta" | "status">>,
+): Promise<CachedMeta> {
+  const cached = getCachedSessionMeta(filePath, mtimeMs)
+  if (cached) return Promise.resolve(cached)
+
+  const key = `${filePath}\0${mtimeMs}`
+  const pending = inFlight.get(key)
+  if (pending) return pending
+
+  const request = load()
+    .then(({ meta, status }) => {
+      const value = { meta, status, mtimeMs, cachedAt: Date.now() }
+      setCachedSessionMeta(filePath, value)
+      return value
+    })
+    .finally(() => {
+      inFlight.delete(key)
+    })
+  inFlight.set(key, request)
+  return request
+}
+
 /** Remove a single entry. Safe to call even when the path is not cached. */
 export function invalidateSessionMeta(filePath: string): void {
   cache.delete(filePath)
@@ -70,4 +100,5 @@ export function invalidateSessionMeta(filePath: string): void {
 /** Clear the entire cache (e.g. for tests). */
 export function invalidateAll(): void {
   cache.clear()
+  inFlight.clear()
 }

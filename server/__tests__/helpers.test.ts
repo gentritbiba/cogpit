@@ -15,7 +15,10 @@ import {
   isLocalRequest,
   createSessionToken,
   validateSessionToken,
+  revokeSessionToken,
   revokeAllSessions,
+  setBrowserSessionCookie,
+  clearBrowserSessionCookie,
   friendlySpawnError,
   securityHeaders,
   bodySizeLimit,
@@ -245,15 +248,40 @@ describe("createSessionToken / validateSessionToken", () => {
     expect(validateSessionToken("nonexistent")).toBe(false)
   })
 
-  it("rejects expired token", () => {
+  it("rejects a token after 30 minutes of inactivity", () => {
     vi.useFakeTimers()
     const token = createSessionToken("127.0.0.1")
     expect(validateSessionToken(token)).toBe(true)
 
-    // Advance past 24h TTL
-    vi.advanceTimersByTime(25 * 60 * 60 * 1000)
+    vi.advanceTimersByTime(31 * 60 * 1000)
     expect(validateSessionToken(token)).toBe(false)
     vi.useRealTimers()
+  })
+
+  it("enforces the eight-hour absolute lifetime despite activity", () => {
+    vi.useFakeTimers()
+    const token = createSessionToken("127.0.0.1")
+    for (let i = 0; i < 24; i++) {
+      vi.advanceTimersByTime(20 * 60 * 1000)
+      expect(validateSessionToken(token)).toBe(true)
+    }
+    vi.advanceTimersByTime(1)
+    expect(validateSessionToken(token)).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it("optionally binds validation to the original user agent", () => {
+    const token = createSessionToken("127.0.0.1", "Browser/1")
+    expect(validateSessionToken(token, "Browser/1")).toBe(true)
+    expect(validateSessionToken(token, "Browser/2")).toBe(false)
+  })
+
+  it("can revoke one session without revoking another", () => {
+    const first = createSessionToken("127.0.0.1")
+    const second = createSessionToken("127.0.0.1")
+    revokeSessionToken(first)
+    expect(validateSessionToken(first)).toBe(false)
+    expect(validateSessionToken(second)).toBe(true)
   })
 })
 
@@ -278,7 +306,7 @@ describe("friendlySpawnError", () => {
 describe("securityHeaders", () => {
   it("sets all required security headers and calls next", () => {
     const headers: Record<string, string> = {}
-    const req = {} as IncomingMessage
+    const req = { socket: {}, headers: {}, url: "/api/projects" } as unknown as IncomingMessage
     const res = {
       setHeader: (name: string, value: string) => { headers[name] = value },
     } as unknown as ServerResponse
@@ -290,8 +318,57 @@ describe("securityHeaders", () => {
     expect(headers["X-Frame-Options"]).toBe("DENY")
     expect(headers["Referrer-Policy"]).toBe("no-referrer")
     expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=()")
-    expect(headers["X-XSS-Protection"]).toBe("1; mode=block")
+    expect(headers["X-XSS-Protection"]).toBe("0")
+    expect(headers["Cross-Origin-Opener-Policy"]).toBe("same-origin")
+    expect(headers["Cross-Origin-Resource-Policy"]).toBe("same-origin")
+    expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'")
+    expect(headers["Cache-Control"]).toBe("no-store")
+    expect(headers["Strict-Transport-Security"]).toBeUndefined()
     expect(next).toHaveBeenCalledOnce()
+  })
+
+  it("sets HSTS only when the request arrived over HTTPS", () => {
+    const headers: Record<string, string> = {}
+    const req = {
+      socket: { remoteAddress: "127.0.0.1" },
+      headers: { host: "mb.cogpit.dev", "x-forwarded-proto": "https" },
+      url: "/",
+    } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+
+    securityHeaders(req, res, vi.fn())
+    expect(headers["Strict-Transport-Security"]).toBe("max-age=63072000")
+    const connectSources = headers["Content-Security-Policy"]
+      .split(";")
+      .map((directive) => directive.trim().split(/\s+/))
+      .find(([name]) => name === "connect-src")
+      ?.slice(1)
+    expect(connectSources).toContain("wss://mb.cogpit.dev")
+    expect(connectSources).not.toContain("wss:")
+  })
+})
+
+describe("browser session cookies", () => {
+  it("uses a host-only HttpOnly Secure Strict cookie", () => {
+    const setHeader = vi.fn()
+    const res = { setHeader } as unknown as ServerResponse
+    setBrowserSessionCookie(res, "abc123")
+    expect(setHeader).toHaveBeenCalledWith(
+      "Set-Cookie",
+      expect.stringMatching(/^__Host-cogpit_session=abc123; Path=\/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800$/),
+    )
+  })
+
+  it("expires the same hardened cookie on logout", () => {
+    const setHeader = vi.fn()
+    const res = { setHeader } as unknown as ServerResponse
+    clearBrowserSessionCookie(res)
+    expect(setHeader).toHaveBeenCalledWith(
+      "Set-Cookie",
+      "__Host-cogpit_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+    )
   })
 })
 
@@ -431,6 +508,7 @@ describe("authMiddleware", () => {
 
   it("allows local requests without auth", () => {
     const req = mockReq("127.0.0.1", "/api/projects")
+    req.headers.host = "127.0.0.1:19384"
     const { res } = mockRes()
     const next = vi.fn()
 
@@ -566,6 +644,29 @@ describe("isRateLimited isolation between IPs", () => {
 
     // req2 should still be allowed
     expect(isRateLimited(req2)).toBe(false)
+  })
+
+  it("isolates forwarded clients sharing one tunnel connector", () => {
+    const forwardedReq = (ip: string) => ({
+      socket: { remoteAddress: "127.0.0.2" },
+      headers: { "cf-connecting-ip": ip },
+    }) as unknown as IncomingMessage
+
+    for (let i = 0; i < 6; i++) isRateLimited(forwardedReq("203.0.113.1"))
+    expect(isRateLimited(forwardedReq("203.0.113.1"))).toBe(true)
+    expect(isRateLimited(forwardedReq("203.0.113.2"))).toBe(false)
+  })
+
+  it("keeps a connector-wide ceiling even when forwarding headers vary", () => {
+    let limited = false
+    for (let i = 0; i < 31; i++) {
+      const req = {
+        socket: { remoteAddress: "127.0.0.3" },
+        headers: { "x-forwarded-for": `198.51.100.${i}` },
+      } as unknown as IncomingMessage
+      limited = isRateLimited(req)
+    }
+    expect(limited).toBe(true)
   })
 })
 

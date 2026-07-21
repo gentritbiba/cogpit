@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
+import type { CachedMeta } from "../../lib/sessionMetaCache"
 
 // We use dynamic imports after vi.useFakeTimers so Date.now is mocked
 // per test. Module is re-loaded each time via vi.resetModules.
@@ -19,7 +20,7 @@ describe("sessionMetaCache", () => {
     return mod
   }
 
-  function makeCachedMeta(overrides?: Partial<Parameters<Awaited<ReturnType<typeof loadModule>>["setCachedSessionMeta"]>[1]>) {
+  function makeCachedMeta(overrides: Partial<CachedMeta> = {}): CachedMeta {
     return {
       meta: {
         sessionId: "abc",
@@ -28,6 +29,7 @@ describe("sessionMetaCache", () => {
         model: "",
         slug: "",
         name: "",
+        aiTitle: "",
         cwd: "/test",
         firstUserMessage: "hello",
         lastUserMessage: "world",
@@ -36,6 +38,8 @@ describe("sessionMetaCache", () => {
         turnCount: 1,
         lineCount: 10,
         branchedFrom: undefined,
+        teamName: "",
+        agentName: "",
         isSubagent: false,
         parentSessionId: null,
       },
@@ -152,5 +156,33 @@ describe("sessionMetaCache", () => {
     setCachedSessionMeta("/test/file.jsonl", updated)
     const result = getCachedSessionMeta("/test/file.jsonl", 2000)
     expect(result?.meta.sessionId).toBe("xyz")
+  })
+
+  it("shares one loader across concurrent misses", async () => {
+    const { getOrLoadSessionMeta } = await loadModule()
+    let resolve!: (value: Pick<CachedMeta, "meta" | "status">) => void
+    const pending = new Promise<Pick<CachedMeta, "meta" | "status">>((done) => {
+      resolve = done
+    })
+    const loader = vi.fn(() => pending)
+
+    const first = getOrLoadSessionMeta("/test/file.jsonl", 1000, loader)
+    const second = getOrLoadSessionMeta("/test/file.jsonl", 1000, loader)
+    resolve(makeCachedMeta())
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toBe(secondResult)
+    expect(loader).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses a warm entry without calling the loader", async () => {
+    const { getOrLoadSessionMeta, setCachedSessionMeta } = await loadModule()
+    setCachedSessionMeta("/test/file.jsonl", makeCachedMeta())
+    const loader = vi.fn()
+
+    const result = await getOrLoadSessionMeta("/test/file.jsonl", 1000, loader)
+
+    expect(result.meta.sessionId).toBe("abc")
+    expect(loader).not.toHaveBeenCalled()
   })
 })

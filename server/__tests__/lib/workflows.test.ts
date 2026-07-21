@@ -140,7 +140,8 @@ describe("workflow normalization", () => {
 
     it("parses wf_*.json files and sorts newest first, skipping junk", async () => {
       mockedReaddir.mockResolvedValueOnce(["wf_old.json", "wf_new.json", "notes.txt", "scripts"] as never)
-      mockedReadFile.mockImplementation(async (p: string) => {
+      mockedReadFile.mockImplementation(async (path: Parameters<typeof readFile>[0]) => {
+        const p = String(path)
         if (p.includes("wf_old.json")) return JSON.stringify(journal({ runId: "wf_old", startTime: 100 }))
         if (p.includes("wf_new.json")) return JSON.stringify(journal({ runId: "wf_new", startTime: 999 }))
         throw new Error("unexpected read " + p)
@@ -151,7 +152,8 @@ describe("workflow normalization", () => {
 
     it("skips files that fail to parse", async () => {
       mockedReaddir.mockResolvedValueOnce(["wf_bad.json", "wf_ok.json"] as never)
-      mockedReadFile.mockImplementation(async (p: string) => {
+      mockedReadFile.mockImplementation(async (path: Parameters<typeof readFile>[0]) => {
+        const p = String(path)
         if (p.includes("wf_bad.json")) return "{not json"
         return JSON.stringify(journal({ runId: "wf_ok", startTime: 5 }))
       })

@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks"
 
-import type { ActivityMetric, ServerPerformanceSnapshot } from "../../src/lib/performanceTypes"
+import type { ActivityMetric, ServerPerformanceSnapshot } from "../../shared/contracts/performance"
 
 const SAMPLE_WINDOW_SECONDS = 10
 const RETAINED_SECONDS = 60

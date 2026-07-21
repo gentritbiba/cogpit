@@ -1,17 +1,181 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-
-// ── Shared types (duplicated here to avoid circular imports) ─────────
-
-type NextFn = (err?: unknown) => void
+import type { NextFn } from "./http"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
 const LOCAL_ADDRS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"])
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
+const FORWARDING_HEADERS = [
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+] as const
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+const BROWSER_SESSION_COOKIE = "__Host-cogpit_session"
+const SESSION_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000
+const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
 
 export function isLocalRequest(req: IncomingMessage): boolean {
   return LOCAL_ADDRS.has(req.socket.remoteAddress || "")
+}
+
+function requestHostname(req: IncomingMessage): string | null {
+  const host = req.headers.host
+  if (!host) return null
+  try {
+    return new URL(`http://${host}`).hostname.toLowerCase().replace(/\.$/, "")
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A loopback socket alone is not a trust boundary: DNS rebinding can make a
+ * browser send a request to 127.0.0.1 while retaining an attacker-controlled
+ * Host header. Local auth bypasses are therefore limited to literal loopback
+ * hosts used by the desktop app and local development server.
+ */
+export function isTrustedLocalHost(req: IncomingMessage): boolean {
+  const hostname = requestHostname(req)
+  return hostname !== null && LOCAL_HOSTS.has(hostname)
+}
+
+/**
+ * A reverse proxy terminating on loopback is still a remote trust boundary.
+ * Standard forwarding headers make that boundary explicit so proxied requests
+ * follow the password/session-token path even when the proxy rewrites Host.
+ */
+export function isForwardedRequest(req: IncomingMessage): boolean {
+  return FORWARDING_HEADERS.some((header) => req.headers[header] !== undefined)
+}
+
+export function isTrustedDirectLocalRequest(req: IncomingMessage): boolean {
+  return isLocalRequest(req) && isTrustedLocalHost(req) && !isForwardedRequest(req)
+}
+
+function isUnforwardedUntrustedLoopback(req: IncomingMessage): boolean {
+  return isLocalRequest(req) && !isForwardedRequest(req) && !isTrustedLocalHost(req)
+}
+
+function hasSameOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  const host = req.headers.host
+  if (!origin || !host) return false
+
+  try {
+    const parsed = new URL(origin)
+    const expectedProtocol = requestUsesHttps(req) ? "https:" : "http:"
+    return parsed.protocol === expectedProtocol && parsed.host.toLowerCase() === host.toLowerCase()
+  } catch {
+    return false
+  }
+}
+
+export function hasTrustedMutationSource(req: IncomingMessage): boolean {
+  // Any explicit browser origin must match, even if a custom client header is
+  // present. This fails closed for extensions, permissive CORS proxies, and
+  // future callers that can set X-Cogpit-Client cross-origin.
+  if (req.headers.origin && !hasSameOrigin(req)) return false
+
+  const fetchSite = req.headers["sec-fetch-site"]
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return false
+
+  // At this point the request is same-origin or carries no browser source
+  // metadata. The latter keeps headerless curl/agent clients compatible.
+  return true
+}
+
+function requestUsesHttps(req: IncomingMessage): boolean {
+  if ((req.socket as (typeof req.socket & { encrypted?: boolean }) | undefined)?.encrypted) return true
+  if (!isForwardedRequest(req)) return false
+
+  const forwardedProto = req.headers["x-forwarded-proto"]
+  const firstProto = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto?.split(",")[0]
+  if (firstProto?.trim().toLowerCase() === "https") return true
+
+  const forwarded = req.headers.forwarded
+  const value: string | undefined = Array.isArray(forwarded) ? forwarded[0] : forwarded
+  return value?.split(",")[0]?.split(";").some((part: string) => part.trim().toLowerCase() === "proto=https") ?? false
+}
+
+function cookieValue(req: IncomingMessage, name: string): string | null {
+  const raw = req.headers.cookie
+  if (!raw) return null
+  for (const pair of raw.split(";")) {
+    const index = pair.indexOf("=")
+    if (index === -1 || pair.slice(0, index).trim() !== name) continue
+    return pair.slice(index + 1).trim() || null
+  }
+  return null
+}
+
+function bearerToken(req: IncomingMessage): string | null {
+  const header = req.headers.authorization
+  return header?.startsWith("Bearer ") ? header.slice(7) || null : null
+}
+
+export function getRequestSessionToken(req: IncomingMessage): string | null {
+  return bearerToken(req) ?? cookieValue(req, BROWSER_SESSION_COOKIE)
+}
+
+export function setBrowserSessionCookie(res: ServerResponse, token: string): void {
+  res.setHeader(
+    "Set-Cookie",
+    `${BROWSER_SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(SESSION_ABSOLUTE_TTL_MS / 1000)}`,
+  )
+}
+
+export function clearBrowserSessionCookie(res: ServerResponse): void {
+  res.setHeader(
+    "Set-Cookie",
+    `${BROWSER_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+  )
+}
+
+export function canIssueBrowserSession(req: IncomingMessage): boolean {
+  return requestUsesHttps(req) && hasTrustedMutationSource(req)
+}
+
+/**
+ * Return the HTTP rejection status for a PTY WebSocket upgrade, or `null` when
+ * the request is authorized. Browser-originated loopback sockets must be both
+ * literal-loopback Host requests and same-origin, closing cross-site WebSocket
+ * hijacking and DNS-rebinding paths without breaking headerless CLI clients.
+ */
+export function websocketUpgradeRejection(
+  req: IncomingMessage,
+  url: URL,
+): 401 | 403 | null {
+  if (isUnforwardedUntrustedLoopback(req)) return 403
+
+  if (isTrustedDirectLocalRequest(req)) {
+    if (req.headers.origin && !hasSameOrigin(req)) return 403
+    return null
+  }
+
+  const config = getConfig()
+  if (!config?.networkAccess || !config.networkPassword) return 401
+
+  const origin = req.headers.origin
+  if (origin) {
+    const token = cookieValue(req, BROWSER_SESSION_COOKIE)
+    if (!hasSameOrigin(req)) return 403
+    if (!token || !validateSessionToken(token, req.headers["user-agent"])) return 401
+    return null
+  }
+
+  // Headerless machine clients and the hub-to-device proxy retain the query
+  // token handshake. Browser WebSockets must use the HttpOnly cookie above, so
+  // their credentials never enter URLs, logs, or browser history.
+  const token = url.searchParams.get("token")
+  if (!token || !validateSessionToken(token)) {
+    return 401
+  }
+  return null
 }
 
 export function safeCompare(a: string, b: string): boolean {
@@ -34,7 +198,6 @@ interface SessionInfo {
 }
 
 const activeSessions = new Map<string, SessionInfo>()
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 export function createSessionToken(ip: string, userAgent?: string): string {
   const token = randomBytes(32).toString("hex")
@@ -43,15 +206,24 @@ export function createSessionToken(ip: string, userAgent?: string): string {
   return token
 }
 
-export function validateSessionToken(token: string): boolean {
+export function validateSessionToken(token: string, userAgent?: string): boolean {
   const session = activeSessions.get(token)
   if (!session) return false
-  if (Date.now() - session.createdAt > SESSION_TTL_MS) {
+  const now = Date.now()
+  if (
+    now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
+    || now - session.lastActivity > SESSION_IDLE_TTL_MS
+    || (userAgent !== undefined && session.userAgent !== userAgent)
+  ) {
     activeSessions.delete(token)
     return false
   }
-  session.lastActivity = Date.now()
+  session.lastActivity = now
   return true
+}
+
+export function revokeSessionToken(token: string): void {
+  activeSessions.delete(token)
 }
 
 export function revokeAllSessions(): void {
@@ -62,7 +234,10 @@ export function getConnectedDevices(): Array<{ ip: string; userAgent: string; de
   const now = Date.now()
   const devices: Array<{ ip: string; userAgent: string; deviceName: string; connectedAt: number; lastActivity: number }> = []
   for (const [, session] of activeSessions) {
-    if (now - session.createdAt > SESSION_TTL_MS) continue
+    if (
+      now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
+      || now - session.lastActivity > SESSION_IDLE_TTL_MS
+    ) continue
     devices.push({
       ip: session.ip.replace(/^::ffff:/, ""),
       userAgent: session.userAgent,
@@ -93,17 +268,27 @@ function parseDeviceName(ua: string): string {
 setInterval(() => {
   const now = Date.now()
   for (const [token, session] of activeSessions) {
-    if (now - session.createdAt > SESSION_TTL_MS) activeSessions.delete(token)
+    if (
+      now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
+      || now - session.lastActivity > SESSION_IDLE_TTL_MS
+    ) activeSessions.delete(token)
   }
 }, 60_000).unref()
 
 // ── Password hashing ────────────────────────────────────────────────
 
-export { hashPassword, isPasswordHashed, verifyPassword } from "./password-utils"
+export {
+  hashPassword,
+  isMalformedPasswordHash,
+  isPasswordHashed,
+  needsPasswordRehash,
+  verifyPassword,
+  verifyPasswordAsync,
+} from "./password-utils"
 
 // ── Password validation ─────────────────────────────────────────────
 
-export const MIN_PASSWORD_LENGTH = 12
+export const MIN_PASSWORD_LENGTH = 16
 
 export function validatePasswordStrength(password: string): string | null {
   if (password.length < MIN_PASSWORD_LENGTH) {
@@ -114,12 +299,30 @@ export function validatePasswordStrength(password: string): string | null {
 
 // ── Security headers middleware ──────────────────────────────────────
 
-export function securityHeaders(_req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+export function securityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  res.removeHeader?.("X-Powered-By")
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "DENY")
   res.setHeader("Referrer-Policy", "no-referrer")
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-  res.setHeader("X-XSS-Protection", "1; mode=block")
+  res.setHeader("X-XSS-Protection", "0")
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin")
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin")
+  const host = req.headers.host
+  const socketOrigin = host && /^[a-z0-9.:[\]-]+$/i.test(host)
+    ? `${requestUsesHttps(req) ? "wss" : "ws"}://${host}`
+    : null
+  res.setHeader(
+    "Content-Security-Policy",
+    `default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'${socketOrigin ? ` ${socketOrigin}` : ""}; worker-src 'self' blob:; manifest-src 'self'`,
+  )
+  if (requestUsesHttps(req)) {
+    res.setHeader("Strict-Transport-Security", "max-age=63072000")
+  }
+  const path = (req.url || "/").split("?")[0].toLowerCase()
+  if (path.startsWith("/api/") || path.startsWith("/hub/") || path.startsWith("/__pty")) {
+    res.setHeader("Cache-Control", "no-store")
+  }
   next()
 }
 
@@ -179,8 +382,28 @@ function isPublicPath(url: string): boolean {
 }
 
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
-  if (isLocalRequest(req)) return next()
-  if (isPublicPath(req.url || "/")) return next()
+  const url = req.url || "/"
+  const publicPath = isPublicPath(url)
+
+  if (!publicPath && isUnforwardedUntrustedLoopback(req)) {
+    res.statusCode = 403
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ error: "Untrusted local host" }))
+    return
+  }
+
+  if (isTrustedDirectLocalRequest(req)) {
+    const method = (req.method || "GET").toUpperCase()
+    if (!publicPath && !SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+      res.statusCode = 403
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({ error: "Untrusted request source" }))
+      return
+    }
+    return next()
+  }
+
+  if (publicPath) return next()
 
   const config = getConfig()
   if (!config?.networkAccess || !config?.networkPassword) {
@@ -190,19 +413,26 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     return
   }
 
-  const authHeader = req.headers.authorization
-  let token: string | null = null
-  if (authHeader?.startsWith("Bearer ")) {
-    token = authHeader.slice(7)
-  } else {
-    const url = new URL(req.url || "/", "http://localhost")
-    token = url.searchParams.get("token")
-  }
+  const bearer = bearerToken(req)
+  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
+  const token = bearer ?? browserCookie
+  const valid = token && validateSessionToken(
+    token,
+    browserCookie && !bearer ? req.headers["user-agent"] : undefined,
+  )
 
-  if (!token || !validateSessionToken(token)) {
+  if (!valid) {
     res.statusCode = 401
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify({ error: "Authentication required" }))
+    return
+  }
+
+  const method = (req.method || "GET").toUpperCase()
+  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    res.statusCode = 403
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({ error: "Untrusted request source" }))
     return
   }
 

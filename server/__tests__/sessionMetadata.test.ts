@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { writeFile, rm, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getSessionMeta } from "../sessionMetadata"
+import { getCodexSessionIdentity, getSessionMeta } from "../sessionMetadata"
 
 const cleanups: string[] = []
 
@@ -30,6 +30,37 @@ function userLine(text: string, timestamp = "2026-06-10T10:00:00Z") {
     message: { role: "user", content: [{ type: "text", text }] },
   }
 }
+
+describe("getCodexSessionIdentity", () => {
+  it("extracts project and subagent identity from the rollout header", async () => {
+    const filePath = await writeSession([
+      {
+        type: "session_meta",
+        payload: {
+          id: "codex-sub-1",
+          cwd: "/code/cogpit",
+          forked_from_id: "codex-parent",
+          source: { subagent: { thread_spawn: { agent_path: "/root/scout" } } },
+          git: { branch: "feature/cold-load" },
+        },
+      },
+      { type: "event_msg", payload: { type: "user_message", message: "ignored" } },
+    ])
+
+    await expect(getCodexSessionIdentity(filePath)).resolves.toEqual({
+      sessionId: "codex-sub-1",
+      cwd: "/code/cogpit",
+      gitBranch: "feature/cold-load",
+      isSubagent: true,
+      parentSessionId: "codex-parent",
+    })
+  })
+
+  it("returns null for non-Codex JSONL", async () => {
+    const filePath = await writeSession([userLine("regular Claude session")])
+    await expect(getCodexSessionIdentity(filePath)).resolves.toBeNull()
+  })
+})
 
 describe("getSessionMeta ai-title support", () => {
   it("extracts the AI-generated title from ai-title events", async () => {

@@ -1,143 +1,45 @@
 import { spawn as spawnChild } from "node:child_process"
-import type { SpawnOptionsWithoutStdio } from "node:child_process"
 import { createInterface } from "node:readline"
 import type { Interface as ReadlineInterface } from "node:readline"
-import type { Readable, Writable } from "node:stream"
 import packageJson from "../package.json"
+import {
+  CODEX_CLIENT_CAPABILITIES,
+  COMMAND_APPROVAL_METHOD,
+  CURRENT_TIME_METHOD,
+  FILE_APPROVAL_METHOD,
+} from "./codex-app-server-protocol"
+import type {
+  ApprovalDecision,
+  ApprovalListener,
+  CodexAppServerOptions,
+  CodexAppServerProcess,
+  CodexAppServerSpawn,
+  CodexNotification,
+  CodexNotificationListener,
+  CodexThread,
+  InitializeResult,
+  JsonObject,
+  JsonRpcId,
+  PendingApproval,
+  ThreadGoalClearResponse,
+  ThreadGoalResponse,
+  ThreadGoalSetParams,
+  ThreadResponse,
+  ThreadResumeParams,
+  ThreadStartParams,
+  TurnResponse,
+  TurnStartParams,
+  TurnSteerParams,
+  TurnSteerResponse,
+  UserInput,
+} from "./codex-app-server-protocol"
+import {
+  normalizeAvailableDecisions,
+  wireApprovalDecision,
+} from "./codex-approval-codec"
 
-export type JsonRpcId = string | number
-export type JsonObject = Record<string, unknown>
-
-export interface CodexAppServerProcess {
-  stdin: Writable
-  stdout: Readable
-  stderr: Readable
-  killed?: boolean
-  kill(signal?: NodeJS.Signals | number): boolean
-  on(event: "error", listener: (error: Error) => void): this
-  on(
-    event: "close",
-    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
-  ): this
-}
-
-export type CodexAppServerSpawn = (
-  command: string,
-  args: string[],
-  options: SpawnOptionsWithoutStdio & { stdio: ["pipe", "pipe", "pipe"] },
-) => CodexAppServerProcess
-
-export interface CodexAppServerOptions {
-  spawn?: CodexAppServerSpawn
-  command?: string
-  requestTimeoutMs?: number
-  clientVersion?: string
-  now?: () => number
-  setTimeout?: typeof globalThis.setTimeout
-  clearTimeout?: typeof globalThis.clearTimeout
-}
-
-export interface CodexNotification<T = unknown> {
-  method: string
-  params: T
-}
-
-export type CodexNotificationListener = (
-  notification: CodexNotification,
-) => void
-
-export type PendingApprovalKind = "commandExecution" | "fileChange"
-export type ApprovalDecision = "allow" | "allow_always" | "deny"
-
-export interface PendingApproval {
-  requestId: JsonRpcId
-  kind: PendingApprovalKind
-  method:
-    | "item/commandExecution/requestApproval"
-    | "item/fileChange/requestApproval"
-  threadId: string
-  turnId: string
-  itemId: string
-  requestedAt: number
-  reason?: string
-  command?: string
-  cwd?: string
-  grantRoot?: string
-  approvalId?: string
-  networkApprovalContext?: unknown
-  /** UI-level decisions that are valid for this specific server request. */
-  availableDecisions: ApprovalDecision[]
-  params: JsonObject
-}
-
-export type ApprovalListener = (
-  threadId: string,
-  approvals: readonly PendingApproval[],
-) => void
-
-export interface CodexThread extends JsonObject {
-  id: string
-  parentThreadId?: string | null
-}
-
-export interface CodexTurn extends JsonObject {
-  id: string
-  status?: string
-}
-
-export type ThreadStartParams = JsonObject
-
-export interface ThreadResumeParams extends JsonObject {
-  threadId: string
-}
-
-export interface UserInput extends JsonObject {
-  type: string
-}
-
-export interface TurnStartParams extends JsonObject {
-  threadId: string
-  input: UserInput[]
-}
-
-export interface TurnSteerParams extends JsonObject {
-  threadId: string
-  input: UserInput[]
-  expectedTurnId?: string
-}
-
-export interface ThreadGoal extends JsonObject {
-  threadId: string
-  objective: string
-  status: string
-  tokenBudget: number | null
-  tokensUsed: number
-  timeUsedSeconds: number
-}
-
-export interface ThreadGoalSetParams extends JsonObject {
-  threadId: string
-  objective?: string | null
-  status?: string | null
-  tokenBudget?: number | null
-}
-
-export type InitializeResult = JsonObject
-export interface ThreadResponse extends JsonObject {
-  thread: CodexThread
-}
-export interface TurnResponse extends JsonObject {
-  turn: CodexTurn
-}
-export interface TurnSteerResponse extends JsonObject {
-  turnId: string
-}
-export interface ThreadGoalResponse extends JsonObject {
-  goal: ThreadGoal | null
-}
-export interface ThreadGoalClearResponse extends JsonObject {
-  cleared: boolean
-}
+export { CODEX_CLIENT_CAPABILITIES } from "./codex-app-server-protocol"
+export type * from "./codex-app-server-protocol"
 
 export class CodexAppServerError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -185,23 +87,10 @@ interface ServerRequest {
   params?: unknown
 }
 
-const COMMAND_APPROVAL_METHOD = "item/commandExecution/requestApproval"
-const FILE_APPROVAL_METHOD = "item/fileChange/requestApproval"
-const CURRENT_TIME_METHOD = "currentTime/read"
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_STDERR_LENGTH = 16_000
-
-/**
- * Capabilities Cogpit actually implements on the app-server connection.
- *
- * Experimental API opt-in is deliberately off: it is a broad protocol switch,
- * not a declaration for the individual experimental methods Cogpit supports.
- * Stable client requests such as goals remain available without it.
- */
-export const CODEX_CLIENT_CAPABILITIES = {
-  experimentalApi: false,
-  requestAttestation: false,
-} as const
+const SHUTDOWN_GRACE_MS = 3_000
+const FORCE_KILL_GRACE_MS = 1_000
 
 const defaultSpawn: CodexAppServerSpawn = (command, args, options) =>
   spawnChild(command, args, options)
@@ -221,57 +110,6 @@ function stringField(object: JsonObject, key: string): string | undefined {
 
 function approvalKey(id: JsonRpcId): string {
   return `${typeof id}:${String(id)}`
-}
-
-const DEFAULT_APPROVAL_DECISIONS: readonly ApprovalDecision[] = [
-  "allow",
-  "allow_always",
-  "deny",
-]
-
-/**
- * Translate the protocol's richer decision union into the three decisions the
- * shared Cogpit approval UI can express. Amendment-bearing decisions remain
- * unavailable until Cogpit has a dedicated UI for reviewing their payloads.
- */
-function normalizeAvailableDecisions(value: unknown): ApprovalDecision[] {
-  if (value == null) return [...DEFAULT_APPROVAL_DECISIONS]
-  if (!Array.isArray(value)) return []
-
-  const decisions: ApprovalDecision[] = []
-  const add = (decision: ApprovalDecision) => {
-    if (!decisions.includes(decision)) decisions.push(decision)
-  }
-  for (const decision of value) {
-    if (decision === "accept") add("allow")
-    else if (decision === "acceptForSession") add("allow_always")
-    else if (decision === "decline" || decision === "cancel") add("deny")
-  }
-  return decisions
-}
-
-function wireApprovalDecision(
-  approval: PendingApproval,
-  decision: ApprovalDecision,
-): unknown {
-  const available = approval.params.availableDecisions
-  if (!Array.isArray(available)) {
-    return {
-      allow: "accept",
-      allow_always: "acceptForSession",
-      deny: "decline",
-    }[decision]
-  }
-
-  if (decision === "allow") {
-    return available.find((candidate) => candidate === "accept")
-  }
-  if (decision === "allow_always") {
-    return available.find((candidate) => candidate === "acceptForSession")
-  }
-  return available.find(
-    (candidate) => candidate === "decline" || candidate === "cancel",
-  )
 }
 
 function textInput(input: string | UserInput[]): UserInput[] {
@@ -300,6 +138,7 @@ export class CodexAppServer {
   private startPromise: Promise<InitializeResult> | null = null
   private initializeResult: InitializeResult | null = null
   private shuttingDown = false
+  private shutdownPromise: Promise<void> | null = null
   private nextRequestId = 1
   private stderr = ""
 
@@ -382,10 +221,9 @@ export class CodexAppServer {
     }
     const child = this.child
     if (child) {
-      this.disconnect(
-        new CodexAppServerError("Codex app-server connection restarted"),
+      await this.terminateChild(
         child,
-        true,
+        new CodexAppServerError("Codex app-server connection restarted"),
       )
     }
     return this.start()
@@ -617,24 +455,22 @@ export class CodexAppServer {
     return () => this.approvalListeners.delete(listener)
   }
 
-  async shutdown(): Promise<void> {
-    if (this.shuttingDown) return
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
     this.shuttingDown = true
-    const child = this.child
-    if (child) {
-      this.disconnect(
-        new CodexAppServerError("Codex app-server client shut down"),
-        child,
-        true,
-      )
-    } else {
-      this.rejectPending(
-        new CodexAppServerError("Codex app-server client shut down"),
-      )
-      this.clearRuntimeState()
-    }
-    this.notificationListeners.clear()
-    this.approvalListeners.clear()
+    this.shutdownPromise = (async () => {
+      const error = new CodexAppServerError("Codex app-server client shut down")
+      const child = this.child
+      this.notificationListeners.clear()
+      this.approvalListeners.clear()
+      if (child) {
+        await this.terminateChild(child, error)
+      } else {
+        this.rejectPending(error)
+        this.clearRuntimeState()
+      }
+    })()
+    return this.shutdownPromise
   }
 
   private async initialize(
@@ -1093,6 +929,50 @@ export class CodexAppServer {
         // The child may already have exited between the state check and kill.
       }
     }
+  }
+
+  private waitForChildClose(
+    closed: Promise<void>,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (didClose: boolean) => {
+        if (settled) return
+        settled = true
+        this.clearTimer(timer)
+        resolve(didClose)
+      }
+      const timer = this.setTimer(() => finish(false), timeoutMs)
+      void closed.then(() => finish(true))
+    })
+  }
+
+  private async terminateChild(
+    child: CodexAppServerProcess,
+    error: Error,
+  ): Promise<void> {
+    let didClose = false
+    let resolveClose: () => void = () => undefined
+    const closed = new Promise<void>((resolve) => {
+      resolveClose = resolve
+    })
+    child.on("close", () => {
+      didClose = true
+      resolveClose()
+    })
+
+    this.disconnect(error, child, true)
+    if (await this.waitForChildClose(closed, SHUTDOWN_GRACE_MS)) return
+
+    if (!didClose) {
+      try {
+        child.kill("SIGKILL")
+      } catch {
+        // The child may have exited between the timeout and force signal.
+      }
+    }
+    await this.waitForChildClose(closed, FORCE_KILL_GRACE_MS)
   }
 
   private rejectPending(error: Error): void {

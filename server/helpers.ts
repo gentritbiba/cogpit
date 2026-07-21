@@ -1,30 +1,25 @@
-import type { ChildProcess } from "node:child_process"
-import { readdir, open, stat, writeFile, unlink } from "node:fs/promises"
+import { readdir, open, writeFile, unlink } from "node:fs/promises"
 import { writeFileSync } from "node:fs"
-import { join, resolve, sep } from "node:path"
+import { join } from "node:path"
 import { homedir, tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
-import { getConfig, getDirs } from "./config"
+import { dirs } from "./sessionPaths"
 import {
   buildClaudePermArgs,
   buildCodexPermArgs as _buildCodexPermArgs,
   buildCodexEffortArgs as _buildCodexEffortArgs,
   buildCodexModelArgs as _buildCodexModelArgs,
   buildCodexFastModeArgs as _buildCodexFastModeArgs,
-  isCodexDirName as _isCodexDirName,
-  encodeCodexDirName as _encodeCodexDirName,
-  decodeCodexDirName as _decodeCodexDirName,
-} from "../src/lib/providers/index"
-export type { AgentKind } from "../src/lib/providers/types"
+} from "../shared/providers"
+import type { PermissionsConfig } from "../shared/providers/types"
+export type { AgentKind } from "../shared/providers/types"
 
 // ── Shared types ────────────────────────────────────────────────────────
 
-import type { IncomingMessage, ServerResponse } from "node:http"
+import type { IncomingMessage } from "node:http"
 
-export type NextFn = (err?: unknown) => void
-export type Middleware = (req: IncomingMessage, res: ServerResponse, next: NextFn) => void
-export type UseFn = (path: string, handler: Middleware) => void
+export type { NextFn, Middleware, UseFn } from "./http"
 
 // ── Friendly error formatter ────────────────────────────────────────────
 
@@ -64,12 +59,12 @@ export function buildMcpArgs(mcpConfig: unknown): string[] {
 // ── Permission args builder ─────────────────────────────────────────────
 
 /** Build Claude CLI permission args (delegates to providers/claude) */
-export function buildPermArgs(permissions?: { mode?: string; allowedTools?: string[]; disallowedTools?: string[] }): string[] {
+export function buildPermArgs(permissions?: PermissionsConfig): string[] {
   return buildClaudePermArgs(permissions)
 }
 
 /** Build Codex CLI permission args (delegates to providers/codex) */
-export function buildCodexPermArgs(permissions?: { mode?: string; allowedTools?: string[]; disallowedTools?: string[] }): string[] {
+export function buildCodexPermArgs(permissions?: PermissionsConfig): string[] {
   return _buildCodexPermArgs(permissions)
 }
 
@@ -119,66 +114,6 @@ export async function cleanupTempFiles(paths: string[]): Promise<void> {
   }))
 }
 
-// ── Mutable directory references ────────────────────────────────────
-
-export const dirs = {
-  PROJECTS_DIR: "",
-  TEAMS_DIR: "",
-  TASKS_DIR: "",
-  UNDO_DIR: "",
-}
-
-export const CODEX_HOME_DIR = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
-export const CODEX_SESSIONS_DIR = join(CODEX_HOME_DIR, "sessions")
-
-/** Delegates to providers/codex.isCodexDirName */
-export function isCodexDirName(dirName: string): boolean {
-  return _isCodexDirName(dirName)
-}
-
-/** Delegates to providers/codex.encodeCodexDirName */
-export function encodeCodexDirName(cwd: string): string {
-  return _encodeCodexDirName(cwd)
-}
-
-/** Delegates to providers/codex.decodeCodexDirName */
-export function decodeCodexDirName(dirName: string): string | null {
-  return _decodeCodexDirName(dirName)
-}
-
-export function isCodexFilePath(filePath: string): boolean {
-  return filePath.startsWith(CODEX_SESSIONS_DIR + "/")
-}
-
-export function formatCodexRolloutFileName(sessionId: string, now = new Date()): string {
-  const year = String(now.getFullYear())
-  const month = String(now.getMonth() + 1).padStart(2, "0")
-  const day = String(now.getDate()).padStart(2, "0")
-  const hour = String(now.getHours()).padStart(2, "0")
-  const minute = String(now.getMinutes()).padStart(2, "0")
-  const second = String(now.getSeconds()).padStart(2, "0")
-  return `${year}/${month}/${day}/rollout-${year}-${month}-${day}T${hour}-${minute}-${second}-${sessionId}.jsonl`
-}
-
-export function refreshDirs(): boolean {
-  const config = getConfig()
-  if (!config) return false
-  const d = getDirs(config.claudeDir)
-  dirs.PROJECTS_DIR = d.PROJECTS_DIR
-  dirs.TEAMS_DIR = d.TEAMS_DIR
-  dirs.TASKS_DIR = d.TASKS_DIR
-  dirs.UNDO_DIR = d.UNDO_DIR
-  return true
-}
-
-// ── Path safety ─────────────────────────────────────────────────────────
-
-export function isWithinDir(parent: string, child: string): boolean {
-  const resolved = resolve(child)
-  const resolvedParent = resolve(parent)
-  return resolved.startsWith(resolvedParent + sep) || resolved === resolvedParent
-}
-
 // ── Rate limiting ────────────────────────────────────────────────────────
 
 interface RateLimitEntry {
@@ -189,23 +124,39 @@ interface RateLimitEntry {
 const rateLimitMap = new Map<string, RateLimitEntry>()
 const RATE_LIMIT_WINDOW_MS = 60_000  // 1 minute
 const RATE_LIMIT_MAX_ATTEMPTS = 5    // 5 attempts per window
+const RATE_LIMIT_CONNECTOR_MAX_ATTEMPTS = 30
 
 function getRateLimitKey(req: IncomingMessage): string {
-  return req.socket.remoteAddress || "unknown"
+  const forwarded = req.headers?.["cf-connecting-ip"] ?? req.headers?.["x-forwarded-for"]
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded
+  const client = value?.split(",")[0]?.trim()
+  return client ? `client:${client.slice(0, 128)}` : `socket:${req.socket.remoteAddress || "unknown"}`
 }
 
-export function isRateLimited(req: IncomingMessage): boolean {
-  const key = getRateLimitKey(req)
-  const now = Date.now()
+function consumeRateLimit(key: string, maxAttempts: number, now: number): boolean {
   const entry = rateLimitMap.get(key)
-
   if (!entry || now > entry.resetAt) {
     rateLimitMap.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS })
     return false
   }
 
-  entry.count++
-  return entry.count > RATE_LIMIT_MAX_ATTEMPTS
+  entry.count += 1
+  return entry.count > maxAttempts
+}
+
+export function isRateLimited(req: IncomingMessage): boolean {
+  const now = Date.now()
+  const clientKey = getRateLimitKey(req)
+  const socketKey = `socket:${req.socket.remoteAddress || "unknown"}`
+
+  const clientLimited = consumeRateLimit(clientKey, RATE_LIMIT_MAX_ATTEMPTS, now)
+  if (clientKey === socketKey) return clientLimited
+
+  // Reverse proxies multiplex many real clients over one connector. Keep a
+  // higher connector-wide ceiling so spoofed forwarding headers cannot turn
+  // into unlimited password work, without letting one IP lock everybody out.
+  const connectorLimited = consumeRateLimit(socketKey, RATE_LIMIT_CONNECTOR_MAX_ATTEMPTS, now)
+  return clientLimited || connectorLimited
 }
 
 // Periodically clean up expired entries (unref so build process can exit)
@@ -345,248 +296,62 @@ export function projectDirToReadableName(dirName: string): { path: string; short
   }
 }
 
-export interface SessionFileInfo {
-  filePath: string
-  fileName: string
-  mtimeMs: number
-  size: number
-}
-
-export async function listCodexSessionFiles(): Promise<SessionFileInfo[]> {
-  const walk = async (dir: string, depth: number): Promise<SessionFileInfo[]> => {
-    let entries: import("node:fs").Dirent[] | string[] | undefined
-    try {
-      entries = await readdir(dir, { withFileTypes: true }) as import("node:fs").Dirent[]
-    } catch {
-      return []
-    }
-    if (!Array.isArray(entries)) return []
-
-    const results: SessionFileInfo[] = []
-    for (const entry of entries) {
-      if (!("name" in entry)) continue
-      const filePath = join(dir, entry.name)
-      if ("isDirectory" in entry && typeof entry.isDirectory === "function" && entry.isDirectory()) {
-        if (depth < 4) results.push(...await walk(filePath, depth + 1))
-        continue
-      }
-      if (!entry.name.endsWith(".jsonl")) continue
-      try {
-        const s = await stat(filePath)
-        results.push({
-          filePath,
-          fileName: filePath.slice(CODEX_SESSIONS_DIR.length + 1),
-          mtimeMs: s.mtimeMs,
-          size: s.size,
-        })
-      } catch {
-        continue
-      }
-    }
-    return results
-  }
-
-  return walk(CODEX_SESSIONS_DIR, 0)
-}
-
-export async function resolveSessionFilePath(dirName: string, fileName: string): Promise<string | null> {
-  if (isCodexDirName(dirName)) {
-    const filePath = join(CODEX_SESSIONS_DIR, fileName)
-    return isWithinDir(CODEX_SESSIONS_DIR, filePath) ? filePath : null
-  }
-
-  const filePath = join(dirs.PROJECTS_DIR, dirName, fileName)
-  return isWithinDir(dirs.PROJECTS_DIR, filePath) ? filePath : null
-}
-
-export function getAgentKindFromSessionPath(filePath: string | null | undefined): AgentKind {
-  return typeof filePath === "string" && isCodexFilePath(filePath) ? "codex" : "claude"
-}
-
-export async function findNewestCodexSessionForCwd(
-  cwd: string,
-  knownPaths: Set<string>,
-  startedAt: number,
-): Promise<{ filePath: string; fileName: string; sessionId: string } | null> {
-  const files = await listCodexSessionFiles()
-  const candidates = files
-    .filter((file) => !knownPaths.has(file.filePath) && file.mtimeMs >= startedAt - 1_000)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-
-  for (const file of candidates) {
-    try {
-      const meta = await getSessionMeta(file.filePath)
-      if (meta.cwd !== cwd || !meta.sessionId) continue
-      return {
-        filePath: file.filePath,
-        fileName: file.fileName,
-        sessionId: meta.sessionId,
-      }
-    } catch {
-      continue
-    }
-  }
-
-  return null
-}
-
-
-// ── Active process tracking ─────────────────────────────────────────────
-
-export const activeProcesses = new Map<string, ReturnType<typeof spawn>>()
-
-// ── Persistent sessions ─────────────────────────────────────────────────
-
-import type { SubagentWatcher } from "./subagentWatcher"
-
-export interface PermissionRequest {
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  description?: string
-  permissionSuggestions?: Array<{ type: string; [key: string]: unknown }>
-  title?: string
-  displayName?: string
-  blockedPath?: string
-  decisionReason?: string
-  agentId?: string
-  timestamp: number
-}
-
-export interface PersistentSession {
-  agentKind: AgentKind
-  proc: ChildProcess
-  /** Resolves when the current turn's `result` message arrives */
-  onResult: ((msg: { type: string; subtype?: string; is_error?: boolean; result?: string }) => void) | null
-  /** Set to true once the process has exited */
-  dead: boolean
-  cwd: string
-  permArgs: string[]
-  modelArgs: string[]
-  effortArgs: string[]
-  /** Path to the session's JSONL file */
-  jsonlPath: string | null
-  /** Active Task tool_use IDs -> prompt text (for matching subagent files) */
-  pendingTaskCalls: Map<string, string>
-  /** Subagent directory watcher (cleaned up on process close) */
-  subagentWatcher: SubagentWatcher | null
-  /** Worktree name if session was created with --worktree */
-  worktreeName: string | null
-  /** Temporary files created for a request, such as Codex image attachments */
-  tempFiles?: string[]
-  /** Pending permission requests awaiting user approval */
-  pendingPermissions: Map<string, PermissionRequest>
-}
-export const persistentSessions = new Map<string, PersistentSession>()
-
-export interface FileChange {
-  path: string
-  status: "M" | "A" | "D" | "R"
-  additions: number
-  deletions: number
-}
-
-export interface WorktreeInfo {
-  name: string
-  path: string
-  branch: string
-  head: string
-  headMessage: string
-  isDirty: boolean
-  commitsAhead: number
-  linkedSessions: string[]
-  createdAt: string
-  changedFiles: FileChange[]
-}
-
-/** Find the JSONL file path for a session by searching all project directories. */
-export async function findJsonlPath(sessionId: string): Promise<string | null> {
-  const targetFile = `${sessionId}.jsonl`
-  try {
-    const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === "memory") continue
-      const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-      try {
-        const files = await readdir(projectDir)
-        if (files.includes(targetFile)) {
-          return join(projectDir, targetFile)
-        }
-      } catch { continue }
-    }
-  } catch { /* dirs.PROJECTS_DIR might not exist */ }
-
-  try {
-    const codexFiles = await listCodexSessionFiles()
-    const match = codexFiles.find((file) => file.fileName.endsWith(`${sessionId}.jsonl`))
-    if (match) return match.filePath
-  } catch {
-    // ignore codex lookup errors
-  }
-  return null
-}
-
-// ── Cleanup ─────────────────────────────────────────────────────────────
-
-export function cleanupProcesses(): void {
-  // Build snapshot of process refs BEFORE clearing Maps.
-  // This prevents the SIGKILL fallback from iterating already-deleted entries,
-  // and mirrors the same fix applied to the kill-all route in claude-manage.ts.
-  const sigkillProcs: Array<{ kill(sig: string): void; pid?: number }> = []
-  for (const proc of activeProcesses.values()) sigkillProcs.push(proc)
-  for (const ps of persistentSessions.values()) sigkillProcs.push(ps.proc)
-
-  // SIGTERM all active processes (snapshot-before-mutation pattern)
-  for (const [sid, proc] of [...activeProcesses.entries()]) {
-    try {
-      proc.kill("SIGTERM")
-    } catch (err) {
-      console.error(`[cleanupProcesses] SIGTERM failed for activeProcess ${sid}`, err)
-    }
-    activeProcesses.delete(sid)
-  }
-
-  // SIGTERM all persistent sessions (snapshot-before-mutation pattern)
-  for (const [sid, ps] of [...persistentSessions.entries()]) {
-    ps.subagentWatcher?.close()
-    try {
-      ps.proc.kill("SIGTERM")
-    } catch (err) {
-      console.error(`[cleanupProcesses] SIGTERM failed for persistentSession ${sid}`, err)
-    }
-    persistentSessions.delete(sid)
-  }
-
-  // Schedule SIGKILL fallback using the pre-clear snapshot.
-  // unref() so the timer does not prevent the process from exiting if all
-  // children are already dead before the 3s grace period elapses.
-  if (sigkillProcs.length > 0) {
-    const forceKill = setTimeout(() => {
-      for (const p of sigkillProcs) {
-        try {
-          p.kill("SIGKILL")
-        } catch (err) {
-          console.error(`[cleanupProcesses] SIGKILL failed for pid ${p.pid ?? "unknown"}`, err)
-        }
-      }
-    }, 3000)
-    forceKill.unref()
-  }
-}
+// Compatibility export for existing server consumers. New cross-runtime
+// consumers should import the neutral wire contract directly.
+export type { FileChange, WorktreeInfo } from "../shared/contracts/worktrees"
 
 // ── Re-exports from extracted modules ───────────────────────────────────
 
 export {
+  activeProcesses,
+  persistentSessions,
+  cleanupProcesses,
+} from "./processRegistry"
+export type { PermissionRequest, PersistentSession } from "./processRegistry"
+
+export { isWithinDir } from "./pathSafety"
+
+export {
+  dirs,
+  CODEX_HOME_DIR,
+  CODEX_SESSIONS_DIR,
+  isCodexDirName,
+  encodeCodexDirName,
+  decodeCodexDirName,
+  isCodexFilePath,
+  formatCodexRolloutFileName,
+  refreshDirs,
+  listCodexSessionFiles,
+  resolveSessionFilePath,
+  getAgentKindFromSessionPath,
+  findNewestCodexSessionForCwd,
+  findJsonlPath,
+} from "./sessionPaths"
+export type { SessionFileInfo } from "./sessionPaths"
+
+export {
   isLocalRequest,
+  isTrustedLocalHost,
+  isForwardedRequest,
+  isTrustedDirectLocalRequest,
+  websocketUpgradeRejection,
   safeCompare,
   createSessionToken,
+  getRequestSessionToken,
+  setBrowserSessionCookie,
+  clearBrowserSessionCookie,
+  canIssueBrowserSession,
+  hasTrustedMutationSource,
   validateSessionToken,
+  revokeSessionToken,
   revokeAllSessions,
   getConnectedDevices,
   hashPassword,
   isPasswordHashed,
+  isMalformedPasswordHash,
+  needsPasswordRehash,
   verifyPassword,
+  verifyPasswordAsync,
   MIN_PASSWORD_LENGTH,
   validatePasswordStrength,
   securityHeaders,
@@ -598,11 +363,7 @@ export { getSessionMeta, getSessionStatus, searchSessionMessages } from "./sessi
 
 // ── Shared route helpers ────────────────────────────────────────────────────
 
-export function sendJson(res: import("node:http").ServerResponse, status: number, data: unknown): void {
-  res.statusCode = status
-  res.setHeader("Content-Type", "application/json")
-  res.end(JSON.stringify(data))
-}
+export { sendJson } from "./http"
 
 export { watchSubagents } from "./subagentWatcher"
 

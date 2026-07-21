@@ -1,10 +1,79 @@
 import { readFile, stat, open } from "node:fs/promises"
-import { deriveSessionStatus, type SessionStatusInfo } from "../src/lib/sessionStatus"
-import { extractCodexMetadataFromLines } from "../src/lib/codex"
+import { deriveSessionStatus, type SessionStatusInfo } from "../shared/session/sessionStatus"
+import { extractCodexMetadataFromLines } from "../shared/session/codex"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
 const SKIP_RE = /^(Tool loaded\.?|Continue|compact)$/i
+const CODEX_IDENTITY_BYTES = 32768
+
+export interface CodexSessionIdentity {
+  sessionId: string
+  cwd: string
+  gitBranch: string
+  isSubagent: boolean
+  parentSessionId: string | null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+/**
+ * Read only the small header needed to place a Codex rollout in the session
+ * inventory. Rich metadata is loaded after routes select the rows they return.
+ */
+export async function getCodexSessionIdentity(filePath: string): Promise<CodexSessionIdentity | null> {
+  const fh = await open(filePath, "r")
+  try {
+    const buf = Buffer.allocUnsafe(CODEX_IDENTITY_BYTES)
+    const { bytesRead } = await fh.read(buf, 0, CODEX_IDENTITY_BYTES, 0)
+    const text = buf.subarray(0, bytesRead).toString("utf-8")
+    const lastNewline = text.lastIndexOf("\n")
+    const completeText = bytesRead === CODEX_IDENTITY_BYTES && lastNewline >= 0
+      ? text.slice(0, lastNewline)
+      : text
+
+    let sessionId = ""
+    let cwd = ""
+    let gitBranch = ""
+    let isSubagent = false
+    let parentSessionId: string | null = null
+    let sawSessionMeta = false
+
+    for (const line of completeText.split("\n")) {
+      if (!line) continue
+      let record: unknown
+      try {
+        record = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (!isRecord(record) || !isRecord(record.payload)) continue
+
+      if (record.type === "session_meta") {
+        sawSessionMeta = true
+        const payload = record.payload
+        if (!sessionId && typeof payload.id === "string") sessionId = payload.id
+        if (!cwd && typeof payload.cwd === "string") cwd = payload.cwd
+        if (!parentSessionId && typeof payload.forked_from_id === "string") {
+          parentSessionId = payload.forked_from_id || null
+        }
+        const source = isRecord(payload.source) ? payload.source : null
+        if (source && isRecord(source.subagent)) isSubagent = true
+        const git = isRecord(payload.git) ? payload.git : null
+        if (!gitBranch && git && typeof git.branch === "string") gitBranch = git.branch
+      } else if (record.type === "turn_context") {
+        if (!cwd && typeof record.payload.cwd === "string") cwd = record.payload.cwd
+      }
+    }
+
+    if (!sawSessionMeta || !cwd) return null
+    return { sessionId, cwd, gitBranch, isSubagent, parentSessionId }
+  } finally {
+    await fh.close()
+  }
+}
 
 /** Extract meaningful user prompt text from a parsed user message object. */
 function extractUserText(obj: { message?: { content?: unknown } }): string {

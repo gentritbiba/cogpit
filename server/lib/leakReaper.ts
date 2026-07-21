@@ -1,4 +1,4 @@
-import type { ReapedEvent } from "../../src/lib/performanceTypes"
+import type { ReapedEvent } from "../../shared/contracts/performance"
 import { showNotification } from "./desktopNotify"
 import { recordActivity } from "./activityMonitor"
 import {

@@ -1,4 +1,4 @@
-export const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
 export const CODEX_IMAGE_ONLY_PROMPT = "Please use the attached image or images as context."
 
 /**

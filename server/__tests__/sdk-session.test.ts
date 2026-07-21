@@ -87,14 +87,14 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       const iter = gen() as AsyncGenerator<unknown> & {
         applyFlagSettings?: typeof applyFlagSettingsSpy
         setModel?: typeof setModelSpy
-        streamInput: typeof vi.fn
-        interrupt: typeof vi.fn
-        setPermissionMode: typeof vi.fn
-        setMcpServers: typeof vi.fn
-        stopTask: typeof vi.fn
-        backgroundTasks: typeof vi.fn
-        rewindFiles: typeof vi.fn
-        close: typeof vi.fn
+        streamInput: ReturnType<typeof vi.fn>
+        interrupt: ReturnType<typeof vi.fn>
+        setPermissionMode: ReturnType<typeof vi.fn>
+        setMcpServers: ReturnType<typeof vi.fn>
+        stopTask: ReturnType<typeof vi.fn>
+        backgroundTasks: ReturnType<typeof vi.fn>
+        rewindFiles: ReturnType<typeof vi.fn>
+        close: ReturnType<typeof vi.fn>
       }
       iter.applyFlagSettings = applyFlagSettingsSpy
       iter.setModel = setModelSpy
