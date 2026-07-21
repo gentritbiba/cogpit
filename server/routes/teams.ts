@@ -7,7 +7,7 @@ import {
   join,
   watch,
 } from "../helpers"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 
 export function registerTeamRoutes(use: UseFn) {
   // GET /api/teams - list all teams with task progress summary

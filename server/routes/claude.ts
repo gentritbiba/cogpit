@@ -14,7 +14,8 @@ import {
   getSessionMeta,
   friendlySpawnError,
 } from "../helpers"
-import type { PersistentSession, UseFn } from "../helpers"
+import type { UseFn } from "../http"
+import type { PersistentSession } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
 import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"

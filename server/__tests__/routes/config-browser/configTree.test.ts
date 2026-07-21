@@ -63,6 +63,39 @@ describe("scanDir", () => {
     expect(result[0].fileType).toBe("skill")
     expect(result[0].description).toBe("A test skill")
   })
+
+  it("falls back to a nested directory when a skill has no SKILL.md", async () => {
+    const invalidSkillDir = join(tmpDir, "invalid-skill")
+    await mkdirp(invalidSkillDir)
+    await writeFile(join(invalidSkillDir, "README.md"), "Still useful")
+
+    const result = await scanDir(tmpDir, { isSkillsDir: true, readOnly: true })
+
+    expect(result).toEqual([
+      {
+        name: "invalid-skill",
+        path: invalidSkillDir,
+        type: "directory",
+        children: [{
+          name: "README.md",
+          path: join(invalidSkillDir, "README.md"),
+          type: "file",
+          fileType: "unknown",
+          description: "",
+          readOnly: true,
+        }],
+        readOnly: true,
+      },
+    ])
+  })
+
+  it("omits nested directories with no relevant files", async () => {
+    const emptyDir = join(tmpDir, "empty")
+    await mkdirp(emptyDir)
+    await writeFile(join(emptyDir, "ignored.txt"), "ignored")
+
+    await expect(scanDir(tmpDir)).resolves.toEqual([])
+  })
 })
 
 // ── buildGlobalSection (themes/) ────────────────────────────────────────

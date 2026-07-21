@@ -10,7 +10,7 @@ import {
   type ThreadGoalSetParams,
   type UserInput,
 } from "../codex-app-server"
-import { sendJson, type UseFn } from "../helpers"
+import { sendJson, type UseFn } from "../http"
 
 export type CodexRuntimeClient = Pick<
   CodexAppServer,

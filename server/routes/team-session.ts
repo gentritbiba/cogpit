@@ -9,7 +9,7 @@ import {
   join,
   stat,
 } from "../helpers"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 
 /** List project dir names under PROJECTS_DIR (excluding the memory dir). */
 async function listProjectDirNames(): Promise<string[]> {

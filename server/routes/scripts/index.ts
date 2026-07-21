@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
-import type { UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
 import { discoverScripts } from "./discovery"
 
 async function validateDir(dir: string): Promise<string | null> {

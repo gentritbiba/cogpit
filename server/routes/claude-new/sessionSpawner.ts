@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path"
-import { encodeClaudeDirName } from "../../../src/lib/providers/claude"
+import type { ServerResponse } from "node:http"
+import { encodeClaudeDirName } from "../../../shared/providers/claude"
 import {
   CODEX_SESSIONS_DIR,
   dirs,
@@ -29,7 +30,8 @@ import {
   findNewestCodexSessionForCwd,
   formatCodexRolloutFileName,
 } from "../../helpers"
-import type { PersistentSession, UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
+import type { PersistentSession } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
@@ -38,9 +40,8 @@ import {
   getCodexThreadIdentity,
   isCodexAppServerUnavailable,
   startCodexExecution,
+  type CodexExecutionOptions,
 } from "../../lib/codexExecution"
-export { buildStreamMessage } from "../../lib/streamMessage"
-
 export async function resolveProjectPath(
   projectDir: string,
   dirName: string
@@ -138,6 +139,47 @@ function registerTrackedSession(sessionId: string, ps: PersistentSession): void 
   activeProcesses.set(sessionId, ps.proc)
 }
 
+async function tryRespondWithCodexAppServerSession(
+  res: ServerResponse,
+  dirName: string,
+  knownPaths: Set<string>,
+  options: CodexExecutionOptions,
+): Promise<boolean> {
+  const startedAt = Date.now()
+  try {
+    const started = await startCodexExecution(codexAppServer, options)
+    const identity = await resolveCodexStartedThread(
+      started.thread,
+      options.cwd,
+      knownPaths,
+      startedAt,
+    )
+    let initialContent: string | undefined
+    try {
+      initialContent = await readFile(identity.filePath, "utf-8")
+    } catch {
+      // The rollout can be materialized just after turn/start is accepted.
+    }
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({
+      success: true,
+      dirName,
+      fileName: identity.fileName,
+      sessionId: identity.sessionId,
+      initialContent,
+    }))
+    return true
+  } catch (error) {
+    if (isCodexAppServerUnavailable(error)) return false
+    sendError(res, new RouteError(
+      500,
+      ErrorCodes.INTERNAL_ERROR,
+      error instanceof Error ? error.message : "Failed to start Codex thread",
+    ))
+    return true
+  }
+}
+
 export function registerNewSessionRoute(use: UseFn) {
   use("/api/new-session", (req, res, next) => {
     if (req.method !== "POST") return next()
@@ -163,47 +205,14 @@ export function registerNewSessionRoute(use: UseFn) {
           }
 
           const knownPaths = new Set((await listCodexSessionFiles()).map((file) => file.filePath))
-          const appServerStartedAt = Date.now()
-          try {
-            const started = await startCodexExecution(codexAppServer, {
-              cwd,
-              message,
-              permissions,
-              model,
-              effort,
-              fastMode,
-            })
-            const identity = await resolveCodexStartedThread(
-              started.thread,
-              cwd,
-              knownPaths,
-              appServerStartedAt,
-            )
-            let initialContent: string | undefined
-            try {
-              initialContent = await readFile(identity.filePath, "utf-8")
-            } catch {
-              // The rollout may be materialized just after turn/start is accepted.
-            }
-            res.setHeader("Content-Type", "application/json")
-            res.end(JSON.stringify({
-              success: true,
-              dirName,
-              fileName: identity.fileName,
-              sessionId: identity.sessionId,
-              initialContent,
-            }))
-            return
-          } catch (error) {
-            if (!isCodexAppServerUnavailable(error)) {
-              sendError(res, new RouteError(
-                500,
-                ErrorCodes.INTERNAL_ERROR,
-                error instanceof Error ? error.message : "Failed to start Codex thread",
-              ))
-              return
-            }
-          }
+          if (await tryRespondWithCodexAppServerSession(res, dirName, knownPaths, {
+            cwd,
+            message,
+            permissions,
+            model,
+            effort,
+            fastMode,
+          })) return
 
           // Compatibility path for Codex versions that predate app-server.
           const permArgs = buildCodexPermArgs(permissions)
@@ -405,48 +414,15 @@ export function registerCreateAndSendRoute(use: UseFn) {
           }
 
           const knownPaths = new Set((await listCodexSessionFiles()).map((file) => file.filePath))
-          const appServerStartedAt = Date.now()
-          try {
-            const started = await startCodexExecution(codexAppServer, {
-              cwd,
-              message,
-              images,
-              permissions,
-              model,
-              effort,
-              fastMode,
-            })
-            const identity = await resolveCodexStartedThread(
-              started.thread,
-              cwd,
-              knownPaths,
-              appServerStartedAt,
-            )
-            let initialContent: string | undefined
-            try {
-              initialContent = await readFile(identity.filePath, "utf-8")
-            } catch {
-              // Let the existing JSONL polling path fill content on the client.
-            }
-            res.setHeader("Content-Type", "application/json")
-            res.end(JSON.stringify({
-              success: true,
-              dirName,
-              fileName: identity.fileName,
-              sessionId: identity.sessionId,
-              initialContent,
-            }))
-            return
-          } catch (error) {
-            if (!isCodexAppServerUnavailable(error)) {
-              sendError(res, new RouteError(
-                500,
-                ErrorCodes.INTERNAL_ERROR,
-                error instanceof Error ? error.message : "Failed to start Codex thread",
-              ))
-              return
-            }
-          }
+          if (await tryRespondWithCodexAppServerSession(res, dirName, knownPaths, {
+            cwd,
+            message,
+            images,
+            permissions,
+            model,
+            effort,
+            fastMode,
+          })) return
 
           // Compatibility path for Codex versions that predate app-server.
           const imagePaths = await writeTempImageFiles(images)

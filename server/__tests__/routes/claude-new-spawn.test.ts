@@ -154,14 +154,14 @@ const mockedCreateSDKSession = vi.mocked(createSDKSession)
 // ---------------------------------------------------------------------------
 function createMockReqRes(method: string, body?: string) {
   const dataHandlers: ((chunk: Buffer) => void)[] = []
-  const endHandlers: (() => void)[] = []
+  const endHandlers: Array<() => void | Promise<void>> = []
 
   const req = {
     method,
     url: "/",
-    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+    on: vi.fn((event: string, handler: (...args: unknown[]) => unknown) => {
       if (event === "data") dataHandlers.push(handler as (chunk: Buffer) => void)
-      if (event === "end") endHandlers.push(handler as () => void)
+      if (event === "end") endHandlers.push(handler as () => void | Promise<void>)
       return req
     }),
     socket: { remoteAddress: "127.0.0.1" },
@@ -184,11 +184,11 @@ function createMockReqRes(method: string, body?: string) {
   const next = vi.fn()
 
   // Manually drive the req event emission
-  const sendBody = () => {
+  const sendBody = async () => {
     if (body) {
       for (const h of dataHandlers) h(Buffer.from(body))
     }
-    for (const h of endHandlers) h()
+    for (const h of endHandlers) await h()
   }
 
   return { req, res, next, sendBody }
@@ -333,9 +333,9 @@ describe("registerNewSessionRoute (Claude)", () => {
     })
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
 
-    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(res.end).toHaveBeenCalled()
     expect(mockSpawn).not.toHaveBeenCalled()
     expect(mockCodexAppServer.startThread).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/tmp/myproject",
@@ -634,6 +634,52 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
     expect(data.code).toBe("INVALID_REQUEST")
+  })
+
+  it("shares the app-server startup path while preserving image input", async () => {
+    mockCodexAppServer.start.mockResolvedValue({})
+    mockCodexAppServer.startThread.mockResolvedValue({
+      thread: {
+        id: "thread-create-and-send",
+        path: "/tmp/.codex/sessions/2026/07/21/rollout-thread-create-and-send.jsonl",
+        turns: [],
+      },
+    })
+    mockCodexAppServer.startTurn.mockResolvedValue({ turn: { id: "turn-create-and-send" } })
+    mockReadFile.mockResolvedValue("native create-and-send rollout")
+
+    const body = JSON.stringify({
+      dirName: "codex:/tmp/myproject",
+      message: "describe this",
+      images: [{ data: "ZmFrZQ==", mediaType: "image/png" }],
+      permissions: { mode: "plan" },
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(mockWriteTempImageFiles).not.toHaveBeenCalled()
+    expect(mockCodexAppServer.startThread).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/tmp/myproject",
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    }))
+    expect(mockCodexAppServer.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread-create-and-send",
+      input: [
+        { type: "text", text: "describe this", text_elements: [] },
+        { type: "image", url: "data:image/png;base64,ZmFrZQ==" },
+      ],
+    }))
+    expect(res._getData()).toEqual({
+      success: true,
+      dirName: "codex:/tmp/myproject",
+      fileName: "2026/07/21/rollout-thread-create-and-send.jsonl",
+      sessionId: "thread-create-and-send",
+      initialContent: "native create-and-send rollout",
+    })
   })
 
   // -------------------------------------------------------------------------

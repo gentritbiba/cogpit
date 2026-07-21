@@ -26,6 +26,7 @@ vi.mock("../../sdk-session", () => ({
 import { isWithinDir, readdir, readFile } from "../../helpers"
 import { stopSDKSession } from "../../sdk-session"
 import type { UseFn, Middleware } from "../../helpers"
+import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerWorkflowRoutes } from "../../routes/workflows"
 
 const mockedIsWithinDir = vi.mocked(isWithinDir)
@@ -67,7 +68,7 @@ function createMockReqRes(method: string, url: string, body?: string) {
     if (body) for (const h of dataHandlers) h(body)
     for (const h of endHandlers) h()
   }
-  return { req, res, next, sendBody }
+  return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
 }
 
 const journalJson = (over: Record<string, unknown> = {}) =>
@@ -103,20 +104,20 @@ describe("workflow routes", () => {
   describe("GET /api/workflows/:dirName/:sessionId", () => {
     it("calls next for non-GET", async () => {
       const { req, res, next } = createMockReqRes("POST", "/proj/sess")
-      await handlers.get("/api/workflows/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("calls next when arity is wrong", async () => {
       const { req, res, next } = createMockReqRes("GET", "/proj")
-      await handlers.get("/api/workflows/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns 403 when path escapes PROJECTS_DIR", async () => {
       mockedIsWithinDir.mockReturnValue(false)
       const { req, res, next } = createMockReqRes("GET", "/proj/sess")
-      await handlers.get("/api/workflows/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       expect(res._getStatus()).toBe(403)
     })
 
@@ -124,7 +125,7 @@ describe("workflow routes", () => {
       mockedReaddir.mockResolvedValueOnce(["wf_abc-123.json"] as never)
       mockedReadFile.mockResolvedValueOnce(journalJson())
       const { req, res, next } = createMockReqRes("GET", "/proj/sess")
-      await handlers.get("/api/workflows/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       const data = JSON.parse(res._getData())
       expect(Array.isArray(data)).toBe(true)
       expect(data[0].runId).toBe("wf_abc-123")
@@ -133,7 +134,7 @@ describe("workflow routes", () => {
     it("returns [] when the session has no workflows dir", async () => {
       mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
       const { req, res, next } = createMockReqRes("GET", "/proj/sess")
-      await handlers.get("/api/workflows/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       expect(JSON.parse(res._getData())).toEqual([])
     })
   })
@@ -142,14 +143,14 @@ describe("workflow routes", () => {
     it("returns 404 when the journal is missing", async () => {
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
       const { req, res, next } = createMockReqRes("GET", "/proj/sess/wf_abc-123")
-      await handlers.get("/api/workflow-detail/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-detail/")(req, res, next)
       expect(res._getStatus()).toBe(404)
     })
 
     it("returns detail with controllable=false when session is not managed", async () => {
       mockedReadFile.mockResolvedValueOnce(journalJson())
       const { req, res, next } = createMockReqRes("GET", "/proj/sess/wf_abc-123")
-      await handlers.get("/api/workflow-detail/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-detail/")(req, res, next)
       const data = JSON.parse(res._getData())
       expect(data.runId).toBe("wf_abc-123")
       expect(data.controllable).toBe(false)
@@ -159,7 +160,7 @@ describe("workflow routes", () => {
       activeProcesses.set("sess", { kill: vi.fn() })
       mockedReadFile.mockResolvedValueOnce(journalJson())
       const { req, res, next } = createMockReqRes("GET", "/proj/sess/wf_abc-123")
-      await handlers.get("/api/workflow-detail/")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-detail/")(req, res, next)
       expect(JSON.parse(res._getData()).controllable).toBe(true)
     })
   })
@@ -167,14 +168,14 @@ describe("workflow routes", () => {
   describe("POST /api/workflow-stop", () => {
     it("returns 400 when sessionId is missing", async () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ runId: "wf_abc-123" }))
-      await handlers.get("/api/workflow-stop")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
       sendBody()
       expect(res._getStatus()).toBe(400)
     })
 
     it("reports controllable=false for an unmanaged session", async () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "ghost", runId: "wf_abc-123" }))
-      await handlers.get("/api/workflow-stop")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
       sendBody()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(false)
@@ -185,7 +186,7 @@ describe("workflow routes", () => {
       const kill = vi.fn()
       activeProcesses.set("sess", { kill })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "sess", runId: "wf_abc-123" }))
-      await handlers.get("/api/workflow-stop")!(req, res, next)
+      await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
       sendBody()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(true)

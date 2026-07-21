@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 
 interface UsageResponse {
   five_hour?: { utilization: number; resets_at?: string }

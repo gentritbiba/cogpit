@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
 import { homedir } from "node:os"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 
 export interface SlashSuggestion {
   name: string

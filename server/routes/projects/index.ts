@@ -1,4 +1,4 @@
-import type { UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
 import {
   dirs,
   CODEX_SESSIONS_DIR,
@@ -19,6 +19,7 @@ import {
 } from "../../helpers"
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
+import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
 
 // ── Bottom-first loading helpers ────────────────────────────────────────────
 
@@ -217,23 +218,16 @@ export function registerProjectRoutes(use: UseFn) {
         })
       }
 
-      const codexFiles = await listCodexSessionFiles()
+      const codexFiles = await getCodexSessionInventory()
       const codexProjects = new Map<string, { latestTime: number; sessionCount: number }>()
       for (const file of codexFiles) {
-        try {
-          const meta = await getSessionMeta(file.filePath)
-          if (!meta.cwd) continue
-          // Skip Codex sub-agent sessions — they're shown inline in their parent
-          if (meta.isSubagent) continue
-          const existing = codexProjects.get(meta.cwd)
-          if (existing) {
-            existing.latestTime = Math.max(existing.latestTime, file.mtimeMs)
-            existing.sessionCount += 1
-          } else {
-            codexProjects.set(meta.cwd, { latestTime: file.mtimeMs, sessionCount: 1 })
-          }
-        } catch {
-          continue
+        if (file.isSubagent) continue
+        const existing = codexProjects.get(file.cwd)
+        if (existing) {
+          existing.latestTime = Math.max(existing.latestTime, file.mtimeMs)
+          existing.sessionCount += 1
+        } else {
+          codexProjects.set(file.cwd, { latestTime: file.mtimeMs, sessionCount: 1 })
         }
       }
 

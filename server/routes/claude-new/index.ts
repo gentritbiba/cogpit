@@ -1,4 +1,4 @@
-import type { UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
 import { registerNewSessionRoute, registerCreateAndSendRoute } from "./sessionSpawner"
 import { registerBranchSessionRoute } from "./sessionBranching"
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import { hostname } from "node:os"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import { getConfig } from "../config"
 
 export type HubMode = "electron" | "standalone" | "dev"

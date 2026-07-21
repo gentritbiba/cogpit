@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { sortSessionsByRecency } from "../../../src/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import {
   dirs,
   encodeCodexDirName,
@@ -7,18 +7,15 @@ import {
   getSessionStatus,
   isWithinDir,
   join,
-  listCodexSessionFiles,
   projectDirToReadableName,
   readFile,
   readdir,
   searchSessionMessages,
   stat,
 } from "../../helpers"
-import type { NextFn } from "../../helpers"
-import {
-  getCachedSessionMeta,
-  setCachedSessionMeta,
-} from "../../lib/sessionMetaCache"
+import type { NextFn } from "../../http"
+import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
+import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
 import { codexAppServer } from "../../codex-app-server"
@@ -81,23 +78,17 @@ export async function handleActiveSessions(
       }
     }
 
-    const codexFiles = await listCodexSessionFiles()
+    const codexFiles = await getCodexSessionInventory()
     for (const file of codexFiles) {
-      try {
-        const meta = await getSessionMeta(file.filePath)
-        if (!meta.cwd) continue
-        // Skip Codex sub-agent sessions — they're shown inline in their parent
-        if (meta.isSubagent) continue
-        candidates.push({
-          dirName: encodeCodexDirName(meta.cwd),
-          fileName: file.fileName,
-          filePath: file.filePath,
-          mtimeMs: file.mtimeMs,
-          size: file.size,
-        })
-      } catch {
-        continue
-      }
+      // Codex sub-agents are shown inline in their parent.
+      if (file.isSubagent) continue
+      candidates.push({
+        dirName: encodeCodexDirName(file.cwd),
+        fileName: file.fileName,
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        size: file.size,
+      })
     }
 
     // Sort by mtime descending within each project, then pick top N per project
@@ -154,22 +145,14 @@ export async function handleActiveSessions(
     const results = await Promise.all(
       scanPool.map(async (c) => {
         try {
-          const cached = getCachedSessionMeta(c.filePath, c.mtimeMs)
-          const [meta, statusInfo] = cached
-            ? [cached.meta, cached.status]
-            : await Promise.all([
+          const cached = await getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
+            const [meta, status] = await Promise.all([
                 getSessionMeta(c.filePath),
                 getSessionStatus(c.filePath),
-              ])
-
-          if (!cached) {
-            setCachedSessionMeta(c.filePath, {
-              meta,
-              status: statusInfo,
-              mtimeMs: c.mtimeMs,
-              cachedAt: Date.now(),
-            })
-          }
+            ])
+            return { meta, status }
+          })
+          const { meta, status: statusInfo } = cached
           const shortName = c.dirName.startsWith("codex__")
             ? `${(meta.cwd || "").replace(/\/+$/, "").split("/").at(-1) || "Codex"} (Codex)`
             : projectDirToReadableName(c.dirName).shortName

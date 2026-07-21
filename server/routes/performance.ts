@@ -1,7 +1,6 @@
 import { performance } from "node:perf_hooks"
 
-import type { Middleware, UseFn } from "../helpers"
-import { sendJson } from "../helpers"
+import { sendJson, type Middleware, type UseFn } from "../http"
 import {
   createServerPerformanceSnapshot,
   normalizeApiPath,

@@ -1,14 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
-// Mock sendJson from helpers
-vi.mock("../../helpers", () => ({
-  sendJson: (res: Record<string, unknown>, status: number, data: unknown) => {
-    res.statusCode = status
-    res.end(JSON.stringify(data))
-  },
-}))
-
 // Mock sdk-session
 const mockResolveUserQuestion = vi.fn()
 const mockSdkSessions = new Map<string, unknown>()
@@ -51,6 +43,7 @@ function makeReqRes(body: string) {
   const res = {
     get statusCode() { return statusCode },
     set statusCode(v: number) { statusCode = v },
+    setHeader: vi.fn(),
     end: vi.fn((data?: string) => { responseBody = data || "" }),
     _getStatus: () => statusCode,
     _getData: () => JSON.parse(responseBody) as unknown,

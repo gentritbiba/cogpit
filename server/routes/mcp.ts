@@ -2,8 +2,7 @@ import { execFile } from "node:child_process"
 import { isAbsolute, join } from "node:path"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import type { UseFn } from "../helpers"
-import { sendJson } from "../helpers"
+import { sendJson, type UseFn } from "../http"
 
 export interface McpServer {
   name: string

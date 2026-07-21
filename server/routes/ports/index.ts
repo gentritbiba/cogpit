@@ -2,7 +2,7 @@ import {
   spawn,
   createConnection,
 } from "../../helpers"
-import type { UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
 import { handleBackgroundTasks } from "./backgroundTasks"
 import { handleBackgroundAgents } from "./backgroundAgents"
 

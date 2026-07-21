@@ -1,12 +1,12 @@
-import type { UseFn } from "../helpers"
-import { findJsonlPath, readFile, sendJson, stat } from "../helpers"
-import type { ToolUseBlock } from "../../src/lib/types"
-import { computeNetDiff, type EditOp } from "../../src/lib/diffUtils"
+import { sendJson, type UseFn } from "../http"
+import { findJsonlPath, readFile, stat } from "../helpers"
+import type { ToolUseBlock } from "../../shared/session/types"
+import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
 import {
   findFailedNestedPatchCallIds,
   parseCustomToolOutput,
   parseCodexToolPatches,
-} from "../../src/lib/codex"
+} from "../../shared/session/codex"
 
 export interface ComputedFileChange {
   filePath: string

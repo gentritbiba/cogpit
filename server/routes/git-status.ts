@@ -2,8 +2,7 @@ import { execFile as execFileCallback } from "node:child_process"
 import { realpath, stat } from "node:fs/promises"
 import { isAbsolute, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
-import type { UseFn } from "../helpers"
-import { sendJson } from "../helpers"
+import { sendJson, type UseFn } from "../http"
 
 const execFile = promisify(execFileCallback)
 

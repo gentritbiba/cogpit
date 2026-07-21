@@ -29,7 +29,7 @@ import {
 
 const mockedMatchSubagent = vi.mocked(matchSubagentToMember)
 const mockedReadSessionTeamTags = vi.mocked(readSessionTeamTags)
-const mockedReaddir = vi.mocked(readdir)
+const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedReadFile = vi.mocked(readFile)
 const mockedOpen = vi.mocked(open)
 const mockedStat = vi.mocked(stat)
@@ -37,6 +37,7 @@ const mockedStat = vi.mocked(stat)
 const NO_TAGS = { teamName: null, agentName: null }
 
 import type { UseFn, Middleware } from "../../helpers"
+import { asIncomingMessage, asReaddirMock, asServerResponse, getRouteHandler } from "../http-fixtures"
 import { registerTeamSessionRoutes } from "../../routes/team-session"
 
 function createMockReqRes(method: string, url: string) {
@@ -58,7 +59,7 @@ function createMockReqRes(method: string, url: string) {
     _getStatus: () => statusCode,
   }
   const next = vi.fn()
-  return { req, res, next }
+  return { req: asIncomingMessage(req), res: asServerResponse(res), next }
 }
 
 describe("team-session routes", () => {
@@ -77,28 +78,28 @@ describe("team-session routes", () => {
 
   describe("GET /api/session-team", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("POST", "/")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("calls next for sub-paths", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "/something")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns 400 when leadSessionId is missing", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?other=value")
       await handler(req, res, next)
       expect(res._getStatus()).toBe(400)
     })
 
     it("returns 404 when TEAMS_DIR does not exist", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
       mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
 
@@ -108,7 +109,7 @@ describe("team-session routes", () => {
     })
 
     it("returns 404 when no team matches the leadSessionId", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -125,7 +126,7 @@ describe("team-session routes", () => {
     })
 
     it("returns team config with lead as currentMemberName when no subagentFile", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -148,7 +149,7 @@ describe("team-session routes", () => {
     })
 
     it("uses matchSubagentToMember when subagentFile is provided", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes(
         "GET", "?leadSessionId=abc-123&subagentFile=agent-xyz.jsonl"
       )
@@ -178,7 +179,7 @@ describe("team-session routes", () => {
     })
 
     it("detects membership from the session's own teamName tags (new team format)", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes(
         "GET", "?leadSessionId=member-sess-999&dirName=proj-a"
       )
@@ -219,7 +220,7 @@ describe("team-session routes", () => {
     })
 
     it("scans project dirs for the session file when dirName is not provided", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?leadSessionId=member-sess-999")
 
       // no team config matches
@@ -256,7 +257,7 @@ describe("team-session routes", () => {
     })
 
     it("returns 404 when the session has no team tags", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes(
         "GET", "?leadSessionId=plain-sess&dirName=proj-a"
       )
@@ -277,7 +278,7 @@ describe("team-session routes", () => {
     })
 
     it("picks the most recently created team when multiple match", async () => {
-      const handler = handlers.get("/api/session-team")
+      const handler = getRouteHandler(handlers, "/api/session-team")
       const { req, res, next } = createMockReqRes("GET", "?leadSessionId=abc-123")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -307,21 +308,21 @@ describe("team-session routes", () => {
 
   describe("GET /api/team-member-session/:teamName/:memberName", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("POST", "team/member")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("calls next when path parts != 2", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "team-only")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns 404 when team has no leadSessionId", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
         members: [{ name: "worker", agentType: "agent" }],
@@ -333,7 +334,7 @@ describe("team-session routes", () => {
     })
 
     it("finds lead session file directly for team-lead members", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/boss")
 
       // config
@@ -357,7 +358,7 @@ describe("team-session routes", () => {
     })
 
     it("returns 404 when lead session file not found", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/boss")
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -376,7 +377,7 @@ describe("team-session routes", () => {
     })
 
     it("returns 404 when non-lead member session not found", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -404,7 +405,7 @@ describe("team-session routes", () => {
     })
 
     it("finds member session stored as its own top-level session (new team format)", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -440,7 +441,7 @@ describe("team-session routes", () => {
     })
 
     it("skips sessions older than the team when scanning for members", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({
@@ -476,7 +477,7 @@ describe("team-session routes", () => {
     })
 
     it("returns 500 on config read error", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
       mockedReadFile.mockRejectedValueOnce(new Error("EPERM"))
@@ -487,7 +488,7 @@ describe("team-session routes", () => {
     })
 
     it("finds subagent session by matching member name in first line", async () => {
-      const handler = handlers.get("/api/team-member-session/")
+      const handler = getRouteHandler(handlers, "/api/team-member-session/")
       const { req, res, next } = createMockReqRes("GET", "my-team/worker")
 
       mockedReadFile.mockResolvedValueOnce(JSON.stringify({

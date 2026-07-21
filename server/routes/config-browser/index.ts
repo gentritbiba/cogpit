@@ -1,7 +1,11 @@
 import { readFile, writeFile, unlink, mkdir, rename } from "node:fs/promises"
-import { resolve, dirname, basename, join } from "node:path"
-import type { UseFn } from "../../helpers"
-import { isAllowedConfigPath, isUserOwned, templates } from "./configValidation"
+import { dirname, basename, join } from "node:path"
+import { sendJson, type UseFn } from "../../http"
+import {
+  isSafeConfigName,
+  resolveConfigBrowserPath,
+  templates,
+} from "./configValidation"
 import { buildGlobalSection, buildProjectSection, buildPluginSections } from "./configTree"
 import type { ConfigTreeSection } from "./configTree"
 
@@ -44,17 +48,16 @@ export function registerConfigBrowserRoutes(use: UseFn) {
         return
       }
 
-      if (!isAllowedConfigPath(filePath)) {
-        res.statusCode = 403
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: "Access denied: not inside a .claude directory" }))
+      const safePath = await resolveConfigBrowserPath(filePath, { allowMissing: true })
+      if (!safePath) {
+        sendJson(res, 403, { error: "Access denied: unsafe config path" })
         return
       }
 
       try {
-        const content = await readFile(resolve(filePath), "utf-8")
+        const content = await readFile(safePath.canonicalPath, "utf-8")
         res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ content, path: resolve(filePath) }))
+        res.end(JSON.stringify({ content, path: safePath.resolvedPath }))
       } catch {
         res.statusCode = 404
         res.setHeader("Content-Type", "application/json")
@@ -77,14 +80,16 @@ export function registerConfigBrowserRoutes(use: UseFn) {
             return
           }
 
-          if (!isUserOwned(filePath)) {
-            res.statusCode = 403
-            res.setHeader("Content-Type", "application/json")
-            res.end(JSON.stringify({ error: "Cannot write to plugin files" }))
+          const safePath = await resolveConfigBrowserPath(filePath, {
+            allowMissing: true,
+            writable: true,
+          })
+          if (!safePath) {
+            sendJson(res, 403, { error: "Access denied: config path is not writable" })
             return
           }
 
-          await writeFile(resolve(filePath), content, "utf-8")
+          await writeFile(safePath.canonicalPath, content, "utf-8")
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ ok: true }))
         } catch {
@@ -108,15 +113,19 @@ export function registerConfigBrowserRoutes(use: UseFn) {
         return
       }
 
-      if (!isUserOwned(filePath)) {
-        res.statusCode = 403
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ error: "Cannot delete plugin files" }))
+      const safePath = await resolveConfigBrowserPath(filePath, {
+        allowMissing: true,
+        writable: true,
+      })
+      if (!safePath) {
+        sendJson(res, 403, { error: "Access denied: config path is not writable" })
         return
       }
 
       try {
-        await unlink(resolve(filePath))
+        // Delete the validated directory entry rather than following an
+        // in-root symlink and deleting its target.
+        await unlink(safePath.resolvedPath)
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ ok: true }))
       } catch {
@@ -139,38 +148,47 @@ export function registerConfigBrowserRoutes(use: UseFn) {
     req.on("end", async () => {
       try {
         const { oldPath, newName } = JSON.parse(body)
-        if (!oldPath || !newName) {
+        if (typeof oldPath !== "string" || typeof newName !== "string") {
           res.statusCode = 400
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ error: "oldPath and newName required" }))
           return
         }
 
-        // Prevent path traversal
-        if (newName.includes('/') || newName.includes('\\') || newName.includes('..')) {
-          res.statusCode = 400
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Invalid name" }))
+        const trimmedName = newName.trim()
+        if (!isSafeConfigName(trimmedName)) {
+          sendJson(res, 400, { error: "Invalid name" })
           return
         }
 
-        if (!isUserOwned(oldPath)) {
-          res.statusCode = 403
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Cannot rename plugin files" }))
+        const safeOldPath = await resolveConfigBrowserPath(oldPath, {
+          allowMissing: true,
+          writable: true,
+        })
+        if (!safeOldPath) {
+          sendJson(res, 403, { error: "Access denied: config path is not writable" })
           return
         }
 
-        const resolvedOld = resolve(oldPath)
+        const resolvedOld = safeOldPath.resolvedPath
         const oldName = basename(resolvedOld)
 
         // For skills (SKILL.md), rename the parent directory
         if (oldName === "SKILL.md") {
           const oldDir = dirname(resolvedOld)
           const parentDir = dirname(oldDir)
-          const newDir = join(parentDir, newName)
-          await rename(oldDir, newDir)
-          const newPath = join(newDir, "SKILL.md")
+          const newDir = join(parentDir, trimmedName)
+          const safeNewDir = await resolveConfigBrowserPath(newDir, {
+            allowMissing: true,
+            writable: true,
+            requireClaudeDirectory: true,
+          })
+          if (!safeNewDir) {
+            sendJson(res, 400, { error: "Invalid destination" })
+            return
+          }
+          await rename(oldDir, safeNewDir.resolvedPath)
+          const newPath = join(safeNewDir.resolvedPath, "SKILL.md")
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ ok: true, newPath }))
         } else {
@@ -178,12 +196,20 @@ export function registerConfigBrowserRoutes(use: UseFn) {
           const dir = dirname(resolvedOld)
           // Preserve the original extension if the user didn't provide one
           const oldExt = oldName.includes(".") ? oldName.slice(oldName.lastIndexOf(".")) : ""
-          const hasExt = newName.includes(".")
-          const finalName = hasExt ? newName : `${newName}${oldExt}`
+          const hasExt = trimmedName.includes(".")
+          const finalName = hasExt ? trimmedName : `${trimmedName}${oldExt}`
           const newPath = join(dir, finalName)
-          await rename(resolvedOld, newPath)
+          const safeNewPath = await resolveConfigBrowserPath(newPath, {
+            allowMissing: true,
+            writable: true,
+          })
+          if (!safeNewPath) {
+            sendJson(res, 400, { error: "Invalid destination" })
+            return
+          }
+          await rename(resolvedOld, safeNewPath.resolvedPath)
           res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ ok: true, newPath }))
+          res.end(JSON.stringify({ ok: true, newPath: safeNewPath.resolvedPath }))
         }
       } catch {
         res.statusCode = 500
@@ -202,45 +228,75 @@ export function registerConfigBrowserRoutes(use: UseFn) {
     req.on("end", async () => {
       try {
         const { dir, fileType, name } = JSON.parse(body)
-        if (!dir || !fileType || !name) {
+        if (typeof dir !== "string" || typeof fileType !== "string" || typeof name !== "string") {
           res.statusCode = 400
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ error: "dir, fileType, and name required" }))
           return
         }
 
-        if (!isUserOwned(dir)) {
-          res.statusCode = 403
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ error: "Cannot create files in plugin directories" }))
+        const trimmedName = name.trim()
+        if (!isSafeConfigName(trimmedName)) {
+          sendJson(res, 400, { error: "Invalid name" })
+          return
+        }
+        if (fileType !== "skill" && fileType !== "agent" && fileType !== "command") {
+          sendJson(res, 400, { error: "Invalid file type" })
+          return
+        }
+
+        const safeDir = await resolveConfigBrowserPath(dir, {
+          allowMissing: true,
+          writable: true,
+          requireClaudeDirectory: true,
+        })
+        if (!safeDir) {
+          sendJson(res, 403, { error: "Access denied: config directory is not writable" })
           return
         }
 
         let filePath: string
-        let content = templates[fileType] || ""
+        let content = templates[fileType]
 
         if (fileType === "skill") {
           // Skills go in dir/name/SKILL.md
-          const skillDir = join(dir, name)
-          await mkdir(skillDir, { recursive: true })
+          const skillDir = join(safeDir.resolvedPath, trimmedName)
           filePath = join(skillDir, "SKILL.md")
-          content = content.replace("my-skill", name).replace("What this skill does", `${name} skill`)
+          content = content.replace("my-skill", trimmedName).replace("What this skill does", `${trimmedName} skill`)
         } else if (fileType === "agent") {
-          filePath = join(dir, `${name}.md`)
-          content = content.replace("my-agent", name).replace("What this agent does", `${name} agent`)
-        } else if (fileType === "command") {
-          filePath = join(dir, `${name}.md`)
-          content = content.replace("My custom command", `${name} command`)
+          filePath = join(safeDir.resolvedPath, `${trimmedName}.md`)
+          content = content.replace("my-agent", trimmedName).replace("What this agent does", `${trimmedName} agent`)
         } else {
-          filePath = join(dir, name.endsWith(".md") ? name : `${name}.md`)
+          filePath = join(safeDir.resolvedPath, `${trimmedName}.md`)
+          content = content.replace("My custom command", `${trimmedName} command`)
         }
 
-        // Ensure parent directory exists
-        await mkdir(dirname(filePath), { recursive: true })
-        await writeFile(filePath, content, "utf-8")
+        let safeFilePath = await resolveConfigBrowserPath(filePath, {
+          allowMissing: true,
+          writable: true,
+          requireClaudeDirectory: true,
+        })
+        if (!safeFilePath) {
+          sendJson(res, 403, { error: "Access denied: unsafe destination" })
+          return
+        }
+
+        await mkdir(dirname(safeFilePath.canonicalPath), { recursive: true })
+        // Re-resolve after mkdir so a pre-existing symlink in the newly visible
+        // parent chain cannot redirect the final write outside the policy root.
+        safeFilePath = await resolveConfigBrowserPath(filePath, {
+          allowMissing: true,
+          writable: true,
+          requireClaudeDirectory: true,
+        })
+        if (!safeFilePath) {
+          sendJson(res, 403, { error: "Access denied: unsafe destination" })
+          return
+        }
+        await writeFile(safeFilePath.canonicalPath, content, "utf-8")
 
         res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ ok: true, path: filePath, content }))
+        res.end(JSON.stringify({ ok: true, path: safeFilePath.resolvedPath, content }))
       } catch {
         res.statusCode = 500
         res.setHeader("Content-Type", "application/json")

@@ -12,7 +12,7 @@ import {
   join,
   randomUUID,
 } from "../../helpers"
-import type { UseFn } from "../../helpers"
+import type { UseFn } from "../../http"
 
 /**
  * Find the JSONL line index where the turn AFTER targetTurnIndex starts.
@@ -22,7 +22,7 @@ import type { UseFn } from "../../helpers"
  * For Codex sessions, a preceding `turn_context` line is included in the
  * truncation point via look-back (stored in `pendingReturnIndex`).
  */
-export function findTruncationLine(
+function findTruncationLine(
   lines: string[],
   targetTurnIndex: number,
   isTurnBoundary: (obj: Record<string, unknown>) => boolean,

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Stats, Dirent } from "node:fs"
 
 const mockGetActiveCodexTurnId = vi.hoisted(() => vi.fn())
+const mockGetCodexSessionInventory = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
   dirs: {
@@ -33,6 +34,10 @@ vi.mock("../../codex-app-server", async (importOriginal) => {
   }
 })
 
+vi.mock("../../lib/codexSessionInventory", () => ({
+  getCodexSessionInventory: mockGetCodexSessionInventory,
+}))
+
 import {
   findJsonlPath,
   isWithinDir,
@@ -52,12 +57,19 @@ const mockedProjectDirToReadableName = vi.mocked(projectDirToReadableName)
 const mockedGetSessionMeta = vi.mocked(getSessionMeta)
 const mockedGetSessionStatus = vi.mocked(getSessionStatus)
 const mockedListCodexSessionFiles = vi.mocked(listCodexSessionFiles)
-const mockedReaddir = vi.mocked(readdir)
+const mockedReaddir = asReaddirMock(vi.mocked(readdir))
 const mockedReadFile = vi.mocked(readFile)
 const mockedResolveSessionFilePath = vi.mocked(resolveSessionFilePath)
 const mockedStat = vi.mocked(stat)
 
 import type { UseFn, Middleware } from "../../helpers"
+import {
+  asIncomingMessage,
+  asReaddirMock,
+  asServerResponse,
+  getRouteHandler,
+  makeSessionMeta,
+} from "../http-fixtures"
 import { registerProjectRoutes } from "../../routes/projects"
 
 function createMockReqRes(method: string, url: string) {
@@ -80,7 +92,7 @@ function createMockReqRes(method: string, url: string) {
     _getHeaders: () => headers,
   }
   const next = vi.fn()
-  return { req, res, next }
+  return { req: asIncomingMessage(req), res: asServerResponse(res), next }
 }
 
 describe("project routes", () => {
@@ -91,7 +103,8 @@ describe("project routes", () => {
     // getSessionStatus always returns idle by default
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     mockedListCodexSessionFiles.mockResolvedValue([])
-    mockedResolveSessionFilePath.mockImplementation((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
+    mockGetCodexSessionInventory.mockResolvedValue([])
+    mockedResolveSessionFilePath.mockImplementation(async (dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
     mockedFindJsonlPath.mockResolvedValue(null)
     mockGetActiveCodexTurnId.mockReturnValue(undefined)
     handlers = new Map()
@@ -105,21 +118,21 @@ describe("project routes", () => {
 
   describe("GET /api/projects", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("POST", "/")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("calls next for non-root URL paths", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/something")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns project list sorted by last modified", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -149,7 +162,7 @@ describe("project routes", () => {
     })
 
     it("skips non-directory entries", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -163,7 +176,7 @@ describe("project routes", () => {
     })
 
     it("skips projects with no jsonl files", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -178,20 +191,20 @@ describe("project routes", () => {
     })
 
     it("returns Codex projects when the Claude projects directory is missing", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-      mockedListCodexSessionFiles.mockResolvedValueOnce([{
+      mockGetCodexSessionInventory.mockResolvedValueOnce([{
         fileName: "rollout-codex-1.jsonl",
         filePath: "/tmp/codex-sessions/rollout-codex-1.jsonl",
         mtimeMs: 2000,
         size: 300,
+        sessionId: "codex-1",
+        cwd: "/code/codex-only",
+        gitBranch: "main",
+        isSubagent: false,
+        parentSessionId: null,
       }])
-      mockedGetSessionMeta.mockResolvedValueOnce({
-        sessionId: "codex-1", version: "", gitBranch: "main", model: "gpt-5.6-terra",
-        slug: "", cwd: "/code/codex-only", firstUserMessage: "hello", lastUserMessage: "bye",
-        timestamp: "", turnCount: 2, lineCount: 4,
-      })
 
       await handler(req, res, next)
 
@@ -207,7 +220,7 @@ describe("project routes", () => {
     })
 
     it("returns 500 on non-missing-directory readdir errors", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
@@ -218,7 +231,7 @@ describe("project routes", () => {
     })
 
     it("handles empty URL as root path", async () => {
-      const handler = handlers.get("/api/projects")
+      const handler = getRouteHandler(handlers, "/api/projects")
       const { req, res, next } = createMockReqRes("GET", "")
 
       mockedReaddir.mockResolvedValueOnce([] as unknown as Dirent[])
@@ -232,7 +245,7 @@ describe("project routes", () => {
 
   describe("GET /api/codex-subagents", () => {
     it("returns Codex subagents with read-only virtual paths", async () => {
-      const handler = handlers.get("/api/codex-subagents")
+      const handler = getRouteHandler(handlers, "/api/codex-subagents")
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedListCodexSessionFiles.mockResolvedValueOnce([
         {
@@ -249,18 +262,18 @@ describe("project routes", () => {
         },
       ])
       mockedGetSessionMeta
-        .mockResolvedValueOnce({
+        .mockResolvedValueOnce(makeSessionMeta({
           sessionId: "sub-older", version: "", gitBranch: "main", model: "gpt-5",
           slug: "", cwd: "/code/cogpit", firstUserMessage: "Inspect the API", lastUserMessage: "Inspect the API",
           timestamp: "", lastTimestamp: "", turnCount: 1, lineCount: 4,
           isSubagent: true, parentSessionId: "parent-1", agentPath: "/root/api_scout",
-        })
-        .mockResolvedValueOnce({
+        }))
+        .mockResolvedValueOnce(makeSessionMeta({
           sessionId: "parent", version: "", gitBranch: "main", model: "gpt-5",
           slug: "", cwd: "/code/cogpit", firstUserMessage: "Build it", lastUserMessage: "Build it",
           timestamp: "", lastTimestamp: "", turnCount: 2, lineCount: 8,
           isSubagent: false, parentSessionId: null, agentPath: "/root",
-        })
+        }))
 
       await handler(req, res, next)
 
@@ -279,14 +292,14 @@ describe("project routes", () => {
 
   describe("GET /api/sessions/:dirName (list sessions)", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("POST", "proj-a")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns 403 for paths outside PROJECTS_DIR", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "../../etc")
       mockedIsWithinDir.mockReturnValueOnce(false)
 
@@ -296,22 +309,22 @@ describe("project routes", () => {
     })
 
     it("lists sessions with pagination", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a?page=1&limit=10")
       mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReaddir.mockResolvedValueOnce(["s1.jsonl", "s2.jsonl", "readme.md"] as unknown as Dirent[])
       mockedStat.mockResolvedValueOnce({ mtime: new Date(2000), size: 100 } as unknown as Stats)
       mockedStat.mockResolvedValueOnce({ mtime: new Date(1000), size: 200 } as unknown as Stats)
-      mockedGetSessionMeta.mockResolvedValueOnce({
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "s1", version: "", gitBranch: "", model: "", slug: "",
         cwd: "", firstUserMessage: "", lastUserMessage: "", timestamp: "",
         turnCount: 5, lineCount: 10,
-      })
-      mockedGetSessionMeta.mockResolvedValueOnce({
+      }))
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "s2", version: "", gitBranch: "", model: "", slug: "",
         cwd: "", firstUserMessage: "", lastUserMessage: "", timestamp: "",
         turnCount: 3, lineCount: 6,
-      })
+      }))
 
       await handler(req, res, next)
 
@@ -324,7 +337,7 @@ describe("project routes", () => {
     })
 
     it("returns 500 on readdir error", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a")
       mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReaddir.mockRejectedValueOnce(new Error("EPERM"))
@@ -335,7 +348,7 @@ describe("project routes", () => {
     })
 
     it("falls back gracefully when getSessionMeta fails", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a")
       mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReaddir.mockResolvedValueOnce(["bad.jsonl"] as unknown as Dirent[])
@@ -355,7 +368,7 @@ describe("project routes", () => {
 
   describe("GET /api/sessions/:dirName/:fileName (serve file)", () => {
     it("rejects non-.jsonl files", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a/file.txt")
 
       await handler(req, res, next)
@@ -364,7 +377,7 @@ describe("project routes", () => {
     })
 
     it("returns 403 for paths outside PROJECTS_DIR", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "../../etc/session.jsonl")
       mockedResolveSessionFilePath.mockResolvedValueOnce(null)
 
@@ -374,7 +387,7 @@ describe("project routes", () => {
     })
 
     it("serves .jsonl file content", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a/session.jsonl")
       mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReadFile.mockResolvedValueOnce('{"line":1}\n{"line":2}\n' as unknown as Buffer)
@@ -386,7 +399,7 @@ describe("project routes", () => {
     })
 
     it("resolves a virtual Codex subagent path to its flat rollout file", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes(
         "GET",
         "codex__project/parent-1/subagents/agent-sub-1.jsonl"
@@ -405,7 +418,7 @@ describe("project routes", () => {
     })
 
     it("returns 404 when file not found", async () => {
-      const handler = handlers.get("/api/sessions/")
+      const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a/missing.jsonl")
       mockedIsWithinDir.mockReturnValueOnce(true)
       mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
@@ -420,14 +433,14 @@ describe("project routes", () => {
 
   describe("GET /api/active-sessions", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("POST", "/")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("returns active sessions sorted by mtime", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?limit=10")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -435,11 +448,11 @@ describe("project routes", () => {
       ] as unknown as Dirent[])
       mockedReaddir.mockResolvedValueOnce(["s1.jsonl"] as unknown as Dirent[])
       mockedStat.mockResolvedValueOnce({ mtimeMs: Date.now(), size: 500 } as unknown as Stats)
-      mockedGetSessionMeta.mockResolvedValueOnce({
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "s1", version: "", gitBranch: "main", model: "claude",
         slug: "", cwd: "/code", firstUserMessage: "hello", lastUserMessage: "bye",
         timestamp: "", turnCount: 3, lineCount: 10,
-      })
+      }))
       mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/a", shortName: "a" })
 
       await handler(req, res, next)
@@ -452,7 +465,7 @@ describe("project routes", () => {
     })
 
     it("sorts active sessions by displayed activity time when it differs from file mtime", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "?limit=10")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -467,7 +480,7 @@ describe("project routes", () => {
       mockedStat.mockResolvedValueOnce({ mtimeMs: Date.parse("2026-03-21T11:00:00.000Z"), size: 200 } as unknown as Stats)
 
       mockedGetSessionMeta
-        .mockResolvedValueOnce({
+        .mockResolvedValueOnce(makeSessionMeta({
           sessionId: "mtime-newer",
           version: "",
           gitBranch: "main",
@@ -480,8 +493,8 @@ describe("project routes", () => {
           lastTimestamp: "2026-03-20T12:00:00.000Z",
           turnCount: 3,
           lineCount: 10,
-        })
-        .mockResolvedValueOnce({
+        }))
+        .mockResolvedValueOnce(makeSessionMeta({
           sessionId: "activity-newer",
           version: "",
           gitBranch: "main",
@@ -494,7 +507,7 @@ describe("project routes", () => {
           lastTimestamp: "2026-03-21T11:30:00.000Z",
           turnCount: 4,
           lineCount: 12,
-        })
+        }))
 
       mockedProjectDirToReadableName.mockReturnValue({ path: "/proj/a", shortName: "a" })
 
@@ -507,7 +520,7 @@ describe("project routes", () => {
     })
 
     it("skips memory directory", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockResolvedValueOnce([
@@ -521,20 +534,25 @@ describe("project routes", () => {
     })
 
     it("returns Codex sessions when the Claude projects directory is missing", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-      mockedListCodexSessionFiles.mockResolvedValueOnce([{
+      mockGetCodexSessionInventory.mockResolvedValueOnce([{
         fileName: "rollout-codex-active.jsonl",
         filePath: "/tmp/codex-sessions/rollout-codex-active.jsonl",
         mtimeMs: Date.now(),
         size: 400,
+        sessionId: "codex-active",
+        cwd: "/code/codex-only",
+        gitBranch: "main",
+        isSubagent: false,
+        parentSessionId: null,
       }])
-      mockedGetSessionMeta.mockResolvedValue({
+      mockedGetSessionMeta.mockResolvedValue(makeSessionMeta({
         sessionId: "codex-active", version: "", gitBranch: "main", model: "gpt-5.6-terra",
         slug: "", cwd: "/code/codex-only", firstUserMessage: "hello", lastUserMessage: "bye",
         timestamp: "", turnCount: 2, lineCount: 4,
-      })
+      }))
       mockGetActiveCodexTurnId.mockReturnValue("turn-codex-active")
 
       await handler(req, res, next)
@@ -550,7 +568,7 @@ describe("project routes", () => {
     })
 
     it("returns 500 on non-missing-directory top-level errors", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       mockedReaddir.mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
@@ -563,7 +581,7 @@ describe("project routes", () => {
     })
 
     it("marks old sessions as not active", async () => {
-      const handler = handlers.get("/api/active-sessions")
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
 
       const oldTime = Date.now() - 10 * 60 * 1000 // 10 minutes ago
@@ -572,11 +590,11 @@ describe("project routes", () => {
       ] as unknown as Dirent[])
       mockedReaddir.mockResolvedValueOnce(["old.jsonl"] as unknown as Dirent[])
       mockedStat.mockResolvedValueOnce({ mtimeMs: oldTime, size: 100 } as unknown as Stats)
-      mockedGetSessionMeta.mockResolvedValueOnce({
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
         sessionId: "old", version: "", gitBranch: "", model: "",
         slug: "", cwd: "", firstUserMessage: "", lastUserMessage: "",
         timestamp: "", turnCount: 1, lineCount: 2,
-      })
+      }))
       mockedProjectDirToReadableName.mockReturnValueOnce({ path: "/proj/a", shortName: "a" })
 
       await handler(req, res, next)
@@ -590,14 +608,14 @@ describe("project routes", () => {
 
   describe("GET /api/find-session/:sessionId", () => {
     it("calls next for non-GET methods", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("POST", "abc-123")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()
     })
 
     it("finds session by ID across projects", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
       mockedFindJsonlPath.mockResolvedValueOnce("/tmp/test-projects/proj-b/abc-123.jsonl")
 
@@ -609,7 +627,7 @@ describe("project routes", () => {
     })
 
     it("returns 404 when session not found", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "nonexistent")
       mockedFindJsonlPath.mockResolvedValueOnce(null)
 
@@ -619,7 +637,7 @@ describe("project routes", () => {
     })
 
     it("returns 500 on readdir error", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
       mockedFindJsonlPath.mockRejectedValueOnce(new Error("ENOENT"))
 
@@ -629,7 +647,7 @@ describe("project routes", () => {
     })
 
     it("skips memory directory", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc-123")
       mockedFindJsonlPath.mockResolvedValueOnce(null)
 
@@ -639,7 +657,7 @@ describe("project routes", () => {
     })
 
     it("calls next when URL has multiple path segments", async () => {
-      const handler = handlers.get("/api/find-session/")
+      const handler = getRouteHandler(handlers, "/api/find-session/")
       const { req, res, next } = createMockReqRes("GET", "abc/extra")
       await handler(req, res, next)
       expect(next).toHaveBeenCalled()

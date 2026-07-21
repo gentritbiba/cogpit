@@ -16,15 +16,15 @@ vi.mock("../../helpers", () => ({
 }))
 
 // Must mock the parser since it imports from src/lib/
-vi.mock("../../../src/lib/parser", () => ({
+vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(),
 }))
 
 import { findJsonlPath, readFile, readdir } from "../../helpers"
-import { parseSession } from "../../../src/lib/parser"
+import { parseSession } from "../../../shared/session/parser"
 import { registerSessionContextRoutes } from "../../routes/session-context"
 import type { UseFn, Middleware } from "../../helpers"
-import type { ParsedSession, Turn, TokenUsage } from "../../../src/lib/types"
+import type { ParsedSession, Turn, TokenUsage } from "../../../shared/session/types"
 
 const mockedFindJsonlPath = vi.mocked(findJsonlPath)
 const mockedReadFile = vi.mocked(readFile)
@@ -87,6 +87,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
     gitBranch: "main",
     cwd: "/projects/myapp",
     slug: "myapp",
+    name: "",
     model: "claude-opus-4-6",
     turns: [makeTurn()],
     stats: {

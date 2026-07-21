@@ -1,49 +1,18 @@
 import { readlink } from "node:fs/promises"
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { dirs } from "../../helpers"
+import type { NextFn } from "../../http"
 import {
-  stat,
-  open,
-  lstat,
-  readdir,
-  join,
-  dirs,
-} from "../../helpers"
-import type { NextFn } from "../../helpers"
+  handleBackgroundOutputCollection,
+  readBackgroundOutputPrefix,
+} from "./backgroundOutputs"
 
 export async function handleBackgroundAgents(
   req: IncomingMessage,
   res: ServerResponse,
   next: NextFn,
 ): Promise<void> {
-  if (req.method !== "GET") return next()
-
-  const url = new URL(req.url || "/", "http://localhost")
-  const pathParts = url.pathname.split("/").filter(Boolean)
-  if (pathParts.length > 0) return next()
-
-  const cwd = url.searchParams.get("cwd")
-  if (!cwd) {
-    res.statusCode = 400
-    res.end(JSON.stringify({ error: "cwd query param required" }))
-    return
-  }
-
-  try {
-    const uid = process.getuid?.() ?? 501
-    const tmpBase = `/private/tmp/claude-${uid}`
-
-    const projectHash = cwd.replace(/\//g, "-").replace(/ /g, "-").replace(/@/g, "-").replace(/\./g, "-")
-    const tasksDir = join(tmpBase, projectHash, "tasks")
-
-    let files: string[]
-    try {
-      files = await readdir(tasksDir)
-    } catch {
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify([]))
-      return
-    }
-
+  return handleBackgroundOutputCollection(req, res, next, async (files) => {
     const agents: Array<{
       agentId: string
       dirName: string
@@ -54,24 +23,15 @@ export async function handleBackgroundAgents(
       preview: string
     }> = []
 
-    for (const f of files) {
-      if (!f.endsWith(".output")) continue
-      const fullPath = join(tasksDir, f)
-
+    for (const file of files) {
       // Only process symlinks (background agents), skip regular files (bash tasks)
-      let isSymlink = false
-      try {
-        const lstats = await lstat(fullPath)
-        isSymlink = lstats.isSymbolicLink()
-      } catch { continue }
+      if (!file.isSymbolicLink) continue
 
-      if (!isSymlink) continue
-
-      const agentId = f.replace(".output", "")
+      const agentId = file.fileName.replace(".output", "")
 
       let targetPath: string
       try {
-        targetPath = await readlink(fullPath)
+        targetPath = await readlink(file.path)
       } catch { continue }
 
       // Parse the target path to extract dirName and fileName
@@ -87,43 +47,35 @@ export async function handleBackgroundAgents(
       const parentSessionId = parts[1]
       const fileName = `${parentSessionId}/subagents/${parts[3]}`
 
-      let modifiedAt = 0
-      let preview = ""
-      try {
-        const s = await stat(targetPath)
-        modifiedAt = s.mtimeMs
+      const output = await readBackgroundOutputPrefix(targetPath, 4096)
+      if (!output) continue
 
-        if (s.size > 0) {
-          const fh = await open(targetPath, "r")
+      const { modifiedAt } = output
+      let preview = ""
+      if (output.size > 0) {
+        // Try to find the agent's task description from the first user message
+        const lines = output.content.split("\n").filter((line) => line.trim())
+        for (const line of lines.slice(0, 5)) {
           try {
-            const buf = Buffer.alloc(Math.min(s.size, 4096))
-            const { bytesRead } = await fh.read(buf, 0, buf.length, 0)
-            const content = buf.subarray(0, bytesRead).toString("utf-8")
-            // Try to find the agent's task description from the first user message
-            const lines = content.split("\n").filter((l) => l.trim())
-            for (const line of lines.slice(0, 5)) {
-              try {
-                const msg = JSON.parse(line)
-                if (msg.type === "user" && !msg.isMeta) {
-                  const content = msg.message?.content
-                  if (typeof content === "string") {
-                    preview = content.slice(0, 120)
-                    break
-                  } else if (Array.isArray(content)) {
-                    const textBlock = content.find((b: { type: string }) => b.type === "text")
-                    if (textBlock && typeof textBlock.text === "string") {
-                      preview = textBlock.text.slice(0, 120)
-                      break
-                    }
-                  }
+            const msg = JSON.parse(line)
+            if (msg.type === "user" && !msg.isMeta) {
+              const content = msg.message?.content
+              if (typeof content === "string") {
+                preview = content.slice(0, 120)
+                break
+              } else if (Array.isArray(content)) {
+                const textBlock = content.find((block: { type: string }) => block.type === "text")
+                if (textBlock && typeof textBlock.text === "string") {
+                  preview = textBlock.text.slice(0, 120)
+                  break
                 }
-              } catch { continue }
+              }
             }
-          } finally {
-            await fh.close()
+          } catch {
+            continue
           }
         }
-      } catch { continue }
+      }
 
       const isActive = Date.now() - modifiedAt < 60_000
 
@@ -131,11 +83,6 @@ export async function handleBackgroundAgents(
     }
 
     agents.sort((a, b) => b.modifiedAt - a.modifiedAt)
-
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify(agents))
-  } catch (err) {
-    res.statusCode = 500
-    res.end(JSON.stringify({ error: String(err) }))
-  }
+    return agents
+  })
 }

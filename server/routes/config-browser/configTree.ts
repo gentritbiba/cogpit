@@ -25,12 +25,36 @@ export interface ConfigTreeSection {
   items: ConfigTreeItem[]
 }
 
+interface ScanDirOptions {
+  readOnly?: boolean
+  isSkillsDir?: boolean
+  isMonitorsDir?: boolean
+  isBinDir?: boolean
+  isThemesDir?: boolean
+}
+
 // ── Directory scanner ──────────────────────────────────────────────────
+
+async function scanChildDirectory(
+  name: string,
+  path: string,
+  opts: ScanDirOptions,
+): Promise<ConfigTreeItem | null> {
+  const children = await scanDir(path, opts)
+  if (children.length === 0) return null
+  return {
+    name,
+    path,
+    type: "directory",
+    children,
+    readOnly: opts.readOnly,
+  }
+}
 
 /** Scan a directory and build tree items */
 export async function scanDir(
   dir: string,
-  opts: { readOnly?: boolean; isSkillsDir?: boolean; isMonitorsDir?: boolean; isBinDir?: boolean; isThemesDir?: boolean } = {},
+  opts: ScanDirOptions = {},
 ): Promise<ConfigTreeItem[]> {
   const items: ConfigTreeItem[] = []
   try {
@@ -57,16 +81,8 @@ export async function scanDir(
             })
           } catch {
             // Not a valid skill dir — still show the directory
-            const children = await scanDir(fullPath, opts)
-            if (children.length > 0) {
-              items.push({
-                name: entry.name,
-                path: fullPath,
-                type: "directory",
-                children,
-                readOnly: opts.readOnly,
-              })
-            }
+            const directory = await scanChildDirectory(entry.name, fullPath, opts)
+            if (directory) items.push(directory)
           }
         } else if (opts.isMonitorsDir) {
           // Monitors: each subdir is a monitor; read manifest.json for description if present
@@ -86,16 +102,8 @@ export async function scanDir(
             readOnly: opts.readOnly,
           })
         } else {
-          const children = await scanDir(fullPath, opts)
-          if (children.length > 0) {
-            items.push({
-              name: entry.name,
-              path: fullPath,
-              type: "directory",
-              children,
-              readOnly: opts.readOnly,
-            })
-          }
+          const directory = await scanChildDirectory(entry.name, fullPath, opts)
+          if (directory) items.push(directory)
         }
       } else if (entry.isFile() || resolved?.isFile()) {
         if (opts.isBinDir) {

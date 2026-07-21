@@ -13,7 +13,7 @@
  * Mirrors the team-watch SSE pattern (debounced fs.watch → {type:"update"}).
  */
 import { watch, activeProcesses, persistentSessions } from "../helpers"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import { sdkSessions, stopSDKSession } from "../sdk-session"
 import {
   listSessionWorkflows,

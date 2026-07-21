@@ -1,6 +1,6 @@
 import { createRequire } from "node:module"
 import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import { resolveClaudeCliPath } from "../sdk-session"
 import { codexAppServer } from "../codex-app-server"
 

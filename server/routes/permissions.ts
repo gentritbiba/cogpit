@@ -1,4 +1,5 @@
-import { persistentSessions, activeProcesses, sendJson } from "../helpers"
+import { sendJson, type UseFn } from "../http"
+import { persistentSessions, activeProcesses } from "../helpers"
 import { sdkSessions, resolvePermission, resolveAllPermissions, getSDKPermissions } from "../sdk-session"
 import {
   codexAppServer,
@@ -6,7 +7,6 @@ import {
   type CodexAppServer,
   type PendingApproval,
 } from "../codex-app-server"
-import type { UseFn } from "../helpers"
 
 export type CodexApprovalClient = Pick<
   CodexAppServer,
@@ -102,7 +102,7 @@ export function normalizeCodexApproval(
  * may safely degrade to one-time allow, but one-time allow never broadens to a
  * session grant and deny never changes into an allow.
  */
-export function selectCodexBatchDecision(
+function selectCodexBatchDecision(
   approval: PendingApproval,
   requested: ApprovalDecision,
 ): ApprovalDecision | null {

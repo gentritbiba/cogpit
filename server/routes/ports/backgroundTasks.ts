@@ -1,48 +1,19 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import {
-  stat,
-  open,
-  lstat,
-  readdir,
-  join,
   createConnection,
 } from "../../helpers"
-import type { NextFn } from "../../helpers"
+import type { NextFn } from "../../http"
+import {
+  handleBackgroundOutputCollection,
+  readBackgroundOutputPrefix,
+} from "./backgroundOutputs"
 
 export async function handleBackgroundTasks(
   req: IncomingMessage,
   res: ServerResponse,
   next: NextFn,
 ): Promise<void> {
-  if (req.method !== "GET") return next()
-
-  const url = new URL(req.url || "/", "http://localhost")
-  const pathParts = url.pathname.split("/").filter(Boolean)
-  if (pathParts.length > 0) return next()
-
-  const cwd = url.searchParams.get("cwd")
-  if (!cwd) {
-    res.statusCode = 400
-    res.end(JSON.stringify({ error: "cwd query param required" }))
-    return
-  }
-
-  try {
-    const uid = process.getuid?.() ?? 501
-    const tmpBase = `/private/tmp/claude-${uid}`
-
-    const projectHash = cwd.replace(/\//g, "-").replace(/ /g, "-").replace(/@/g, "-").replace(/\./g, "-")
-    const tasksDir = join(tmpBase, projectHash, "tasks")
-
-    let files: string[]
-    try {
-      files = await readdir(tasksDir)
-    } catch {
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify([]))
-      return
-    }
-
+  return handleBackgroundOutputCollection(req, res, next, async (files) => {
     const PORT_RE = /(?::(\d{4,5}))|(?:localhost:(\d{4,5}))|(?:port\s+(\d{4,5}))/gi
     const tasks: Array<{
       id: string
@@ -52,33 +23,15 @@ export async function handleBackgroundTasks(
       modifiedAt: number
     }> = []
 
-    for (const f of files) {
-      if (!f.endsWith(".output")) continue
-      const fullPath = join(tasksDir, f)
-
+    for (const file of files) {
       // Skip symlinks (those are subagent tasks, not bash background tasks)
-      try {
-        const lstats = await lstat(fullPath)
-        if (lstats.isSymbolicLink()) continue
-      } catch { continue }
+      if (file.isSymbolicLink) continue
 
-      const taskId = f.replace(".output", "")
+      const taskId = file.fileName.replace(".output", "")
 
-      let content = ""
-      let modifiedAt = 0
-      try {
-        const s = await stat(fullPath)
-        modifiedAt = s.mtimeMs
-        if (s.size === 0) continue // skip empty output files
-        const fh = await open(fullPath, "r")
-        try {
-          const buf = Buffer.alloc(Math.min(s.size, 8192))
-          const { bytesRead } = await fh.read(buf, 0, buf.length, 0)
-          content = buf.subarray(0, bytesRead).toString("utf-8")
-        } finally {
-          await fh.close()
-        }
-      } catch { continue }
+      const output = await readBackgroundOutputPrefix(file.path, 8192)
+      if (!output || output.size === 0) continue // skip empty output files
+      const { content, modifiedAt } = output
 
       const ports = new Set<number>()
       for (const m of content.matchAll(PORT_RE)) {
@@ -93,7 +46,7 @@ export async function handleBackgroundTasks(
 
       tasks.push({
         id: taskId,
-        outputPath: fullPath,
+        outputPath: file.path,
         ports: [...ports],
         preview,
         modifiedAt,
@@ -149,10 +102,6 @@ export async function handleBackgroundTasks(
       })
     }
 
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify(result))
-  } catch (err) {
-    res.statusCode = 500
-    res.end(JSON.stringify({ error: String(err) }))
-  }
+    return result
+  })
 }

@@ -1,6 +1,5 @@
 import { sdkSessions, resolveUserQuestion, type UserQuestionAnswers } from "../sdk-session"
-import { sendJson } from "../helpers"
-import type { UseFn } from "../helpers"
+import { sendJson, type UseFn } from "../http"
 
 export function registerAskUserRoutes(use: UseFn) {
   use("/api/ask-user-answer", (req, res, next) => {

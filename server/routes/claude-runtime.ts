@@ -1,6 +1,6 @@
 import { createRequire } from "node:module"
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import type { UseFn } from "../helpers"
+import type { UseFn } from "../http"
 import { resolveClaudeCliPath } from "../sdk-session"
 
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -54,7 +54,7 @@ async function bestEffort<T>(promise: Promise<T>): Promise<T | null> {
  * channel. This avoids reading OAuth secrets from the macOS Keychain and works
  * on every platform supported by the Agent SDK.
  */
-export async function getClaudeRuntimeSnapshot(force = false): Promise<ClaudeRuntimeSnapshot> {
+async function getClaudeRuntimeSnapshot(force = false): Promise<ClaudeRuntimeSnapshot> {
   if (!force && cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached
   if (inFlight) return inFlight
 
