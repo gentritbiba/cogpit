@@ -9,6 +9,7 @@ import {
   isCodexDirName,
   projectDirNameForAgent,
   projectDirNameForNewFolder,
+  sessionIdFromFileName,
 } from "@/lib/sessionSource"
 
 describe("sessionSource", () => {
@@ -54,5 +55,28 @@ describe("sessionSource", () => {
     ]
 
     expect(findClaudeProjectDirNameForCwd(projects, cwd)).toBe("tmp-project")
+  })
+
+  describe("sessionIdFromFileName", () => {
+    it("strips .jsonl from Claude session file names", () => {
+      expect(sessionIdFromFileName("68596e24-db5d-46a4-86fe-9d82425f36d7.jsonl"))
+        .toBe("68596e24-db5d-46a4-86fe-9d82425f36d7")
+    })
+
+    it("extracts the thread UUID from nested Codex rollout paths", () => {
+      expect(sessionIdFromFileName(
+        "2026/07/21/rollout-2026-07-21T22-59-57-e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3.jsonl"
+      )).toBe("e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3")
+    })
+
+    it("extracts the agent UUID from virtual Codex subagent paths", () => {
+      expect(sessionIdFromFileName(
+        "019f85cf-0ac3-7233-84f9-ac45a79d40e9/subagents/agent-019f8682-1c07-7fe2-8c38-26b0cafe7e08.jsonl"
+      )).toBe("019f8682-1c07-7fe2-8c38-26b0cafe7e08")
+    })
+
+    it("falls back to stripping .jsonl when no UUID is present", () => {
+      expect(sessionIdFromFileName("sess.jsonl")).toBe("sess")
+    })
   })
 })

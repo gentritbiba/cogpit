@@ -122,6 +122,30 @@ describe("usePtyChat", () => {
     expect(result.current.status).toBe("idle")
   })
 
+  it("sends the rollout thread UUID (not the nested file path) for Codex sessions without a parsed id", async () => {
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    } as Response)
+
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: {
+          dirName: "codex__proj",
+          fileName: "2026/07/21/rollout-2026-07-21T22-59-57-e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3.jsonl",
+          rawText: "",
+        },
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.sessionId).toBe("e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3")
+  })
+
   it("sets error status on network error", async () => {
     mockedAuthFetch.mockRejectedValueOnce(new Error("Network failure"))
 

@@ -106,12 +106,16 @@ export function useProjectSessionLaunch({
       return
     }
 
-    const claudeDirName = isCodexDirName(dirName)
+    const startsInCodex = isCodexDirName(dirName)
+    const claudeDirName = startsInCodex
       ? await resolveClaudeProjectDirName(normalizedCwd)
-      : dirName
+      : projectDirNameForNewFolder(normalizedCwd, "claude")
 
     setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
-    beginNewSession(dirName, normalizedCwd)
+    beginNewSession(
+      startsInCodex || !claudeDirName ? dirName : claudeDirName,
+      normalizedCwd,
+    )
   }, [beginNewSession, resolveClaudeProjectDirName])
 
   const handleStartNewFolder = useCallback((cwd: string) => {

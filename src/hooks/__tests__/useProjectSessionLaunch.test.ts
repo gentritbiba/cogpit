@@ -58,6 +58,23 @@ describe("useProjectSessionLaunch", () => {
     })
   })
 
+  it("normalizes a stale Claude dirName to the supplied cwd", async () => {
+    const { result } = renderHook(() => useProjectSessionLaunch(baseOptions))
+
+    await act(async () => result.current.handleStartNewSession(
+      "-repo--claude-worktrees-feature",
+      "/repo",
+    ))
+
+    expect(mockAuthFetch).not.toHaveBeenCalled()
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "INIT_PENDING_SESSION",
+      dirName: "-repo",
+      cwd: "/repo",
+      isMobile: false,
+    })
+  })
+
   it("resolves the Claude peer before starting a Codex project", async () => {
     mockAuthFetch.mockResolvedValue(new Response(JSON.stringify([
       { dirName: encodeCodexDirName("/repo"), path: "/repo" },

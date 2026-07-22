@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { type PermissionsConfig, DEFAULT_PERMISSIONS } from "@/lib/permissions"
 import { authFetch } from "@/lib/auth"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindFromDirName, sessionIdFromFileName } from "@/lib/sessionSource"
 import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
 
 export type PtyChatStatus = "idle" | "connected" | "error"
@@ -39,7 +39,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
   const creatingRef = useRef(false)
 
   // Use parsed session ID (actual UUID from JSONL) if available, else derive from fileName
-  const fileBasedId = sessionSource?.fileName?.replace(".jsonl", "") ?? null
+  const fileBasedId = sessionSource?.fileName ? sessionIdFromFileName(sessionSource.fileName) : null
   const sessionId = parsedSessionId || fileBasedId
   const agentKind = sessionSource ? agentKindFromDirName(sessionSource.dirName) : null
 
