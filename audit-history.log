@@ -4,15 +4,15 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
-### 2026-07-22 15:38 UTC — Current Session Parser and Agent Guidance (PLACEHOLDER)
-- **File:** `audit-history/audit-20260722T153816Z-PLACEHOLDER.md`
+### 2026-07-22 15:38 UTC — Current Session Parser and Agent Guidance (9c8cdad)
+- **File:** `audit-history/audit-20260722T153816Z-9c8cdad.md`
 - **Status:** PASS
 - **Scope:** Claude Code 2.1.217 and Codex CLI 0.145.0 parser compatibility,
   `cogpit-memory` package contracts, and root agent-guidance cleanup
 - **Documentation:** Package README and bundled skill match provider support,
   output shapes, compatibility, and search scope; root guidance and canonical
   parser ownership docs remain consistent
-- **Follow-up:** Replace `PLACEHOLDER` with the resulting commit hash
+- **Commit:** `9c8cdad`
 
 ### 2026-07-21 15:17 UTC — Modular Architecture and Hardened Authentication
 - **File:** `audit-history/audit-20260721T151730Z-69d5d05.md`
