@@ -14,6 +14,7 @@ vi.mock("../../helpers", () => ({
   watch: vi.fn(() => ({ on: vi.fn(), close: vi.fn() })),
   readdir: vi.fn(),
   readFile: vi.fn(),
+  stat: vi.fn(),
   activeProcesses,
   persistentSessions,
 }))
@@ -23,7 +24,7 @@ vi.mock("../../sdk-session", () => ({
   stopSDKSession: vi.fn(() => false),
 }))
 
-import { isWithinDir, readdir, readFile } from "../../helpers"
+import { isWithinDir, readdir, readFile, stat } from "../../helpers"
 import { stopSDKSession } from "../../sdk-session"
 import type { UseFn, Middleware } from "../../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
@@ -32,6 +33,7 @@ import { registerWorkflowRoutes } from "../../routes/workflows"
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedReaddir = vi.mocked(readdir)
 const mockedReadFile = vi.mocked(readFile)
+const mockedStat = vi.mocked(stat)
 const mockedStopSDK = vi.mocked(stopSDKSession)
 
 function createMockReqRes(method: string, url: string, body?: string) {
@@ -122,7 +124,9 @@ describe("workflow routes", () => {
     })
 
     it("lists workflows for the session", async () => {
-      mockedReaddir.mockResolvedValueOnce(["wf_abc-123.json"] as never)
+      mockedReaddir
+        .mockResolvedValueOnce(["wf_abc-123.json"] as never)
+        .mockResolvedValueOnce([] as never)
       mockedReadFile.mockResolvedValueOnce(journalJson())
       const { req, res, next } = createMockReqRes("GET", "/proj/sess")
       await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
@@ -132,16 +136,39 @@ describe("workflow routes", () => {
     })
 
     it("returns [] when the session has no workflows dir", async () => {
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReaddir
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockRejectedValueOnce(new Error("ENOENT"))
       const { req, res, next } = createMockReqRes("GET", "/proj/sess")
       await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
       expect(JSON.parse(res._getData())).toEqual([])
+    })
+
+    it("lists a running workflow from its live event journal", async () => {
+      mockedReaddir
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockResolvedValueOnce(["wf_live-123"] as never)
+      mockedReadFile
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockResolvedValueOnce(JSON.stringify({ type: "started", key: "one", agentId: "agent-1" }))
+      mockedStat.mockResolvedValueOnce({ birthtimeMs: 1234, ctimeMs: 1234 } as never)
+      const { req, res, next } = createMockReqRes("GET", "/proj/sess")
+
+      await getRouteHandler(handlers, "/api/workflows/")(req, res, next)
+
+      expect(JSON.parse(res._getData())).toMatchObject([{
+        runId: "wf_live-123",
+        status: "running",
+        agentCount: 1,
+      }])
     })
   })
 
   describe("GET /api/workflow-detail/:dirName/:sessionId/:runId", () => {
     it("returns 404 when the journal is missing", async () => {
-      mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReadFile
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockRejectedValueOnce(new Error("ENOENT"))
       const { req, res, next } = createMockReqRes("GET", "/proj/sess/wf_abc-123")
       await getRouteHandler(handlers, "/api/workflow-detail/")(req, res, next)
       expect(res._getStatus()).toBe(404)

@@ -1,17 +1,17 @@
 /**
  * Workflow journal parsing.
  *
- * Claude Code's Workflow tool writes a JSON "journal" per run at
+ * Claude Code's Workflow tool writes live events at
+ *   <PROJECTS_DIR>/<dirName>/<sessionId>/subagents/workflows/<runId>/journal.jsonl
+ * and creates the full JSON journal only when the run finishes at
  *   <PROJECTS_DIR>/<dirName>/<sessionId>/workflows/wf_<runId>.json
- * and per-agent transcripts at
- *   <PROJECTS_DIR>/<dirName>/<sessionId>/subagents/workflows/<runId>/agent-<id>.jsonl
  *
- * The journal is rewritten on every progress tick, so watching it gives a
- * live feed. This module reads + normalizes journals into the summary/detail
+ * The event journal is appended throughout the run, so watching it gives a
+ * live feed. This module reads + normalizes both formats into the summary/detail
  * shapes the API serves. Normalization is split into pure functions
  * (summarizeJournal / normalizeDetail) so they can be unit-tested without fs.
  */
-import { dirs, isWithinDir, readdir, readFile, join } from "../helpers"
+import { dirs, isWithinDir, readdir, readFile, stat, join } from "../helpers"
 
 // ── Wire types (mirror src/lib/workflow-types.ts) ───────────────────────────
 
@@ -67,6 +67,12 @@ export interface WorkflowJournal {
   workflowProgress?: WorkflowProgressEntry[]
   script?: string
   error?: string
+  result?: unknown
+}
+
+interface LiveWorkflowEvent {
+  type?: string
+  agentId?: string
   result?: unknown
 }
 
@@ -223,34 +229,124 @@ async function readJournal(dir: string, runId: string): Promise<WorkflowJournal 
   }
 }
 
+async function readDir(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir)
+  } catch {
+    return []
+  }
+}
+
+function liveWorkflowsDirFor(dirName: string, sessionId: string): string | null {
+  const sessionDir = sessionDirFor(dirName, sessionId)
+  if (!sessionDir) return null
+  const dir = join(sessionDir, "subagents", "workflows")
+  return isWithinDir(dirs.PROJECTS_DIR, dir) ? dir : null
+}
+
+/** Build a best-effort running detail from the append-only live event journal. */
+async function readLiveWorkflowDetail(
+  dir: string,
+  runId: string,
+): Promise<WorkflowDetail | null> {
+  const runDir = join(dir, runId)
+  if (!isWithinDir(dir, runDir)) return null
+  const journalPath = join(runDir, "journal.jsonl")
+
+  let raw: string
+  try {
+    raw = await readFile(journalPath, "utf-8")
+  } catch {
+    return null
+  }
+
+  let startTime = 0
+  try {
+    const journalStat = await stat(journalPath)
+    startTime = journalStat.birthtimeMs || journalStat.ctimeMs || 0
+  } catch {
+    // The events still identify the live agents even when metadata is unavailable.
+  }
+
+  const agents = new Map<string, WorkflowAgentEntry>()
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue
+    let event: LiveWorkflowEvent
+    try {
+      event = JSON.parse(line) as LiveWorkflowEvent
+    } catch {
+      // The final line can be temporarily incomplete while the runtime appends it.
+      continue
+    }
+    if (!event.agentId || (event.type !== "started" && event.type !== "result")) continue
+
+    let agent = agents.get(event.agentId)
+    if (!agent) {
+      const index = agents.size + 1
+      agent = {
+        type: "workflow_agent",
+        index,
+        label: `Agent ${index}`,
+        phaseIndex: 1,
+        phaseTitle: "Agents",
+        agentId: event.agentId,
+        state: "running",
+        startedAt: startTime || undefined,
+      }
+      agents.set(event.agentId, agent)
+    }
+    if (event.type === "result") {
+      agent.state = "done"
+      agent.resultPreview = truncate(event.result, 4000)
+    }
+  }
+
+  if (agents.size === 0) return null
+  const liveAgents = [...agents.values()]
+  const phases: WorkflowPhaseMeta[] = [{ title: "Agents" }]
+  const progress: WorkflowProgressEntry[] = [
+    { type: "workflow_phase", index: 1, title: "Agents" },
+    ...liveAgents,
+  ]
+  return normalizeDetail(runId, {
+    runId,
+    workflowName: runId,
+    status: "running",
+    startTime,
+    agentCount: liveAgents.length,
+    phases,
+    workflowProgress: progress,
+  })
+}
+
 /** List all workflows for a session, newest first. Returns [] when none. */
 export async function listSessionWorkflows(
   dirName: string,
   sessionId: string,
 ): Promise<WorkflowSummary[]> {
-  const dir = workflowsDirFor(dirName, sessionId)
-  if (!dir) return []
+  const completedDir = workflowsDirFor(dirName, sessionId)
+  const liveDir = liveWorkflowsDirFor(dirName, sessionId)
+  if (!completedDir || !liveDir) return []
 
-  let files: string[]
-  try {
-    files = await readdir(dir)
-  } catch {
-    return []
-  }
+  const [completedFiles, liveEntries] = await Promise.all([
+    readDir(completedDir),
+    readDir(liveDir),
+  ])
+  const completedRunIds = completedFiles.filter(isWorkflowFile).map(runIdFromFile)
+  const liveRunIds = liveEntries.filter(isSafeRunId)
+  const runIds = [...new Set([...completedRunIds, ...liveRunIds])]
 
-  // Read journals concurrently; filenames come from readdir so they can't
-  // traverse, but still skip anything that doesn't parse.
-  const runIds = files.filter(isWorkflowFile).map(runIdFromFile)
-  const journals = await Promise.all(runIds.map((runId) => readJournal(dir, runId)))
+  // Prefer the full completion journal; fall back to the live event journal
+  // while the runtime has not created that final file yet.
+  const summaries = await Promise.all(runIds.map(async (runId) => {
+    const journal = await readJournal(completedDir, runId)
+    if (journal) return summarizeJournal(runId, journal)
+    return readLiveWorkflowDetail(liveDir, runId)
+  }))
 
-  const summaries: WorkflowSummary[] = []
-  runIds.forEach((runId, i) => {
-    const journal = journals[i]
-    if (journal) summaries.push(summarizeJournal(runId, journal))
-  })
-
-  summaries.sort((a, b) => (b.startTime || 0) - (a.startTime || 0))
   return summaries
+    .filter((summary): summary is WorkflowSummary => summary !== null)
+    .sort((a, b) => (b.startTime || 0) - (a.startTime || 0))
 }
 
 /** Full detail for one workflow run, or null when the journal is missing. */
@@ -260,11 +356,12 @@ export async function readWorkflowDetail(
   runId: string,
 ): Promise<WorkflowDetail | null> {
   if (!isSafeRunId(runId)) return null
-  const dir = workflowsDirFor(dirName, sessionId)
-  if (!dir) return null
+  const completedDir = workflowsDirFor(dirName, sessionId)
+  const liveDir = liveWorkflowsDirFor(dirName, sessionId)
+  if (!completedDir || !liveDir) return null
   // Defense in depth: confirm the resolved journal path stays inside the dir.
-  if (!isWithinDir(dir, join(dir, `${runId}.json`))) return null
-  const journal = await readJournal(dir, runId)
-  if (!journal) return null
-  return normalizeDetail(runId, journal)
+  if (!isWithinDir(completedDir, join(completedDir, `${runId}.json`))) return null
+  const journal = await readJournal(completedDir, runId)
+  if (journal) return normalizeDetail(runId, journal)
+  return readLiveWorkflowDetail(liveDir, runId)
 }

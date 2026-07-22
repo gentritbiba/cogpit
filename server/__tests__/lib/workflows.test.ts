@@ -6,10 +6,11 @@ vi.mock("../../helpers", () => ({
   isWithinDir: vi.fn(() => true),
   readdir: vi.fn(),
   readFile: vi.fn(),
+  stat: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
 }))
 
-import { isWithinDir, readdir, readFile } from "../../helpers"
+import { isWithinDir, readdir, readFile, stat } from "../../helpers"
 import {
   summarizeJournal,
   normalizeDetail,
@@ -22,6 +23,7 @@ import {
 
 const mockedReaddir = vi.mocked(readdir)
 const mockedReadFile = vi.mocked(readFile)
+const mockedStat = vi.mocked(stat)
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 
 function journal(overrides: Partial<WorkflowJournal> = {}): WorkflowJournal {
@@ -134,12 +136,16 @@ describe("workflow normalization", () => {
 
   describe("listSessionWorkflows", () => {
     it("returns [] when the workflows dir is missing", async () => {
-      mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReaddir
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockRejectedValueOnce(new Error("ENOENT"))
       expect(await listSessionWorkflows("proj", "sess")).toEqual([])
     })
 
     it("parses wf_*.json files and sorts newest first, skipping junk", async () => {
-      mockedReaddir.mockResolvedValueOnce(["wf_old.json", "wf_new.json", "notes.txt", "scripts"] as never)
+      mockedReaddir
+        .mockResolvedValueOnce(["wf_old.json", "wf_new.json", "notes.txt", "scripts"] as never)
+        .mockResolvedValueOnce([] as never)
       mockedReadFile.mockImplementation(async (path: Parameters<typeof readFile>[0]) => {
         const p = String(path)
         if (p.includes("wf_old.json")) return JSON.stringify(journal({ runId: "wf_old", startTime: 100 }))
@@ -151,7 +157,9 @@ describe("workflow normalization", () => {
     })
 
     it("skips files that fail to parse", async () => {
-      mockedReaddir.mockResolvedValueOnce(["wf_bad.json", "wf_ok.json"] as never)
+      mockedReaddir
+        .mockResolvedValueOnce(["wf_bad.json", "wf_ok.json"] as never)
+        .mockResolvedValueOnce([] as never)
       mockedReadFile.mockImplementation(async (path: Parameters<typeof readFile>[0]) => {
         const p = String(path)
         if (p.includes("wf_bad.json")) return "{not json"
@@ -159,6 +167,53 @@ describe("workflow normalization", () => {
       })
       const list = await listSessionWorkflows("proj", "sess")
       expect(list.map((w) => w.runId)).toEqual(["wf_ok"])
+    })
+
+    it("lists agents from the live event journal before the final journal exists", async () => {
+      mockedReaddir
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockResolvedValueOnce(["wf_live-123"] as never)
+      mockedReadFile.mockImplementation(async (path: Parameters<typeof readFile>[0]) => {
+        const p = String(path)
+        if (p.endsWith("/workflows/wf_live-123.json")) throw new Error("ENOENT")
+        if (p.endsWith("/wf_live-123/journal.jsonl")) {
+          return [
+            JSON.stringify({ type: "started", key: "one", agentId: "agent-1" }),
+            JSON.stringify({ type: "started", key: "two", agentId: "agent-2" }),
+            JSON.stringify({ type: "result", key: "one", agentId: "agent-1", result: "finished" }),
+            "{partially-written",
+          ].join("\n")
+        }
+        throw new Error("unexpected read " + p)
+      })
+      mockedStat.mockResolvedValueOnce({ birthtimeMs: 1234, ctimeMs: 1234 } as never)
+
+      const list = await listSessionWorkflows("proj", "sess")
+
+      expect(list).toHaveLength(1)
+      expect(list[0]).toMatchObject({
+        runId: "wf_live-123",
+        status: "running",
+        startTime: 1234,
+        agentCount: 2,
+        agentCounts: { total: 2, running: 1, done: 1, error: 0 },
+      })
+    })
+
+    it("prefers the completed journal when the run also has live artifacts", async () => {
+      mockedReaddir
+        .mockResolvedValueOnce(["wf_both.json"] as never)
+        .mockResolvedValueOnce(["wf_both"] as never)
+      mockedReadFile.mockResolvedValueOnce(JSON.stringify(journal({
+        runId: "wf_both",
+        status: "completed",
+      })))
+
+      const list = await listSessionWorkflows("proj", "sess")
+
+      expect(list).toHaveLength(1)
+      expect(list[0].status).toBe("completed")
+      expect(mockedReadFile).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -177,7 +232,9 @@ describe("workflow normalization", () => {
     })
 
     it("returns null when the journal is missing", async () => {
-      mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
+      mockedReadFile
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockRejectedValueOnce(new Error("ENOENT"))
       expect(await readWorkflowDetail("proj", "sess", "wf_missing")).toBeNull()
     })
 
@@ -187,6 +244,31 @@ describe("workflow normalization", () => {
       expect(d).not.toBeNull()
       expect(d!.runId).toBe("wf_abc-123")
       expect(d!.agents).toHaveLength(3)
+    })
+
+    it("returns live agent detail before the completed journal is written", async () => {
+      mockedReadFile
+        .mockRejectedValueOnce(new Error("ENOENT"))
+        .mockResolvedValueOnce([
+          JSON.stringify({ type: "started", key: "one", agentId: "agent-1" }),
+          JSON.stringify({ type: "result", key: "one", agentId: "agent-1", result: { ok: true } }),
+          JSON.stringify({ type: "started", key: "two", agentId: "agent-2" }),
+        ].join("\n"))
+      mockedStat.mockResolvedValueOnce({ birthtimeMs: 4321, ctimeMs: 4321 } as never)
+
+      const d = await readWorkflowDetail("proj", "sess", "wf_live-123")
+
+      expect(d).toMatchObject({
+        runId: "wf_live-123",
+        status: "running",
+        startTime: 4321,
+        phases: [{ title: "Agents" }],
+      })
+      expect(d!.agents.map((agent) => [agent.label, agent.state])).toEqual([
+        ["Agent 1", "done"],
+        ["Agent 2", "running"],
+      ])
+      expect(d!.agents[0].resultPreview).toBe('{"ok":true}')
     })
   })
 })
