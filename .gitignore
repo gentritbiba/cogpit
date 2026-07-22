@@ -11,6 +11,8 @@ test-results/
 /release
 /coverage
 .worktrees/
+.claude/worktrees/
+/ios/
 process-state.json
 packages/cogpit-memory/cogpit-memory
 .claude/deployments.md

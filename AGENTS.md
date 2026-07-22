@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **cogpit** (5504 symbols, 14121 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **cogpit** (5542 symbols, 14198 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
@@ -42,3 +42,7 @@ This project is indexed by GitNexus as **cogpit** (5504 symbols, 14121 relations
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Nested iOS Repository
+
+The `ios/` directory is a separate, private Git repository that is intentionally ignored by this parent repository. When changing anything under `ios/`, run Git commands from `ios/` and commit and push those changes to the child repository. Never stage iOS files in the parent repository, and always report the status of both repositories when a task touches both.
