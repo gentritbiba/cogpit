@@ -7,6 +7,14 @@ interface UseChatScrollOpts {
   pendingMessages: string[]
   consumePending: (count?: number) => void
   sessionChangeKey: number
+  /**
+   * Summed character length across all in-flight partial assistant blocks.
+   * Used only as a reactivity signal: when partials grow (streaming tokens),
+   * the live-content auto-scroll effect re-runs so a user at the bottom
+   * stays pinned to the bottom. Users scrolled up are not hijacked — the
+   * effect still checks `chatIsAtBottomRef`.
+   */
+  partialContentLen?: number
 }
 
 /**
@@ -21,7 +29,7 @@ function runAcrossFrames(action: () => void): void {
   })
 }
 
-export function useChatScroll({ session, isLive, pendingMessages, consumePending, sessionChangeKey }: UseChatScrollOpts) {
+export function useChatScroll({ session, isLive, pendingMessages, consumePending, sessionChangeKey, partialContentLen = 0 }: UseChatScrollOpts) {
   const chatScrollRef = useRef<HTMLDivElement>(null)
   const scrollEndRef = useRef<HTMLDivElement>(null)
   const chatIsAtBottomRef = useRef(true)
@@ -173,6 +181,10 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
   }, [turnCount, pendingCount, consumePending, smoothScrollToEnd])
 
   // Live content -- auto-scroll (keyed on turn count + tool count + content length to catch streaming)
+  // `partialContentLen` is added so partial-assistant-message streaming
+  // (rendered below the last canonical turn while the SDK streams tokens) also
+  // triggers the auto-scroll effect. Without it, users at the bottom would see
+  // the response grow below the fold during the pre-reconciliation window.
   const lastTurn = session?.turns.at(-1)
   const liveLastTurnToolCount = lastTurn?.toolCalls.length ?? 0
   const liveLastTurnContentLen = lastTurn?.assistantText.length ?? 0
@@ -184,7 +196,7 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     }
     requestAnimationFrame(updateScrollIndicators)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
-  }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, isLive, updateScrollIndicators])
+  }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, partialContentLen, isLive, updateScrollIndicators])
 
   return useMemo(() => ({
     chatScrollRef,

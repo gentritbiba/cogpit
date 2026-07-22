@@ -281,6 +281,16 @@ export default function App() {
     () => reconnectHandlerRef.current?.(),
     state.session,
   )
+  const streamingContentLen = useMemo(
+    () => streamingOverlay.reduce(
+      (total, message) => total + message.blocks.reduce(
+        (messageTotal, block) => messageTotal + block.text.length,
+        0,
+      ),
+      0,
+    ),
+    [streamingOverlay],
+  )
 
   // Background agents (shared between notifications + StatsPanel)
   const backgroundAgents = useBackgroundAgents(state.session?.cwd ?? null)
@@ -438,6 +448,7 @@ export default function App() {
     pendingMessages: claudeChat.pendingMessages,
     consumePending: claudeChat.consumePending,
     sessionChangeKey: state.sessionChangeKey,
+    partialContentLen: streamingContentLen,
   })
 
   const chatScrollRef = scroll.chatScrollRef

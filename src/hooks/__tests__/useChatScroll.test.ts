@@ -314,4 +314,37 @@ describe("useChatScroll", () => {
     expect(result.current.canScrollUp).toBe(false)
     expect(result.current.canScrollDown).toBe(false)
   })
+
+  it("keeps the viewport pinned as streaming overlay content grows", () => {
+    const session = makeSession(1)
+    const { result, rerender } = renderHook(
+      (props) => useChatScroll(props),
+      {
+        initialProps: {
+          ...defaultOpts,
+          session,
+          isLive: true,
+          partialContentLen: 0,
+        },
+      },
+    )
+    const mockEl = {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    }
+    // @ts-expect-error - assigning mock to ref
+    result.current.chatScrollRef.current = mockEl
+    act(() => { result.current.handleScroll() })
+
+    mockEl.scrollHeight = 1200
+    rerender({
+      ...defaultOpts,
+      session,
+      isLive: true,
+      partialContentLen: 200,
+    })
+
+    expect(mockEl.scrollTop).toBe(1200)
+  })
 })

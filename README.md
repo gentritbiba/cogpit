@@ -48,6 +48,8 @@ Start sessions with Claude Code or Codex from the same interface. Model settings
 ### Live Session Monitoring
 Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations.
 
+Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.
+
 ### Interactive Chat
 Send or steer messages with a model and effort override, toggle Fast where supported, and choose Full access (default), Workspace, or more restrictive modes. On capable Claude models, Ultracode can be enabled for new or active sessions to pin XHigh effort and standing multi-agent orchestration. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
 

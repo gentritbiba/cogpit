@@ -40,6 +40,19 @@ const CLAUDE_CLI_PATH: string | undefined = resolveClaudeCliPath((id) =>
   createRequire(import.meta.url).resolve(id),
 )
 
+/**
+ * Parse COGPIT_STREAM_PARTIAL as an opt-out kill switch. Streaming stays on
+ * unless the value is 0, false, off, or no (case-insensitive and trimmed).
+ */
+function streamingEnabled(): boolean {
+  const raw = process.env.COGPIT_STREAM_PARTIAL
+  if (raw === undefined) return true
+  return !["0", "false", "off", "no"].includes(raw.trim().toLowerCase())
+}
+
+/** @internal test-only alias */
+export const streamingEnabledForTest = streamingEnabled
+
 // ── Types ────────────────────────────────────────────────────────────────
 
 export interface PermissionRequestData {
@@ -221,7 +234,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
     // Token-level streaming: raw Anthropic stream events are forwarded to
     // the stream bus so the UI can render text as it is generated.
-    includePartialMessages: true,
+    includePartialMessages: streamingEnabled(),
     // Forward the full subagent conversation (tagged with parent_tool_use_id)
     // so live subagent transcripts can render under their tool card.
     forwardSubagentText: true,
