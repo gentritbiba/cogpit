@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect, memo, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, Terminal, Pencil, X, Users } from "lucide-react"
+import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, Terminal, Pencil, Users } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
@@ -7,6 +7,8 @@ import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
 import { parseTeammateMessage } from "@/lib/teammateMessage"
 import { cn } from "@/lib/utils"
 import { CompletedIcon, FailedIcon, RunningIcon, ProcessingIcon } from "@/components/ui/StatusIcons"
+import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
+import { useOptionalImageGallery } from "./SessionImageGallery"
 
 const SYSTEM_TAG_RE =
   /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)>/g
@@ -175,84 +177,6 @@ function ExpandedCommandContent({ loading, content }: { loading: boolean; conten
   )
 }
 
-// ── Image Lightbox ───────────────────────────────────────────────────────
-
-function ImageLightbox({
-  images,
-  initialIndex,
-  onClose,
-}: {
-  images: string[]
-  initialIndex: number
-  onClose: () => void
-}) {
-  const [index, setIndex] = useState(initialIndex)
-  const hasMultiple = images.length > 1
-
-  const goPrev = useCallback(() => setIndex((i) => (i - 1 + images.length) % images.length), [images.length])
-  const goNext = useCallback(() => setIndex((i) => (i + 1) % images.length), [images.length])
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
-      if (e.key === "ArrowLeft") goPrev()
-      if (e.key === "ArrowRight") goNext()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [onClose, goPrev, goNext])
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
-
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
-      >
-        <X className="w-5 h-5" />
-      </button>
-
-      {/* Counter */}
-      {hasMultiple && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 text-white/70 text-sm font-medium bg-black/40 rounded-full px-3 py-1">
-          {index + 1} / {images.length}
-        </div>
-      )}
-
-      {/* Left arrow */}
-      {hasMultiple && (
-        <button
-          onClick={(e) => { e.stopPropagation(); goPrev() }}
-          className="absolute left-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
-        >
-          <ChevronLeft className="w-6 h-6" />
-        </button>
-      )}
-
-      {/* Image */}
-      <img
-        src={images[index]}
-        alt={`Image ${index + 1}`}
-        className="relative z-[1] max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
-        onClick={(e) => e.stopPropagation()}
-      />
-
-      {/* Right arrow */}
-      {hasMultiple && (
-        <button
-          onClick={(e) => { e.stopPropagation(); goNext() }}
-          className="absolute right-4 z-10 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white transition-colors"
-        >
-          <ChevronRight className="w-6 h-6" />
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ── Main component ───────────────────────────────────────────────────────
 
 interface UserMessageProps {
@@ -264,12 +188,13 @@ interface UserMessageProps {
 }
 
 export const UserMessage = memo(function UserMessage({ content, timestamp, onEditCommand, onExpandCommand, compact = false }: UserMessageProps) {
+  const imageGallery = useOptionalImageGallery()
   const [expanded, setExpanded] = useState(false)
   const [showRaw, setShowRaw] = useState(false)
   const [commandExpanded, setCommandExpanded] = useState(false)
   const [commandContent, setCommandContent] = useState<string | null>(null)
   const [commandLoading, setCommandLoading] = useState(false)
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [standaloneImageIndex, setStandaloneImageIndex] = useState<number | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
@@ -301,11 +226,30 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     () => images.map((img) => `data:${img.source.media_type};base64,${img.source.data}`),
     [images]
   )
+  const viewerImages = useMemo<ImageViewerItem[]>(
+    () => imageUrls.map((src, index) => ({
+      id: `message-attachment-${index}`,
+      src,
+      alt: `Attachment ${index + 1}`,
+      label: imageUrls.length > 1 ? `Attachment ${index + 1}` : "Attached image",
+    })),
+    [imageUrls],
+  )
   const hasTags = rawText !== cleanText
   const displayText = showRaw ? rawText : textAfterOutputs
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
+
+  const openImage = (index: number) => {
+    const image = viewerImages[index]
+    if (!image) return
+    if (imageGallery) {
+      imageGallery.openImage(image)
+    } else {
+      setStandaloneImageIndex(index)
+    }
+  }
 
   return (
     <div className="group">
@@ -374,18 +318,33 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {imageUrls.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+          <div className="mb-3 flex flex-wrap gap-2">
             {imageUrls.map((url, i) => (
               <button
-                key={i}
-                onClick={() => setLightboxIndex(i)}
-                className="rounded-lg overflow-hidden border border-border/50 hover:border-blue-500/50 transition-colors cursor-pointer"
+                key={`${images[i].source.media_type}-${images[i].source.data.slice(0, 24)}-${i}`}
+                type="button"
+                onClick={() => openImage(i)}
+                aria-label={`Open attached image ${i + 1}`}
+                className={cn(
+                  "group/image relative max-w-full overflow-hidden rounded-xl border border-border/50 bg-elevation-2 p-1 text-left",
+                  "transition-[border-color,background-color] hover:border-blue-400/45 hover:bg-elevation-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
+                )}
               >
                 <img
                   src={url}
-                  alt={`Attached image ${i + 1}`}
-                  className="max-h-40 max-w-60 object-contain bg-elevation-2"
+                  alt={`Attachment ${i + 1}`}
+                  loading="lazy"
+                  decoding="async"
+                  className="max-h-64 max-w-full rounded-lg object-contain sm:max-w-md"
                 />
+                <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
+                  <Maximize2 className="size-3.5" />
+                </span>
+                {imageUrls.length > 1 && (
+                  <span className="absolute bottom-2 right-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[9px] text-white/70 backdrop-blur">
+                    {i + 1} / {imageUrls.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -437,11 +396,12 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
       </div>
 
-      {lightboxIndex !== null && (
-        <ImageLightbox
-          images={imageUrls}
-          initialIndex={lightboxIndex}
-          onClose={() => setLightboxIndex(null)}
+      {standaloneImageIndex !== null && (
+        <ImageViewer
+          key={standaloneImageIndex}
+          images={viewerImages}
+          initialIndex={standaloneImageIndex}
+          onClose={() => setStandaloneImageIndex(null)}
         />
       )}
     </div>

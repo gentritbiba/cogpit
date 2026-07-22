@@ -3,6 +3,7 @@ import { VirtualizedTimeline, NonVirtualTimeline } from "./timeline/VirtualizedT
 import { matchesSearch } from "@/lib/timelineHelpers"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { SessionImageGalleryProvider } from "./timeline/SessionImageGallery"
 
 // Threshold: only virtualize when we have enough turns to benefit
 const VIRTUALIZE_THRESHOLD = 15
@@ -37,16 +38,15 @@ export const ConversationTimeline = memo(function ConversationTimeline({
 
   const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && chatScrollRef?.current != null
 
+  let timeline: React.ReactNode
   if (filteredTurns.length === 0) {
-    return (
+    timeline = (
       <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
         {searchQuery ? "No turns match your search." : "No turns in this session."}
       </div>
     )
-  }
-
-  if (shouldVirtualize) {
-    return (
+  } else if (shouldVirtualize) {
+    timeline = (
       <VirtualizedTimeline
         filteredTurns={filteredTurns}
         scrollContainerRef={chatScrollRef}
@@ -54,7 +54,15 @@ export const ConversationTimeline = memo(function ConversationTimeline({
         onLoadMore={onLoadMore}
       />
     )
+  } else {
+    timeline = (
+      <NonVirtualTimeline
+        filteredTurns={filteredTurns}
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+      />
+    )
   }
 
-  return <NonVirtualTimeline filteredTurns={filteredTurns} hasMore={hasMore} onLoadMore={onLoadMore} />
+  return <SessionImageGalleryProvider>{timeline}</SessionImageGalleryProvider>
 })

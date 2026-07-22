@@ -18,7 +18,7 @@ import { isRemoteDeviceActive } from "@/lib/device"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
-import { AskUserAnswerForm } from "./AskUserAnswerForm"
+import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import {
   JsonResultHighlighted,
   ReadResultHighlighted,
@@ -262,6 +262,17 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     if (isCompactMobile) setMobileExpanded(true)
   }, [isCompactMobile])
 
+  if (toolCall.name === "AskUserQuestion") {
+    return (
+      <AskUserQuestionCard
+        toolCall={toolCall}
+        expandAll={expandAll}
+        isAgentActive={isAgentActive}
+        sessionId={session?.sessionId}
+      />
+    )
+  }
+
   return (
     <div
       className={cn(
@@ -401,10 +412,6 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             expanded={true}
           />
         )
-      )}
-
-      {toolCall.name === "AskUserQuestion" && toolCall.result === null && isAgentActive && session?.sessionId && (
-        <AskUserAnswerForm toolCall={toolCall} sessionId={session.sessionId} />
       )}
 
       {(toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null && (

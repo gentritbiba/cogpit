@@ -35,7 +35,8 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const targetRef = useRef<HTMLDivElement | null>(null)
 
   const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
-  const isOpen = expandAll || manualOpen || hasInProgressCall
+  const hasUserQuestion = toolCalls.some((tc) => tc.name === "AskUserQuestion")
+  const isOpen = expandAll || manualOpen || hasInProgressCall || hasUserQuestion
 
   const lastScrolledToolCallRef = useRef<string | null>(null)
   const scrollRafRef = useRef<number | null>(null)
@@ -100,8 +101,9 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   if (isOpen) {
     return (
       <div className="space-y-2">
-        {!expandAll && (
+        {!expandAll && !hasUserQuestion && (
           <button
+            type="button"
             onClick={() => setManualOpen(false)}
             className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -141,6 +143,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   return (
     <button
+      type="button"
       onClick={() => setManualOpen(true)}
       className="flex items-center gap-2 w-full py-1 text-left transition-colors hover:opacity-80"
     >

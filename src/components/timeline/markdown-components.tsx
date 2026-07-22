@@ -1,9 +1,12 @@
 import { useState } from "react"
+import { Maximize2 } from "lucide-react"
 import type { Components, Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { authUrl } from "@/lib/auth"
 import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
+import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
+import { useOptionalImageGallery } from "./SessionImageGallery"
 
 const IMAGE_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
@@ -129,27 +132,46 @@ function ExternalLink({
  */
 function LocalImage({ src, alt }: { src?: string; alt?: string }) {
   const [expanded, setExpanded] = useState(false)
+  const imageGallery = useOptionalImageGallery()
   const resolved = resolveImageSrc(src)
+  const viewerImage: ImageViewerItem | null = resolved
+    ? { id: "markdown-image", src: resolved, alt: alt ?? "Rendered image", label: alt || "Rendered image" }
+    : null
+
+  const openImage = () => {
+    if (!viewerImage) return
+    if (imageGallery) {
+      imageGallery.openImage(viewerImage)
+    } else {
+      setExpanded(true)
+    }
+  }
 
   return (
     <>
-      <img
-        src={resolved}
-        alt={alt ?? ""}
-        className="my-3 max-w-full max-h-96 rounded-lg border border-border/30 cursor-pointer hover:border-border/60 transition-colors"
-        onClick={() => setExpanded(true)}
-      />
-      {expanded && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-          onClick={() => setExpanded(false)}
-        >
-          <img
-            src={resolved}
-            alt={alt ?? ""}
-            className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl"
-          />
-        </div>
+      <button
+        type="button"
+        onClick={openImage}
+        aria-label={`Open ${alt || "rendered image"}`}
+        className="group/image relative my-3 block max-w-full overflow-hidden rounded-xl border border-border/40 bg-elevation-1 p-1 transition-[border-color,background-color] hover:border-blue-400/40 hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+      >
+        <img
+          src={resolved}
+          alt={alt ?? ""}
+          loading="lazy"
+          decoding="async"
+          className="max-h-96 max-w-full rounded-lg object-contain"
+        />
+        <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
+          <Maximize2 className="size-3.5" />
+        </span>
+      </button>
+      {expanded && viewerImage && (
+        <ImageViewer
+          images={[viewerImage]}
+          initialIndex={0}
+          onClose={() => setExpanded(false)}
+        />
       )}
     </>
   )

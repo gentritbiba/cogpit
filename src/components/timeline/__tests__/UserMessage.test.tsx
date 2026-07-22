@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { UserMessage } from "../UserMessage"
+import { ImageGalleryProvider } from "../SessionImageGallery"
 
 // Mock window.matchMedia — required by downstream markdown components
 beforeAll(() => {
@@ -69,9 +70,37 @@ describe("UserMessage — image attachments", () => {
       />,
     )
 
-    const thumbnail = screen.getByAltText("Attached image 1")
+    const thumbnail = screen.getByAltText("Attachment 1")
     expect(thumbnail).toHaveAttribute("src", "data:image/png;base64,cG5n")
     fireEvent.click(thumbnail)
-    expect(screen.getByAltText("Image 1")).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: "Image viewer" })).toBeInTheDocument()
+    expect(screen.getAllByAltText("Attachment 1")).toHaveLength(2)
+  })
+
+  it("opens attachments in the surrounding session gallery", () => {
+    render(
+      <ImageGalleryProvider
+        images={[
+          { id: "turn-1", src: "data:image/png;base64,cG5n", alt: "Image from turn 1", label: "Turn 1 · Image 1" },
+          { id: "turn-2", src: "data:image/png;base64,bmV4dA==", alt: "Image from turn 2", label: "Turn 2 · Image 1" },
+        ]}
+      >
+        <UserMessage
+          content={[
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: "cG5n" },
+            },
+          ]}
+          timestamp=""
+        />
+      </ImageGalleryProvider>,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open attached image 1" }))
+    expect(screen.getByRole("img", { name: "Image from turn 1" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }))
+    expect(screen.getByRole("img", { name: "Image from turn 2" })).toBeInTheDocument()
   })
 })

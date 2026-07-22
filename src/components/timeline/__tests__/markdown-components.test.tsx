@@ -105,4 +105,17 @@ describe("markdown images", () => {
     expect(mockedAuthUrl).not.toHaveBeenCalled()
     expect(img.getAttribute("src")).toBe("https://cdn.example.com/pic.png")
   })
+
+  it("opens markdown images in the shared contained viewer", () => {
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![architecture](https://cdn.example.com/architecture.png)"}
+      </ReactMarkdown>,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open architecture" }))
+
+    expect(screen.getByRole("dialog", { name: "Image viewer" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "architecture" })).toBeInTheDocument()
+  })
 })

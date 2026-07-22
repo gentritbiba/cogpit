@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { getToolSummary, ToolCallCard } from "../ToolCallCard"
+import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "@/lib/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
@@ -345,8 +346,13 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
 
-    expect(screen.getByText("Option A")).toBeTruthy()
+    const optionA = screen.getByRole("button", { name: "Option A" })
+    expect(optionA).toHaveAttribute("aria-pressed", "false")
     expect(screen.getByText("Option B")).toBeTruthy()
+
+    fireEvent.click(optionA)
+
+    expect(optionA).toHaveAttribute("aria-pressed", "true")
   })
 
   it("renders send answer button when pending and agent active", () => {
@@ -415,6 +421,95 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
   })
 })
 
+describe("ToolCallCard AskUserQuestion history", () => {
+  it("renders the question, option descriptions, and selected answer as readable history", () => {
+    const question = "Which fixes should I implement?"
+    const result = `Your questions have been answered: "${question}"="Both (Recommended)". You can now continue with these answers in mind.`
+    const toolCall: ToolCall = {
+      id: "answered-question-id",
+      name: "AskUserQuestion",
+      input: {
+        questions: [{
+          header: "Fix scope",
+          question,
+          options: [
+            { label: "Both (Recommended)", description: "Compression plus a byte-budgeted initial tail." },
+            { label: "Compression only", description: "The smallest server-side change." },
+          ],
+        }],
+      },
+      result,
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+
+    expect(screen.getByRole("region", { name: "Question history" })).toBeTruthy()
+    expect(screen.getByText("Decision requested")).toBeTruthy()
+    expect(screen.getByText("Answered")).toBeTruthy()
+    expect(screen.getByText(question)).toBeTruthy()
+    expect(screen.getByText("Compression plus a byte-budgeted initial tail.")).toBeTruthy()
+    expect(screen.getByText("The smallest server-side change.")).toBeTruthy()
+    expect(screen.getByText("Selected")).toBeTruthy()
+    expect(screen.queryByText("Input")).toBeNull()
+    expect(screen.queryByText("Result")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Raw details" }))
+
+    expect(screen.getByText("Input")).toBeTruthy()
+    expect(screen.getByText("Result")).toBeTruthy()
+  })
+
+  it("renders free-form answers without exposing the raw result", () => {
+    const question = "Anything else to consider?"
+    const toolCall: ToolCall = {
+      id: "free-form-question-id",
+      name: "AskUserQuestion",
+      input: { questions: [{ question }] },
+      result: `Your questions have been answered: "${question}"="Keep the mobile layout compact.". You can now continue with these answers in mind.`,
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+
+    expect(screen.getByText("Answer")).toBeTruthy()
+    expect(screen.getByText("Keep the mobile layout compact.")).toBeTruthy()
+    expect(screen.queryByText(/Your questions have been answered/)).toBeNull()
+  })
+
+  it("keeps an activity group open when it contains question history", () => {
+    const questionCall: ToolCall = {
+      id: "grouped-question-id",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Ship it?", options: [{ label: "Yes" }, { label: "No" }] }] },
+      result: 'Your questions have been answered: "Ship it?"="Yes".',
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+    const readCall: ToolCall = {
+      id: "grouped-read-id",
+      name: "Read",
+      input: { file_path: "/tmp/example.ts" },
+      result: "contents",
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+
+    render(
+      <CollapsibleToolCalls
+        toolCalls={[readCall, questionCall]}
+        expandAll={false}
+        activeToolCallId={null}
+      />,
+    )
+
+    expect(screen.getByRole("region", { name: "Question history" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /tool calls/i })).toBeNull()
+  })
+})
+
 describe("ToolCallCard mobile AskUserQuestion rendering", () => {
   const questions = [
     { question: "What should we do next?", options: [{ label: "Continue" }, { label: "Pause" }] },
@@ -447,18 +542,16 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
     })
   })
 
-  it("renders a completed question as a compact human-labeled row and expands it on tap", () => {
+  it("keeps a completed question expanded as readable history", () => {
     const toolCall = makeAskUserQuestionCall("User chose Continue")
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
 
-    expect(screen.getByText("Question")).toBeTruthy()
+    expect(screen.getByRole("region", { name: "Question history" })).toBeTruthy()
+    expect(screen.getByText("Decision requested")).toBeTruthy()
+    expect(screen.getByText("Answered")).toBeTruthy()
+    expect(screen.getByText("Selected")).toBeTruthy()
     expect(screen.queryByText("Input")).toBeNull()
     expect(screen.queryByText("Result")).toBeNull()
-
-    fireEvent.click(screen.getByRole("button", { name: "Expand Question tool call" }))
-
-    expect(screen.getByText("Input")).toBeTruthy()
-    expect(screen.getByText("Result")).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Expand Question tool call" })).toBeNull()
   })
 
@@ -466,7 +559,8 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
 
-    expect(screen.getByText("Question")).toBeTruthy()
+    expect(screen.getByText("Decision requested")).toBeTruthy()
+    expect(screen.getByText("Waiting for answer")).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Expand Question tool call" })).toBeNull()
     expect(screen.getByText("Continue")).toBeTruthy()
     expect(screen.getByText("Pause")).toBeTruthy()
