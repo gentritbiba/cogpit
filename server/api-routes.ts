@@ -1,3 +1,4 @@
+import { compressionMiddleware } from "./compression"
 import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
 import { registerAskUserRoutes } from "./routes/ask-user"
@@ -109,6 +110,9 @@ export const API_ROUTE_REGISTRY = [
 
 export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {
   const safeUse: UseFn = (path, handler) => use(path, catchAsyncErrors(handler))
+  // Registered before every route so single-shot JSON/text responses gzip for
+  // remote clients (tunnel/LAN); streaming responses pass through untouched.
+  safeUse("/api", compressionMiddleware)
   for (const route of API_ROUTE_REGISTRY) {
     route.register(safeUse, context)
   }

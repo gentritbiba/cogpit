@@ -20,10 +20,13 @@ import {
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
 import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
+import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
 
 // ── Bottom-first loading helpers ────────────────────────────────────────────
 
 const HEADER_BYTES = 4096
+/** Upper bound for growing the header read when the first line is oversized. */
+const MAX_HEADER_BYTES = 1024 * 1024
 
 interface TailResult {
   lines: string[]
@@ -112,16 +115,27 @@ async function readRange(filePath: string, startOffset: number, endOffset: numbe
 }
 
 /**
- * Reads the first `HEADER_BYTES` bytes of a file for metadata extraction.
+ * Reads the head of a file for metadata extraction. Starts with `HEADER_BYTES`
+ * and grows the read (up to `MAX_HEADER_BYTES`) until it contains at least one
+ * complete line — newer Codex rollouts embed the full base instructions in the
+ * first session_meta line, pushing it well past the initial read size.
  */
-async function readSessionHeader(filePath: string): Promise<HeaderResult> {
+export async function readSessionHeader(filePath: string): Promise<HeaderResult> {
   const fh = await open(filePath, "r")
   try {
     const fileStat = await fh.stat()
-    const readLen = Math.min(HEADER_BYTES, fileStat.size)
-    const buf = Buffer.allocUnsafe(readLen)
-    const { bytesRead } = await fh.read(buf, 0, readLen, 0)
-    const text = buf.subarray(0, bytesRead).toString("utf-8")
+    let readLen = Math.min(HEADER_BYTES, fileStat.size)
+    let text = ""
+    let bytesRead = 0
+    for (;;) {
+      const buf = Buffer.allocUnsafe(readLen)
+      const result = await fh.read(buf, 0, readLen, 0)
+      bytesRead = result.bytesRead
+      text = buf.subarray(0, bytesRead).toString("utf-8")
+      const isWholeFile = bytesRead >= fileStat.size
+      if (isWholeFile || text.includes("\n") || readLen >= MAX_HEADER_BYTES) break
+      readLen = Math.min(readLen * 4, Math.min(fileStat.size, MAX_HEADER_BYTES))
+    }
     const parts = text.split("\n").filter((l) => l.trim().length > 0)
     // Drop the last element if we didn't read the whole file — it's likely truncated
     if (bytesRead < fileStat.size && parts.length > 0) {
@@ -442,22 +456,25 @@ export function registerProjectRoutes(use: UseFn) {
 
       try {
         if (tailParam !== null) {
-          // ?tail=N — return last N turns worth of lines plus header lines
+          // ?tail=N — return last N turns worth of lines plus header lines,
+          // trimmed to a byte budget so big sessions stay cheap over tunnels
           const requestedTurns = Math.max(1, Math.min(parseInt(tailParam) || 30, 200))
           const bytesToRead = requestedTurns * 65536
+          const byteBudget = parseTailByteBudget(url.searchParams.get("maxBytes"))
 
           const [header, tail] = await Promise.all([
             readSessionHeader(filePath),
             readTail(filePath, bytesToRead),
           ])
 
-          const hasMore = tail.byteOffset > header.bytesRead
+          const trimmed = trimTailToByteBudget(tail.lines, tail.byteOffset, byteBudget)
+          const hasMore = trimmed.byteOffset > header.bytesRead
 
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({
             headerLines: header.lines,
-            tailLines: tail.lines,
-            byteOffset: tail.byteOffset,
+            tailLines: trimmed.lines,
+            byteOffset: trimmed.byteOffset,
             totalSize: tail.totalSize,
             hasMore,
           }))
