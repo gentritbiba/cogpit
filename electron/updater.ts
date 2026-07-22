@@ -65,6 +65,11 @@ function isNewer(remote: string, local: string): boolean {
 export function initUpdater(mainWindow: BrowserWindow): void {
   const platform = getUpdatePlatform()
 
+  // How often to re-check for updates while the app stays open. A one-shot
+  // check at startup never surfaces releases published during a long-lived
+  // session, so we also poll on this interval.
+  const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+
   // Listen for dismiss from renderer
   ipcMain.on("dismiss-update", (_event, version: string) => {
     writePrefs({ dismissedVersion: version })
@@ -82,13 +87,17 @@ export function initUpdater(mainWindow: BrowserWindow): void {
       })
     })
 
-    // Check after 5s delay
-    setTimeout(() => {
-      autoUpdater.checkForUpdates().catch(() => {})
-    }, 5000)
+    // Check shortly after launch, then periodically for long-running instances.
+    const check = () => autoUpdater.checkForUpdates().catch(() => {})
+    setTimeout(check, 5000)
+    const interval = setInterval(check, UPDATE_CHECK_INTERVAL_MS)
+    app.on("before-quit", () => clearInterval(interval))
   } else {
-    // macOS or Linux system package: check GitHub API
-    setTimeout(async () => {
+    // macOS or Linux system package: check GitHub API shortly after launch,
+    // then periodically so a long-running instance still surfaces new releases.
+    const checkForUpdate = async () => {
+      if (mainWindow.isDestroyed()) return
+
       const release = await checkGitHubRelease()
       if (!release) return
 
@@ -98,11 +107,16 @@ export function initUpdater(mainWindow: BrowserWindow): void {
       const prefs = readPrefs()
       if (prefs.dismissedVersion === release.version) return
 
+      if (mainWindow.isDestroyed()) return
       mainWindow.webContents.send("update-available", {
         version: release.version,
         url: release.url,
         platform: platform === "mac-notification" ? "mac" : "linux-pkg",
       })
-    }, 5000)
+    }
+
+    setTimeout(checkForUpdate, 5000)
+    const interval = setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS)
+    app.on("before-quit", () => clearInterval(interval))
   }
 }
