@@ -7,6 +7,10 @@ Claude Code history.
 
 All output is JSON to stdout — designed for programmatic consumption by AI agents.
 
+Session compatibility is validated against Claude Code 2.1.217 and Codex CLI
+0.145.0. The parser also retains backward compatibility with older rollout
+formats covered by the test suite.
+
 ## Install
 
 ```bash
@@ -143,7 +147,7 @@ The session parser under `src/lib/` is generated from Cogpit's canonical
 `bun run check:cogpit-memory-sync` and rejects drift.
 
 ```bash
-# Run tests (82 tests)
+# Run tests
 bun test
 
 # Build compiled binary (Bun, uses bun:sqlite)

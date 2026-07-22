@@ -48,6 +48,9 @@ function isCodexRawMessages(rawMessages: Array<{ type: string; [key: string]: un
     || firstType === "turn_context"
     || firstType === "event_msg"
     || firstType === "response_item"
+    || firstType === "compacted"
+    || firstType === "world_state"
+    || firstType === "inter_agent_communication_metadata"
 }
 
 function serializeRawMessages(rawMessages: Array<{ type: string; [key: string]: unknown }>): string {

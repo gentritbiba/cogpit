@@ -148,6 +148,56 @@ not valid json
     expect(queued.timestamp).toBe("2025-01-15T10:00:02Z")
   })
 
+  it("does not duplicate Claude 2.1.217 enqueue/dequeue prompts before a user record", () => {
+    const prompt = "Reply with exactly: shape-ok"
+    const session = parseSession(toJsonl([
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: prompt,
+        timestamp: "2026-07-22T13:39:53.973Z",
+      },
+      {
+        type: "queue-operation",
+        operation: "dequeue",
+        content: null,
+        timestamp: "2026-07-22T13:39:53.973Z",
+      },
+      userMsg(prompt, { version: "2.1.217" }),
+      textAssistant("shape-ok"),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toBe(prompt)
+    expect(session.turns[0].contentBlocks.some((block) => block.kind === "queued_prompt")).toBe(false)
+  })
+
+  it("does not duplicate enqueue/dequeue prompts between completed turns", () => {
+    const prompt = "Reply with exactly: second-turn-ok"
+    const session = parseSession(toJsonl([
+      userMsg("first turn"),
+      textAssistant("first answer"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: prompt,
+        timestamp: "2026-07-22T13:40:00.000Z",
+      },
+      {
+        type: "queue-operation",
+        operation: "dequeue",
+        content: null,
+        timestamp: "2026-07-22T13:40:00.001Z",
+      },
+      userMsg(prompt, { version: "2.1.217" }),
+      textAssistant("second-turn-ok"),
+    ]))
+
+    expect(session.turns).toHaveLength(2)
+    expect(session.turns[0].contentBlocks.some((block) => block.kind === "queued_prompt")).toBe(false)
+    expect(session.turns[1].userMessage).toBe(prompt)
+  })
+
   it("does not render Claude's internal queued task notifications as prompts", () => {
     const session = parseSession(toJsonl([
       userMsg("Run the audit"),
@@ -1750,6 +1800,24 @@ describe("edge cases", () => {
     ])
     const session = parseSession(jsonl)
     expect(session.turns[0].toolCalls[0].result).toBe("line 1\nline 2")
+  })
+
+  it("treats a missing Claude tool_result is_error field as success", () => {
+    const toolId = "optional_error"
+    const jsonl = toJsonl([
+      userMsg("Read"),
+      toolUseAssistant("Read", { file_path: "test.ts" }, toolId),
+      userMsg([
+        {
+          type: "tool_result",
+          tool_use_id: toolId,
+          content: "done",
+        },
+      ] as unknown as string),
+    ])
+
+    const session = parseSession(jsonl)
+    expect(session.turns[0].toolCalls[0].isError).toBe(false)
   })
 
   it("handles summary message at the very start", () => {

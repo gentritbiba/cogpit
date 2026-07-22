@@ -15,6 +15,7 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 assert.equal(manifest.main, "./dist/index.js")
 assert.equal(manifest.types, "./dist/index.d.ts")
 assert.equal(manifest.engines.node, ">=20")
+assert.deepEqual(manifest.bin, { "cogpit-memory": "dist/cli.js" })
 
 assert.equal(typeof api.parseSession, "function")
 assert.equal(typeof api.SearchIndex, "function")
@@ -126,10 +127,12 @@ const pack = spawnSync("npm", ["pack", "--json", "--dry-run"], {
   encoding: "utf8",
 })
 assert.equal(pack.status, 0, pack.stderr)
-const packFiles = JSON.parse(pack.stdout)[0].files.map((file) => file.path)
+const packFiles = JSON.parse(pack.stdout)[0].files
+const packPaths = packFiles.map((file) => file.path)
 for (const requiredFile of ["dist/index.js", "dist/index.d.ts", "dist/cli.js", "skill/SKILL.md"]) {
-  assert.ok(packFiles.includes(requiredFile), `npm tarball is missing ${requiredFile}`)
+  assert.ok(packPaths.includes(requiredFile), `npm tarball is missing ${requiredFile}`)
 }
-assert.equal(packFiles.some((file) => file.includes("__tests__")), false)
+assert.equal(packPaths.some((file) => file.includes("__tests__")), false)
+assert.equal(packFiles.find((file) => file.path === "dist/cli.js")?.mode, 0o755)
 
 console.log("Verified cogpit-memory public package and CLI contracts")

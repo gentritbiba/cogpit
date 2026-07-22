@@ -221,6 +221,85 @@ describe("context command", () => {
         expect(result.tokenUsage).toHaveProperty("output")
       }
     })
+
+    it("serializes current attachment and presentation block shapes without null entries", async () => {
+      const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
+      mkdirSync(projDir, { recursive: true })
+
+      const lines = [
+        { type: "system", sessionId: "modern-shapes", cwd: "/test/project", gitBranch: "main" },
+        { type: "system", subtype: "away_summary", content: "Earlier work is complete.", timestamp: "2026-07-22T10:00:00Z" },
+        {
+          type: "user",
+          sessionId: "modern-shapes",
+          timestamp: "2026-07-22T10:00:01Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: "cGRm" } },
+              { type: "audio", source: { type: "base64", media_type: "audio/wav", data: "d2F2" } },
+              { type: "image", source: { type: "base64", media_type: "image/png", data: "cG5n" } },
+              { type: "text", text: "Review the attachments" },
+            ],
+          },
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-07-22T10:00:02Z",
+          message: {
+            role: "assistant",
+            model: "claude-opus-4-6",
+            id: "enter-message",
+            content: [{ type: "tool_use", id: "enter", name: "EnterPlanMode", input: { plan: "Review plan" } }],
+            stop_reason: "tool_use",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        },
+        {
+          type: "user",
+          timestamp: "2026-07-22T10:00:03Z",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "enter", content: "ok" }] },
+        },
+        { type: "queue-operation", operation: "enqueue", content: "Include tests", timestamp: "2026-07-22T10:00:04Z" },
+        {
+          type: "progress",
+          timestamp: "2026-07-22T10:00:05Z",
+          data: { type: "hook_progress", hook_event_name: "PostToolUse", tool_use_id: "enter", duration_ms: 4 },
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-07-22T10:00:06Z",
+          message: {
+            role: "assistant",
+            model: "claude-opus-4-6",
+            id: "exit-message",
+            content: [{ type: "tool_use", id: "exit", name: "ExitPlanMode", input: { path: "/tmp/plan.md" } }],
+            stop_reason: "tool_use",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        },
+        {
+          type: "user",
+          timestamp: "2026-07-22T10:00:07Z",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "exit", content: "approved" }] },
+        },
+      ].map((line) => JSON.stringify(line)).join("\n")
+      writeSession(projDir, "modern-shapes.jsonl", lines)
+
+      const overview = await getSessionOverview("modern-shapes") as any
+      expect(overview.turns[0].userMessage).toBe(
+        "[document attached]\n[audio attached]\n[image attached]\nReview the attachments",
+      )
+
+      const detail = await getTurnDetail("modern-shapes", 0) as any
+      expect(detail.contentBlocks.every((block: unknown) => block !== null && block !== undefined)).toBe(true)
+      expect(detail.contentBlocks.map((block: { kind: string }) => block.kind)).toEqual([
+        "recap",
+        "plan_mode",
+        "queued_prompt",
+        "hook_event",
+      ])
+    })
   })
 
   // -- getAgentOverview (L3) --------------------------------------------------

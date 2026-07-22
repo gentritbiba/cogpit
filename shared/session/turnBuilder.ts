@@ -280,6 +280,26 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   // Track Task tool call metadata (name, subagent_type) by tool_use ID
   const taskMetaMap = new Map<string, { name: string | null; subagentType: string | null }>()
 
+  // A queued prompt may either be an in-turn steer or the durable precursor to
+  // the next ordinary user record. Hold it until the next non-queue record so
+  // the latter shape can be reconciled without rendering the prompt twice.
+  const pendingQueuedPrompts: Array<{
+    turn: Turn
+    content: string
+    timestamp?: string
+  }> = []
+
+  function flushPendingQueuedPrompts() {
+    for (const prompt of pendingQueuedPrompts) {
+      prompt.turn.contentBlocks.push({
+        kind: "queued_prompt",
+        content: prompt.content,
+        timestamp: prompt.timestamp,
+      })
+    }
+    pendingQueuedPrompts.length = 0
+  }
+
   function flushSubAgentMessages(parentId: string) {
     if (!current) return
     const agentMsgs = subAgentMap.get(parentId)
@@ -374,29 +394,32 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // those prompts inline at their chronological position so they remain
     // visible after the in-memory optimistic preview is gone or the page reloads.
     if (isQueueOperationMessage(msg)) {
-      if (msg.operation === "enqueue" && isVisibleQueuedPrompt(msg.content)) {
-        if (!current) {
-          current = {
-            id: `queued-${msg.timestamp ?? crypto.randomUUID()}`,
-            userMessage: null,
-            contentBlocks: [],
-            thinking: [],
-            assistantText: [],
-            toolCalls: [],
-            subAgentActivity: [],
-            timestamp: msg.timestamp ?? "",
-            durationMs: null,
-            tokenUsage: null,
-            model: null,
-          }
-        }
-        current.contentBlocks.push({
-          kind: "queued_prompt",
+      // Claude Code 2.1.217+ writes an enqueue/dequeue pair immediately before
+      // an ordinary user record. With no active turn, the following user record
+      // is the durable transcript entry, so creating a synthetic turn here would
+      // duplicate the prompt. Enqueues during an active turn remain useful as
+      // chronological steer/queued-prompt blocks.
+      if (current && msg.operation === "enqueue" && isVisibleQueuedPrompt(msg.content)) {
+        pendingQueuedPrompts.push({
+          turn: current,
           content: msg.content,
           timestamp: msg.timestamp,
         })
       }
       continue
+    }
+
+    if (pendingQueuedPrompts.length > 0) {
+      const userContent = isUserMessage(msg) && !msg.isMeta
+        ? msg.message.content
+        : null
+      if (typeof userContent === "string") {
+        const duplicateIndex = pendingQueuedPrompts.findIndex(
+          (prompt) => prompt.content === userContent
+        )
+        if (duplicateIndex >= 0) pendingQueuedPrompts.splice(duplicateIndex, 1)
+      }
+      flushPendingQueuedPrompts()
     }
 
     // User messages start a new turn (skip meta / tool-result-only messages)
@@ -413,7 +436,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
               if (pending) {
                 pending.turn.toolCalls[pending.index].result =
                   extractToolResultText(block.content)
-                pending.turn.toolCalls[pending.index].isError = block.is_error
+                pending.turn.toolCalls[pending.index].isError = block.is_error === true
                 pendingToolUses.delete(block.tool_use_id)
               }
             }
@@ -707,7 +730,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
                   )
                   if (match) {
                     match.result = extractToolResultText(block.content)
-                    match.isError = block.is_error
+                    match.isError = block.is_error === true
                   }
                 }
               }
@@ -780,6 +803,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   }
 
   // Finalize the last turn
+  flushPendingQueuedPrompts()
   finalizeTurn()
 
   return turns

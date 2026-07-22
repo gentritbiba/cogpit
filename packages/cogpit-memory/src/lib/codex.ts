@@ -10,6 +10,7 @@ import {
   parseCustomToolOutput,
 } from "./codex-tool-normalization"
 import type {
+  AudioBlock,
   ContentBlock,
   ImageBlock,
   ParseSessionOptions,
@@ -59,6 +60,7 @@ interface CodexMetadata {
 
 const SKIP_PROMPT_PREFIXES = [
   "# AGENTS.md instructions for ",
+  "<recommended_plugins>",
   "<environment_context>",
   "<permissions instructions>",
   "<collaboration_mode>",
@@ -88,6 +90,8 @@ function isCodexRecord(record: CodexRecord | null): record is CodexRecord {
     || record.type === "event_msg"
     || record.type === "response_item"
     || record.type === "inter_agent_communication_metadata"
+    || record.type === "compacted"
+    || record.type === "world_state"
 }
 
 function extractMessageText(payload: Record<string, unknown> | undefined, blockType: "input_text" | "output_text"): string {
@@ -101,6 +105,7 @@ function extractMessageText(payload: Record<string, unknown> | undefined, blockT
 }
 
 const CODEX_IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/is
+const CODEX_AUDIO_DATA_URL = /^data:(audio\/(?:wav|x-wav|mpeg|mp4|webm|ogg));base64,(.+)$/is
 
 function parseImageDataUrl(value: unknown): ImageBlock | null {
   if (typeof value !== "string") return null
@@ -116,11 +121,32 @@ function parseImageDataUrl(value: unknown): ImageBlock | null {
   }
 }
 
+function parseAudioDataUrl(value: unknown): AudioBlock | null {
+  if (typeof value !== "string") return null
+  const match = CODEX_AUDIO_DATA_URL.exec(value)
+  if (!match?.[1] || !match[2]) return null
+  return {
+    type: "audio",
+    source: {
+      type: "base64",
+      media_type: match[1].toLowerCase(),
+      data: match[2],
+    },
+  }
+}
+
 function extractEventMessageImages(payload: Record<string, unknown>): ImageBlock[] {
   if (!Array.isArray(payload.images)) return []
   return payload.images
     .map(parseImageDataUrl)
     .filter((image): image is ImageBlock => image !== null)
+}
+
+function extractEventMessageAudio(payload: Record<string, unknown>): AudioBlock[] {
+  if (!Array.isArray(payload.audio)) return []
+  return payload.audio
+    .map(parseAudioDataUrl)
+    .filter((audio): audio is AudioBlock => audio !== null)
 }
 
 function extractResponseMessageImages(payload: Record<string, unknown>): ImageBlock[] {
@@ -133,16 +159,32 @@ function extractResponseMessageImages(payload: Record<string, unknown>): ImageBl
     .filter((image): image is ImageBlock => image !== null)
 }
 
+function extractResponseMessageAudio(payload: Record<string, unknown>): AudioBlock[] {
+  if (!Array.isArray(payload.content)) return []
+  return payload.content
+    .filter((block): block is Record<string, unknown> => (
+      isObject(block) && block.type === "input_audio"
+    ))
+    .map((block) => parseAudioDataUrl(block.audio_url))
+    .filter((audio): audio is AudioBlock => audio !== null)
+}
+
 function buildCodexUserContent(
   message: string,
   images: ImageBlock[],
+  audio: AudioBlock[] = [],
   localImages: string[] = [],
+  localAudio: string[] = [],
 ): string | ContentBlock[] {
-  const imageSuffix = localImages.map((path) => `\n![image](<${path}>)`).join("")
-  const text = message + imageSuffix
-  if (images.length === 0) return text
+  const attachmentSuffix = [
+    ...localImages.map((path) => `\n![image](<${path}>)`),
+    ...localAudio.map((path) => `\n[audio attachment](<${path}>)`),
+  ].join("")
+  const text = message + attachmentSuffix
+  if (images.length === 0 && audio.length === 0) return text
   return [
     ...images,
+    ...audio,
     ...(text ? [{ type: "text" as const, text }] : []),
   ]
 }
@@ -236,7 +278,9 @@ function parseTokenUsage(value: unknown): TokenUsage | null {
   if (!isObject(value)) return null
   const reportedInputTokens = typeof value.input_tokens === "number" ? value.input_tokens : 0
   const outputTokens = typeof value.output_tokens === "number" ? value.output_tokens : 0
-  const cacheCreation = typeof value.cache_creation_input_tokens === "number" ? value.cache_creation_input_tokens : 0
+  const cacheCreation = typeof value.cache_write_input_tokens === "number"
+    ? value.cache_write_input_tokens
+    : typeof value.cache_creation_input_tokens === "number" ? value.cache_creation_input_tokens : 0
   const nativeCachedInput = typeof value.cached_input_tokens === "number"
     ? Math.max(0, value.cached_input_tokens)
     : null
@@ -463,6 +507,7 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
   const metadata = extractMetadataFromRecords(records)
   const turns: Turn[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
+  const webSearchCalls = new Map<string, ToolCall>()
   // apply_patch parent callId → synthetic per-file tool calls
   const patchCallIds = new Map<string, { calls: ToolCall[]; direct: boolean }>()
   // spawn_agent call tracking
@@ -565,10 +610,57 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
   let currentTurnId: string | null = null
   let currentModel: string | null = metadata.model || null
   let lastTurnTimestamp = ""
+  let pendingCompaction: string | null = null
+
+  function createActiveTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
+    const turn = createTurn(turnId, timestamp, model)
+    if (pendingCompaction) {
+      turn.compactionSummary = pendingCompaction
+      pendingCompaction = null
+    }
+    return turn
+  }
+
+  function upsertWebSearchCall(
+    targetTurn: Turn,
+    id: string,
+    input: Record<string, unknown>,
+    status: string,
+    timestamp: string,
+  ) {
+    const existing = webSearchCalls.get(id)
+    if (existing) {
+      existing.input = { ...existing.input, ...input }
+      existing.result = status
+      existing.isError = status === "failed"
+      return
+    }
+
+    const toolCall: ToolCall = {
+      id,
+      name: "WebSearch",
+      input,
+      result: status,
+      isError: status === "failed",
+      timestamp,
+    }
+    webSearchCalls.set(id, toolCall)
+    appendToolCall(targetTurn, toolCall, timestamp)
+  }
 
   for (const record of records) {
     const payload = isObject(record.payload) ? record.payload : undefined
     const timestamp = record.timestamp ?? ""
+
+    if (record.type === "compacted") {
+      current = finalizeTurn(turns, current, lastTurnTimestamp)
+      pendingCompaction = "Conversation compacted"
+      lastTurnTimestamp = timestamp
+      continue
+    }
+
+    // World-state snapshots are model context, not transcript turns.
+    if (record.type === "world_state") continue
 
     if (record.type === "turn_context") {
       current = finalizeTurn(turns, current, lastTurnTimestamp)
@@ -582,21 +674,26 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       if (current && (current.assistantText.length > 0 || current.toolCalls.length > 0 || current.thinking.length > 0)) {
         current = finalizeTurn(turns, current, lastTurnTimestamp)
       }
-      current ??= createTurn(currentTurnId, timestamp, currentModel)
+      current ??= createActiveTurn(currentTurnId, timestamp, currentModel)
       const localImages = (Array.isArray(payload.local_images) ? payload.local_images : []).filter(
+        (p): p is string => typeof p === "string" && p.length > 0,
+      )
+      const localAudio = (Array.isArray(payload.local_audio) ? payload.local_audio : []).filter(
         (p): p is string => typeof p === "string" && p.length > 0,
       )
       current.userMessage = buildCodexUserContent(
         payload.message,
         extractEventMessageImages(payload),
+        extractEventMessageAudio(payload),
         localImages,
+        localAudio,
       )
       current.timestamp = current.timestamp || timestamp
       lastTurnTimestamp = timestamp
       continue
     }
 
-    current ??= createTurn(currentTurnId, timestamp, currentModel)
+    current ??= createActiveTurn(currentTurnId, timestamp, currentModel)
     if (!current.model && currentModel) current.model = currentModel
     if (!current.timestamp) current.timestamp = timestamp
     if (timestamp) lastTurnTimestamp = timestamp
@@ -607,6 +704,18 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       if (lastUsage) {
         current.tokenUsage = mergeTokenUsage(current.tokenUsage, lastUsage)
       }
+      continue
+    }
+
+    if (
+      record.type === "event_msg"
+      && payload?.type === "web_search_end"
+      && typeof payload.call_id === "string"
+    ) {
+      const input: Record<string, unknown> = {}
+      if (typeof payload.query === "string" && payload.query) input.query = payload.query
+      if (isObject(payload.action)) input.action = payload.action
+      upsertWebSearchCall(current, payload.call_id, input, "completed", timestamp)
       continue
     }
 
@@ -674,7 +783,18 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
     if (payload.type === "message" && payload.role === "user" && current.userMessage === null) {
       const text = normalizePromptText(extractMessageText(payload, "input_text"))
       const images = extractResponseMessageImages(payload)
-      if (text || images.length > 0) current.userMessage = buildCodexUserContent(text, images)
+      const audio = extractResponseMessageAudio(payload)
+      if (text || images.length > 0 || audio.length > 0) {
+        current.userMessage = buildCodexUserContent(text, images, audio)
+      }
+      continue
+    }
+
+    if (payload.type === "web_search_call" && typeof payload.id === "string") {
+      const input: Record<string, unknown> = {}
+      if (isObject(payload.action)) input.action = payload.action
+      const status = typeof payload.status === "string" ? payload.status : "completed"
+      upsertWebSearchCall(current, payload.id, input, status, timestamp)
       continue
     }
 

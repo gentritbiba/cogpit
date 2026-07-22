@@ -8,7 +8,7 @@
  * - Keeps better-sqlite3 external (native module, can't be bundled)
  */
 import { build } from "esbuild"
-import { mkdirSync, rmSync } from "node:fs"
+import { chmodSync, mkdirSync, rmSync } from "node:fs"
 
 rmSync("dist", { recursive: true, force: true })
 mkdirSync("dist", { recursive: true })
@@ -38,5 +38,7 @@ await Promise.all([
     outfile: "dist/index.js",
   }),
 ])
+
+chmodSync("dist/cli.js", 0o755)
 
 console.log("Built dist/cli.js and dist/index.js")

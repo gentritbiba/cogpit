@@ -23,19 +23,46 @@ export interface ToolResultBlock {
   type: "tool_result"
   tool_use_id: string
   content: string | ContentBlock[]
-  is_error: boolean
+  is_error?: boolean
+}
+
+export interface Base64MediaSource {
+  type: "base64"
+  media_type: string
+  data: string
 }
 
 export interface ImageBlock {
   type: "image"
-  source: {
-    type: "base64"
-    media_type: string
-    data: string
-  }
+  source: Base64MediaSource
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock | ImageBlock
+export interface DocumentBlock {
+  type: "document"
+  source: Base64MediaSource
+}
+
+export interface AudioBlock {
+  type: "audio"
+  source: Base64MediaSource
+}
+
+/** Claude emits this when an API request falls back from one model to another. */
+export interface FallbackBlock {
+  type: "fallback"
+  from: { model: string }
+  to: { model: string }
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ThinkingBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ImageBlock
+  | DocumentBlock
+  | AudioBlock
+  | FallbackBlock
 
 export type UserContent = string | ContentBlock[]
 

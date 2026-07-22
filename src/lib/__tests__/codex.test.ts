@@ -448,6 +448,23 @@ describe("parseCodexSession", () => {
     expect(usage?.cache_read_input_tokens).toBe(30)
   })
 
+  it("maps Codex 0.145 cache-write tokens to cache creation", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext(),
+      userMessage("Hello"),
+      tokenCount(100, 50, {
+        cached_input_tokens: 30,
+        cache_write_input_tokens: 12,
+      }),
+    ].join("\n")
+
+    const usage = parseCodexSession(text).turns[0].tokenUsage
+    expect(usage?.input_tokens).toBe(70)
+    expect(usage?.cache_creation_input_tokens).toBe(12)
+    expect(usage?.cache_read_input_tokens).toBe(30)
+  })
+
   it("populates rawMessages", () => {
     const session = parseCodexSession(SIMPLE_SESSION)
     expect(session.rawMessages.length).toBeGreaterThan(0)
@@ -1198,6 +1215,36 @@ describe("parseCodexSession", () => {
     ])
   })
 
+  it("parses Codex 0.145 audio and local-audio attachments", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext(),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "user_message",
+          message: "listen to this",
+          images: [],
+          local_images: [],
+          audio: ["data:audio/mpeg;base64,bXAz"],
+          local_audio: ["/tmp/note.wav"],
+          text_elements: [],
+        },
+      }),
+      assistantMessage("Got it"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].userMessage).toEqual([
+      {
+        type: "audio",
+        source: { type: "base64", media_type: "audio/mpeg", data: "bXAz" },
+      },
+      { type: "text", text: "listen to this\n[audio attachment](</tmp/note.wav>)" },
+    ])
+  })
+
   it("reads input_image blocks when a Codex response item is the only user record", () => {
     const text = [
       sessionMeta(),
@@ -1225,6 +1272,128 @@ describe("parseCodexSession", () => {
       },
       { type: "text", text: "image only fallback" },
     ])
+  })
+
+  it("reads input_audio blocks when a Codex response item is the only user record", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext(),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_audio", audio_url: "data:audio/wav;base64,d2F2" },
+            { type: "input_text", text: "audio fallback" },
+          ],
+        },
+      }),
+      assistantMessage("Got it"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].userMessage).toEqual([
+      {
+        type: "audio",
+        source: { type: "base64", media_type: "audio/wav", data: "d2F2" },
+      },
+      { type: "text", text: "audio fallback" },
+    ])
+  })
+
+  it("skips injected recommended-plugin context in Codex 0.145 rollouts", () => {
+    const injected = "<recommended_plugins>\n- GitHub\n</recommended_plugins>\n<environment_context>internal</environment_context>"
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext(),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01.500Z",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: injected }],
+        },
+      }),
+      userMessage("the actual prompt"),
+      assistantMessage("the answer"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    const metadata = extractCodexMetadataFromLines(text.split("\n"))
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toBe("the actual prompt")
+    expect(metadata.firstUserMessage).toBe("the actual prompt")
+    expect(metadata.turnCount).toBe(1)
+  })
+
+  it("retains Codex compaction boundaries and world-state records", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext({ turn_id: "turn-before" }),
+      userMessage("before compaction"),
+      assistantMessage("before answer"),
+      JSON.stringify({
+        type: "compacted",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: { message: "", replacement_history: [], window_number: 2 },
+      }),
+      JSON.stringify({
+        type: "world_state",
+        timestamp: "2024-01-01T00:00:04.100Z",
+        payload: { full: true, state: [] },
+      }),
+      turnContext({ turn_id: "turn-after" }),
+      userMessage("after compaction", "2024-01-01T00:00:05.000Z"),
+      assistantMessage("after answer", "2024-01-01T00:00:06.000Z"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns).toHaveLength(2)
+    expect(session.turns[1].compactionSummary).toBe("Conversation compacted")
+    expect(session.rawMessages.map((record) => record.type)).toContain("compacted")
+    expect(session.rawMessages.map((record) => record.type)).toContain("world_state")
+  })
+
+  it("records and deduplicates persisted Codex web searches", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.145.0" }),
+      turnContext(),
+      userMessage("find the docs"),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "web_search_end",
+          call_id: "ws_123",
+          query: "official docs",
+          action: { type: "search", query: "official docs" },
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.100Z",
+        payload: {
+          type: "web_search_call",
+          id: "ws_123",
+          status: "completed",
+          action: { type: "search", query: "official docs" },
+        },
+      }),
+      assistantMessage("found it"),
+    ].join("\n")
+
+    const session = parseCodexSession(text)
+    expect(session.turns[0].toolCalls).toHaveLength(1)
+    expect(session.turns[0].toolCalls[0]).toMatchObject({
+      id: "ws_123",
+      name: "WebSearch",
+      input: { query: "official docs" },
+      result: "completed",
+      isError: false,
+    })
   })
 
   it("handles empty local_images gracefully", () => {

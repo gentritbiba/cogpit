@@ -1,11 +1,11 @@
 ---
 name: cogpit-memory
-description: CLI tool for Claude Code session introspection -- retrieves conversation history, tool calls, thinking, sub-agent/team activity, full-text search, and session discovery. All output is JSON to stdout.
+description: CLI tool for Claude Code and Codex session introspection -- retrieves conversation history, tool calls, thinking, sub-agent/team activity, full-text search, and session discovery. All output is JSON to stdout.
 ---
 
 # Cogpit Memory -- Session Context CLI
 
-CLI tool that gives any AI assistant memory of past Claude Code sessions. Retrieve conversation history, tool usage, thinking, and sub-agent activity via a layered command structure. **Also supports full-text search across all sessions** and session discovery/listing.
+CLI tool that gives any AI assistant memory of past Claude Code and Codex sessions. Retrieve conversation history, tool usage, thinking, and sub-agent activity via a layered command structure. Session discovery and layered context support both providers; cross-session full-text indexing currently covers Claude Code history, while `search --session` supports either provider.
 
 Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
 
@@ -105,7 +105,7 @@ Response shape:
 ```
 
 Key fields:
-- `userMessage` -- the human's full prompt text (`null` for synthetic turns, images shown as `[image attached]`)
+- `userMessage` -- the human's full prompt text (`null` for synthetic turns; images, documents, and audio are shown as attachment placeholders)
 - `assistantMessage` -- the AI's full text response (`null` if only tools ran)
 - `toolSummary` -- tool name to count (e.g., `{"Read": 5, "Edit": 2}`)
 - `subAgents` -- summary of sub-agents that ran in this turn. Fields `status`, `durationMs`, `toolUseCount` may be `null` for older sessions
@@ -151,7 +151,7 @@ Response shape:
 ```
 
 Key details:
-- `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`
+- `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`, `queued_prompt`, `hook_event`, `plan_mode`, `recap`
 - Tool call `result` is truncated at 10,000 chars -- check `resultTruncated: true`
 - Tool call `result` may be `null` if the tool hasn't returned yet
 - Sub-agent blocks show prompt + result text. For full sub-agent conversation, use Layer 3

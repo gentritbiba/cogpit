@@ -29,6 +29,8 @@ function extractUserMessageText(userMessage: UserContent | null): string | null 
   for (const block of userMessage) {
     if (block.type === "text") parts.push(block.text)
     else if (block.type === "image") parts.push("[image attached]")
+    else if (block.type === "document") parts.push("[document attached]")
+    else if (block.type === "audio") parts.push("[audio attached]")
   }
   return parts.length > 0 ? parts.join("\n") : null
 }
@@ -151,6 +153,11 @@ function mapTurnToDetail(session: ParsedSession, turnIndex: number) {
   }
 }
 
+function mapToolCall(tc: Turn["toolCalls"][number]) {
+  const { result, resultTruncated } = truncateResult(tc.result)
+  return { id: tc.id, name: tc.name, input: tc.input, result, resultTruncated, isError: tc.isError }
+}
+
 function mapContentBlock(block: TurnContentBlock) {
   switch (block.kind) {
     case "thinking": {
@@ -165,10 +172,7 @@ function mapContentBlock(block: TurnContentBlock) {
     case "tool_calls":
       return {
         kind: "tool_calls" as const,
-        toolCalls: block.toolCalls.map((tc) => {
-          const { result, resultTruncated } = truncateResult(tc.result)
-          return { id: tc.id, name: tc.name, input: tc.input, result, resultTruncated, isError: tc.isError }
-        }),
+        toolCalls: block.toolCalls.map(mapToolCall),
         timestamp: block.timestamp ?? null,
       }
     case "sub_agent":
@@ -178,6 +182,21 @@ function mapContentBlock(block: TurnContentBlock) {
         agents: block.messages.map(mapSubAgentDetail),
         timestamp: block.timestamp ?? null,
       }
+    case "queued_prompt":
+      return { kind: "queued_prompt" as const, content: block.content, timestamp: block.timestamp ?? null }
+    case "hook_event":
+      return { kind: "hook_event" as const, events: block.events, timestamp: block.timestamp ?? null }
+    case "plan_mode":
+      return {
+        kind: "plan_mode" as const,
+        plan: block.plan,
+        planFilePath: block.planFilePath ?? null,
+        status: block.status,
+        toolCalls: block.toolCalls.map(mapToolCall),
+        timestamp: block.timestamp ?? null,
+      }
+    case "recap":
+      return { kind: "recap" as const, content: block.content, timestamp: block.timestamp ?? null }
   }
 }
 
