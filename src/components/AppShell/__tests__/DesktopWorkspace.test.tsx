@@ -222,6 +222,7 @@ function makeProps(
       todosExpanded: false,
       onTodosExpandedChange: vi.fn(),
       hasMoreTurns: false,
+      isLoadingOlderTurns: false,
       onLoadMoreTurns: vi.fn(),
       onBackToMain: vi.fn(),
       onShowWorkflows: vi.fn(),
