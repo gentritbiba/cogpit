@@ -39,7 +39,7 @@ import { useSlashSuggestions } from "@/hooks/useSlashSuggestions"
 import { usePanelState } from "@/hooks/usePanelState"
 import { useAppHandlers } from "@/hooks/useAppHandlers"
 import { useParserWorker } from "@/hooks/useParserWorker"
-import { useChunkedSession } from "@/hooks/useChunkedSession"
+import { useSessionPaging } from "@/hooks/useSessionPaging"
 import { useComposerSettings } from "@/hooks/useComposerSettings"
 import { useSessionConfigSync } from "@/hooks/useSessionConfigSync"
 import type { SessionConfig } from "@/lib/sessionConfig"
@@ -75,7 +75,7 @@ export default function App() {
   const [state, dispatch] = useSessionState()
   const { parse: workerParse, append: workerAppend } = useParserWorker()
 
-  const handlePrependTurns = useCallback((olderTurns: Turn[], _hasMore: boolean, _nextByteOffset: number) => {
+  const handlePrependTurns = useCallback((olderTurns: Turn[]) => {
     dispatch({ type: "PREPEND_TURNS", turns: olderTurns })
   }, [dispatch])
 
@@ -88,9 +88,10 @@ export default function App() {
     [workerParse],
   )
 
-  const chunkedSession = useChunkedSession({
+  const chunkedSession = useSessionPaging({
     dirName: state.sessionSource?.dirName ?? null,
     fileName: state.sessionSource?.fileName ?? null,
+    sessionChangeKey: state.sessionChangeKey,
     workerParse,
     onPrependTurns: handlePrependTurns,
   })
@@ -1036,6 +1037,7 @@ export default function App() {
             pendingTurns: pendingPreviewList,
             todoProgress: todoProgress && <TodoProgressPanel progress={todoProgress} />,
             hasMoreTurns: chunkedSession.hasMore,
+            isLoadingOlderTurns: chunkedSession.isLoadingOlder,
             onLoadMoreTurns: chunkedSession.loadMore,
             onBackToMain: handleBackToMain,
             onShowWorkflows: handleShowWorkflows,
@@ -1104,6 +1106,7 @@ export default function App() {
             todosExpanded,
             onTodosExpandedChange: handleTodosExpandedChange,
             hasMoreTurns: chunkedSession.hasMore,
+            isLoadingOlderTurns: chunkedSession.isLoadingOlder,
             onLoadMoreTurns: chunkedSession.loadMore,
             onBackToMain: handleBackToMain,
             onShowWorkflows: handleShowWorkflows,

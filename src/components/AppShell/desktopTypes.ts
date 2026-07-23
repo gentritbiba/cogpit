@@ -99,6 +99,7 @@ export interface DesktopSessionView {
   todosExpanded: boolean
   onTodosExpandedChange: (expanded: boolean) => void
   hasMoreTurns: boolean
+  isLoadingOlderTurns: boolean
   onLoadMoreTurns: () => void
   onBackToMain: () => void
   onShowWorkflows: () => void

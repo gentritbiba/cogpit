@@ -106,6 +106,7 @@ export function MobileAppShell({
                 <ChatArea
                   searchInputRef={sessionView.searchInputRef}
                   hasMore={sessionView.hasMoreTurns}
+                  isLoadingOlder={sessionView.isLoadingOlderTurns}
                   onLoadMore={sessionView.onLoadMoreTurns}
                   mobileSearchOpen={chrome.searchOpen}
                   onMobileSearchClose={() => chrome.onSearchOpenChange(false)}

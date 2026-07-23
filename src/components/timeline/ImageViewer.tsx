@@ -9,6 +9,11 @@ import {
   X,
 } from "lucide-react"
 import {
+  TransformComponent,
+  TransformWrapper,
+  type ReactZoomPanPinchRef,
+} from "react-zoom-pan-pinch"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -29,9 +34,7 @@ interface ImageViewerProps {
   onClose: () => void
 }
 
-const MIN_ZOOM = 1
-const MAX_ZOOM = 4
-const ZOOM_STEP = 0.25
+const MAX_ZOOM = 8
 const SWIPE_THRESHOLD = 56
 
 function IconButton({
@@ -68,32 +71,30 @@ function IconButton({
 
 export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps): React.ReactElement | null {
   const safeInitialIndex = Math.min(Math.max(initialIndex, 0), Math.max(images.length - 1, 0))
-  const [view, setView] = useState({ index: safeInitialIndex, zoom: MIN_ZOOM })
+  const [index, setIndex] = useState(safeInitialIndex)
+  const [zoomPercent, setZoomPercent] = useState(100)
+  const transformRef = useRef<ReactZoomPanPinchRef | null>(null)
   const pointerStart = useRef<{ x: number; y: number } | null>(null)
-  const current = images[view.index]
+  const current = images[index]
 
-  const goTo = useCallback((index: number) => {
-    setView({
-      index: Math.min(Math.max(index, 0), images.length - 1),
-      zoom: MIN_ZOOM,
-    })
+  const goTo = useCallback((nextIndex: number) => {
+    setIndex(Math.min(Math.max(nextIndex, 0), images.length - 1))
+    setZoomPercent(100)
   }, [images.length])
 
-  const goPrev = useCallback(() => goTo(view.index - 1), [goTo, view.index])
-  const goNext = useCallback(() => goTo(view.index + 1), [goTo, view.index])
-  const updateZoom = useCallback((nextZoom: number) => {
-    setView((currentView) => ({
-      ...currentView,
-      zoom: Math.min(Math.max(nextZoom, MIN_ZOOM), MAX_ZOOM),
-    }))
-  }, [])
+  const goPrev = useCallback(() => goTo(index - 1), [goTo, index])
+  const goNext = useCallback(() => goTo(index + 1), [goTo, index])
 
   if (!current) return null
 
   const hasMultiple = images.length > 1
-  const canGoPrev = view.index > 0
-  const canGoNext = view.index < images.length - 1
-  const zoomPercent = Math.round(view.zoom * 100)
+  const canGoPrev = index > 0
+  const canGoNext = index < images.length - 1
+  const isZoomedIn = zoomPercent > 100
+
+  const zoomIn = () => transformRef.current?.zoomIn()
+  const zoomOut = () => transformRef.current?.zoomOut()
+  const resetZoom = () => transformRef.current?.resetTransform()
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === "ArrowLeft" && canGoPrev) {
@@ -104,31 +105,29 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
       goNext()
     } else if (event.key === "+" || event.key === "=") {
       event.preventDefault()
-      updateZoom(view.zoom + ZOOM_STEP)
+      zoomIn()
     } else if (event.key === "-") {
       event.preventDefault()
-      updateZoom(view.zoom - ZOOM_STEP)
+      zoomOut()
     } else if (event.key === "0") {
       event.preventDefault()
-      updateZoom(MIN_ZOOM)
+      resetZoom()
     }
   }
 
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && !event.metaKey) return
-    event.preventDefault()
-    updateZoom(view.zoom + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
-  }
-
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (view.zoom !== MIN_ZOOM || event.pointerType === "mouse") return
+    if (event.pointerType === "mouse" || event.isPrimary === false) {
+      pointerStart.current = null
+      return
+    }
     pointerStart.current = { x: event.clientX, y: event.clientY }
   }
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = pointerStart.current
     pointerStart.current = null
-    if (!start || view.zoom !== MIN_ZOOM) return
+    const scale = transformRef.current?.instance.state.scale ?? 1
+    if (!start || scale > 1.01) return
 
     const deltaX = event.clientX - start.x
     const deltaY = event.clientY - start.y
@@ -162,7 +161,7 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
             </div>
             {hasMultiple && (
               <div className="text-[10px] tabular-nums text-white/45">
-                {view.index + 1} of {images.length}
+                {index + 1} of {images.length}
               </div>
             )}
           </div>
@@ -170,14 +169,14 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
           <div className="flex items-center gap-1">
             <IconButton
               label="Zoom out"
-              disabled={view.zoom <= MIN_ZOOM}
-              onClick={() => updateZoom(view.zoom - ZOOM_STEP)}
+              disabled={zoomPercent <= 100}
+              onClick={zoomOut}
             >
               <Minus className="size-3.5" />
             </IconButton>
             <button
               type="button"
-              onClick={() => updateZoom(MIN_ZOOM)}
+              onClick={resetZoom}
               className="h-8 min-w-12 rounded-md px-1.5 font-mono text-[10px] tabular-nums text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
               aria-label="Reset zoom"
               title="Reset zoom"
@@ -186,8 +185,8 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
             </button>
             <IconButton
               label="Zoom in"
-              disabled={view.zoom >= MAX_ZOOM}
-              onClick={() => updateZoom(view.zoom + ZOOM_STEP)}
+              disabled={zoomPercent >= MAX_ZOOM * 100}
+              onClick={zoomIn}
             >
               <Plus className="size-3.5" />
             </IconButton>
@@ -199,32 +198,39 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
         </header>
 
         <div
-          className="relative min-h-0 flex-1 touch-pan-y overflow-hidden bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.055),transparent_65%)]"
-          onWheel={handleWheel}
+          className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.055),transparent_65%)]"
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
         >
-          <div className="absolute inset-0 overflow-auto overscroll-contain">
-            <div
-              className="flex min-h-full min-w-full items-center justify-center p-3 sm:p-6"
-              style={{
-                width: `${view.zoom * 100}%`,
-                height: `${view.zoom * 100}%`,
-              }}
+          <TransformWrapper
+            key={current.id}
+            ref={transformRef}
+            minScale={1}
+            maxScale={MAX_ZOOM}
+            centerOnInit
+            centerZoomedOut
+            doubleClick={{ mode: "toggle" }}
+            // Additive zoom: effective step = step × |wheel deltaY| (`smooth`
+            // default). 0.005 ≈ +0.6 per mouse notch, proportional on trackpads.
+            wheel={{ step: 0.005 }}
+            onTransform={(_ref, state) => setZoomPercent(Math.round(state.scale * 100))}
+          >
+            <TransformComponent
+              wrapperStyle={{ width: "100%", height: "100%" }}
+              contentStyle={{ width: "100%", height: "100%" }}
+              contentClass="flex items-center justify-center p-3 sm:p-6"
             >
               <img
-                key={current.id}
                 src={current.src}
                 alt={current.alt}
                 draggable={false}
                 className={cn(
                   "max-h-full max-w-full select-none object-contain shadow-2xl",
-                  view.zoom > MIN_ZOOM ? "cursor-grab" : "cursor-zoom-in",
+                  isZoomedIn ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in",
                 )}
-                onDoubleClick={() => updateZoom(view.zoom === MIN_ZOOM ? 2 : MIN_ZOOM)}
               />
-            </div>
-          </div>
+            </TransformComponent>
+          </TransformWrapper>
 
           {hasMultiple && (
             <>
@@ -247,10 +253,10 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
             </>
           )}
 
-          {view.zoom === MIN_ZOOM && (
+          {zoomPercent === 100 && (
             <div className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-[10px] text-white/45 backdrop-blur sm:flex">
               <Maximize2 className="size-3" />
-              Double-click to zoom
+              Scroll or double-click to zoom · drag to pan
             </div>
           )}
         </div>
@@ -264,10 +270,10 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
                   type="button"
                   onClick={() => goTo(imageIndex)}
                   aria-label={`View image ${imageIndex + 1}`}
-                  aria-current={imageIndex === view.index ? "true" : undefined}
+                  aria-current={imageIndex === index ? "true" : undefined}
                   className={cn(
                     "relative size-12 shrink-0 overflow-hidden rounded-md border bg-white/[0.04] p-0.5 transition-all sm:h-14 sm:w-[4.5rem]",
-                    imageIndex === view.index
+                    imageIndex === index
                       ? "border-blue-400 ring-1 ring-blue-400/35"
                       : "border-white/10 opacity-55 hover:border-white/25 hover:opacity-90",
                   )}

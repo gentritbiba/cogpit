@@ -52,6 +52,10 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
 
   const [canScrollUp, setCanScrollUp] = useState(false)
   const [canScrollDown, setCanScrollDown] = useState(false)
+  // sessionChangeKey whose initial scroll placement has completed. Consumers
+  // gate scroll-up paging on this so a freshly opened session (scrollTop still
+  // 0 while content renders) can't spuriously trigger older-history loads.
+  const [placedKey, setPlacedKey] = useState<number | null>(null)
 
   const smoothScrollToEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -126,7 +130,10 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
       chatScrollOnNextRef.current = false
     }
     runAcrossFrames(doScroll)
-    const timer = setTimeout(doScroll, 150)
+    const timer = setTimeout(() => {
+      doScroll()
+      setPlacedKey(sessionChangeKey)
+    }, 150)
     return () => clearTimeout(timer)
   }, [sessionChangeKey])
 
@@ -198,14 +205,17 @@ export function useChatScroll({ session, isLive, pendingMessages, consumePending
     // eslint-disable-next-line react-hooks/exhaustive-deps -- session is only used for null check; derived counts cover reactivity
   }, [turnCount, liveLastTurnToolCount, liveLastTurnContentLen, partialContentLen, isLive, updateScrollIndicators])
 
+  const initialScrollDone = placedKey === sessionChangeKey
+
   return useMemo(() => ({
     chatScrollRef,
     scrollEndRef,
     canScrollUp,
     canScrollDown,
+    initialScrollDone,
     handleScroll,
     scrollToBottomInstant,
     requestScrollToTop,
     resetTurnCount,
-  }), [canScrollUp, canScrollDown, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
+  }), [canScrollUp, canScrollDown, initialScrollDone, handleScroll, scrollToBottomInstant, requestScrollToTop, resetTurnCount])
 }

@@ -23,19 +23,23 @@ export interface TrimmedTail {
 /**
  * Drop oldest lines until the tail fits `budget` bytes (newline included per
  * line). Always keeps the newest line even when it alone exceeds the budget,
- * and advances `byteOffset` by the exact bytes dropped so `?before=` paging
- * continues seamlessly from the trimmed boundary.
+ * and never trims below `minLines` kept lines — the floor wins over the byte
+ * budget so one fat line cannot reduce a page to a dribble. Advances
+ * `byteOffset` by the exact bytes dropped so `?before=` paging continues
+ * seamlessly from the trimmed boundary.
  */
 export function trimTailToByteBudget(
   lines: string[],
   byteOffset: number,
   budget: number,
+  minLines = 1,
 ): TrimmedTail {
+  const floor = Math.max(1, minLines)
   let firstKept = lines.length
   let keptBytes = 0
   for (let i = lines.length - 1; i >= 0; i--) {
     const lineBytes = Buffer.byteLength(lines[i], "utf8") + 1
-    if (keptBytes + lineBytes > budget && firstKept < lines.length) break
+    if (keptBytes + lineBytes > budget && lines.length - firstKept >= floor) break
     firstKept = i
     keptBytes += lineBytes
   }

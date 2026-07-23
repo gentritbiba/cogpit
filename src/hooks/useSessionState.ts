@@ -1,4 +1,5 @@
 import { useReducer } from "react"
+import { prependTurns } from "@/lib/timelinePaging"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { MobileTab } from "@/components/MobileNav"
@@ -183,15 +184,17 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "PREPEND_TURNS": {
       if (!state.session) return state
-      // Deduplicate: older turns may overlap with existing turns from tail load
-      const existingIds = new Set(state.session.turns.map((t) => t.id))
-      const unique = action.turns.filter((t) => !existingIds.has(t.id))
-      if (unique.length === 0) return state
+      const turns = prependTurns(
+        state.session.turns,
+        action.turns,
+        state.sessionSource?.agentKind,
+      )
+      if (turns === state.session.turns) return state
       return {
         ...state,
         session: {
           ...state.session,
-          turns: [...unique, ...state.session.turns],
+          turns,
         },
       }
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ImageViewer, type ImageViewerItem } from "../ImageViewer"
 
 const images: ImageViewerItem[] = [
@@ -27,14 +27,16 @@ describe("ImageViewer", () => {
     expect(screen.getByRole("img", { name: "First image" })).toBeInTheDocument()
   })
 
-  it("supports zoom controls and resets zoom when changing images", () => {
+  it("supports zoom controls and resets zoom when changing images", async () => {
     render(<ImageViewer images={images} initialIndex={0} onClose={vi.fn()} />)
 
     const resetZoom = screen.getByRole("button", { name: "Reset zoom" })
     expect(resetZoom).toHaveTextContent("100%")
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled()
 
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
-    expect(resetZoom).toHaveTextContent("125%")
+    await waitFor(() => expect(resetZoom).not.toHaveTextContent("100%"))
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeEnabled()
 
     fireEvent.click(screen.getByRole("button", { name: "Next image" }))
     expect(resetZoom).toHaveTextContent("100%")
@@ -49,11 +51,34 @@ describe("ImageViewer", () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it("uses a bounded, internally scrollable canvas", () => {
+  it("renders the image inside a bounded pan/zoom viewport", () => {
     render(<ImageViewer images={images.slice(0, 1)} initialIndex={0} onClose={vi.fn()} />)
 
     const dialog = screen.getByRole("dialog", { name: "Image viewer" })
     expect(dialog).toHaveClass("overflow-hidden", "sm:max-w-none")
-    expect(dialog.querySelector(".overscroll-contain")).toBeTruthy()
+
+    const viewport = dialog.querySelector(".react-transform-wrapper")
+    expect(viewport).toBeTruthy()
+    expect(viewport?.querySelector("img")).toBeTruthy()
+  })
+
+  it("navigates with a touch swipe when not zoomed in", () => {
+    render(<ImageViewer images={images} initialIndex={0} onClose={vi.fn()} />)
+
+    const image = screen.getByRole("img", { name: "First image" })
+    fireEvent.pointerDown(image, {
+      pointerType: "touch",
+      isPrimary: true,
+      clientX: 240,
+      clientY: 100,
+    })
+    fireEvent.pointerUp(image, {
+      pointerType: "touch",
+      isPrimary: true,
+      clientX: 120,
+      clientY: 108,
+    })
+
+    expect(screen.getByRole("img", { name: "Second image" })).toBeInTheDocument()
   })
 })

@@ -95,7 +95,7 @@ async function fetchSessionsPage(
 /**
  * Open a session bottom-first: last ~30 turns via the tail endpoint, parsed in
  * the worker and cached in `sessionCache`. Older turns load on scroll-up via
- * `useChunkedSession`, which reads the same cache entry.
+ * `useSessionPaging`, which reads the same cache entry.
  */
 async function loadParsedSession(
   dirName: string,

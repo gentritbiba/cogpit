@@ -31,12 +31,14 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   /** Skill metadata map for Skill tool rendering enrichment. */
   skillMetadata?: Map<string, SkillMeta>
 }) {
-  const [manualOpen, setManualOpen] = useState(false)
+  // null follows the automatic live-call behavior; once the user toggles the
+  // group, their explicit choice takes precedence.
+  const [openOverride, setOpenOverride] = useState<boolean | null>(null)
   const targetRef = useRef<HTMLDivElement | null>(null)
 
   const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
   const hasUserQuestion = toolCalls.some((tc) => tc.name === "AskUserQuestion")
-  const isOpen = expandAll || manualOpen || hasInProgressCall || hasUserQuestion
+  const isOpen = expandAll || hasUserQuestion || (openOverride ?? hasInProgressCall)
 
   const lastScrolledToolCallRef = useRef<string | null>(null)
   const scrollRafRef = useRef<number | null>(null)
@@ -48,7 +50,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     if (activeToolCallId === lastScrolledToolCallRef.current) return
     if (!toolCalls.some((tc) => tc.id === activeToolCallId)) return
     lastScrolledToolCallRef.current = activeToolCallId
-    setManualOpen(true)
+    setOpenOverride(true)
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = requestAnimationFrame(() => {
         scrollRafRef.current = null
@@ -104,7 +106,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         {!expandAll && !hasUserQuestion && (
           <button
             type="button"
-            onClick={() => setManualOpen(false)}
+            onClick={() => setOpenOverride(false)}
             className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
             <ChevronDown className="size-3" />
@@ -144,7 +146,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   return (
     <button
       type="button"
-      onClick={() => setManualOpen(true)}
+      onClick={() => setOpenOverride(true)}
       className="flex items-center gap-2 w-full py-1 text-left transition-colors hover:opacity-80"
     >
       <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />

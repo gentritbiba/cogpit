@@ -347,4 +347,48 @@ describe("useChatScroll", () => {
 
     expect(mockEl.scrollTop).toBe(1200)
   })
+
+  it("reports initialScrollDone only after the session-change placement settles", () => {
+    vi.useFakeTimers()
+    try {
+      const { result, rerender } = renderHook(
+        (props) => useChatScroll(props),
+        { initialProps: { ...defaultOpts, session: makeSession(2) } },
+      )
+      // No placement has happened for the initial key.
+      expect(result.current.initialScrollDone).toBe(false)
+
+      rerender({ ...defaultOpts, session: makeSession(2), sessionChangeKey: 1 })
+      expect(result.current.initialScrollDone).toBe(false)
+
+      act(() => { vi.advanceTimersByTime(150) })
+      expect(result.current.initialScrollDone).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("resets initialScrollDone immediately when another session loads", () => {
+    vi.useFakeTimers()
+    try {
+      const { result, rerender } = renderHook(
+        (props) => useChatScroll(props),
+        { initialProps: { ...defaultOpts, session: makeSession(2), sessionChangeKey: 1 } },
+      )
+      act(() => { vi.advanceTimersByTime(150) })
+      expect(result.current.initialScrollDone).toBe(false)
+
+      rerender({ ...defaultOpts, session: makeSession(2), sessionChangeKey: 2 })
+      expect(result.current.initialScrollDone).toBe(false)
+
+      act(() => { vi.advanceTimersByTime(150) })
+      expect(result.current.initialScrollDone).toBe(true)
+
+      // A new load invalidates the gate at render time, before any effects.
+      rerender({ ...defaultOpts, session: makeSession(3), sessionChangeKey: 3 })
+      expect(result.current.initialScrollDone).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

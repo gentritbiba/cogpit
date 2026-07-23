@@ -72,6 +72,7 @@ function DesktopSessionContent({
               searchInputRef={sessionView.searchInputRef}
               hasTodos={Boolean(sessionView.todoProgress) && sessionView.todosExpanded}
               hasMore={sessionView.hasMoreTurns}
+              isLoadingOlder={sessionView.isLoadingOlderTurns}
               onLoadMore={sessionView.onLoadMoreTurns}
             />
             <SessionInputFooter floating>

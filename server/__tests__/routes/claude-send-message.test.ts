@@ -18,6 +18,7 @@ const {
   mockSdkSessions,
   mockFindJsonlPath,
   mockGetSessionMeta,
+  mockSendSDKMessage,
   mockResumeSDKSession,
   mockGetAgentKind,
   mockSpawn,
@@ -28,6 +29,7 @@ const {
   mockSdkSessions: new Map<string, unknown>(),
   mockFindJsonlPath: vi.fn(),
   mockGetSessionMeta: vi.fn(),
+  mockSendSDKMessage: vi.fn(),
   mockResumeSDKSession: vi.fn(),
   mockGetAgentKind: vi.fn(() => "claude"),
   mockSpawn: vi.fn(),
@@ -67,7 +69,7 @@ vi.mock("../../helpers", () => ({
 
 vi.mock("../../sdk-session", () => ({
   sdkSessions: mockSdkSessions,
-  sendSDKMessage: vi.fn(),
+  sendSDKMessage: mockSendSDKMessage,
   resumeSDKSession: mockResumeSDKSession,
   attachSubagentWatcher: vi.fn(),
 }))
@@ -171,6 +173,7 @@ beforeEach(() => {
   mockSdkSessions.clear()
   mockGetAgentKind.mockReturnValue("claude")
   mockSpawn.mockReset()
+  mockSendSDKMessage.mockReturnValue(null)
   mockCodexAppServer.start.mockResolvedValue({})
   mockCodexAppServer.getActiveTurnId.mockReturnValue(undefined)
   mockCodexAppServer.resumeThread.mockResolvedValue({
@@ -187,6 +190,35 @@ beforeEach(() => {
 })
 
 describe("/api/send-message SDK resume cwd", () => {
+  it("reuses an active SDK query after a turn result while workflows continue", async () => {
+    const liveState = {
+      sessionId: "sess-1",
+      running: false,
+      activeQuery: {},
+      messageStream: {},
+    }
+    mockSdkSessions.set("sess-1", liveState)
+    mockSendSDKMessage.mockReturnValue(liveState)
+
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes(
+      "POST",
+      JSON.stringify({ sessionId: "sess-1", message: "new direction", ultracode: true }),
+    )
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockSendSDKMessage).toHaveBeenCalledWith(
+      "sess-1",
+      "new direction",
+      undefined,
+      expect.objectContaining({ ultracode: true }),
+    )
+    expect(mockResumeSDKSession).not.toHaveBeenCalled()
+    expect(res._getData()).toEqual({ success: true })
+  })
+
   it("derives cwd from session metadata when the request omits cwd", async () => {
     mockFindJsonlPath.mockResolvedValue("/Users/me/.claude/projects/-Users-me-proj/sess-1.jsonl")
     mockGetSessionMeta.mockResolvedValue({ cwd: "/Users/me/proj" })

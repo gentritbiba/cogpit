@@ -50,6 +50,28 @@ describe("trimTailToByteBudget", () => {
     expect(result.lines).toEqual([])
     expect(result.byteOffset).toBe(42)
   })
+
+  it("keeps at least minLines lines even when over the byte budget", () => {
+    const lines = Array.from({ length: 50 }, () => lineOfBytes(1024))
+    const result = trimTailToByteBudget(lines, 0, 2048, 30)
+    expect(result.lines).toEqual(lines.slice(20))
+    expect(result.byteOffset).toBe(20 * 1025)
+  })
+
+  it("lets the budget keep more lines than the floor", () => {
+    const lines = Array.from({ length: 50 }, () => lineOfBytes(1024))
+    // 40KB fits 39 lines of 1025 bytes — more than the 30-line floor
+    const result = trimTailToByteBudget(lines, 0, 40 * 1024, 30)
+    expect(result.lines).toEqual(lines.slice(11))
+    expect(result.byteOffset).toBe(11 * 1025)
+  })
+
+  it("keeps everything when the floor exceeds the line count", () => {
+    const lines = [lineOfBytes(100), lineOfBytes(900_000)]
+    const result = trimTailToByteBudget(lines, 7, 1024, 30)
+    expect(result.lines).toEqual(lines)
+    expect(result.byteOffset).toBe(7)
+  })
 })
 
 describe("parseTailByteBudget", () => {

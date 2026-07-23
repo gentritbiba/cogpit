@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // handle whose lifecycle we can drive manually.
 
 interface CapturedCall {
+  prompt: unknown
   options: {
     model?: string
     effort?: string
@@ -39,6 +40,7 @@ let applyFlagSettingsSpy: ReturnType<typeof vi.fn> | null = null
 let setModelSpy: ReturnType<typeof vi.fn> | null = null
 let setPermissionModeSpy: ReturnType<typeof vi.fn> | null = null
 let setMcpServersSpy: ReturnType<typeof vi.fn> | null = null
+let streamInputSpy: ReturnType<typeof vi.fn> | null = null
 
 // When set, the next query's generator yields these messages instead of the
 // default one-assistant-one-result exchange.
@@ -50,6 +52,8 @@ let scriptedStderr: string | null = null
 let scriptedError: Error | null = null
 let holdQueryOpen = false
 let releaseHeldQuery: (() => void) | null = null
+let holdQueryAfterMessages = false
+let releaseQueryAfterMessages: (() => void) | null = null
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => {
   return {
@@ -58,7 +62,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       const completed = new Promise<void>((r) => {
         resolveCompleted = r
       })
-      captured.push({ options: args.options, completed })
+      captured.push({ prompt: args.prompt, options: args.options, completed })
 
       // Build an async generator that yields one assistant msg, one result,
       // then closes. This models a normal one-turn exchange.
@@ -66,6 +70,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       setModelSpy = vi.fn().mockResolvedValue(undefined)
       setPermissionModeSpy = vi.fn().mockResolvedValue(undefined)
       setMcpServersSpy = vi.fn().mockResolvedValue({ added: [], removed: [], errors: {} })
+      streamInputSpy = vi.fn().mockResolvedValue(undefined)
 
       async function* gen() {
         if (holdQueryOpen) {
@@ -82,6 +87,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           { type: "result", is_error: false },
         ]
         for (const m of msgs) yield m
+        if (holdQueryAfterMessages) {
+          await new Promise<void>((resolve) => { releaseQueryAfterMessages = resolve })
+        }
         resolveCompleted()
       }
       const iter = gen() as AsyncGenerator<unknown> & {
@@ -98,7 +106,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       }
       iter.applyFlagSettings = applyFlagSettingsSpy
       iter.setModel = setModelSpy
-      iter.streamInput = vi.fn().mockResolvedValue(undefined)
+      iter.streamInput = streamInputSpy
       iter.interrupt = vi.fn().mockResolvedValue(undefined)
       iter.setPermissionMode = setPermissionModeSpy
       iter.setMcpServers = setMcpServersSpy
@@ -147,11 +155,14 @@ beforeEach(() => {
   setModelSpy = null
   setPermissionModeSpy = null
   setMcpServersSpy = null
+  streamInputSpy = null
   scriptedMessages = null
   scriptedStderr = null
   scriptedError = null
   holdQueryOpen = false
   releaseHeldQuery = null
+  holdQueryAfterMessages = false
+  releaseQueryAfterMessages = null
   vi.clearAllMocks()
 })
 
@@ -366,6 +377,47 @@ describe("sdk-session subagent watcher lifecycle", () => {
 })
 
 describe("sdk-session effort propagation", () => {
+  it("queues follow-ups on one persistent input stream instead of starting or closing another query", async () => {
+    holdQueryAfterMessages = true
+    const { createSDKSession, sendSDKMessage } = await loadModule()
+    const state = createSDKSession({
+      sessionId: "persistent-input",
+      cwd: "/tmp",
+      message: "first",
+      ultracode: true,
+    })
+    await waitUntil(() => captured.length === 1)
+    await waitUntil(() => !state.running)
+
+    // A turn result was emitted, but the SDK query remains alive because a
+    // background workflow can continue beyond that boundary.
+    expect(state.activeQuery).not.toBeNull()
+
+    const input = captured[0].prompt as AsyncIterable<Record<string, unknown>>
+    const messages = input[Symbol.asyncIterator]()
+    const first = await messages.next()
+
+    expect(first.done).toBe(false)
+    expect(first.value).toMatchObject({
+      type: "user",
+      message: { content: [{ type: "text", text: "first" }] },
+    })
+
+    sendSDKMessage("persistent-input", "follow-up")
+    const second = await messages.next()
+
+    expect(second.done).toBe(false)
+    expect(second.value).toMatchObject({
+      type: "user",
+      message: { content: [{ type: "text", text: "follow-up" }] },
+    })
+    expect(captured).toHaveLength(1)
+    expect(streamInputSpy).not.toHaveBeenCalled()
+
+    state.messageStream?.close()
+    releaseQueryAfterMessages?.()
+  })
+
   it("createSDKSession passes the initial effort to the first query", async () => {
     const { createSDKSession } = await loadModule()
     createSDKSession({

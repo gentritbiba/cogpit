@@ -28,6 +28,15 @@ const HEADER_BYTES = 4096
 /** Upper bound for growing the header read when the first line is oversized. */
 const MAX_HEADER_BYTES = 1024 * 1024
 
+/** Initial byte window per requested turn for `?tail=` and `?before=` pages. */
+const PAGE_WINDOW_BYTES_PER_TURN = 65536
+/** Every page guarantees at least this many complete lines when available. */
+const MIN_PAGE_LINES = 30
+/** Hard cap when extending a `?tail=` window to satisfy the min-line floor. */
+const MAX_TAIL_WINDOW_BYTES = 2 * 1024 * 1024
+/** Hard cap when extending a `?before=` window to satisfy the min-line floor. */
+const MAX_BEFORE_WINDOW_BYTES = 4 * 1024 * 1024
+
 interface TailResult {
   lines: string[]
   byteOffset: number
@@ -37,7 +46,6 @@ interface TailResult {
 interface RangeResult {
   lines: string[]
   byteOffset: number
-  hasMore: boolean
 }
 
 interface HeaderResult {
@@ -45,70 +53,101 @@ interface HeaderResult {
   bytesRead: number
 }
 
+const NEWLINE = 0x0a
+
+/**
+ * Extracts complete JSONL lines from a byte window starting at `readStart`.
+ * When the window begins mid-file the first (potentially partial) line is
+ * discarded and `byteOffset` advances to the next line boundary — computed on
+ * the raw bytes so multibyte UTF-8 content cannot skew offsets. When
+ * `truncatedEnd` is set (window ends mid-file without a trailing newline) the
+ * final partial segment is discarded as well, so callers never emit a line
+ * fragment that overlaps content at or after the window end.
+ */
+function extractCompleteLines(buf: Buffer, readStart: number, truncatedEnd: boolean): RangeResult {
+  let contentStart = 0
+  if (readStart > 0) {
+    const firstNewline = buf.indexOf(NEWLINE)
+    if (firstNewline === -1) return { lines: [], byteOffset: readStart }
+    contentStart = firstNewline + 1
+  }
+  let content = buf.subarray(contentStart)
+  if (truncatedEnd) {
+    const lastNewline = content.lastIndexOf(NEWLINE)
+    if (lastNewline === -1) return { lines: [], byteOffset: readStart }
+    content = content.subarray(0, lastNewline + 1)
+  }
+  const lines = content.toString("utf-8").split("\n").filter((l) => l.trim().length > 0)
+  if (lines.length === 0) return { lines: [], byteOffset: readStart }
+  return { lines, byteOffset: readStart + contentStart }
+}
+
 /**
  * Reads the last `byteCount` bytes of a file and returns complete JSONL lines.
- * When reading from the middle of the file, the first partial line is discarded.
+ * When reading from the middle of the file, the first partial line is
+ * discarded. If the window yields fewer than `minLines` complete lines it is
+ * extended backward (doubling) until satisfied, the start of the file, or
+ * `MAX_TAIL_WINDOW_BYTES` — so one fat line cannot reduce the tail to a
+ * near-empty page.
  */
-async function readTail(filePath: string, byteCount: number): Promise<TailResult> {
+async function readTail(filePath: string, byteCount: number, minLines = 0): Promise<TailResult> {
   const fh = await open(filePath, "r")
   try {
     const fileStat = await fh.stat()
     const totalSize = fileStat.size
 
-    const readStart = Math.max(0, totalSize - byteCount)
-    const readLength = totalSize - readStart
-    const buf = Buffer.allocUnsafe(readLength)
-    const { bytesRead } = await fh.read(buf, 0, readLength, readStart)
-    const text = buf.subarray(0, bytesRead).toString("utf-8")
+    let window = Math.min(Math.max(byteCount, 1), totalSize)
+    for (;;) {
+      const readStart = totalSize - window
+      const buf = Buffer.allocUnsafe(window)
+      const { bytesRead } = await fh.read(buf, 0, window, readStart)
+      const { lines, byteOffset } = extractCompleteLines(buf.subarray(0, bytesRead), readStart, false)
 
-    let lines = text.split("\n").filter((l) => l.trim().length > 0)
-
-    // Discard potentially partial first line when reading from the middle
-    // and compute the correct byte offset of the first complete line.
-    let adjustedOffset = readStart
-    if (readStart > 0 && lines.length > 0) {
-      lines = lines.slice(1)
-      const firstNewline = text.indexOf("\n")
-      if (firstNewline >= 0) {
-        adjustedOffset = readStart + firstNewline + 1
+      const canGrow = readStart > 0 && window < MAX_TAIL_WINDOW_BYTES
+      if (lines.length >= minLines || !canGrow) {
+        return { lines, byteOffset, totalSize }
       }
+      window = Math.min(window * 2, MAX_TAIL_WINDOW_BYTES, totalSize)
     }
-
-    return { lines, byteOffset: adjustedOffset, totalSize }
   } finally {
     await fh.close()
   }
 }
 
 /**
- * Reads JSONL lines between `startOffset` and `endOffset` (exclusive).
- * Returns the lines plus whether there is more content before `startOffset`.
+ * Reads complete JSONL lines from a byte window ending at `endOffset`
+ * (exclusive). Starts with `initialWindow` bytes and extends backward
+ * (doubling) until the window yields at least `minLines` complete lines, the
+ * start of the file, or `MAX_BEFORE_WINDOW_BYTES`. The returned `byteOffset`
+ * is the exact byte position of the first returned line, so paging with
+ * `?before=byteOffset` reconstructs the file with no gaps or duplicates.
  */
-async function readRange(filePath: string, startOffset: number, endOffset: number): Promise<RangeResult> {
+async function readRangeBefore(
+  filePath: string,
+  endOffset: number,
+  initialWindow: number,
+  minLines: number,
+): Promise<RangeResult> {
   const fh = await open(filePath, "r")
   try {
     const fileStat = await fh.stat()
     const totalSize = fileStat.size
+    const end = Math.min(Math.max(endOffset, 0), totalSize)
+    if (end <= 0) return { lines: [], byteOffset: 0 }
 
-    const readStart = Math.max(0, startOffset)
-    const readEnd = Math.min(endOffset, totalSize)
-    const readLength = readEnd - readStart
-    if (readLength <= 0) {
-      return { lines: [], byteOffset: readStart, hasMore: readStart > 0 }
+    let window = Math.min(Math.max(initialWindow, 1), end)
+    for (;;) {
+      const readStart = end - window
+      const buf = Buffer.allocUnsafe(window)
+      const { bytesRead } = await fh.read(buf, 0, window, readStart)
+      const view = buf.subarray(0, bytesRead)
+      const truncatedEnd = end < totalSize && view[view.length - 1] !== NEWLINE
+      const result = extractCompleteLines(view, readStart, truncatedEnd)
+
+      const canGrow = readStart > 0 && window < MAX_BEFORE_WINDOW_BYTES
+      if (result.lines.length >= minLines || !canGrow) return result
+      window = Math.min(window * 2, MAX_BEFORE_WINDOW_BYTES, end)
     }
-
-    const buf = Buffer.allocUnsafe(readLength)
-    const { bytesRead } = await fh.read(buf, 0, readLength, readStart)
-    const text = buf.subarray(0, bytesRead).toString("utf-8")
-
-    let lines = text.split("\n").filter((l) => l.trim().length > 0)
-
-    // Discard potentially partial first line when reading from the middle
-    if (readStart > 0 && lines.length > 0) {
-      lines = lines.slice(1)
-    }
-
-    return { lines, byteOffset: readStart, hasMore: readStart > 0 }
   } finally {
     await fh.close()
   }
@@ -457,17 +496,19 @@ export function registerProjectRoutes(use: UseFn) {
       try {
         if (tailParam !== null) {
           // ?tail=N — return last N turns worth of lines plus header lines,
-          // trimmed to a byte budget so big sessions stay cheap over tunnels
+          // trimmed to a byte budget so big sessions stay cheap over tunnels.
+          // A min-line floor guarantees real pages even around fat lines.
           const requestedTurns = Math.max(1, Math.min(parseInt(tailParam) || 30, 200))
-          const bytesToRead = requestedTurns * 65536
+          const minLines = Math.max(requestedTurns, MIN_PAGE_LINES)
+          const bytesToRead = requestedTurns * PAGE_WINDOW_BYTES_PER_TURN
           const byteBudget = parseTailByteBudget(url.searchParams.get("maxBytes"))
 
           const [header, tail] = await Promise.all([
             readSessionHeader(filePath),
-            readTail(filePath, bytesToRead),
+            readTail(filePath, bytesToRead, minLines),
           ])
 
-          const trimmed = trimTailToByteBudget(tail.lines, tail.byteOffset, byteBudget)
+          const trimmed = trimTailToByteBudget(tail.lines, tail.byteOffset, byteBudget, minLines)
           const hasMore = trimmed.byteOffset > header.bytesRead
 
           res.setHeader("Content-Type", "application/json")
@@ -479,15 +520,16 @@ export function registerProjectRoutes(use: UseFn) {
             hasMore,
           }))
         } else if (beforeParam !== null) {
-          // ?before=offset&count=N — return lines before the given byte offset
+          // ?before=offset&count=N — return lines before the given byte offset,
+          // extending the read window until the page has enough complete lines
           const endOffset = Math.max(0, parseInt(beforeParam) || 0)
           const requestedTurns = Math.max(1, Math.min(parseInt(countParam || "") || 30, 200))
-          const bytesToRead = requestedTurns * 65536
-          const startOffset = Math.max(0, endOffset - bytesToRead)
+          const minLines = Math.max(requestedTurns, MIN_PAGE_LINES)
+          const initialWindow = requestedTurns * PAGE_WINDOW_BYTES_PER_TURN
 
           const [header, range] = await Promise.all([
             readSessionHeader(filePath),
-            readRange(filePath, startOffset, endOffset),
+            readRangeBefore(filePath, endOffset, initialWindow, minLines),
           ])
 
           res.setHeader("Content-Type", "application/json")

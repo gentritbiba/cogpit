@@ -14,6 +14,20 @@ if (typeof globalThis.crypto === "undefined") {
   })
 }
 
+// jsdom lacks ResizeObserver (needed by react-zoom-pan-pinch)
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+
+// jsdom lacks Element.getAnimations (reached by @base-ui ScrollArea once ResizeObserver exists)
+if (typeof Element !== "undefined" && typeof Element.prototype.getAnimations === "undefined") {
+  Element.prototype.getAnimations = () => []
+}
+
 // Mock localStorage for auth tests
 const localStorageMock = (() => {
   let store: Record<string, string> = {}

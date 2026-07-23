@@ -93,8 +93,13 @@ export interface SDKSessionState {
   sessionAllowedTools: Set<string>
   running: boolean
   abort: AbortController | null
-  /** The live SDK Query handle — kept alive so we can call streamInput() mid-turn */
+  /** The live SDK Query handle. It stays alive across turn results while its input queue is open. */
   activeQuery: Query | null
+  /** Persistent streaming-input queue used to add turns without resuming a competing query. */
+  messageStream: {
+    enqueue: (message: SDKUserMessage) => boolean
+    close: () => void
+  } | null
   onResult: ((msg: Record<string, unknown>) => void) | null
   jsonlPath: string | null
   pendingTaskCalls: Map<string, string>
@@ -126,7 +131,7 @@ export const sdkSessions = new Map<string, SDKSessionState>()
 export function attachSubagentWatcher(state: SDKSessionState): void {
   // A path lookup can finish after a short query has already completed. Never
   // attach a permanent poller to an idle session in that race.
-  if (state.subagentWatcher || !state.jsonlPath || !state.running) return
+  if (state.subagentWatcher || !state.jsonlPath || !state.activeQuery) return
   state.subagentWatcher = watchSubagents(
     state.jsonlPath,
     state.sessionId,
@@ -288,8 +293,10 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "result") {
+    // A result is a turn boundary, not necessarily the end of the SDK query.
+    // Background agents/workflows can outlive it, and the persistent input
+    // stream remains available for queued follow-up turns.
     state.running = false
-    state.activeQuery = null
     streamBus.clear(state.sessionId)
     state.onResult?.(msg as unknown as Record<string, unknown>)
     state.onResult = null
@@ -353,9 +360,51 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/** Wrap a single SDKUserMessage into an AsyncIterable the SDK accepts as a prompt. */
-async function* singleMessageIterable(msg: SDKUserMessage): AsyncIterable<SDKUserMessage> {
-  yield msg
+/**
+ * Pushable input stream for a long-lived SDK query.
+ *
+ * Passing this stream to query() is the SDK's supported multi-turn mode. New
+ * messages are queued by the CLI and processed sequentially, so sending a
+ * follow-up does not interrupt foreground work or replace background workflows
+ * with a second resumed process.
+ */
+class SDKMessageStream implements AsyncIterableIterator<SDKUserMessage> {
+  private queued: SDKUserMessage[] = []
+  private waiting: Array<(result: IteratorResult<SDKUserMessage>) => void> = []
+  private closed = false
+
+  enqueue(message: SDKUserMessage): boolean {
+    if (this.closed) return false
+    const resolve = this.waiting.shift()
+    if (resolve) resolve({ value: message, done: false })
+    else this.queued.push(message)
+    return true
+  }
+
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    this.queued.length = 0
+    for (const resolve of this.waiting.splice(0)) {
+      resolve({ value: undefined, done: true })
+    }
+  }
+
+  next(): Promise<IteratorResult<SDKUserMessage>> {
+    const message = this.queued.shift()
+    if (message) return Promise.resolve({ value: message, done: false })
+    if (this.closed) return Promise.resolve({ value: undefined, done: true })
+    return new Promise((resolve) => this.waiting.push(resolve))
+  }
+
+  return(): Promise<IteratorResult<SDKUserMessage>> {
+    this.close()
+    return Promise.resolve({ value: undefined, done: true })
+  }
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<SDKUserMessage> {
+    return this
+  }
 }
 
 // ── Run a query and iterate in background ────────────────────────────
@@ -370,20 +419,20 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
   state.abort = new AbortController()
   state.running = true
   state.stderr = ""
-  // Idle sessions keep their resolved JSONL path. Reattach only for the active
-  // query; the finally block below always releases the watcher again.
-  attachSubagentWatcher(state)
 
   const queryOpts = buildQueryOptions(state, opts)
+  const messageStream = new SDKMessageStream()
+  messageStream.enqueue(buildUserMessage(prompt, opts.images))
+  state.messageStream = messageStream
 
-  // Use an AsyncIterable<SDKUserMessage> prompt when images are present
-  // so multimodal content reaches the API instead of being dropped.
-  const queryPrompt = opts.images?.length
-    ? singleMessageIterable(buildUserMessage(prompt, opts.images))
-    : prompt
-
-  const q = query({ prompt: queryPrompt, options: queryOpts })
+  // Streaming input keeps one SDK/CLI process alive across turns. This is
+  // essential for Ultracode because workflows can continue after the parent
+  // turn's result event has been emitted.
+  const q = query({ prompt: messageStream, options: queryOpts })
   state.activeQuery = q
+  // Idle sessions keep their resolved JSONL path. Reattach only for the live
+  // query; the finally block below releases the watcher when the process ends.
+  attachSubagentWatcher(state)
 
   ;(async () => {
     try {
@@ -401,11 +450,13 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         state.onResult = null
       }
     } finally {
+      messageStream.close()
       state.subagentWatcher?.close()
       state.subagentWatcher = null
       state.running = false
-      state.activeQuery = null
-      state.abort = null
+      if (state.messageStream === messageStream) state.messageStream = null
+      if (state.activeQuery === q) state.activeQuery = null
+      if (state.abort === queryOpts.abortController) state.abort = null
       streamBus.clear(state.sessionId)
       rejectAllPending(state, "Session ended")
     }
@@ -484,6 +535,7 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     running: false,
     abort: null,
     activeQuery: null,
+    messageStream: null,
     onResult: null,
     jsonlPath: null,
     pendingTaskCalls: new Map(),
@@ -591,7 +643,7 @@ async function pushSessionUpdates(
   changes: AppliedSessionUpdates,
 ): Promise<string[]> {
   const queryHandle = state.activeQuery
-  if (!state.running || !queryHandle) return []
+  if (!queryHandle) return []
 
   const applied: string[] = []
   if (changes.modelChanged) {
@@ -695,20 +747,20 @@ export function sendSDKMessage(
   const changes = applySessionUpdates(state, updates)
   autoResolvePendingForMode(state, changes)
 
-  if (state.running && state.activeQuery) {
+  if (state.activeQuery && state.messageStream) {
     const q = state.activeQuery
-    // Fire the message plus any setting updates as three independent control
-    // requests. The SDK delivers them over its own queue; we don't await
-    // ordering guarantees here, so in practice the model/effort change may
-    // apply to the turn this message kicks off *or* the turn after —
+    const input = buildUserMessage(message, images)
+    if (!state.messageStream.enqueue(input)) return null
+    state.running = true
+
+    // Fire any setting updates as independent control requests. The SDK
+    // delivers them over its own queue; we don't await ordering guarantees
+    // here, so in practice a model/effort change may apply to the queued turn
+    // or the turn after —
     // whichever the SDK schedules first. Either outcome is acceptable: the
     // setting is persisted on `state` (above) so any subsequent resume also
-    // sees the new value. All three are best-effort; we swallow failures so
+    // sees the new value. All updates are best-effort; we swallow failures so
     // a single failing control request doesn't break the in-flight turn.
-    const input = singleMessageIterable(buildUserMessage(message, images))
-    q.streamInput(input).catch(() => {
-      // streamInput can fail if the query finished between our check and the call
-    })
     if (changes.modelChanged) {
       q.setModel(state.model).catch(() => {})
     }
@@ -871,6 +923,8 @@ function teardownState(state: SDKSessionState): void {
   rejectAllPending(state, "Session stopped")
   state.subagentWatcher?.close()
   state.subagentWatcher = null
+  state.messageStream?.close()
+  state.messageStream = null
   if (state.activeQuery) {
     state.activeQuery.close()
     state.activeQuery = null

@@ -3,7 +3,7 @@
  *
  * Fetches the tail of a session file (`?tail=30`), parses it in the worker,
  * and caches the result in `sessionCache`. Older turns load on demand via
- * `useChunkedSession` (`?before=&count=`), which reads the same cache.
+ * `useSessionPaging` (`?before=&count=`), which reads the same cache.
  *
  * Loading the tail instead of the whole file is what makes long sessions open
  * instantly; `watchOffset = totalSize` ensures the live SSE watcher resumes

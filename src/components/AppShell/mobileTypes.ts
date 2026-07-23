@@ -53,6 +53,7 @@ export interface MobileSessionView {
   pendingTurns: ReactNode[]
   todoProgress: ReactNode
   hasMoreTurns: boolean
+  isLoadingOlderTurns: boolean
   onLoadMoreTurns: () => void
   onBackToMain: () => void
   onShowWorkflows: () => void

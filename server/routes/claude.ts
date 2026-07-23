@@ -185,10 +185,12 @@ export function registerClaudeRoutes(use: UseFn) {
         // Check for an existing SDK session first
         const existingSDK = sdkSessions.get(sessionId)
 
-        if (existingSDK && existingSDK.running) {
-          // SDK session is alive — inject the message via streamInput()
-          // and forward the latest model/effort/mcpConfig so both the
-          // running Query and any subsequent restart see fresh values.
+        if (existingSDK && existingSDK.activeQuery && existingSDK.messageStream) {
+          // SDK query is alive — enqueue the message on its persistent input
+          // stream. A turn result can arrive while background workflows are
+          // still running, so `running` alone is not a process-liveness check.
+          // Forward the latest model/effort/mcpConfig so both the live query
+          // and any subsequent restart see fresh values.
           const state = sendSDKMessage(sessionId, message, images, {
             model,
             effort,

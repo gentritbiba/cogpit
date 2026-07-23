@@ -1,27 +1,28 @@
 import { useMemo, memo, type RefObject } from "react"
-import { VirtualizedTimeline, NonVirtualTimeline } from "./timeline/VirtualizedTimeline"
+import { VirtualizedTimeline } from "./timeline/VirtualizedTimeline"
 import { matchesSearch } from "@/lib/timelineHelpers"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { SessionImageGalleryProvider } from "./timeline/SessionImageGallery"
-
-// Threshold: only virtualize when we have enough turns to benefit
-const VIRTUALIZE_THRESHOLD = 15
 
 // ── Main component ───────────────────────────────────────────────────────────
 
 interface ConversationTimelineProps {
   chatScrollRef: RefObject<HTMLDivElement | null>
   hasMore?: boolean
+  isLoadingOlder?: boolean
+  pagingEnabled?: boolean
   onLoadMore?: () => void
 }
 
 export const ConversationTimeline = memo(function ConversationTimeline({
   chatScrollRef,
   hasMore,
+  isLoadingOlder,
+  pagingEnabled,
   onLoadMore,
 }: ConversationTimelineProps) {
-  const { state: { searchQuery } } = useAppContext()
+  const { state: { searchQuery, sessionChangeKey } } = useAppContext()
   const { session } = useSessionContext()
 
   const turns = session?.turns
@@ -36,33 +37,25 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [allTurns, searchQuery]
   )
 
-  const shouldVirtualize = filteredTurns.length >= VIRTUALIZE_THRESHOLD && chatScrollRef?.current != null
-
-  let timeline: React.ReactNode
-  if (filteredTurns.length === 0) {
-    timeline = (
-      <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-        {searchQuery ? "No turns match your search." : "No turns in this session."}
-      </div>
-    )
-  } else if (shouldVirtualize) {
-    timeline = (
-      <VirtualizedTimeline
-        filteredTurns={filteredTurns}
-        scrollContainerRef={chatScrollRef}
-        hasMore={hasMore}
-        onLoadMore={onLoadMore}
-      />
-    )
-  } else {
-    timeline = (
-      <NonVirtualTimeline
-        filteredTurns={filteredTurns}
-        hasMore={hasMore}
-        onLoadMore={onLoadMore}
-      />
-    )
-  }
-
-  return <SessionImageGalleryProvider>{timeline}</SessionImageGalleryProvider>
+  return (
+    <SessionImageGalleryProvider>
+      {filteredTurns.length === 0 ? (
+        <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
+          {searchQuery ? "No turns match your search." : "No turns in this session."}
+        </div>
+      ) : (
+        <VirtualizedTimeline
+          // Remount per session so the height cache and prepend detection
+          // never leak across different transcripts.
+          key={sessionChangeKey}
+          filteredTurns={filteredTurns}
+          scrollContainerRef={chatScrollRef}
+          hasMore={hasMore}
+          isLoadingOlder={isLoadingOlder}
+          pagingEnabled={pagingEnabled}
+          onLoadMore={onLoadMore}
+        />
+      )}
+    </SessionImageGalleryProvider>
+  )
 })

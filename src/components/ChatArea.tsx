@@ -21,6 +21,7 @@ interface ChatAreaProps {
   searchInputRef: RefObject<HTMLInputElement | null>
   hasTodos?: boolean
   hasMore?: boolean
+  isLoadingOlder?: boolean
   onLoadMore?: () => void
   mobileSearchOpen?: boolean
   onMobileSearchClose?: () => void
@@ -30,6 +31,7 @@ export const ChatArea = memo(function ChatArea({
   searchInputRef,
   hasTodos,
   hasMore,
+  isLoadingOlder,
   onLoadMore,
   mobileSearchOpen = false,
   onMobileSearchClose,
@@ -40,7 +42,7 @@ export const ChatArea = memo(function ChatArea({
 
   const { searchQuery } = state
   const { pendingMessages } = chat
-  const { chatScrollRef, scrollEndRef, handleScroll, canScrollDown, scrollToBottomInstant } = scroll
+  const { chatScrollRef, scrollEndRef, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
 
   // Cmd/Ctrl+F → open find-in-session
@@ -116,6 +118,8 @@ export const ChatArea = memo(function ChatArea({
                 <ConversationTimeline
                   chatScrollRef={chatScrollRef}
                   hasMore={hasMore}
+                  isLoadingOlder={isLoadingOlder}
+                  pagingEnabled={initialScrollDone}
                   onLoadMore={onLoadMore}
                 />
               )}

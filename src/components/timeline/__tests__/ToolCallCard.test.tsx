@@ -510,6 +510,43 @@ describe("ToolCallCard AskUserQuestion history", () => {
   })
 })
 
+describe("CollapsibleToolCalls", () => {
+  it("lets the user collapse a group while a tool call is still in progress", () => {
+    const completedCall: ToolCall = {
+      id: "completed-call-id",
+      name: "Read",
+      input: { file_path: "/tmp/completed.ts" },
+      result: "contents",
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+    const inProgressCall: ToolCall = {
+      id: "in-progress-call-id",
+      name: "Edit",
+      input: { file_path: "/tmp/in-progress.ts" },
+      result: null,
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+
+    render(
+      <CollapsibleToolCalls
+        toolCalls={[completedCall, inProgressCall]}
+        expandAll={false}
+        activeToolCallId={null}
+        isAgentActive
+      />,
+    )
+
+    expect(screen.getByText("/tmp/in-progress.ts")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "2 tool calls" }))
+
+    expect(screen.queryByText("/tmp/in-progress.ts")).toBeNull()
+    expect(screen.getByRole("button", { name: /2 tool calls/i })).toBeTruthy()
+  })
+})
+
 describe("ToolCallCard mobile AskUserQuestion rendering", () => {
   const questions = [
     { question: "What should we do next?", options: [{ label: "Continue" }, { label: "Pause" }] },

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useCallback, useMemo } from "react"
-import { useVirtualizer } from "@tanstack/react-virtual"
-import { Redo2 } from "lucide-react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Virtualizer, type VirtualizerHandle } from "virtua"
+import { Loader2, Redo2 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
 import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
@@ -8,14 +8,18 @@ import { TurnSection } from "./TurnSection"
 import { CompactionMarker } from "./CompactionMarker"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
-import { getTurnKey } from "@/components/stats/turnKey"
+import { isNearTop, isPrepend, type TimelineSnapshot } from "@/lib/timelinePaging"
 import type { Turn } from "@/lib/types"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface TimelineInnerProps {
+interface VirtualizedTimelineProps {
   filteredTurns: { turn: Turn; index: number }[]
+  scrollContainerRef: React.RefObject<HTMLElement | null>
   hasMore?: boolean
+  isLoadingOlder?: boolean
+  /** False until the initial bottom placement for this session has happened. */
+  pagingEnabled?: boolean
   onLoadMore?: () => void
 }
 
@@ -92,62 +96,23 @@ function RedoSection() {
   )
 }
 
-// ── Non-virtualized timeline ─────────────────────────────────────────────────
+// ── History status slot ──────────────────────────────────────────────────────
 
-export function NonVirtualTimeline({ filteredTurns, hasMore, onLoadMore }: TimelineInnerProps) {
-  const { state: { activeTurnIndex } } = useAppContext()
-  const { undoRedo } = useSessionContext()
-
-  const turnRefs = useRef<Map<number, HTMLDivElement>>(new Map())
-
-  const setTurnRef = useCallback(
-    (index: number) => (el: HTMLDivElement | null) => {
-      if (el) {
-        turnRefs.current.set(index, el)
-      } else {
-        turnRefs.current.delete(index)
-      }
-    },
-    []
-  )
-
-  useEffect(() => {
-    if (activeTurnIndex === null) return
-    const el = turnRefs.current.get(activeTurnIndex)
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
-  }, [activeTurnIndex])
-
+/**
+ * Fixed-height slot above the list. Its height never changes while mounted so
+ * paging state transitions can never shift the content below it.
+ */
+function HistoryStatusSlot({ hasMore, isLoadingOlder }: { hasMore: boolean; isLoadingOlder: boolean }) {
   return (
-    <div className="flex flex-col gap-1 md:gap-3">
-      {hasMore && onLoadMore && (
-        // Below the virtualization threshold there is no scroll-up trigger, so
-        // sessions whose loaded tail parses to only a few (large) turns still
-        // need a way to reach older history.
-        <button
-          type="button"
-          onClick={onLoadMore}
-          className="self-center py-2 px-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Load older turns
-        </button>
+    <div className="flex h-8 items-center justify-center text-[11px] text-muted-foreground/70 select-none" data-testid="history-status">
+      {isLoadingOlder ? (
+        <span className="flex items-center gap-1.5">
+          <Loader2 className="size-3 animate-spin" />
+          Loading older turns…
+        </span>
+      ) : hasMore ? null : (
+        <span>Beginning of session</span>
       )}
-      {filteredTurns.map(({ turn, index }) => (
-        <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
-          <div ref={setTurnRef(index)} data-turn-index={index}>
-            {turn.compactionSummary && (
-              <CompactionMarker summary={turn.compactionSummary} />
-            )}
-            <TurnSection
-              turn={turn}
-              index={index}
-              branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
-            />
-          </div>
-        </MaybeContextMenuTurn>
-      ))}
-      <RedoSection />
     </div>
   )
 }
@@ -157,27 +122,78 @@ export function NonVirtualTimeline({ filteredTurns, hasMore, onLoadMore }: Timel
 export function VirtualizedTimeline({
   filteredTurns,
   scrollContainerRef,
-  hasMore,
+  hasMore = false,
+  isLoadingOlder = false,
+  pagingEnabled = false,
   onLoadMore,
-}: TimelineInnerProps & { scrollContainerRef: React.RefObject<HTMLElement | null> }) {
+}: VirtualizedTimelineProps) {
   const { state: { activeTurnIndex } } = useAppContext()
   const { undoRedo } = useSessionContext()
+  const handleRef = useRef<VirtualizerHandle>(null)
+  const listWrapRef = useRef<HTMLDivElement>(null)
+  const [startMargin, setStartMargin] = useState(0)
 
-  const virtualizer = useVirtualizer({
-    count: filteredTurns.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 200,
-    overscan: 5,
-  })
-
-  const turnIndexToVirtualIdx = useMemo(() => {
-    const map = new Map<number, number>()
-    for (let i = 0; i < filteredTurns.length; i++) {
-      map.set(filteredTurns[i].index, i)
-    }
-    return map
+  // React keys must be stable across prepends, so key by turn id alone
+  // (indices shift). Duplicate ids within one parse are disambiguated.
+  const keyedTurns = useMemo(() => {
+    const seen = new Map<string, number>()
+    return filteredTurns.map((entry) => {
+      const n = seen.get(entry.turn.id) ?? 0
+      seen.set(entry.turn.id, n + 1)
+      return { ...entry, key: n === 0 ? entry.turn.id : `${entry.turn.id}#${n}` }
+    })
   }, [filteredTurns])
 
+  // Prepend detection drives virtua's `shift` prop: during a prepend the
+  // scroll position is maintained from the end, so older turns appear above
+  // the viewport without moving what the user is reading.
+  const prevSnapshotRef = useRef<TimelineSnapshot | null>(null)
+  const shift = useMemo(
+    () => isPrepend(prevSnapshotRef.current, keyedTurns.map((t) => t.key)),
+    [keyedTurns],
+  )
+  useLayoutEffect(() => {
+    prevSnapshotRef.current = { firstKey: keyedTurns[0]?.key, length: keyedTurns.length }
+  }, [keyedTurns])
+
+  // Once history paging has been observed, keep the status slot mounted so its
+  // appearance/disappearance can never shift content.
+  const showSlotRef = useRef(hasMore)
+  if (hasMore) showSlotRef.current = true
+  const showSlot = showSlotRef.current
+
+  // The virtualizer needs to know how much non-virtualized content sits above
+  // it inside the scroll container (padding + status slot).
+  useLayoutEffect(() => {
+    const scrollEl = scrollContainerRef.current
+    const listEl = listWrapRef.current
+    if (!scrollEl || !listEl) return
+    const margin =
+      listEl.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    setStartMargin((prev) => (Math.abs(prev - margin) < 1 ? prev : margin))
+  }, [scrollContainerRef, showSlot])
+
+  // Distance-based load trigger: fires when the viewport is within
+  // NEAR_TOP_VIEWPORTS of the top, re-checks on scroll and after every
+  // completed load, so short pages chain until the buffer above is filled.
+  useEffect(() => {
+    if (!hasMore || !onLoadMore || !pagingEnabled || isLoadingOlder) return
+    const el = scrollContainerRef.current
+    if (!el) return
+    const check = () => {
+      if (isNearTop(el.scrollTop, el.clientHeight)) onLoadMore()
+    }
+    check()
+    el.addEventListener("scroll", check, { passive: true })
+    return () => el.removeEventListener("scroll", check)
+  }, [hasMore, isLoadingOlder, pagingEnabled, onLoadMore, keyedTurns.length, scrollContainerRef])
+
+  // Jump to the turn selected in the stats/sidebar panels.
+  const turnIndexToVirtualIdx = useMemo(() => {
+    const map = new Map<number, number>()
+    for (let i = 0; i < keyedTurns.length; i++) map.set(keyedTurns[i].index, i)
+    return map
+  }, [keyedTurns])
   const lastScrolledTurnRef = useRef<number | null>(null)
   useEffect(() => {
     if (activeTurnIndex === null) {
@@ -188,68 +204,40 @@ export function VirtualizedTimeline({
     lastScrolledTurnRef.current = activeTurnIndex
     const virtualIdx = turnIndexToVirtualIdx.get(activeTurnIndex)
     if (virtualIdx !== undefined) {
-      virtualizer.scrollToIndex(virtualIdx, { align: "start", behavior: "smooth" })
+      handleRef.current?.scrollToIndex(virtualIdx, { align: "start", smooth: true })
     }
-  }, [activeTurnIndex, turnIndexToVirtualIdx, virtualizer])
-
-  // Scroll-up lazy loading: when first visible item is near the top, load more
-  const virtualItems = virtualizer.getVirtualItems()
-  useEffect(() => {
-    if (!hasMore || !onLoadMore) return
-    if (virtualItems.length === 0) return
-    const firstVisible = virtualItems[0]
-    if (firstVisible && firstVisible.index < 5) {
-      onLoadMore()
-    }
-  }, [virtualItems, hasMore, onLoadMore])
+  }, [activeTurnIndex, turnIndexToVirtualIdx])
 
   return (
-    <div
-      style={{
-        height: `${virtualizer.getTotalSize()}px`,
-        width: "100%",
-        position: "relative",
-      }}
-    >
-      {hasMore && (
-        <div className="flex items-center justify-center py-3 text-muted-foreground text-xs">
-          Loading older turns...
-        </div>
-      )}
-      {virtualizer.getVirtualItems().map((virtualRow) => {
-        const { turn, index } = filteredTurns[virtualRow.index]
-        const isLastVirtualRow = virtualRow.index === filteredTurns.length - 1
-
-        return (
-          <MaybeContextMenuTurn key={getTurnKey(turn, index)} index={index}>
-            <div
-              data-index={virtualRow.index}
-              data-turn-index={index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
-            >
-              {turn.compactionSummary && (
-                <CompactionMarker summary={turn.compactionSummary} />
-              )}
-              <TurnSection
-                turn={turn}
-                index={index}
-                branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
-              />
-              {!isLastVirtualRow && <Separator className="bg-border/60" />}
+    <>
+      {showSlot && <HistoryStatusSlot hasMore={hasMore} isLoadingOlder={isLoadingOlder} />}
+      <div ref={listWrapRef}>
+        <Virtualizer
+          ref={handleRef}
+          scrollRef={scrollContainerRef}
+          startMargin={startMargin}
+          shift={shift}
+        >
+          {keyedTurns.map(({ turn, index, key }, i) => (
+            <div key={key} data-turn-index={index}>
+              <MaybeContextMenuTurn index={index}>
+                <div>
+                  {turn.compactionSummary && (
+                    <CompactionMarker summary={turn.compactionSummary} />
+                  )}
+                  <TurnSection
+                    turn={turn}
+                    index={index}
+                    branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
+                  />
+                  {i < keyedTurns.length - 1 && <Separator className="bg-border/60" />}
+                </div>
+              </MaybeContextMenuTurn>
             </div>
-          </MaybeContextMenuTurn>
-        )
-      })}
-      <div style={{ position: "absolute", top: `${virtualizer.getTotalSize()}px`, width: "100%" }}>
-        <RedoSection />
+          ))}
+        </Virtualizer>
       </div>
-    </div>
+      <RedoSection />
+    </>
   )
 }

@@ -30,6 +30,7 @@ export interface ScrollState {
   scrollEndRef: RefObject<HTMLDivElement | null>
   canScrollUp: boolean
   canScrollDown: boolean
+  initialScrollDone: boolean
   handleScroll: () => void
   scrollToBottomInstant: () => void
   requestScrollToTop: () => void
