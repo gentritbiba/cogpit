@@ -59,7 +59,6 @@ export function computeAgentBreakdown(turns: Turn[]): AgentBreakdown {
 // ── Model Breakdown ──────────────────────────────────────────────────────────
 
 interface ModelBreakdown {
-  model: string
   shortName: string
   input: number
   output: number
@@ -68,14 +67,19 @@ interface ModelBreakdown {
   cost: number
 }
 
+/**
+ * Buckets by general family name ("opus"), so different versions of one family
+ * merge into a single row. Cost stays version-accurate: addToBucket prices each
+ * usage with the exact per-turn model id before it lands in the bucket.
+ */
 export function computeModelBreakdown(turns: Turn[], shortenModel: (m: string) => string): ModelBreakdown[] {
   const map = new Map<string, ModelBreakdown>()
 
   function getEntry(model: string | null): ModelBreakdown {
-    const key = model ?? "unknown"
+    const key = shortenModel(model ?? "unknown")
     let entry = map.get(key)
     if (!entry) {
-      entry = { model: key, shortName: shortenModel(key), input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }
+      entry = { shortName: key, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }
       map.set(key, entry)
     }
     return entry

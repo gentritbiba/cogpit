@@ -37,11 +37,11 @@ describe("SessionStatusBar", () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it("renders model name when session.model is set", () => {
+  it("renders the general model family name when session.model is set", () => {
     render(
       <SessionStatusBar session={makeSession({ model: "claude-opus-4-5" })} />
     )
-    expect(screen.getByText("claude-opus-4-5")).toBeInTheDocument()
+    expect(screen.getByText("opus")).toBeInTheDocument()
   })
 
   it("renders effort with Zap icon text when effort prop is provided", () => {
@@ -112,7 +112,7 @@ describe("SessionStatusBar", () => {
         worktreePath="/worktrees/task-1"
       />
     )
-    expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument()
+    expect(screen.getByText("sonnet")).toBeInTheDocument()
     expect(screen.getByText("medium")).toBeInTheDocument()
     expect(screen.getByText("thinking")).toBeInTheDocument()
     expect(screen.getByText("/worktrees/task-1")).toBeInTheDocument()

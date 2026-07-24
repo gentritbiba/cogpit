@@ -146,7 +146,7 @@ export function TokenBreakdown({ session }: { session: ParsedSession }): React.R
             </span>
             {modelBreakdown.map((m) => (
               <BreakdownRow
-                key={m.model}
+                key={m.shortName}
                 label={m.shortName}
                 input={m.input + m.cacheRead + m.cacheWrite}
                 output={m.output}

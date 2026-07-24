@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { Brain, Zap, GitBranch } from "lucide-react"
+import { shortenModel } from "@/lib/format"
 import type { ParsedSession } from "@/lib/types"
 
 interface Props {
@@ -15,7 +16,7 @@ export const SessionStatusBar = memo(function SessionStatusBar({ session, effort
 
   return (
     <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border/40 bg-elevation-0/50 text-[11px] font-mono">
-      {session.model && <span className="text-foreground/80">{session.model}</span>}
+      {session.model && <span className="text-foreground/80">{shortenModel(session.model)}</span>}
       {effort && (
         <span className="flex items-center gap-1 text-amber-400">
           <Zap className="w-3 h-3" />

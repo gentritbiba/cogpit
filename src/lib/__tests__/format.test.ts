@@ -26,52 +26,26 @@ describe("shortenModel", () => {
     expect(shortenModel("")).toBe("unknown")
   })
 
-  it("shortens fable 5 model ids (including [1m] variant)", () => {
-    expect(shortenModel("claude-fable-5")).toBe("fable 5")
-    expect(shortenModel("claude-fable-5[1m]")).toBe("fable 5")
+  it("shortens fable model ids to the family name (including [1m] variant)", () => {
+    expect(shortenModel("claude-fable-5")).toBe("fable")
+    expect(shortenModel("claude-fable-5[1m]")).toBe("fable")
   })
 
-  it("shortens opus 4.8 model ids", () => {
-    expect(shortenModel("claude-opus-4-8")).toBe("opus 4.8")
-  })
-
-  it("shortens opus 4.6 model ids", () => {
-    expect(shortenModel("claude-opus-4-6-20250115")).toBe("opus 4.6")
-  })
-
-  it("shortens opus 4.5 model ids", () => {
-    expect(shortenModel("claude-opus-4-5-20250101")).toBe("opus 4.5")
-  })
-
-  it("shortens sonnet 4.6 model ids", () => {
-    expect(shortenModel("claude-sonnet-4-6-20250115")).toBe("sonnet 4.6")
-  })
-
-  it("shortens sonnet 4.5 model ids", () => {
-    expect(shortenModel("claude-sonnet-4-5-20250101")).toBe("sonnet 4.5")
-  })
-
-  it("shortens haiku 4.5 model ids", () => {
-    expect(shortenModel("claude-haiku-4-5-20250101")).toBe("haiku 4.5")
-  })
-
-  it("shortens opus 4.0 model ids", () => {
-    expect(shortenModel("claude-opus-4-0-20250101")).toBe("opus 4")
-  })
-
-  it("shortens sonnet 4.0 model ids", () => {
-    expect(shortenModel("claude-sonnet-4-0-20250101")).toBe("sonnet 4")
-  })
-
-  it("shortens generic opus to 'opus'", () => {
+  it("shortens versioned opus model ids to 'opus'", () => {
+    expect(shortenModel("claude-opus-4-8")).toBe("opus")
+    expect(shortenModel("claude-opus-4-6-20250115")).toBe("opus")
+    expect(shortenModel("claude-opus-4-0-20250101")).toBe("opus")
     expect(shortenModel("claude-opus-future")).toBe("opus")
   })
 
-  it("shortens generic sonnet to 'sonnet'", () => {
+  it("shortens versioned sonnet model ids to 'sonnet'", () => {
+    expect(shortenModel("claude-sonnet-4-6-20250115")).toBe("sonnet")
+    expect(shortenModel("claude-sonnet-4-0-20250101")).toBe("sonnet")
     expect(shortenModel("claude-sonnet-future")).toBe("sonnet")
   })
 
-  it("shortens generic haiku to 'haiku'", () => {
+  it("shortens versioned haiku model ids to 'haiku'", () => {
+    expect(shortenModel("claude-haiku-4-5-20250101")).toBe("haiku")
     expect(shortenModel("claude-haiku-future")).toBe("haiku")
   })
 
