@@ -730,7 +730,9 @@ git commit -m "feat(timeline): annotate tool calls when PostToolUse hook replace
 
 ---
 
-## Task 12: AskUserQuestion interactive UI (live sessions only)
+## Task 12: AskUserQuestion interactive UI
+
+> **Superseded (2026-07-25):** the shipped gating is not liveness-based. A turn blocked on `AskUserQuestion` emits no SSE traffic, so `isAgentActive`/`isLive` go false exactly when the answer form is needed. Answerability comes from `detectPendingInteraction()` in `shared/session/interactiveState.ts` instead.
 
 **Why:** Today the AskUserQuestion summary is shown but the user has to go back to the terminal to answer. The HTTP API already has `POST /api/permissions` for live sessions — mirror that for AskUserQuestion.
 
@@ -745,7 +747,7 @@ Mirror the permissions route. Accept `{ toolUseId: string, answers: string[] | R
 
 **Step 2: Frontend inline form**
 
-When `toolCall.name === "AskUserQuestion"` AND result is null AND `isAgentActive`, render a form with the questions extracted from `input.questions`. Submit calls the new endpoint.
+Render the form when the tool call is the session's pending interaction — `pendingInteraction.type === "question"` and `pendingInteraction.toolUseId === toolCall.id` — with the questions extracted from `input.questions`. Submit calls the new endpoint. When the server cannot resolve the tool call (session started from the terminal, server restarted, or answered from another device), the answer is delivered as a normal chat message instead of surfacing an error.
 
 **Step 3: Tests**
 

@@ -312,6 +312,113 @@ describe("sdk-session AskUserQuestion handling", () => {
   })
 })
 
+describe("sdk-session turn completion", () => {
+  it("settles a parked onResult when the query ends without emitting a result", async () => {
+    // Regression: a query can end without ever yielding a `result` message —
+    // Query.close() (used by teardownState/stopSDKSession) ends the iterator
+    // cleanly rather than throwing. The finally block cleared `running` but
+    // left `onResult` parked, so the HTTP response held open by
+    // /api/send-message never ended and the composer stayed "connected"
+    // forever.
+    const { createSDKSession, sdkSessions } = await loadModule()
+    scriptedMessages = [{ type: "assistant", message: { content: [] } }]
+    holdQueryAfterMessages = true
+
+    createSDKSession({ sessionId: "no-result", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+    await waitUntil(() => releaseQueryAfterMessages !== null)
+
+    // Model the send-message route parking the HTTP response on onResult.
+    let result: Record<string, unknown> | null = null
+    sdkSessions.get("no-result")!.onResult = (msg) => { result = msg }
+
+    releaseQueryAfterMessages!()
+
+    await waitUntil(() => result !== null)
+    expect(result!.type).toBe("result")
+    expect(result!.is_error).toBe(true)
+    expect(sdkSessions.get("no-result")?.running).toBe(false)
+    expect(sdkSessions.get("no-result")?.onResult).toBeNull()
+  })
+})
+
+describe("sdk-session send resilience", () => {
+  it("restarts the turn instead of enqueueing into an aborted query", async () => {
+    // Regression: the SDK aborts the whole query when a transport write fails
+    // (dead CLI), but activeQuery/messageStream stay set until runQuery's
+    // finally runs. Sending in that window enqueued into a stream nobody reads
+    // — the route answered HTTP 200 and the message vanished, which is why a
+    // session "just stops" after a couple of messages.
+    const { createSDKSession, sendSDKMessage, sdkSessions } = await loadModule()
+    holdQueryAfterMessages = true
+
+    createSDKSession({ sessionId: "aborted-send", cwd: "/tmp", message: "one" })
+    await waitUntil(() => captured.length === 1)
+
+    const state = sdkSessions.get("aborted-send")!
+    expect(state.activeQuery).not.toBeNull()
+    expect(state.messageStream).not.toBeNull()
+
+    // Model the SDK aborting the query after a failed write to a dead process.
+    state.abort!.abort()
+
+    sendSDKMessage("aborted-send", "two", undefined, {})
+
+    await waitUntil(() => captured.length === 2)
+    expect(captured[1].options.resume).toBe("aborted-send")
+  })
+
+  it("carries session-scoped tool grants across a resume", async () => {
+    // Losing "always allow" grants on resume makes the new process re-prompt
+    // for tools the user already approved; an unanswered prompt blocks the
+    // turn forever, which reads as the session stalling.
+    const { createSDKSession, resumeSDKSession, sdkSessions } = await loadModule()
+    createSDKSession({ sessionId: "grants", cwd: "/tmp", message: "one" })
+    await waitUntil(() => captured.length === 1)
+    sdkSessions.get("grants")!.sessionAllowedTools.add("Bash")
+
+    resumeSDKSession({ sessionId: "grants", cwd: "/tmp", message: "two" })
+    await waitUntil(() => captured.length === 2)
+
+    expect(sdkSessions.get("grants")!.sessionAllowedTools.has("Bash")).toBe(true)
+  })
+
+  it("does not wipe the live stream when a superseded query finishes", async () => {
+    // resumeSDKSession replaces the state under the same session id. The old
+    // state's finally still runs later and used to streamBus.clear() that id,
+    // blanking the NEW query's streaming overlay mid-turn.
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession, resumeSDKSession, sdkSessions } = await loadModule()
+    holdQueryAfterMessages = true
+
+    createSDKSession({ sessionId: "superseded", cwd: "/tmp", message: "one" })
+    await waitUntil(() => captured.length === 1)
+    await waitUntil(() => releaseQueryAfterMessages !== null)
+    const releaseFirst = releaseQueryAfterMessages!
+    releaseQueryAfterMessages = null
+    const superseded = sdkSessions.get("superseded")!
+
+    // Keep the replacement query parked too, so the only clear() that could
+    // land in the assertion window is the superseded state's own finally.
+    const fresh = resumeSDKSession({ sessionId: "superseded", cwd: "/tmp", message: "two" })
+    await waitUntil(() => captured.length === 2)
+    await waitUntil(() => releaseQueryAfterMessages !== null)
+    expect(sdkSessions.get("superseded")).toBe(fresh)
+    expect(superseded).not.toBe(fresh)
+
+    // Settling onResult is unconditional in the finally, so it is a reliable
+    // marker that the superseded query's cleanup actually ran.
+    let finallyRan = false
+    superseded.onResult = () => { finallyRan = true }
+
+    vi.mocked(streamBus.clear).mockClear()
+    releaseFirst()
+    await waitUntil(() => finallyRan)
+
+    expect(streamBus.clear).not.toHaveBeenCalled()
+  })
+})
+
 describe("sdk-session subagent watcher lifecycle", () => {
   it("does not attach a watcher after a query has already completed", async () => {
     const watcherModule = await import("../subagentWatcher")

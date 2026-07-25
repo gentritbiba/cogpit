@@ -38,16 +38,19 @@ function indicatorWithContext({
   session = completedSession(),
   isLive = true,
   isCompacting = false,
+  pendingInteraction = null,
 }: {
   session?: MockSession
   isLive?: boolean
   isCompacting?: boolean
+  pendingInteraction?: SessionContextValue["pendingInteraction"]
 } = {}) {
   const value = {
     session: session as unknown as ParsedSession,
     isLive,
     sseState: "connected",
     isCompacting,
+    pendingInteraction,
   } as SessionContextValue
 
   return (
@@ -60,6 +63,33 @@ function indicatorWithContext({
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+})
+
+describe("AgentStatusIndicator pending interaction", () => {
+  it("surfaces a blocked question even though live traffic has stopped", () => {
+    // A session blocked on AskUserQuestion emits no traffic, so isLive is false
+    // and the derived status is idle — the indicator rendered nothing and the
+    // session looked finished while it was actually waiting on the user.
+    render(indicatorWithContext({
+      isLive: false,
+      pendingInteraction: {
+        type: "question",
+        toolUseId: "toolu_1",
+        questions: [{ question: "Which one?", options: [{ label: "A" }] }],
+      },
+    }))
+
+    expect(screen.getByText("Waiting for your answer")).toBeInTheDocument()
+  })
+
+  it("surfaces a blocked plan approval", () => {
+    render(indicatorWithContext({
+      isLive: false,
+      pendingInteraction: { type: "plan" },
+    }))
+
+    expect(screen.getByText("Waiting for plan approval")).toBeInTheDocument()
+  })
 })
 
 describe("AgentStatusIndicator lifecycle", () => {

@@ -1359,6 +1359,51 @@ describe("detectPendingInteraction", () => {
     expect(detectPendingInteraction(session)).toBeNull()
   })
 
+  function withPreviousQuestionTurn(
+    session: ParsedSession,
+    previousIsError: boolean,
+  ): ParsedSession {
+    const previous = {
+      ...session.turns[0],
+      id: "t0",
+      toolCalls: [
+        {
+          id: "tc0",
+          name: "AskUserQuestion",
+          input: { questions: [{ question: "First?", options: [{ label: "A" }] }] },
+          result: previousIsError ? "Answer questions?" : null,
+          isError: previousIsError,
+          timestamp: "",
+        },
+      ],
+    }
+    return { ...session, turns: [previous, session.turns[0]] }
+  }
+
+  it("still surfaces a new question when the previous turn's question went unanswered", () => {
+    // Regression: an abandoned question (the user replied with a message
+    // instead of answering) is not a stuck re-call loop. Treating it as one
+    // suppressed the NEW question entirely — no inline form and no composer
+    // bar — leaving the turn blocked with no way to answer it.
+    const session = makeSessionWithLastToolCall(
+      "AskUserQuestion",
+      { questions: [{ question: "Second?", options: [{ label: "B" }] }] },
+    )
+
+    const result = detectPendingInteraction(withPreviousQuestionTurn(session, false))
+
+    expect(result?.type).toBe("question")
+  })
+
+  it("suppresses a re-called question when the previous one errored", () => {
+    const session = makeSessionWithLastToolCall(
+      "AskUserQuestion",
+      { questions: [{ question: "Second?", options: [{ label: "B" }] }] },
+    )
+
+    expect(detectPendingInteraction(withPreviousQuestionTurn(session, true))).toBeNull()
+  })
+
   it("returns null for errored AskUserQuestion when the agent continued afterwards", () => {
     // Real-world case: in bypass mode (before canUseTool was always
     // registered) the CLI errored the tool instantly and the agent fell back

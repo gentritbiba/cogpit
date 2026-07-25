@@ -191,12 +191,13 @@ function QuestionHistoryItem({
 export function AskUserQuestionCard({
   toolCall,
   expandAll,
-  isAgentActive,
+  isAwaitingAnswer,
   sessionId,
 }: {
   toolCall: ToolCall
   expandAll: boolean
-  isAgentActive?: boolean
+  /** True when this question is the session's pending interaction. */
+  isAwaitingAnswer?: boolean
   sessionId?: string
 }): React.ReactElement {
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -204,7 +205,10 @@ export function AskUserQuestionCard({
   const answers = useMemo(() => getAnswers(toolCall, questions), [toolCall, questions])
   const showRawDetails = expandAll || detailsOpen
   const isAnswered = toolCall.result !== null && !toolCall.isError
-  const isWaiting = toolCall.result === null && isAgentActive && Boolean(sessionId)
+  // questions.length guards the form branch from rendering an empty body:
+  // AskUserAnswerForm returns null when it has nothing to ask.
+  const isWaiting =
+    toolCall.result === null && isAwaitingAnswer && Boolean(sessionId) && questions.length > 0
   const hasStructuredAnswers = Object.keys(answers).length > 0
 
   const Status = toolCall.isError

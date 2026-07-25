@@ -17,7 +17,7 @@ import {
 import type { UseFn } from "../http"
 import type { PersistentSession } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
-import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher } from "../sdk-session"
+import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher, isSDKQueryLive } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 import { codexAppServer } from "../codex-app-server"
 import {
@@ -185,7 +185,7 @@ export function registerClaudeRoutes(use: UseFn) {
         // Check for an existing SDK session first
         const existingSDK = sdkSessions.get(sessionId)
 
-        if (existingSDK && existingSDK.activeQuery && existingSDK.messageStream) {
+        if (isSDKQueryLive(existingSDK)) {
           // SDK query is alive — enqueue the message on its persistent input
           // stream. A turn result can arrive while background workflows are
           // still running, so `running` alone is not a process-liveness check.

@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect } from "react"
-import { Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, TerminalSquare } from "lucide-react"
+import { Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
 import { formatDuration, getTurnDuration } from "@/lib/format"
@@ -116,7 +116,7 @@ function CompletedAgentStatus({
 }
 
 export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
-  const { session, isLive, sseState, isCompacting } = useSessionContext()
+  const { session, isLive, sseState, isCompacting, pendingInteraction } = useSessionContext()
 
   // Suppress stale "completed" when isLive transitions false→true (new turn starting).
   // Without this, the old "Done" briefly flashes before the new user message arrives.
@@ -169,6 +169,24 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     const ms = getTurnDuration(lastTurn)
     return ms !== null ? formatDuration(ms) : null
   }, [isCompleted, lastTurn])
+
+  // An interactive prompt blocks the turn, which means the session emits no
+  // traffic: isLive is false and the derived status reads as idle. Surfacing it
+  // here is the only signal that the session is waiting rather than finished.
+  // sseState gates it: browsing an archived session whose last turn ended in an
+  // abandoned question must not show a live "waiting" prompt.
+  if (pendingInteraction && sseState === "connected") {
+    return (
+      <div className="flex items-center gap-2.5 py-3 px-4">
+        <CircleHelp className="size-5 shrink-0 animate-pulse text-pink-400" />
+        <span className="text-xs font-medium text-pink-300">
+          {pendingInteraction.type === "plan"
+            ? "Waiting for plan approval"
+            : "Waiting for your answer"}
+        </span>
+      </div>
+    )
+  }
 
   if (!agentStatus) return null
 

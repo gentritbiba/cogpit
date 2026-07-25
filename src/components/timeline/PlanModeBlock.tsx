@@ -1,4 +1,4 @@
-import { memo, useState } from "react"
+import { memo, useRef, useState } from "react"
 import { ChevronRight, ChevronDown, NotebookPen, CheckCircle, Clock, XCircle } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -20,7 +20,17 @@ interface Props {
 
 export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls, expandAll = false, isAgentActive, skillMetadata }: Props) {
   const [open, setOpen] = useState(true)
-  const [callsOpen, setCallsOpen] = useState(false)
+  // An unanswered question inside a collapsed plan block is unreachable, so it
+  // forces the list open. Latched: once opened it stays open, so the list does
+  // not collapse out from under the user the moment they answer. An explicit
+  // toggle always wins.
+  const [callsOverride, setCallsOverride] = useState<boolean | null>(null)
+  const hasPendingQuestion = toolCalls.some(
+    (tc) => tc.name === "AskUserQuestion" && tc.result === null,
+  )
+  const autoOpened = useRef(false)
+  if (hasPendingQuestion) autoOpened.current = true
+  const callsOpen = callsOverride ?? autoOpened.current
 
   const Icon = status === "approved" ? CheckCircle : status === "rejected" ? XCircle : Clock
   const Chev = open ? ChevronDown : ChevronRight
@@ -73,7 +83,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
           {toolCalls.length > 0 && (
             <div className="mt-2">
               <button
-                onClick={() => setCallsOpen(!callsOpen)}
+                onClick={() => setCallsOverride(!callsOpen)}
                 className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
               >
                 <CallsChev className="w-3 h-3" />

@@ -28,14 +28,19 @@ export type PendingInteraction = PlanApprovalState | UserQuestionState | null
 // ── Detection ────────────────────────────────────────────────────────────────
 
 /**
- * Check if the previous turn's last tool call is the same interactive tool
- * with a pending/error result -- indicates a stuck loop we should suppress.
+ * Check if the previous turn's last tool call is the same interactive tool that
+ * *errored* -- indicates a stuck re-call loop we should suppress.
+ *
+ * An unanswered (result === null) prompt in the previous turn is NOT a loop:
+ * it just means the user replied with a message instead of answering, and the
+ * agent is now asking again. Treating that as stuck suppressed the current
+ * prompt entirely, leaving the turn blocked with no way to answer it.
  */
 export function isStuckInteractiveLoop(turns: Turn[], toolName: string): boolean {
   if (turns.length < 2) return false
   const prevTurn = turns[turns.length - 2]
   const prevLastTC = prevTurn.toolCalls[prevTurn.toolCalls.length - 1]
-  return prevLastTC?.name === toolName && (prevLastTC.result === null || prevLastTC.isError)
+  return prevLastTC?.name === toolName && prevLastTC.isError
 }
 
 /**

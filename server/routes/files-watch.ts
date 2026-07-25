@@ -436,7 +436,12 @@ export function registerFileWatchRoutes(use: UseFn) {
     // so we poll the subagents dir and send a synthetic SSE event.
     const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
     const subagentsDir = sessionDir + "/subagents"
-    let compactingSignalSent = false
+    // Re-announce periodically rather than latching a single event. A
+    // compaction writes nothing to the parent JSONL, so the client's stale
+    // timer would fire mid-compaction and clear the flag with no way for the
+    // server to say "still going" — the session would render as finished.
+    let compactingSentAt = 0
+    const COMPACTING_RESEND_MS = 10_000
 
     const compactionPoller = isCodexDirName(dirName)
       ? null
@@ -451,14 +456,16 @@ export function registerFileWatchRoutes(use: UseFn) {
           if (compactFile) {
             const s = await stat(subagentsDir + "/" + compactFile)
             const recentlyActive = Date.now() - s.mtimeMs < 30_000
-            if (recentlyActive && !compactingSignalSent) {
-              compactingSignalSent = true
-              res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
-            } else if (!recentlyActive) {
-              compactingSignalSent = false
+            if (recentlyActive) {
+              if (Date.now() - compactingSentAt >= COMPACTING_RESEND_MS) {
+                compactingSentAt = Date.now()
+                res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
+              }
+            } else {
+              compactingSentAt = 0
             }
           } else {
-            compactingSignalSent = false
+            compactingSentAt = 0
           }
         } catch {
           // subagents dir may not exist — that's fine

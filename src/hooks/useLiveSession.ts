@@ -105,7 +105,13 @@ export function useLiveSession(
 
     const resetStaleTimer = (ms = 30_000) => {
       if (staleTimer) clearTimeout(staleTimer)
-      staleTimer = setTimeout(() => setIsLive(false), ms)
+      staleTimer = setTimeout(() => {
+        setIsLive(false)
+        // The server only ever announces the START of a compaction, so a stalled
+        // stream has to clear the flag itself — otherwise an interrupted
+        // compaction pins "Compressing context…" on screen forever.
+        setIsCompacting(false)
+      }, ms)
     }
 
     // ── SSE burst coalescing ────────────────────────────────────────────
@@ -285,6 +291,7 @@ export function useLiveSession(
 
     es.onerror = () => {
       setIsLive(false)
+      setIsCompacting(false)
       wasDisconnectedRef.current = sseStateRef.current === "connected"
       sseStateRef.current = "disconnected"
       setSseState("disconnected")

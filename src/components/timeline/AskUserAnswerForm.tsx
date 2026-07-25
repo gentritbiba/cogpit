@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Check } from "lucide-react"
 import type { ToolCall } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
 
 interface AskUserQuestion {
@@ -27,14 +28,33 @@ export function AskUserAnswerForm({
   ))
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { chat: { sendMessage } } = useSessionChatContext()
 
   if (questions.length === 0) return null
+
+  /**
+   * The server can refuse the answer for reasons the user cannot act on: the
+   * session was started from the terminal so this server never owned the
+   * blocked tool, it restarted, or the question was answered from another
+   * device. Never make the user retype — deliver the answer as a normal
+   * message, which resumes the session. Mirrors the composer's question bar.
+   */
+  const deliverAsMessage = () => {
+    const text = questions
+      .map((question) => {
+        const answer = answers[question.question]?.trim()
+        if (!answer) return null
+        return questions.length > 1 ? `${question.question}\n${answer}` : answer
+      })
+      .filter(Boolean)
+      .join("\n\n")
+    if (text) sendMessage(text)
+    setSubmitted(true)
+  }
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     setSubmitting(true)
-    setError(null)
     try {
       const response = await authFetch("/api/ask-user-answer", {
         method: "POST",
@@ -44,11 +64,10 @@ export function AskUserAnswerForm({
       if (response.ok) {
         setSubmitted(true)
       } else {
-        const data = await response.json() as { error?: string }
-        setError(data.error ?? "Failed to submit answer")
+        deliverAsMessage()
       }
     } catch {
-      setError("Network error")
+      deliverAsMessage()
     }
     setSubmitting(false)
   }
@@ -161,7 +180,6 @@ export function AskUserAnswerForm({
           </div>
         )
       })}
-      {error && <p className="text-[10px] text-red-400">{error}</p>}
       <button
         type="submit"
         disabled={submitting || submitted}

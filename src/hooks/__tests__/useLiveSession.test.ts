@@ -214,6 +214,33 @@ describe("useLiveSession", () => {
     expect(result.current.isLive).toBe(false)
   })
 
+  it("clears the compacting flag when the stream goes stale", () => {
+    // The server announces the start of a compaction but never its end, so an
+    // interrupted or failed compaction left "Compressing context…" pinned on
+    // screen indefinitely — the status survives isLive going false.
+    vi.useFakeTimers()
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "file.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "compacting_in_progress" })
+    })
+    expect(result.current.isCompacting).toBe(true)
+
+    act(() => {
+      vi.advanceTimersByTime(30_001)
+    })
+
+    expect(result.current.isCompacting).toBe(false)
+    expect(result.current.isLive).toBe(false)
+    vi.useRealTimers()
+  })
+
   it("handles init message type", () => {
     vi.useFakeTimers()
     const source: SessionSource = {

@@ -50,6 +50,34 @@ function makeToolCall(overrides: Partial<ToolCall> = {}): ToolCall {
   }
 }
 
+describe("PlanModeBlock pending question", () => {
+  it("auto-expands the calls list when it holds an unanswered question", () => {
+    // Regression: a question asked during plan mode is grouped into this block,
+    // whose calls list starts collapsed. The question was invisible until the
+    // user happened to expand it, so the session sat blocked.
+    const question = makeToolCall({
+      id: "tc_q",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Ship it?", options: [{ label: "Yes" }] }] },
+      result: null,
+    })
+
+    render(
+      <PlanModeBlock plan="A plan" status="pending" toolCalls={[question]} />
+    )
+
+    expect(screen.getByText("Ship it?")).toBeInTheDocument()
+  })
+
+  it("keeps the calls list collapsed when every call is resolved", () => {
+    render(
+      <PlanModeBlock plan="A plan" status="approved" toolCalls={[makeToolCall()]} />
+    )
+
+    expect(screen.queryByText("src/main.ts")).not.toBeInTheDocument()
+  })
+})
+
 describe("PlanModeBlock", () => {
   it("renders the heading 'Plan Mode'", () => {
     render(

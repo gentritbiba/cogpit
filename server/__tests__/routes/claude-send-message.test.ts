@@ -67,12 +67,18 @@ vi.mock("../../helpers", () => ({
   friendlySpawnError: vi.fn((err: Error) => err.message),
 }))
 
-vi.mock("../../sdk-session", () => ({
-  sdkSessions: mockSdkSessions,
-  sendSDKMessage: mockSendSDKMessage,
-  resumeSDKSession: mockResumeSDKSession,
-  attachSubagentWatcher: vi.fn(),
-}))
+vi.mock("../../sdk-session", async (importOriginal) => {
+  // Pass the REAL isSDKQueryLive through: re-implementing it here would let the
+  // route keep passing if the predicate ever regressed.
+  const actual = await importOriginal<typeof import("../../sdk-session")>()
+  return {
+    sdkSessions: mockSdkSessions,
+    sendSDKMessage: mockSendSDKMessage,
+    resumeSDKSession: mockResumeSDKSession,
+    attachSubagentWatcher: vi.fn(),
+    isSDKQueryLive: actual.isSDKQueryLive,
+  }
+})
 
 vi.mock("../../codex-app-server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../codex-app-server")>()
@@ -190,6 +196,32 @@ beforeEach(() => {
 })
 
 describe("/api/send-message SDK resume cwd", () => {
+  it("resumes instead of enqueueing into an aborted query", async () => {
+    // Regression: an aborted query keeps activeQuery/messageStream set until
+    // runQuery's finally runs. The route treated that as live, enqueued into a
+    // stream nobody reads, and answered 200 — the message was silently lost and
+    // the session appeared to stop responding.
+    const abortedState = {
+      sessionId: "sess-aborted",
+      running: true,
+      activeQuery: {},
+      messageStream: {},
+      abort: { signal: { aborted: true } },
+    }
+    mockSdkSessions.set("sess-aborted", abortedState)
+
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes(
+      "POST",
+      JSON.stringify({ sessionId: "sess-aborted", message: "still there?" }),
+    )
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(mockResumeSDKSession).toHaveBeenCalled())
+    expect(mockSendSDKMessage).not.toHaveBeenCalled()
+  })
+
   it("reuses an active SDK query after a turn result while workflows continue", async () => {
     const liveState = {
       sessionId: "sess-1",

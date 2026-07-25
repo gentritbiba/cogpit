@@ -221,7 +221,7 @@ const MOBILE_TOOL_LABELS: Record<string, string> = {
 }
 
 export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
-  const { session } = useSessionContext()
+  const { session, pendingInteraction } = useSessionContext()
   const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
@@ -263,11 +263,17 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   }, [isCompactMobile])
 
   if (toolCall.name === "AskUserQuestion") {
+    // Answerability comes from the session's pending interaction, never from
+    // live-traffic heuristics: a question-blocked session emits no traffic, so
+    // isAgentActive goes false exactly when the answer form is needed most.
     return (
       <AskUserQuestionCard
         toolCall={toolCall}
         expandAll={expandAll}
-        isAgentActive={isAgentActive}
+        isAwaitingAnswer={
+          pendingInteraction?.type === "question" &&
+          pendingInteraction.toolUseId === toolCall.id
+        }
         sessionId={session?.sessionId}
       />
     )

@@ -12,10 +12,17 @@ vi.mock("@/lib/auth", () => ({
   isRemoteClient: vi.fn().mockReturnValue(false),
 }))
 
-// Mock useSessionContext — used by ToolCallCard for sessionId
+// Mock useSessionContext — used by ToolCallCard for sessionId and for the
+// pending-interaction lookup that decides whether a question is answerable.
 const mockSession = { sessionId: "test-session-id" }
+let mockPendingInteraction: unknown = null
+const mockSendMessage = vi.fn()
 vi.mock("@/contexts/SessionContext", () => ({
-  useSessionContext: vi.fn(() => ({ session: mockSession })),
+  useSessionContext: vi.fn(() => ({
+    session: mockSession,
+    pendingInteraction: mockPendingInteraction,
+  })),
+  useSessionChatContext: vi.fn(() => ({ chat: { sendMessage: mockSendMessage } })),
 }))
 
 // Mock shiki (syntax highlighting) to avoid async side-effects in tests
@@ -334,6 +341,32 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     mockAuthFetchFn.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
   })
 
+  beforeEach(() => {
+    mockPendingInteraction = {
+      type: "question",
+      toolUseId: "tool-use-id-123",
+      questions,
+    }
+  })
+
+  afterEach(() => {
+    mockPendingInteraction = null
+  })
+
+  it("renders the answer form while live traffic is stale", () => {
+    // Regression: a session blocked on AskUserQuestion emits no SSE traffic by
+    // construction, so useLiveSession's 30s stale timer flips isLive (and thus
+    // isAgentActive) to false. Gating the form on that removed the only way to
+    // answer — the session then hung until the CLI's permission stream died
+    // hours later. Answerability comes from the pending interaction, not from
+    // traffic.
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+
+    expect(screen.getByText("Send answer")).toBeTruthy()
+    expect(screen.getByPlaceholderText("Type your answer...")).toBeTruthy()
+  })
+
   it("renders one input per open question when pending and agent active", () => {
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
@@ -362,12 +395,25 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     expect(screen.getByText("Send answer")).toBeTruthy()
   })
 
-  it("does NOT render form when agent is NOT active", () => {
+  it("does NOT render form when the question is no longer the pending interaction", () => {
+    mockPendingInteraction = null
     const toolCall = makeAskUserQuestionCall(null)
-    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
 
     expect(screen.queryByText("Send answer")).toBeNull()
     expect(screen.queryByPlaceholderText("Type your answer...")).toBeNull()
+  })
+
+  it("does NOT render form when a different question is pending", () => {
+    mockPendingInteraction = {
+      type: "question",
+      toolUseId: "some-other-tool-use-id",
+      questions,
+    }
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    expect(screen.queryByText("Send answer")).toBeNull()
   })
 
   it("does NOT render form when toolCall already has a result", () => {
@@ -403,20 +449,41 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     })
   })
 
-  it("shows error message when fetch fails", async () => {
+  it("delivers the answer as a message when the server cannot resolve it", async () => {
+    // A session started from the terminal was never owned by this server, so
+    // /api/ask-user-answer 404s. Never make the user retype: send the answer as
+    // a normal message, which resumes the session.
+    mockSendMessage.mockClear()
     mockAuthFetchFn.mockResolvedValue({
       ok: false,
+      status: 404,
       json: vi.fn().mockResolvedValue({ error: "Session not found" }),
     })
 
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
 
-    const submitBtn = screen.getByText("Send answer")
-    fireEvent.click(submitBtn)
+    fireEvent.click(screen.getByRole("button", { name: "Option A" }))
+    fireEvent.click(screen.getByText("Send answer"))
 
     await waitFor(() => {
-      expect(screen.getByText("Session not found")).toBeTruthy()
+      expect(mockSendMessage).toHaveBeenCalledTimes(1)
+    })
+    expect(String(mockSendMessage.mock.calls[0][0])).toContain("Option A")
+  })
+
+  it("delivers the answer as a message when the request throws", async () => {
+    mockSendMessage.mockClear()
+    mockAuthFetchFn.mockRejectedValue(new Error("offline"))
+
+    const toolCall = makeAskUserQuestionCall(null)
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Option A" }))
+    fireEvent.click(screen.getByText("Send answer"))
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledTimes(1)
     })
   })
 })
@@ -573,6 +640,7 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
 
   afterEach(() => {
     mobileViewport = false
+    mockPendingInteraction = null
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 1024,
@@ -593,6 +661,11 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
   })
 
   it("keeps a live active question expanded and actionable", () => {
+    mockPendingInteraction = {
+      type: "question",
+      toolUseId: "mobile-question-id",
+      questions,
+    }
     const toolCall = makeAskUserQuestionCall(null)
     render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={true} />)
 

@@ -450,15 +450,35 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         state.onResult = null
       }
     } finally {
+      // A newer query can already be running for this session — either a resume
+      // replaced the state object, or sendSDKMessage restarted the turn on this
+      // same one. Everything shared with that successor (stream, watcher,
+      // running flag, pending prompts) must only be torn down by the query that
+      // still owns it, or this finally blanks a live turn seconds after it began.
+      const ownsSession = state.activeQuery === q
       messageStream.close()
-      state.subagentWatcher?.close()
-      state.subagentWatcher = null
-      state.running = false
+      if (ownsSession) {
+        state.subagentWatcher?.close()
+        state.subagentWatcher = null
+        state.running = false
+        streamBus.clear(state.sessionId)
+      }
       if (state.messageStream === messageStream) state.messageStream = null
       if (state.activeQuery === q) state.activeQuery = null
       if (state.abort === queryOpts.abortController) state.abort = null
-      streamBus.clear(state.sessionId)
-      rejectAllPending(state, "Session ended")
+      if (ownsSession) rejectAllPending(state, "Session ended")
+      // The iterator can finish without ever yielding a `result` — Query.close()
+      // (teardownState/stopSDKSession) ends it cleanly rather than throwing. Any
+      // HTTP response parked on onResult would otherwise never end, leaving the
+      // composer stuck showing a running turn forever.
+      if (state.onResult) {
+        state.onResult({
+          type: "result",
+          is_error: true,
+          result: "Session ended before the turn completed",
+        })
+        state.onResult = null
+      }
     }
   })()
 }
@@ -735,6 +755,26 @@ export async function updateSDKSession(
   }
 }
 
+type LiveSDKSessionState = SDKSessionState & {
+  activeQuery: NonNullable<SDKSessionState["activeQuery"]>
+  messageStream: NonNullable<SDKSessionState["messageStream"]>
+}
+
+/**
+ * Whether this session's query can still accept input.
+ *
+ * The SDK aborts the whole query when its transport write fails (the CLI
+ * process died), but `activeQuery` and `messageStream` stay set until
+ * runQuery's finally block runs. Enqueuing during that window is accepted and
+ * then silently dropped, so an aborted query must count as dead: callers
+ * resume instead, which respawns the CLI and actually delivers the message.
+ */
+export function isSDKQueryLive(
+  state: SDKSessionState | null | undefined,
+): state is LiveSDKSessionState {
+  return Boolean(state?.activeQuery && state.messageStream && !state.abort?.signal.aborted)
+}
+
 export function sendSDKMessage(
   sessionId: string,
   message: string,
@@ -747,7 +787,7 @@ export function sendSDKMessage(
   const changes = applySessionUpdates(state, updates)
   autoResolvePendingForMode(state, changes)
 
-  if (state.activeQuery && state.messageStream) {
+  if (isSDKQueryLive(state)) {
     const q = state.activeQuery
     const input = buildUserMessage(message, images)
     if (!state.messageStream.enqueue(input)) return null
@@ -792,7 +832,18 @@ export function sendSDKMessage(
 // ── Resume a dead SDK session (creates fresh state + runs resume query) ──
 
 export function resumeSDKSession(opts: SDKSessionInitOpts): SDKSessionState {
+  // A resume supersedes whatever query held this id. Tear the old one down
+  // first so its CLI process can't keep appending to the same transcript, and
+  // carry over the session-scoped "always allow" grants — otherwise the new
+  // process re-prompts for tools the user already approved, and an unanswered
+  // prompt blocks the turn indefinitely.
+  const previous = sdkSessions.get(opts.sessionId)
+  if (previous) teardownState(previous)
+
   const state = initSDKSessionState({ ...opts, worktreeName: undefined })
+  if (previous) {
+    for (const tool of previous.sessionAllowedTools) state.sessionAllowedTools.add(tool)
+  }
   sdkSessions.set(opts.sessionId, state)
   runQuery(state, opts.message, { isResume: true, mcpConfig: opts.mcpConfig, images: opts.images })
   return state
