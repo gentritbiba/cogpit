@@ -4,6 +4,24 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-07-25 — Session Hang, Compaction Signalling, and Interactive Prompt Answerability (999e0d8)
+- **File:** `audit-history/audit-999e0d8-session-hang-streaming.md`
+- **Status:** PASS
+- **Scope:** Bug-fix commit — `isSDKQueryLive()` treats an aborted SDK query as
+  dead so `/api/send-message` resumes instead of dropping the message;
+  ownership-aware `runQuery` teardown plus guaranteed `onResult` settlement;
+  `compacting_in_progress` SSE re-announced every 10s instead of latched;
+  `isStuckInteractiveLoop()` narrowed to errored calls only; renderer answer UI
+  gated on `pendingInteraction` rather than traffic-derived liveness
+- **Documentation:** `docs/plans/2026-05-07-claude-code-feature-catchup.md`
+  Task 12 corrected — the original "live sessions only" / `isAgentActive`
+  gating is the exact defect this commit fixes. Architecture guide, README,
+  agent guidance, and the `cogpit-sessions` skill verified accurate; no
+  contract, route, event schema, or configuration changes
+- **Tests:** 2859/2859 passing
+- **Risk:** LOW
+- **Commit:** `999e0d8`
+
 ### 2026-07-23 19:20 UTC — Session Paging, Timeline Interaction, and 1.1.6 Release (78c7284)
 - **File:** `audit-history/audit-20260723T192039Z-78c7284.md`
 - **Status:** PASS
@@ -34,8 +52,8 @@ Chronological record of all documentation audits for the agent-window project.
 - **Verification:** 2,600 tests; lint, strict types, architecture, duplication,
   audit, sync, web/Electron builds, and package contracts pass
 
-### 2026-04-17 18:31 — Session Switching Performance + Sub-Agent UI Redesign + SDK Live Updates (PLACEHOLDER)
-- **File:** `audit-history/audit-20260417-1831-PLACEHOLDER.txt`
+### 2026-04-17 18:31 — Session Switching Performance + Sub-Agent UI Redesign + SDK Live Updates (999e0d8)
+- **File:** `audit-history/audit-20260417-1831-999e0d8.txt`
 - **Status:** DOCUMENTATION UPDATED
 - **Changes:** 13 modified files, 1 new module (sessionPrefetch.ts), 1 new test suite (sdk-session.test.ts), net ~621 lines added
 - **Key updates:**
