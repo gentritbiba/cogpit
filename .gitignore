@@ -16,3 +16,7 @@ test-results/
 process-state.json
 packages/cogpit-memory/cogpit-memory
 .claude/deployments.md
+
+# Local QA scratch — screenshots and notes, regenerable
+/artifacts
+qa-notes.md
