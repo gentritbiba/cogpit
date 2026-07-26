@@ -15,6 +15,7 @@ export default defineConfig({
       "src/**/*.test.ts",
       "src/**/*.test.tsx",
       "server/**/*.test.ts",
+      "electron/**/*.test.ts",
     ],
     coverage: {
       provider: "v8",
@@ -33,6 +34,7 @@ export default defineConfig({
     // Server tests use node environment via inline config
     environmentMatchGlobs: [
       ["server/**/*.test.ts", "node"],
+      ["electron/**/*.test.ts", "node"],
     ],
   },
 })

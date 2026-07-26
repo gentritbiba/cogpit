@@ -2,6 +2,11 @@ import { app, BrowserWindow, ipcMain, Menu, shell, utilityProcess } from "electr
 import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
+import {
+  ATTENTION_WINDOW_EVENTS,
+  handleWorkerNotification,
+  startAttentionReporting,
+} from "./notifications.ts"
 
 // GUI apps don't inherit the user's shell PATH.
 // Spawn their shell to get the real PATH so `claude` CLI is found.
@@ -15,6 +20,8 @@ try {
 
 let mainWindow: BrowserWindow | null = null
 let serverProcess: Electron.UtilityProcess | null = null
+/** Set once the worker exists; re-reports desktop presence to it. */
+let reportAttention: (() => void) | null = null
 
 function processName(metric: Electron.ProcessMetric): string {
   if (metric.pid === serverProcess?.pid) return "Server"
@@ -78,9 +85,19 @@ async function createWindow(port: number) {
   // and handles all API routes on the same origin (no proxy needed).
   mainWindow.loadURL(`http://127.0.0.1:${port}`)
 
+  for (const event of ATTENTION_WINDOW_EVENTS) {
+    // Electron declares one overload per event name, so a union needs narrowing.
+    mainWindow.on(event as "focus", () => reportAttention?.())
+  }
+
   mainWindow.on("closed", () => {
     mainWindow = null
+    reportAttention?.()
   })
+
+  // The worker is forked before this window exists, so its first report saw no
+  // window at all. Re-report now that there is one.
+  reportAttention?.()
 }
 
 /**
@@ -92,6 +109,15 @@ function startServerWorker(staticDir: string, userDataDir: string, isDev: boolea
   return new Promise((resolve, reject) => {
     const workerPath = join(__dirname, "server-worker.js")
     serverProcess = utilityProcess.fork(workerPath)
+
+    // The worker cannot construct Notifications itself; it asks us to.
+    serverProcess.on("message", (msg: unknown) => handleWorkerNotification(msg, mainWindow))
+
+    // ...and it cannot see window focus, so we tell it when to use the phone.
+    reportAttention = startAttentionReporting(
+      () => mainWindow,
+      (message) => serverProcess?.postMessage(message),
+    )
 
     const timeout = setTimeout(() => {
       reject(new Error("Server worker timed out after 15s"))

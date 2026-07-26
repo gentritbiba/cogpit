@@ -16,6 +16,7 @@ import {
   applyEnvNetworkOverrides,
 } from "./config"
 import { validatePasswordStrength } from "./security"
+import { removePortFile, writePortFile } from "./lib/portFile"
 import {
   resolveEnvPassword,
   hasUsableNetworkCredentials,
@@ -95,6 +96,8 @@ if (shouldFailClosed(host, hasNetworkCredentials)) {
 const { httpServer, dispose } = await createStandaloneAppServer(staticDir, dataDir)
 
 httpServer.listen(port, host, () => {
+  // Published so agent hooks can find us without hard-coding a port.
+  writePortFile(port)
   const deviceName = resolveDeviceName(process.env, hostname())
   const banner = buildBootBanner({ deviceName, host, port, interfaces: networkInterfaces() })
   for (const line of banner) console.log(line)
@@ -111,6 +114,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (shuttingDown) return
     shuttingDown = true
     console.log(`\nReceived ${signal}, shutting down...`)
+    removePortFile()
     try {
       await dispose()
       process.exit(0)

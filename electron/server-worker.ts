@@ -5,6 +5,9 @@
  */
 import { createAppServer } from "./server.ts"
 import { getConfig } from "../server/config"
+import { removePortFile, writePortFile } from "../server/lib/portFile"
+import { setDesktopAttention } from "../server/lib/desktopAttention"
+import { isDesktopAttentionMessage } from "../shared/notifications"
 
 interface WorkerConfig {
   staticDir: string
@@ -12,9 +15,9 @@ interface WorkerConfig {
   isDev: boolean
 }
 
-process.parentPort.on("message", async ({ data }: { data: WorkerConfig }) => {
-  const { staticDir, userDataDir, isDev } = data
+let starting = false
 
+async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<void> {
   try {
     const { httpServer } = await createAppServer(staticDir, userDataDir)
 
@@ -35,10 +38,29 @@ process.parentPort.on("message", async ({ data }: { data: WorkerConfig }) => {
       return
     }
 
+    // Published so agent hooks can find us even on an ephemeral port. Removed on
+    // exit so a hook can never POST session text to whatever process inherits
+    // that port after Cogpit quits.
+    writePortFile(port)
+    process.on("exit", removePortFile)
+
     console.log(`[server-worker] Cogpit server listening on http://${listenHost}:${port}`)
     process.parentPort.postMessage({ type: "ready", port })
   } catch (err) {
     console.error("[server-worker] Failed to start server:", err)
     process.parentPort.postMessage({ type: "error", error: String(err) })
   }
+}
+
+process.parentPort.on("message", ({ data }: { data: unknown }) => {
+  // The main process reports window focus on this same channel, so every
+  // message must be dispatched by shape — not assumed to be the boot config.
+  if (isDesktopAttentionMessage(data)) {
+    setDesktopAttention(data.attended)
+    return
+  }
+
+  if (starting) return
+  starting = true
+  void start(data as WorkerConfig)
 })

@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+// sweep() notifies on a successful reap, and a configured ~/.cogpit/push.json
+// would make that a real push to the user's phone from a test run.
+vi.mock("../../lib/notificationDelivery", () => ({ deliverNotification: vi.fn() }))
 
 import { planReaping, type PendingOrphan } from "../../lib/leakReaper"
 import type { OrphanedClaudeSubtree } from "../../lib/systemProcesses"

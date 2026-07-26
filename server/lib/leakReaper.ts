@@ -1,5 +1,5 @@
 import type { ReapedEvent } from "../../shared/contracts/performance"
-import { showNotification } from "./desktopNotify"
+import { deliverNotification } from "./notificationDelivery"
 import { recordActivity } from "./activityMonitor"
 import {
   collectOrphanedClaudeSubtrees,
@@ -114,11 +114,11 @@ async function sweep(): Promise<void> {
 
   if (toKill.length > 0) {
     const processCount = toKill.reduce((sum, tree) => sum + tree.pids.length, 0)
-    showNotification(
-      "Cogpit",
-      `Cleaned up ${processCount} leaked agent ${processCount === 1 ? "process" : "processes"} (orphaned Claude ${toKill.length === 1 ? "session" : "sessions"})`,
-      { sessionId: null, dirName: null },
-    )
+    deliverNotification({
+      title: "Cogpit",
+      body: `Cleaned up ${processCount} leaked agent ${processCount === 1 ? "process" : "processes"} (orphaned Claude ${toKill.length === 1 ? "session" : "sessions"})`,
+      nav: { sessionId: null, dirName: null },
+    })
   }
 }
 

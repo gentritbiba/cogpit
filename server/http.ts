@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { StringDecoder } from "node:string_decoder"
 
 export type NextFn = (err?: unknown) => void
 export type Middleware = (
@@ -36,6 +37,9 @@ export function readJsonBody<T = unknown>(
     let body = ""
     let bytesRead = 0
     let settled = false
+    // Buffers a multi-byte character that straddles two chunks, which would
+    // otherwise decode to U+FFFD and corrupt the JSON.
+    const decoder = new StringDecoder("utf8")
 
     const rejectOnce = (error: unknown) => {
       if (settled) return
@@ -50,11 +54,12 @@ export function readJsonBody<T = unknown>(
         rejectOnce(new HttpBodyError("Request body too large", 413))
         return
       }
-      body += chunk.toString()
+      body += typeof chunk === "string" ? chunk : decoder.write(chunk)
     })
     req.on("end", () => {
       if (settled) return
       settled = true
+      body += decoder.end()
       if (!body.trim() && options.allowEmpty) {
         resolve({} as T)
         return
