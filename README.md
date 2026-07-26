@@ -69,7 +69,29 @@ Per-turn token usage (uncached input, cached input, cache creation, and output),
 Open the header monitor to inspect Cogpit's CPU, memory, event-loop, file/stream, and API activity. The desktop app also breaks usage down by Electron process, and the monitor polls only while it is open.
 
 ### Process Leak Monitor
-Automatically detect and clean up leaked agent processes: orphaned Claude sessions, hot headless browsers, and abandoned scripts that drain battery or hog CPU. The header indicator shows active leaks with severity (CPU%, age); one-click cleanup kills only suspected leaks. Two-sweep confirmation prevents accidental kills of transient processes. Desktop notifications announce automatic cleanup.
+Automatically detect and clean up leaked agent processes: orphaned Claude sessions, hot headless browsers, and abandoned scripts that drain battery or hog CPU. The header indicator shows active leaks with severity (CPU%, age); one-click cleanup kills only suspected leaks. Two-sweep confirmation prevents accidental kills of transient processes. Notifications announce automatic cleanup.
+
+### Notifications
+Get told when an agent finishes a turn or needs an answer — on the desktop, and on your phone when you have walked away.
+
+Desktop notifications are presented by Cogpit itself, so they carry the app icon, bounce the dock, and open the session when clicked. They are suppressed only when the window is focused *and* already showing that session. The headless `cogpit-server` has no Electron main process, so it falls back to `osascript` on macOS and has no desktop channel elsewhere — there, push is the only channel.
+
+Phone push goes out via [ntfy](https://ntfy.sh) only when nobody is at the desktop: no window, screen locked or suspended, or 120 s without keyboard/mouse input anywhere on the machine (system idle, not window focus). Configure it in `~/.cogpit/push.json` — create it `chmod 600`, since the topic is a bearer secret and anyone who knows it can read every notification:
+
+```json
+{ "topic": "your-private-topic", "publicUrl": "https://cogpit.example.com" }
+```
+
+| Key | Env override | Default | Purpose |
+|-----|--------------|---------|---------|
+| `topic` | `COGPIT_NTFY_TOPIC` | — | ntfy topic; `[-_A-Za-z0-9]`, ≤64 chars. Push is off until set. |
+| `ntfyUrl` | `COGPIT_NTFY_URL` | `https://ntfy.sh` | Base URL of the ntfy server (self-hosted works). |
+| `token` | `COGPIT_NTFY_TOKEN` | — | Sent as `Authorization: Bearer` for protected topics. |
+| `publicUrl` | `COGPIT_PUBLIC_URL` | — | Reachable Cogpit base URL. Without it, pushes carry no click target rather than a dead `127.0.0.1` link. |
+
+Env overrides let a headless box be configured entirely through systemd. Edits take effect without a restart.
+
+Notifications are triggered by provider hooks that `POST /api/notify` (per-session 5 s cooldown; subagent transcripts are skipped). Claude Code's `Stop` and `Notification` hooks send snake_case JSON on stdin; Codex's `notify` config key passes a kebab-case `agent-turn-complete` payload as the final argv element. Point both at one script that forwards its payload verbatim and resolves the port from `$COGPIT_PORT`, then `~/.cogpit/port`, then `19384` — the packaged app binds an ephemeral port unless Network Access pins it, so it publishes the bound port to `~/.cogpit/port` on start and removes it on exit.
 
 ### Undo / Redo with Branching
 Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.

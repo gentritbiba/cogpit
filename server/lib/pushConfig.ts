@@ -51,9 +51,23 @@ function fileMtime(path: string): number | null {
   }
 }
 
+/**
+ * The topic is a bearer secret — anyone who can read it can read every
+ * notification — so a group- or world-readable config is worth complaining
+ * about rather than silently accepting.
+ */
+function warnIfExposed(path: string, mode: number | null): void {
+  if (process.platform === "win32" || mode === null) return
+  const permissions = mode & 0o777
+  if (permissions & 0o077) {
+    warnOnce(`${path} is readable by other users (mode ${permissions.toString(8)}); chmod 600 it`)
+  }
+}
+
 function readConfigFile(path: string): Record<string, unknown> {
   let raw: string
   try {
+    warnIfExposed(path, statSync(path).mode)
     raw = readFileSync(path, "utf8")
   } catch (err) {
     // An absent file is the normal unconfigured case. Anything else — bad

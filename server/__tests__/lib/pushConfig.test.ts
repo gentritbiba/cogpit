@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { mkdtempSync, rmSync, writeFileSync, utimesSync } from "node:fs"
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, utimesSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { getPushConfig, resetPushConfigCache } from "../../lib/pushConfig"
@@ -131,6 +131,36 @@ describe("getPushConfig — environment overrides", () => {
 
     process.env.COGPIT_NTFY_TOPIC = "later"
     expect(getPushConfig(file)?.topic).toBe("later")
+  })
+})
+
+describe("getPushConfig — secret hygiene", () => {
+  it("warns when the config is readable by other users", () => {
+    write({ topic: "t" })
+    chmodSync(file, 0o644)
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    expect(getPushConfig(file)?.topic).toBe("t")
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("readable by other users"))
+  })
+
+  it("stays quiet for an owner-only config", () => {
+    write({ topic: "t" })
+    chmodSync(file, 0o600)
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    expect(getPushConfig(file)?.topic).toBe("t")
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it("never logs the topic value, which is a bearer secret", () => {
+    write({ topic: "has spaces so it is rejected" })
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    expect(getPushConfig(file)).toBeNull()
+    for (const call of spy.mock.calls) {
+      expect(String(call[0])).not.toContain("has spaces")
+    }
   })
 })
 

@@ -9,7 +9,7 @@ Any code change MUST account for its impact on existing tests. Before considerin
 3. If you added new behavior, add test coverage for it
 4. Never leave tests broken — fixing tests is part of the change, not a separate task
 
-Test files follow the pattern `src/**/__tests__/*.test.ts` and `server/__tests__/**/*.test.ts`.
+Test files follow the pattern `src/**/__tests__/*.test.ts`, `server/__tests__/**/*.test.ts`, and `electron/__tests__/*.test.ts`.
 
 ## Adding New API Routes
 
@@ -19,7 +19,7 @@ canonical ordered registry.
 
 ## External Session API (cogpit-sessions skill)
 
-Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. Key endpoints:
+Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. The packaged app binds an ephemeral port unless network access pins 19384, so resolve the port from `$COGPIT_PORT`, then `~/.cogpit/port` (written on start, removed on exit), then `19384`. Key endpoints:
 
 - `POST /api/create-and-send` — Start a new session with a message (responds in 5–15s)
 - `POST /api/send-message` — Send follow-up to an existing session (waits for full turn)
