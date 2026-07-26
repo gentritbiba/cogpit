@@ -7,7 +7,8 @@ import {
   getToolColor,
   detectPendingInteraction,
 } from "@/lib/parser"
-import type { ParsedSession, SubAgentMessage, TokenUsage } from "@/lib/types"
+import { buildTurns, findTurnStartIndices } from "@/lib/turnBuilder"
+import type { ParsedSession, RawMessage, SubAgentMessage, TokenUsage } from "@/lib/types"
 import {
   resetFixtureCounter,
   userMsg,
@@ -1053,6 +1054,116 @@ describe("parseSessionAppend", () => {
     const updated = parseSessionAppend(existing, newJsonl)
     expect(updated.stats.turnCount).toBe(2)
     expect(updated.stats.totalDurationMs).toBe(3500) // 1500 + 2000
+  })
+
+  // Sessions open bottom-first, so the loaded window regularly begins in the
+  // middle of a turn and contains no turn-starting user record at all.
+  describe("window with no turn-starting user record", () => {
+    function midTurnWindow(): string {
+      const toolId = "tail_tool"
+      return toJsonl([
+        textAssistant("working on it"),
+        toolUseAssistant("Bash", { command: "ls" }, toolId),
+        toolResultMsg(toolId, "ok"),
+        textAssistant("done step"),
+      ])
+    }
+
+    it("keeps the synthetic head turn when the appended line starts no turn", () => {
+      const existing = parseSession(midTurnWindow())
+      expect(existing.turns).toHaveLength(1)
+
+      // file-history-delta / ai-title / mode records produce no turn of their
+      // own; they must not take the head turn down with them.
+      const updated = parseSessionAppend(
+        existing,
+        JSON.stringify({ type: "file-history-delta", messageId: "fh-1" }),
+      )
+
+      expect(updated.turns).toHaveLength(1)
+      expect(updated.turns[0].assistantText).toContain("done step")
+    })
+
+    it("does not erode turns across repeated appends", () => {
+      let session = parseSession(midTurnWindow())
+      for (const line of [
+        JSON.stringify({ type: "file-history-delta", messageId: "fh-1" }),
+        JSON.stringify({ type: "ai-title", aiTitle: "Some title" }),
+        toJsonl([textAssistant("still going")]),
+      ]) {
+        session = parseSessionAppend(session, line)
+      }
+
+      expect(session.turns).toHaveLength(1)
+      expect(session.turns[0].assistantText).toEqual([
+        "working on it",
+        "done step",
+        "still going",
+      ])
+    })
+
+    it("keeps the head turn when late sub-agent progress targets it", () => {
+      const taskToolId = "task_head"
+      const existing = parseSession(toJsonl([
+        toolUseAssistant("Task", { prompt: "Research" }, taskToolId),
+        toolResultMsg(taskToolId, "Done"),
+        userMsg("Follow up"),
+        textAssistant("Sure"),
+      ]))
+      expect(existing.turns).toHaveLength(2)
+
+      const updated = parseSessionAppend(existing, toJsonl([
+        agentProgressMsg("agent-late", taskToolId, "assistant", [
+          { type: "text", text: "Late progress from agent" },
+        ]),
+      ]))
+
+      expect(updated.turns).toHaveLength(2)
+      expect(updated.turns[0].toolCalls.map((tc) => tc.id)).toEqual([taskToolId])
+    })
+  })
+})
+
+// ── findTurnStartIndices ────────────────────────────────────────────────
+
+describe("findTurnStartIndices", () => {
+  // parseSessionAppend trusts these indices to line up one-for-one with the
+  // turns buildTurns emits; if the two rules ever drift, appends silently drop
+  // or duplicate turns.
+  const sessions: Array<[string, string]> = [
+    ["simple", simpleSession()],
+    ["tool use", toolUseSession()],
+    ["thinking", thinkingSession()],
+    ["compaction", compactionSession()],
+    ["sub-agent", subAgentSession()],
+    ["agent tool", agentToolSession()],
+    ["background agent tool", backgroundAgentToolSession()],
+    ["mid-turn window (no user record)", toJsonl([
+      textAssistant("working on it"),
+      toolUseAssistant("Bash", { command: "ls" }, "t1"),
+      toolResultMsg("t1", "ok"),
+    ])],
+    ["window starting on a tool result", toJsonl([
+      toolResultMsg("t0", "orphan result"),
+      textAssistant("carrying on"),
+    ])],
+    ["no turns at all", toJsonl([turnDurationMsg(10), summaryMsg()])],
+  ]
+
+  it.each(sessions)("matches the turn count buildTurns produces for %s", (_label, jsonl) => {
+    const raw = parseSession(jsonl).rawMessages as RawMessage[]
+    expect(findTurnStartIndices(raw)).toHaveLength(buildTurns(raw).length)
+  })
+
+  it("points at the record that opens each turn", () => {
+    const jsonl = toJsonl([
+      textAssistant("mid-turn head"),
+      userMsg("First prompt"),
+      textAssistant("Answer"),
+      userMsg("Second prompt"),
+    ])
+    const raw = parseSession(jsonl).rawMessages as RawMessage[]
+    expect(findTurnStartIndices(raw)).toEqual([0, 1, 3])
   })
 })
 

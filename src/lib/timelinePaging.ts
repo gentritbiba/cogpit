@@ -15,6 +15,19 @@ export function isNearTop(scrollTop: number, clientHeight: number): boolean {
   return scrollTop < clientHeight * NEAR_TOP_VIEWPORTS
 }
 
+/**
+ * Whether the timeline should render its empty state instead of the list.
+ *
+ * An empty state renders no scroll content, so nothing is left to trigger a
+ * scroll-up load. A window that happens to parse to zero turns — a byte-window
+ * tail of nothing but tool results or metadata records — would therefore be
+ * stranded on "No turns in this session" forever. While older pages remain,
+ * keep the (empty) list mounted so paging chains until history arrives.
+ */
+export function shouldShowEmptyState(visibleTurnCount: number, hasMore: boolean): boolean {
+  return visibleTurnCount === 0 && !hasMore
+}
+
 export interface TimelineSnapshot {
   firstKey: string | undefined
   length: number

@@ -7,7 +7,7 @@ import type {
   ParseSessionOptions,
   UserContent,
 } from "./types"
-import { buildTurns } from "./turnBuilder"
+import { buildTurns, findTurnStartIndices } from "./turnBuilder"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { isCodexSessionText, parseCodexSession } from "./codex"
 import { isAssistantMessage } from "./messageTypeGuards"
@@ -121,80 +121,43 @@ export function parseSessionAppend(
   const existingRawMessages = existing.rawMessages as RawMessage[]
   const allRawMessages = [...existingRawMessages, ...newMessages]
 
-  // Find the raw message index where the last existing turn started.
-  // We pop the last turn and re-build from that point forward.
-  // This way, even for a 500-turn session, we only re-process ~1 turn's worth of messages.
-  let lastTurnStartIdx = existingRawMessages.length // default: start of new messages
-  let turnsToKeep = existing.turns.length > 0 ? existing.turns.length - 1 : 0
-  if (existing.turns.length > 0) {
-    // Walk backwards through existing raw messages to find the last non-meta
-    // user message (which starts a turn)
-    let userMsgCount = 0
-    for (let i = existingRawMessages.length - 1; i >= 0; i--) {
-      const msg = existingRawMessages[i]
-      if (msg.type === "user" && !msg.isMeta) {
-        const content = msg.message?.content
-        // Skip tool-result user messages
-        if (Array.isArray(content) && content.some((b: { type: string }) => b.type === "tool_result")) {
-          continue
-        }
-        userMsgCount++
-        if (userMsgCount === 1) {
-          lastTurnStartIdx = i
-          break
-        }
-      }
-    }
+  // Only the last turn can still change, so keep every turn before it and
+  // rebuild from where it started. Both the cut point and the keep-count come
+  // from `turnStarts` so they cannot disagree — even for a window that begins
+  // mid-turn (bottom-first loading) and therefore has no turn-starting user
+  // record to walk back to.
+  const turnStarts = findTurnStartIndices(existingRawMessages)
+  // Turns paged in above the loaded window have no raw messages behind them.
+  const historyTurnCount = Math.max(0, existing.turns.length - turnStarts.length)
+  let rebuildFromTurn = Math.max(0, turnStarts.length - 1)
 
-    // Check if new messages include progress events whose parentToolUseID
-    // belongs to an earlier turn (not the last one being rebuilt).  Claude
-    // Code can flush sub-agent progress events AFTER the parent turn's
-    // tool_result and even after the next turn has started.  When that
-    // happens we need to rebuild from the turn that owns the tool call so
-    // the sub-agent content block lands in the correct turn.
-    const progressParentIds = new Set<string>()
-    for (const msg of newMessages) {
-      if (msg.type === "progress") {
-        const parentId = (msg as typeof newMessages[0] & { parentToolUseID?: string }).parentToolUseID
-        if (parentId) progressParentIds.add(parentId)
-      }
+  // Claude Code can flush sub-agent progress events AFTER the parent turn's
+  // tool_result and even after the next turn has started. When that happens we
+  // rebuild from the turn that owns the tool call so the sub-agent content
+  // block lands in the correct turn.
+  const progressParentIds = new Set<string>()
+  for (const msg of newMessages) {
+    if (msg.type === "progress") {
+      const parentId = (msg as typeof newMessages[0] & { parentToolUseID?: string }).parentToolUseID
+      if (parentId) progressParentIds.add(parentId)
     }
+  }
 
-    if (progressParentIds.size > 0) {
-      // Walk earlier turns to see if any own the referenced tool calls
-      for (let t = existing.turns.length - 2; t >= 0; t--) {
-        const turn = existing.turns[t]
-        const ownsProgressParent = turn.toolCalls.some((tc) => progressParentIds.has(tc.id))
-        if (ownsProgressParent) {
-          // Need to rebuild from this earlier turn.  Find its start in rawMessages.
-          turnsToKeep = t
-          let found = 0
-          for (let i = 0; i < existingRawMessages.length; i++) {
-            const msg = existingRawMessages[i]
-            if (msg.type === "user" && !msg.isMeta) {
-              const content = msg.message?.content
-              if (Array.isArray(content) && content.some((b: { type: string }) => b.type === "tool_result")) {
-                continue
-              }
-              if (found === t) {
-                lastTurnStartIdx = i
-                break
-              }
-              found++
-            }
-          }
-          break
-        }
+  if (progressParentIds.size > 0) {
+    for (let t = rebuildFromTurn - 1; t >= 0; t--) {
+      const turn = existing.turns[historyTurnCount + t]
+      if (turn?.toolCalls.some((tc) => progressParentIds.has(tc.id))) {
+        rebuildFromTurn = t
+        break
       }
     }
   }
 
-  // Keep all turns before the rebuild point
-  const keptTurns = existing.turns.slice(0, turnsToKeep)
-
-  // Re-build turns from the last turn's start through all new messages
-  const tailMessages = allRawMessages.slice(lastTurnStartIdx)
-  const tailTurns = buildTurns(tailMessages)
+  // With no turns in the window at all, there is nothing to rebuild — parse
+  // the new messages on their own and keep everything already known.
+  const rebuildFrom = turnStarts[rebuildFromTurn] ?? existingRawMessages.length
+  const keptTurns = existing.turns.slice(0, historyTurnCount + rebuildFromTurn)
+  const tailTurns = buildTurns(allRawMessages.slice(rebuildFrom))
 
   const allTurns = [...keptTurns, ...tailTurns]
   const stats = computeStats(allTurns)

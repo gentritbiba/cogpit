@@ -4,6 +4,7 @@ import { useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
 import type { ParsedSession } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
+import { makeTurn } from "@/__tests__/fixtures"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ function renderState() {
 
 function getState(hook: ReturnType<typeof renderState>): SessionState {
   return hook.result.current[0]
+}
+
+function getSession(hook: ReturnType<typeof renderState>): ParsedSession {
+  const session = getState(hook).session
+  if (!session) throw new Error("expected a session to be loaded")
+  return session
 }
 
 function dispatch(hook: ReturnType<typeof renderState>, ...actions: Parameters<typeof hook.result.current[1]>) {
@@ -465,6 +472,94 @@ describe("useSessionState", () => {
       expect(getState(hook).session).toBe(session2)
       // activeTurnIndex should NOT be reset
       expect(getState(hook).activeTurnIndex).toBe(3)
+    })
+
+    // The live pipeline only ever knows the window the session opened with, so
+    // every live update carries just those turns. Without re-applying the
+    // paged-in history, one streamed line wipes everything scrolled up to.
+    it("keeps turns paged in above the live window", () => {
+      const hook = renderState()
+      const windowTurn = makeTurn({ id: "live-1", userMessage: "live prompt" })
+      dispatch(hook, {
+        type: "LOAD_SESSION",
+        session: makeSession({ turns: [windowTurn] }),
+        source: makeSource(),
+        isMobile: false,
+      })
+
+      const older = [makeTurn({ id: "old-1" }), makeTurn({ id: "old-2" })]
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: older })
+      expect(getSession(hook).turns.map((t) => t.id)).toEqual([
+        "old-1", "old-2", "live-1",
+      ])
+
+      // useLiveSession re-emits its window (here: the same turn, now with a
+      // tool result filled in) after every appended line.
+      const rebuiltWindowTurn = { ...windowTurn, assistantText: ["updated"] }
+      dispatch(hook, {
+        type: "UPDATE_SESSION",
+        session: makeSession({ turns: [rebuiltWindowTurn] }),
+      })
+
+      expect(getSession(hook).turns.map((t) => t.id)).toEqual([
+        "old-1", "old-2", "live-1",
+      ])
+      expect(getSession(hook).turns[2].assistantText).toEqual(["updated"])
+    })
+
+    it("re-stitches a boundary turn the live window cut in half", () => {
+      const hook = renderState()
+      // A window loaded mid-turn parses its first fragment with a null user
+      // message; prependTurns merges the older half into it.
+      const cutHead = makeTurn({ id: "live-1", userMessage: null, assistantText: ["second half"] })
+      dispatch(hook, {
+        type: "LOAD_SESSION",
+        session: makeSession({ turns: [cutHead] }),
+        source: makeSource(),
+        isMobile: false,
+      })
+      dispatch(hook, {
+        type: "SET_OLDER_TURNS",
+        turns: [makeTurn({ id: "old-1", userMessage: "the prompt", assistantText: ["first half"] })],
+      })
+      expect(getSession(hook).turns).toHaveLength(1)
+      expect(getSession(hook).turns[0].assistantText).toEqual(["first half", "second half"])
+
+      dispatch(hook, {
+        type: "UPDATE_SESSION",
+        session: makeSession({ turns: [{ ...cutHead, assistantText: ["second half", "more"] }] }),
+      })
+
+      expect(getSession(hook).turns).toHaveLength(1)
+      expect(getSession(hook).turns[0].userMessage).toBe("the prompt")
+      expect(getSession(hook).turns[0].assistantText).toEqual([
+        "first half", "second half", "more",
+      ])
+    })
+
+    it("drops paged-in history when a different session is loaded", () => {
+      const hook = renderState()
+      dispatch(hook, {
+        type: "LOAD_SESSION",
+        session: makeSession({ turns: [makeTurn({ id: "live-1" })] }),
+        source: makeSource(),
+        isMobile: false,
+      })
+      dispatch(hook, { type: "SET_OLDER_TURNS", turns: [makeTurn({ id: "old-1" })] })
+
+      const nextWindowTurn = makeTurn({ id: "other-1" })
+      dispatch(hook, {
+        type: "LOAD_SESSION",
+        session: makeSession({ sessionId: "other", turns: [nextWindowTurn] }),
+        source: makeSource({ fileName: "other.jsonl" }),
+        isMobile: false,
+      })
+      dispatch(hook, {
+        type: "UPDATE_SESSION",
+        session: makeSession({ sessionId: "other", turns: [nextWindowTurn] }),
+      })
+
+      expect(getSession(hook).turns.map((t) => t.id)).toEqual(["other-1"])
     })
   })
 

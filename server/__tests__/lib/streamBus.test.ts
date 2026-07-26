@@ -4,6 +4,7 @@ import {
   publish,
   completeMessage,
   clear,
+  publishError,
   getSnapshot,
   subscribe,
   _resetForTests,
@@ -241,4 +242,23 @@ describe("streamBus", () => {
     expect(block.blockType).toBe("thinking")
     expect(block.text).toBe("orphan thinking")
   })
+
+  it("delivers a turn_error to subscribers, including right after a clear", () => {
+    // sdk-session clears the stream before reporting a failed turn, and clear()
+    // runs maybeGc — a subscribed session must survive that and still receive
+    // the error, or a failed turn is silent for the one client watching it.
+    const events: StreamBusEvent[] = []
+    const unsubscribe = subscribe(SID, (ev) => events.push(ev))
+
+    clear(SID)
+    publishError(SID, "CLI exited with code 1")
+
+    expect(events).toContainEqual({ type: "turn_error", message: "CLI exited with code 1" })
+    unsubscribe()
+  })
+
+  it("drops a turn_error when nobody is watching the session", () => {
+    expect(() => publishError("nobody-home", "boom")).not.toThrow()
+  })
+
 })

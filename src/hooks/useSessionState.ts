@@ -1,11 +1,20 @@
 import { useReducer } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
+import type { AgentKind } from "@/lib/sessionSource"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { MobileTab } from "@/components/MobileNav"
 
 export interface SessionState {
   session: ParsedSession | null
+  /**
+   * Turns exactly as the live pipeline last emitted them. Sessions open
+   * bottom-first, so this is only the loaded tail window — never the history
+   * paged in above it.
+   */
+  windowTurns: Turn[]
+  /** Older pages loaded by scroll-up paging, oldest first, unstitched. */
+  olderTurns: Turn[]
   sessionSource: SessionSource | null
   /** dirName of a pending (not-yet-created) session, set before first message */
   pendingDirName: string | null
@@ -39,7 +48,7 @@ export type SessionAction =
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
   | { type: "UPDATE_SESSION"; session: ParsedSession }
-  | { type: "PREPEND_TURNS"; turns: Turn[] }
+  | { type: "SET_OLDER_TURNS"; turns: Turn[] }
   | { type: "RELOAD_SESSION_CONTENT"; session: ParsedSession; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
   | { type: "GUARD_MOBILE_TAB"; hasSession: boolean; hasTeam: boolean }
@@ -53,6 +62,8 @@ export type SessionAction =
 
 const initialState: SessionState = {
   session: null,
+  windowTurns: [],
+  olderTurns: [],
   sessionSource: null,
   pendingDirName: null,
   pendingCwd: null,
@@ -71,12 +82,35 @@ const initialState: SessionState = {
   dashboardProject: null,
 }
 
+/**
+ * Rebuilds the rendered session from the live window plus the history paged in
+ * above it. The live pipeline re-emits only its own window on every appended
+ * line, so the paged-in turns have to be re-applied each time or one streamed
+ * line wipes everything the user scrolled up to. `prependTurns` dedupes by id
+ * and re-stitches the turn a page boundary cut in half, so replaying it is
+ * safe.
+ */
+function composeSession(
+  session: ParsedSession,
+  windowTurns: Turn[],
+  olderTurns: Turn[],
+  agentKind?: AgentKind,
+): ParsedSession {
+  const turns = prependTurns(windowTurns, olderTurns, agentKind)
+  return turns === session.turns ? session : { ...session, turns }
+}
+
+/** Opening a different session discards the paging state of the previous one. */
+function openSession(session: ParsedSession | null) {
+  return { session, windowTurns: session?.turns ?? [], olderTurns: [] }
+}
+
 function sessionReducer(state: SessionState, action: SessionAction): SessionState {
   switch (action.type) {
     case "LOAD_SESSION":
       return {
         ...state,
-        session: action.session,
+        ...openSession(action.session),
         sessionSource: action.source,
         pendingDirName: null,
         pendingCwd: null,
@@ -96,7 +130,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "GO_HOME":
       return {
         ...state,
-        session: null,
+        ...openSession(null),
         sessionSource: null,
         pendingDirName: null,
         pendingCwd: null,
@@ -115,7 +149,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "LOAD_SESSION_FROM_TEAM":
       return {
         ...state,
-        session: action.session,
+        ...openSession(action.session),
         sessionSource: action.source,
         activeTurnIndex: null,
         searchQuery: "",
@@ -130,7 +164,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "SWITCH_TEAM_MEMBER":
       return {
         ...state,
-        session: action.session,
+        ...openSession(action.session),
         sessionSource: action.source,
         activeTurnIndex: null,
         searchQuery: "",
@@ -180,29 +214,35 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     }
 
     case "UPDATE_SESSION":
-      return { ...state, session: action.session }
-
-    case "PREPEND_TURNS": {
-      if (!state.session) return state
-      const turns = prependTurns(
-        state.session.turns,
-        action.turns,
-        state.sessionSource?.agentKind,
-      )
-      if (turns === state.session.turns) return state
       return {
         ...state,
-        session: {
-          ...state.session,
-          turns,
-        },
+        windowTurns: action.session.turns,
+        session: composeSession(
+          action.session,
+          action.session.turns,
+          state.olderTurns,
+          state.sessionSource?.agentKind,
+        ),
+      }
+
+    case "SET_OLDER_TURNS": {
+      if (!state.session || action.turns === state.olderTurns) return state
+      return {
+        ...state,
+        olderTurns: action.turns,
+        session: composeSession(
+          state.session,
+          state.windowTurns,
+          action.turns,
+          state.sessionSource?.agentKind,
+        ),
       }
     }
 
     case "RELOAD_SESSION_CONTENT":
       return {
         ...state,
-        session: action.session,
+        ...openSession(action.session),
         sessionSource: action.source,
         sessionChangeKey: state.sessionChangeKey + 1,
       }
@@ -237,7 +277,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "INIT_PENDING_SESSION":
       return {
         ...state,
-        session: null,
+        ...openSession(null),
         sessionSource: null,
         pendingDirName: action.dirName,
         pendingCwd: action.cwd ?? null,
@@ -256,7 +296,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "FINALIZE_SESSION":
       return {
         ...state,
-        session: action.session,
+        ...openSession(action.session),
         sessionSource: action.source,
         pendingDirName: null,
         pendingCwd: null,

@@ -183,6 +183,7 @@ describe("useSessionActions", () => {
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
         source: cachedSource,
+        olderTurns: [],
         nextByteOffset: 100,
         hasMore: false,
         lastAccessed: Date.now(),
@@ -347,6 +348,7 @@ describe("useSessionActions", () => {
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
         source: cachedSource,
+        olderTurns: [],
         nextByteOffset: 100,
         hasMore: false,
         lastAccessed: Date.now(),
@@ -523,6 +525,7 @@ describe("useSessionActions", () => {
       vi.mocked(sessionCache.get).mockReturnValue({
         parsed: session,
         source: { dirName: "d", fileName: "f.jsonl", rawText: "cached" },
+        olderTurns: [],
         nextByteOffset: 100,
         hasMore: false,
         lastAccessed: Date.now(),

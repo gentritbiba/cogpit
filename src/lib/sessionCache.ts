@@ -1,8 +1,14 @@
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession, Turn } from "@/lib/types"
 import { getActiveDeviceId } from "@/lib/device"
 
 export interface CacheEntry {
   parsed: ParsedSession
+  /**
+   * Turns paged in above the loaded window, oldest first. Stored next to
+   * `nextByteOffset` so the cursor and the history it consumed can never
+   * disagree — a cursor without its pages leaves an ungettable gap.
+   */
+  olderTurns: Turn[]
   source: {
     dirName: string
     fileName: string
@@ -54,6 +60,7 @@ class SessionCache {
 
     this.cache.set(key, {
       parsed,
+      olderTurns: [],
       source: {
         dirName,
         fileName,
@@ -73,6 +80,7 @@ class SessionCache {
     if (!entry) return
 
     if (partial.parsed !== undefined) entry.parsed = partial.parsed
+    if (partial.olderTurns !== undefined) entry.olderTurns = partial.olderTurns
     if (partial.nextByteOffset !== undefined) entry.nextByteOffset = partial.nextByteOffset
     if (partial.hasMore !== undefined) entry.hasMore = partial.hasMore
     if (partial.lastAccessed !== undefined) entry.lastAccessed = partial.lastAccessed

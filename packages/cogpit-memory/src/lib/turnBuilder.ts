@@ -249,6 +249,49 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
 
 // ── Build Turns State Machine ────────────────────────────────────────────────
 
+/**
+ * Raw-message index where each turn `buildTurns` would produce begins, so
+ * `starts[i]` is the index that produces `turns[i]`.
+ *
+ * Incremental appends need both a rebuild cut point and the number of turns
+ * that precede it. Deriving them separately is how an append drifts out of
+ * sync with a full re-parse, so both come from this one pass.
+ *
+ * Mirrors the turn-creation rule of `buildTurns` below — a parser test asserts
+ * the two agree, so keep them in lockstep.
+ */
+export function findTurnStartIndices(messages: RawMessage[]): number[] {
+  const starts: number[] = []
+  let hasOpenTurn = false
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+
+    if (isSummaryMessage(msg) || isCompactBoundary(msg)) {
+      hasOpenTurn = false
+      continue
+    }
+
+    if (isUserMessage(msg) && !msg.isMeta) {
+      const content = msg.message.content
+      const continuesOpenTurn = hasOpenTurn
+        && Array.isArray(content)
+        && content.some((b) => b.type === "tool_result")
+      if (continuesOpenTurn) continue
+      starts.push(i)
+      hasOpenTurn = true
+      continue
+    }
+
+    if (isAssistantMessage(msg) && !hasOpenTurn) {
+      starts.push(i)
+      hasOpenTurn = true
+    }
+  }
+
+  return starts
+}
+
 export function buildTurns(messages: RawMessage[]): Turn[] {
   const turns: Turn[] = []
   let current: Turn | null = null

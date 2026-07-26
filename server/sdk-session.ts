@@ -10,35 +10,112 @@ import type {
   Query,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
+import { execFileSync } from "node:child_process"
+import { accessSync, constants as fsConstants } from "node:fs"
 import { createRequire } from "node:module"
-import { dirname, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import * as streamBus from "./lib/streamBus"
 
-// The SDK ships the Claude CLI as a native binary inside a platform-specific
-// optional package (e.g. @anthropic-ai/claude-agent-sdk-darwin-arm64) — there
-// is no cli.js next to sdk.mjs anymore. Outside Electron the SDK's own
-// resolution works, so we pass undefined. In a packaged Electron app the
-// binary resolves to a path inside app.asar, which cannot be spawned (asar is
-// only virtualized inside Electron), so we rewrite to the unpacked copy.
-export function resolveClaudeCliPath(
-  resolveModule: (id: string) => string,
-): string | undefined {
+const CLI_BIN_NAME = process.platform === "win32" ? "claude.exe" : "claude"
+
+/** First executable named `claude` on PATH, if any. */
+function findClaudeOnPath(): string | undefined {
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue
+    const candidate = join(dir, CLI_BIN_NAME)
+    try {
+      accessSync(candidate, fsConstants.X_OK)
+      return candidate
+    } catch {
+      // Not here — keep walking PATH.
+    }
+  }
+  return undefined
+}
+
+/** `2.1.220 (Claude Code)` -> `[2, 1, 220]`; undefined if the binary won't answer. */
+function readCliVersion(binPath: string): number[] | undefined {
   try {
-    const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    const binName = process.platform === "win32" ? "claude.exe" : "claude"
-    const binPath = join(dirname(resolveModule(`${platformPkg}/package.json`)), binName)
-    return binPath.includes("/app.asar/")
-      ? binPath.replace("/app.asar/", "/app.asar.unpacked/")
-      : undefined
+    const output = execFileSync(binPath, ["--version"], {
+      encoding: "utf-8",
+      timeout: 5_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+    const match = output.match(/(\d+)\.(\d+)\.(\d+)/)
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
   } catch {
     return undefined
   }
 }
 
-const CLAUDE_CLI_PATH: string | undefined = resolveClaudeCliPath((id) =>
-  createRequire(import.meta.url).resolve(id),
-)
+function isAtLeast(version: number[], floor: number[]): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    if (version[i] !== floor[i]) return version[i] > floor[i]
+  }
+  return true
+}
+
+export interface ClaudeCliProbes {
+  findOnPath?: () => string | undefined
+  readVersion?: (binPath: string) => number[] | undefined
+}
+
+// The SDK ships the Claude CLI as a native binary inside a platform-specific
+// optional package (e.g. @anthropic-ai/claude-agent-sdk-darwin-arm64) — there
+// is no cli.js next to sdk.mjs anymore. That vendored copy lags whatever the
+// user has installed, and its model catalog is what feeds our model picker, so
+// prefer the CLI on PATH whenever it is at least as new. Failing that: inside a
+// packaged Electron app the vendored binary resolves into app.asar, which
+// cannot be spawned (asar is only virtualized inside Electron), so point at the
+// unpacked copy; everywhere else the SDK's own resolution already works.
+export function resolveClaudeCliPath(
+  resolveModule: (id: string) => string,
+  probes: ClaudeCliProbes = {},
+): string | undefined {
+  const findOnPath = probes.findOnPath ?? findClaudeOnPath
+  const readVersion = probes.readVersion ?? readCliVersion
+
+  let vendored: string | undefined
+  try {
+    const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+    vendored = join(dirname(resolveModule(`${platformPkg}/package.json`)), CLI_BIN_NAME)
+  } catch {
+    vendored = undefined
+  }
+  const insideAsar = vendored?.includes("/app.asar/") ?? false
+  const vendoredExecutable = insideAsar
+    ? vendored!.replace("/app.asar/", "/app.asar.unpacked/")
+    : vendored
+  const fallback = insideAsar ? vendoredExecutable : undefined
+
+  const installed = findOnPath()
+  if (!installed) return fallback
+  const installedVersion = readVersion(installed)
+  if (!installedVersion) return fallback
+
+  // Never downgrade: a CLI older than the one the SDK was built against can
+  // break the control protocol, not just the model list.
+  const vendoredVersion = vendoredExecutable ? readVersion(vendoredExecutable) : undefined
+  if (vendoredVersion && !isAtLeast(installedVersion, vendoredVersion)) return fallback
+
+  return installed
+}
+
+let cliPathProbed = false
+let cliPath: string | undefined
+
+/**
+ * Path to the Claude CLI to spawn, or undefined to let the SDK resolve it.
+ * Memoized — resolution shells out to `claude --version`.
+ */
+export function claudeCliPath(): string | undefined {
+  if (!cliPathProbed) {
+    cliPath = resolveClaudeCliPath((id) => createRequire(import.meta.url).resolve(id))
+    cliPathProbed = true
+  }
+  return cliPath
+}
 
 /**
  * Parse COGPIT_STREAM_PARTIAL as an opt-out kill switch. Streaming stays on
@@ -236,7 +313,7 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     effort: effort as Options["effort"],
     enableFileCheckpointing: true,
     persistSession: true,
-    pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+    pathToClaudeCodeExecutable: claudeCliPath(),
     // Token-level streaming: raw Anthropic stream events are forwarded to
     // the stream bus so the UI can render text as it is generated.
     includePartialMessages: streamingEnabled(),
@@ -291,6 +368,13 @@ function buildQueryOptions(state: SDKSessionState, opts: {
 
 // ── Process SDK events ───────────────────────────────────────────────
 
+/** Human-readable text for an errored `result` message. */
+function describeErrorResult(result: Record<string, unknown>): string {
+  if (result.result != null) return String(result.result)
+  const subtype = result.subtype
+  return `Claude returned an error${subtype ? ` (${String(subtype)})` : ""}`
+}
+
 function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
   if (msg.type === "result") {
     // A result is a turn boundary, not necessarily the end of the SDK query.
@@ -298,8 +382,16 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
     // stream remains available for queued follow-up turns.
     state.running = false
     streamBus.clear(state.sessionId)
-    state.onResult?.(msg as unknown as Record<string, unknown>)
-    state.onResult = null
+    const result = msg as unknown as Record<string, unknown>
+    if (state.onResult) {
+      state.onResult(result)
+      state.onResult = null
+    } else if (result.is_error) {
+      // Nobody is holding an HTTP response for this turn (the enqueue path
+      // answers 200 immediately), so push the failure to the client instead of
+      // letting the turn stop with no explanation.
+      streamBus.publishError(state.sessionId, describeErrorResult(result))
+    }
   }
 
   if (msg.type === "stream_event") {
@@ -440,14 +532,16 @@ function runQuery(state: SDKSessionState, prompt: string, opts: {
         processSDKEvent(state, msg)
       }
     } catch (err) {
+      const base = String(err)
+      const detail = state.stderr?.trim()
+      // Append captured stderr so the surfaced error is verbose enough to
+      // diagnose (the SDK's own message is just "exited with code 1").
+      const result = detail && !base.includes(detail) ? `${base}\n\n${detail}` : base
       if (state.onResult) {
-        const base = String(err)
-        const detail = state.stderr?.trim()
-        // Append captured stderr so the surfaced error is verbose enough to
-        // diagnose (the SDK's own message is just "exited with code 1").
-        const result = detail && !base.includes(detail) ? `${base}\n\n${detail}` : base
         state.onResult({ type: "result", is_error: true, result })
         state.onResult = null
+      } else {
+        streamBus.publishError(state.sessionId, result)
       }
     } finally {
       // A newer query can already be running for this session — either a resume
@@ -1035,7 +1129,7 @@ export async function rewindClaudeFiles(
       cwd,
       resume: sessionId,
       enableFileCheckpointing: true,
-      pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+      pathToClaudeCodeExecutable: claudeCliPath(),
     },
   })
   try {

@@ -214,6 +214,28 @@ describe("useLiveSession", () => {
     expect(result.current.isLive).toBe(false)
   })
 
+  it("surfaces a turn_error and clears it when the next turn produces tokens", () => {
+    // The enqueue path answers 200 before the turn runs, so a later failure has
+    // no HTTP response to ride back on — it arrives over the SSE stream instead.
+    const source: SessionSource = {
+      dirName: "dir",
+      fileName: "file.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "turn_error", message: "CLI exited with code 1" })
+    })
+    expect(result.current.turnError).toBe("CLI exited with code 1")
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "stream_delta", events: [] })
+    })
+    expect(result.current.turnError).toBeNull()
+  })
+
   it("clears the compacting flag when the stream goes stale", () => {
     // The server announces the start of a compaction but never its end, so an
     // interrupted or failed compaction left "Compressing context…" pinned on

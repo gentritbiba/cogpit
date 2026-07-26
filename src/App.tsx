@@ -75,8 +75,8 @@ export default function App() {
   const [state, dispatch] = useSessionState()
   const { parse: workerParse, append: workerAppend } = useParserWorker()
 
-  const handlePrependTurns = useCallback((olderTurns: Turn[]) => {
-    dispatch({ type: "PREPEND_TURNS", turns: olderTurns })
+  const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
+    dispatch({ type: "SET_OLDER_TURNS", turns: olderTurns })
   }, [dispatch])
 
   // Stable prefetch callback bound to the current worker. Used by sidebar rows
@@ -93,7 +93,7 @@ export default function App() {
     fileName: state.sessionSource?.fileName ?? null,
     sessionChangeKey: state.sessionChangeKey,
     workerParse,
-    onPrependTurns: handlePrependTurns,
+    onOlderTurns: handleOlderTurns,
   })
 
   // While in-session search is active, hydrate the full transcript in the
@@ -270,7 +270,7 @@ export default function App() {
   // duplicate worker parse on every source change (the session was already
   // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting, streamingOverlay } = useLiveSession(
+  const { isLive, sseState, isCompacting, streamingOverlay, turnError } = useLiveSession(
     state.sessionSource,
     (updated) => {
       startTransition(() => {
@@ -708,6 +708,7 @@ export default function App() {
     isLive,
     sseState,
     isCompacting,
+    turnError,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -729,7 +730,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState, isCompacting,
+    isLive, sseState, isCompacting, turnError,
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,

@@ -50,6 +50,8 @@ export interface SessionContextValue {
   sseState: SseConnectionState
   /** Whether the session is currently compacting (in progress) */
   isCompacting: boolean
+  /** A turn that failed with no HTTP response waiting on it (null when none) */
+  turnError: string | null
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

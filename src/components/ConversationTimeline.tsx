@@ -1,6 +1,7 @@
 import { useMemo, memo, type RefObject } from "react"
 import { VirtualizedTimeline } from "./timeline/VirtualizedTimeline"
 import { matchesSearch } from "@/lib/timelineHelpers"
+import { shouldShowEmptyState } from "@/lib/timelinePaging"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { SessionImageGalleryProvider } from "./timeline/SessionImageGallery"
@@ -37,9 +38,15 @@ export const ConversationTimeline = memo(function ConversationTimeline({
     [allTurns, searchQuery]
   )
 
+  // A search that matches nothing is not a dead end: App hydrates the rest of
+  // the transcript in the background while a query is active.
+  const showEmptyState = searchQuery
+    ? filteredTurns.length === 0
+    : shouldShowEmptyState(filteredTurns.length, hasMore ?? false)
+
   return (
     <SessionImageGalleryProvider>
-      {filteredTurns.length === 0 ? (
+      {showEmptyState ? (
         <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
           {searchQuery ? "No turns match your search." : "No turns in this session."}
         </div>

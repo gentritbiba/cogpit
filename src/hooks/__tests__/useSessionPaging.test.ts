@@ -28,26 +28,34 @@ function beforeResponse(overrides: Record<string, unknown> = {}) {
   )
 }
 
-const olderTurns = [{ id: "old-1" }] as unknown as Turn[]
+const olderTurns = [{ id: "old-1", userMessage: "old" }] as unknown as Turn[]
 const parsed = { turns: olderTurns } as unknown as ParsedSession
 
 function cachedEntry(overrides: Record<string, unknown> = {}) {
-  return { hasMore: true, nextByteOffset: 500, ...overrides } as ReturnType<typeof sessionCache.get>
+  return {
+    parsed,
+    hasMore: true,
+    nextByteOffset: 500,
+    olderTurns: [],
+    source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "" },
+    lastAccessed: 0,
+    ...overrides,
+  } as ReturnType<typeof sessionCache.get>
 }
 
 function setup(props: Partial<Parameters<typeof useSessionPaging>[0]> = {}) {
-  const onPrependTurns = vi.fn()
+  const onOlderTurns = vi.fn()
   const workerParse = vi.fn(async () => parsed)
   const initial = {
     dirName: "-dir" as string | null,
     fileName: "sess.jsonl" as string | null,
     sessionChangeKey: 1,
     workerParse,
-    onPrependTurns,
+    onOlderTurns,
     ...props,
   }
   const hook = renderHook((p) => useSessionPaging(p), { initialProps: initial })
-  return { ...hook, onPrependTurns, workerParse, initial }
+  return { ...hook, onOlderTurns, workerParse, initial }
 }
 
 beforeEach(() => {
@@ -69,7 +77,7 @@ describe("useSessionPaging", () => {
 
   it("loads an older page and prepends parsed turns", async () => {
     mockAuthFetch.mockResolvedValue(beforeResponse())
-    const { result, onPrependTurns, workerParse } = setup()
+    const { result, onOlderTurns, workerParse } = setup()
 
     let added = 0
     await act(async () => {
@@ -78,11 +86,12 @@ describe("useSessionPaging", () => {
 
     expect(mockAuthFetch).toHaveBeenCalledWith("/api/sessions/-dir/sess.jsonl?before=500&count=30")
     expect(workerParse).toHaveBeenCalledWith('{"h":1}\n{"l":1}\n{"l":2}')
-    expect(onPrependTurns).toHaveBeenCalledWith(olderTurns)
+    expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
     expect(added).toBe(1)
     expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
       hasMore: true,
       nextByteOffset: 100,
+      olderTurns,
     })
     expect(result.current.hasMore).toBe(true)
     expect(result.current.isLoadingOlder).toBe(false)
@@ -114,13 +123,13 @@ describe("useSessionPaging", () => {
 
   it("treats an empty page as exhausted and does not prepend", async () => {
     mockAuthFetch.mockResolvedValue(beforeResponse({ lines: [], hasMore: true }))
-    const { result, onPrependTurns } = setup()
+    const { result, onOlderTurns } = setup()
 
     await act(async () => {
       expect(await result.current.loadMore()).toBe(0)
     })
 
-    expect(onPrependTurns).not.toHaveBeenCalled()
+    expect(onOlderTurns).not.toHaveBeenCalled()
     expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
       hasMore: false,
       nextByteOffset: 100,
@@ -140,12 +149,12 @@ describe("useSessionPaging", () => {
 
   it("ignores failed responses", async () => {
     mockAuthFetch.mockResolvedValue(new Response("nope", { status: 500 }))
-    const { result, onPrependTurns } = setup()
+    const { result, onOlderTurns } = setup()
 
     await act(async () => {
       expect(await result.current.loadMore()).toBe(0)
     })
-    expect(onPrependTurns).not.toHaveBeenCalled()
+    expect(onOlderTurns).not.toHaveBeenCalled()
     expect(result.current.isLoadingOlder).toBe(false)
   })
 
@@ -177,7 +186,7 @@ describe("useSessionPaging", () => {
     mockAuthFetch.mockImplementation(
       () => new Promise<Response>((resolve) => { release = resolve }),
     )
-    const { result, rerender, onPrependTurns, initial } = setup()
+    const { result, rerender, onOlderTurns, initial } = setup()
 
     let pending: Promise<number>
     act(() => {
@@ -192,11 +201,13 @@ describe("useSessionPaging", () => {
       expect(await pending).toBe(0)
     })
 
-    expect(onPrependTurns).not.toHaveBeenCalled()
-    // The stale page still updates the old session's cache entry (correct data).
+    expect(onOlderTurns).not.toHaveBeenCalled()
+    // The stale page is still banked on the old session's entry, cursor and
+    // turns together, so reopening it picks up where this left off.
     expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
       hasMore: true,
       nextByteOffset: 100,
+      olderTurns,
     })
   })
 
@@ -205,7 +216,7 @@ describe("useSessionPaging", () => {
     mockAuthFetch.mockImplementation(
       () => new Promise<Response>((resolve) => { release = resolve }),
     )
-    const { result, rerender, onPrependTurns, initial } = setup()
+    const { result, rerender, onOlderTurns, initial } = setup()
 
     let pending: Promise<number>
     act(() => {
@@ -219,7 +230,7 @@ describe("useSessionPaging", () => {
       expect(await pending).toBe(0)
     })
 
-    expect(onPrependTurns).not.toHaveBeenCalled()
+    expect(onOlderTurns).not.toHaveBeenCalled()
   })
 
   it("resyncs hasMore from the cache when the session reloads in place", () => {
@@ -229,5 +240,30 @@ describe("useSessionPaging", () => {
     mockGet.mockReturnValue(cachedEntry({ hasMore: false }))
     rerender({ ...initial, sessionChangeKey: 2 })
     expect(result.current.hasMore).toBe(false)
+  })
+
+  it("restores history the cache already paged in", () => {
+    mockGet.mockReturnValue(cachedEntry({ olderTurns, nextByteOffset: 100 }))
+    const { onOlderTurns } = setup()
+    expect(onOlderTurns).toHaveBeenCalledWith(olderTurns)
+  })
+
+  it("accumulates each page onto the history already banked", async () => {
+    const previous = [{ id: "old-0", userMessage: "older" }] as unknown as Turn[]
+    mockGet.mockReturnValue(cachedEntry({ olderTurns: previous }))
+    mockAuthFetch.mockResolvedValue(beforeResponse())
+    const { result, onOlderTurns } = setup()
+
+    await act(async () => {
+      await result.current.loadMore()
+    })
+
+    // The new (older) page lands in front of what was already loaded.
+    expect(onOlderTurns).toHaveBeenLastCalledWith([...olderTurns, ...previous])
+    expect(mockUpdate).toHaveBeenCalledWith("-dir", "sess.jsonl", {
+      hasMore: true,
+      nextByteOffset: 100,
+      olderTurns: [...olderTurns, ...previous],
+    })
   })
 })

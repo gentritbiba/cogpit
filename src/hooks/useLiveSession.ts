@@ -41,6 +41,9 @@ export function useLiveSession(
   const [isLive, setIsLive] = useState(false)
   const [sseState, setSseState] = useState<SseConnectionState>("disconnected")
   const [isCompacting, setIsCompacting] = useState(false)
+  // A turn that failed with no HTTP response waiting on it (see
+  // streamBus.publishError). Cleared as soon as a new turn produces tokens.
+  const [turnError, setTurnError] = useState<string | null>(null)
   // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
   // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
   const [streamingOverlay, setStreamingOverlay] = useState<StreamingOverlay>(EMPTY_OVERLAY)
@@ -267,7 +270,11 @@ export function useLiveSession(
         } else if (data.type === "stream_delta") {
           setIsLive(true)
           resetStaleTimer()
+          // Tokens are flowing again — whatever failed before is now history.
+          setTurnError(null)
           setOverlay(applyDeltas(overlayRef.current, data.events ?? []))
+        } else if (data.type === "turn_error") {
+          setTurnError(typeof data.message === "string" ? data.message : "The turn failed")
         } else if (data.type === "stream_clear") {
           clearOverlay()
         } else if (data.type === "lines" && data.lines.length > 0) {
@@ -317,5 +324,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, rawText, watchOffset])
 
-  return { isLive, sseState, isCompacting, streamingOverlay }
+  return { isLive, sseState, isCompacting, streamingOverlay, turnError }
 }

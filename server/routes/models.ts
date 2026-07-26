@@ -1,7 +1,6 @@
-import { createRequire } from "node:module"
 import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { UseFn } from "../http"
-import { resolveClaudeCliPath } from "../sdk-session"
+import { claudeCliPath } from "../sdk-session"
 import { codexAppServer } from "../codex-app-server"
 
 /** Option shape consumed by the frontend model dropdowns. */
@@ -217,10 +216,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   })
 }
 
-const CLAUDE_CLI_PATH: string | undefined = resolveClaudeCliPath((id) =>
-  createRequire(import.meta.url).resolve(id),
-)
-
 /**
  * Ask the Claude Code CLI (via the agent SDK) which models it currently
  * supports. Spawns a short-lived query solely for the supportedModels()
@@ -238,7 +233,7 @@ async function fetchClaudeModels(): Promise<ModelOption[] | null> {
       options: {
         abortController: abort,
         maxTurns: 1,
-        pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+        pathToClaudeCodeExecutable: claudeCliPath(),
       },
     })
     const models = await withTimeout(q.supportedModels(), FETCH_TIMEOUT_MS, "claude supportedModels")

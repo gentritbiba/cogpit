@@ -1,14 +1,9 @@
-import { createRequire } from "node:module"
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { UseFn } from "../http"
-import { resolveClaudeCliPath } from "../sdk-session"
+import { claudeCliPath } from "../sdk-session"
 
 const CACHE_TTL_MS = 5 * 60 * 1000
 const CONTROL_TIMEOUT_MS = 20_000
-
-const CLAUDE_CLI_PATH = resolveClaudeCliPath((id) =>
-  createRequire(import.meta.url).resolve(id),
-)
 
 interface ClaudeRuntimeSnapshot {
   available: true
@@ -70,7 +65,7 @@ async function getClaudeRuntimeSnapshot(force = false): Promise<ClaudeRuntimeSna
       options: {
         abortController: abort,
         maxTurns: 1,
-        pathToClaudeCodeExecutable: CLAUDE_CLI_PATH,
+        pathToClaudeCodeExecutable: claudeCliPath(),
       },
     })
 

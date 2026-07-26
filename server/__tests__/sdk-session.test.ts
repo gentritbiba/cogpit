@@ -129,6 +129,7 @@ vi.mock("../lib/streamBus", () => ({
   publish: vi.fn(),
   publishCompleteMessage: vi.fn(),
   completeMessage: vi.fn(),
+  publishError: vi.fn(),
   clear: vi.fn(),
   getSnapshot: vi.fn(() => null),
   subscribe: vi.fn(() => () => {}),
@@ -174,31 +175,84 @@ afterEach(async () => {
 describe("resolveClaudeCliPath", () => {
   const binName = process.platform === "win32" ? "claude.exe" : "claude"
   const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+  const devResolve = (id: string) => `/Users/me/app/node_modules/${id}`
+  const asarResolve = (id: string) =>
+    `/Applications/Cogpit.app/Contents/Resources/app.asar/node_modules/${id}`
+  const unpackedBin = `/Applications/Cogpit.app/Contents/Resources/app.asar.unpacked/node_modules/${platformPkg}/${binName}`
+  const installedBin = `/usr/local/bin/${binName}`
+  /** No CLI on PATH — the pre-existing vendored-binary behavior. */
+  const noneOnPath = { findOnPath: () => undefined, readVersion: () => undefined }
 
   it("returns undefined outside asar so the SDK resolves its own native binary", async () => {
     const { resolveClaudeCliPath } = await loadModule()
-    const result = resolveClaudeCliPath(
-      (id) => `/Users/me/app/node_modules/${id}`,
-    )
-    expect(result).toBeUndefined()
+    expect(resolveClaudeCliPath(devResolve, noneOnPath)).toBeUndefined()
   })
 
   it("rewrites app.asar paths to app.asar.unpacked", async () => {
     const { resolveClaudeCliPath } = await loadModule()
-    const result = resolveClaudeCliPath(
-      (id) => `/Applications/Cogpit.app/Contents/Resources/app.asar/node_modules/${id}`,
-    )
-    expect(result).toBe(
-      `/Applications/Cogpit.app/Contents/Resources/app.asar.unpacked/node_modules/${platformPkg}/${binName}`,
-    )
+    expect(resolveClaudeCliPath(asarResolve, noneOnPath)).toBe(unpackedBin)
   })
 
   it("returns undefined when the platform package cannot be resolved", async () => {
     const { resolveClaudeCliPath } = await loadModule()
     const result = resolveClaudeCliPath(() => {
       throw new Error("Cannot find module")
+    }, noneOnPath)
+    expect(result).toBeUndefined()
+  })
+
+  it("prefers the installed CLI when it is newer than the vendored binary", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(devResolve, {
+      findOnPath: () => installedBin,
+      readVersion: (bin) => (bin === installedBin ? [2, 1, 220] : [2, 1, 215]),
+    })
+    expect(result).toBe(installedBin)
+  })
+
+  it("prefers the installed CLI when it matches the vendored version", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(devResolve, {
+      findOnPath: () => installedBin,
+      readVersion: () => [2, 1, 215],
+    })
+    expect(result).toBe(installedBin)
+  })
+
+  it("falls back to the vendored binary when the installed CLI is older", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(devResolve, {
+      findOnPath: () => installedBin,
+      readVersion: (bin) => (bin === installedBin ? [2, 0, 9] : [2, 1, 215]),
     })
     expect(result).toBeUndefined()
+  })
+
+  it("falls back to the unpacked binary when the installed CLI is older, inside asar", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(asarResolve, {
+      findOnPath: () => installedBin,
+      readVersion: (bin) => (bin === installedBin ? [2, 0, 9] : [2, 1, 215]),
+    })
+    expect(result).toBe(unpackedBin)
+  })
+
+  it("ignores an installed CLI that will not report a version", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(devResolve, {
+      findOnPath: () => installedBin,
+      readVersion: (bin) => (bin === installedBin ? undefined : [2, 1, 215]),
+    })
+    expect(result).toBeUndefined()
+  })
+
+  it("uses the installed CLI when the vendored binary has no readable version", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(devResolve, {
+      findOnPath: () => installedBin,
+      readVersion: (bin) => (bin === installedBin ? [2, 1, 220] : undefined),
+    })
+    expect(result).toBe(installedBin)
   })
 })
 
@@ -416,6 +470,53 @@ describe("sdk-session send resilience", () => {
     await waitUntil(() => finallyRan)
 
     expect(streamBus.clear).not.toHaveBeenCalled()
+  })
+})
+
+describe("sdk-session silent turn failures", () => {
+  it("reports a failed turn over the stream bus when no HTTP response is waiting", async () => {
+    // The enqueue path (every message after the first on a live query) answers
+    // 200 the moment the message is queued and parks no onResult, so a turn
+    // that failed afterwards was dropped on the floor: no error, no new turn.
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [{ type: "result", is_error: true, result: "CLI exited with code 1" }]
+
+    createSDKSession({ sessionId: "silent-fail", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 0)
+    const [sessionId, message] = vi.mocked(streamBus.publishError).mock.calls[0]
+    expect(sessionId).toBe("silent-fail")
+    expect(String(message)).toContain("CLI exited with code 1")
+  })
+
+  it("reports a thrown query error over the stream bus when nothing is listening", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedError = new Error("spawn failed")
+
+    createSDKSession({ sessionId: "thrown-fail", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishError).mock.calls.length > 0)
+    expect(String(vi.mocked(streamBus.publishError).mock.calls[0][1])).toContain("spawn failed")
+  })
+
+  it("does not duplicate the error when an HTTP response is already waiting", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession, sdkSessions } = await loadModule()
+    holdQueryOpen = true
+    scriptedMessages = [{ type: "result", is_error: true, result: "boom" }]
+
+    createSDKSession({ sessionId: "http-waiting", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    let delivered: Record<string, unknown> | null = null
+    sdkSessions.get("http-waiting")!.onResult = (msg) => { delivered = msg }
+    releaseHeldQuery!()
+
+    await waitUntil(() => delivered !== null)
+    expect(delivered!.is_error).toBe(true)
+    expect(streamBus.publishError).not.toHaveBeenCalled()
   })
 })
 

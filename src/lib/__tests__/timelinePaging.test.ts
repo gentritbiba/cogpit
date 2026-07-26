@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest"
-import { isNearTop, isPrepend, prependTurns, NEAR_TOP_VIEWPORTS } from "@/lib/timelinePaging"
+import {
+  isNearTop,
+  isPrepend,
+  prependTurns,
+  shouldShowEmptyState,
+  NEAR_TOP_VIEWPORTS,
+} from "@/lib/timelinePaging"
 import type { Turn } from "@/lib/types"
 
 function makeTurn(id: string, overrides: Partial<Turn> = {}): Turn {
@@ -32,6 +38,24 @@ describe("isNearTop", () => {
 
   it("is false for a hidden container", () => {
     expect(isNearTop(0, 0)).toBe(false)
+  })
+})
+
+describe("shouldShowEmptyState", () => {
+  it("shows the empty state once history is exhausted", () => {
+    expect(shouldShowEmptyState(0, false)).toBe(true)
+  })
+
+  it("keeps the list mounted while older pages remain", () => {
+    // The empty state renders no scroll content, so nothing would be left to
+    // trigger a page load — a window that parsed to zero turns would strand
+    // the session there permanently.
+    expect(shouldShowEmptyState(0, true)).toBe(false)
+  })
+
+  it("never shows the empty state when there are turns", () => {
+    expect(shouldShowEmptyState(3, true)).toBe(false)
+    expect(shouldShowEmptyState(3, false)).toBe(false)
   })
 })
 

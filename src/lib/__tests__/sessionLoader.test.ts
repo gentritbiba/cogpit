@@ -85,6 +85,7 @@ describe("loadSessionTailCached", () => {
     const cachedEntry = {
       parsed,
       source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "x", watchOffset: 50 },
+      olderTurns: [],
       nextByteOffset: 10,
       hasMore: false,
       lastAccessed: 0,
@@ -108,6 +109,7 @@ describe("loadSessionTailCached", () => {
     const racedEntry = {
       parsed: { turns: [{}] } as unknown as ParsedSession,
       source: { dirName: "-dir", fileName: "sess.jsonl", rawText: "live", watchOffset: 999 },
+      olderTurns: [],
       nextByteOffset: 50,
       hasMore: true,
       lastAccessed: 0,

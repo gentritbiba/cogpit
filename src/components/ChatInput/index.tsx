@@ -106,6 +106,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     respondAllPermissions,
     slashSuggestions,
     slashSuggestionsLoading,
+    turnError,
   } = useSessionContext()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
@@ -375,6 +376,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           </div>
         </div>
         {status === "error" && error && <ErrorBanner error={error} />}
+        {/* Failures with no HTTP response behind them arrive over SSE instead.
+            Mutually exclusive with the banner above: the server only publishes
+            when nothing is waiting on a response. */}
+        {turnError && <ErrorBanner error={turnError} />}
       </div>
     </div>
   )

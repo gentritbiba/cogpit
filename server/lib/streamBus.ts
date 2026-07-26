@@ -53,6 +53,7 @@ export interface StreamMessageState {
 export type StreamBusEvent =
   | { type: "stream_delta"; events: StreamDelta[] }
   | { type: "stream_clear" }
+  | { type: "turn_error"; message: string }
 
 /**
  * Minimal structural type for the Anthropic raw stream events we consume —
@@ -359,6 +360,20 @@ export function clear(sessionId: string): void {
   }
   emit(state, { type: "stream_clear" })
   maybeGc(sessionId, state)
+}
+
+/**
+ * Report a turn that failed with no HTTP response waiting on it.
+ *
+ * /api/send-message answers 200 as soon as a message is queued on a live
+ * query, so a failure after that point has no response left to fail — without
+ * this the turn just stops with no error anywhere. Transient: nothing is
+ * stored, so a late subscriber never replays a stale failure.
+ */
+export function publishError(sessionId: string, message: string): void {
+  const state = sessions.get(sessionId)
+  if (!state) return
+  emit(state, { type: "turn_error", message })
 }
 
 /** Current in-flight messages for a late subscriber (mid-turn page load). */
