@@ -28,18 +28,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `bun run <script> -- <args>` appends to the END of the whole script
+          # string, so the target flags used to land on a trailing command
+          # instead of electron-builder. Invoke electron-builder directly.
           - os: macos-latest
             name: macOS
-            cmd: bun run electron:package -- --mac --arm64 --x64 --publish never
+            cmd: bun run electron:build && bunx electron-builder --mac --arm64 --x64 --publish never
             pattern: "release/*.dmg"
           - os: ubuntu-latest
             name: Linux (AppImage)
-            cmd: bun run electron:package -- --linux AppImage --x64 --publish never
+            cmd: bun run electron:build && bunx electron-builder --linux AppImage --x64 --publish never
             pattern: "release/*.AppImage"
           - os: ubuntu-latest
             name: Linux (pacman)
-            cmd: bun run electron:package -- --linux pacman --x64 --publish never
+            cmd: bun run electron:build && bunx electron-builder --linux pacman --x64 --publish never
             pattern: "release/*.pacman"
+          - os: windows-latest
+            name: Windows
+            cmd: bun run electron:build && bunx electron-builder --win nsis --x64 --publish never
+            pattern: "release/*.exe"
 
     name: build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -65,6 +72,8 @@ jobs:
             ~/.cache/electron-builder
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
           key: electron-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: electron-${{ runner.os }}-
 
@@ -76,6 +85,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
       - name: Build and package (${{ matrix.name }})
+        # windows-latest defaults to pwsh; Git Bash keeps the command shape
+        # identical across every runner.
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: ${{ matrix.cmd }}
 
       - name: Upload artifacts
@@ -107,7 +121,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for extension in dmg AppImage pacman; do
+          for extension in dmg AppImage pacman exe; do
             if ! find artifacts -maxdepth 1 -type f -name "*.${extension}" -print -quit | grep -q .; then
               echo "Missing required .${extension} release artifact" >&2
               exit 1
@@ -118,6 +132,7 @@ jobs:
             ! -name "*.dmg" \
             ! -name "*.AppImage" \
             ! -name "*.pacman" \
+            ! -name "*.exe" \
             -print -quit | grep -q .; then
             echo "Release artifact manifest contains an unexpected file type" >&2
             find artifacts -maxdepth 1 -type f -print >&2
