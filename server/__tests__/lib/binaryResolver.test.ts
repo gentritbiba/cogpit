@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   findExecutableOnPath,
+  hasExecutableExtension,
   nativeBinaryName,
   resolveAgentCommand,
   type ResolveEnvironment,
@@ -163,5 +164,26 @@ describe("nativeBinaryName", () => {
   it("appends .exe only on Windows", () => {
     expect(nativeBinaryName("claude", "win32")).toBe("claude.exe")
     expect(nativeBinaryName("claude", "darwin")).toBe("claude")
+  })
+})
+
+describe("hasExecutableExtension", () => {
+  const env = { PATHEXT: ".COM;.EXE;.BAT;.CMD" }
+
+  it("accepts PATHEXT members regardless of case", () => {
+    expect(hasExecutableExtension("runme.cmd", env)).toBe(true)
+    expect(hasExecutableExtension("RunMe.CMD", env)).toBe(true)
+    expect(hasExecutableExtension("tool.exe", env)).toBe(true)
+  })
+
+  it("rejects documents and extensionless files", () => {
+    // The pair that mattered: on Windows fs.access(X_OK) passes for both.
+    expect(hasExecutableExtension("readme.txt", env)).toBe(false)
+    expect(hasExecutableExtension("runme", env)).toBe(false)
+  })
+
+  it("falls back to the default PATHEXT when unset", () => {
+    expect(hasExecutableExtension("runme.bat", {})).toBe(true)
+    expect(hasExecutableExtension("runme.txt", {})).toBe(false)
   })
 })

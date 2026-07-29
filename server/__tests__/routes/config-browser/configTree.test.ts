@@ -200,7 +200,9 @@ describe("buildPluginSections — new plugin dirs", () => {
     const installPath = join(tmpDir, "plugin-install")
     const binDir = join(installPath, "bin")
     await mkdirp(binDir)
-    const exePath = join(binDir, "runme")
+    // Windows has no execute bit — runnability comes from the extension.
+    const exeName = process.platform === "win32" ? "runme.cmd" : "runme"
+    const exePath = join(binDir, exeName)
     await writeFile(exePath, "#!/bin/sh\necho hello")
     await chmod(exePath, 0o755)
     const nonExePath = join(binDir, "readme.txt")
@@ -209,10 +211,10 @@ describe("buildPluginSections — new plugin dirs", () => {
 
     const result = await scanDir(binDir, { isBinDir: true })
     const names = result.map((i) => i.name)
-    expect(names).toContain("runme")
+    expect(names).toContain(exeName)
     // readme.txt should be skipped (not executable)
     expect(names).not.toContain("readme.txt")
-    const binItem = result.find((i) => i.name === "runme")
+    const binItem = result.find((i) => i.name === exeName)
     expect(binItem?.fileType).toBe("bin")
   })
 

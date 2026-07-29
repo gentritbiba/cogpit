@@ -76,6 +76,15 @@ function hasExtension(binName: string, extensions: string[]): boolean {
   return extensions.includes(win32.extname(binName).toLowerCase())
 }
 
+/**
+ * Whether Windows would consider a file runnable. There is no execute bit
+ * there — fs.access(X_OK) degrades to an existence check — so the extension is
+ * the only signal.
+ */
+export function hasExecutableExtension(fileName: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  return hasExtension(fileName, pathExtensions({ env }))
+}
+
 export interface FindOptions extends ResolveEnvironment {
   /** Only accept binaries the OS can launch without cmd.exe (Windows only). */
   directOnly?: boolean
