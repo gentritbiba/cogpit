@@ -34,6 +34,10 @@ import {
 
 let dir: string
 
+// Windows has no POSIX modes — chmod only toggles the read-only bit there, so
+// a real file can never report 0600.
+const POSIX_MODES_UNSUPPORTED = process.platform === "win32"
+
 async function freshRegistry(): Promise<string> {
   const d = await mkdtemp(join(tmpdir(), "cogpit-registry-"))
   await initDeviceRegistry(d)
@@ -53,15 +57,18 @@ afterEach(async () => {
 // ── addDevice / getDevice ────────────────────────────────────────────
 
 describe("addDevice", () => {
-  it("mints a dev_ id, defaults the port, and persists a 0600 file", async () => {
+  it("mints a dev_ id and defaults the port", async () => {
     const device = await addDevice({ name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret" })
 
     expect(device.id).toMatch(/^dev_[0-9a-f]{16}$/)
     expect(device.port).toBe(19384)
     expect(device.addedAt).toBeGreaterThan(0)
+  })
 
-    const filePath = join(dir, "devices.local.json")
-    const fileStat = await stat(filePath)
+  it.skipIf(POSIX_MODES_UNSUPPORTED)("persists a 0600 file", async () => {
+    await addDevice({ name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret" })
+
+    const fileStat = await stat(join(dir, "devices.local.json"))
     expect(fileStat.mode & 0o777).toBe(0o600)
   })
 
@@ -292,7 +299,7 @@ describe("persistence", () => {
     await rm(badDir, { recursive: true, force: true })
   })
 
-  it("re-chmods an already-existing file back to 0600 on write", async () => {
+  it.skipIf(POSIX_MODES_UNSUPPORTED)("re-chmods an already-existing file back to 0600 on write", async () => {
     const { id } = await addDevice({ name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret" })
     const filePath = join(dir, "devices.local.json")
     // Loosen the mode, then trigger another write.
@@ -302,7 +309,7 @@ describe("persistence", () => {
     expect((await stat(filePath)).mode & 0o777).toBe(0o600)
   })
 
-  it("repairs an existing registry to 0600 before loading credentials", async () => {
+  it.skipIf(POSIX_MODES_UNSUPPORTED)("repairs an existing registry to 0600 before loading credentials", async () => {
     const { id } = await addDevice({
       name: "Studio",
       host: "10.0.0.5",

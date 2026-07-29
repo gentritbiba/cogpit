@@ -2,17 +2,35 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { resolveTaskOutputPath } from "../../routes/files-watch"
+
+// Mirrors the allowlist in files-watch.ts: Windows has no /tmp, so task output
+// lives under %TEMP% there.
+const TEMP_ROOT = process.platform === "win32" ? tmpdir() : "/tmp"
+
+/** Windows only permits symlink creation under Developer Mode or elevation. */
+const canCreateSymlinks = await (async () => {
+  const probeDir = await mkdtemp(join(TEMP_ROOT, "cogpit-symlink-probe-"))
+  try {
+    await symlink(probeDir, join(probeDir, "link"), "dir")
+    return true
+  } catch {
+    return false
+  } finally {
+    await rm(probeDir, { recursive: true, force: true })
+  }
+})()
 
 describe("resolveTaskOutputPath", () => {
   let taskRoot: string
   let outsideRoot: string
 
   beforeEach(async () => {
-    taskRoot = await mkdtemp("/tmp/claude-cogpit-output-")
-    outsideRoot = await mkdtemp("/tmp/cogpit-output-outside-")
+    taskRoot = await mkdtemp(join(TEMP_ROOT, "claude-cogpit-output-"))
+    outsideRoot = await mkdtemp(join(TEMP_ROOT, "cogpit-output-outside-"))
   })
 
   afterEach(async () => {
@@ -34,31 +52,37 @@ describe("resolveTaskOutputPath", () => {
 
   it("rejects lexical paths outside a direct claude-* temp tree", async () => {
     await expect(resolveTaskOutputPath(join(outsideRoot, "task.output"))).resolves.toBeNull()
-    await expect(resolveTaskOutputPath("/tmp/claude-/task.output")).resolves.toBeNull()
+    await expect(resolveTaskOutputPath(join(TEMP_ROOT, "claude-", "task.output"))).resolves.toBeNull()
     await expect(
       resolveTaskOutputPath(join(taskRoot, "..", "..", "etc", "passwd")),
     ).resolves.toBeNull()
   })
 
-  it("rejects file and directory symlinks that escape the allowed temp tree", async () => {
-    const outsideFile = join(outsideRoot, "secret.txt")
-    await writeFile(outsideFile, "secret")
+  it.skipIf(!canCreateSymlinks)(
+    "rejects file and directory symlinks that escape the allowed temp tree",
+    async () => {
+      const outsideFile = join(outsideRoot, "secret.txt")
+      await writeFile(outsideFile, "secret")
 
-    const fileLink = join(taskRoot, "file-link.output")
-    const directoryLink = join(taskRoot, "directory-link")
-    await Promise.all([
-      symlink(outsideFile, fileLink),
-      symlink(outsideRoot, directoryLink),
-    ])
+      const fileLink = join(taskRoot, "file-link.output")
+      const directoryLink = join(taskRoot, "directory-link")
+      await Promise.all([
+        symlink(outsideFile, fileLink, "file"),
+        symlink(outsideRoot, directoryLink, "dir"),
+      ])
 
-    await expect(resolveTaskOutputPath(fileLink)).resolves.toBeNull()
-    await expect(resolveTaskOutputPath(join(directoryLink, "secret.txt"))).resolves.toBeNull()
-  })
+      await expect(resolveTaskOutputPath(fileLink)).resolves.toBeNull()
+      await expect(resolveTaskOutputPath(join(directoryLink, "secret.txt"))).resolves.toBeNull()
+    },
+  )
 
-  it("rejects broken symlinks instead of treating them as future output files", async () => {
-    const brokenLink = join(taskRoot, "broken.output")
-    await symlink(join(outsideRoot, "missing.output"), brokenLink)
+  it.skipIf(!canCreateSymlinks)(
+    "rejects broken symlinks instead of treating them as future output files",
+    async () => {
+      const brokenLink = join(taskRoot, "broken.output")
+      await symlink(join(outsideRoot, "missing.output"), brokenLink, "file")
 
-    await expect(resolveTaskOutputPath(brokenLink)).resolves.toBeNull()
-  })
+      await expect(resolveTaskOutputPath(brokenLink)).resolves.toBeNull()
+    },
+  )
 })

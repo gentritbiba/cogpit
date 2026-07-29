@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest"
+import { join, resolve } from "node:path"
 import { CodexAppServerError, type CodexThread } from "../codex-app-server"
 import {
   buildCodexAccessSettings,
@@ -154,17 +155,20 @@ describe("Codex execution mappings", () => {
   })
 
   it("accepts only nested rollout paths inside the Codex sessions root", () => {
-    expect(getCodexThreadIdentity(thread({
-      path: "/codex/sessions/2026/07/12/rollout-thread-1.jsonl",
-    }), "/codex/sessions")).toEqual({
+    // Host-native absolute paths, since the identity carries filePath through
+    // as an OS path while fileName has to stay forward-slashed for the URL.
+    const sessionsRoot = resolve("/codex/sessions")
+    const rolloutPath = join(sessionsRoot, "2026", "07", "12", "rollout-thread-1.jsonl")
+
+    expect(getCodexThreadIdentity(thread({ path: rolloutPath }), sessionsRoot)).toEqual({
       sessionId: "thread-1",
       fileName: "2026/07/12/rollout-thread-1.jsonl",
-      filePath: "/codex/sessions/2026/07/12/rollout-thread-1.jsonl",
+      filePath: rolloutPath,
     })
     expect(getCodexThreadIdentity(thread({
-      path: "/codex/outside/rollout-thread-1.jsonl",
-    }), "/codex/sessions")).toBeNull()
-    expect(getCodexThreadIdentity(thread({ path: null }), "/codex/sessions")).toBeNull()
+      path: resolve("/codex/outside/rollout-thread-1.jsonl"),
+    }), sessionsRoot)).toBeNull()
+    expect(getCodexThreadIdentity(thread({ path: null }), sessionsRoot)).toBeNull()
   })
 
   it("does not treat an ambiguous mutating RPC timeout as a legacy fallback", () => {

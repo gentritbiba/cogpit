@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { EventEmitter } from "node:events"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const { activeProcesses, persistentSessions, spawn } = vi.hoisted(() => ({
   activeProcesses: new Map(),
@@ -86,13 +86,20 @@ describe("parseAgentProcessOutput", () => {
 })
 
 describe("registerRunningProcessesRoute", () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!
+
   beforeEach(() => {
     vi.clearAllMocks()
     activeProcesses.clear()
     persistentSessions.clear()
   })
 
-  it("streams process output through the parser and responds once", () => {
+  afterEach(() => {
+    Object.defineProperty(process, "platform", originalPlatform)
+  })
+
+  /** Drive one request to completion, feeding `stdout` through the child. */
+  function runRoute(stdout: string) {
     const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter }
     child.stdout = new EventEmitter()
     spawn.mockReturnValue(child)
@@ -104,15 +111,32 @@ describe("registerRunningProcessesRoute", () => {
       end: vi.fn(),
     }
     const next = vi.fn()
-    const handler = handlers.get("/api/running-processes")!
 
-    handler({ method: "GET", url: "/" } as never, res as never, next as never)
-    child.stdout.emit(
-      "data",
-      Buffer.from(`alice 1001 2.0 0.1 0 2048 ttys001 S+ 10:00 0:01.00 claude --resume ${CLAUDE_SESSION_ID}`),
+    handlers.get("/api/running-processes")!(
+      { method: "GET", url: "/" } as never,
+      res as never,
+      next as never,
     )
+    child.stdout.emit("data", Buffer.from(stdout))
     child.emit("close")
     child.emit("close")
+
+    return { res, next }
+  }
+
+  // Pinned rather than inherited from the host: the inventory command and the
+  // parser it feeds differ per platform, so both halves stay asserted wherever
+  // CI runs.
+  function pinPlatform(value: NodeJS.Platform): void {
+    Object.defineProperty(process, "platform", { ...originalPlatform, value })
+  }
+
+  it("streams ps output through the posix parser and responds once", () => {
+    pinPlatform("linux")
+
+    const { res, next } = runRoute(
+      `alice 1001 2.0 0.1 0 2048 ttys001 S+ 10:00 0:01.00 claude --resume ${CLAUDE_SESSION_ID}`,
+    )
 
     expect(spawn).toHaveBeenCalledWith("ps", ["aux"])
     expect(res.statusCode).toBe(200)
@@ -121,6 +145,26 @@ describe("registerRunningProcessesRoute", () => {
     ])
     expect(res.end).toHaveBeenCalledTimes(1)
     expect(next).not.toHaveBeenCalled()
+  })
+
+  it("streams PowerShell output through the windows parser", () => {
+    pinPlatform("win32")
+
+    const { res } = runRoute(JSON.stringify({
+      ProcessId: 1001,
+      WorkingSetSize: 2 * 1024 * 1024,
+      CommandLine: `claude --resume ${CLAUDE_SESSION_ID}`,
+    }))
+
+    expect(spawn).toHaveBeenCalledWith("powershell", [
+      "-NoProfile",
+      "-Command",
+      expect.stringContaining("Get-CimInstance Win32_Process"),
+    ])
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.end.mock.calls[0][0])).toEqual([
+      expect.objectContaining({ pid: 1001, sessionId: CLAUDE_SESSION_ID }),
+    ])
   })
 
   it("forwards unsupported methods and nested paths", () => {

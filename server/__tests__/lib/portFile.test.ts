@@ -32,10 +32,15 @@ describe("portFile", () => {
     expect(readFileSync(portFile, "utf8").trim()).toBe("19384")
   })
 
-  it("writes owner-only, since the file steers where hook payloads are POSTed", () => {
-    writePortFile(19384)
-    expect(statSync(portFile).mode & 0o777).toBe(0o600)
-  })
+  // Windows has no POSIX modes — chmod only toggles the read-only bit there, so
+  // a real file can never report 0600.
+  it.skipIf(process.platform === "win32")(
+    "writes owner-only, since the file steers where hook payloads are POSTed",
+    () => {
+      writePortFile(19384)
+      expect(statSync(portFile).mode & 0o777).toBe(0o600)
+    },
+  )
 
   it("overwrites a stale port rather than appending", () => {
     writePortFile(19384)

@@ -128,7 +128,44 @@ describe("loadConfig", () => {
     expect(config!.networkPassword).toBe("$sha256$abc:def")
     // Should NOT have written back to disk
     expect(mockedWriteFile).not.toHaveBeenCalled()
-    expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
+  })
+
+  describe("owner-only repair on read", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!
+
+    afterEach(() => {
+      Object.defineProperty(process, "platform", original)
+    })
+
+    function pinPlatform(value: NodeJS.Platform): void {
+      Object.defineProperty(process, "platform", { ...original, value })
+    }
+
+    // Pinned rather than inherited from the host so both halves of the branch
+    // stay asserted wherever CI runs.
+    it("re-applies 0600 on posix, where an old file may still be world-readable", async () => {
+      pinPlatform("linux")
+      const { loadConfig } = await import("../config")
+      mockedIsPasswordHashed.mockReturnValueOnce(true)
+      mockedReadFile.mockResolvedValueOnce(
+        JSON.stringify({ claudeDir: "/home/.claude", networkPassword: "$sha256$abc:def" })
+      )
+
+      await loadConfig()
+      expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
+    })
+
+    it("skips the chmod on win32, where it would EPERM on a read-only file", async () => {
+      pinPlatform("win32")
+      const { loadConfig } = await import("../config")
+      mockedIsPasswordHashed.mockReturnValueOnce(true)
+      mockedReadFile.mockResolvedValueOnce(
+        JSON.stringify({ claudeDir: "/home/.claude", networkPassword: "$sha256$abc:def" })
+      )
+
+      await expect(loadConfig()).resolves.not.toBeNull()
+      expect(mockedChmod).not.toHaveBeenCalled()
+    })
   })
 
   it("migrates plaintext password to hashed on first read and writes back to disk", async () => {
@@ -212,7 +249,7 @@ describe("loadConfig", () => {
     const config = await loadConfig()
 
     expect(config).toEqual({
-      claudeDir: "/home/test/.claude",
+      claudeDir: join("/home/test", ".claude"),
       codexOnly: true,
     })
     expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.codex"))

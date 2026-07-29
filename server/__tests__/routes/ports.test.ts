@@ -2,6 +2,7 @@
 import { EventEmitter } from "node:events"
 import type { FileHandle } from "node:fs/promises"
 import type { Socket } from "node:net"
+import { tmpdir } from "node:os"
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -70,10 +71,17 @@ function fixtureFor(filePath: string): OutputFixture | undefined {
     ?? [...fixtures.values()].find((fixture) => fixture.target === filePath)
 }
 
+/**
+ * Mirrors the first candidate root in backgroundOutputs.ts. The mocked `join`
+ * uses "/" on every host, so the fixture keys stay comparable to the paths the
+ * route builds.
+ */
 function taskDirectory(cwd: string): string {
-  const uid = process.getuid?.() ?? 501
+  const uid = process.getuid?.()
+  const suffix = uid === undefined ? "claude" : `claude-${uid}`
+  const base = process.platform === "win32" ? `${tmpdir()}/${suffix}` : `/private/tmp/${suffix}`
   const projectHash = cwd.replace(/\//g, "-").replace(/ /g, "-").replace(/@/g, "-").replace(/\./g, "-")
-  return `/private/tmp/claude-${uid}/${projectHash}/tasks`
+  return `${base}/${projectHash}/tasks`
 }
 
 function addOutput(
