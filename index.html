@@ -17,7 +17,11 @@
         var t='dark';try{t=localStorage.getItem('cogpit-theme')||'dark'}catch(e){}
         if(t==='dark'||t==='oled')document.documentElement.classList.add('dark');
         if(t==='oled')document.documentElement.classList.add('theme-oled');
-        if(navigator.userAgent.includes('Electron'))document.documentElement.classList.add('electron');
+        if(navigator.userAgent.includes('Electron')){
+          document.documentElement.classList.add('electron');
+          // Windows draws its window controls on the right, not the left.
+          if(navigator.userAgent.includes('Windows'))document.documentElement.classList.add('electron-win');
+        }
         var m=document.querySelector('meta[name="theme-color"]');
         if(m)m.setAttribute('content',t==='light'?'#fafafa':'#09090b');
       })();

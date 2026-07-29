@@ -383,11 +383,15 @@
   -webkit-app-region: no-drag;
 }
 
-/* macOS traffic light inset — only in Electron where the native
-   title bar is hidden. The "electron" class is set on <html> via
-   inline script in index.html based on user-agent detection. */
-html.electron .electron-drag {
+/* Native window control inset — only in Electron where the title bar is
+   hidden. The "electron"/"electron-win" classes are set on <html> via inline
+   script in index.html based on user-agent detection. */
+html.electron:not(.electron-win) .electron-drag {
   padding-left: 96px;
+}
+/* Windows draws its Window Controls Overlay (~138px) on the right. */
+html.electron-win .electron-drag {
+  padding-right: 138px;
 }
 
 /* Desktop scrollbar styling */

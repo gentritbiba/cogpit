@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, shell, utilityProcess } from "electron"
-import { execSync } from "node:child_process"
+import { execFileSync, execSync } from "node:child_process"
 import { join } from "node:path"
 import { initUpdater } from "./updater.ts"
 import {
@@ -10,13 +10,19 @@ import {
 
 // GUI apps don't inherit the user's shell PATH.
 // Spawn their shell to get the real PATH so `claude` CLI is found.
-try {
-  const userShell = process.env.SHELL || "/bin/zsh"
-  const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
-  if (realPath) process.env.PATH = realPath
-} catch {
-  // Fall back to system PATH
+if (process.platform !== "win32") {
+  try {
+    const userShell = process.env.SHELL || "/bin/zsh"
+    const realPath = execSync(`${userShell} -ilc 'echo -n "$PATH"'`, { encoding: "utf-8" })
+    if (realPath) process.env.PATH = realPath
+  } catch {
+    // Fall back to system PATH
+  }
 }
+
+// Windows routes toasts through this ID; it must match the electron-builder
+// appId or notifications are silently dropped.
+if (process.platform === "win32") app.setAppUserModelId("com.cogpit.app")
 
 let mainWindow: BrowserWindow | null = null
 let serverProcess: Electron.UtilityProcess | null = null
@@ -46,6 +52,21 @@ ipcMain.handle("performance:get-snapshot", () => ({
   })),
 }))
 
+/**
+ * macOS insets its traffic lights into the hidden title bar; Windows has no
+ * equivalent, so the native Window Controls Overlay has to draw the
+ * minimize/maximize/close buttons or the window cannot be closed.
+ */
+function titleBarOptions(): Electron.BrowserWindowConstructorOptions {
+  if (process.platform === "win32") {
+    return {
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#09090b", symbolColor: "#a1a1aa", height: 32 },
+    }
+  }
+  return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 14 } }
+}
+
 async function createWindow(port: number) {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -53,8 +74,7 @@ async function createWindow(port: number) {
     minWidth: 800,
     minHeight: 600,
     title: "Cogpit",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 14 },
+    ...titleBarOptions(),
     backgroundColor: "#09090b",
     webPreferences: {
       preload: join(__dirname, "../preload/preload.cjs"),
@@ -166,8 +186,11 @@ app.whenReady().then(async () => {
 
   // Custom menu: removes macOS "Show Tab Bar" (Ctrl+Cmd+T) which
   // conflicts with the open-terminal shortcut in the renderer.
+  const isWindows = process.platform === "win32"
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: "appMenu" },
+    isWindows
+      ? { label: "File", submenu: [{ role: "quit", label: "Exit" }] }
+      : { role: "appMenu" },
     { role: "editMenu" },
     {
       label: "View",
@@ -187,7 +210,7 @@ app.whenReady().then(async () => {
       label: "Window",
       submenu: [
         { role: "minimize" },
-        { role: "zoom" },
+        ...(isWindows ? [] : [{ role: "zoom" as const }]),
         { role: "close" },
       ],
     },
@@ -217,8 +240,18 @@ app.on("window-all-closed", () => {
 
 // Clean up the server worker when the app quits
 app.on("before-quit", () => {
-  if (serverProcess) {
+  if (!serverProcess) return
+  const pid = serverProcess.pid
+  // Windows has no process groups, so killing the worker alone orphans every
+  // claude/codex/git/PTY process it spawned.
+  if (process.platform === "win32" && pid) {
+    try {
+      execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" })
+    } catch {
+      serverProcess.kill()
+    }
+  } else {
     serverProcess.kill()
-    serverProcess = null
   }
+  serverProcess = null
 })

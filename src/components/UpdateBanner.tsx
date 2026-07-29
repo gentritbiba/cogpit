@@ -29,7 +29,7 @@ export function UpdateBanner() {
     })
   }, [])
 
-  // AppImage: update downloaded, show restart prompt
+  // Windows / AppImage: update downloaded, show restart prompt
   if (downloadedInfo && !dismissed) {
     return (
       <div className="flex items-center gap-3 bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2 text-sm">

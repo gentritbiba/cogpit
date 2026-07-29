@@ -106,7 +106,14 @@ function revealSession(message: NotifyMessage, target: BrowserWindow | null): vo
   if (win.isMinimized()) win.restore()
   if (!win.isVisible()) win.show()
   win.focus()
-  app.focus({ steal: true })
+  if (process.platform !== "win32") {
+    app.focus({ steal: true })
+  } else if (!win.isFocused()) {
+    // Windows can deny a foreground steal; flashing the taskbar button is the
+    // sanctioned way to ask for attention instead.
+    win.flashFrame(true)
+    win.once("focus", () => win.flashFrame(false))
+  }
 
   const path = sessionPath(message.nav)
   if (!path) return
