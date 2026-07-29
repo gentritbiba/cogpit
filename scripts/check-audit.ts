@@ -37,9 +37,19 @@ const targets: AuditTarget[] = [
       ["@babel/core:1123528", "low"],
       // Windows-only path traversal in serve-static; fixed only in the 2.x
       // major, which @modelcontextprotocol/sdk still pins out of (^1.19.9).
-      // Cogpit ships no Windows builds and never imports serve-static.
+      // Reaches the tree solely through that SDK — Cogpit never constructs a
+      // Hono server and never imports serve-static, so no route is exposed.
+      // (Previously justified by "ships no Windows builds", which stopped
+      // being true when the NSIS target started shipping.)
       ["@hono/node-server:1124006", "moderate"],
       ["ip-address:1118827", "moderate"],
+      // DoS via unbounded brace expansion. Arrives only via minimatch@3.1.5,
+      // which pins brace-expansion ^1.1.7 — build tooling (eslint, glob,
+      // electron-builder), never shipped or reachable from a request. The fix
+      // exists only in 5.0.8, an ESM-first package that cannot satisfy
+      // minimatch@3's CommonJS contract, and expansion inputs here are repo
+      // globs rather than untrusted input.
+      ["brace-expansion:1124334", "high"],
     ]),
   },
   {
