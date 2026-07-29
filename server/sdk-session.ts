@@ -11,27 +11,18 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { execFileSync } from "node:child_process"
-import { accessSync, constants as fsConstants } from "node:fs"
 import { createRequire } from "node:module"
-import { delimiter, dirname, join } from "node:path"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
+import { findExecutableOnPath, nativeBinaryName } from "./lib/binaryResolver"
 import * as streamBus from "./lib/streamBus"
 
-const CLI_BIN_NAME = process.platform === "win32" ? "claude.exe" : "claude"
+const CLI_BIN_NAME = nativeBinaryName("claude")
 
 /** First executable named `claude` on PATH, if any. */
 function findClaudeOnPath(): string | undefined {
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    if (!dir) continue
-    const candidate = join(dir, CLI_BIN_NAME)
-    try {
-      accessSync(candidate, fsConstants.X_OK)
-      return candidate
-    } catch {
-      // Not here — keep walking PATH.
-    }
-  }
-  return undefined
+  // The SDK spawns this path with no shell, so a Windows .cmd shim could only
+  // ENOENT there — those installs fall back to the vendored native binary.
+  return findExecutableOnPath("claude", { directOnly: true })
 }
 
 /** `2.1.220 (Claude Code)` -> `[2, 1, 220]`; undefined if the binary won't answer. */
@@ -56,6 +47,9 @@ function isAtLeast(version: number[], floor: number[]): boolean {
   return true
 }
 
+/** Separator-agnostic so the packaged Windows app is detected too. */
+const ASAR_SEGMENT = /([\\/])app\.asar([\\/])/
+
 export interface ClaudeCliProbes {
   findOnPath?: () => string | undefined
   readVersion?: (binPath: string) => number[] | undefined
@@ -79,13 +73,15 @@ export function resolveClaudeCliPath(
   let vendored: string | undefined
   try {
     const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    vendored = join(dirname(resolveModule(`${platformPkg}/package.json`)), CLI_BIN_NAME)
+    // Swapping the file name keeps the resolver's own separators, which the
+    // asar rewrite below relies on.
+    vendored = resolveModule(`${platformPkg}/package.json`).replace(/package\.json$/, CLI_BIN_NAME)
   } catch {
     vendored = undefined
   }
-  const insideAsar = vendored?.includes("/app.asar/") ?? false
+  const insideAsar = vendored !== undefined && ASAR_SEGMENT.test(vendored)
   const vendoredExecutable = insideAsar
-    ? vendored!.replace("/app.asar/", "/app.asar.unpacked/")
+    ? vendored!.replace(ASAR_SEGMENT, "$1app.asar.unpacked$2")
     : vendored
   const fallback = insideAsar ? vendoredExecutable : undefined
 

@@ -35,6 +35,7 @@ import type { PersistentSession } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
+import { resolveAgentCommand } from "../../lib/binaryResolver"
 import { codexAppServer, type CodexThread } from "../../codex-app-server"
 import {
   getCodexThreadIdentity,
@@ -220,13 +221,18 @@ export function registerNewSessionRoute(use: UseFn) {
           const effortArgs = buildCodexEffortArgs(effort)
           const fastModeArgs = buildCodexFastModeArgs(fastMode)
           const startedAt = Date.now()
-          const child = spawn(
+          const codexCli = resolveAgentCommand(
             "codex",
             ["exec", "--json", ...permArgs, ...modelArgs, ...effortArgs, ...fastModeArgs, message],
+          )
+          const child = spawn(
+            codexCli.command,
+            codexCli.args,
             {
               cwd,
               env: process.env,
               stdio: ["ignore", "pipe", "pipe"],
+              ...codexCli.spawnOptions,
             }
           )
 
@@ -326,13 +332,18 @@ export function registerNewSessionRoute(use: UseFn) {
         const cleanEnv = { ...process.env }
         delete cleanEnv.CLAUDECODE
 
-        const child = spawn(
+        const claudeCli = resolveAgentCommand(
           "claude",
           ["-p", message, "--session-id", sessionId, ...permArgs, ...modelArgs, ...effortArgs, ...nameArgs],
+        )
+        const child = spawn(
+          claudeCli.command,
+          claudeCli.args,
           {
             cwd: projectPath,
             env: cleanEnv,
             stdio: ["ignore", "pipe", "pipe"],
+            ...claudeCli.spawnOptions,
           }
         )
 
@@ -434,7 +445,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
           const prompt = message || (imagePaths.length > 0 ? CODEX_IMAGE_ONLY_PROMPT : "")
           const startedAt = Date.now()
 
-          const child = spawn(
+          const codexCli = resolveAgentCommand(
             "codex",
             [
               "exec",
@@ -446,10 +457,15 @@ export function registerCreateAndSendRoute(use: UseFn) {
               ...imageArgs,
               ...(prompt ? [prompt] : []),
             ],
+          )
+          const child = spawn(
+            codexCli.command,
+            codexCli.args,
             {
               cwd,
               env: process.env,
               stdio: ["ignore", "pipe", "pipe"],
+              ...codexCli.spawnOptions,
             }
           )
 
