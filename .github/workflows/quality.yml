@@ -110,6 +110,11 @@ jobs:
       - name: Install application dependencies
         run: bun install --frozen-lockfile
 
+      # typecheck includes typecheck:memory, which needs this package's own deps
+      - name: Install cogpit-memory dependencies
+        working-directory: packages/cogpit-memory
+        run: bun install --frozen-lockfile
+
       - name: Type-check production code
         run: bun run typecheck
 
