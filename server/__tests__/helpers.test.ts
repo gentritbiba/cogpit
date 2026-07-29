@@ -66,9 +66,24 @@ describe("isWithinDir", () => {
     expect(isWithinDir("/home/user/docs", "/home/user")).toBe(false)
   })
 
-  it("stays case-sensitive on POSIX", () => {
-    expect(isWithinDir("/home/user", "/HOME/USER/file.txt")).toBe(false)
-    expect(isWithinDir("/home/user", "/Home/User")).toBe(false)
+  describe("on posix", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!
+
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { ...original, value: "linux" })
+    })
+
+    afterEach(() => {
+      Object.defineProperty(process, "platform", original)
+    })
+
+    // Pinned rather than inherited from the host: case folding is a real
+    // containment weakness on POSIX, so it must be asserted when CI runs on
+    // Windows too.
+    it("stays case-sensitive", () => {
+      expect(isWithinDir("/home/user", "/HOME/USER/file.txt")).toBe(false)
+      expect(isWithinDir("/home/user", "/Home/User")).toBe(false)
+    })
   })
 
   describe("on win32", () => {
