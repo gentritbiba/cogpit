@@ -215,7 +215,9 @@ describe("background process port routes", () => {
     "/api/background-agents",
     "/api/background-tasks",
   ])("treats an unreadable tasks directory as an empty collection for %s", async (route) => {
-    mockedReaddir.mockRejectedValueOnce(new Error("ENOENT"))
+    // Every candidate temp root must be unreadable: the lookup falls back
+    // across /private/tmp, /tmp and os.tmpdir().
+    mockedReaddir.mockRejectedValue(new Error("ENOENT"))
     const handler = getRouteHandler(handlers, route)
     const { req, res, next } = createMockReqRes("GET", "/?cwd=/tmp/project")
 

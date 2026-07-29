@@ -10,6 +10,7 @@ import { stat, writeFile, unlink, readdir, open } from "node:fs/promises"
 import { platform, tmpdir } from "node:os"
 import { join, basename, dirname } from "node:path"
 import { randomBytes } from "node:crypto"
+import { decodeClaudeDirName } from "../../shared/providers/claude"
 
 /**
  * Read the `cwd` field from the first line of a JSONL session file.
@@ -60,7 +61,7 @@ export async function resolveActionPath(body: { path?: string; dirName?: string 
       }
     } catch { /* projectDir might not exist */ }
     // Last resort: lossy conversion
-    return "/" + body.dirName.replace(/^-/, "").replace(/-/g, "/")
+    return decodeClaudeDirName(body.dirName)
   }
 
   return null

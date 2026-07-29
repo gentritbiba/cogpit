@@ -16,6 +16,7 @@ vi.mock("../../helpers", () => ({
   isCodexDirName: vi.fn((dirName: string) => dirName.startsWith("codex__")),
   isWithinDir: vi.fn(),
   projectDirToReadableName: vi.fn(),
+  shortNameFromPath: vi.fn((path: string) => path.replace(/\/+$/, "").split("/").at(-1) || path),
   getSessionMeta: vi.fn(),
   getSessionStatus: vi.fn().mockResolvedValue({ status: "idle" }),
   listCodexSessionFiles: vi.fn().mockResolvedValue([]),

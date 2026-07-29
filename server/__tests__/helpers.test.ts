@@ -2,6 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { EventEmitter } from "node:events"
+import { homedir } from "node:os"
+import { join } from "node:path"
+import { encodeClaudeDirName } from "../../shared/providers/claude"
 
 import {
   isWithinDir,
@@ -12,6 +15,7 @@ import {
   validatePasswordStrength,
   MIN_PASSWORD_LENGTH,
   projectDirToReadableName,
+  shortNameFromPath,
   isLocalRequest,
   createSessionToken,
   validateSessionToken,
@@ -60,6 +64,33 @@ describe("isWithinDir", () => {
 
   it("returns false for parent outside child", () => {
     expect(isWithinDir("/home/user/docs", "/home/user")).toBe(false)
+  })
+
+  it("stays case-sensitive on POSIX", () => {
+    expect(isWithinDir("/home/user", "/HOME/USER/file.txt")).toBe(false)
+    expect(isWithinDir("/home/user", "/Home/User")).toBe(false)
+  })
+
+  describe("on win32", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!
+
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { ...original, value: "win32" })
+    })
+
+    afterEach(() => {
+      Object.defineProperty(process, "platform", original)
+    })
+
+    it("ignores case differences the filesystem also ignores", () => {
+      expect(isWithinDir("/Users/Alice", "/users/alice/file.txt")).toBe(true)
+      expect(isWithinDir("/users/alice", "/Users/Alice")).toBe(true)
+    })
+
+    it("still rejects siblings and traversal when folding case", () => {
+      expect(isWithinDir("/Users/Alice", "/users/alicexyz")).toBe(false)
+      expect(isWithinDir("/Users/Alice", "/users/alice/../bob")).toBe(false)
+    })
   })
 })
 
@@ -190,6 +221,33 @@ describe("projectDirToReadableName", () => {
   it("returns shortName as raw if no home prefix match", () => {
     const result = projectDirToReadableName("some-random-dir")
     expect(result.shortName).toBe("some-random-dir")
+  })
+
+  it("rebuilds a Windows path from a drive-letter dir name", () => {
+    const result = projectDirToReadableName("C--Users-alice-projects-myapp")
+    expect(result.path).toBe("C:\\Users\\alice\\projects\\myapp")
+  })
+
+  it("shortens a dir name under the current home directory", () => {
+    const dirName = encodeClaudeDirName(join(homedir(), "widgets", "app"))
+    expect(projectDirToReadableName(dirName).shortName).toBe("widgets-app")
+  })
+})
+
+// ── shortNameFromPath ───────────────────────────────────────────────────
+
+describe("shortNameFromPath", () => {
+  it("returns the last segment", () => {
+    expect(shortNameFromPath("/home/user/projects/myapp")).toBe("myapp")
+  })
+
+  it("ignores trailing separators of either flavour", () => {
+    expect(shortNameFromPath("/home/user/myapp/")).toBe("myapp")
+    expect(shortNameFromPath("/home/user/myapp\\")).toBe("myapp")
+  })
+
+  it("falls back to the input when there is no segment", () => {
+    expect(shortNameFromPath("/")).toBe("/")
   })
 })
 

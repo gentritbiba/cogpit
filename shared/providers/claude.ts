@@ -1,9 +1,27 @@
 import type { PermissionsConfig } from "./types"
 
-/** Encode a cwd using Claude Code's project-directory naming convention. */
+/**
+ * Encode a cwd using Claude Code's project-directory naming convention: every
+ * character outside `[A-Za-z0-9]` becomes `-`, so both `/Users/x/proj` and
+ * `C:\Users\x\proj` collapse into a flat directory name under
+ * `~/.claude/projects`.
+ */
 export function encodeClaudeDirName(cwd: string): string {
   const normalized = cwd.replace(/[\\/]+$/, "") || cwd
-  return normalized.replace(/[:\\/]/g, "-")
+  return normalized.replace(/[^a-zA-Z0-9]/g, "-")
+}
+
+/**
+ * Best-effort inverse of {@link encodeClaudeDirName}. The encoding is lossy —
+ * a literal `-` is indistinguishable from a separator — so callers that can
+ * read a session's recorded `cwd` should always prefer that.
+ */
+export function decodeClaudeDirName(dirName: string): string {
+  const windowsDrive = /^([A-Za-z])--(.*)$/.exec(dirName)
+  if (windowsDrive) {
+    return `${windowsDrive[1]}:\\${windowsDrive[2].replace(/-/g, "\\")}`
+  }
+  return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
 }
 
 export function buildClaudePermArgs(permissions?: PermissionsConfig): string[] {

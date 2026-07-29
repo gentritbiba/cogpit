@@ -11,6 +11,7 @@ import {
   readFile,
   readdir,
   searchSessionMessages,
+  shortNameFromPath,
   stat,
 } from "../../helpers"
 import type { NextFn } from "../../http"
@@ -154,7 +155,7 @@ export async function handleActiveSessions(
           })
           const { meta, status: statusInfo } = cached
           const shortName = c.dirName.startsWith("codex__")
-            ? `${(meta.cwd || "").replace(/\/+$/, "").split("/").at(-1) || "Codex"} (Codex)`
+            ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Codex"} (Codex)`
             : projectDirToReadableName(c.dirName).shortName
           const lastModified = new Date(c.mtimeMs).toISOString()
 

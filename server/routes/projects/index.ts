@@ -1,3 +1,4 @@
+import { basename, dirname, sep } from "node:path"
 import type { UseFn } from "../../http"
 import {
   dirs,
@@ -15,6 +16,7 @@ import {
   readFile,
   readdir,
   resolveSessionFilePath,
+  shortNameFromPath,
   stat,
 } from "../../helpers"
 import { handleActiveSessions } from "./activeSessionsRoute"
@@ -184,11 +186,6 @@ export async function readSessionHeader(filePath: string): Promise<HeaderResult>
   } finally {
     await fh.close()
   }
-}
-
-function shortNameFromPath(path: string): string {
-  const trimmed = path.replace(/\/+$/, "")
-  return trimmed.split("/").at(-1) || trimmed || path
 }
 
 export function registerProjectRoutes(use: UseFn) {
@@ -569,7 +566,7 @@ export function registerProjectRoutes(use: UseFn) {
     try {
       const filePath = await findJsonlPath(sessionId)
       if (filePath) {
-        const isCodex = filePath.startsWith(CODEX_SESSIONS_DIR + "/")
+        const isCodex = filePath.startsWith(CODEX_SESSIONS_DIR + sep)
         if (isCodex) {
           const meta = await getSessionMeta(filePath)
           res.setHeader("Content-Type", "application/json")
@@ -580,8 +577,8 @@ export function registerProjectRoutes(use: UseFn) {
           return
         }
 
-        const fileName = filePath.split("/").at(-1) || `${sessionId}.jsonl`
-        const dirName = filePath.slice(0, -fileName.length - 1).split("/").at(-1) || ""
+        const fileName = basename(filePath) || `${sessionId}.jsonl`
+        const dirName = basename(dirname(filePath))
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ dirName, fileName }))
         return
