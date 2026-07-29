@@ -16,7 +16,7 @@
 
 Cogpit turns Claude Code and Codex into one live, interactive control center. It uses provider-native control APIs for active work and the CLIs' on-disk history for restoration, so you can watch, steer, approve, and debug agents without leaving your workflow.
 
-Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
+Available as a **desktop app** (macOS, Linux, Windows) or a **browser-based** dev server.
 
 ## Download
 
@@ -26,6 +26,11 @@ Available as a **desktop app** (macOS, Linux) or a **browser-based** dev server.
 | macOS (Intel) | `Cogpit-x.x.x.dmg` |
 | Linux (AppImage) | `Cogpit-x.x.x.AppImage` |
 | Linux (Arch) | `Cogpit-x.x.x.pacman` |
+| Windows (x64) | `Cogpit-x.x.x-setup.exe` |
+
+> **Windows is newly supported and not yet widely tested.** The installer is
+> unsigned, so SmartScreen shows an "unknown publisher" prompt — choose
+> **More info → Run anyway**. Please file an issue if you hit a problem.
 
 > **Prerequisite:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) must be installed. Cogpit uses your existing CLIs — no API keys or separate login needed.
 
@@ -183,7 +188,8 @@ bun run electron:dev
 # Web
 bun run build && bun run preview
 
-# Desktop (DMG on macOS, AppImage + pacman on Linux)
+# Desktop — builds the host platform's target by default
+# (DMG on macOS, AppImage + pacman on Linux, NSIS installer on Windows)
 bun run electron:package
 ```
 
