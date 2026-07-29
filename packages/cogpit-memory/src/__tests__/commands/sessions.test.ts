@@ -259,6 +259,17 @@ describe("sessions command", () => {
       expect(typeof result!.mtime).toBe("number")
     })
 
+    it("handles a Windows cwd", async () => {
+      // CWD "C:\\Users\\me\\proj" -> dir name "C--Users-me-proj"
+      const projDir = join(mockDirs.PROJECTS_DIR, "C--Users-me-proj")
+      mkdirSync(projDir, { recursive: true })
+      writeSession(projDir, "winpath.jsonl", { cwd: "C:\\Users\\me\\proj" })
+
+      const result = await currentSession("C:\\Users\\me\\proj")
+      expect(result).not.toBeNull()
+      expect(result!.sessionId).toBe("winpath")
+    })
+
     it("handles dots in the cwd path", async () => {
       // CWD "/Users/me/.config" -> dir name "-Users-me--config"
       const projDir = join(mockDirs.PROJECTS_DIR, "-Users-me--config")

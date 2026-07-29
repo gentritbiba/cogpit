@@ -242,7 +242,7 @@ function extractInterAgentMessage(payload: Record<string, unknown>): InterAgentM
 }
 
 function agentNameFromPath(agentPath: string): string | null {
-  const segments = agentPath.split("/").filter(Boolean)
+  const segments = agentPath.split(/[\\/]/).filter(Boolean)
   return segments.at(-1) ?? null
 }
 

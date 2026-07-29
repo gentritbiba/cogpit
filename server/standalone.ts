@@ -109,7 +109,13 @@ httpServer.listen(port, host, () => {
 
 // Graceful shutdown
 let shuttingDown = false
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
+// Windows never delivers SIGTERM to a listener, so the port file would go stale
+// on taskkill. SIGBREAK covers Ctrl+Break and "exit" is the last-resort net.
+const shutdownSignals = process.platform === "win32"
+  ? (["SIGINT", "SIGBREAK"] as const)
+  : (["SIGINT", "SIGTERM"] as const)
+process.on("exit", () => removePortFile())
+for (const signal of shutdownSignals) {
   process.on(signal, async () => {
     if (shuttingDown) return
     shuttingDown = true

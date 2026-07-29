@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Control center for Claude Code and OpenAI Codex agent sessions",
   "license": "MIT",
   "author": {
@@ -35,7 +35,7 @@
     "electron:dev": "electron-vite dev",
     "electron:build": "electron-vite build",
     "electron:preview": "electron-vite build && electron .",
-    "electron:package": "start=$(date +%s) && electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never && echo \"\\n✅ electron:package completed in $(($(date +%s) - start))s\"",
+    "electron:package": "electron-vite build && electron-builder --publish never",
     "postinstall": "electron-builder install-app-deps",
     "serve": "bun run build && bun server/standalone.ts",
     "serve:start": "bun server/standalone.ts",
@@ -87,7 +87,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "babel-plugin-react-compiler": "^1.0.0",
     "electron": "^40.10.6",
-    "electron-builder": "^26.7.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^9.17.0",
     "eslint-plugin-react-hooks": "^5.0.0",
@@ -105,7 +105,9 @@
   "overrides": {
     "@hono/node-server": "1.19.13",
     "@xmldom/xmldom": "0.8.13",
+    "app-builder-lib": "26.15.3",
     "body-parser": "2.3.0",
+    "builder-util-runtime": "9.7.0",
     "fast-uri": "3.1.4",
     "flatted": "3.4.2",
     "form-data": "4.0.6",
@@ -114,7 +116,7 @@
     "lodash": "4.18.1",
     "postcss": "8.5.20",
     "qs": "6.15.3",
-    "tar": "7.5.20",
+    "tar": "7.5.21",
     "tmp": "0.2.7",
     "undici": "7.28.0"
   }

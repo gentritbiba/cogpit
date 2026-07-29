@@ -107,7 +107,32 @@ export async function matchSubagentToMember(
 
 // ── Project name helpers ─────────────────────────────────────────────────────
 
-const HOME_PREFIX = homedir().replace(/\//g, "-").replace(/^-/, "").toLowerCase()
+/**
+ * Encode a cwd using Claude Code's project-directory naming convention: every
+ * character outside `[A-Za-z0-9]` becomes `-`, so both `/Users/x/proj` and
+ * `C:\Users\x\proj` collapse into a flat directory name under
+ * `~/.claude/projects`. Mirrors `shared/providers/claude.ts`; this package is
+ * published standalone and cannot import outside its own `src` root.
+ */
+export function encodeClaudeDirName(cwd: string): string {
+  const normalized = cwd.replace(/[\\/]+$/, "") || cwd
+  return normalized.replace(/[^a-zA-Z0-9]/g, "-")
+}
+
+/**
+ * Best-effort inverse of {@link encodeClaudeDirName}. The encoding is lossy —
+ * a literal `-` is indistinguishable from a separator — so callers that can
+ * read a session's recorded `cwd` should always prefer that.
+ */
+export function decodeClaudeDirName(dirName: string): string {
+  const windowsDrive = /^([A-Za-z])--(.*)$/.exec(dirName)
+  if (windowsDrive) {
+    return `${windowsDrive[1]}:\\${windowsDrive[2].replace(/-/g, "\\")}`
+  }
+  return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
+}
+
+const HOME_PREFIX = encodeClaudeDirName(homedir()).replace(/^-/, "").toLowerCase()
 
 export function projectDirToReadableName(dirName: string): { path: string; shortName: string } {
   const raw = dirName.replace(/^-/, "")
@@ -135,7 +160,7 @@ export function projectDirToReadableName(dirName: string): { path: string; short
   const shortName = shortPart || raw
 
   return {
-    path: "/" + raw.replace(/-/g, "/"),
+    path: decodeClaudeDirName(dirName),
     shortName,
   }
 }

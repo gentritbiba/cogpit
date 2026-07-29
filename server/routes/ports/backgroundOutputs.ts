@@ -6,7 +6,20 @@ import {
   open,
   stat,
 } from "../../helpers"
+import { tmpdir } from "node:os"
 import type { NextFn } from "../../http"
+
+/**
+ * Roots Claude Code may place per-project task output under, most likely first.
+ * macOS resolves /tmp to /private/tmp; Windows has neither, so it needs %TEMP%.
+ * The uid suffix only exists where getuid() does.
+ */
+function taskOutputBases(): string[] {
+  const uid = process.getuid?.()
+  const suffix = uid === undefined ? "claude" : `claude-${uid}`
+  if (process.platform === "win32") return [join(tmpdir(), suffix)]
+  return [...new Set([`/private/tmp/${suffix}`, `/tmp/${suffix}`, join(tmpdir(), suffix)])]
+}
 
 export interface BackgroundOutputFile {
   fileName: string
@@ -41,17 +54,21 @@ function getBackgroundOutputCwd(
 async function listBackgroundOutputFiles(
   cwd: string,
 ): Promise<BackgroundOutputFile[]> {
-  const uid = process.getuid?.() ?? 501
-  const tmpBase = `/private/tmp/claude-${uid}`
-  const projectHash = cwd.replace(/\//g, "-").replace(/ /g, "-").replace(/@/g, "-").replace(/\./g, "-")
-  const tasksDir = join(tmpBase, projectHash, "tasks")
+  const projectHash = cwd.replace(/[\\/:@. ]/g, "-")
 
-  let fileNames: string[]
-  try {
-    fileNames = await readdir(tasksDir)
-  } catch {
-    return []
+  let fileNames: string[] = []
+  let tasksDir = ""
+  for (const base of taskOutputBases()) {
+    const candidate = join(base, projectHash, "tasks")
+    try {
+      fileNames = await readdir(candidate)
+      tasksDir = candidate
+      break
+    } catch {
+      continue
+    }
   }
+  if (!tasksDir) return []
 
   const files: BackgroundOutputFile[] = []
   for (const fileName of fileNames) {

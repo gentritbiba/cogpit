@@ -1,10 +1,8 @@
-import {
-  spawn,
-  createConnection,
-} from "../../helpers"
+import { createConnection } from "../../helpers"
 import type { UseFn } from "../../http"
 import { handleBackgroundTasks } from "./backgroundTasks"
 import { handleBackgroundAgents } from "./backgroundAgents"
+import { findListeningPids, killListeningProcess } from "./listeningProcesses"
 
 export function registerPortRoutes(use: UseFn) {
   // GET /api/check-ports?ports=3000,5173 - check which ports are listening
@@ -66,8 +64,16 @@ export function registerPortRoutes(use: UseFn) {
       body += chunk
     })
     req.on("end", () => {
-      try {
-        const { port } = JSON.parse(body)
+      void (async () => {
+        let port: number
+        try {
+          port = JSON.parse(body).port
+        } catch {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Invalid JSON body" }))
+          return
+        }
+
         if (!port || port < 1 || port > 65535) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "Valid port required" }))
@@ -83,58 +89,33 @@ export function registerPortRoutes(use: UseFn) {
           return
         }
 
-        const child = spawn("lsof", [
-          "-t",
-          "-i",
-          `:${port}`,
-          "-sTCP:LISTEN",
-        ])
-
-        let stdout = ""
-        child.stdout!.on("data", (data: Buffer) => {
-          stdout += data.toString()
-        })
-
-        child.on("close", () => {
-          const pids = stdout
-            .trim()
-            .split("\n")
-            .map((p) => parseInt(p, 10))
-            .filter((p) => p > 0)
-
-          if (pids.length === 0) {
-            res.setHeader("Content-Type", "application/json")
-            res.end(
-              JSON.stringify({
-                success: false,
-                error: "No process found on port",
-              })
-            )
-            return
-          }
-
-          let killed = 0
-          for (const pid of pids) {
-            try {
-              process.kill(pid, "SIGTERM")
-              killed++
-            } catch {
-              // process may have already exited
-            }
-          }
-
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({ success: true, killed, pids }))
-        })
-
-        child.on("error", (err) => {
+        let pids: number[]
+        try {
+          pids = await findListeningPids(port)
+        } catch (err) {
           res.statusCode = 500
-          res.end(JSON.stringify({ error: err.message }))
-        })
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
-      }
+          res.end(JSON.stringify({ error: (err as Error).message }))
+          return
+        }
+
+        res.setHeader("Content-Type", "application/json")
+        if (pids.length === 0) {
+          res.end(JSON.stringify({ success: false, error: "No process found on port" }))
+          return
+        }
+
+        let killed = 0
+        for (const pid of pids) {
+          try {
+            await killListeningProcess(pid)
+            killed++
+          } catch {
+            // process may have already exited
+          }
+        }
+
+        res.end(JSON.stringify({ success: true, killed, pids }))
+      })()
     })
   })
 

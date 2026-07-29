@@ -37,6 +37,7 @@ import {
   normalizeAvailableDecisions,
   wireApprovalDecision,
 } from "./codex-approval-codec"
+import { resolveAgentCommand } from "./lib/binaryResolver"
 
 export { CODEX_CLIENT_CAPABILITIES } from "./codex-app-server-protocol"
 export type * from "./codex-app-server-protocol"
@@ -177,9 +178,11 @@ export class CodexAppServer {
 
     let child: CodexAppServerProcess
     try {
-      child = this.spawn(this.command, ["app-server", "--stdio"], {
+      const cli = resolveAgentCommand(this.command, ["app-server", "--stdio"])
+      child = this.spawn(cli.command, cli.args, {
         stdio: ["pipe", "pipe", "pipe"],
         env: process.env,
+        ...cli.spawnOptions,
       })
     } catch (error) {
       return Promise.reject(

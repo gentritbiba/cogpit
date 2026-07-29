@@ -56,9 +56,17 @@ function fakeWindow(overrides: Record<string, unknown> = {}) {
     restore: vi.fn(),
     show: vi.fn(),
     focus: vi.fn(),
+    flashFrame: vi.fn(),
+    once: vi.fn(),
     webContents: { getURL: () => "http://127.0.0.1:19384/", executeJavaScript: vi.fn() },
     ...overrides,
   }
+}
+
+const realPlatform = process.platform
+
+function setPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true })
 }
 
 beforeEach(() => {
@@ -70,7 +78,10 @@ beforeEach(() => {
   appFocus.mockReset()
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => {
+  setPlatform(realPlatform)
+  vi.restoreAllMocks()
+})
 
 describe("handleWorkerNotification", () => {
   it("shows a notification and bounces the dock", () => {
@@ -141,6 +152,7 @@ describe("handleWorkerNotification", () => {
 
   describe("click", () => {
     it("reveals the window and routes the SPA to the session", () => {
+      setPlatform("darwin")
       const win = fakeWindow({ isMinimized: () => true, isVisible: () => false })
       handleWorkerNotification(MESSAGE, win as never)
       created[0].handlers.click()
@@ -153,6 +165,31 @@ describe("handleWorkerNotification", () => {
       const script = (win.webContents.executeJavaScript as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       expect(script).toContain('"/-Users-me-proj/abc-123"')
       expect(script).toContain("PopStateEvent('popstate')")
+    })
+
+    it("raises the window on Windows instead of stealing the foreground", () => {
+      setPlatform("win32")
+      const win = fakeWindow({ isMinimized: () => true, isVisible: () => false })
+      handleWorkerNotification(MESSAGE, win as never)
+      created[0].handlers.click()
+
+      expect(win.restore).toHaveBeenCalled()
+      expect(win.show).toHaveBeenCalled()
+      expect(win.focus).toHaveBeenCalled()
+      expect(appFocus).not.toHaveBeenCalled()
+      // Windows can deny the raise, so the taskbar button flashes until focused.
+      expect(win.flashFrame).toHaveBeenCalledWith(true)
+      expect(win.once).toHaveBeenCalledWith("focus", expect.any(Function))
+    })
+
+    it("does not flash the taskbar when Windows granted focus", () => {
+      setPlatform("win32")
+      const win = fakeWindow({ isFocused: () => true })
+      handleWorkerNotification(MESSAGE, win as never)
+      created[0].handlers.click()
+
+      expect(win.focus).toHaveBeenCalled()
+      expect(win.flashFrame).not.toHaveBeenCalled()
     })
 
     it("percent-encodes a Codex rollout path into one segment", () => {

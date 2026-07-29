@@ -28,11 +28,13 @@ function writePrefs(prefs: UpdatePrefs): void {
   writeFileSync(getPrefsPath(), JSON.stringify(prefs, null, 2))
 }
 
-type UpdatePlatform = "appimage" | "mac-notification" | "linux-notification"
+/** "auto-download" is every target electron-updater can install itself: NSIS and AppImage. */
+type UpdatePlatform = "auto-download" | "mac-notification" | "linux-notification"
 
 function getUpdatePlatform(): UpdatePlatform {
   if (process.platform === "darwin") return "mac-notification"
-  if (process.env.APPIMAGE) return "appimage"
+  if (process.platform === "win32") return "auto-download"
+  if (process.env.APPIMAGE) return "auto-download"
   return "linux-notification"
 }
 
@@ -70,7 +72,7 @@ export function initUpdater(mainWindow: BrowserWindow): void {
     writePrefs({ dismissedVersion: version })
   })
 
-  if (platform === "appimage") {
+  if (platform === "auto-download") {
     // Silent auto-update via electron-updater
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true

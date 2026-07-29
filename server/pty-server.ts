@@ -1,7 +1,33 @@
 import { WebSocket, WebSocketServer } from "ws"
 import { spawn as ptySpawn, type IPty } from "node-pty"
+import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
+
+function defaultShell(): string {
+  if (process.platform === "win32") return process.env.COMSPEC ?? "powershell.exe"
+  return process.env.SHELL ?? "/bin/zsh"
+}
+
+/**
+ * node-pty ignores the signal on Windows and calls TerminateProcess on the
+ * shell alone, which orphans everything the shell started.
+ */
+function killPty(pty: IPty): void {
+  if (process.platform === "win32" && pty.pid) {
+    try {
+      execFileSync("taskkill", ["/pid", String(pty.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+        timeout: 5_000,
+      })
+      return
+    } catch {
+      // Already gone, or taskkill is unavailable — fall through to node-pty.
+    }
+  }
+  pty.kill()
+}
 
 interface PtySessionMetadata {
   type: "script" | "terminal"
@@ -113,7 +139,7 @@ export class PtySessionManager {
     const cwd = (msg.cwd as string) || homedir()
     const cols = (msg.cols as number) || 80
     const rows = (msg.rows as number) || 24
-    const command = (msg.command as string) || process.env.SHELL || "/bin/zsh"
+    const command = (msg.command as string) || defaultShell()
     const args = (msg.args as string[]) || []
     const metadata = (msg.metadata as PtySessionMetadata | undefined)
 
@@ -206,7 +232,7 @@ export class PtySessionManager {
     const session = this.sessions.get(msg.id as string)
     if (session) {
       if (session.status === "running") {
-        session.pty.kill()
+        killPty(session.pty)
       }
       this.sessions.delete(msg.id as string)
       this.sendSessionList()
@@ -282,7 +308,7 @@ export class PtySessionManager {
   cleanup(): void {
     for (const session of this.sessions.values()) {
       if (session.status === "running") {
-        session.pty.kill()
+        killPty(session.pty)
       }
     }
     this.sessions.clear()

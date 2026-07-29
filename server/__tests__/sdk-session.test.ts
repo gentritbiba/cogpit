@@ -20,6 +20,7 @@ interface CapturedCall {
   options: {
     model?: string
     effort?: string
+    resume?: string
     settings?: unknown
     mcpServers?: unknown
     stderr?: (data: string) => void
@@ -191,6 +192,20 @@ describe("resolveClaudeCliPath", () => {
   it("rewrites app.asar paths to app.asar.unpacked", async () => {
     const { resolveClaudeCliPath } = await loadModule()
     expect(resolveClaudeCliPath(asarResolve, noneOnPath)).toBe(unpackedBin)
+  })
+
+  it("rewrites app.asar paths that use Windows separators", async () => {
+    // Regression: the rewrite matched "/app.asar/" only, so the packaged
+    // Windows app tried to spawn the CLI from inside the archive.
+    const root = "C:\\Users\\me\\AppData\\Local\\Programs\\Cogpit\\resources"
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(
+      (id) => `${root}\\app.asar\\node_modules\\${id.replace(/\//g, "\\")}`,
+      noneOnPath,
+    )
+    expect(result).toBe(
+      `${root}\\app.asar.unpacked\\node_modules\\@anthropic-ai\\${platformPkg.split("/")[1]}\\${binName}`,
+    )
   })
 
   it("returns undefined when the platform package cannot be resolved", async () => {

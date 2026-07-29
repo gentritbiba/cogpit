@@ -6,6 +6,7 @@
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { dirs } from "../lib/dirs"
+import { encodeClaudeDirName } from "../lib/helpers"
 import { parseMaxAge } from "../lib/response"
 import { getSessionMeta, getSessionStatus } from "../lib/metadata"
 
@@ -172,14 +173,9 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
 /**
  * Find the most recently active session for a given working directory.
  * Returns null if no sessions exist for the given cwd.
- *
- * CWD-to-project-dir derivation: replace `/` and `.` with `-` to get
- * the directory name under ~/.claude/projects/.
  */
 export async function currentSession(cwd: string): Promise<SessionSummary | null> {
-  // Derive project directory name: /Users/foo/code/bar -> -Users-foo-code-bar
-  const projectDirName = cwd.replace(/[/.]/g, "-")
-  const projectDir = join(dirs.PROJECTS_DIR, projectDirName)
+  const projectDir = join(dirs.PROJECTS_DIR, encodeClaudeDirName(cwd))
 
   let files: string[]
   try {

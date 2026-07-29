@@ -11,6 +11,7 @@ import {
   projectDirNameForNewFolder,
   sessionIdFromFileName,
 } from "@/lib/sessionSource"
+import { decodeClaudeDirName } from "../../../shared/providers/claude"
 
 describe("sessionSource", () => {
   it("detects codex dir names", () => {
@@ -40,6 +41,38 @@ describe("sessionSource", () => {
     expect(encodeClaudeDirName("/tmp/my-project/")).toBe("-tmp-my-project")
     expect(projectDirNameForNewFolder("/tmp/project", "claude")).toBe("-tmp-project")
     expect(projectDirNameForNewFolder("/tmp/project", "codex")).toBe(encodeCodexDirName("/tmp/project"))
+  })
+
+  describe("Claude project dir codec", () => {
+    it("collapses every non-alphanumeric character, as Claude Code does", () => {
+      expect(encodeClaudeDirName("/Users/me/.claude")).toBe("-Users-me--claude")
+      expect(encodeClaudeDirName("/Users/me/Google Drive/Code")).toBe("-Users-me-Google-Drive-Code")
+      expect(encodeClaudeDirName("/Users/me/a@b.com/proj")).toBe("-Users-me-a-b-com-proj")
+      expect(encodeClaudeDirName("/Users/me/My_Repo")).toBe("-Users-me-My-Repo")
+    })
+
+    it("encodes Windows drive paths", () => {
+      expect(encodeClaudeDirName("C:\\Users\\x\\proj")).toBe("C--Users-x-proj")
+      expect(encodeClaudeDirName("C:\\Users\\x\\proj\\")).toBe("C--Users-x-proj")
+    })
+
+    it("decodes POSIX dir names back to absolute paths", () => {
+      expect(decodeClaudeDirName("-tmp-project")).toBe("/tmp/project")
+      expect(decodeClaudeDirName("home-user-projects-myapp")).toBe("/home/user/projects/myapp")
+      // Lossy: a dash inside a segment is indistinguishable from a separator
+      expect(decodeClaudeDirName("-tmp-my-project")).toBe("/tmp/my/project")
+    })
+
+    it("decodes a drive-letter dir name back to a Windows path", () => {
+      expect(decodeClaudeDirName("C--Users-x-proj")).toBe("C:\\Users\\x\\proj")
+      expect(decodeClaudeDirName("d--work-repo")).toBe("d:\\work\\repo")
+    })
+
+    it("round-trips paths whose segments contain no dashes", () => {
+      for (const cwd of ["/tmp/project", "/Users/me/code/app", "C:\\Users\\x\\proj"]) {
+        expect(decodeClaudeDirName(encodeClaudeDirName(cwd))).toBe(cwd)
+      }
+    })
   })
 
   it("maps a Claude project dir to the selected agent kind", () => {

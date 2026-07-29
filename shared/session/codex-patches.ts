@@ -121,7 +121,11 @@ export function extractApplyPatchInputs(execSource: string): string[] {
 
 function resolveCodexPatchPath(filePath: string, cwd: string): string {
   if (!cwd || filePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(filePath)) return filePath
-  return `${cwd.replace(/[\\/]+$/, "")}/${filePath.replace(/^\.\//, "")}`
+  const base = cwd.replace(/[\\/]+$/, "")
+  const relative = filePath.replace(/^\.[\\/]/, "")
+  return /^[A-Za-z]:[\\/]/.test(cwd)
+    ? `${base}\\${relative.replace(/\//g, "\\")}`
+    : `${base}/${relative}`
 }
 
 /** Parse a Codex apply_patch string into per-file Edit/Write tool calls. */

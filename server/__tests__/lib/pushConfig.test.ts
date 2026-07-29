@@ -135,15 +135,32 @@ describe("getPushConfig — environment overrides", () => {
 })
 
 describe("getPushConfig — secret hygiene", () => {
-  it("warns when the config is readable by other users", () => {
-    write({ topic: "t" })
-    chmodSync(file, 0o644)
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+  describe("on posix", () => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!
 
-    expect(getPushConfig(file)?.topic).toBe("t")
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("readable by other users"))
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { ...original, value: "linux" })
+    })
+
+    afterEach(() => {
+      Object.defineProperty(process, "platform", original)
+    })
+
+    // Pinned rather than inherited from the host: the check is skipped on win32,
+    // so the POSIX guarantee has to be asserted when CI runs on Windows too. A
+    // Windows chmod 644 still reports 0666, which trips the same group/other bits.
+    it("warns when the config is readable by other users", () => {
+      write({ topic: "t" })
+      chmodSync(file, 0o644)
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+      expect(getPushConfig(file)?.topic).toBe("t")
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("readable by other users"))
+    })
   })
 
+  // Not pinned: Windows reports 0666 for a chmod 600 file, so only the real
+  // platform can prove an owner-only config is accepted silently.
   it("stays quiet for an owner-only config", () => {
     write({ topic: "t" })
     chmodSync(file, 0o600)

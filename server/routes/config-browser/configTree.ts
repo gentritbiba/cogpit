@@ -3,7 +3,22 @@ import { constants } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { parseFrontmatter } from "../slash-suggestions"
+import { hasExecutableExtension } from "../../lib/binaryResolver"
 import { getFileType, type ConfigFileType } from "./configValidation"
+
+/**
+ * Windows has no execute bit, and fs.access(X_OK) degrades to an existence
+ * check there — every file in bin/ would look runnable.
+ */
+async function isExecutableFile(fullPath: string, fileName: string): Promise<boolean> {
+  if (process.platform === "win32") return hasExecutableExtension(fileName)
+  try {
+    await access(fullPath, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -108,8 +123,7 @@ export async function scanDir(
       } else if (entry.isFile() || resolved?.isFile()) {
         if (opts.isBinDir) {
           // bin/ entries: only include executable files
-          try {
-            await access(fullPath, constants.X_OK)
+          if (await isExecutableFile(fullPath, entry.name)) {
             items.push({
               name: entry.name,
               path: fullPath,
@@ -117,7 +131,7 @@ export async function scanDir(
               fileType: "bin",
               readOnly: opts.readOnly,
             })
-          } catch { /* not executable — skip */ }
+          }
           continue
         }
 

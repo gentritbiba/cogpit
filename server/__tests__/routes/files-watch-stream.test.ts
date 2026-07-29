@@ -7,6 +7,8 @@
  * on disconnect, and codex sessions opting out.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 const { mockStat, mockOpen, mockWatch } = vi.hoisted(() => ({
   mockStat: vi.fn(),
@@ -83,6 +85,12 @@ async function connect(urlPath: string) {
 }
 
 const SESSION = "11111111-2222-3333-4444-555555555555"
+// Mirrors the allowlist in files-watch.ts: Windows has no /tmp, so task output
+// lives under %TEMP% there.
+const TASK_OUTPUT_DIR = join(
+  process.platform === "win32" ? tmpdir() : "/tmp",
+  "claude-cogpit-test",
+)
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -239,7 +247,7 @@ describe("/api/task-output streaming", () => {
 
     const handler = getHandler("/api/task-output")
     const harness = makeReqRes(
-      `/?path=${encodeURIComponent("/tmp/claude-cogpit-test/task.output")}`,
+      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "task.output"))}`,
     )
     await handler(harness.req as never, harness.res as never, harness.next)
     await vi.waitFor(() => expect(readSizes.reduce((sum, size) => sum + size, 0)).toBe(totalBytes))
@@ -270,7 +278,7 @@ describe("/api/task-output streaming", () => {
 
     const handler = getHandler("/api/task-output")
     const harness = makeReqRes(
-      `/?path=${encodeURIComponent("/tmp/claude-cogpit-test/utf8.output")}`,
+      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "utf8.output"))}`,
     )
     await handler(harness.req as never, harness.res as never, harness.next)
     await vi.waitFor(() => {

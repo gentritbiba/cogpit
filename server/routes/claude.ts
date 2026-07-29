@@ -19,6 +19,7 @@ import type { PersistentSession } from "../helpers"
 import { buildStreamMessage as buildClaudeStreamMessage, CODEX_IMAGE_ONLY_PROMPT } from "../lib/streamMessage"
 import { sdkSessions, sendSDKMessage, resumeSDKSession, attachSubagentWatcher, isSDKQueryLive } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
+import { resolveAgentCommand } from "../lib/binaryResolver"
 import { codexAppServer } from "../codex-app-server"
 import {
   continueCodexExecution,
@@ -91,7 +92,7 @@ export function registerClaudeRoutes(use: UseFn) {
           const imageArgs = imagePaths.flatMap((filePath) => ["-i", filePath])
           const prompt = message || (imagePaths.length > 0 ? CODEX_IMAGE_ONLY_PROMPT : "")
 
-          const child = spawn(
+          const codexCli = resolveAgentCommand(
             "codex",
             [
               "exec",
@@ -105,10 +106,15 @@ export function registerClaudeRoutes(use: UseFn) {
               sessionId,
               ...(prompt ? [prompt] : []),
             ],
+          )
+          const child = spawn(
+            codexCli.command,
+            codexCli.args,
             {
               cwd: resolvedCwd,
               env: process.env,
               stdio: ["ignore", "pipe", "pipe"],
+              ...codexCli.spawnOptions,
             }
           )
 

@@ -1,6 +1,6 @@
 import { readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { join, relative, resolve, sep } from "node:path"
 import {
   decodeCodexDirName as decodeProviderCodexDirName,
   encodeCodexDirName as encodeProviderCodexDirName,
@@ -95,7 +95,9 @@ export async function listCodexSessionFiles(): Promise<SessionFileInfo[]> {
         const fileStat = await stat(filePath)
         results.push({
           filePath,
-          fileName: filePath.slice(CODEX_SESSIONS_DIR.length + 1),
+          // Travels to the client and back as a URL path segment, so it stays
+          // forward-slashed regardless of the host separator.
+          fileName: relative(CODEX_SESSIONS_DIR, filePath).split(sep).join("/"),
           mtimeMs: fileStat.mtimeMs,
           size: fileStat.size,
         })

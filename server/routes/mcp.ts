@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path"
 import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { sendJson, type UseFn } from "../http"
+import { resolveAgentCommand } from "../lib/binaryResolver"
 
 export interface McpServer {
   name: string
@@ -127,7 +128,8 @@ export async function getMcpServers(cwd: string): Promise<{ servers: McpServer[]
   return new Promise((resolve) => {
     const env = { ...process.env }
     delete env.CLAUDECODE
-    execFile("claude", ["mcp", "list"], { cwd, env, timeout: 15000 }, (err, stdout) => {
+    const cli = resolveAgentCommand("claude", ["mcp", "list"])
+    execFile(cli.command, cli.args, { cwd, env, timeout: 15000, ...cli.spawnOptions }, (err, stdout) => {
       if (err) {
         resolve({ servers: cached?.servers ?? [], configs })
         return

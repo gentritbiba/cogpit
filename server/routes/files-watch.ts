@@ -8,13 +8,18 @@ import {
   watch,
 } from "../helpers"
 import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
-const TASK_OUTPUT_BASES = ["/private/tmp", "/tmp"] as const
+// Allowlist of roots that background task output may be read from. Windows has
+// no /tmp, so nothing would ever pass containment there without %TEMP%.
+const TASK_OUTPUT_BASES: readonly string[] = process.platform === "win32"
+  ? [tmpdir()]
+  : ["/private/tmp", "/tmp"]
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
 let canonicalTaskOutputBases: Promise<string[]> | null = null
@@ -87,14 +92,19 @@ function isTaskOutputDescendant(base: string, candidate: string): boolean {
 /** Resolve a task-output path without allowing symlink escapes from a claude-* temp tree. */
 export async function resolveTaskOutputPath(outputPath: string): Promise<string | null> {
   const lexicalPath = resolve(outputPath)
-  if (!TASK_OUTPUT_BASES.some((base) => isTaskOutputDescendant(resolve(base), lexicalPath))) {
+  const canonicalBases = await getCanonicalTaskOutputBases()
+  // The lexical pre-check accepts either spelling of a base, since a root can
+  // reach the caller in a form os.tmpdir() does not use — /tmp vs /private/tmp
+  // on macOS, an 8.3 short path vs its long form on Windows. Containment is
+  // still decided by the canonical check below.
+  const lexicalBases = [...new Set([...TASK_OUTPUT_BASES.map((base) => resolve(base)), ...canonicalBases])]
+  if (!lexicalBases.some((base) => isTaskOutputDescendant(base, lexicalPath))) {
     return null
   }
 
   const canonicalPath = await canonicalizeIncludingMissing(lexicalPath)
   if (!canonicalPath) return null
-  const bases = await getCanonicalTaskOutputBases()
-  return bases.some((base) => isTaskOutputDescendant(base, canonicalPath))
+  return canonicalBases.some((base) => isTaskOutputDescendant(base, canonicalPath))
     ? canonicalPath
     : null
 }

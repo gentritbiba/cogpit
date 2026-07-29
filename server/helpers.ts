@@ -1,10 +1,11 @@
 import { readdir, open, writeFile, unlink } from "node:fs/promises"
 import { writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { homedir, tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
 import { dirs } from "./sessionPaths"
+import { decodeClaudeDirName, encodeClaudeDirName } from "../shared/providers/claude"
 import {
   buildClaudePermArgs,
   buildCodexPermArgs as _buildCodexPermArgs,
@@ -225,7 +226,13 @@ export async function matchSubagentToMember(
 
 // ── Project name helpers ────────────────────────────────────────────────
 
-const HOME_PREFIX = homedir().replace(/\//g, "-").replace(/^-/, "").toLowerCase()
+const HOME_PREFIX = encodeClaudeDirName(homedir()).replace(/^-/, "").toLowerCase()
+
+/** Last path segment of a cwd, tolerating trailing separators of either flavour. */
+export function shortNameFromPath(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "")
+  return basename(trimmed) || trimmed || path
+}
 
 /**
  * Read a session's agent-team identity from the head of its JSONL file.
@@ -291,7 +298,7 @@ export function projectDirToReadableName(dirName: string): { path: string; short
   const shortName = shortPart || raw
 
   return {
-    path: "/" + raw.replace(/-/g, "/"),
+    path: decodeClaudeDirName(dirName),
     shortName,
   }
 }
