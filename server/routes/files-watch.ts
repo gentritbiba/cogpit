@@ -8,13 +8,18 @@ import {
   watch,
 } from "../helpers"
 import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import type { UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
 
-const TASK_OUTPUT_BASES = ["/private/tmp", "/tmp"] as const
+// Allowlist of roots that background task output may be read from. Windows has
+// no /tmp, so nothing would ever pass containment there without %TEMP%.
+const TASK_OUTPUT_BASES: readonly string[] = process.platform === "win32"
+  ? [tmpdir()]
+  : ["/private/tmp", "/tmp"]
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
 let canonicalTaskOutputBases: Promise<string[]> | null = null

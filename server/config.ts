@@ -151,7 +151,12 @@ export async function loadConfig(): Promise<AppConfig | null> {
       // Existing installations may predate the owner-only creation mode used
       // by saveConfig(). Re-apply it on every successful read so an old file
       // containing a password cannot remain group/world-readable indefinitely.
-      await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
+      // Windows has no POSIX modes: chmod only toggles the read-only bit there,
+      // and throws EPERM on an already-read-only file — which this try/catch
+      // would swallow into "no config at all".
+      if (process.platform !== "win32") {
+        await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
+      }
 
       cachedConfig = {
         claudeDir: parsed.claudeDir,
