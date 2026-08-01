@@ -146,6 +146,21 @@ describe("summarizeSession", () => {
     expect(s!.filesTotal.count).toBe(2)
   })
 
+  it("reports net line counts however many times one hunk is re-edited", async () => {
+    // Each edit chains onto the previous one, so the file went from "v0" to
+    // "v70" — one line changed, not seventy.
+    write(
+      Array.from({ length: 70 }, (_, i) =>
+        assistant([{
+          type: "tool_use", id: `e${i}`, name: "Edit",
+          input: { file_path: "/chain.ts", old_string: `v${i}`, new_string: `v${i + 1}` },
+        }]),
+      ),
+    )
+    const s = await summarizeSession("s", file)
+    expect(s!.files).toEqual([{ path: "/chain.ts", additions: 1, deletions: 1 }])
+  })
+
   it("records a failing tool result", async () => {
     write([
       assistant([{ type: "tool_use", id: "t1", name: "Bash", input: { command: "false" } }]),

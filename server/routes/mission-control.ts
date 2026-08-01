@@ -1,9 +1,9 @@
 /**
  * GET /api/mission-control — card payloads for the Mission Control grid.
  *
- * Returns a rich summary for the most recently active sessions. Pending
- * permission requests come from GET /api/permissions instead, because the
- * sidebar and header need them whether or not this view is open.
+ * Pending permission requests are deliberately not here: GET /api/permissions
+ * serves those, because the sidebar and header need them whether or not this
+ * view is open.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http"
@@ -12,10 +12,7 @@ import { dirs, join, readdir, stat } from "../helpers"
 import { getCodexSessionInventory } from "../lib/codexSessionInventory"
 import { readClaudeProjectEntries } from "./projects/claudeProjectEntries"
 import { summarizeSession } from "../lib/missionControlSummary"
-import type {
-  MissionControlResponse,
-  MissionControlSummary,
-} from "../../shared/contracts/missionControl"
+import type { MissionControlResponse } from "../../shared/contracts/missionControl"
 
 const DEFAULT_LIMIT = 24
 const MAX_LIMIT = 60
@@ -43,12 +40,8 @@ async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
       if (!file.endsWith(".jsonl")) continue
       const filePath = join(projectDir, file)
       try {
-        const info = await stat(filePath)
-        candidates.push({
-          sessionId: file.replace(/\.jsonl$/, ""),
-          filePath,
-          mtimeMs: info.mtimeMs,
-        })
+        const { mtimeMs } = await stat(filePath)
+        candidates.push({ sessionId: file.replace(/\.jsonl$/, ""), filePath, mtimeMs })
       } catch {
         /* skip unreadable files */
       }
@@ -58,11 +51,7 @@ async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
   try {
     for (const file of await getCodexSessionInventory()) {
       if (file.isSubagent) continue
-      candidates.push({
-        sessionId: file.sessionId,
-        filePath: file.filePath,
-        mtimeMs: file.mtimeMs,
-      })
+      candidates.push({ sessionId: file.sessionId, filePath: file.filePath, mtimeMs: file.mtimeMs })
     }
   } catch {
     /* Codex inventory is optional */
@@ -79,7 +68,7 @@ export async function handleMissionControl(
 ): Promise<void> {
   if (req.method !== "GET") return next()
 
-  const url = new URL((req.url || "/").replace(/^\/?/, "/"), "http://localhost")
+  const url = new URL(req.url || "/", "http://localhost")
   const requested = Number.parseInt(url.searchParams.get("limit") ?? "", 10)
   const limit = Number.isFinite(requested)
     ? Math.max(1, Math.min(requested, MAX_LIMIT))
@@ -90,10 +79,8 @@ export async function handleMissionControl(
     const settled = await Promise.all(
       candidates.map((c) => summarizeSession(c.sessionId, c.filePath).catch(() => null)),
     )
-    const summaries = settled.filter((s): s is MissionControlSummary => s !== null)
-
     const body: MissionControlResponse = {
-      summaries,
+      summaries: settled.filter((summary) => summary !== null),
       generatedAt: new Date().toISOString(),
     }
     sendJson(res, 200, body)

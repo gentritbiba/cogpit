@@ -1,39 +1,28 @@
 /**
  * Wire contract for GET /api/mission-control — the per-session card payload
- * behind the Mission Control grid.
- *
- * `/api/active-sessions` carries identity and status but none of the density a
- * card needs (tokens, context pressure, diffstat, tool trail). This contract
- * fills that gap and is browser-safe.
+ * behind the Mission Control grid. Browser-safe.
  */
 
-/** A file touched by a session, with net line counts. */
 export interface MissionControlFileChange {
   path: string
   additions: number
   deletions: number
 }
 
-/** Token totals accumulated across every assistant response in the session. */
 export interface MissionControlTokens {
   input: number
   output: number
   cacheRead: number
   cacheCreation: number
   /**
-   * input + output — the headline card number, matching `computeStats`.
-   *
-   * Cache reads are deliberately excluded: every call re-reads the whole
-   * context, so summing them reports tens of millions for an ordinary session.
+   * input + output. Cache reads are deliberately excluded: every call re-reads
+   * the whole context, so summing them reports tens of millions of tokens for
+   * an ordinary session.
    */
   total: number
 }
 
-/**
- * Context-window pressure, read from the most recent assistant usage rather
- * than summed: it is the only value that reflects what the model is carrying
- * right now.
- */
+/** Read from the latest assistant usage, not summed — only that reflects what the model carries now. */
 export interface MissionControlContext {
   used: number
   limit: number
@@ -41,7 +30,6 @@ export interface MissionControlContext {
   percent: number
 }
 
-/** The tool call a session is executing right now. */
 export interface MissionControlCurrentTool {
   name: string
   /** One-line rendering of the tool input (command, file path, pattern…). */
@@ -51,37 +39,26 @@ export interface MissionControlCurrentTool {
 /** Everything the grid shows for one session beyond its ActiveSessionInfo. */
 export interface MissionControlSummary {
   sessionId: string
-  /** Model id from the latest assistant message, when the session has one. */
   model: string | null
-  /** ISO timestamp of the first event in the session. */
   startedAt: string | null
-  /** ISO timestamp of the most recent event. */
   lastEventAt: string | null
-  /** Wall-clock span between the first and last event, in ms. */
   elapsedMs: number
   turnCount: number
   tokens: MissionControlTokens
   context: MissionControlContext | null
   currentTool: MissionControlCurrentTool | null
-  /** Most recent tool names, oldest first — the trail shown under the card. */
+  /** Most recent tool names, oldest first. */
   toolTrail: string[]
   totalToolCalls: number
-  /** Changed files, largest change first. Truncated to a card-sized list. */
+  /** Largest change first, truncated to a card-sized list. */
   files: MissionControlFileChange[]
   /** Totals across every changed file, including any beyond `files`. */
   filesTotal: { count: number; additions: number; deletions: number }
-  /** Latest assistant prose, for the card preview line. */
   lastAssistantText: string | null
-  /** True when the last tool result in the session was an error. */
   lastToolErrored: boolean
 }
 
-/**
- * A pending permission request, paired with the session that raised it.
- *
- * Served by GET /api/permissions rather than this endpoint: the sidebar and
- * header need pending requests whether or not Mission Control is open.
- */
+/** A pending permission request, served by GET /api/permissions. */
 export interface MissionControlPermission {
   sessionId: string
   requestId: string
@@ -95,21 +72,17 @@ export interface MissionControlPermission {
   timestamp: number
 }
 
-/** One selectable option on a question. */
 export interface MissionControlQuestionOption {
   label: string
   description?: string
   /**
-   * True when the option carried a rich preview (a mockup, a code snippet).
-   *
-   * The preview itself is deliberately not sent: it can run to kilobytes, and
-   * this list is polled app-wide. A card cannot render one anyway, so it says
-   * so and points at the session instead.
+   * Whether the option carried a rich preview (a mockup, a code snippet). The
+   * preview itself is deliberately not sent: it can run to kilobytes and this
+   * list is polled app-wide. Cards surface the flag and point at the session.
    */
   hasPreview: boolean
 }
 
-/** One question within an AskUserQuestion call. */
 export interface MissionControlQuestionItem {
   question: string
   header?: string
@@ -119,11 +92,8 @@ export interface MissionControlQuestionItem {
 
 /**
  * An AskUserQuestion call blocking a session, served by GET /api/user-questions.
- *
- * Unlike a permission, this fires regardless of permission mode — a session run
- * with bypassPermissions still stops dead here. Presence in this list is proof
- * the question is live and answerable: it is read from the in-memory resolver
- * map, so a session whose server restarted simply is not listed.
+ * Read from the in-memory resolver map, so being listed proves the question is
+ * still live and answerable.
  */
 export interface MissionControlQuestion {
   sessionId: string

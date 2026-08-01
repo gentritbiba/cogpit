@@ -8,7 +8,7 @@
  * POST resolves the whole tool at the end.
  */
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { ChevronRight, MessageCircleQuestion } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -26,6 +26,8 @@ interface QuestionPromptProps {
   onAnswer: (toolUseId: string, answers: UserQuestionAnswerMap) => void
   onOpenSession: () => void
 }
+
+const ACTION_BUTTON = "rounded border px-2.5 py-1 text-[11px] font-medium transition-colors"
 
 /**
  * Some calls cannot be answered honestly from a card: a question with no
@@ -49,21 +51,19 @@ export function QuestionPrompt({
   const [answers, setAnswers] = useState<UserQuestionAnswerMap>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const tooComplex = useMemo(() => needsFullView(questions), [questions])
-  const current = questions[index]
-
   if (questions.length === 0) return null
 
-  if (tooComplex) {
+  if (needsFullView(questions)) {
     return (
       <Shell>
-        <p className="text-[11.5px] leading-relaxed text-pink-100/80">
-          {questions[0].question}
-        </p>
+        <p className="text-[11.5px] leading-relaxed text-pink-100/80">{questions[0].question}</p>
         <button
           type="button"
           onClick={onOpenSession}
-          className="mt-2 flex items-center gap-1 rounded border border-pink-500/40 bg-pink-500/15 px-2.5 py-1 text-[11px] font-medium text-pink-200 transition-colors hover:bg-pink-500/25"
+          className={cn(
+            ACTION_BUTTON,
+            "mt-2 flex items-center gap-1 border-pink-500/40 bg-pink-500/15 text-pink-200 hover:bg-pink-500/25",
+          )}
         >
           Open session — this one needs the full view
           <ChevronRight className="size-3" />
@@ -72,8 +72,10 @@ export function QuestionPrompt({
     )
   }
 
-  /** Record an answer and either advance or submit the completed set. */
-  const commit = (value: string) => {
+  const current = questions[index]
+
+  /** Record an answer, then advance or submit the completed set. */
+  function commit(value: string) {
     const next = { ...answers, [current.question]: value }
     if (index + 1 < questions.length) {
       setAnswers(next)
@@ -84,7 +86,7 @@ export function QuestionPrompt({
     onAnswer(request.toolUseId, next)
   }
 
-  const toggle = (label: string) => {
+  function toggle(label: string) {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(label)) next.delete(label)
@@ -116,16 +118,17 @@ export function QuestionPrompt({
       </p>
 
       <div className="mt-1.5 flex flex-col gap-1">
-        {current.options.map((option) => {
-          const isSelected = selected.has(option.label)
-          const button = (
+        {current.options.map((option) => (
+          // Descriptions are full sentences — inline they would triple the
+          // card height, so they live in the hover card.
+          <WithTooltip key={option.label} text={option.description}>
             <button
               type="button"
               disabled={responding}
               onClick={() => (current.multiSelect ? toggle(option.label) : commit(option.label))}
               className={cn(
                 "flex w-full items-center gap-1.5 rounded border px-2 py-1 text-left text-[11px] transition-colors disabled:opacity-50",
-                isSelected
+                selected.has(option.label)
                   ? "border-pink-400/60 bg-pink-500/25 text-pink-100"
                   : "border-pink-500/25 bg-pink-500/5 text-pink-100/85 hover:bg-pink-500/15",
               )}
@@ -135,25 +138,13 @@ export function QuestionPrompt({
                 className={cn(
                   "size-2.5 shrink-0 border",
                   current.multiSelect ? "rounded-[2px]" : "rounded-full",
-                  isSelected ? "border-pink-300 bg-pink-400" : "border-pink-400/40",
+                  selected.has(option.label) ? "border-pink-300 bg-pink-400" : "border-pink-400/40",
                 )}
               />
               <span className="min-w-0 flex-1 truncate">{option.label}</span>
             </button>
-          )
-          // Descriptions are full sentences — inline they would triple the
-          // card height, so they live in the hover card.
-          return option.description ? (
-            <Tooltip key={option.label}>
-              <TooltipTrigger render={button} />
-              <TooltipContent side="right" className="max-w-[250px]">
-                {option.description}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <span key={option.label}>{button}</span>
-          )
-        })}
+          </WithTooltip>
+        ))}
       </div>
 
       <div className="mt-1.5 flex items-center gap-2">
@@ -162,7 +153,10 @@ export function QuestionPrompt({
             type="button"
             disabled={responding || selected.size === 0}
             onClick={() => commit(joinMultiSelect(selected))}
-            className="rounded border border-pink-400/50 bg-pink-500/20 px-2.5 py-1 text-[11px] font-medium text-pink-100 transition-colors hover:bg-pink-500/30 disabled:opacity-40"
+            className={cn(
+              ACTION_BUTTON,
+              "border-pink-400/50 bg-pink-500/20 text-pink-100 hover:bg-pink-500/30 disabled:opacity-40",
+            )}
           >
             {index + 1 < questions.length ? "Next" : "Send"}
           </button>
@@ -183,6 +177,18 @@ export function QuestionPrompt({
         </p>
       )}
     </Shell>
+  )
+}
+
+function WithTooltip({ text, children }: { text?: string; children: React.ReactElement }) {
+  if (!text) return children
+  return (
+    <Tooltip>
+      <TooltipTrigger render={children} />
+      <TooltipContent side="right" className="max-w-[250px]">
+        {text}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

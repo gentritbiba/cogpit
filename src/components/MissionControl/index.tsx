@@ -27,11 +27,20 @@ import {
 /** How often the open grid re-reads the session inventory. */
 const INVENTORY_REFRESH_MS = 8_000
 
+const EMPTY_HINT = "Start Claude Code or Codex and every session shows up here"
+
+type Layout = "grid" | "list"
+
 const FILTERS: { id: MissionFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "running", label: "Running" },
   { id: "needs-you", label: "Needs you" },
   { id: "finished", label: "Finished" },
+]
+
+const LAYOUTS: { id: Layout; label: string; Icon: typeof LayoutGrid }[] = [
+  { id: "grid", label: "Grid layout", Icon: LayoutGrid },
+  { id: "list", label: "List layout", Icon: List },
 ]
 
 interface MissionControlProps {
@@ -56,7 +65,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const { names: sessionNames } = useSessionNames()
   const { names: projectNames } = useProjectNames()
   const [filter, setFilter] = useState<MissionFilter>("all")
-  const [layout, setLayout] = useLocalStorage<"grid" | "list">(
+  const [layout, setLayout] = useLocalStorage<Layout>(
     deviceScopedKey("mission-control-layout"),
     "grid",
   )
@@ -82,11 +91,9 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
     refreshHumanInput()
   }, [refreshInventory, refreshMission, refreshHumanInput])
 
-  // The inventory's own poll is deliberately gentle (20s) because it scans every
-  // project and shells out to `ps`. That is too slow here: a session that just
-  // blocked on a permission would sit invisible for up to a poll interval, which
-  // is exactly the case this view exists to catch. While the grid is open and
-  // visible, refresh the inventory on a tighter cadence.
+  // The inventory's own 20s poll is too slow for this view: a session that just
+  // blocked on a permission — the case the grid exists to catch — would sit
+  // invisible for up to a full interval.
   useEffect(() => {
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") refreshInventory()
@@ -94,31 +101,22 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
     return () => clearInterval(interval)
   }, [refreshInventory])
 
-  const handleOpen = useCallback((dirName: string, fileName: string) => {
-    onSelectSession(dirName, fileName)
-  }, [onSelectSession])
-
   const handleAnswerQuestion = useCallback(async (
     sessionId: string,
     toolUseId: string,
     answers: Record<string, string>,
   ) => {
     const result = await answerQuestion(sessionId, toolUseId, answers)
-    if (!result.ok) {
-      setGoneQuestions((prev) => new Set(prev).add(toolUseId))
-    }
+    if (!result.ok) setGoneQuestions((prev) => new Set(prev).add(toolUseId))
   }, [answerQuestion])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Toolbar */}
       <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border/50 px-4">
         <h2 className="text-[13px] font-semibold tracking-tight">Mission Control</h2>
         <div className="flex items-center gap-2.5 font-mono text-[11px] text-muted-foreground/60">
           {counts.running > 0 && <span className="text-blue-400">{counts.running} running</span>}
-          {counts.needsYou > 0 && (
-            <span className="text-amber-400">{counts.needsYou} need you</span>
-          )}
+          {counts.needsYou > 0 && <span className="text-amber-400">{counts.needsYou} need you</span>}
           {counts.finished > 0 && <span className="text-green-400">{counts.finished} done</span>}
           {counts.failed > 0 && <span className="text-red-400">{counts.failed} failed</span>}
         </div>
@@ -147,26 +145,19 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
           </div>
 
           <div className="flex items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="size-6 p-0"
-              aria-label="Grid layout"
-              aria-pressed={layout === "grid"}
-              onClick={() => setLayout("grid")}
-            >
-              <LayoutGrid className={cn("size-3.5", layout === "grid" ? "text-foreground" : "text-muted-foreground/50")} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="size-6 p-0"
-              aria-label="List layout"
-              aria-pressed={layout === "list"}
-              onClick={() => setLayout("list")}
-            >
-              <List className={cn("size-3.5", layout === "list" ? "text-foreground" : "text-muted-foreground/50")} />
-            </Button>
+            {LAYOUTS.map(({ id, label, Icon }) => (
+              <Button
+                key={id}
+                variant="ghost"
+                size="sm"
+                className="size-6 p-0"
+                aria-label={label}
+                aria-pressed={layout === id}
+                onClick={() => setLayout(id)}
+              >
+                <Icon className={cn("size-3.5", layout === id ? "text-foreground" : "text-muted-foreground/50")} />
+              </Button>
+            ))}
             <Button
               variant="ghost"
               size="sm"
@@ -203,9 +194,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
                 {cards.length === 0 ? "No live sessions" : `Nothing matches "${filter}"`}
               </p>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                {cards.length === 0
-                  ? "Start Claude Code or Codex and every session shows up here"
-                  : "Try a different filter"}
+                {cards.length === 0 ? EMPTY_HINT : "Try a different filter"}
               </p>
             </div>
           )}
@@ -216,14 +205,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
             </div>
           )}
 
-          <div
-            className={cn(
-              "grid gap-3",
-              layout === "grid"
-                ? "grid-cols-1 md:grid-cols-2 2xl:grid-cols-3"
-                : "grid-cols-1",
-            )}
-          >
+          <div className={cn("grid grid-cols-1 gap-3", layout === "grid" && "md:grid-cols-2 2xl:grid-cols-3")}>
             {visible.map((card) => (
               <SessionCard
                 key={card.session.sessionId}
@@ -235,7 +217,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
                 }
                 responding={responding}
                 goneQuestions={goneQuestions}
-                onOpen={() => handleOpen(card.session.dirName, card.session.fileName)}
+                onOpen={() => onSelectSession(card.session.dirName, card.session.fileName)}
                 onRespond={respond}
                 onAnswerQuestion={handleAnswerQuestion}
               />

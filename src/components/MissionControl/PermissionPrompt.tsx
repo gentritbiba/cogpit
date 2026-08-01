@@ -22,6 +22,16 @@ interface PermissionPromptProps {
 
 const DEFAULT_DECISIONS: PermissionDecision[] = ["allow", "allow_always", "deny"]
 
+const ALLOW = "border-green-600/50 bg-green-600/20 px-2.5 font-medium text-green-300 hover:bg-green-600/35"
+const DENY = "border-red-700/50 bg-red-600/15 px-2.5 font-medium text-red-300 hover:bg-red-600/30"
+const ALWAYS = "border-border/60 px-2 text-muted-foreground hover:text-foreground"
+
+const DECISION_BUTTONS: { decision: PermissionDecision; label: string; tone: string }[] = [
+  { decision: "allow", label: "Allow", tone: ALLOW },
+  { decision: "deny", label: "Deny", tone: DENY },
+  { decision: "allow_always", label: "Always", tone: ALWAYS },
+]
+
 function supports(request: MissionControlPermission, decision: PermissionDecision): boolean {
   return (request.availableDecisions ?? DEFAULT_DECISIONS).includes(decision)
 }
@@ -32,16 +42,17 @@ export function PermissionPrompt({
   responding,
   onRespond,
 }: PermissionPromptProps) {
-  const canAllow = supports(request, "allow")
-  const canDeny = supports(request, "deny")
-  const label = request.title || `Allow ${request.toolName}?`
+  const available = DECISION_BUTTONS.filter((button) => supports(request, button.decision))
+  // "Always" alone is not an answer — without allow or deny the card cannot
+  // resolve the request and has to say so.
+  const answerable = available.some((button) => button.decision !== "allow_always")
 
   return (
     <div className="rounded-md border border-amber-500/40 bg-amber-500/[0.07] p-2">
       <div className="flex items-center gap-1.5">
         <ShieldAlert className="size-3.5 shrink-0 text-amber-400" />
         <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-amber-200">
-          {label}
+          {request.title || `Allow ${request.toolName}?`}
         </span>
         {queued > 0 && (
           <span className="shrink-0 font-mono text-[10px] text-amber-400/70">+{queued}</span>
@@ -51,7 +62,10 @@ export function PermissionPrompt({
       <div className="mt-1.5 flex items-center gap-1.5">
         <Badge
           variant="outline"
-          className={cn("h-4 shrink-0 px-1.5 py-0 font-mono text-[10px]", getToolBadgeStyle(request.toolName))}
+          className={cn(
+            "h-4 shrink-0 px-1.5 py-0 font-mono text-[10px]",
+            getToolBadgeStyle(request.toolName),
+          )}
         >
           {request.toolName}
         </Badge>
@@ -62,43 +76,27 @@ export function PermissionPrompt({
         )}
       </div>
 
-      {!canAllow && !canDeny ? (
+      {answerable ? (
+        <div className="mt-2 flex items-center gap-1.5">
+          {available.map(({ decision, label, tone }) => (
+            <button
+              key={decision}
+              type="button"
+              disabled={responding}
+              onClick={() => onRespond(request.requestId, decision)}
+              className={cn(
+                "rounded border py-1 text-[11px] transition-colors disabled:opacity-50",
+                tone,
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
         <p className="mt-2 text-[11px] text-amber-300/80">
           Resolve this approval in its own provider
         </p>
-      ) : (
-        <div className="mt-2 flex items-center gap-1.5">
-          {canAllow && (
-            <button
-              type="button"
-              disabled={responding}
-              onClick={() => onRespond(request.requestId, "allow")}
-              className="rounded border border-green-600/50 bg-green-600/20 px-2.5 py-1 text-[11px] font-medium text-green-300 transition-colors hover:bg-green-600/35 disabled:opacity-50"
-            >
-              Allow
-            </button>
-          )}
-          {canDeny && (
-            <button
-              type="button"
-              disabled={responding}
-              onClick={() => onRespond(request.requestId, "deny")}
-              className="rounded border border-red-700/50 bg-red-600/15 px-2.5 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-600/30 disabled:opacity-50"
-            >
-              Deny
-            </button>
-          )}
-          {supports(request, "allow_always") && (
-            <button
-              type="button"
-              disabled={responding}
-              onClick={() => onRespond(request.requestId, "allow_always")}
-              className="rounded border border-border/60 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              Always
-            </button>
-          )}
-        </div>
       )}
     </div>
   )

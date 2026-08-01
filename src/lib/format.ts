@@ -27,6 +27,8 @@ export function formatDuration(ms: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
+  // Long-running sessions are routine, and "885m 12s" is unreadable.
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   return `${minutes}m ${seconds}s`
 }
 

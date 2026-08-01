@@ -9,8 +9,6 @@ import {
   buildMissionCards,
   countMissionCards,
   filterMissionCards,
-  formatElapsed,
-  formatTokens,
   contextBarColor,
   isFinished,
   needsYou,
@@ -312,20 +310,7 @@ describe("state predicates", () => {
   })
 })
 
-describe("formatters", () => {
-  it("formats elapsed spans", () => {
-    expect(formatElapsed(0)).toBe("—")
-    expect(formatElapsed(45_000)).toBe("45s")
-    expect(formatElapsed(192_000)).toBe("3m 12s")
-    expect(formatElapsed(3_840_000)).toBe("1h 04m")
-  })
-
-  it("formats token totals with separators", () => {
-    expect(formatTokens(148_092)).toBe("148,092")
-    expect(formatTokens(0)).toBe("0")
-  })
-
-
+describe("contextBarColor", () => {
   it("escalates context bar colour with pressure", () => {
     expect(contextBarColor(31)).toBe("bg-green-500")
     expect(contextBarColor(71)).toBe("bg-amber-500")

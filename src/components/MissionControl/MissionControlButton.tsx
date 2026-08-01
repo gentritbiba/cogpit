@@ -1,9 +1,8 @@
 /**
  * Header entry point for Mission Control, carrying the "needs you" count.
  *
- * The count comes from the shared session inventory and the shared pending
- * permission poll, so the badge, the sidebar strip and the grid can never
- * disagree about how many sessions are blocked.
+ * The count comes from the shared inventory and pending-input polls, so the
+ * badge, the sidebar strip and the grid can never disagree.
  */
 
 import { useMemo } from "react"
@@ -20,6 +19,12 @@ interface MissionControlButtonProps {
   onToggle: () => void
 }
 
+function buttonLabel(active: boolean, needsYou: number): string {
+  if (active) return "Close Mission Control"
+  if (needsYou > 0) return `Mission Control — ${needsYou} need${needsYou === 1 ? "s" : ""} you`
+  return "Mission Control"
+}
+
 export function MissionControlButton({ active, onToggle }: MissionControlButtonProps) {
   const { sessions, procBySession, newlyCompleted } = useSessionInventory()
   const { awaitingPermission, awaitingQuestion } = usePendingHumanInput()
@@ -29,11 +34,7 @@ export function MissionControlButton({ active, onToggle }: MissionControlButtonP
     [sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion],
   )
 
-  const label = active
-    ? "Close Mission Control"
-    : needsYou > 0
-      ? `Mission Control — ${needsYou} need${needsYou === 1 ? "s" : ""} you`
-      : "Mission Control"
+  const label = buttonLabel(active, needsYou)
 
   return (
     <Tooltip>

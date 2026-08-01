@@ -2,11 +2,10 @@
  * The session inventory — `/api/active-sessions` + `/api/running-processes` —
  * owned in one place.
  *
- * This logic used to live privately inside `LiveSessions`. Mission Control needs
- * exactly the same data, and two independent copies would mean two polls, two
- * caches, and two chances to disagree about which sessions are live. The
- * provider is mounted per device root, so switching devices remounts it and each
- * device keeps its own inventory.
+ * Lifted out of `LiveSessions` once Mission Control needed the same data: two
+ * copies would mean two polls, two caches and two chances to disagree about
+ * which sessions are live. Mounted per device root, so each device keeps its own
+ * inventory and switching devices remounts it.
  */
 
 import {
@@ -28,6 +27,8 @@ import {
   sessionListCacheKeys,
   writeCachedList,
 } from "@/lib/sessionListCache"
+
+const LIVE_POLL_INTERVAL = 20_000
 
 /** Map processes to sessions by sessionId (keep highest-mem per session). */
 export function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> {
@@ -61,12 +62,12 @@ const SessionInventoryContext = createContext<SessionInventory | null>(null)
 
 export function SessionInventoryProvider({ children }: { children: ReactNode }) {
   const [mountedDeviceId] = useState(getActiveDeviceId)
-  const [initialCachedData] = useState(() => ({
-    sessions: readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
-    processes: readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
-  }))
-  const [sessions, setSessions] = useState<ActiveSessionInfo[]>(initialCachedData.sessions)
-  const [processes, setProcesses] = useState<RunningProcess[]>(initialCachedData.processes)
+  const [sessions, setSessions] = useState<ActiveSessionInfo[]>(
+    () => readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
+  )
+  const [processes, setProcesses] = useState<RunningProcess[]>(
+    () => readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
@@ -84,7 +85,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     }
   }, [])
 
-  const refresh = useCallback(async () => {
+  const fetchInventory = useCallback(async () => {
     if (!mountedRef.current || getActiveDeviceId() !== mountedDeviceId) return
     abortRef.current?.abort()
     const ac = new AbortController()
@@ -124,6 +125,8 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     }
   }, [mountedDeviceId])
 
+  const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
+
   useEffect(() => {
     refresh()
   }, [refresh])
@@ -131,30 +134,27 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const procBySession = useMemo(() => buildProcMap(processes), [processes])
 
   // Scanning every project and spawning `ps` on a timer once consumed a full
-  // CPU core in bursts, so the inventory is not polled unconditionally: it
-  // refreshes on focus and, while something is live, on a gentle visible-only
-  // timer.
+  // CPU core in bursts, so the inventory refreshes on focus and, while
+  // something is live, on a gentle visible-only timer — never unconditionally.
   const hasLiveWork = useMemo(
     () => hasUnfinishedWork(sessions, procBySession),
     [sessions, procBySession],
   )
 
   useEffect(() => {
-    const onFocus = () => refresh()
-    window.addEventListener("focus", onFocus)
-    return () => window.removeEventListener("focus", onFocus)
+    window.addEventListener("focus", refresh)
+    return () => window.removeEventListener("focus", refresh)
   }, [refresh])
 
   useEffect(() => {
     if (!hasLiveWork) return
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") refresh()
-    }, 20_000)
+    }, LIVE_POLL_INTERVAL)
     return () => clearInterval(interval)
   }, [hasLiveWork, refresh])
 
-  // Detect transitions to "completed" so a session that just finished can be
-  // highlighted until the user looks at it.
+  // Highlight a session that just finished until the user looks at it.
   useEffect(() => {
     if (sessions.length === 0) return
 
@@ -207,8 +207,6 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     })
   }, [mountedDeviceId])
 
-  const refreshNow = useCallback(() => { void refresh() }, [refresh])
-
   const value = useMemo<SessionInventory>(() => ({
     sessions,
     processes,
@@ -216,12 +214,12 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
     newlyCompleted,
     loading,
     error,
-    refresh: refreshNow,
+    refresh,
     removeSession,
     acknowledgeCompleted,
   }), [
     sessions, processes, procBySession, newlyCompleted, loading, error,
-    refreshNow, removeSession, acknowledgeCompleted,
+    refresh, removeSession, acknowledgeCompleted,
   ])
 
   return (

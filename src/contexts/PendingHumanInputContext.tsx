@@ -1,20 +1,12 @@
 /**
- * Everything currently blocking a session on a human, across every session.
+ * Everything blocking a session on a human: permission requests
+ * (`GET /api/permissions`) and AskUserQuestion calls (`GET /api/user-questions`,
+ * which strand a session even under bypassPermissions).
  *
- * Two distinct things strand an agent, and the app needs both in one place:
- *
- * - a **permission** request (`GET /api/permissions`), which never fires when a
- *   session runs with bypassPermissions;
- * - an **AskUserQuestion** call (`GET /api/user-questions`), which blocks
- *   regardless of permission mode and is therefore the signal that matters most
- *   for anyone running agents unattended.
- *
- * The sidebar strip, the header badge and the Mission Control grid all consume
- * this. Two separate contexts would mean every consumer unions two sets by
- * hand, and any one of them could forget — the exact drift a shared context
- * exists to prevent. Both endpoints read in-memory registries only (no
- * filesystem, no `ps`), so polling them together costs one extra request on an
- * existing tick and guarantees both lists come from the same instant.
+ * One context rather than two so the sidebar strip, the header badge and the
+ * Mission Control grid cannot drift by each unioning the two sets by hand. Both
+ * endpoints read in-memory registries only (no filesystem, no `ps`), so polling
+ * them on one tick is cheap and both lists come from the same instant.
  */
 
 import {
@@ -26,6 +18,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react"
 import { authFetch } from "@/lib/auth"
 import { respondToPermission, type PermissionDecision } from "@/lib/permissionApi"
@@ -77,153 +70,150 @@ export interface PendingHumanInput {
 
 const PendingHumanInputContext = createContext<PendingHumanInput | null>(null)
 
+/**
+ * Read one endpoint, yielding its body only when the raw text differs from the
+ * last body accepted from *that* endpoint — a shared dedupe key would let a
+ * stable permissions payload suppress a changed questions payload. An
+ * unchanged, failed or unparseable read yields undefined, leaving the previous
+ * list standing: a stale blocker beats dropping one the user must still answer.
+ */
+async function readIfChanged<T>(url: string, seen: RefObject<string>): Promise<T | undefined> {
+  try {
+    const res = await authFetch(url)
+    if (!res.ok) return undefined
+    const text = await res.text()
+    if (text === seen.current) return undefined
+    seen.current = text
+    return JSON.parse(text) as T
+  } catch {
+    return undefined
+  }
+}
+
+function toPermissionMap(
+  bySession: Record<string, RawPermission[]>,
+): Map<string, MissionControlPermission[]> {
+  const map = new Map<string, MissionControlPermission[]>()
+  for (const [sessionId, requests] of Object.entries(bySession)) {
+    map.set(sessionId, requests.map((r) => ({
+      sessionId,
+      requestId: r.requestId,
+      toolName: r.toolName,
+      summary: getToolSummary({ name: r.toolName, input: r.input ?? {} }),
+      title: r.title,
+      description: r.description,
+      ...(r.availableDecisions && { availableDecisions: r.availableDecisions }),
+      timestamp: r.timestamp,
+    })))
+  }
+  return map
+}
+
+function toQuestionMap(
+  bySession: Record<string, MissionControlQuestion[]>,
+): Map<string, MissionControlQuestion[]> {
+  const map = new Map<string, MissionControlQuestion[]>()
+  for (const [sessionId, questions] of Object.entries(bySession)) {
+    if (Array.isArray(questions) && questions.length > 0) map.set(sessionId, questions)
+  }
+  return map
+}
+
+/** Drop the answered item, forgetting the session once nothing is left on it. */
+function drop<T>(
+  bySession: Map<string, T[]>,
+  sessionId: string,
+  answered: (item: T) => boolean,
+): Map<string, T[]> {
+  const next = new Map(bySession)
+  const remaining = (next.get(sessionId) ?? []).filter((item) => !answered(item))
+  if (remaining.length > 0) next.set(sessionId, remaining)
+  else next.delete(sessionId)
+  return next
+}
+
 export function PendingHumanInputProvider({ children }: { children: ReactNode }) {
   const [permissionsBySession, setPermissionsBySession] =
-    useState<Map<string, MissionControlPermission[]>>(new Map)
+    useState<Map<string, MissionControlPermission[]>>(new Map())
   const [questionsBySession, setQuestionsBySession] =
-    useState<Map<string, MissionControlQuestion[]>>(new Map)
+    useState<Map<string, MissionControlQuestion[]>>(new Map())
   const [responding, setResponding] = useState<Set<string>>(new Set())
-  const cancelledRef = useRef(false)
-  // One dedupe key per endpoint. A single shared key would let a stable
-  // permissions payload suppress a changed questions payload, and the grid
-  // would silently stop updating.
-  const lastPermissionsRef = useRef<string>("")
-  const lastQuestionsRef = useRef<string>("")
-
-  useEffect(() => {
-    cancelledRef.current = false
-    return () => { cancelledRef.current = true }
-  }, [])
+  const lastPermissionsRef = useRef("")
+  const lastQuestionsRef = useRef("")
 
   const fetchNow = useCallback(async () => {
-    const [permRes, questionRes] = await Promise.all([
-      authFetch("/api/permissions").catch(() => null),
-      authFetch("/api/user-questions").catch(() => null),
+    const [permissions, questions] = await Promise.all([
+      readIfChanged<{ bySession?: Record<string, RawPermission[]> }>(
+        "/api/permissions",
+        lastPermissionsRef,
+      ),
+      readIfChanged<Partial<UserQuestionsResponse>>("/api/user-questions", lastQuestionsRef),
     ])
-    if (cancelledRef.current) return
-
-    if (permRes?.ok) {
-      try {
-        const text = await permRes.text()
-        if (!cancelledRef.current && text !== lastPermissionsRef.current) {
-          lastPermissionsRef.current = text
-          const data = JSON.parse(text) as { bySession?: Record<string, RawPermission[]> }
-          const next = new Map<string, MissionControlPermission[]>()
-          for (const [sessionId, requests] of Object.entries(data.bySession ?? {})) {
-            next.set(sessionId, requests.map((r) => ({
-              sessionId,
-              requestId: r.requestId,
-              toolName: r.toolName,
-              summary: getToolSummary({ name: r.toolName, input: r.input ?? {} }),
-              title: r.title,
-              description: r.description,
-              ...(r.availableDecisions && { availableDecisions: r.availableDecisions }),
-              timestamp: r.timestamp,
-            })))
-          }
-          setPermissionsBySession(next)
-        }
-      } catch {
-        // Keep the previous list: a stale entry is better than dropping
-        // something the user still has to answer.
-      }
-    }
-
-    if (questionRes?.ok) {
-      try {
-        const text = await questionRes.text()
-        if (!cancelledRef.current && text !== lastQuestionsRef.current) {
-          lastQuestionsRef.current = text
-          const data = JSON.parse(text) as Partial<UserQuestionsResponse>
-          const next = new Map<string, MissionControlQuestion[]>()
-          for (const [sessionId, questions] of Object.entries(data.bySession ?? {})) {
-            if (Array.isArray(questions) && questions.length > 0) next.set(sessionId, questions)
-          }
-          setQuestionsBySession(next)
-        }
-      } catch {
-        // As above.
-      }
-    }
+    if (permissions) setPermissionsBySession(toPermissionMap(permissions.bySession ?? {}))
+    if (questions) setQuestionsBySession(toQuestionMap(questions.bySession ?? {}))
   }, [])
 
   useEffect(() => {
     const pollWhenVisible = () => {
-      if (typeof document === "undefined" || document.visibilityState === "visible") {
-        void fetchNow()
-      }
-    }
-    const onVisibility = () => {
       if (document.visibilityState === "visible") void fetchNow()
     }
-
     pollWhenVisible()
     const id = setInterval(pollWhenVisible, POLL_INTERVAL)
-    document.addEventListener("visibilitychange", onVisibility)
+    document.addEventListener("visibilitychange", pollWhenVisible)
     return () => {
       clearInterval(id)
-      document.removeEventListener("visibilitychange", onVisibility)
+      document.removeEventListener("visibilitychange", pollWhenVisible)
     }
   }, [fetchNow])
 
-  const respond = useCallback(async (
+  /**
+   * Both answers share a shape: flag the id as in flight, run the call, then
+   * always unflag and re-poll so the server's view replaces the optimistic edit.
+   */
+  const withResponding = useCallback(async <T,>(
+    id: string,
+    run: () => Promise<T>,
+  ): Promise<T> => {
+    setResponding((prev) => new Set(prev).add(id))
+    try {
+      return await run()
+    } finally {
+      setResponding((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      void fetchNow()
+    }
+  }, [fetchNow])
+
+  const respond = useCallback((
     sessionId: string,
     requestId: string,
     behavior: PermissionDecision,
-  ) => {
-    setResponding((prev) => new Set(prev).add(requestId))
-    try {
-      if (await respondToPermission(sessionId, requestId, behavior)) {
-        // Release the card immediately rather than waiting out the poll.
-        setPermissionsBySession((prev) => {
-          const next = new Map(prev)
-          const remaining = (next.get(sessionId) ?? []).filter((p) => p.requestId !== requestId)
-          if (remaining.length > 0) next.set(sessionId, remaining)
-          else next.delete(sessionId)
-          return next
-        })
-        lastPermissionsRef.current = ""
-      }
-    } catch {
-      // The next poll re-surfaces the request if the answer did not land.
-    } finally {
-      setResponding((prev) => {
-        const next = new Set(prev)
-        next.delete(requestId)
-        return next
-      })
-      void fetchNow()
-    }
-  }, [fetchNow])
+  ): Promise<void> => withResponding(requestId, async () => {
+    // A refused or failed answer is left alone: the next poll re-surfaces it.
+    const accepted = await respondToPermission(sessionId, requestId, behavior)
+      .catch(() => false)
+    if (!accepted) return
+    // Release the card now rather than waiting out the poll, and clear the
+    // dedupe key so the next payload re-applies over the optimistic removal.
+    setPermissionsBySession((prev) => drop(prev, sessionId, (p) => p.requestId === requestId))
+    lastPermissionsRef.current = ""
+  }), [withResponding])
 
-  const answerQuestion = useCallback(async (
+  const answerQuestion = useCallback((
     sessionId: string,
     toolUseId: string,
     answers: UserQuestionAnswerMap,
-  ): Promise<AnswerResult> => {
-    setResponding((prev) => new Set(prev).add(toolUseId))
-    try {
-      const result = await submitUserQuestionAnswers(sessionId, toolUseId, answers)
-      if (result.ok) {
-        setQuestionsBySession((prev) => {
-          const next = new Map(prev)
-          const remaining = (next.get(sessionId) ?? []).filter((q) => q.toolUseId !== toolUseId)
-          if (remaining.length > 0) next.set(sessionId, remaining)
-          else next.delete(sessionId)
-          return next
-        })
-        lastQuestionsRef.current = ""
-      }
-      return result
-    } finally {
-      setResponding((prev) => {
-        const next = new Set(prev)
-        next.delete(toolUseId)
-        return next
-      })
-      void fetchNow()
+  ): Promise<AnswerResult> => withResponding(toolUseId, async () => {
+    const result = await submitUserQuestionAnswers(sessionId, toolUseId, answers)
+    if (result.ok) {
+      setQuestionsBySession((prev) => drop(prev, sessionId, (q) => q.toolUseId === toolUseId))
+      lastQuestionsRef.current = ""
     }
-  }, [fetchNow])
+    return result
+  }), [withResponding])
 
   const awaitingPermission = useMemo(
     () => new Set(permissionsBySession.keys()),

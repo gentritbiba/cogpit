@@ -1,9 +1,7 @@
 /**
- * Permission response calls.
- *
- * Shared by the session permission bar and the Mission Control grid so both
- * answer requests through exactly one code path. The server resolves purely by
- * session id, so a caller does not need the session to be open.
+ * Permission responses, shared by the session permission bar and the Mission
+ * Control grid. The server resolves purely by session id, so the session does
+ * not need to be open.
  */
 
 import { authFetch } from "@/lib/auth"

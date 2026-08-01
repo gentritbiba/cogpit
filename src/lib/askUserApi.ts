@@ -1,9 +1,8 @@
 /**
- * Answering a blocked AskUserQuestion call.
+ * Answering a blocked AskUserQuestion call, shared by the timeline form, the
+ * composer bar, and the Mission Control grid.
  *
- * Shared because three surfaces answer questions — the timeline form, the
- * composer bar, and the Mission Control grid — and the wire format has two
- * traps that fail silently:
+ * Two traps in the wire format fail silently:
  *
  * - Answer keys must be the verbatim question text. The server does no key
  *   validation, so a mistyped key returns 200 and hands the agent an answer map
@@ -18,12 +17,7 @@ import { authFetch } from "@/lib/auth"
 /** Answers keyed by the exact question text the agent asked. */
 export type UserQuestionAnswerMap = Record<string, string>
 
-/**
- * Join multi-select labels the way the SDK expects.
- *
- * `AskUserAnswerForm` splits stored answers back apart on this exact separator,
- * so it has to stay ", ".
- */
+/** `AskUserAnswerForm` splits stored answers back apart on this exact separator. */
 export function joinMultiSelect(labels: Iterable<string>): string {
   return [...labels].join(", ")
 }
@@ -34,13 +28,7 @@ export interface AnswerResult {
   gone: boolean
 }
 
-/**
- * Submit answers for one blocked tool call.
- *
- * Resolves rather than throwing so callers can choose their own fallback: the
- * in-session surfaces re-deliver the text as a chat message, while the grid
- * simply reports that the question moved on.
- */
+/** Resolves rather than throwing so each caller can choose its own fallback. */
 export async function submitUserQuestionAnswers(
   sessionId: string,
   toolUseId: string,

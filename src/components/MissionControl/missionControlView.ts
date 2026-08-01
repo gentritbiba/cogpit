@@ -1,7 +1,6 @@
 /**
  * Pure view logic for the Mission Control grid — how a session is stated,
- * ordered, filtered and formatted. Kept free of React so it can be tested
- * directly.
+ * ordered and filtered. Kept free of React so it can be tested directly.
  */
 
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
@@ -14,12 +13,10 @@ import type {
 } from "../../../shared/contracts/missionControl"
 
 /**
- * What a card says about a session.
- *
- * The first two are resolvable from the grid itself: `awaiting_approval` is a
- * live permission request, `awaiting_question` a blocked AskUserQuestion call.
- * `awaiting_answer` is a session idle at the prompt or paused by a deferred
- * hook — it needs the user, but only opening the session resolves it.
+ * `awaiting_approval` (a live permission request) and `awaiting_question` (a
+ * blocked AskUserQuestion) are answerable from the grid itself;
+ * `awaiting_answer` — idle at the prompt, or paused by a deferred hook — is
+ * only resolved by opening the session.
  */
 export type MissionCardState =
   | "awaiting_approval"
@@ -54,10 +51,8 @@ export function isFinished(state: MissionCardState): boolean {
 }
 
 /**
- * Ordering weight — blocked sessions first, then work in flight, then results.
- *
- * Within "blocked", an answerable permission outranks an idle prompt because it
- * is the one the user can clear from the grid itself.
+ * Blocked sessions first, then work in flight, then results. Within "blocked",
+ * what the user can clear from the grid outranks what needs a session opened.
  */
 const STATE_RANK: Record<MissionCardState, number> = {
   awaiting_approval: 0,
@@ -75,10 +70,11 @@ function resolveState(
   hasQuestion: boolean,
 ): MissionCardState {
   if (hasPermission) return "awaiting_approval"
-  // Must precede every agentStatus branch. A session blocked on a question
-  // still reports `tool_use`, so ordering it later would render it "Running"
-  // until its file went stale, then "Done" — a session waiting on the user
-  // would vanish into the finished bucket.
+  // Must precede every agentStatus branch. A question-blocked session still
+  // reports `tool_use`, and a blocked agent stops writing to its JSONL, so
+  // ordering it later would render it "Running" until the file went stale and
+  // then "Done" — a session waiting on the user would vanish into the finished
+  // bucket.
   if (hasQuestion) return "awaiting_question"
   // A deferred hook needs the user but cannot be answered from the grid.
   if (session.agentStatus === "deferred") return "awaiting_answer"
@@ -86,7 +82,6 @@ function resolveState(
   // terminalReason is only ever set alongside "completed", and any value means
   // the run stopped early rather than finishing.
   if (session.agentTerminalReason) return "failed"
-  if (session.agentStatus === "completed") return "done"
   if (active && session.agentStatus && WORKING_STATUSES.has(session.agentStatus)) {
     return "running"
   }
@@ -109,13 +104,7 @@ export interface BuildCardsOptions {
 
 const DEFAULT_FINISHED_LIMIT = 6
 
-/**
- * Build the ordered card list.
- *
- * Everything live or blocked is included. Finished sessions are capped so the
- * grid stays a picture of current work rather than a session archive; the ones
- * that finished while the user was watching are always kept.
- */
+/** Build the ordered card list: everything live or blocked, plus recent results. */
 export function buildMissionCards({
   sessions,
   procBySession,
@@ -129,35 +118,39 @@ export function buildMissionCards({
   const cards: MissionCard[] = []
 
   for (const session of sortSessionsByRecency(sessions)) {
+    const permissions = permissionsBySession.get(session.sessionId) ?? []
+    const questions = questionsBySession.get(session.sessionId) ?? []
     // A teammate's own session is represented by its lead, unless it is the one
     // actually blocked on the user.
     const isTeammate = Boolean(session.teamName && session.agentName)
-    const permissions = permissionsBySession.get(session.sessionId) ?? []
-    const questions = questionsBySession.get(session.sessionId) ?? []
     if (isTeammate && permissions.length === 0 && questions.length === 0) continue
 
-    const active = isSessionActive(session, procBySession, now)
     cards.push({
       session,
-      state: resolveState(session, active, permissions.length > 0, questions.length > 0),
+      state: resolveState(
+        session,
+        isSessionActive(session, procBySession, now),
+        permissions.length > 0,
+        questions.length > 0,
+      ),
       summary: summaries.get(session.sessionId) ?? null,
       permissions,
       questions,
     })
   }
 
-  const activeCards = cards.filter((c) => !isFinished(c.state))
+  // Finished sessions are capped so the grid stays a picture of current work
+  // rather than a session archive; the ones that finished while the user was
+  // watching are always kept.
   const finished = cards.filter((c) => isFinished(c.state))
   const keptFinished = [
     ...finished.filter((c) => newlyCompleted.has(c.session.sessionId)),
     ...finished.filter((c) => !newlyCompleted.has(c.session.sessionId)),
   ].slice(0, finishedLimit)
 
-  return [...activeCards, ...keptFinished].sort((a, b) => {
-    const rank = STATE_RANK[a.state] - STATE_RANK[b.state]
-    if (rank !== 0) return rank
-    return 0 // sortSessionsByRecency already ordered within each state
-  })
+  // Stable sort: sortSessionsByRecency already ordered within each state.
+  return [...cards.filter((c) => !isFinished(c.state)), ...keptFinished]
+    .sort((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state])
 }
 
 export function filterMissionCards(
@@ -193,24 +186,6 @@ export function countMissionCards(cards: MissionCard[]): MissionCounts {
     if (card.state === "failed") counts.failed++
   }
   return counts
-}
-
-/** "3m 12s" / "1h 04m" — compact elapsed time for the card metric row. */
-export function formatElapsed(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "—"
-  const totalSeconds = Math.floor(ms / 1000)
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`
-  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`
-  return `${seconds}s`
-}
-
-/** "148,092" — thousands-separated token counts. */
-export function formatTokens(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0"
-  return value.toLocaleString("en-US")
 }
 
 /**
