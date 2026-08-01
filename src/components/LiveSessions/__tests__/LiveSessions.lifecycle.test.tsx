@@ -8,7 +8,17 @@ import {
   sessionListCacheKeys,
   writeCachedList,
 } from "@/lib/sessionListCache"
+import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { LiveSessions } from "../index"
+
+/**
+ * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
+ * so Mission Control can share it. These tests still exercise the same
+ * guarantees end to end, now through the provider seam.
+ */
+function renderLive(ui: ReactNode) {
+  return render(<>{ui}</>, { wrapper: SessionInventoryProvider })
+}
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -127,7 +137,7 @@ describe("LiveSessions committed-state synchronization", () => {
   it("keeps consecutive delete events and the cached inventory in lockstep", () => {
     writeCachedList(sessionListCacheKeys.activeSessions, [session("one"), session("two")])
 
-    render(
+    renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -152,7 +162,7 @@ describe("LiveSessions committed-state synchronization", () => {
     const firstRefreshRef: MutableRefObject<(() => void) | null> = { current: null }
     const secondRefreshRef: MutableRefObject<(() => void) | null> = { current: null }
 
-    const view = render(
+    const view = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -199,7 +209,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
       .mockResolvedValueOnce(jsonResponse([session("device-b")]))
       .mockResolvedValueOnce(jsonResponse([]))
 
-    const deviceAView = render(
+    const deviceAView = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -216,7 +226,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
     expect(deviceASignals).toHaveLength(2)
     expect(deviceASignals.every((signal) => signal?.aborted)).toBe(true)
 
-    const deviceBView = render(
+    const deviceBView = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -259,7 +269,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
       return new Promise<Response>(() => {})
     })
 
-    const view = render(
+    const view = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}

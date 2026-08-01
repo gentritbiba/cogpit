@@ -4,6 +4,7 @@ import App from "@/App"
 import { getActiveDeviceId, switchDevice, LOCAL_DEVICE_ID } from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
 import { useDevices } from "@/hooks/useDevices"
+import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 
 /**
  * Owns the active device identity and remounts the whole {@link App} subtree
@@ -24,6 +25,9 @@ import { useDevices } from "@/hooks/useDevices"
  * Also hosted here because they must survive the remount:
  * - device keyboard shortcuts (mod+shift+1..9 jump, mod+shift+0 cycle)
  * - the offline banner for an unreachable active remote device
+ *
+ * The session inventory provider is keyed here rather than inside App so the
+ * sidebar and Mission Control share one poll, scoped to the active device.
  */
 export function DeviceRoot() {
   const [activeDeviceId, setActiveDeviceId] = useState(getActiveDeviceId)
@@ -145,7 +149,9 @@ export function DeviceRoot() {
           </button>
         </div>
       )}
-      <App key={`${activeDeviceId}:${retryNonce}`} />
+      <SessionInventoryProvider key={`${activeDeviceId}:${retryNonce}`}>
+        <App />
+      </SessionInventoryProvider>
     </>
   )
 }

@@ -4,11 +4,12 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
-import { deviceScopedKey, getActiveDeviceId } from "@/lib/device"
+import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
-import type { ActiveSessionInfo, RunningProcess } from "./types"
+import type { ActiveSessionInfo } from "./types"
 import { usePty } from "@/contexts/PtyContext"
+import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -20,11 +21,6 @@ import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
 import { ProjectGroupList } from "./ProjectGroupList"
-import {
-  readCachedList,
-  sessionListCacheKeys,
-  writeCachedList,
-} from "@/lib/sessionListCache"
 
 // Re-export extracted modules so external imports remain unchanged
 export { SessionRow } from "./SessionRow"
@@ -45,33 +41,21 @@ interface LiveSessionsProps {
   onPrefetchSession?: (dirName: string, fileName: string) => void
 }
 
-/** Map processes to sessions by sessionId (keep highest-mem per session). */
-function buildProcMap(processes: RunningProcess[]): Map<string, RunningProcess> {
-  const map = new Map<string, RunningProcess>()
-  for (const p of processes) {
-    if (!p.sessionId) continue
-    const existing = map.get(p.sessionId)
-    if (!existing || p.memMB > existing.memMB) {
-      map.set(p.sessionId, p)
-    }
-  }
-  return map
-}
-
 export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSelectSession, onDuplicateSession, onDeleteSession, onNewSession, creatingSession, pendingSession, refreshRef, onPrefetchSession }: LiveSessionsProps) {
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
-  const [mountedDeviceId] = useState(getActiveDeviceId)
-  const [initialCachedData] = useState(() => ({
-    sessions: readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
-    processes: readCachedList<RunningProcess>(sessionListCacheKeys.runningProcesses) ?? [],
-  }))
-  const [sessions, setSessions] = useState<ActiveSessionInfo[]>(initialCachedData.sessions)
-  const [processes, setProcesses] = useState<RunningProcess[]>(initialCachedData.processes)
-  const [loading, setLoading] = useState(false)
+  const {
+    sessions,
+    procBySession,
+    newlyCompleted,
+    loading,
+    error: fetchError,
+    refresh: fetchData,
+    removeSession,
+    acknowledgeCompleted,
+  } = useSessionInventory()
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
-  const [fetchError, setFetchError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   // Per-project collapse choices, persisted so the user's arrangement survives
   // reloads. Groups without an entry fall back to smart defaults (live groups
@@ -85,11 +69,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const toggleGroupCollapsed = useCallback((key: string, collapsed: boolean) => {
     setCollapsedGroups((prev) => ({ ...prev, [key]: collapsed }))
   }, [setCollapsedGroups])
-  // Tracks sessions that transitioned to "completed" during this browser session
-  const [newlyCompleted, setNewlyCompleted] = useState<Set<string>>(new Set())
-  const prevStatusRef = useRef<Map<string, string> | null>(null)
   const sessionsRef = useRef(sessions)
-  const abortRef = useRef<AbortController | null>(null)
   const timeoutHandlesRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
   const mountedRef = useRef(false)
 
@@ -107,8 +87,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      abortRef.current?.abort()
-      abortRef.current = null
       for (const handle of timeoutHandles) clearTimeout(handle)
       timeoutHandles.clear()
     }
@@ -119,49 +97,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   useEffect(() => {
     sessionsRef.current = sessions
   }, [sessions])
-
-  const fetchData = useCallback(async () => {
-    if (!mountedRef.current || getActiveDeviceId() !== mountedDeviceId) return
-    abortRef.current?.abort()
-    const ac = new AbortController()
-    abortRef.current = ac
-    const isCurrentRequest = () => (
-      mountedRef.current
-      && !ac.signal.aborted
-      && abortRef.current === ac
-      && getActiveDeviceId() === mountedDeviceId
-    )
-
-    setLoading(true)
-    try {
-      const [sessRes, procRes] = await Promise.all([
-        authFetch("/api/active-sessions", { signal: ac.signal }),
-        authFetch("/api/running-processes", { signal: ac.signal }),
-      ])
-      if (!isCurrentRequest()) return
-      if (!sessRes.ok || !procRes.ok) {
-        throw new Error("Failed to fetch live data")
-      }
-      const [sessData, procData] = await Promise.all([
-        sessRes.json(),
-        procRes.json(),
-      ])
-      if (!isCurrentRequest()) return
-      const nextSessions = Array.isArray(sessData) ? sessData as ActiveSessionInfo[] : []
-      const nextProcesses = Array.isArray(procData) ? procData as RunningProcess[] : []
-      setSessions(nextSessions)
-      setProcesses(nextProcesses)
-      writeCachedList(sessionListCacheKeys.activeSessions, nextSessions)
-      writeCachedList(sessionListCacheKeys.runningProcesses, nextProcesses)
-      setFetchError(null)
-    } catch (err) {
-      if (!isCurrentRequest()) return
-      setFetchError(err instanceof Error ? err.message : "Failed to load data")
-    } finally {
-      if (isCurrentRequest()) setLoading(false)
-      if (abortRef.current === ac) abortRef.current = null
-    }
-  }, [mountedDeviceId])
 
   // Expose imperative refresh so a parent can force a data fetch (for example,
   // after session finalization). The callback is installed only after commit.
@@ -175,20 +110,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   const isMobile = useIsMobile()
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
-  // Session inventory is not polled unconditionally — scanning every project
-  // and spawning `ps` on a timer consumed a full CPU core in bursts. Besides
-  // lifecycle events and the refresh button, we refresh on window focus, and
-  // poll gently ONLY while the attention strip has live work and the tab is
-  // visible (see effects below).
-
-  const procBySession = useMemo(
-    () => buildProcMap(processes),
-    [processes]
-  )
   const liveSessionCount = useMemo(
     () => countLiveSessions(sessions, procBySession),
     [sessions, procBySession]
@@ -227,23 +148,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
   const showAttentionStrip = !searchQuery.trim() && hasAttention
 
-  // Refresh the inventory when the window regains focus — the moment the user
-  // comes back to Cogpit is exactly when the strip must be accurate.
-  useEffect(() => {
-    const onFocus = () => fetchData()
-    window.addEventListener("focus", onFocus)
-    return () => window.removeEventListener("focus", onFocus)
-  }, [fetchData])
-
-  // Gentle live polling: only while something is running or waiting, and only
-  // while the tab is visible. Idle dashboards cost nothing.
-  useEffect(() => {
-    if (!hasAttention) return
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchData()
-    }, 20_000)
-    return () => clearInterval(interval)
-  }, [hasAttention, fetchData])
+  // Focus refresh and live polling are owned by SessionInventoryProvider so the
+  // sidebar and Mission Control share a single poll.
 
   // Derive pending session's project path once (used for group matching)
   const pendingProjectPath = useMemo(() => {
@@ -286,40 +192,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     }
   }, [sessions, onPrefetchSession])
 
-  // Detect status transitions to "completed" — only highlight newly completed sessions.
-  useEffect(() => {
-    if (sessions.length === 0) return
-
-    const prev = prevStatusRef.current
-    const currentStatuses = new Map<string, string>()
-    for (const s of sessions) {
-      if (s.agentStatus && procBySession.has(s.sessionId)) {
-        currentStatuses.set(s.sessionId, s.agentStatus)
-      }
-    }
-
-    if (prev !== null) {
-      setNewlyCompleted((nc) => {
-        let next: Set<string> | null = null
-        for (const [id, status] of currentStatuses) {
-          if (status === "completed" && prev.get(id) !== "completed") {
-            next ??= new Set(nc)
-            next.add(id)
-          }
-        }
-        for (const id of nc) {
-          if (currentStatuses.get(id) !== "completed") {
-            next ??= new Set(nc)
-            next.delete(id)
-          }
-        }
-        return next ?? nc
-      })
-    }
-
-    prevStatusRef.current = currentStatuses
-  }, [sessions, procBySession])
-
   const handleKill = useCallback(async (pid: number, e: React.MouseEvent) => {
     e.stopPropagation()
     setKillingPids(prev => new Set(prev).add(pid))
@@ -342,26 +214,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   const handleSelectSession = useCallback((dirName: string, fileName: string) => {
     const match = sessionsRef.current.find((s) => s.dirName === dirName && s.fileName === fileName)
-    if (match) {
-      setNewlyCompleted((prev) => {
-        if (!prev.has(match.sessionId)) return prev
-        const next = new Set(prev)
-        next.delete(match.sessionId)
-        return next
-      })
-    }
+    if (match) acknowledgeCompleted(match.sessionId)
     onSelectSession(dirName, fileName)
-  }, [onSelectSession])
+  }, [onSelectSession, acknowledgeCompleted])
 
   const handleDeleteSession = useCallback((s: ActiveSessionInfo) => {
     onDeleteSession?.(s.dirName, s.fileName)
-    const next = sessionsRef.current.filter((x) => x.sessionId !== s.sessionId)
-    sessionsRef.current = next
-    setSessions(next)
-    if (getActiveDeviceId() === mountedDeviceId) {
-      writeCachedList(sessionListCacheKeys.activeSessions, next)
-    }
-  }, [mountedDeviceId, onDeleteSession])
+    removeSession(s.sessionId)
+  }, [onDeleteSession, removeSession])
 
   /**
    * Spawn `claude -p --resume <sessionId>` in a PTY terminal so the user can
@@ -435,7 +295,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
               <span className="text-[10px] text-red-400 flex-1 truncate">{fetchError}</span>
               <button
                 type="button"
-                onClick={() => { setFetchError(null); fetchData() }}
+                onClick={fetchData}
                 className="text-[10px] text-red-400 hover:text-red-300 shrink-0"
               >
                 Retry
