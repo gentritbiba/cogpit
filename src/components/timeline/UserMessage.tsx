@@ -1,88 +1,47 @@
 import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, Eye, EyeOff, Maximize2, Terminal, Pencil, Users } from "lucide-react"
+import { ChevronDown, ChevronRight, Eye, EyeOff, Hand, Maximize2, Terminal, Pencil, Users } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
 import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
 import { parseTeammateMessage } from "@/lib/teammateMessage"
+import {
+  extractCommandArgs,
+  extractCommandName,
+  hasSystemTags,
+  parseInterrupts,
+  parseLocalCommandOutputs,
+  parseTaskNotifications,
+  stripSystemNotificationPreamble,
+  stripSystemTags,
+  type LocalCommandOutput,
+  type TaskNotification,
+} from "@/lib/userMessageContent"
 import { cn } from "@/lib/utils"
 import { CompletedIcon, FailedIcon, RunningIcon, ProcessingIcon } from "@/components/ui/StatusIcons"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 
-const SYSTEM_TAG_RE =
-  /<(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|command-message|command-args|env|claude_background_info|fast_mode_info|gitStatus)>/g
-
-const COMMAND_MESSAGE_RE = /<command-message>([^<]+)<\/command-message>/
-const COMMAND_ARGS_RE = /<command-args>([\s\S]*?)<\/command-args>/
-
-// ── Local command output parsing ────────────────────────────────────────
-const LOCAL_CMD_OUTPUT_RE = /<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/g
-
-interface LocalCommandOutput {
-  text: string
-  stream: "stdout" | "stderr"
-}
-
-function parseLocalCommandOutputs(text: string): { outputs: LocalCommandOutput[]; remainingText: string } {
-  const outputs: LocalCommandOutput[] = []
-  const remaining = text
-    .replace(LOCAL_CMD_OUTPUT_RE, (_, stream, inner) => {
-      outputs.push({ text: inner.trim(), stream: stream as "stdout" | "stderr" })
-      return ""
-    })
-    .trim()
-  return { outputs, remainingText: remaining }
-}
-
 function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
   const isError = output.stream === "stderr"
+  const isInput = output.stream === "input"
   return (
     <div className={cn(
       "rounded-md border px-3 py-2 my-1 font-mono text-xs",
-      isError
-        ? "border-red-500/20 bg-red-500/10 text-red-300"
-        : "border-border/40 bg-elevation-2 text-muted-foreground",
+      isError && "border-red-500/20 bg-red-500/10 text-red-300",
+      isInput && "border-blue-500/20 bg-blue-500/10 text-blue-300",
+      !isError && !isInput && "border-border/40 bg-elevation-2 text-muted-foreground",
     )}>
       <div className="flex items-center gap-1.5">
-        <Terminal className={cn("w-3 h-3 flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")} />
-        <span>{output.text}</span>
+        {isInput ? (
+          <ChevronRight className="w-3 h-3 flex-shrink-0 text-blue-400" />
+        ) : (
+          <Terminal className={cn("w-3 h-3 flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")} />
+        )}
+        <span className="whitespace-pre-wrap break-words">{output.text}</span>
       </div>
     </div>
   )
-}
-
-// ── Task notification parsing ───────────────────────────────────────────
-
-const TASK_NOTIFICATION_RE = /<task-notification>([\s\S]*?)<\/task-notification>/g
-
-interface TaskNotification {
-  taskId: string
-  toolUseId: string
-  status: string
-  summary: string
-  result: string
-}
-
-function extractTag(xml: string, tag: string): string {
-  const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`)
-  const m = xml.match(re)
-  return m ? m[1].trim() : ""
-}
-
-function parseTaskNotifications(text: string): { notifications: TaskNotification[]; remainingText: string } {
-  const notifications: TaskNotification[] = []
-  const remainingText = text.replace(TASK_NOTIFICATION_RE, (_, inner) => {
-    notifications.push({
-      taskId: extractTag(inner, "task-id"),
-      toolUseId: extractTag(inner, "tool-use-id"),
-      status: extractTag(inner, "status"),
-      summary: extractTag(inner, "summary"),
-      result: extractTag(inner, "result"),
-    })
-    return ""
-  }).trim()
-  return { notifications, remainingText }
 }
 
 const ERROR_STYLE = { Icon: FailedIcon, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" } as const
@@ -94,15 +53,11 @@ const STATUS_STYLES = {
   running: { Icon: RunningIcon, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20", label: "Running" },
 } as const
 
-function getStatusStyle(status: string) {
-  return STATUS_STYLES[status as keyof typeof STATUS_STYLES] ?? STATUS_STYLES.running
-}
-
 function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
   const [expanded, setExpanded] = useState(false)
-  const statusStyle = getStatusStyle(notification.status)
+  const statusStyle = STATUS_STYLES[notification.status as keyof typeof STATUS_STYLES] ?? STATUS_STYLES.running
   const { Icon: StatusIcon } = statusStyle
-  const hasResult = notification.result.length > 0
+  const hasDetail = notification.result.length > 0 || notification.outputFile.length > 0
   const Chevron = expanded ? ChevronDown : ChevronRight
 
   return (
@@ -116,20 +71,30 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
               {statusStyle.label}
             </span>
           </div>
-          {hasResult && (
+          {hasDetail && (
             <>
               <button
                 onClick={() => setExpanded(!expanded)}
                 className="mt-1.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
               >
                 <Chevron className="w-3 h-3" />
-                {expanded ? "Hide result" : "Show result"}
+                {expanded ? "Hide detail" : "Show detail"}
               </button>
               {expanded && (
                 <div className="mt-2 text-sm text-foreground/90 border-t border-border/30 pt-2">
-                  <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
-                    {notification.result}
-                  </ReactMarkdown>
+                  {notification.result && (
+                    <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
+                      {notification.result}
+                    </ReactMarkdown>
+                  )}
+                  {notification.outputFile && (
+                    <div className="mt-2">
+                      <div className="text-[10px] font-medium text-muted-foreground/70">OUTPUT FILE</div>
+                      <div className="mt-0.5 select-all break-all rounded bg-elevation-2 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                        {notification.outputFile}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -138,20 +103,6 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
       </div>
     </div>
   )
-}
-
-function stripSystemTags(text: string): string {
-  return text.replace(SYSTEM_TAG_RE, "").trim()
-}
-
-function extractCommandName(text: string): string | null {
-  const match = text.match(COMMAND_MESSAGE_RE)
-  return match ? match[1] : null
-}
-
-function extractCommandArgs(text: string): string | null {
-  const match = text.match(COMMAND_ARGS_RE)
-  return match ? match[1].trim() : null
 }
 
 // ── Expanded command content ─────────────────────────────────────────────
@@ -201,8 +152,13 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
   const { teammateId, isTeammate, text: unwrappedText } = useMemo(() => parseTeammateMessage(rawText), [rawText])
   const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
-  const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(cleanText), [cleanText])
+  const { text: textAfterBanner, isSystemNotification } = useMemo(
+    () => stripSystemNotificationPreamble(cleanText),
+    [cleanText],
+  )
+  const { notifications, remainingText: textAfterNotifications } = useMemo(() => parseTaskNotifications(textAfterBanner), [textAfterBanner])
   const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
+  const { interrupts, remainingText: textAfterInterrupts } = useMemo(() => parseInterrupts(textAfterOutputs), [textAfterOutputs])
 
   const handleToggleExpand = useCallback(async () => {
     if (commandExpanded) {
@@ -235,8 +191,15 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     })),
     [imageUrls],
   )
-  const hasTags = rawText !== cleanText
-  const displayText = showRaw ? rawText : textAfterOutputs
+  // Ask the parser directly rather than diffing raw against clean: the diff also
+  // fires on plain whitespace trimming, offering "Show raw" when nothing is
+  // hidden. The teammate envelope and the notification banner are genuinely
+  // hidden, so they still count.
+  const hasTags = useMemo(
+    () => hasSystemTags(rawText) || isSystemNotification || isTeammate,
+    [rawText, isSystemNotification, isTeammate],
+  )
+  const displayText = showRaw ? rawText : textAfterInterrupts
 
   const isTruncated = displayText.length > 500 && !expanded
   const visibleText = isTruncated ? displayText.slice(0, 500) + "..." : displayText
@@ -272,6 +235,15 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
             </button>
           )}
         </div>
+
+        {!showRaw && isSystemNotification && (
+          <div className="mb-2">
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300">
+              <Terminal className="w-3 h-3" />
+              System event
+            </span>
+          </div>
+        )}
 
         {!showRaw && isTeammate && (
           <div className="mb-2">
@@ -362,6 +334,17 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
           <div className="space-y-1 mb-2">
             {cmdOutputs.map((o, i) => (
               <LocalCommandOutputCard key={i} output={o} />
+            ))}
+          </div>
+        )}
+
+        {!showRaw && interrupts.length > 0 && (
+          <div className="space-y-1 mb-2">
+            {interrupts.map((text, i) => (
+              <div key={i} className="flex items-center gap-1.5 text-xs font-medium text-red-400">
+                <Hand className="w-3 h-3 flex-shrink-0" />
+                <span>{text}</span>
+              </div>
             ))}
           </div>
         )}

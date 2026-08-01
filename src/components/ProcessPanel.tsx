@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "react"
+import { stripAnsi } from "@/lib/ansi"
 import { authUrl } from "@/lib/auth"
 import { ChevronDown, ChevronRight, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -8,25 +9,6 @@ import { usePty } from "@/contexts/PtyContext"
 const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
 )
-
-// ── ANSI stripping ───────────────────────────────────────────────────────────
-
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC = /\x1b\].*?(?:\x07|\x1b\\)/g
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g
-// eslint-disable-next-line no-control-regex
-const ANSI_OTHER = /\x1b[()][AB012]/g
-const LINE_REDRAW = /\[2K\[1G/g
-
-function stripAnsi(text: string): string {
-  return text
-    .replace(ANSI_OSC, "")
-    .replace(ANSI_CSI, "")
-    .replace(ANSI_OTHER, "")
-    .replace(LINE_REDRAW, "\n")
-    .replace(/\r/g, "")
-}
 
 // ── Type badge colors ────────────────────────────────────────────────────────
 

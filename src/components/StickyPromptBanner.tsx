@@ -3,10 +3,8 @@ import { ChevronUp } from "lucide-react"
 import type { ParsedSession } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
 import { parseTeammateMessage } from "@/lib/teammateMessage"
+import { extractCommandArgs, extractCommandName, stripSystemTags } from "@/lib/userMessageContent"
 import { cn } from "@/lib/utils"
-
-const SYSTEM_TAG_RE =
-  /<(?:system-reminder|local-command-caveat|command-name|env|claude_background_info|fast_mode_info|gitStatus)[^>]*>[\s\S]*?<\/(?:system-reminder|local-command-caveat|command-name|env|claude_background_info|fast_mode_info|gitStatus)>/g
 
 interface StickyPromptBannerProps {
   session: ParsedSession
@@ -124,8 +122,15 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
     if (!turn?.userMessage) return null
     const raw = getUserMessageText(turn.userMessage)
     const { text: unwrapped } = parseTeammateMessage(raw)
-    const clean = unwrapped.replace(SYSTEM_TAG_RE, "").trim()
-    if (!clean) return null
+    const clean = stripSystemTags(unwrapped)
+    // A turn that is only a slash command strips to nothing, which would hide
+    // the banner entirely — show the command itself instead.
+    if (!clean) {
+      const command = extractCommandName(raw)
+      if (!command) return null
+      const args = extractCommandArgs(raw)
+      return args ? `/${command} ${args}` : `/${command}`
+    }
     const firstLine = clean.split("\n")[0]
     return firstLine.length > 150 ? firstLine.slice(0, 150) + "..." : firstLine
   }, [stickyTurn, session.turns])
