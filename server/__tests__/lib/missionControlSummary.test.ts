@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs"
+import { mkdtempSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resetMissionControlCache, summarizeSession } from "../../lib/missionControlSummary"
@@ -239,5 +239,62 @@ describe("summarizeSession — incremental reads", () => {
     write([assistant([{ type: "text", text: "only" }], { output_tokens: 3 })])
     const s = await summarizeSession("s", file)
     expect(s!.tokens.output).toBe(3)
+  })
+})
+
+describe("summarizeSession — corruption and rewrite guards", () => {
+  it("keeps a multi-byte character whole when a poll lands mid-character", async () => {
+    // The rocket is 4 UTF-8 bytes. Decoding the two halves separately yields
+    // U+FFFD on both sides — JSON.parse survives it, so the damage is silent
+    // and permanent for the life of the process.
+    const line = assistant([{
+      type: "tool_use", id: "t1", name: "Bash", input: { command: "echo 🚀 done" },
+    }])
+    const bytes = Buffer.from(line + "\n", "utf8")
+    const rocket = Buffer.from("🚀", "utf8")
+    const split = bytes.indexOf(rocket) + 2 // mid-character
+
+    writeFileSync(file, bytes.subarray(0, split))
+    await summarizeSession("s", file)
+    appendFileSync(file, bytes.subarray(split))
+
+    const s = await summarizeSession("s", file)
+    expect(s!.currentTool).toEqual({ name: "Bash", summary: "echo 🚀 done" })
+  })
+
+  it("rebuilds when a file is rewritten to a larger size", async () => {
+    // Size alone only catches a shrink. A rewrite that lands larger would keep
+    // the old totals and fold the new bytes in at an offset that is now
+    // mid-line, leaving the card reporting work that no longer exists.
+    write([
+      assistant([{ type: "tool_use", id: "a", name: "Bash", input: {} }], { output_tokens: 15 }),
+      assistant([{ type: "tool_use", id: "b", name: "Bash", input: {} }], { output_tokens: 15 }),
+      assistant([{ type: "tool_use", id: "c", name: "Bash", input: {} }], { output_tokens: 15 }),
+      assistant([{ type: "tool_use", id: "d", name: "Bash", input: {} }], { output_tokens: 15 }),
+    ])
+    const stale = await summarizeSession("s", file)
+    expect(stale!.totalToolCalls).toBe(4)
+
+    // One event, padded so the file ends up strictly LARGER than before —
+    // otherwise the shrink check catches it and the guard is never exercised.
+    const before = statSync(file).size
+    write([assistant(
+      [{ type: "tool_use", id: "z", name: "Bash", input: { command: "x".repeat(4000) } }],
+      { output_tokens: 15 },
+    )])
+    expect(statSync(file).size).toBeGreaterThan(before)
+
+    const s = await summarizeSession("s", file)
+    expect(s!.totalToolCalls).toBe(1)
+    expect(s!.tokens.output).toBe(15)
+  })
+
+  it("still folds a plain append without re-reading from the start", async () => {
+    write([assistant([{ type: "text", text: "one" }], { output_tokens: 4 })])
+    await summarizeSession("s", file)
+    appendFileSync(file, assistant([{ type: "text", text: "two" }], { output_tokens: 6 }) + "\n")
+
+    const s = await summarizeSession("s", file)
+    expect(s!.tokens.output).toBe(10)
   })
 })

@@ -63,13 +63,19 @@ describe("isSessionActive", () => {
 })
 
 describe("hasUnfinishedWork", () => {
-  it("stays true for a stale unfinished session", () => {
-    // The poll gate must not depend on recency: a gate that decays by the clock
-    // alone would stop the poll that refreshes those very timestamps, and
-    // polling would never resume.
+  it("goes false for a stale session the UI already calls finished", () => {
+    // deriveSessionStatus leaves "tool_use" on anything killed mid-tool, and
+    // /api/active-sessions keeps returning it. Gating on status alone would let
+    // one long-dead session poll `ps` forever. Recovery when this goes false is
+    // the provider's focus listener, not a timer.
     const s = session({ agentStatus: "tool_use", lastModified: STALE })
     expect(isSessionActive(s, NO_PROCS, NOW)).toBe(false)
-    expect(hasUnfinishedWork([s], NO_PROCS)).toBe(true)
+    expect(hasUnfinishedWork([s], NO_PROCS, NOW)).toBe(false)
+  })
+
+  it("stays true while a session is genuinely working", () => {
+    const s = session({ agentStatus: "tool_use", lastModified: FRESH })
+    expect(hasUnfinishedWork([s], NO_PROCS, NOW)).toBe(true)
   })
 
   it("is false once every session has completed", () => {

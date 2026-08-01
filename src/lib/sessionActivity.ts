@@ -43,18 +43,19 @@ export function isSessionActive(
 /**
  * Whether any session might still be working — the gate for polling.
  *
- * Deliberately ignores recency, unlike {@link isSessionActive}: a recency-based
- * gate decays to false purely by the clock advancing, stopping the very poll
- * that would refresh those timestamps, and polling never resumes. This predicate
- * only changes when new data arrives, so it cannot switch itself off.
+ * Uses the same predicate the UI does, so a session the grid calls finished
+ * cannot keep the poller alive. `/api/active-sessions` returns the 50 most
+ * recently modified files and `deriveSessionStatus` leaves "tool_use" on
+ * anything killed mid-tool, so a status check alone would let one week-old
+ * Ctrl-C'd session pin this true forever.
+ *
+ * Going false is safe: the provider also refreshes on window focus, and any
+ * session that is genuinely working advances `lastActivityAt` on every poll.
  */
 export function hasUnfinishedWork(
   sessions: readonly ActiveSessionInfo[],
   procBySession: Map<string, RunningProcess>,
+  now: number = Date.now(),
 ): boolean {
-  return sessions.some((s) => {
-    if (isSessionLive(s, procBySession)) return true
-    if (!s.agentStatus) return false
-    return s.agentStatus !== "completed"
-  })
+  return sessions.some((s) => isSessionActive(s, procBySession, now))
 }

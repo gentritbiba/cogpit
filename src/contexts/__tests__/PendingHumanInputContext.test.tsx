@@ -99,7 +99,8 @@ describe("PendingHumanInputProvider", () => {
     routeFetch(
       {
         bySession: {
-          "sess-p": [{ requestId: "r1", toolName: "Bash", input: { command: "rm -rf dist" }, timestamp: 1 }],
+          // The server ships the card-ready summary; raw tool input is not sent.
+          "sess-p": [{ sessionId: "sess-p", requestId: "r1", toolName: "Bash", summary: "rm -rf dist", timestamp: 1 }],
         },
       },
       ONE_QUESTION,

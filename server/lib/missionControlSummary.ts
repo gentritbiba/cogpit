@@ -4,8 +4,9 @@
  * Live session files grow constantly, so an mtime-keyed cache would miss on
  * exactly the sessions the grid cares about. Each file instead keeps a running
  * accumulator plus the byte offset already folded into it, and a poll reads only
- * the bytes appended since last time. A file that shrank was rewritten, so its
- * accumulator is dropped and the file is read from the start again.
+ * the bytes appended since last time. A rewritten file — one that shrank, or
+ * whose bytes before the resume point changed — drops its accumulator and is
+ * read from the start again.
  */
 
 import { open, stat } from "node:fs/promises"
@@ -50,12 +51,34 @@ interface SessionAccumulator {
 interface CacheEntry {
   /** Bytes of the file already folded into `acc`. */
   parsedBytes: number
-  /** Trailing bytes that did not end in a newline yet. */
-  pendingLine: string
+  /**
+   * Trailing bytes that did not end in a newline yet.
+   *
+   * Bytes, not a string: a poll can land mid-character, and decoding the two
+   * halves separately turns one multi-byte character into two U+FFFDs. That
+   * survives JSON.parse, so it silently corrupts display text — and if the
+   * mangled text is a file path, the file gets two entries and its +/- counts
+   * are computed over split histories.
+   */
+  pending: Buffer
+  /** The bytes just before `parsedBytes`, to prove the file was only appended to. */
+  anchor: Buffer
   acc: SessionAccumulator
   /** Built payload, reused until new bytes arrive. */
   summary: MissionControlSummary | null
 }
+
+/**
+ * How many bytes before the resume offset are re-read each poll to confirm the
+ * file was appended to rather than rewritten.
+ *
+ * Size alone only catches a rewrite that shrank the file; one that lands larger
+ * would keep an accumulator describing content that is gone. The file *head* is
+ * useless for this — every JSONL line starts with the same keys, so two
+ * different files share a head. The bytes immediately before the resume point
+ * are deep in the content and differ as soon as anything upstream changed.
+ */
+const ANCHOR_BYTES = 64
 
 const cache = new Map<string, CacheEntry>()
 
@@ -260,12 +283,30 @@ function toSummary(sessionId: string, acc: SessionAccumulator): MissionControlSu
 }
 
 /** Read `[from, to)` of a file as UTF-8. */
-async function readRange(filePath: string, from: number, to: number): Promise<string> {
+const EMPTY = Buffer.alloc(0)
+const NEWLINE = 0x0a
+
+async function readAt(
+  handle: Awaited<ReturnType<typeof open>>,
+  from: number,
+  to: number,
+): Promise<Buffer> {
+  if (to <= from) return EMPTY
+  const buffer = Buffer.allocUnsafe(to - from)
+  const { bytesRead } = await handle.read(buffer, 0, to - from, from)
+  return buffer.subarray(0, bytesRead)
+}
+
+/** Re-read the anchor preceding `from`, plus the bytes appended since it. */
+async function readSince(
+  filePath: string,
+  from: number,
+  to: number,
+): Promise<{ anchor: Buffer; chunk: Buffer }> {
   const handle = await open(filePath, "r")
   try {
-    const buffer = Buffer.allocUnsafe(to - from)
-    const { bytesRead } = await handle.read(buffer, 0, to - from, from)
-    return buffer.subarray(0, bytesRead).toString("utf8")
+    const anchor = await readAt(handle, Math.max(0, from - ANCHOR_BYTES), from)
+    return { anchor, chunk: await readAt(handle, from, to) }
   } finally {
     await handle.close()
   }
@@ -287,25 +328,46 @@ export async function summarizeSession(
   }
 
   let entry = cache.get(filePath)
-  // A file that shrank was rewritten, so the accumulator no longer describes it.
-  if (entry && entry.parsedBytes > size) entry = undefined
+  const resumable = entry !== undefined && entry.parsedBytes <= size
+  let read: { anchor: Buffer; chunk: Buffer }
+  try {
+    read = await readSince(filePath, resumable ? entry!.parsedBytes : 0, size)
+  } catch {
+    return null
+  }
+
+  // The file was rewritten, not appended to, if it shrank or if the bytes we
+  // already consumed are no longer the ones sitting before our resume point.
+  if (entry && (!resumable || !entry.anchor.equals(read.anchor))) entry = undefined
   if (!entry) {
-    entry = { parsedBytes: 0, pendingLine: "", acc: createAccumulator(), summary: null }
+    entry = { parsedBytes: 0, pending: EMPTY, anchor: EMPTY, acc: createAccumulator(), summary: null }
     cache.set(filePath, entry)
     if (cache.size > MAX_CACHE_ENTRIES) {
       const oldest = cache.keys().next().value
       if (oldest !== undefined) cache.delete(oldest)
     }
+    // The read above resumed from a now-discarded offset; take the file whole.
+    if (resumable) read = await readSince(filePath, 0, size)
   }
 
   if (entry.parsedBytes < size) {
-    const text = entry.pendingLine + (await readRange(filePath, entry.parsedBytes, size))
-    const lines = text.split("\n")
-    // The final element is whatever follows the last newline — possibly a
-    // half-written line, which must wait for the rest of the append.
-    entry.pendingLine = lines.pop() ?? ""
-    for (const line of lines) foldLine(entry.acc, line)
+    const buffer = entry.pending.length > 0
+      ? Buffer.concat([entry.pending, read.chunk])
+      : read.chunk
+    // Split on bytes and decode only whole lines, so a multi-byte character
+    // straddling the read boundary is never decoded in halves.
+    const lastNewline = buffer.lastIndexOf(NEWLINE)
+    if (lastNewline >= 0) {
+      const complete = buffer.subarray(0, lastNewline).toString("utf8")
+      for (const line of complete.split("\n")) foldLine(entry.acc, line)
+      entry.pending = Buffer.from(buffer.subarray(lastNewline + 1))
+    } else {
+      entry.pending = Buffer.from(buffer)
+    }
     entry.parsedBytes = size
+    entry.anchor = Buffer.from(
+      buffer.subarray(Math.max(0, buffer.length - ANCHOR_BYTES)),
+    )
     entry.summary = null
   }
 

@@ -27,7 +27,6 @@ import {
   type AnswerResult,
   type UserQuestionAnswerMap,
 } from "@/lib/askUserApi"
-import { getToolSummary } from "../../shared/session/toolSummary"
 import type {
   MissionControlPermission,
   MissionControlQuestion,
@@ -35,16 +34,6 @@ import type {
 } from "../../shared/contracts/missionControl"
 
 const POLL_INTERVAL = 3_000
-
-interface RawPermission {
-  requestId: string
-  toolName: string
-  input?: Record<string, unknown>
-  title?: string
-  description?: string
-  availableDecisions?: PermissionDecision[]
-  timestamp: number
-}
 
 export interface PendingHumanInput {
   permissionsBySession: Map<string, MissionControlPermission[]>
@@ -91,20 +80,11 @@ async function readIfChanged<T>(url: string, seen: RefObject<string>): Promise<T
 }
 
 function toPermissionMap(
-  bySession: Record<string, RawPermission[]>,
+  bySession: Record<string, MissionControlPermission[]>,
 ): Map<string, MissionControlPermission[]> {
   const map = new Map<string, MissionControlPermission[]>()
   for (const [sessionId, requests] of Object.entries(bySession)) {
-    map.set(sessionId, requests.map((r) => ({
-      sessionId,
-      requestId: r.requestId,
-      toolName: r.toolName,
-      summary: getToolSummary({ name: r.toolName, input: r.input ?? {} }),
-      title: r.title,
-      description: r.description,
-      ...(r.availableDecisions && { availableDecisions: r.availableDecisions }),
-      timestamp: r.timestamp,
-    })))
+    if (Array.isArray(requests) && requests.length > 0) map.set(sessionId, requests)
   }
   return map
 }
@@ -143,7 +123,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
 
   const fetchNow = useCallback(async () => {
     const [permissions, questions] = await Promise.all([
-      readIfChanged<{ bySession?: Record<string, RawPermission[]> }>(
+      readIfChanged<{ bySession?: Record<string, MissionControlPermission[]> }>(
         "/api/permissions",
         lastPermissionsRef,
       ),

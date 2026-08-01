@@ -132,3 +132,31 @@ describe("workingChip", () => {
     expect(workingChip(makeSession())).toBe("Running")
   })
 })
+
+describe("classifyAttention — sessions with no local process", () => {
+  // Every fixture above is dated well outside the activity window, so these
+  // pin the recency branch that made a PID optional. A terminal-launched
+  // `claude` has no --session-id in argv, so buildProcMap never maps it.
+  const FRESH = new Date(Date.now() - 30_000).toISOString()
+  const STALE = new Date(Date.now() - 10 * 60_000).toISOString()
+
+  it("counts a recently active session as working without a mapped process", () => {
+    const s = makeSession({ sessionId: "remote", agentStatus: "tool_use", lastModified: FRESH })
+    const { working, needsYou } = classifyAttention([s], new Map(), new Set())
+    expect(working.map((w) => w.sessionId)).toEqual(["remote"])
+    expect(needsYou).toEqual([])
+  })
+
+  it("drops a session that stopped writing, instead of showing it as working", () => {
+    const s = makeSession({ sessionId: "abandoned", agentStatus: "tool_use", lastModified: STALE })
+    const { working, needsYou } = classifyAttention([s], new Map(), new Set())
+    expect(working).toEqual([])
+    expect(needsYou).toEqual([])
+  })
+
+  it("does not ask for attention over a stale idle session", () => {
+    // Otherwise a terminal someone closed sits under "Needs you" indefinitely.
+    const s = makeSession({ sessionId: "idle-old", agentStatus: "idle", lastModified: STALE })
+    expect(classifyAttention([s], new Map(), new Set()).needsYou).toEqual([])
+  })
+})

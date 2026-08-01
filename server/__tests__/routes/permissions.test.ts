@@ -448,3 +448,43 @@ describe("GET /api/permissions — cross-session listing", () => {
     expect(response.statusCode).toBe(200)
   })
 })
+
+describe("GET /api/permissions — payload shape", () => {
+  beforeEach(() => {
+    mockPersistentSessions.clear()
+    mockSdkSessions.clear()
+    mockGetSDKPermissions.mockReset().mockReturnValue([])
+  })
+
+  it("summarises requests instead of shipping the raw tool input", async () => {
+    // A pending Write carries the entire file being written, and this list is
+    // polled app-wide — sending it would put that payload on the wire every few
+    // seconds for every client, including remote and tunnel ones.
+    const wholeFile = "x".repeat(5000)
+    mockSdkSessions.set("s1", {})
+    mockGetSDKPermissions.mockImplementation((sessionId: unknown) =>
+      sessionId === "s1"
+        ? [{
+            requestId: "r1",
+            toolName: "Write",
+            input: { file_path: "/big.ts", content: wholeFile },
+            toolUseId: "r1",
+            timestamp: 7,
+          }]
+        : [],
+    )
+
+    const { response } = await invoke(register(makeCodex()), { method: "GET", url: "" })
+    const body = response.json() as { bySession: Record<string, Record<string, unknown>[]> }
+    const [request] = body.bySession.s1
+
+    expect(request).toEqual({
+      sessionId: "s1",
+      requestId: "r1",
+      toolName: "Write",
+      summary: "/big.ts",
+      timestamp: 7,
+    })
+    expect(JSON.stringify(body)).not.toContain(wholeFile)
+  })
+})

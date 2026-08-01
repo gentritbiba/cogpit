@@ -1,4 +1,6 @@
 import { sendJson, type UseFn } from "../http"
+import { getToolSummary } from "../../shared/session/toolSummary"
+import type { MissionControlPermission } from "../../shared/contracts/missionControl"
 import { persistentSessions, activeProcesses } from "../helpers"
 import { sdkSessions, resolvePermission, resolveAllPermissions, getSDKPermissions } from "../sdk-session"
 import {
@@ -191,6 +193,41 @@ export function listPermissionSessionIds(
   return [...ids]
 }
 
+/**
+ * Reduce one request to what a dashboard card renders.
+ *
+ * The raw `input` is the complete tool input — for a pending Write, the entire
+ * file being written. This list is polled app-wide, so shipping it would put
+ * that payload on the wire every few seconds for every connected client,
+ * including remote and tunnel ones. The card only ever shows a one-line
+ * summary, so that is all it gets. (The per-session route below still returns
+ * the full input; the permission bar needs it to render.)
+ */
+function summarizeRequest(
+  sessionId: string,
+  request: ReturnType<typeof collectPendingPermissions>[number],
+): MissionControlPermission {
+  const input = asRecord(request.input)
+  const available = (request as { availableDecisions?: MissionControlPermission["availableDecisions"] })
+    .availableDecisions
+  return {
+    sessionId,
+    requestId: request.requestId,
+    toolName: request.toolName,
+    summary: getToolSummary({ name: request.toolName, input }),
+    ...(request.title && { title: request.title }),
+    ...(request.description && { description: request.description }),
+    ...(available && { availableDecisions: available }),
+    timestamp: request.timestamp,
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
 export function registerPermissionRoutes(
   use: UseFn,
   codex: CodexApprovalClient = codexAppServer,
@@ -202,10 +239,12 @@ export function registerPermissionRoutes(
     // the Mission Control grid, which must surface requests for sessions that
     // are not open.
     if (req.method === "GET" && (url === "" || url === "/" || url.startsWith("?"))) {
-      const bySession: Record<string, unknown[]> = {}
+      const bySession: Record<string, MissionControlPermission[]> = {}
       for (const sessionId of listPermissionSessionIds(codex)) {
         const permissions = collectPendingPermissions(sessionId, codex)
-        if (permissions.length > 0) bySession[sessionId] = permissions
+        if (permissions.length > 0) {
+          bySession[sessionId] = permissions.map((r) => summarizeRequest(sessionId, r))
+        }
       }
       sendJson(res, 200, { bySession })
       return
