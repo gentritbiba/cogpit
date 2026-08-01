@@ -7,6 +7,7 @@ import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useSessionActions } from "@/hooks/useSessionActions"
 
 const TeamsDashboard = lazy(() => import("@/components/TeamsDashboard").then((module) => ({ default: module.TeamsDashboard })))
+const MissionControl = lazy(() => import("@/components/MissionControl").then((module) => ({ default: module.MissionControl })))
 
 type ShellActions = Pick<
   ReturnType<typeof useSessionActions>,
@@ -98,6 +99,15 @@ export function ProjectDashboard({ navigation }: { navigation: ShellNavigation }
       onDuplicateSession={navigation.handlers.handleDuplicateSessionByPath}
       onDeleteSession={navigation.handlers.handleDeleteSession}
     />
+  )
+}
+
+/** Mission Control grid, shared by desktop and mobile shells. */
+export function MissionControlView({ navigation }: { navigation: ShellNavigation }) {
+  return (
+    <Suspense fallback={null}>
+      <MissionControl onSelectSession={navigation.actions.handleDashboardSelect} />
+    </Suspense>
   )
 }
 

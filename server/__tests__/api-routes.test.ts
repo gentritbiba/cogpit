@@ -46,6 +46,7 @@ const CANONICAL_ROUTE_IDS = [
   "notify",
   "scripts",
   "permissions",
+  "mission-control",
   "ask-user",
   "models",
   "codex-runtime",

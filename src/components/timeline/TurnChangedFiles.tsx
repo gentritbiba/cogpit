@@ -4,6 +4,7 @@ import { diffLineCount } from "@/lib/diffUtils"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { OpIndicator, SubAgentIndicator } from "@/components/FileChangesPanel/file-change-indicators"
 import { cn } from "@/lib/utils"
+import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
 import type { Turn, ToolCall } from "@/lib/types"
 
 // ── Data types ────────────────────────────────────────────────────────────────
@@ -204,26 +205,6 @@ function buildFileTree(changes: FileChangeInfo[], cwd: string): TreeNode[] {
 
 // ── Change bar (GitHub-style colored blocks) ────────────────────────────────
 
-const CHANGE_BAR_BLOCKS = 5
-
-function ChangeBar({ add, del }: { add: number; del: number }) {
-  const total = add + del
-  if (total === 0) return null
-
-  const addBlocks = Math.round((add / total) * CHANGE_BAR_BLOCKS)
-  const delBlocks = CHANGE_BAR_BLOCKS - addBlocks
-
-  return (
-    <span className="flex items-center gap-[1px] shrink-0 ml-1">
-      {Array.from({ length: addBlocks }, (_, i) => (
-        <span key={`a${i}`} className="inline-block w-[6px] h-[6px] rounded-[1px] bg-green-500/70" />
-      ))}
-      {Array.from({ length: delBlocks }, (_, i) => (
-        <span key={`d${i}`} className="inline-block w-[6px] h-[6px] rounded-[1px] bg-red-400/70" />
-      ))}
-    </span>
-  )
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -366,19 +347,6 @@ const TreeRow = memo(function TreeRow({
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
-function LineCounts({ add, del, dimmed }: { add: number; del: number; dimmed?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "flex items-center gap-1 shrink-0 text-[10px] font-mono tabular-nums",
-        dimmed && "opacity-40",
-      )}
-    >
-      {add > 0 && <span className="text-green-500">+{add}</span>}
-      {del > 0 && <span className="text-red-400">-{del}</span>}
-    </span>
-  )
-}
 
 const EXT_COLORS: Record<string, string> = {
   tsx: "bg-blue-400/70",

@@ -384,6 +384,16 @@ export class CodexAppServer {
     }))
   }
 
+  /**
+   * Thread ids that currently hold at least one pending approval.
+   *
+   * Lets callers enumerate approvals across every thread; `listPendingApprovals`
+   * only answers for a thread you already know about.
+   */
+  listApprovalThreadIds(): string[] {
+    return [...this.approvalsByThread.keys()]
+  }
+
   listPendingApprovals(threadId: string): PendingApproval[] {
     const approvals = [...this.approvalsByThread.entries()]
       .filter(([approvalThreadId]) =>

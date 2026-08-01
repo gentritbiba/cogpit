@@ -27,7 +27,7 @@ export interface SessionState {
   sessionChangeKey: number
   currentMemberName: string | null
   loadingMember: string | null
-  mainView: "sessions" | "teams" | "config"
+  mainView: "sessions" | "teams" | "config" | "mission"
   configFilePath: string | null
   selectedTeam: string | null
   sidebarTab: "live" | "browse" | "teams"
@@ -59,6 +59,8 @@ export type SessionAction =
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
   | { type: "OPEN_CONFIG"; filePath?: string }
   | { type: "CLOSE_CONFIG" }
+  | { type: "OPEN_MISSION" }
+  | { type: "CLOSE_MISSION" }
 
 const initialState: SessionState = {
   session: null,
@@ -317,6 +319,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
 
     case "CLOSE_CONFIG":
       return { ...state, mainView: "sessions", configFilePath: null }
+
+    case "OPEN_MISSION":
+      return { ...state, mainView: "mission" }
+
+    case "CLOSE_MISSION":
+      return { ...state, mainView: "sessions" }
 
     default:
       return state

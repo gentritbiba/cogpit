@@ -7,6 +7,7 @@ export type KeybindingCommand =
   | "collapseAll"
   | "toggleSidebar"
   | "toggleStats"
+  | "missionControl"
   | "newSession"
   | "themeSelector"
   | "systemTerminal"
@@ -68,6 +69,13 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     description: "Show or hide projects and sessions",
     group: "View",
     defaultShortcut: { key: "b", modKey: true },
+  },
+  {
+    command: "missionControl",
+    label: "Toggle Mission Control",
+    description: "Show every live session at once and answer whatever is blocked",
+    group: "View",
+    defaultShortcut: { key: "m", modKey: true, shiftKey: true },
   },
   {
     command: "toggleStats",

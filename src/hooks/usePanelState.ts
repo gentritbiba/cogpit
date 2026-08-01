@@ -20,6 +20,7 @@ interface PanelState {
   handleToggleWorkflows: () => void
   handleToggleFileChanges: () => void
   handleToggleConfig: () => void
+  handleToggleMission: () => void
   handleEditConfig: (filePath: string) => void
   handleOpenProjectSwitcher: () => void
   handleCloseProjectSwitcher: () => void
@@ -56,6 +57,13 @@ export function usePanelState(
       dispatch({ type: "OPEN_CONFIG" })
     }
   }, [state.mainView, dispatch])
+  const handleToggleMission = useCallback(() => {
+    if (state.mainView === "mission") {
+      dispatch({ type: "CLOSE_MISSION" })
+    } else {
+      dispatch({ type: "OPEN_MISSION" })
+    }
+  }, [state.mainView, dispatch])
   const handleEditConfig = useCallback((filePath: string) => {
     dispatch({ type: "OPEN_CONFIG", filePath })
   }, [dispatch])
@@ -78,6 +86,7 @@ export function usePanelState(
     handleToggleWorkflows,
     handleToggleFileChanges,
     handleToggleConfig,
+    handleToggleMission,
     handleEditConfig,
     handleOpenProjectSwitcher,
     handleCloseProjectSwitcher,

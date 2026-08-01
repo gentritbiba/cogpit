@@ -33,6 +33,8 @@ export function DesktopAppShell({
         onToggleFileChanges={navigation.panels.handleToggleFileChanges}
         showConfig={state.mainView === "config"}
         onToggleConfig={navigation.panels.handleToggleConfig}
+        showMission={state.mainView === "mission"}
+        onToggleMission={navigation.panels.handleToggleMission}
         onKillAll={chrome.onKillAll}
         onOpenSettings={config.openConfigDialog}
         onOpenCommandPalette={chrome.onOpenCommandPalette}

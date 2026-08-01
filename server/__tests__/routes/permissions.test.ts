@@ -83,6 +83,7 @@ function makeCodex(pending: PendingApproval[] = []): CodexApprovalClient {
     listPendingApprovals: vi.fn((threadId: string) =>
       pending.filter((item) => item.threadId === threadId),
     ),
+    listApprovalThreadIds: vi.fn(() => [...new Set(pending.map((item) => item.threadId))]),
     respondApproval: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -393,5 +394,97 @@ describe("Codex permission fallback", () => {
       error: "transport lost",
       code: "CODEX_APPROVAL_FAILED",
     })
+  })
+})
+
+describe("GET /api/permissions — cross-session listing", () => {
+  beforeEach(() => {
+    mockPersistentSessions.clear()
+    mockSdkSessions.clear()
+    mockGetSDKPermissions.mockReset().mockReturnValue([])
+  })
+
+  it("groups pending requests from every provider by session", async () => {
+    // Mission Control renders cards for sessions that are not open, so it needs
+    // one call that covers all of them rather than a poll per session.
+    mockSdkSessions.set("sdk-session", {})
+    mockGetSDKPermissions.mockImplementation((sessionId: unknown) =>
+      sessionId === "sdk-session"
+        ? [{ requestId: "r1", toolName: "Bash", input: {}, toolUseId: "r1", timestamp: 1 }]
+        : [],
+    )
+    const codex = makeCodex([approval({ threadId: "codex-thread" })])
+
+    const { response } = await invoke(register(codex), { method: "GET", url: "" })
+
+    expect(response.statusCode).toBe(200)
+    const body = response.json() as { bySession: Record<string, unknown[]> }
+    expect(Object.keys(body.bySession).sort()).toEqual(["codex-thread", "sdk-session"])
+    expect(body.bySession["sdk-session"]).toHaveLength(1)
+    expect(body.bySession["codex-thread"]).toHaveLength(1)
+  })
+
+  it("includes legacy CLI sessions that have pending permissions", async () => {
+    mockPersistentSessions.set("legacy", {
+      pendingPermissions: new Map([["r9", { requestId: "r9", toolName: "Write" }]]),
+    })
+
+    const { response } = await invoke(register(makeCodex()), { method: "GET", url: "" })
+
+    const body = response.json() as { bySession: Record<string, unknown[]> }
+    expect(body.bySession.legacy).toHaveLength(1)
+  })
+
+  it("omits sessions with nothing pending", async () => {
+    mockSdkSessions.set("quiet", {})
+
+    const { response } = await invoke(register(makeCodex()), { method: "GET", url: "" })
+
+    expect(response.json()).toEqual({ bySession: {} })
+  })
+
+  it("answers the bare path even with a query string", async () => {
+    const { response } = await invoke(register(makeCodex()), { method: "GET", url: "?x=1" })
+    expect(response.statusCode).toBe(200)
+  })
+})
+
+describe("GET /api/permissions — payload shape", () => {
+  beforeEach(() => {
+    mockPersistentSessions.clear()
+    mockSdkSessions.clear()
+    mockGetSDKPermissions.mockReset().mockReturnValue([])
+  })
+
+  it("summarises requests instead of shipping the raw tool input", async () => {
+    // A pending Write carries the entire file being written, and this list is
+    // polled app-wide — sending it would put that payload on the wire every few
+    // seconds for every client, including remote and tunnel ones.
+    const wholeFile = "x".repeat(5000)
+    mockSdkSessions.set("s1", {})
+    mockGetSDKPermissions.mockImplementation((sessionId: unknown) =>
+      sessionId === "s1"
+        ? [{
+            requestId: "r1",
+            toolName: "Write",
+            input: { file_path: "/big.ts", content: wholeFile },
+            toolUseId: "r1",
+            timestamp: 7,
+          }]
+        : [],
+    )
+
+    const { response } = await invoke(register(makeCodex()), { method: "GET", url: "" })
+    const body = response.json() as { bySession: Record<string, Record<string, unknown>[]> }
+    const [request] = body.bySession.s1
+
+    expect(request).toEqual({
+      sessionId: "s1",
+      requestId: "r1",
+      toolName: "Write",
+      summary: "/big.ts",
+      timestamp: 7,
+    })
+    expect(JSON.stringify(body)).not.toContain(wholeFile)
   })
 })

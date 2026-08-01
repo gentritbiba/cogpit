@@ -1,7 +1,36 @@
-import { sdkSessions, resolveUserQuestion, type UserQuestionAnswers } from "../sdk-session"
+import {
+  sdkSessions,
+  resolveUserQuestion,
+  getSDKUserQuestions,
+  listUserQuestionSessionIds,
+  type UserQuestionAnswers,
+} from "../sdk-session"
 import { sendJson, type UseFn } from "../http"
+import type { MissionControlQuestion } from "../../shared/contracts/missionControl"
 
 export function registerAskUserRoutes(use: UseFn) {
+  /**
+   * GET /api/user-questions — every AskUserQuestion call currently blocking a
+   * session, grouped by session.
+   *
+   * Read from the live resolver map rather than from transcripts on purpose: a
+   * session whose server restarted still has the tool call in its JSONL forever,
+   * so a transcript-derived list would claim abandoned sessions are waiting on
+   * the user. Being listed here means the question can actually be answered.
+   */
+  use("/api/user-questions", (req, res, next) => {
+    if (req.method !== "GET") {
+      next()
+      return
+    }
+    const bySession: Record<string, MissionControlQuestion[]> = {}
+    for (const sessionId of listUserQuestionSessionIds()) {
+      const questions = getSDKUserQuestions(sessionId)
+      if (questions.length > 0) bySession[sessionId] = questions
+    }
+    sendJson(res, 200, { bySession })
+  })
+
   use("/api/ask-user-answer", (req, res, next) => {
     if (req.method !== "POST") {
       next()

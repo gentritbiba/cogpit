@@ -18,6 +18,7 @@ import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerMcpRoutes } from "./routes/mcp"
+import { registerMissionControlRoutes } from "./routes/mission-control"
 import { registerModelRoutes } from "./routes/models"
 import { registerNotifyRoutes } from "./routes/notify"
 import { registerPerformanceRoutes } from "./routes/performance"
@@ -102,6 +103,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("notify", registerNotifyRoutes),
   apiRoute("scripts", registerScriptRoutes),
   apiRoute("permissions", registerPermissionRoutes),
+  apiRoute("mission-control", registerMissionControlRoutes),
   apiRoute("ask-user", registerAskUserRoutes),
   apiRoute("models", registerModelRoutes),
   apiRoute("codex-runtime", registerCodexRuntimeRoutes),

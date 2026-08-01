@@ -1,4 +1,6 @@
 import { sendJson, type UseFn } from "../http"
+import { getToolSummary } from "../../shared/session/toolSummary"
+import type { MissionControlPermission } from "../../shared/contracts/missionControl"
 import { persistentSessions, activeProcesses } from "../helpers"
 import { sdkSessions, resolvePermission, resolveAllPermissions, getSDKPermissions } from "../sdk-session"
 import {
@@ -10,7 +12,7 @@ import {
 
 export type CodexApprovalClient = Pick<
   CodexAppServer,
-  "listPendingApprovals" | "respondApproval"
+  "listPendingApprovals" | "respondApproval" | "listApprovalThreadIds"
 >
 
 interface FrontendPermissionRequest {
@@ -149,6 +151,83 @@ function sendCodexApprovalError(res: Parameters<typeof sendJson>[0], error: unkn
   })
 }
 
+/**
+ * Pending requests for one session, in provider precedence order.
+ *
+ * Shared by the per-session route and the cross-session listing so both cannot
+ * drift on which provider wins.
+ */
+export function collectPendingPermissions(
+  sessionId: string,
+  codex: CodexApprovalClient = codexAppServer,
+): FrontendPermissionRequest[] | ReturnType<typeof getSDKPermissions> {
+  // Check SDK sessions first (real-time canUseTool permissions)
+  const sdkPerms = getSDKPermissions(sessionId)
+  if (sdkPerms.length > 0) return sdkPerms
+
+  // Codex app-server approvals are live requests: answering them resumes
+  // the turn directly, with no process kill/retry cycle.
+  const codexPerms = codex.listPendingApprovals(sessionId).map(normalizeCodexApproval)
+  if (codexPerms.length > 0) return codexPerms
+
+  // Fallback: check legacy CLI persistent sessions
+  const ps = persistentSessions.get(sessionId)
+  if (ps) return Array.from(ps.pendingPermissions.values())
+
+  return []
+}
+
+/**
+ * Every session id that could currently hold a pending request.
+ *
+ * Codex approvals are reachable from their own thread id, so listing SDK,
+ * Codex, and legacy registries covers all three providers.
+ */
+export function listPermissionSessionIds(
+  codex: CodexApprovalClient = codexAppServer,
+): string[] {
+  const ids = new Set<string>()
+  for (const id of sdkSessions.keys()) ids.add(id)
+  for (const id of persistentSessions.keys()) ids.add(id)
+  for (const id of codex.listApprovalThreadIds()) ids.add(id)
+  return [...ids]
+}
+
+/**
+ * Reduce one request to what a dashboard card renders.
+ *
+ * The raw `input` is the complete tool input — for a pending Write, the entire
+ * file being written. This list is polled app-wide, so shipping it would put
+ * that payload on the wire every few seconds for every connected client,
+ * including remote and tunnel ones. The card only ever shows a one-line
+ * summary, so that is all it gets. (The per-session route below still returns
+ * the full input; the permission bar needs it to render.)
+ */
+function summarizeRequest(
+  sessionId: string,
+  request: ReturnType<typeof collectPendingPermissions>[number],
+): MissionControlPermission {
+  const input = asRecord(request.input)
+  const available = (request as { availableDecisions?: MissionControlPermission["availableDecisions"] })
+    .availableDecisions
+  return {
+    sessionId,
+    requestId: request.requestId,
+    toolName: request.toolName,
+    summary: getToolSummary({ name: request.toolName, input }),
+    ...(request.title && { title: request.title }),
+    ...(request.description && { description: request.description }),
+    ...(available && { availableDecisions: available }),
+    timestamp: request.timestamp,
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
 export function registerPermissionRoutes(
   use: UseFn,
   codex: CodexApprovalClient = codexAppServer,
@@ -156,37 +235,26 @@ export function registerPermissionRoutes(
   use("/api/permissions", (req, res, next) => {
     const url = req.url ?? ""
 
+    // GET /api/permissions — every pending request, grouped by session. Powers
+    // the Mission Control grid, which must surface requests for sessions that
+    // are not open.
+    if (req.method === "GET" && (url === "" || url === "/" || url.startsWith("?"))) {
+      const bySession: Record<string, MissionControlPermission[]> = {}
+      for (const sessionId of listPermissionSessionIds(codex)) {
+        const permissions = collectPendingPermissions(sessionId, codex)
+        if (permissions.length > 0) {
+          bySession[sessionId] = permissions.map((r) => summarizeRequest(sessionId, r))
+        }
+      }
+      sendJson(res, 200, { bySession })
+      return
+    }
+
     // GET /api/permissions/:sessionId — return pending permission requests
     const getMatch = url.match(/^\/([^/?]+)$/)
     if (req.method === "GET" && getMatch) {
       const sessionId = decodeURIComponent(getMatch[1])
-
-      // Check SDK sessions first (real-time canUseTool permissions)
-      const sdkPerms = getSDKPermissions(sessionId)
-      if (sdkPerms.length > 0) {
-        sendJson(res, 200, { permissions: sdkPerms })
-        return
-      }
-
-      // Codex app-server approvals are live requests: answering them resumes
-      // the turn directly, with no process kill/retry cycle.
-      const codexPerms = codex
-        .listPendingApprovals(sessionId)
-        .map(normalizeCodexApproval)
-      if (codexPerms.length > 0) {
-        sendJson(res, 200, { permissions: codexPerms })
-        return
-      }
-
-      // Fallback: check legacy CLI persistent sessions
-      const ps = persistentSessions.get(sessionId)
-      if (ps) {
-        const permissions = Array.from(ps.pendingPermissions.values())
-        sendJson(res, 200, { permissions })
-        return
-      }
-
-      sendJson(res, 200, { permissions: [] })
+      sendJson(res, 200, { permissions: collectPendingPermissions(sessionId, codex) })
       return
     }
 

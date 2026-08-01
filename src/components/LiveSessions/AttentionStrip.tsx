@@ -30,6 +30,11 @@ function TimeSince({ iso }: { iso: string }) {
 
 const REASON_CHIP: Record<AttentionItem["reason"], { label: string; className: string }> = {
   permission: { label: "Permission", className: "bg-amber-500/15 text-amber-400" },
+  deferred: { label: "Deferred", className: "bg-amber-500/15 text-amber-400" },
+  // Pink is the app's established colour for AskUserQuestion (tool badge,
+  // composer bar, timeline form), so a blocked question reads the same
+  // everywhere.
+  question: { label: "Question", className: "bg-pink-500/15 text-pink-400" },
   waiting: { label: "Waiting", className: "bg-amber-500/10 text-amber-300/90" },
   done: { label: "Done", className: "bg-green-500/10 text-green-400" },
 }
@@ -219,11 +224,15 @@ export function AttentionStrip({
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
               chip={REASON_CHIP[reason]}
-              dotClassName={reason === "done" ? "bg-green-400" : "bg-amber-400"}
+              dotClassName={
+                reason === "done"
+                  ? "bg-green-400"
+                  : reason === "question" ? "bg-pink-400" : "bg-amber-400"
+              }
               cardClassName="border-amber-500/20 bg-amber-500/[0.04] hover:bg-amber-500/[0.08]"
               onKill={onKill}
               onResume={
-                reason === "permission" && onResumeSession
+                reason === "deferred" && onResumeSession
                   ? () => onResumeSession(s.sessionId, s.cwd)
                   : undefined
               }

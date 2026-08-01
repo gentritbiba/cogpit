@@ -114,6 +114,13 @@ describe("formatDuration", () => {
     expect(formatDuration(120_000)).toBe("2m 0s")
   })
 
+  it("switches to hours past the hour mark", () => {
+    // Agent sessions routinely run for hours, and "885m 12s" is unreadable.
+    expect(formatDuration(3_600_000)).toBe("1h 0m")
+    expect(formatDuration(3_840_000)).toBe("1h 4m")
+    expect(formatDuration(53_112_000)).toBe("14h 45m")
+  })
+
   it("rounds sub-second durations to nearest second", () => {
     expect(formatDuration(1500)).toBe("2s")
   })
