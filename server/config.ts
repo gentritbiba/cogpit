@@ -11,7 +11,23 @@ const CONFIG_FILE_MODE = 0o600
 const __dirname = fileURLToPath(new URL(".", import.meta.url))
 const PROJECT_ROOT = resolve(__dirname, "..")
 
+/**
+ * Where Cogpit stores the data it owns (undo history, per-session config).
+ * Defaults to the project root for dev and tests; packaged builds point it at
+ * the OS user-data directory because the app bundle is read-only.
+ */
+let DATA_ROOT = PROJECT_ROOT
+
 let CONFIG_PATH = join(PROJECT_ROOT, "config.local.json")
+
+/**
+ * Override the writable data root at runtime (Electron and standalone entry
+ * points). Must be called before refreshDirs() so the directories it derives
+ * stay writable across later config reloads.
+ */
+export function setDataRoot(dir: string): void {
+  DATA_ROOT = dir
+}
 
 /**
  * Override the config file path at runtime (used by Electron main process
@@ -219,7 +235,7 @@ export function getDirs(claudeDir: string) {
     PROJECTS_DIR: join(claudeDir, "projects"),
     TEAMS_DIR: join(claudeDir, "teams"),
     TASKS_DIR: join(claudeDir, "tasks"),
-    UNDO_DIR: join(PROJECT_ROOT, "undo-history"),
-    SESSION_CONFIG_DIR: join(PROJECT_ROOT, "session-config"),
+    UNDO_DIR: join(DATA_ROOT, "undo-history"),
+    SESSION_CONFIG_DIR: join(DATA_ROOT, "session-config"),
   }
 }

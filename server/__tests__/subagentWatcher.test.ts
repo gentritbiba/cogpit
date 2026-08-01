@@ -42,6 +42,37 @@ function mockSource(readSource: () => Buffer, readSizes: number[] = []): void {
   }))
 }
 
+/** Serve a distinct body per agent file, keyed by file name. */
+function mockFiles(files: Record<string, string>): void {
+  const buffers = new Map(Object.entries(files).map(([name, body]) => [name, Buffer.from(body)]))
+  const bufferFor = (p: string): Buffer => buffers.get(p.slice(p.lastIndexOf("/") + 1)) ?? Buffer.alloc(0)
+  readdir.mockResolvedValue([...buffers.keys()])
+  stat.mockImplementation(async (p: string) => ({ size: bufferFor(p).length }))
+  open.mockImplementation(async (p: string) => ({
+    read: vi.fn(
+      async (buffer: Buffer, _bufferOffset: number, length: number, position: number) => {
+        const bytesRead = bufferFor(p).copy(buffer, 0, position, position + length)
+        return { bytesRead }
+      },
+    ),
+    close: vi.fn().mockResolvedValue(undefined),
+  }))
+}
+
+/** agentId → parentToolUseID across every synthesized progress entry. */
+function forwardedAttribution(): Map<string, string> {
+  const seen = new Map<string, string>()
+  for (const call of appendFile.mock.calls) {
+    const entry = JSON.parse(String(call[1]).trim())
+    seen.set(entry.data.agentId, entry.parentToolUseID)
+  }
+  return seen
+}
+
+// Sibling agents launched in one batch share a long prompt preamble; the head
+// comparison alone cannot tell them apart.
+const PREAMBLE = "Repo: /Users/dev/agent-window (branch worktree-mission-control). ".padEnd(140, "-")
+
 function userLine(content: string): string {
   return JSON.stringify({
     type: "user",
@@ -149,6 +180,142 @@ describe("watchSubagents", () => {
     firstScan.resolve([])
     await vi.advanceTimersByTimeAsync(0)
     expect(readdir).toHaveBeenCalledTimes(2)
+    watcher.close()
+  })
+
+  it("gives each sibling its own Task call when their prompts share a preamble", async () => {
+    const promptA = `${PREAMBLE} Simplify the streaming overlay.`
+    const promptB = `${PREAMBLE} Simplify the diff viewer.`
+    const promptC = `${PREAMBLE} Simplify the file-changes panel.`
+    mockFiles({
+      "agent-a.jsonl": `${userLine(promptA)}\n`,
+      "agent-b.jsonl": `${userLine(promptB)}\n`,
+      "agent-c.jsonl": `${userLine(promptC)}\n`,
+    })
+    const watcher = watchSubagents(
+      "/tmp/session.jsonl",
+      "session",
+      new Map([["tool-a", promptA], ["tool-b", promptB], ["tool-c", promptC]]),
+    )
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    const attribution = forwardedAttribution()
+    expect(attribution.get("a")).toBe("tool-a")
+    expect(attribution.get("b")).toBe("tool-b")
+    expect(attribution.get("c")).toBe("tool-c")
+    expect(new Set(attribution.values()).size).toBe(3)
+    watcher.close()
+  })
+
+  it("never hands the same Task call to two agents", async () => {
+    const promptC = `${PREAMBLE} Simplify the file-changes panel.`
+    // a and b match no prompt exactly and both match every head — unresolvable.
+    mockFiles({
+      "agent-a.jsonl": `${userLine(`${PREAMBLE} unrelated tail one`)}\n`,
+      "agent-b.jsonl": `${userLine(`${PREAMBLE} unrelated tail two`)}\n`,
+      "agent-c.jsonl": `${userLine(promptC)}\n`,
+    })
+    const watcher = watchSubagents(
+      "/tmp/session.jsonl",
+      "session",
+      new Map([
+        ["tool-a", `${PREAMBLE} Simplify the streaming overlay.`],
+        ["tool-b", `${PREAMBLE} Simplify the diff viewer.`],
+        ["tool-c", promptC],
+      ]),
+    )
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Refusing to guess beats attributing both agents to one Task call — but
+    // the agent that can prove ownership is still forwarded.
+    const attribution = forwardedAttribution()
+    expect(attribution.has("a")).toBe(false)
+    expect(attribution.has("b")).toBe(false)
+    expect(attribution.get("c")).toBe("tool-c")
+    watcher.close()
+  })
+
+  it("holds a claim across scan cycles as later agent files appear", async () => {
+    const promptA = `${PREAMBLE} Simplify the streaming overlay.`
+    const promptB = `${PREAMBLE} Simplify the diff viewer.`
+    const pending = new Map([["tool-a", promptA], ["tool-b", promptB]])
+    mockFiles({ "agent-a.jsonl": `${userLine(promptA)}\n` })
+    const watcher = watchSubagents("/tmp/session.jsonl", "session", pending)
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(forwardedAttribution().get("a")).toBe("tool-a")
+
+    // b shows up only on a later scan; a's claim on tool-a must still stand.
+    mockFiles({
+      "agent-a.jsonl": `${userLine(promptA)}\n`,
+      "agent-b.jsonl": `${userLine(promptB)}\n`,
+    })
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    const attribution = forwardedAttribution()
+    expect(attribution.get("a")).toBe("tool-a")
+    expect(attribution.get("b")).toBe("tool-b")
+    watcher.close()
+  })
+
+  it("lets a proven match take over a Task call a weak head match had guessed", async () => {
+    const promptA = `${PREAMBLE} Simplify the streaming overlay.`
+    // b resolves first, but only via the weak head comparison.
+    mockFiles({ "agent-b.jsonl": `${userLine(`${PREAMBLE} rewritten tail`)}\n` })
+    const pending = new Map([["tool-a", promptA]])
+    const watcher = watchSubagents("/tmp/session.jsonl", "session", pending)
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(forwardedAttribution().get("b")).toBe("tool-a")
+
+    mockFiles({
+      "agent-b.jsonl": `${userLine(`${PREAMBLE} rewritten tail`)}\n`,
+      "agent-a.jsonl": `${userLine(promptA)}\n`,
+    })
+    await vi.advanceTimersByTimeAsync(2_000)
+
+    // The agent that can prove ownership wins the id outright.
+    expect(forwardedAttribution().get("a")).toBe("tool-a")
+    watcher.close()
+  })
+
+  it("does not treat an empty Task prompt as a wildcard", async () => {
+    mockFiles({ "agent-a.jsonl": `${userLine("some subagent opening message")}\n` })
+    const watcher = watchSubagents("/tmp/session.jsonl", "session", new Map([["tool-empty", ""]]))
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(appendFile).not.toHaveBeenCalled()
+    watcher.close()
+  })
+
+  it("still matches on the prompt head when only one Task call can match", async () => {
+    mockFiles({ "agent-a.jsonl": `${userLine(`${PREAMBLE} tail rewritten by the CLI`)}\n` })
+    const watcher = watchSubagents(
+      "/tmp/session.jsonl",
+      "session",
+      new Map([["tool-a", `${PREAMBLE} original tail`]]),
+    )
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(forwardedAttribution().get("a")).toBe("tool-a")
+    watcher.close()
+  })
+
+  it("prefers the most specific prompt when one is a prefix of another", async () => {
+    mockFiles({ "agent-a.jsonl": `${userLine(`${PREAMBLE} review the parser carefully`)}\n` })
+    const watcher = watchSubagents(
+      "/tmp/session.jsonl",
+      "session",
+      new Map([["tool-short", PREAMBLE], ["tool-long", `${PREAMBLE} review the parser`]]),
+    )
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(forwardedAttribution().get("a")).toBe("tool-long")
     watcher.close()
   })
 

@@ -6,6 +6,9 @@ import { recordActivity } from "./lib/activityMonitor"
 
 const READ_CHUNK_BYTES = 256 * 1024
 
+/** Weak head-comparison length, used only when it singles out one candidate. */
+const PROMPT_HEAD_CHARS = 100
+
 // ── Subagent JSONL watcher ───────────────────────────────────────────
 // Claude Code doesn't reliably write agent_progress to the parent JSONL
 // when using --output-format stream-json.  The subagent data IS written to
@@ -28,8 +31,10 @@ export interface SubagentWatcher {
  *
  * @param parentJsonlPath  Path to the parent session's JSONL file
  * @param sessionId        The parent session UUID
- * @param pendingTaskCalls Map of tool_use_id -> prompt for active Task tool calls.
- *                         Updated externally by the stdout parser when it sees Task tool_use/result.
+ * @param pendingTaskCalls Map of tool_use_id -> prompt for Task tool calls.
+ *                         Owned by the caller, which only ever adds to it, so it
+ *                         accumulates every Task call of the session — entries
+ *                         from earlier turns remain candidates here.
  */
 export function watchSubagents(
   parentJsonlPath: string,
@@ -41,7 +46,39 @@ export function watchSubagents(
   // Track offsets per subagent file and their parentToolUseID mapping
   const fileOffsets = new Map<string, number>()
   const agentToParentToolId = new Map<string, string>()
+  // A Task tool_use id belongs to exactly one subagent. Without this, siblings
+  // launched in the same batch — whose prompts share a long preamble — all bind
+  // to the first Task call and then replay each other's output under every card.
+  // A binding proved by the prompt itself is final; one inferred from the weak
+  // head comparison is provisional and yields to a later proven match, so a bad
+  // guess cannot starve the rightful owner.
+  const claims = new Map<string, { agentId: string; proven: boolean }>()
   let closed = false
+
+  /** Resolve the Task call that launched a subagent from its opening message. */
+  function resolveParentToolId(promptText: string): { toolId: string; proven: boolean } | undefined {
+    const withPrompt = [...pendingTaskCalls].filter(([, prompt]) => prompt.length > 0)
+    const provable = withPrompt.filter(([toolId]) => !claims.get(toolId)?.proven)
+
+    // Two byte-identical prompts leave no signal to tell their agents apart;
+    // claiming makes the choice arbitrary but at least one-to-one.
+    const exact = provable.find(([, prompt]) => prompt === promptText)
+    if (exact) return { toolId: exact[0], proven: true }
+
+    // Claude Code may append to the prompt it hands the subagent. The longest
+    // matching prompt is the most specific one.
+    const prefixed = provable
+      .filter(([, prompt]) => promptText.startsWith(prompt))
+      .sort((a, b) => b[1].length - a[1].length)
+    if (prefixed.length > 0) return { toolId: prefixed[0][0], proven: true }
+
+    // Last resort. Ambiguity here is exactly what made siblings collide, so
+    // refuse to guess unless a single unclaimed candidate matches.
+    const head = withPrompt
+      .filter(([toolId]) => !claims.has(toolId))
+      .filter(([, prompt]) => promptText.startsWith(prompt.slice(0, PROMPT_HEAD_CHARS)))
+    return head.length === 1 ? { toolId: head[0][0], proven: false } : undefined
+  }
   let dirWatcher: ReturnType<typeof watch> | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let scanInFlight: Promise<void> | null = null
@@ -83,12 +120,15 @@ export function watchSubagents(
         }
       }
       if (promptText) {
-        for (const [toolId, taskPrompt] of pendingTaskCalls) {
-          if (taskPrompt === promptText || promptText.startsWith(taskPrompt.slice(0, 100))) {
-            parentToolId = toolId
-            agentToParentToolId.set(agentId, toolId)
-            break
-          }
+        const match = resolveParentToolId(promptText)
+        if (match) {
+          // Displacing a provisional holder leaves it unresolved, which beats
+          // leaving the agent that can prove ownership with nothing.
+          const displaced = claims.get(match.toolId)
+          if (displaced) agentToParentToolId.delete(displaced.agentId)
+          claims.set(match.toolId, { agentId, proven: match.proven })
+          agentToParentToolId.set(agentId, match.toolId)
+          parentToolId = match.toolId
         }
       }
     }

@@ -6,14 +6,14 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
-import { setConfigPath, loadConfig, getConfig } from "./config"
+import { setConfigPath, setDataRoot, loadConfig, getConfig } from "./config"
 import {
   authMiddleware,
   securityHeaders,
   bodySizeLimit,
 } from "./helpers"
 import { cleanupProcesses } from "./processRegistry"
-import { dirs, refreshDirs } from "./sessionPaths"
+import { refreshDirs } from "./sessionPaths"
 import { websocketUpgradeRejection } from "./security"
 import { initDeviceRegistry } from "./hub/registry"
 import { handleHubUpgrade } from "./hub/proxy"
@@ -36,11 +36,14 @@ export async function createServerComposition(
   userDataDir: string,
   environment: AppServerEnvironment,
 ) {
+  // The app bundle is read-only, so everything Cogpit writes for itself lives
+  // under the user-data directory. Setting the root before refreshDirs() keeps
+  // those paths correct across later config reloads.
+  setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
   await loadConfig()
   await initDeviceRegistry(userDataDir)
   refreshDirs()
-  dirs.UNDO_DIR = join(userDataDir, "undo-history")
 
   const app = express()
   const httpServer = createServer(app)

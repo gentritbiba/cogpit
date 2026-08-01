@@ -25,13 +25,9 @@ interface AppHandlersDeps {
   hasPermsPendingChanges: boolean
   permissionsConfig: PermissionsConfig
   selectedModel: string
-  setSelectedModel: React.Dispatch<React.SetStateAction<string>>
   selectedEffort: string
-  setSelectedEffort: React.Dispatch<React.SetStateAction<string>>
   fastMode: boolean
-  setFastMode: React.Dispatch<React.SetStateAction<boolean>>
   ultracode: boolean
-  setUltracode: React.Dispatch<React.SetStateAction<boolean>>
   mcpConfig: string | null
   scrollRequestScrollToTop: () => void
   handleDashboardSelect: (dirName: string, fileName: string) => void
@@ -86,10 +82,10 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
   const {
     state, dispatch, isMobile, handleJumpToTurn,
     markPermissionsApplied, hasPermsPendingChanges, permissionsConfig,
-    selectedModel, setSelectedModel,
-    selectedEffort, setSelectedEffort,
-    fastMode, setFastMode,
-    ultracode, setUltracode,
+    selectedModel,
+    selectedEffort,
+    fastMode,
+    ultracode,
     mcpConfig,
     scrollRequestScrollToTop, handleDashboardSelect,
     workerParse,
@@ -207,18 +203,15 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
 
   const currentSessionId = state.session?.sessionId ?? null
   const prevSessionIdRef = useRef<string | null>(null)
+  // Records what each session's process was started with. Never written back
+  // into the composer: useSessionConfigSync owns that state, and replaying a
+  // snapshot would undo edits made after the session id last changed.
   useEffect(() => {
     if (currentSessionId === prevSessionIdRef.current) return
     prevSessionIdRef.current = currentSessionId
     if (!currentSessionId) return
     setAppliedSettings(prev => {
-      if (currentSessionId in prev) {
-        setSelectedModel(prev[currentSessionId].model)
-        setSelectedEffort(prev[currentSessionId].effort)
-        setFastMode(prev[currentSessionId].fastMode)
-        setUltracode(prev[currentSessionId].ultracode)
-        return prev
-      }
+      if (currentSessionId in prev) return prev
       return {
         ...prev,
         [currentSessionId]: {
@@ -230,7 +223,7 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
         },
       }
     })
-  }, [currentSessionId, setSelectedModel, setSelectedEffort, setFastMode, setUltracode])
+  }, [currentSessionId])
 
   const applied = currentSessionId ? appliedSettings[currentSessionId] : undefined
   const mcpChanged = mcpConfig !== (applied?.mcpConfig ?? null)

@@ -1,9 +1,9 @@
 import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import type { Turn } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { TOOL_BADGE_STYLES, toolSummary } from "./branchStyles"
+import { toolSummary } from "./branchStyles"
+import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
 
 // ─── Full Turn Card (parsed from JSONL) ───────────────────────
 
@@ -60,21 +60,20 @@ export function FullTurnCard({
         {turn.toolCalls.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 mt-1.5 shrink-0" />
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-x-2 gap-y-1">
               {turn.toolCalls.map((tc, i) => {
                 const summary = toolSummary(tc)
                 return (
-                  <Badge
+                  <span
                     key={i}
-                    variant="outline"
                     className={cn(
-                      "text-[10px] px-1.5 py-0 h-4 font-mono",
-                      TOOL_BADGE_STYLES[tc.name] ?? "border-border/50 text-muted-foreground",
-                      tc.isError && "border-red-700/50 text-red-400"
+                      "font-mono text-[10px]",
+                      getToolTextStyle(tc.name),
+                      tc.isError && "text-red-400"
                     )}
                   >
                     {tc.name}{summary ? ` ${summary}` : ""}
-                  </Badge>
+                  </span>
                 )
               })}
             </div>
@@ -139,18 +138,14 @@ export function ArchivedTurnCard({
         {turn.toolCalls.length > 0 && (
           <div className="flex items-start gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 mt-1.5 shrink-0" />
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-x-2 gap-y-1">
               {turn.toolCalls.map((tc, i) => (
-                <Badge
+                <span
                   key={i}
-                  variant="outline"
-                  className={cn(
-                    "text-[10px] px-1.5 py-0 h-4 font-mono",
-                    tc.type === "Edit" ? "border-amber-700/50 text-amber-400" : "border-green-700/50 text-green-400"
-                  )}
+                  className={cn("font-mono text-[10px]", getToolTextStyle(tc.type))}
                 >
                   {tc.type} {tc.filePath.split("/").pop()}
-                </Badge>
+                </span>
               ))}
             </div>
           </div>

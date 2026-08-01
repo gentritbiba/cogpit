@@ -20,3 +20,4 @@ packages/cogpit-memory/cogpit-memory
 # Local QA scratch — screenshots and notes, regenerable
 /artifacts
 qa-notes.md
+/marketing

@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { createServer, request, type Server } from "node:http"
 import { connect } from "node:net"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -91,6 +91,34 @@ describe.each(adapterCases)("%s app-server adapter", (_name, expectedMode, facto
     const fallbackResponse = await fetch(`${baseUrl}/deep/client/route`)
     expect(fallbackResponse.status).toBe(200)
     await expect(fallbackResponse.text()).resolves.toBe("<main>composition-fixture</main>")
+
+    await close(httpServer)
+  })
+
+  // A packaged app runs from a read-only bundle, so anything Cogpit writes for
+  // itself has to land in the user-data directory it was handed. Reading the
+  // value back proves the composition pointed the store somewhere writable.
+  it("stores per-session config under the user-data directory", async () => {
+    await writeFile(
+      join(userDataDir, "config.local.json"),
+      JSON.stringify({ claudeDir: fixtureRoot }),
+    )
+    const { httpServer } = await factory(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+
+    const saved = await fetch(`${baseUrl}/api/session-config/probe.jsonl`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ultracode: false }),
+    })
+    expect(saved.status).toBe(200)
+
+    await expect(
+      readFile(join(userDataDir, "session-config", "probe.jsonl.json"), "utf-8"),
+    ).resolves.toContain('"ultracode": false')
+
+    const reloaded = await fetch(`${baseUrl}/api/session-config/probe.jsonl`)
+    await expect(reloaded.json()).resolves.toEqual({ ultracode: false })
 
     await close(httpServer)
   })

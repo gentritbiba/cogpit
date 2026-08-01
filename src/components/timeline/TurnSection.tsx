@@ -329,7 +329,7 @@ function ContentBlocks({
 
     // Group consecutive thinking + tool_calls blocks into one collapsible
     if (block.kind === "thinking" || block.kind === "tool_calls") {
-      const { items, toolCalls, thinkingCount, nextIndex } = collectActivity(blocks, i)
+      const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i)
 
       // Single tool_calls group with no thinking → render as orphan tool calls
       if (items.length === 1 && items[0].kind === "tool_calls") {
@@ -355,6 +355,7 @@ function ContentBlocks({
               isAgentActive={isAgentActive}
               activityItems={items}
               thinkingCount={thinkingCount}
+              thoughtForMs={thoughtForMs}
               skillMetadata={skillMetadata}
             />
           </div>
@@ -365,7 +366,7 @@ function ContentBlocks({
     }
 
     if (block.kind === "text") {
-      const { items, toolCalls, thinkingCount, nextIndex } = collectActivity(blocks, i + 1)
+      const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i + 1)
       block.text.forEach((text, ti) => {
         const isLastTextInBlock = ti === block.text.length - 1
         const hasFollowingActivity = isLastTextInBlock && (toolCalls.length > 0 || thinkingCount > 0)
@@ -387,6 +388,7 @@ function ContentBlocks({
                   isAgentActive={isAgentActive}
                   activityItems={thinkingCount > 0 ? items : undefined}
                   thinkingCount={thinkingCount}
+                  thoughtForMs={thoughtForMs}
                   skillMetadata={skillMetadata}
                 />
               </div>

@@ -24,7 +24,7 @@ vi.mock("../password-utils", () => ({
 
 import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "../password-utils"
-import { resolve, join } from "node:path"
+import { dirname, resolve, join } from "node:path"
 import { asReaddirMock } from "./http-fixtures"
 
 const mockedReadFile = vi.mocked(readFile)
@@ -45,8 +45,26 @@ describe("getDirs", () => {
     expect(dirs.PROJECTS_DIR).toBe(join("/home/user/.claude", "projects"))
     expect(dirs.TEAMS_DIR).toBe(join("/home/user/.claude", "teams"))
     expect(dirs.TASKS_DIR).toBe(join("/home/user/.claude", "tasks"))
-    // UNDO_DIR is relative to PROJECT_ROOT, not claudeDir
+    // UNDO_DIR is relative to the data root, not claudeDir
     expect(dirs.UNDO_DIR).toContain("undo-history")
+    expect(dirs.SESSION_CONFIG_DIR).toContain("session-config")
+  })
+
+  // Packaged builds run from a read-only app bundle, so the directories Cogpit
+  // writes to must follow the data root it is given.
+  it("derives the writable directories from the data root", async () => {
+    const { getDirs, setDataRoot } = await import("../config")
+    const defaultRoot = dirname(getDirs("/home/user/.claude").UNDO_DIR)
+    setDataRoot("/data/cogpit")
+    try {
+      const dirs = getDirs("/home/user/.claude")
+      expect(dirs.UNDO_DIR).toBe(join("/data/cogpit", "undo-history"))
+      expect(dirs.SESSION_CONFIG_DIR).toBe(join("/data/cogpit", "session-config"))
+      // The Claude history directories stay independent of the data root.
+      expect(dirs.PROJECTS_DIR).toBe(join("/home/user/.claude", "projects"))
+    } finally {
+      setDataRoot(defaultRoot)
+    }
   })
 })
 

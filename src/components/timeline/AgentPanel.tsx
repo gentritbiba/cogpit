@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { formatDuration, parseSubAgentPath } from "@/lib/format"
 import type { SubAgentMessage } from "@/lib/types"
 import { LiveSubagentTranscript } from "./LiveSubagentTranscript"
-import { buildAgentLabelMap } from "./agent-utils"
+import { buildAgentLabelMap, buildParentToolByAgent } from "./agent-utils"
 import { useSubagentContent } from "@/hooks/useSubagentContent"
 import { useSessionContext } from "@/contexts/SessionContext"
 import ReactMarkdown from "react-markdown"
@@ -89,14 +89,10 @@ export const AgentPanel = memo(function AgentPanel({
     return map
   }, [messages, displayMessages])
 
-  // agentId → Task/Agent tool_use id (key for the live streaming transcript)
-  const parentToolByAgent = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const m of [...messages, ...displayMessages]) {
-      if (m.parentToolUseId && !map.has(m.agentId)) map.set(m.agentId, m.parentToolUseId)
-    }
-    return map
-  }, [messages, displayMessages])
+  const parentToolByAgent = useMemo(
+    () => buildParentToolByAgent([...messages, ...displayMessages]),
+    [messages, displayMessages],
+  )
 
   // Pick the "return" message for each agent — the last message that carried
   // non-empty text (what the sub-agent handed back to its parent). Falls back

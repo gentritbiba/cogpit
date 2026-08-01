@@ -7,7 +7,6 @@ import { SlashSuggestions } from "@/components/SlashSuggestions"
 import { FileSuggestions } from "@/components/FileSuggestions"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import { PlanApprovalBar } from "./PlanApprovalBar"
-import { UserQuestionBar } from "./UserQuestionBar"
 import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
@@ -294,7 +293,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
       <div>
           {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
-        {isUserQuestion && <UserQuestionBar questions={pendingInteraction.questions} onSend={(answer) => { void submitUserQuestion(answer) }} />}
 
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">

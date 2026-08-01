@@ -36,31 +36,53 @@ export function matchesSearch(turn: Turn, query: string): boolean {
   return false
 }
 
-/** Human-readable label for a count of tool calls. */
-export function toolCallCountLabel(count: number): string {
-  return `${count} tool call${count !== 1 ? "s" : ""}`
-}
-
 // ── Activity grouping (thinking + tool_calls) ──────────────────────────────
 
 export type ActivityItem =
   | { kind: "thinking"; blocks: ThinkingBlock[] }
   | { kind: "tool_calls"; toolCalls: ToolCall[] }
 
+/** Upper bound on a single thinking block's attributed duration (10 minutes). */
+const MAX_THINKING_BLOCK_MS = 600_000
+
+/**
+ * Time attributed to a thinking block: the gap between it and the preceding
+ * block, matching how Claude Code derives "Thought for Xs".
+ */
+function thinkingGapMs(
+  blocks: TurnContentBlock[],
+  index: number,
+): number {
+  const current = blocks[index].timestamp
+  const previous = index > 0 ? blocks[index - 1].timestamp : undefined
+  if (!current || !previous) return 0
+  const delta = Date.parse(current) - Date.parse(previous)
+  if (!Number.isFinite(delta) || delta <= 0) return 0
+  return Math.min(delta, MAX_THINKING_BLOCK_MS)
+}
+
 /** Collect consecutive thinking + tool_calls blocks starting at `startIndex`. */
 export function collectActivity(
   blocks: TurnContentBlock[],
   startIndex: number,
-): { items: ActivityItem[]; toolCalls: ToolCall[]; thinkingCount: number; nextIndex: number } {
+): {
+  items: ActivityItem[]
+  toolCalls: ToolCall[]
+  thinkingCount: number
+  thoughtForMs: number
+  nextIndex: number
+} {
   const items: ActivityItem[] = []
   const allToolCalls: ToolCall[] = []
   let thinkingCount = 0
+  let thoughtForMs = 0
   let j = startIndex
   while (j < blocks.length) {
     const block = blocks[j]
     if (block.kind === "thinking") {
       items.push({ kind: "thinking", blocks: block.blocks })
       thinkingCount += block.blocks.length
+      thoughtForMs += thinkingGapMs(blocks, j)
       j++
     } else if (block.kind === "tool_calls") {
       items.push({ kind: "tool_calls", toolCalls: block.toolCalls })
@@ -70,13 +92,5 @@ export function collectActivity(
       break
     }
   }
-  return { items, toolCalls: allToolCalls, thinkingCount, nextIndex: j }
-}
-
-/** Human-readable label for a mixed activity group. */
-export function activityCountLabel(toolCallCount: number, thinkingCount: number): string {
-  if (thinkingCount === 0) return toolCallCountLabel(toolCallCount)
-  if (toolCallCount === 0) return `${thinkingCount} thinking`
-  const total = toolCallCount + thinkingCount
-  return `${total} action${total !== 1 ? "s" : ""}`
+  return { items, toolCalls: allToolCalls, thinkingCount, thoughtForMs, nextIndex: j }
 }

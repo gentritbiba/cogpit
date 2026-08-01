@@ -188,9 +188,13 @@ bun run electron:dev
 # Web
 bun run build && bun run preview
 
-# Desktop — builds the host platform's target by default
-# (DMG on macOS, AppImage + pacman on Linux, NSIS installer on Windows)
+# Desktop — arm64 macOS DMG, unsigned. ~1 min, for local iteration.
+# Release artifacts for every platform are built by .github/workflows/release.yml
 bun run electron:package
+
+# Same, but signs with a local Developer ID and builds every host target.
+# Only useful with a paid Apple Developer account.
+bun run electron:package:signed
 ```
 
 ## Tech Stack

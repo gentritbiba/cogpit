@@ -607,10 +607,33 @@ describe("CollapsibleToolCalls", () => {
 
     expect(screen.getByText("/tmp/in-progress.ts")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "2 tool calls" }))
+    fireEvent.click(screen.getByRole("button", { name: /edited 1 file, read 1 file/i }))
 
     expect(screen.queryByText("/tmp/in-progress.ts")).toBeNull()
-    expect(screen.getByRole("button", { name: /2 tool calls/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /edited 1 file, read 1 file/i })).toBeTruthy()
+  })
+
+  it("summarizes the collapsed group the way the Claude Code CLI does", () => {
+    const scratchpad =
+      "/private/tmp/claude-501/-Users-me-proj/0c4c77c4-afa4-4f74-9765-31452fb872fe/scratchpad/find.ts"
+    const toolCalls: ToolCall[] = [
+      { id: "a", name: "Write", input: { file_path: scratchpad, content: "x\ny\nz" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+      { id: "b", name: "Read", input: { file_path: "/tmp/read.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+      { id: "c", name: "Bash", input: { command: "bun run a.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+      { id: "d", name: "Bash", input: { command: "bun run b.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+    ]
+
+    render(
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} activeToolCallId={null} />,
+    )
+
+    const button = screen.getByRole("button")
+    expect(button.textContent).toContain("Made 1 scratchpad edit")
+    expect(button.textContent).toContain("+3")
+    expect(button.textContent).toContain("read 1 file")
+    expect(button.textContent).toContain("ran 2 shell commands")
+    // Tool badges remain alongside the summary.
+    expect(button.textContent).toContain("Bash ×2")
   })
 })
 

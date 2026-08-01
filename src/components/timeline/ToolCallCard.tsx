@@ -7,7 +7,6 @@ import {
   Loader2,
   ExternalLink,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import type { ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
@@ -28,46 +27,44 @@ import {
 /**
  * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
  *
- * Intentionally desaturated and background-filled to reduce noise in a dense,
- * streaming list. Primary action tools (Write/Edit/Bash) use higher saturation to
- * draw attention; secondary/read-only tools are very dim.
- *
- * Distinct from the BranchModal's TOOL_BADGE_STYLES (branchStyles.ts), which uses
- * high-contrast border+text only (no background) for a compact historical summary view.
+ * Bare tinted text — no pill, background, or border — so a dense streaming list
+ * stays quiet. Primary action tools (Write/Edit/Bash) render at full strength to
+ * draw attention; secondary/read-only tools are dimmed.
  */
-const TIMELINE_TOOL_BADGE_STYLES: Record<string, string> = {
-  // High saturation — primary action tools
-  Write: "bg-green-500/20 text-green-400 border-green-500/30",
-  Edit: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  Bash: "bg-red-500/20 text-red-400 border-red-500/30",
-  // Low saturation — secondary tools
-  Read: "bg-blue-500/5 text-blue-400/40 border-blue-500/10",
-  Grep: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
-  Glob: "bg-cyan-500/5 text-cyan-400/40 border-cyan-500/10",
-  Task: "bg-indigo-500/5 text-indigo-400/40 border-indigo-500/10",
-  WebFetch: "bg-orange-500/5 text-orange-400/40 border-orange-500/10",
-  WebSearch: "bg-orange-500/5 text-orange-400/40 border-orange-500/10",
-  EnterPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
-  ExitPlanMode: "bg-purple-500/5 text-purple-400/40 border-purple-500/10",
-  AskUserQuestion: "bg-pink-500/5 text-pink-400/40 border-pink-500/10",
+const TOOL_TEXT_STYLES: Record<string, string> = {
+  // Full strength — primary action tools
+  Write: "text-green-400",
+  Edit: "text-amber-400",
+  Bash: "text-red-400",
+  // Dimmed — secondary tools
+  Read: "text-blue-400/70",
+  Grep: "text-purple-400/70",
+  Glob: "text-cyan-400/70",
+  Task: "text-indigo-400/70",
+  WebFetch: "text-orange-400/70",
+  WebSearch: "text-orange-400/70",
+  EnterPlanMode: "text-purple-400/70",
+  ExitPlanMode: "text-purple-400/70",
+  AskUserQuestion: "text-pink-400/70",
   // Scheduling / automation tools
-  Monitor: "bg-cyan-500/5 text-cyan-400/40 border-cyan-500/10",
-  CronCreate: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
-  CronDelete: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
-  CronList: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
-  ScheduleWakeup: "bg-violet-500/5 text-violet-400/40 border-violet-500/10",
-  RemoteTrigger: "bg-blue-500/5 text-blue-400/40 border-blue-500/10",
-  PushNotification: "bg-pink-500/10 text-pink-400/60 border-pink-500/20",
-  EnterWorktree: "bg-emerald-500/5 text-emerald-400/40 border-emerald-500/10",
-  ExitWorktree: "bg-emerald-500/5 text-emerald-400/40 border-emerald-500/10",
-  Skill: "bg-indigo-500/10 text-indigo-400/60 border-indigo-500/20",
-  ToolSearch: "bg-slate-500/5 text-slate-400/40 border-slate-500/10",
+  Monitor: "text-cyan-400/70",
+  CronCreate: "text-violet-400/70",
+  CronDelete: "text-violet-400/70",
+  CronList: "text-violet-400/70",
+  ScheduleWakeup: "text-violet-400/70",
+  RemoteTrigger: "text-blue-400/70",
+  PushNotification: "text-pink-400/80",
+  EnterWorktree: "text-emerald-400/70",
+  ExitWorktree: "text-emerald-400/70",
+  Skill: "text-indigo-400/80",
+  ToolSearch: "text-slate-400/70",
 }
 
-const DEFAULT_BADGE_STYLE = "bg-muted/5 text-muted-foreground/40 border-muted-foreground/10"
+const DEFAULT_TOOL_TEXT_STYLE = "text-muted-foreground/60"
 
-export function getToolBadgeStyle(name: string): string {
-  return TIMELINE_TOOL_BADGE_STYLES[name] ?? DEFAULT_BADGE_STYLE
+/** Tool name color. Bare tinted text — no pill, no background, no border. */
+export function getToolTextStyle(name: string): string {
+  return TOOL_TEXT_STYLES[name] ?? DEFAULT_TOOL_TEXT_STYLE
 }
 
 export function getToolSummary(tc: ToolCall): string {
@@ -294,16 +291,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           aria-label={`Expand ${displayName} tool call`}
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className={cn(
-                "h-4 shrink-0 px-1 py-0 font-mono text-[10px]",
-                getToolBadgeStyle(toolCall.name),
-              )}
+            <span
+              className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(toolCall.name))}
               title={toolCall.name}
             >
               {displayName}
-            </Badge>
+            </span>
             {summary && (
               <span className="truncate font-mono text-[11px] text-muted-foreground">
                 {summary}
@@ -316,17 +309,16 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       ) : (
         <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")}>
         <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
-          <Badge
-            variant="outline"
+          <span
             className={cn(
-              "shrink-0 px-1.5 py-0 font-mono",
-              isMobile ? "h-4 text-[10px]" : "h-5 text-[11px]",
-              getToolBadgeStyle(toolCall.name)
+              "shrink-0 font-mono",
+              isMobile ? "text-[10px]" : "text-[11px]",
+              getToolTextStyle(toolCall.name)
             )}
             title={toolCall.name}
           >
             {displayName}
-          </Badge>
+          </span>
           {summary && (
             <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
               {summary}
