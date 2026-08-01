@@ -606,6 +606,7 @@ export default function App() {
     dispatch,
     onToggleSidebar: panels.handleToggleSidebar,
     onToggleRightSidebar: panels.handleToggleStats,
+    onToggleMissionControl: panels.handleToggleMission,
     onOpenCommandPalette: handleOpenCommandPalette,
     onOpenProjectSwitcher: panels.handleOpenProjectSwitcher,
     onOpenThemeSelector: panels.handleToggleThemeSelector,

@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/App", () => ({ default: () => <div data-testid="app" /> }))
+// These tests cover the offline banner, not the inventory; a pass-through
+// provider keeps them from fetching sessions.
+vi.mock("@/contexts/SessionInventoryContext", () => ({
+  SessionInventoryProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
 vi.mock("@/lib/device", () => ({
   LOCAL_DEVICE_ID: "local",
   getActiveDeviceId: mocks.getActiveDeviceId,

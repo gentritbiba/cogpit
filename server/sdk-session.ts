@@ -15,6 +15,10 @@ import { createRequire } from "node:module"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
 import { findExecutableOnPath, nativeBinaryName } from "./lib/binaryResolver"
 import * as streamBus from "./lib/streamBus"
+import type {
+  MissionControlQuestion,
+  MissionControlQuestionItem,
+} from "../shared/contracts/missionControl"
 
 const CLI_BIN_NAME = nativeBinaryName("claude")
 
@@ -148,6 +152,8 @@ interface PendingPermission extends PermissionRequestData {
 
 interface PendingUserQuestion {
   input: Record<string, unknown>
+  /** When the agent asked — lets a dashboard show how long it has been stuck. */
+  askedAt: number
   resolve: (result: PermissionResult) => void
 }
 
@@ -225,6 +231,7 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
       return new Promise<PermissionResult>((resolve) => {
         const pending: PendingUserQuestion = {
           input,
+          askedAt: Date.now(),
           resolve,
         }
         state.pendingUserQuestions.set(toolUseId, pending)
@@ -1055,6 +1062,82 @@ export function getSDKPermissions(sessionId: string): PermissionRequestData[] {
   const state = sdkSessions.get(sessionId)
   if (!state) return []
   return Array.from(state.pendingPermissions.values(), ({ resolve: _, ...rest }) => rest)
+}
+
+// ── Get pending AskUserQuestion calls ────────────────────────────────
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+/**
+ * Project a raw AskUserQuestion input down to what a dashboard can render.
+ *
+ * Option `preview` payloads (mockups, code snippets) are dropped and replaced
+ * with a boolean: they can run to kilobytes each and this list is polled, so
+ * shipping them would put real weight on every remote and tunnel client.
+ */
+function projectQuestions(input: Record<string, unknown>): MissionControlQuestionItem[] {
+  const raw = Array.isArray(input.questions) ? input.questions : []
+  const items: MissionControlQuestionItem[] = []
+  for (const entry of raw) {
+    const q = asRecord(entry)
+    const question = typeof q.question === "string" ? q.question : ""
+    if (!question) continue
+    const rawOptions = Array.isArray(q.options) ? q.options : []
+    items.push({
+      question,
+      ...(typeof q.header === "string" && q.header ? { header: q.header } : {}),
+      multiSelect: q.multiSelect === true,
+      options: rawOptions.flatMap((o) => {
+        const option = asRecord(o)
+        const label = typeof option.label === "string" ? option.label : ""
+        if (!label) return []
+        return [{
+          label,
+          ...(typeof option.description === "string" && option.description
+            ? { description: option.description }
+            : {}),
+          hasPreview: typeof option.preview === "string" && option.preview.length > 0,
+        }]
+      }),
+    })
+  }
+  return items
+}
+
+/**
+ * Pending questions for a session.
+ *
+ * The Map key is the toolUseId, and it is the only thing that can answer the
+ * call — deriving it from a transcript instead would go stale silently.
+ */
+export function getSDKUserQuestions(sessionId: string): MissionControlQuestion[] {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return []
+  return Array.from(state.pendingUserQuestions, ([toolUseId, pending]) => ({
+    sessionId,
+    toolUseId,
+    askedAt: pending.askedAt,
+    questions: projectQuestions(pending.input),
+  }))
+}
+
+/**
+ * Sessions currently blocked on a question.
+ *
+ * Only SDK sessions: Codex has no equivalent (its app-server rejects any
+ * method outside its approval pair), and legacy CLI sessions have no question
+ * map, so there is nothing to union in.
+ */
+export function listUserQuestionSessionIds(): string[] {
+  const ids: string[] = []
+  for (const [sessionId, state] of sdkSessions) {
+    if (state.pendingUserQuestions.size > 0) ids.push(sessionId)
+  }
+  return ids
 }
 
 // ── Stop / cleanup ───────────────────────────────────────────────────

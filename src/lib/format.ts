@@ -1,4 +1,5 @@
 import type { RawMessage, Turn } from "./types"
+import { computeContextUsage, type ContextUsage } from "../../shared/session/contextWindow"
 
 export { calculateTurnCost, formatCost } from "./token-costs"
 export { computeAgentBreakdown, computeModelBreakdown, computeCacheBreakdown } from "./costAnalytics"
@@ -26,6 +27,8 @@ export function formatDuration(ms: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
+  // Long-running sessions are routine, and "885m 12s" is unreadable.
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
   return `${minutes}m ${seconds}s`
 }
 
@@ -132,29 +135,8 @@ export function parseSubAgentPath(fileName: string): {
 
 // ── Context Window ────────────────────────────────────────────────────────
 
-// Auto-compact reserves ~33k tokens as buffer before the hard limit.
-// Compaction fires at roughly (limit - buffer), not at the absolute limit.
-const AUTO_COMPACT_BUFFER = 33_000
-
-const DEFAULT_CONTEXT_LIMIT = 1_000_000
-const EXTENDED_CONTEXT_LIMIT = 1_000_000
-
-export function getContextLimit(model: string): number {
-  if (model.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
-  return DEFAULT_CONTEXT_LIMIT
-}
-
-export interface ContextUsage {
-  used: number
-  /** Hard context window limit (e.g. 200k) */
-  limit: number
-  /** Approximate threshold where auto-compact fires */
-  compactAt: number
-  /** Percentage of usable space consumed (0–100, relative to compactAt) */
-  percent: number
-  /** Percentage of absolute context window consumed */
-  percentAbsolute: number
-}
+export { getContextLimit, AUTO_COMPACT_BUFFER, computeContextUsage } from "../../shared/session/contextWindow"
+export type { ContextUsage } from "../../shared/session/contextWindow"
 
 /**
  * Get the current context usage from the last API response in the session.
@@ -171,20 +153,7 @@ export function getContextUsage(
   for (let i = rawMessages.length - 1; i >= 0; i--) {
     const msg = rawMessages[i]
     if (msg.type === "assistant") {
-      const u = msg.message.usage
-      const input = typeof u.input_tokens === "number" ? u.input_tokens : 0
-      const cacheCreate = typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : 0
-      const cacheRead = typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : 0
-      const used = input + cacheCreate + cacheRead
-      const limit = getContextLimit(msg.message.model ?? "")
-      const compactAt = limit - AUTO_COMPACT_BUFFER
-      return {
-        used,
-        limit,
-        compactAt,
-        percent: Math.min(100, (used / compactAt) * 100),
-        percentAbsolute: Math.min(100, (used / limit) * 100),
-      }
+      return computeContextUsage(msg.message.usage, msg.message.model ?? "")
     }
   }
   return null

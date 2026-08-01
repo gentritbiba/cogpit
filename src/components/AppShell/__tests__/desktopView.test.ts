@@ -15,6 +15,26 @@ describe("resolveDesktopMainView", () => {
     })).toBe("config")
   })
 
+  it("shows Mission Control over an open session", () => {
+    // The view exists to find what is blocked while you are already deep in
+    // another session, so an open session must not hide it.
+    expect(resolveDesktopMainView({
+      mainView: "mission",
+      selectedTeam: "core",
+      hasSession: true,
+      pendingDirName: "pending",
+    })).toBe("mission")
+  })
+
+  it("keeps config ahead of Mission Control", () => {
+    expect(resolveDesktopMainView({
+      mainView: "config",
+      selectedTeam: null,
+      hasSession: false,
+      pendingDirName: null,
+    })).toBe("config")
+  })
+
   it("shows a selected team before session content", () => {
     expect(resolveDesktopMainView({
       mainView: "teams",

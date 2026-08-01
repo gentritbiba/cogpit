@@ -8,7 +8,20 @@ import {
   sessionListCacheKeys,
   writeCachedList,
 } from "@/lib/sessionListCache"
+import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { LiveSessions } from "../index"
+
+/**
+ * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
+ * so Mission Control can share it. These tests still exercise the same
+ * guarantees end to end, now through the provider seam.
+ *
+ * The permission poll is stubbed out: these assertions count inventory requests,
+ * and a second poller sharing the authFetch mock would make them meaningless.
+ */
+function renderLive(ui: ReactNode) {
+  return render(<>{ui}</>, { wrapper: SessionInventoryProvider })
+}
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -20,6 +33,18 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/contexts/PendingHumanInputContext", () => ({
+  usePendingHumanInput: () => ({
+    permissionsBySession: new Map(),
+    questionsBySession: new Map(),
+    awaitingPermission: new Set(),
+    awaitingQuestion: new Set(),
+    responding: new Set(),
+    respond: vi.fn(),
+    answerQuestion: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}))
 vi.mock("@/contexts/PtyContext", () => ({ usePty: () => ({ send: mocks.ptySend }) }))
 vi.mock("@/hooks/useIsMobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/useLocalStorage", () => ({
@@ -127,7 +152,7 @@ describe("LiveSessions committed-state synchronization", () => {
   it("keeps consecutive delete events and the cached inventory in lockstep", () => {
     writeCachedList(sessionListCacheKeys.activeSessions, [session("one"), session("two")])
 
-    render(
+    renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -152,7 +177,7 @@ describe("LiveSessions committed-state synchronization", () => {
     const firstRefreshRef: MutableRefObject<(() => void) | null> = { current: null }
     const secondRefreshRef: MutableRefObject<(() => void) | null> = { current: null }
 
-    const view = render(
+    const view = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -199,7 +224,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
       .mockResolvedValueOnce(jsonResponse([session("device-b")]))
       .mockResolvedValueOnce(jsonResponse([]))
 
-    const deviceAView = render(
+    const deviceAView = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -216,7 +241,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
     expect(deviceASignals).toHaveLength(2)
     expect(deviceASignals.every((signal) => signal?.aborted)).toBe(true)
 
-    const deviceBView = render(
+    const deviceBView = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}
@@ -259,7 +284,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
       return new Promise<Response>(() => {})
     })
 
-    const view = render(
+    const view = renderLive(
       <LiveSessions
         activeSessionKey={null}
         onSelectSession={vi.fn()}

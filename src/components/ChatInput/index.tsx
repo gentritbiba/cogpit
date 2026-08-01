@@ -15,7 +15,7 @@ import { ErrorBanner } from "./ErrorBanner"
 import type { AgentKind } from "@/lib/sessionSource"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
-import { authFetch } from "@/lib/auth"
+import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 
 export interface ChatInputHandle {
   focus: () => void
@@ -160,20 +160,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     const question = interaction.questions[0]
     if (!question || !answer.trim()) return
 
-    const res = await authFetch("/api/ask-user-answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: session.sessionId,
-        toolUseId: interaction.toolUseId,
-        answers: { [question.question]: answer },
-      }),
-    }).catch(() => null)
+    const result = await submitUserQuestionAnswers(
+      session.sessionId,
+      interaction.toolUseId,
+      { [question.question]: answer },
+    )
 
     // The question may no longer be answerable server-side (tool already
     // errored, session restarted, …). Never swallow the user's text — deliver
     // it as a regular message instead so the input can't appear frozen.
-    if (!res || !res.ok) onSend(answer)
+    if (!result.ok) onSend(answer)
   }, [pendingInteraction, session?.sessionId, onSend])
 
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {

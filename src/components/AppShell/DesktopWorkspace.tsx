@@ -20,6 +20,7 @@ import { dirNameToPath, shortPath } from "@/lib/format"
 import { SessionInputFooter } from "./SessionInputFooter"
 import {
   PrimarySessionBrowser,
+  MissionControlView,
   ProjectDashboard,
   SelectedTeamDashboard,
 } from "./SharedAppViews"
@@ -138,6 +139,10 @@ function DesktopMainView({
         />
       </Suspense>
     )
+  }
+
+  if (view === "mission") {
+    return <MissionControlView navigation={navigation} />
   }
 
   if (view === "teams" && state.selectedTeam) {

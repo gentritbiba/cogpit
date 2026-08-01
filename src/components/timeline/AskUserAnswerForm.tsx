@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Check } from "lucide-react"
 import type { ToolCall } from "@/lib/types"
-import { authFetch } from "@/lib/auth"
+import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 import { useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
 
@@ -56,12 +56,8 @@ export function AskUserAnswerForm({
     event.preventDefault()
     setSubmitting(true)
     try {
-      const response = await authFetch("/api/ask-user-answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, toolUseId: toolCall.id, answers }),
-      })
-      if (response.ok) {
+      const result = await submitUserQuestionAnswers(sessionId, toolCall.id, answers)
+      if (result.ok) {
         setSubmitted(true)
       } else {
         deliverAsMessage()

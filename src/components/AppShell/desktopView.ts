@@ -1,9 +1,15 @@
 import type { ProjectPromptContext } from "@/components/ProjectFilesPanel"
 
-export type DesktopMainView = "config" | "teams" | "session" | "pending" | "dashboard"
+export type DesktopMainView =
+  | "config"
+  | "mission"
+  | "teams"
+  | "session"
+  | "pending"
+  | "dashboard"
 
 interface ResolveDesktopMainViewOptions {
-  mainView: "sessions" | "config" | "teams"
+  mainView: "sessions" | "config" | "teams" | "mission"
   selectedTeam: string | null
   hasSession: boolean
   pendingDirName: string | null
@@ -17,6 +23,9 @@ export function resolveDesktopMainView({
   pendingDirName,
 }: ResolveDesktopMainViewOptions): DesktopMainView {
   if (mainView === "config") return "config"
+  // Mission Control outranks an open session on purpose: it is where the user
+  // goes to find what is blocked while already deep in another session.
+  if (mainView === "mission") return "mission"
   if (mainView === "teams" && selectedTeam) return "teams"
   if (hasSession) return "session"
   if (pendingDirName) return "pending"

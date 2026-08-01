@@ -31,6 +31,7 @@ import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
+import { MissionControlButton } from "@/components/MissionControl/MissionControlButton"
 import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
@@ -51,6 +52,8 @@ interface DesktopHeaderProps {
   commandPaletteShortcut: string
   showConfig?: boolean
   onToggleConfig?: () => void
+  showMission?: boolean
+  onToggleMission?: () => void
 }
 
 export const DesktopHeader = memo(function DesktopHeader({
@@ -71,6 +74,8 @@ export const DesktopHeader = memo(function DesktopHeader({
   commandPaletteShortcut,
   showConfig,
   onToggleConfig,
+  showMission,
+  onToggleMission,
 }: DesktopHeaderProps) {
   const { config: { networkUrl, networkAccessDisabled, defaultAgentKind } } = useAppContext()
   const { session, sessionSource, isLive } = useSessionContext()
@@ -179,6 +184,9 @@ export const DesktopHeader = memo(function DesktopHeader({
           onClick={onOpenCommandPalette}
           className="text-muted-foreground hover:text-foreground"
         />
+        {onToggleMission && (
+          <MissionControlButton active={showMission ?? false} onToggle={onToggleMission} />
+        )}
         {onToggleConfig && (
           <HeaderIconButton
             icon={SlidersHorizontal}

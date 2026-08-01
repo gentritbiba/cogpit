@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { EditDiffView } from "../timeline/EditDiffView"
 import { cn } from "@/lib/utils"
+import { ChangeBar } from "@/components/shared/ChangeCounts"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
@@ -27,24 +28,6 @@ const EXT_COLORS: Record<string, string> = {
   html: "text-orange-400",
 }
 
-const CHANGE_BAR_BLOCKS = 5
-
-function ChangeBar({ add, del }: { add: number; del: number }) {
-  const total = add + del
-  if (total === 0) return null
-  const addBlocks = Math.round((add / total) * CHANGE_BAR_BLOCKS)
-  const delBlocks = CHANGE_BAR_BLOCKS - addBlocks
-  return (
-    <span className="flex items-center gap-[1px] shrink-0">
-      {Array.from({ length: addBlocks }, (_, i) => (
-        <span key={`a${i}`} className="inline-block w-[5px] h-[5px] rounded-[1px] bg-green-500/70" />
-      ))}
-      {Array.from({ length: delBlocks }, (_, i) => (
-        <span key={`d${i}`} className="inline-block w-[5px] h-[5px] rounded-[1px] bg-red-400/70" />
-      ))}
-    </span>
-  )
-}
 
 interface GroupedFileCardProps {
   file: GroupedFile

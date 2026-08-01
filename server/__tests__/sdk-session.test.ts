@@ -332,6 +332,46 @@ describe("sdk-session AskUserQuestion handling", () => {
     expect(sdkSessions.get("question-1")?.pendingUserQuestions.size).toBe(0)
   })
 
+  it("exposes blocked questions for a dashboard, stripping option previews", async () => {
+    const { createSDKSession, getSDKUserQuestions, listUserQuestionSessionIds } = await loadModule()
+    createSDKSession({ sessionId: "question-list", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    void captured[0].options.canUseTool!("AskUserQuestion", {
+      questions: [{
+        question: "Pick a layout",
+        header: "Layout",
+        multiSelect: true,
+        options: [
+          { label: "Grid", description: "Cards in a grid", preview: "x".repeat(5000) },
+          { label: "List", description: "One per row" },
+          { label: "" },
+        ],
+      }],
+    }, { toolUseID: "tool-list-1" })
+
+    expect(listUserQuestionSessionIds()).toContain("question-list")
+    const [pending] = getSDKUserQuestions("question-list")
+    expect(pending.toolUseId).toBe("tool-list-1")
+    expect(pending.askedAt).toBeGreaterThan(0)
+    expect(pending.questions).toEqual([{
+      question: "Pick a layout",
+      header: "Layout",
+      multiSelect: true,
+      options: [
+        // The preview itself is dropped: it can run to kilobytes and this list
+        // is polled app-wide. Only its existence survives.
+        { label: "Grid", description: "Cards in a grid", hasPreview: true },
+        { label: "List", description: "One per row", hasPreview: false },
+      ],
+    }])
+  })
+
+  it("reports no blocked questions for an unknown session", async () => {
+    const { getSDKUserQuestions } = await loadModule()
+    expect(getSDKUserQuestions("nope")).toEqual([])
+  })
+
   it("registers canUseTool in bypassPermissions mode and still blocks AskUserQuestion", async () => {
     // Regression: canUseTool used to be omitted in bypass mode, so the CLI
     // errored AskUserQuestion instantly ("Answer questions?") and the

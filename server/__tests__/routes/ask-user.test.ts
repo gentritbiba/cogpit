@@ -4,10 +4,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Mock sdk-session
 const mockResolveUserQuestion = vi.fn()
 const mockSdkSessions = new Map<string, unknown>()
+const mockGetSDKUserQuestions = vi.fn((..._args: unknown[]): unknown[] => [])
+const mockListUserQuestionSessionIds = vi.fn((): string[] => [])
 
 vi.mock("../../sdk-session", () => ({
   get sdkSessions() { return mockSdkSessions },
   resolveUserQuestion: (...args: unknown[]) => mockResolveUserQuestion(...args),
+  getSDKUserQuestions: (...args: unknown[]) => mockGetSDKUserQuestions(...args),
+  listUserQuestionSessionIds: () => mockListUserQuestionSessionIds(),
 }))
 
 import { registerAskUserRoutes } from "../../routes/ask-user"
@@ -15,11 +19,12 @@ import type { UseFn, Middleware } from "../../helpers"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function buildHandler(): Middleware {
-  let captured: Middleware | undefined
-  const use: UseFn = (_path, h) => { captured = h }
+function buildHandler(path = "/api/ask-user-answer"): Middleware {
+  const handlers = new Map<string, Middleware>()
+  const use: UseFn = (mounted, h) => { handlers.set(mounted, h) }
   registerAskUserRoutes(use)
-  if (!captured) throw new Error("registerAskUserRoutes did not call use()")
+  const captured = handlers.get(path)
+  if (!captured) throw new Error(`registerAskUserRoutes did not mount ${path}`)
   return captured
 }
 
@@ -177,5 +182,63 @@ describe("POST /api/ask-user-answer", () => {
 
     expect(next).toHaveBeenCalled()
     expect(mockResolveUserQuestion).not.toHaveBeenCalled()
+  })
+})
+
+describe("GET /api/user-questions", () => {
+  beforeEach(() => {
+    mockGetSDKUserQuestions.mockReset().mockReturnValue([])
+    mockListUserQuestionSessionIds.mockReset().mockReturnValue([])
+  })
+
+  function invokeGet(): { status: number; body: unknown } {
+    const handler = buildHandler("/api/user-questions")
+    let status = 0
+    let payload = ""
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn((value?: string) => { payload = value ?? "" }),
+    }
+    Object.defineProperty(res, "statusCode", {
+      get: () => status,
+      set: (v: number) => { status = v },
+    })
+    const next = vi.fn()
+    handler(
+      { method: "GET", url: "" } as unknown as Parameters<Middleware>[0],
+      res as unknown as Parameters<Middleware>[1],
+      next,
+    )
+    return { status, body: payload ? JSON.parse(payload) : null }
+  }
+
+  it("groups blocked questions by session", () => {
+    // Mission Control renders cards for sessions that are not open, so it needs
+    // one call covering all of them.
+    mockListUserQuestionSessionIds.mockReturnValue(["s1"])
+    mockGetSDKUserQuestions.mockImplementation((sessionId: unknown) =>
+      sessionId === "s1"
+        ? [{ sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }]
+        : [],
+    )
+
+    const { status, body } = invokeGet()
+
+    expect(status).toBe(200)
+    expect(body).toEqual({
+      bySession: { s1: [{ sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }] },
+    })
+  })
+
+  it("omits sessions with nothing pending", () => {
+    mockListUserQuestionSessionIds.mockReturnValue(["quiet"])
+    mockGetSDKUserQuestions.mockReturnValue([])
+
+    expect(invokeGet().body).toEqual({ bySession: {} })
+  })
+
+  it("returns an empty map when no session is blocked", () => {
+    expect(invokeGet().body).toEqual({ bySession: {} })
   })
 })

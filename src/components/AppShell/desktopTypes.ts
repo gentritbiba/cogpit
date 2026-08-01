@@ -29,6 +29,7 @@ export type DesktopPanels = Pick<
   | "handleToggleWorktrees"
   | "handleToggleFileChanges"
   | "handleToggleConfig"
+  | "handleToggleMission"
   | "handleOpenProjectSwitcher"
   | "handleCloseProjectSwitcher"
   | "handleToggleThemeSelector"
