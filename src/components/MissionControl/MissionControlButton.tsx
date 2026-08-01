@@ -1,11 +1,9 @@
 /**
  * Header entry point for Mission Control, carrying the "needs you" count.
  *
- * The count comes from the shared session inventory the sidebar already polls,
- * so showing it costs no extra requests. Live permission requests are not
- * included here — surfacing those would mean polling every session on a timer
- * just to render a badge; Mission Control's own toolbar reports them exactly
- * once the view is open.
+ * The count comes from the shared session inventory and the shared pending
+ * permission poll, so the badge, the sidebar strip and the grid can never
+ * disagree about how many sessions are blocked.
  */
 
 import { useMemo } from "react"
@@ -14,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
+import { usePendingPermissions } from "@/contexts/PendingPermissionsContext"
 import { classifyAttention } from "@/components/LiveSessions/attentionGroups"
 
 interface MissionControlButtonProps {
@@ -23,10 +22,11 @@ interface MissionControlButtonProps {
 
 export function MissionControlButton({ active, onToggle }: MissionControlButtonProps) {
   const { sessions, procBySession, newlyCompleted } = useSessionInventory()
+  const { awaiting } = usePendingPermissions()
 
   const needsYou = useMemo(
-    () => classifyAttention(sessions, procBySession, newlyCompleted).needsYou.length,
-    [sessions, procBySession, newlyCompleted],
+    () => classifyAttention(sessions, procBySession, newlyCompleted, awaiting).needsYou.length,
+    [sessions, procBySession, newlyCompleted, awaiting],
   )
 
   const label = active

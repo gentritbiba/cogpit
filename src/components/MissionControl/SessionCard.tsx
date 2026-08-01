@@ -9,7 +9,7 @@ import { memo } from "react"
 import { CheckCircle2, ChevronRight, MessageCircleQuestion, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { formatRelativeTime } from "@/lib/format"
+import { formatRelativeTime, formatTokenCount } from "@/lib/format"
 import { getToolBadgeStyle } from "@/components/timeline/ToolCallCard"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
@@ -18,7 +18,6 @@ import type { PermissionDecision } from "@/lib/permissionApi"
 import { PermissionPrompt } from "./PermissionPrompt"
 import {
   contextBarColor,
-  formatCompactTokens,
   formatElapsed,
   formatTokens,
   type MissionCard,
@@ -248,7 +247,7 @@ export const SessionCard = memo(function SessionCard({
         <div className="flex flex-col gap-1">
           <div className="flex justify-between font-mono text-[9.5px] text-muted-foreground/70">
             <span>
-              context {formatCompactTokens(context.used)} / {formatCompactTokens(context.limit)}
+              context {formatTokenCount(context.used)} / {formatTokenCount(context.limit)}
             </span>
             <span>{context.percent}%</span>
           </div>

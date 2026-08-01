@@ -5,6 +5,7 @@ import { getActiveDeviceId, switchDevice, LOCAL_DEVICE_ID } from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
 import { useDevices } from "@/hooks/useDevices"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
+import { PendingPermissionsProvider } from "@/contexts/PendingPermissionsContext"
 
 /**
  * Owns the active device identity and remounts the whole {@link App} subtree
@@ -150,7 +151,9 @@ export function DeviceRoot() {
         </div>
       )}
       <SessionInventoryProvider key={`${activeDeviceId}:${retryNonce}`}>
-        <App />
+        <PendingPermissionsProvider>
+          <App />
+        </PendingPermissionsProvider>
       </SessionInventoryProvider>
     </>
   )

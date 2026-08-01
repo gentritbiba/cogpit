@@ -34,7 +34,6 @@ export interface MissionCard {
   summary: MissionControlSummary | null
   /** Pending requests for this session; non-empty only for awaiting_approval. */
   permissions: MissionControlPermission[]
-  proc?: RunningProcess
 }
 
 /** True when the card is blocked on the user. */
@@ -126,7 +125,6 @@ export function buildMissionCards({
       state: resolveState(session, active, permissions.length > 0),
       summary: summaries.get(session.sessionId) ?? null,
       permissions,
-      proc: procBySession.get(session.sessionId),
     })
   }
 
@@ -195,14 +193,6 @@ export function formatElapsed(ms: number): string {
 export function formatTokens(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0"
   return value.toLocaleString("en-US")
-}
-
-/** "62.1k" — compact token counts for the context line. */
-export function formatCompactTokens(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return "0"
-  if (value < 1000) return String(Math.round(value))
-  if (value < 1_000_000) return `${(value / 1000).toFixed(1)}k`
-  return `${(value / 1_000_000).toFixed(1)}M`
 }
 
 /**

@@ -15,6 +15,9 @@ import { LiveSessions } from "../index"
  * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
  * so Mission Control can share it. These tests still exercise the same
  * guarantees end to end, now through the provider seam.
+ *
+ * The permission poll is stubbed out: these assertions count inventory requests,
+ * and a second poller sharing the authFetch mock would make them meaningless.
  */
 function renderLive(ui: ReactNode) {
   return render(<>{ui}</>, { wrapper: SessionInventoryProvider })
@@ -30,6 +33,15 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/contexts/PendingPermissionsContext", () => ({
+  usePendingPermissions: () => ({
+    bySession: new Map(),
+    awaiting: new Set(),
+    responding: new Set(),
+    respond: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}))
 vi.mock("@/contexts/PtyContext", () => ({ usePty: () => ({ send: mocks.ptySend }) }))
 vi.mock("@/hooks/useIsMobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/useLocalStorage", () => ({

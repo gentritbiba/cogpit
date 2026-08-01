@@ -1,9 +1,9 @@
 /**
  * GET /api/mission-control — card payloads for the Mission Control grid.
  *
- * Returns a rich summary for the most recently active sessions plus every
- * pending permission request across all sessions, so the grid can render a
- * blocked session's Allow/Deny inline without opening it.
+ * Returns a rich summary for the most recently active sessions. Pending
+ * permission requests come from GET /api/permissions instead, because the
+ * sidebar and header need them whether or not this view is open.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http"
@@ -12,10 +12,7 @@ import { dirs, join, readdir, stat } from "../helpers"
 import { getCodexSessionInventory } from "../lib/codexSessionInventory"
 import { readClaudeProjectEntries } from "./projects/claudeProjectEntries"
 import { summarizeSession } from "../lib/missionControlSummary"
-import { collectPendingPermissions, listPermissionSessionIds } from "./permissions"
-import { getToolSummary } from "../../shared/session/toolSummary"
 import type {
-  MissionControlPermission,
   MissionControlResponse,
   MissionControlSummary,
 } from "../../shared/contracts/missionControl"
@@ -75,33 +72,6 @@ async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
   return candidates.slice(0, limit)
 }
 
-/** Flatten pending requests across sessions into card-ready rows. */
-function collectPermissions(): MissionControlPermission[] {
-  const rows: MissionControlPermission[] = []
-  for (const sessionId of listPermissionSessionIds()) {
-    for (const request of collectPendingPermissions(sessionId)) {
-      const input =
-        request.input && typeof request.input === "object"
-          ? (request.input as Record<string, unknown>)
-          : {}
-      // Only Codex advertises the decisions it accepts; other providers take all.
-      const available = (request as { availableDecisions?: MissionControlPermission["availableDecisions"] })
-        .availableDecisions
-      rows.push({
-        sessionId,
-        requestId: request.requestId,
-        toolName: request.toolName,
-        summary: getToolSummary({ name: request.toolName, input }),
-        title: request.title,
-        description: request.description,
-        ...(available && { availableDecisions: available }),
-        timestamp: request.timestamp,
-      })
-    }
-  }
-  return rows
-}
-
 export async function handleMissionControl(
   req: IncomingMessage,
   res: ServerResponse,
@@ -124,7 +94,6 @@ export async function handleMissionControl(
 
     const body: MissionControlResponse = {
       summaries,
-      permissions: collectPermissions(),
       generatedAt: new Date().toISOString(),
     }
     sendJson(res, 200, body)

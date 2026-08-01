@@ -13,6 +13,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
+import { usePendingPermissions } from "@/contexts/PendingPermissionsContext"
 import { useMissionControl } from "@/hooks/useMissionControl"
 import { sessionGroupKey } from "@/components/LiveSessions/sessionListView"
 import { SessionCard } from "./SessionCard"
@@ -40,15 +41,13 @@ interface MissionControlProps {
 export function MissionControl({ onSelectSession }: MissionControlProps) {
   const { sessions, procBySession, newlyCompleted, refresh: refreshInventory } =
     useSessionInventory()
+  const { summaries, loading, error, refresh: refreshMission } = useMissionControl()
   const {
-    summaries,
-    permissionsBySession,
-    loading,
-    error,
+    bySession: permissionsBySession,
     responding,
     respond,
-    refresh: refreshMission,
-  } = useMissionControl(true)
+    refresh: refreshPermissions,
+  } = usePendingPermissions()
   const { names: sessionNames } = useSessionNames()
   const { names: projectNames } = useProjectNames()
   const [filter, setFilter] = useState<MissionFilter>("all")
@@ -74,7 +73,8 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const refresh = useCallback(() => {
     refreshInventory()
     refreshMission()
-  }, [refreshInventory, refreshMission])
+    refreshPermissions()
+  }, [refreshInventory, refreshMission, refreshPermissions])
 
   // The inventory's own poll is deliberately gentle (20s) because it scans every
   // project and shells out to `ps`. That is too slow here: a session that just

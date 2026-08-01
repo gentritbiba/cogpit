@@ -8,7 +8,6 @@ import {
   buildMissionCards,
   countMissionCards,
   filterMissionCards,
-  formatCompactTokens,
   formatElapsed,
   formatTokens,
   contextBarColor,
@@ -257,11 +256,6 @@ describe("formatters", () => {
     expect(formatTokens(0)).toBe("0")
   })
 
-  it("formats compact token counts", () => {
-    expect(formatCompactTokens(950)).toBe("950")
-    expect(formatCompactTokens(62_100)).toBe("62.1k")
-    expect(formatCompactTokens(1_400_000)).toBe("1.4M")
-  })
 
   it("escalates context bar colour with pressure", () => {
     expect(contextBarColor(31)).toBe("bg-green-500")

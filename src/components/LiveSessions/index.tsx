@@ -10,6 +10,7 @@ import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import type { ActiveSessionInfo } from "./types"
 import { usePty } from "@/contexts/PtyContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
+import { usePendingPermissions } from "@/contexts/PendingPermissionsContext"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -55,6 +56,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession,
     acknowledgeCompleted,
   } = useSessionInventory()
+  const { awaiting: awaitingPermission } = usePendingPermissions()
   const [killingPids, setKillingPids] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
   // Per-project collapse choices, persisted so the user's arrangement survives
@@ -142,8 +144,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   // Cross-project triage for the attention strip (independent of search)
   const attention = useMemo(
-    () => classifyAttention(sessions, procBySession, newlyCompleted),
-    [sessions, procBySession, newlyCompleted]
+    () => classifyAttention(sessions, procBySession, newlyCompleted, awaitingPermission),
+    [sessions, procBySession, newlyCompleted, awaitingPermission]
   )
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
   const showAttentionStrip = !searchQuery.trim() && hasAttention

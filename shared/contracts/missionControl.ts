@@ -76,7 +76,12 @@ export interface MissionControlSummary {
   lastToolErrored: boolean
 }
 
-/** A pending permission request, paired with the session that raised it. */
+/**
+ * A pending permission request, paired with the session that raised it.
+ *
+ * Served by GET /api/permissions rather than this endpoint: the sidebar and
+ * header need pending requests whether or not Mission Control is open.
+ */
 export interface MissionControlPermission {
   sessionId: string
   requestId: string
@@ -93,6 +98,5 @@ export interface MissionControlPermission {
 /** Response body of GET /api/mission-control. */
 export interface MissionControlResponse {
   summaries: MissionControlSummary[]
-  permissions: MissionControlPermission[]
   generatedAt: string
 }

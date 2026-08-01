@@ -1,49 +1,35 @@
 /**
- * Card summaries and cross-session permission requests for Mission Control.
+ * Per-session card summaries for Mission Control.
  *
- * One poll covers every card. The alternative — mounting the per-session
- * permission hook once per card — would issue N polls every two seconds.
+ * One poll covers every card. Pending permissions come from
+ * PendingPermissionsContext instead, because the sidebar and header need them
+ * whether or not this view is open.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
-import { respondToPermission, type PermissionDecision } from "@/lib/permissionApi"
 import type {
-  MissionControlPermission,
   MissionControlResponse,
   MissionControlSummary,
 } from "../../shared/contracts/missionControl"
 
 /**
- * A blocked agent is stopped dead, so this polls faster than the 20 s session
- * inventory. It stays idle while the tab is hidden and while the view is
- * closed, so a background window costs nothing.
+ * Summaries re-read session files, so this is gentler than the permission poll
+ * and idles entirely while the tab is hidden.
  */
-const POLL_INTERVAL = 3_000
+const POLL_INTERVAL = 4_000
 
 export interface MissionControlData {
   summaries: Map<string, MissionControlSummary>
-  permissionsBySession: Map<string, MissionControlPermission[]>
-  /** Session ids with at least one live request — feeds classifyAttention. */
-  awaitingPermission: Set<string>
   loading: boolean
   error: string | null
-  /** Request ids currently being answered. */
-  responding: Set<string>
-  respond: (
-    sessionId: string,
-    requestId: string,
-    behavior: PermissionDecision,
-  ) => Promise<void>
   refresh: () => void
 }
 
-export function useMissionControl(enabled: boolean): MissionControlData {
+export function useMissionControl(): MissionControlData {
   const [summaries, setSummaries] = useState<MissionControlSummary[]>([])
-  const [permissions, setPermissions] = useState<MissionControlPermission[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [responding, setResponding] = useState<Set<string>>(new Set())
   const cancelledRef = useRef(false)
 
   useEffect(() => {
@@ -59,7 +45,6 @@ export function useMissionControl(enabled: boolean): MissionControlData {
       const data = await res.json() as MissionControlResponse
       if (cancelledRef.current) return
       setSummaries(Array.isArray(data.summaries) ? data.summaries : [])
-      setPermissions(Array.isArray(data.permissions) ? data.permissions : [])
       setError(null)
     } catch (err) {
       if (cancelledRef.current) return
@@ -70,7 +55,6 @@ export function useMissionControl(enabled: boolean): MissionControlData {
   }, [])
 
   useEffect(() => {
-    if (!enabled) return
     setLoading(true)
 
     const pollWhenVisible = () => {
@@ -89,30 +73,6 @@ export function useMissionControl(enabled: boolean): MissionControlData {
       clearInterval(id)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [enabled, fetchNow])
-
-  const respond = useCallback(async (
-    sessionId: string,
-    requestId: string,
-    behavior: PermissionDecision,
-  ) => {
-    setResponding((prev) => new Set(prev).add(requestId))
-    try {
-      if (await respondToPermission(sessionId, requestId, behavior)) {
-        // Drop it locally so the card releases immediately rather than waiting
-        // out the poll interval.
-        setPermissions((prev) => prev.filter((p) => p.requestId !== requestId))
-      }
-    } catch {
-      // The next poll re-surfaces the request if the answer did not land.
-    } finally {
-      setResponding((prev) => {
-        const next = new Set(prev)
-        next.delete(requestId)
-        return next
-      })
-      void fetchNow()
-    }
   }, [fetchNow])
 
   const summariesById = useMemo(() => {
@@ -121,31 +81,7 @@ export function useMissionControl(enabled: boolean): MissionControlData {
     return map
   }, [summaries])
 
-  const permissionsBySession = useMemo(() => {
-    const map = new Map<string, MissionControlPermission[]>()
-    for (const p of permissions) {
-      const list = map.get(p.sessionId)
-      if (list) list.push(p)
-      else map.set(p.sessionId, [p])
-    }
-    return map
-  }, [permissions])
-
-  const awaitingPermission = useMemo(
-    () => new Set(permissionsBySession.keys()),
-    [permissionsBySession],
-  )
-
   const refresh = useCallback(() => { void fetchNow() }, [fetchNow])
 
-  return {
-    summaries: summariesById,
-    permissionsBySession,
-    awaitingPermission,
-    loading,
-    error,
-    responding,
-    respond,
-    refresh,
-  }
+  return { summaries: summariesById, loading, error, refresh }
 }
