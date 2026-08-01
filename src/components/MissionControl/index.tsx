@@ -13,7 +13,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { useSessionNames } from "@/hooks/useSessionNames"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
-import { usePendingPermissions } from "@/contexts/PendingPermissionsContext"
+import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import { useMissionControl } from "@/hooks/useMissionControl"
 import { sessionGroupKey } from "@/components/LiveSessions/sessionListView"
 import { SessionCard } from "./SessionCard"
@@ -43,11 +43,16 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
     useSessionInventory()
   const { summaries, loading, error, refresh: refreshMission } = useMissionControl()
   const {
-    bySession: permissionsBySession,
+    permissionsBySession,
+    questionsBySession,
     responding,
     respond,
-    refresh: refreshPermissions,
-  } = usePendingPermissions()
+    answerQuestion,
+    refresh: refreshHumanInput,
+  } = usePendingHumanInput()
+  // Tool-use ids the server has forgotten, so the card can say so instead of
+  // silently doing nothing.
+  const [goneQuestions, setGoneQuestions] = useState<Set<string>>(new Set())
   const { names: sessionNames } = useSessionNames()
   const { names: projectNames } = useProjectNames()
   const [filter, setFilter] = useState<MissionFilter>("all")
@@ -62,9 +67,10 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
       procBySession,
       summaries,
       permissionsBySession,
+      questionsBySession,
       newlyCompleted,
     }),
-    [sessions, procBySession, summaries, permissionsBySession, newlyCompleted],
+    [sessions, procBySession, summaries, permissionsBySession, questionsBySession, newlyCompleted],
   )
 
   const counts = useMemo(() => countMissionCards(cards), [cards])
@@ -73,8 +79,8 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const refresh = useCallback(() => {
     refreshInventory()
     refreshMission()
-    refreshPermissions()
-  }, [refreshInventory, refreshMission, refreshPermissions])
+    refreshHumanInput()
+  }, [refreshInventory, refreshMission, refreshHumanInput])
 
   // The inventory's own poll is deliberately gentle (20s) because it scans every
   // project and shells out to `ps`. That is too slow here: a session that just
@@ -91,6 +97,17 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const handleOpen = useCallback((dirName: string, fileName: string) => {
     onSelectSession(dirName, fileName)
   }, [onSelectSession])
+
+  const handleAnswerQuestion = useCallback(async (
+    sessionId: string,
+    toolUseId: string,
+    answers: Record<string, string>,
+  ) => {
+    const result = await answerQuestion(sessionId, toolUseId, answers)
+    if (!result.ok) {
+      setGoneQuestions((prev) => new Set(prev).add(toolUseId))
+    }
+  }, [answerQuestion])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -217,8 +234,10 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
                   projectNames[card.session.dirName] ?? sessionGroupKey(card.session)
                 }
                 responding={responding}
+                goneQuestions={goneQuestions}
                 onOpen={() => handleOpen(card.session.dirName, card.session.fileName)}
                 onRespond={respond}
+                onAnswerQuestion={handleAnswerQuestion}
               />
             ))}
           </div>

@@ -95,6 +95,49 @@ export interface MissionControlPermission {
   timestamp: number
 }
 
+/** One selectable option on a question. */
+export interface MissionControlQuestionOption {
+  label: string
+  description?: string
+  /**
+   * True when the option carried a rich preview (a mockup, a code snippet).
+   *
+   * The preview itself is deliberately not sent: it can run to kilobytes, and
+   * this list is polled app-wide. A card cannot render one anyway, so it says
+   * so and points at the session instead.
+   */
+  hasPreview: boolean
+}
+
+/** One question within an AskUserQuestion call. */
+export interface MissionControlQuestionItem {
+  question: string
+  header?: string
+  multiSelect: boolean
+  options: MissionControlQuestionOption[]
+}
+
+/**
+ * An AskUserQuestion call blocking a session, served by GET /api/user-questions.
+ *
+ * Unlike a permission, this fires regardless of permission mode — a session run
+ * with bypassPermissions still stops dead here. Presence in this list is proof
+ * the question is live and answerable: it is read from the in-memory resolver
+ * map, so a session whose server restarted simply is not listed.
+ */
+export interface MissionControlQuestion {
+  sessionId: string
+  /** The blocked tool call — the id required to answer it. */
+  toolUseId: string
+  askedAt: number
+  questions: MissionControlQuestionItem[]
+}
+
+/** Response body of GET /api/user-questions. */
+export interface UserQuestionsResponse {
+  bySession: Record<string, MissionControlQuestion[]>
+}
+
 /** Response body of GET /api/mission-control. */
 export interface MissionControlResponse {
   summaries: MissionControlSummary[]

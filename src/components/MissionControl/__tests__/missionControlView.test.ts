@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import type {
   MissionControlPermission,
+  MissionControlQuestion,
   MissionControlSummary,
 } from "../../../../shared/contracts/missionControl"
 import {
@@ -43,10 +44,28 @@ function permission(sessionId: string, requestId = "req-1"): MissionControlPermi
 const NO_PROCS = new Map<string, RunningProcess>()
 const NO_SUMMARIES = new Map<string, MissionControlSummary>()
 
+function question(sessionId: string, toolUseId = "toolu_1"): MissionControlQuestion {
+  return {
+    sessionId,
+    toolUseId,
+    askedAt: NOW,
+    questions: [{
+      question: "Which language?",
+      header: "Language",
+      multiSelect: false,
+      options: [
+        { label: "TypeScript", hasPreview: false },
+        { label: "Python", hasPreview: false },
+      ],
+    }],
+  }
+}
+
 function build(
   sessions: ActiveSessionInfo[],
   permissions: MissionControlPermission[] = [],
   extra: Partial<Parameters<typeof buildMissionCards>[0]> = {},
+  questions: MissionControlQuestion[] = [],
 ) {
   const permissionsBySession = new Map<string, MissionControlPermission[]>()
   for (const p of permissions) {
@@ -54,11 +73,18 @@ function build(
     if (list) list.push(p)
     else permissionsBySession.set(p.sessionId, [p])
   }
+  const questionsBySession = new Map<string, MissionControlQuestion[]>()
+  for (const q of questions) {
+    const list = questionsBySession.get(q.sessionId)
+    if (list) list.push(q)
+    else questionsBySession.set(q.sessionId, [q])
+  }
   return buildMissionCards({
     sessions,
     procBySession: NO_PROCS,
     summaries: NO_SUMMARIES,
     permissionsBySession,
+    questionsBySession,
     newlyCompleted: new Set(),
     now: NOW,
     ...extra,
@@ -89,6 +115,7 @@ describe("buildMissionCards — state resolution", () => {
       procBySession: procs,
       summaries: NO_SUMMARIES,
       permissionsBySession: new Map(),
+      questionsBySession: new Map(),
       newlyCompleted: new Set(),
       now: NOW,
     })
@@ -112,6 +139,42 @@ describe("buildMissionCards — state resolution", () => {
       [permission("a")],
     )
     expect(cards[0].state).toBe("awaiting_approval")
+  })
+
+  it("reports a blocked question as awaiting_question, beating its tool_use status", () => {
+    // A question-blocked session reports agentStatus "tool_use". Resolving the
+    // question later than the status checks would render it "Running".
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use" })], [], {}, [question("a")],
+    )
+    expect(cards[0].state).toBe("awaiting_question")
+    expect(cards[0].questions).toHaveLength(1)
+  })
+
+  it("keeps a blocked question visible after the session file goes stale", () => {
+    // A blocked agent stops writing to its JSONL, so it falls outside the
+    // activity window while still waiting. It must not decay to "done".
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use", lastModified: STALE })],
+      [], {}, [question("a")],
+    )
+    expect(cards[0].state).toBe("awaiting_question")
+  })
+
+  it("lets a permission outrank a question when a session has both", () => {
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use" })],
+      [permission("a")], {}, [question("a")],
+    )
+    expect(cards[0].state).toBe("awaiting_approval")
+  })
+
+  it("keeps a teammate session that is blocked on a question", () => {
+    const cards = build(
+      [session({ sessionId: "t", agentStatus: "tool_use", teamName: "x", agentName: "m" })],
+      [], {}, [question("t")],
+    )
+    expect(cards.map((c) => c.session.sessionId)).toEqual(["t"])
   })
 
   it("maps a deferred hook to awaiting_answer, not awaiting_approval", () => {
@@ -147,10 +210,16 @@ describe("buildMissionCards — ordering and inclusion", () => {
         session({ sessionId: "run", agentStatus: "thinking" }),
         session({ sessionId: "perm", agentStatus: "tool_use" }),
         session({ sessionId: "idle", agentStatus: "idle" }),
+        session({ sessionId: "ask", agentStatus: "tool_use" }),
       ],
       [permission("perm")],
+      {},
+      [question("ask")],
     )
-    expect(cards.map((c) => c.session.sessionId)).toEqual(["perm", "idle", "run", "done"])
+    // Grid-resolvable blockers first (permission, then question), then the
+    // ones that need the session opened, then work in flight, then results.
+    expect(cards.map((c) => c.session.sessionId))
+      .toEqual(["perm", "ask", "idle", "run", "done"])
   })
 
   it("hides teammate sessions but keeps a teammate that is blocked on the user", () => {

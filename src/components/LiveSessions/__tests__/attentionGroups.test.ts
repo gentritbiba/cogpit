@@ -21,11 +21,41 @@ function procs(...ids: string[]): Map<string, RunningProcess> {
 }
 
 describe("classifyAttention", () => {
-  it("puts deferred sessions in needsYou with a permission reason", () => {
+  it("puts deferred sessions in needsYou with a deferred reason", () => {
+    // Distinct from "permission": a deferred hook is cleared by resuming the
+    // session, a live request by answering it. The strip only offers Resume
+    // for the former.
     const s = makeSession({ agentStatus: "deferred" })
     const { needsYou, working } = classifyAttention([s], new Map(), new Set())
-    expect(needsYou).toEqual([{ session: s, reason: "permission" }])
+    expect(needsYou).toEqual([{ session: s, reason: "deferred" }])
     expect(working).toEqual([])
+  })
+
+  it("puts sessions with a live permission request in needsYou", () => {
+    const s = makeSession({ sessionId: "perm", agentStatus: "tool_use" })
+    const { needsYou } = classifyAttention(
+      [s], procs("perm"), new Set(), new Set(["perm"]),
+    )
+    expect(needsYou).toEqual([{ session: s, reason: "permission" }])
+  })
+
+  it("puts sessions blocked on a question in needsYou, despite a tool_use status", () => {
+    // A question-blocked session still reports tool_use, so without the
+    // explicit set it would be triaged as merely working.
+    const s = makeSession({ sessionId: "ask", agentStatus: "tool_use" })
+    const { needsYou, working } = classifyAttention(
+      [s], procs("ask"), new Set(), undefined, new Set(["ask"]),
+    )
+    expect(needsYou).toEqual([{ session: s, reason: "question" }])
+    expect(working).toEqual([])
+  })
+
+  it("prefers the permission reason when a session somehow has both", () => {
+    const s = makeSession({ sessionId: "both", agentStatus: "tool_use" })
+    const { needsYou } = classifyAttention(
+      [s], procs("both"), new Set(), new Set(["both"]), new Set(["both"]),
+    )
+    expect(needsYou).toEqual([{ session: s, reason: "permission" }])
   })
 
   it("puts live idle sessions in needsYou as waiting", () => {
@@ -77,7 +107,7 @@ describe("classifyAttention", () => {
     const blocked = makeSession({ sessionId: "t2", agentStatus: "deferred", ...teammate })
     const { needsYou, working } = classifyAttention([busy, blocked], procs("t1", "t2"), new Set())
     expect(working).toEqual([])
-    expect(needsYou).toEqual([{ session: blocked, reason: "permission" }])
+    expect(needsYou).toEqual([{ session: blocked, reason: "deferred" }])
   })
 
   it("orders each bucket newest-first", () => {

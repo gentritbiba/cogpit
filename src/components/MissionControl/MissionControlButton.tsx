@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
-import { usePendingPermissions } from "@/contexts/PendingPermissionsContext"
+import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import { classifyAttention } from "@/components/LiveSessions/attentionGroups"
 
 interface MissionControlButtonProps {
@@ -22,11 +22,11 @@ interface MissionControlButtonProps {
 
 export function MissionControlButton({ active, onToggle }: MissionControlButtonProps) {
   const { sessions, procBySession, newlyCompleted } = useSessionInventory()
-  const { awaiting } = usePendingPermissions()
+  const { awaitingPermission, awaitingQuestion } = usePendingHumanInput()
 
   const needsYou = useMemo(
-    () => classifyAttention(sessions, procBySession, newlyCompleted, awaiting).needsYou.length,
-    [sessions, procBySession, newlyCompleted, awaiting],
+    () => classifyAttention(sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion).needsYou.length,
+    [sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion],
   )
 
   const label = active

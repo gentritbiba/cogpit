@@ -2,7 +2,7 @@
  * Per-session card summaries for Mission Control.
  *
  * One poll covers every card. Pending permissions come from
- * PendingPermissionsContext instead, because the sidebar and header need them
+ * PendingHumanInputContext instead, because the sidebar and header need them
  * whether or not this view is open.
  */
 

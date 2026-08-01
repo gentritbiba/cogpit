@@ -15,7 +15,9 @@ import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
 import { shortenModel } from "@/lib/format"
 import type { PermissionDecision } from "@/lib/permissionApi"
+import type { UserQuestionAnswerMap } from "@/lib/askUserApi"
 import { PermissionPrompt } from "./PermissionPrompt"
+import { QuestionPrompt } from "./QuestionPrompt"
 import {
   contextBarColor,
   formatElapsed,
@@ -37,6 +39,14 @@ const STATE_STYLES: Record<MissionCardState, StateStyle> = {
     text: "text-amber-400",
     border: "border-amber-500/60",
     surface: "bg-amber-500/[0.045]",
+  },
+  // Pink separates "answer a question" from "approve a tool" at a glance,
+  // matching the colour the rest of the app already uses for AskUserQuestion.
+  awaiting_question: {
+    label: "Waiting for your answer",
+    text: "text-pink-400",
+    border: "border-pink-500/60",
+    surface: "bg-pink-500/[0.05]",
   },
   awaiting_answer: {
     label: "Waiting for your answer",
@@ -71,6 +81,7 @@ function StateIcon({ state }: { state: MissionCardState }) {
       // the sanctioned pulsing indicator.
       return <span className="live-pulse size-[7px] shrink-0 rounded-full bg-blue-400" />
     case "awaiting_approval":
+    case "awaiting_question":
     case "awaiting_answer":
       return <MessageCircleQuestion className="size-3.5 shrink-0" />
     case "done":
@@ -85,9 +96,16 @@ interface SessionCardProps {
   customName?: string
   projectLabel: string
   responding: Set<string>
+  /** Tool-use ids the server has since forgotten. */
+  goneQuestions: Set<string>
   compact?: boolean
   onOpen: () => void
   onRespond: (sessionId: string, requestId: string, behavior: PermissionDecision) => void
+  onAnswerQuestion: (
+    sessionId: string,
+    toolUseId: string,
+    answers: UserQuestionAnswerMap,
+  ) => void
 }
 
 export const SessionCard = memo(function SessionCard({
@@ -95,13 +113,17 @@ export const SessionCard = memo(function SessionCard({
   customName,
   projectLabel,
   responding,
+  goneQuestions,
   compact = false,
   onOpen,
   onRespond,
+  onAnswerQuestion,
 }: SessionCardProps) {
-  const { session, state, summary, permissions } = card
+  const { session, state, summary, permissions, questions } = card
   const style = STATE_STYLES[state]
   const request = permissions[0]
+  const question = questions[0]
+  const blocked = Boolean(request || question)
   const context = summary?.context ?? null
   const files = summary?.files ?? []
   const filesTotal = summary?.filesTotal
@@ -114,6 +136,7 @@ export const SessionCard = memo(function SessionCard({
         style.border,
         style.surface,
         state === "awaiting_approval" && "ring-1 ring-amber-500/20",
+        state === "awaiting_question" && "ring-1 ring-pink-500/20",
         compact && "gap-1.5 py-2",
       )}
     >
@@ -159,8 +182,19 @@ export const SessionCard = memo(function SessionCard({
         />
       )}
 
+      {/* Blocked on a question — answerable right here */}
+      {!request && question && (
+        <QuestionPrompt
+          request={question}
+          responding={responding.has(question.toolUseId)}
+          gone={goneQuestions.has(question.toolUseId)}
+          onAnswer={(toolUseId, answers) => onAnswerQuestion(session.sessionId, toolUseId, answers)}
+          onOpenSession={onOpen}
+        />
+      )}
+
       {/* What it is doing right now */}
-      {!request && summary?.currentTool && (
+      {!blocked && summary?.currentTool && (
         <div className="rounded-md border border-border/40 bg-black/25 px-2 py-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <Badge
@@ -180,7 +214,7 @@ export const SessionCard = memo(function SessionCard({
       )}
 
       {/* Latest prose */}
-      {!compact && !request && summary?.lastAssistantText && (
+      {!compact && !blocked && summary?.lastAssistantText && (
         <p className="line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
           {summary.lastAssistantText}
         </p>

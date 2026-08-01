@@ -2,8 +2,15 @@ import { sortSessionsByRecency } from "@/lib/sessionOrdering"
 import { isSessionActive } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
-/** Why a session is asking for the user's attention. */
-export type AttentionReason = "permission" | "waiting" | "done"
+/**
+ * Why a session is asking for the user's attention.
+ *
+ * `permission` and `deferred` are deliberately distinct even though both are
+ * about permissions: a live request is answered in place, while a hook-deferred
+ * one is cleared by resuming the session. Offering "Resume" for a live request
+ * would spawn a second CLI against a session that is alive and merely waiting.
+ */
+export type AttentionReason = "permission" | "deferred" | "question" | "waiting" | "done"
 
 export interface AttentionItem {
   session: ActiveSessionInfo
@@ -31,15 +38,21 @@ const WORKING_STATUSES = new Set(["thinking", "tool_use", "processing", "compact
  * A live session with an unknown status is assumed to be working — never claim
  * a session needs the user without a positive signal.
  *
- * `sessionsAwaitingPermission` carries session ids with a live permission
- * request (from the permissions API, which `agentStatus` knows nothing about).
- * A blocked agent is stopped dead, so those outrank every other signal.
+ * `sessionsAwaitingPermission` and `sessionsAwaitingQuestion` carry session ids
+ * blocked on a live permission request or an AskUserQuestion call. Neither is
+ * visible in `agentStatus` — a session blocked on a question still reports
+ * `tool_use` — and a blocked agent is stopped dead, so both outrank every other
+ * signal.
+ *
+ * They stay separate reasons because the remedies differ: a deferred permission
+ * is cleared by resuming the session, a question by answering it.
  */
 export function classifyAttention(
   sessions: ActiveSessionInfo[],
   procBySession: Map<string, RunningProcess>,
   newlyCompleted: Set<string>,
   sessionsAwaitingPermission?: ReadonlySet<string>,
+  sessionsAwaitingQuestion?: ReadonlySet<string>,
 ): AttentionGroups {
   const needsYou: AttentionItem[] = []
   const working: ActiveSessionInfo[] = []
@@ -49,8 +62,12 @@ export function classifyAttention(
       needsYou.push({ session: s, reason: "permission" })
       continue
     }
+    if (sessionsAwaitingQuestion?.has(s.sessionId)) {
+      needsYou.push({ session: s, reason: "question" })
+      continue
+    }
     if (s.agentStatus === "deferred") {
-      needsYou.push({ session: s, reason: "permission" })
+      needsYou.push({ session: s, reason: "deferred" })
       continue
     }
     if (isTeammate(s)) continue

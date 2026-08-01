@@ -9,18 +9,21 @@ import { WORKING_STATUSES, isSessionActive } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import type {
   MissionControlPermission,
+  MissionControlQuestion,
   MissionControlSummary,
 } from "../../../shared/contracts/missionControl"
 
 /**
  * What a card says about a session.
  *
- * `awaiting_approval` is a live permission request answerable inline;
+ * The first two are resolvable from the grid itself: `awaiting_approval` is a
+ * live permission request, `awaiting_question` a blocked AskUserQuestion call.
  * `awaiting_answer` is a session idle at the prompt or paused by a deferred
  * hook — it needs the user, but only opening the session resolves it.
  */
 export type MissionCardState =
   | "awaiting_approval"
+  | "awaiting_question"
   | "awaiting_answer"
   | "running"
   | "done"
@@ -34,11 +37,15 @@ export interface MissionCard {
   summary: MissionControlSummary | null
   /** Pending requests for this session; non-empty only for awaiting_approval. */
   permissions: MissionControlPermission[]
+  /** Blocked AskUserQuestion calls; non-empty only for awaiting_question. */
+  questions: MissionControlQuestion[]
 }
 
 /** True when the card is blocked on the user. */
 export function needsYou(state: MissionCardState): boolean {
-  return state === "awaiting_approval" || state === "awaiting_answer"
+  return state === "awaiting_approval"
+    || state === "awaiting_question"
+    || state === "awaiting_answer"
 }
 
 /** True when the session has stopped, successfully or not. */
@@ -54,18 +61,25 @@ export function isFinished(state: MissionCardState): boolean {
  */
 const STATE_RANK: Record<MissionCardState, number> = {
   awaiting_approval: 0,
-  awaiting_answer: 1,
-  running: 2,
-  failed: 3,
-  done: 4,
+  awaiting_question: 1,
+  awaiting_answer: 2,
+  running: 3,
+  failed: 4,
+  done: 5,
 }
 
 function resolveState(
   session: ActiveSessionInfo,
   active: boolean,
   hasPermission: boolean,
+  hasQuestion: boolean,
 ): MissionCardState {
   if (hasPermission) return "awaiting_approval"
+  // Must precede every agentStatus branch. A session blocked on a question
+  // still reports `tool_use`, so ordering it later would render it "Running"
+  // until its file went stale, then "Done" — a session waiting on the user
+  // would vanish into the finished bucket.
+  if (hasQuestion) return "awaiting_question"
   // A deferred hook needs the user but cannot be answered from the grid.
   if (session.agentStatus === "deferred") return "awaiting_answer"
   if (session.agentStatus === "idle" && active) return "awaiting_answer"
@@ -84,6 +98,7 @@ export interface BuildCardsOptions {
   procBySession: Map<string, RunningProcess>
   summaries: Map<string, MissionControlSummary>
   permissionsBySession: Map<string, MissionControlPermission[]>
+  questionsBySession: Map<string, MissionControlQuestion[]>
   /** Sessions that finished during this browser session, kept visible. */
   newlyCompleted: ReadonlySet<string>
   /** Finished sessions to keep after the recently-finished ones. */
@@ -106,6 +121,7 @@ export function buildMissionCards({
   procBySession,
   summaries,
   permissionsBySession,
+  questionsBySession,
   newlyCompleted,
   finishedLimit = DEFAULT_FINISHED_LIMIT,
   now = Date.now(),
@@ -117,14 +133,16 @@ export function buildMissionCards({
     // actually blocked on the user.
     const isTeammate = Boolean(session.teamName && session.agentName)
     const permissions = permissionsBySession.get(session.sessionId) ?? []
-    if (isTeammate && permissions.length === 0) continue
+    const questions = questionsBySession.get(session.sessionId) ?? []
+    if (isTeammate && permissions.length === 0 && questions.length === 0) continue
 
     const active = isSessionActive(session, procBySession, now)
     cards.push({
       session,
-      state: resolveState(session, active, permissions.length > 0),
+      state: resolveState(session, active, permissions.length > 0, questions.length > 0),
       summary: summaries.get(session.sessionId) ?? null,
       permissions,
+      questions,
     })
   }
 

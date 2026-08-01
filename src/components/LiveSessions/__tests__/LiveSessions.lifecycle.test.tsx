@@ -33,12 +33,15 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
-vi.mock("@/contexts/PendingPermissionsContext", () => ({
-  usePendingPermissions: () => ({
-    bySession: new Map(),
-    awaiting: new Set(),
+vi.mock("@/contexts/PendingHumanInputContext", () => ({
+  usePendingHumanInput: () => ({
+    permissionsBySession: new Map(),
+    questionsBySession: new Map(),
+    awaitingPermission: new Set(),
+    awaitingQuestion: new Set(),
     responding: new Set(),
     respond: vi.fn(),
+    answerQuestion: vi.fn(),
     refresh: vi.fn(),
   }),
 }))
