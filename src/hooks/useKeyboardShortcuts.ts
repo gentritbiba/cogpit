@@ -15,6 +15,7 @@ interface UseKeyboardShortcutsOpts {
   dispatch: Dispatch<SessionAction>
   onToggleSidebar: () => void
   onToggleRightSidebar: () => void
+  onToggleMissionControl: () => void
   onOpenCommandPalette?: () => void
   onOpenProjectSwitcher: () => void
   onOpenThemeSelector: () => void
@@ -66,6 +67,7 @@ export function useKeyboardShortcuts({
   dispatch,
   onToggleSidebar,
   onToggleRightSidebar,
+  onToggleMissionControl,
   onOpenCommandPalette,
   onOpenProjectSwitcher,
   onOpenThemeSelector,
@@ -125,6 +127,11 @@ export function useKeyboardShortcuts({
       if (matchesKeybinding("toggleStats", e)) {
         e.preventDefault()
         onToggleRightSidebar()
+        return
+      }
+      if (matchesKeybinding("missionControl", e)) {
+        e.preventDefault()
+        onToggleMissionControl()
         return
       }
 
@@ -223,5 +230,5 @@ export function useKeyboardShortcuts({
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onOpenCommandPalette, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onToggleIntegratedTerminal, onTogglePreview, onToggleProjectFiles, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
+  }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onToggleMissionControl, onOpenCommandPalette, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onToggleIntegratedTerminal, onTogglePreview, onToggleProjectFiles, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

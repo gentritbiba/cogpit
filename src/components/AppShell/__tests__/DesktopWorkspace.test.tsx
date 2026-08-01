@@ -177,6 +177,7 @@ function makeProps(
         handleToggleWorktrees: vi.fn(),
         handleToggleFileChanges: vi.fn(),
         handleToggleConfig: vi.fn(),
+        handleToggleMission: vi.fn(),
         handleOpenProjectSwitcher: vi.fn(),
         handleCloseProjectSwitcher: vi.fn(),
         handleToggleThemeSelector: vi.fn(),

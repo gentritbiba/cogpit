@@ -13,6 +13,7 @@ function createOpts(overrides: Partial<Parameters<typeof useKeyboardShortcuts>[0
     dispatch: vi.fn() as Dispatch<SessionAction>,
     onToggleSidebar: vi.fn(),
     onToggleRightSidebar: vi.fn(),
+    onToggleMissionControl: vi.fn(),
     onOpenProjectSwitcher: vi.fn(),
     onOpenThemeSelector: vi.fn(),
     onOpenTerminal: vi.fn(),
@@ -188,6 +189,24 @@ describe("useKeyboardShortcuts", () => {
 
       fireKey("B", { ctrlKey: true, shiftKey: true })
       expect(opts.onToggleRightSidebar).toHaveBeenCalled()
+    })
+  })
+
+  describe("Cmd+Shift+M - toggle Mission Control", () => {
+    it("calls onToggleMissionControl on Cmd+Shift+M", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("M", { metaKey: true, shiftKey: true })
+      expect(opts.onToggleMissionControl).toHaveBeenCalled()
+    })
+
+    it("does not fire without the shift modifier", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("M", { metaKey: true })
+      expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
     })
   })
 

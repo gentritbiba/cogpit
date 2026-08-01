@@ -21,6 +21,7 @@ import {
 } from "react"
 import { authFetch } from "@/lib/auth"
 import { getActiveDeviceId } from "@/lib/device"
+import { hasUnfinishedWork } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import {
   readCachedList,
@@ -134,7 +135,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   // refreshes on focus and, while something is live, on a gentle visible-only
   // timer.
   const hasLiveWork = useMemo(
-    () => sessions.some((s) => s.isActive || procBySession.has(s.sessionId)),
+    () => hasUnfinishedWork(sessions, procBySession),
     [sessions, procBySession],
   )
 

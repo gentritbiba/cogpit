@@ -1,4 +1,5 @@
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { isSessionActive } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /** Why a session is asking for the user's attention. */
@@ -29,23 +30,34 @@ const WORKING_STATUSES = new Set(["thinking", "tool_use", "processing", "compact
  * deferred permissions, which always need the user regardless of who hit them.
  * A live session with an unknown status is assumed to be working — never claim
  * a session needs the user without a positive signal.
+ *
+ * `sessionsAwaitingPermission` carries session ids with a live permission
+ * request (from the permissions API, which `agentStatus` knows nothing about).
+ * A blocked agent is stopped dead, so those outrank every other signal.
  */
 export function classifyAttention(
   sessions: ActiveSessionInfo[],
   procBySession: Map<string, RunningProcess>,
   newlyCompleted: Set<string>,
+  sessionsAwaitingPermission?: ReadonlySet<string>,
 ): AttentionGroups {
   const needsYou: AttentionItem[] = []
   const working: ActiveSessionInfo[] = []
 
   for (const s of sortSessionsByRecency(sessions)) {
+    if (sessionsAwaitingPermission?.has(s.sessionId)) {
+      needsYou.push({ session: s, reason: "permission" })
+      continue
+    }
     if (s.agentStatus === "deferred") {
       needsYou.push({ session: s, reason: "permission" })
       continue
     }
     if (isTeammate(s)) continue
 
-    const live = s.isActive === true || procBySession.has(s.sessionId)
+    // Owned-by-this-Cogpit is too narrow: sessions started elsewhere never map
+    // to a PID, and would all be triaged as finished. See lib/sessionActivity.
+    const live = isSessionActive(s, procBySession)
     if (s.agentStatus === "completed" || !live) {
       if (newlyCompleted.has(s.sessionId)) needsYou.push({ session: s, reason: "done" })
       continue

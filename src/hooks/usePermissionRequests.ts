@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
+import {
+  respondToAllPermissions,
+  respondToPermission,
+  type PermissionDecision,
+} from "@/lib/permissionApi"
 
-export type PermissionDecision = "allow" | "allow_always" | "deny"
+export type { PermissionDecision }
 
 export interface PermissionRequest {
   requestId: string
@@ -95,12 +100,7 @@ export function usePermissionRequests(
     setResponding((prev) => new Set(prev).add(requestId))
 
     try {
-      const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, behavior }),
-      })
-      if (res.ok) {
+      if (await respondToPermission(sessionId, requestId, behavior)) {
         setRequests((prev) => prev.filter((r) => r.requestId !== requestId))
       }
     } finally {
@@ -116,12 +116,7 @@ export function usePermissionRequests(
     if (!sessionId) return
 
     try {
-      const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}/respond-all`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ behavior }),
-      })
-      if (res.ok) {
+      if (await respondToAllPermissions(sessionId, behavior)) {
         setRequests([])
       }
     } catch {
