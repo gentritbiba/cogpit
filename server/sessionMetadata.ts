@@ -75,6 +75,98 @@ export async function getCodexSessionIdentity(filePath: string): Promise<CodexSe
   }
 }
 
+const EFFORT_CHUNK = 65536
+const NEWLINE_BYTE = 0x0a
+
+/**
+ * Pull the reasoning effort out of a single transcript line.
+ *
+ * Claude tags every assistant record with the effort that turn ran at; Codex
+ * records it per turn, and newer CLI versions moved it under `thread_settings`.
+ */
+function effortFromLine(line: string): string | null {
+  let record: unknown
+  try {
+    record = JSON.parse(line)
+  } catch {
+    return null
+  }
+  if (!isRecord(record)) return null
+
+  if (record.type === "assistant") {
+    return typeof record.effort === "string" && record.effort ? record.effort : null
+  }
+
+  if (record.type === "turn_context" && isRecord(record.payload)) {
+    const { payload } = record
+    if (typeof payload.effort === "string" && payload.effort) return payload.effort
+    const settings = isRecord(payload.thread_settings) ? payload.thread_settings : null
+    const nested = settings?.reasoning_effort
+    if (typeof nested === "string" && nested) return nested
+  }
+
+  return null
+}
+
+/**
+ * Read the effort a session most recently ran at, scanning newest → oldest.
+ *
+ * Effort changes mid-session, so only the last record reflects current state.
+ * Kept out of getSessionMeta because session listings render that for every row
+ * and would pay this scan without using the result. Takes a path rather than a
+ * session id because findJsonlPath lives in sessionPaths, which imports this
+ * module — resolving here would make the cycle.
+ */
+export async function readTranscriptEffort(filePath: string): Promise<string | null> {
+  let fileStat: Awaited<ReturnType<typeof stat>>
+  try {
+    fileStat = await stat(filePath)
+  } catch {
+    return null
+  }
+
+  const fh = await open(filePath, "r")
+  try {
+    let cursor = fileStat.size
+    // Held as bytes, not text: a chunk boundary can fall inside a multi-byte
+    // character, so only whole lines are ever decoded.
+    let leftover = Buffer.alloc(0)
+
+    // No scan cap. Codex writes turn_context once per turn, so a single long
+    // turn can push the only effort record megabytes away from the end; any
+    // fixed budget silently returns null on exactly those sessions.
+    while (cursor > 0) {
+      const readSize = Math.min(EFFORT_CHUNK, cursor)
+      cursor -= readSize
+      const buf = Buffer.alloc(readSize)
+      const { bytesRead } = await fh.read(buf, 0, readSize, cursor)
+      const chunk = Buffer.concat([buf.subarray(0, bytesRead), leftover])
+
+      const firstNewline = chunk.indexOf(NEWLINE_BYTE)
+      if (cursor > 0 && firstNewline === -1) {
+        // One line longer than a chunk; keep accumulating toward its start.
+        leftover = chunk
+        continue
+      }
+      // Below the first newline is a partial line until we reach the head.
+      leftover = cursor > 0 ? chunk.subarray(0, firstNewline) : Buffer.alloc(0)
+
+      const body = cursor > 0 ? chunk.subarray(firstNewline + 1) : chunk
+      const lines = body.toString("utf-8").split("\n")
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]
+        if (!line || !line.includes("effort")) continue
+        const effort = effortFromLine(line)
+        if (effort) return effort
+      }
+    }
+  } finally {
+    await fh.close()
+  }
+
+  return null
+}
+
 /** Extract meaningful user prompt text from a parsed user message object. */
 function extractUserText(obj: { message?: { content?: unknown } }): string {
   const c = obj.message?.content

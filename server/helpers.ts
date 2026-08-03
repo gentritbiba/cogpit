@@ -366,7 +366,7 @@ export {
   authMiddleware,
 } from "./security"
 
-export { getSessionMeta, getSessionStatus, searchSessionMessages } from "./sessionMetadata"
+export { getSessionMeta, getSessionStatus, searchSessionMessages, readTranscriptEffort } from "./sessionMetadata"
 
 // ── Shared route helpers ────────────────────────────────────────────────────
 

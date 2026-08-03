@@ -6,8 +6,10 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Middleware, UseFn } from "../../http"
 
-const { mockDirs } = vi.hoisted(() => ({
+const { mockDirs, mockFindJsonlPath, mockReadTranscriptEffort } = vi.hoisted(() => ({
   mockDirs: { SESSION_CONFIG_DIR: "" },
+  mockFindJsonlPath: vi.fn(async (_sessionId: string): Promise<string | null> => null),
+  mockReadTranscriptEffort: vi.fn(async (_filePath: string): Promise<string | null> => null),
 }))
 
 vi.mock("../../helpers", async () => {
@@ -18,6 +20,8 @@ vi.mock("../../helpers", async () => {
     join: path.join,
     mkdir: fs.mkdir,
     readFile: fs.readFile,
+    findJsonlPath: mockFindJsonlPath,
+    readTranscriptEffort: mockReadTranscriptEffort,
     sendJson: (
       res: { statusCode: number; setHeader: (n: string, v: string) => void; end: (v?: string) => void },
       status: number,
@@ -96,6 +100,10 @@ async function invoke(method: string, url: string, body?: string): Promise<FakeR
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "session-config-test-"))
   mockDirs.SESSION_CONFIG_DIR = join(tempDir, "session-config")
+  mockFindJsonlPath.mockReset()
+  mockReadTranscriptEffort.mockReset()
+  mockFindJsonlPath.mockResolvedValue(null)
+  mockReadTranscriptEffort.mockResolvedValue(null)
   const use: UseFn = (_path, middleware) => {
     handler = middleware
   }
@@ -176,5 +184,68 @@ describe("session-config routes", () => {
   it("rejects invalid JSON payloads", async () => {
     const res = await invoke("PUT", "/session.jsonl", "not-json")
     expect(res.statusCode).toBe(400)
+  })
+})
+
+describe("session-config transcript effort overlay", () => {
+  it("supplies effort for a session that has none stored", async () => {
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockResolvedValue("xhigh")
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.json()).toEqual({ effort: "xhigh" })
+    expect(mockFindJsonlPath).toHaveBeenCalledWith("abc-123")
+  })
+
+  it("overrides a stored effort, because the transcript is what actually ran", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ model: "opus", effort: "low" }))
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockResolvedValue("xhigh")
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.json()).toEqual({ model: "opus", effort: "xhigh" })
+  })
+
+  it("keeps the stored effort when the transcript records none", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ effort: "medium" }))
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockResolvedValue(null)
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.json()).toEqual({ effort: "medium" })
+  })
+
+  it("leaves ultracode sessions alone so the underlying preference survives", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ effort: "medium", ultracode: true }))
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockResolvedValue("xhigh")
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.json()).toEqual({ effort: "medium", ultracode: true })
+    expect(mockReadTranscriptEffort).not.toHaveBeenCalled()
+  })
+
+  it("does not hunt for a transcript for project-level keys", async () => {
+    await invoke("PUT", "/-Users-gentritbiba-agent-window", JSON.stringify({ mcpServers: ["clickup"] }))
+
+    const res = await invoke("GET", "/-Users-gentritbiba-agent-window")
+
+    expect(res.json()).toEqual({ mcpServers: ["clickup"] })
+    expect(mockFindJsonlPath).not.toHaveBeenCalled()
+  })
+
+  it("still returns stored config when reading the transcript throws", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ effort: "medium" }))
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockRejectedValue(new Error("vanished mid-read"))
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ effort: "medium" })
   })
 })

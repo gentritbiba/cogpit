@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http"
-import { dirs, join, mkdir, readFile, sendJson } from "../helpers"
+import { dirs, findJsonlPath, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../helpers"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 import type { UseFn } from "../http"
@@ -33,6 +33,37 @@ async function readStoredConfig(key: string): Promise<Record<string, unknown>> {
     // Missing or corrupted file — treat as empty config.
   }
   return {}
+}
+
+const SESSION_KEY_SUFFIX = ".jsonl"
+
+/**
+ * Overlay the effort the session actually last ran at.
+ *
+ * The transcript is the source of truth: resolving it server-side means every
+ * client receives the same value instead of seeding its own default and writing
+ * it back, which is how desktop and iOS previously overwrote each other.
+ *
+ * Skipped under ultracode, which pins effectiveEffort to xhigh — that is what
+ * the transcript records, so overlaying it would overwrite the underlying
+ * preference the composer restores when ultracode is switched back off.
+ */
+async function withTranscriptEffort(
+  key: string,
+  stored: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  // Keys are session fileNames or project dirNames; only the former have a transcript.
+  if (!key.endsWith(SESSION_KEY_SUFFIX) || stored.ultracode === true) return stored
+
+  try {
+    const filePath = await findJsonlPath(key.slice(0, -SESSION_KEY_SUFFIX.length))
+    if (!filePath) return stored
+    const effort = await readTranscriptEffort(filePath)
+    return effort ? { ...stored, effort } : stored
+  } catch {
+    // An unreadable transcript must not break loading session config.
+    return stored
+  }
 }
 
 function collectBody(req: IncomingMessage): Promise<string> {
@@ -76,7 +107,7 @@ export function registerSessionConfigRoutes(use: UseFn) {
       }
 
       if (req.method === "GET") {
-        return sendJson(res, 200, await readStoredConfig(key))
+        return sendJson(res, 200, await withTranscriptEffort(key, await readStoredConfig(key)))
       }
 
       if (req.method === "PUT" || req.method === "POST") {
