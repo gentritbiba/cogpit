@@ -8,10 +8,9 @@
 import { memo } from "react"
 import { CheckCircle2, ChevronRight, MessageCircleQuestion, XCircle } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { formatDuration, formatRelativeTime, formatTokenCount, shortenModel } from "@/lib/format"
-import { getToolBadgeStyle } from "@/components/timeline/ToolCallCard"
+import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
 import type { PermissionDecision } from "@/lib/permissionApi"
@@ -26,7 +25,6 @@ import { QuestionPrompt } from "./QuestionPrompt"
 import { contextBarColor, type MissionCard, type MissionCardState } from "./missionControlView"
 
 const CAPTION = "text-[9px] uppercase tracking-wider text-muted-foreground/70"
-const TOOL_BADGE = "h-4 px-1.5 py-0 font-mono"
 
 interface StateStyle {
   label: string
@@ -196,12 +194,9 @@ export const SessionCard = memo(function SessionCard({
 function CurrentTool({ tool }: { tool: MissionControlCurrentTool }) {
   return (
     <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-border/40 bg-black/25 px-2 py-1.5">
-      <Badge
-        variant="outline"
-        className={cn(TOOL_BADGE, "shrink-0 text-[10px]", getToolBadgeStyle(tool.name))}
-      >
+      <span className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(tool.name))}>
         {tool.name}
-      </Badge>
+      </span>
       <code className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground/75">
         {tool.summary}
       </code>
@@ -238,12 +233,9 @@ function ToolTrail({ trail, totalCalls }: { trail: string[]; totalCalls: number 
       {trail.map((tool, i) => (
         <span key={`${tool}-${i}`} className="flex items-center gap-1">
           {i > 0 && <span className="text-[10px] text-muted-foreground/30">›</span>}
-          <Badge
-            variant="outline"
-            className={cn(TOOL_BADGE, "text-[9.5px]", getToolBadgeStyle(tool))}
-          >
+          <span className={cn("font-mono text-[9.5px]", getToolTextStyle(tool))}>
             {tool}
-          </Badge>
+          </span>
         </span>
       ))}
       {hidden > 0 && (

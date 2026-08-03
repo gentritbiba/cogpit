@@ -6,9 +6,8 @@
  */
 
 import { ShieldAlert } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { getToolBadgeStyle } from "@/components/timeline/ToolCallCard"
+import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
 import type { PermissionDecision } from "@/lib/permissionApi"
 import type { MissionControlPermission } from "../../../shared/contracts/missionControl"
 
@@ -60,15 +59,11 @@ export function PermissionPrompt({
       </div>
 
       <div className="mt-1.5 flex items-center gap-1.5">
-        <Badge
-          variant="outline"
-          className={cn(
-            "h-4 shrink-0 px-1.5 py-0 font-mono text-[10px]",
-            getToolBadgeStyle(request.toolName),
-          )}
+        <span
+          className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(request.toolName))}
         >
           {request.toolName}
-        </Badge>
+        </span>
         {request.summary && (
           <code className="min-w-0 flex-1 truncate rounded bg-black/30 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground/80">
             {request.summary}
