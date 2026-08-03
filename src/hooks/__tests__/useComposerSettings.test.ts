@@ -98,6 +98,41 @@ describe("useComposerSettings", () => {
     expect(result.current.effectiveEffort).toBe("xhigh")
   })
 
+  it("turns ultracode off when another session is opened", async () => {
+    const { result, rerender } = renderSettings({ agentKind: "claude", source: sessionSource })
+
+    act(() => result.current.setUltracodeEnabled(true))
+    expect(result.current.ultracodeEnabled).toBe(true)
+
+    rerender({
+      agentKind: "claude",
+      source: { ...sessionSource, fileName: "other-session.jsonl" },
+    })
+    await waitFor(() => expect(result.current.ultracodeEnabled).toBe(false))
+  })
+
+  it("turns ultracode off when a new-session composer is opened", async () => {
+    const { result, rerender } = renderSettings({ agentKind: "claude", source: sessionSource })
+
+    act(() => result.current.setUltracodeEnabled(true))
+    rerender({ agentKind: "claude", source: null, pendingDirName: "-repo" })
+
+    await waitFor(() => expect(result.current.ultracodeEnabled).toBe(false))
+  })
+
+  it("keeps ultracode when the composed session becomes a real session", async () => {
+    const { result, rerender } = renderSettings({
+      agentKind: "claude",
+      source: null,
+      pendingDirName: "-repo",
+    })
+
+    act(() => result.current.setUltracodeEnabled(true))
+    rerender({ agentKind: "claude", source: sessionSource })
+
+    await waitFor(() => expect(result.current.ultracodeActive).toBe(true))
+  })
+
   it("exposes Codex fast mode but never enables Claude-only ultracode", () => {
     const { result } = renderSettings({ agentKind: "codex" })
 

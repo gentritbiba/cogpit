@@ -56,7 +56,7 @@ Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit fi
 Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.
 
 ### Interactive Chat
-Send or steer messages with a model and effort override, toggle Fast where supported, and choose Full access (default), Workspace, or more restrictive modes. On capable Claude models, Ultracode can be enabled for new or active sessions to pin XHigh effort and standing multi-agent orchestration. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
+Send or steer messages with a model and effort override, toggle Fast where supported, and choose Full access (default), Workspace, or more restrictive modes. On capable Claude models, Ultracode can be enabled for new or active sessions to pin XHigh effort and standing multi-agent orchestration; it is off until you click it and never carries over into another session. Slash command autocomplete comes from project skills and commands. Image drag-and-drop, paste, and conversion are enabled only for models that accept images.
 
 ### Long-Running Goals
 Create persistent goals above the composer and monitor status, tokens, elapsed time, and provider-native evaluator feedback. Codex goals can optionally use token budgets and explicit pause/resume controls; Claude goals follow Claude Code's native goal lifecycle.

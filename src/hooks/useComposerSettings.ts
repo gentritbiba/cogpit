@@ -53,6 +53,25 @@ export function useComposerSettings({
   const [modelFallbackNotice, setModelFallbackNotice] = useState<string | null>(null)
   const lastClaudeFallbackRef = useRef<string | null>(null)
 
+  // Ultracode is expensive, so it never rides along: opening another session or
+  // starting a new one turns it back off, and only an explicit click (or the
+  // opened session's own stored config, applied after this reset) enables it.
+  const sessionKey = sessionSource?.fileName ?? null
+  const previousSessionKeyRef = useRef(sessionKey)
+  useEffect(() => {
+    const previous = previousSessionKeyRef.current
+    previousSessionKeyRef.current = sessionKey
+    // A null predecessor means the composed session just became real — keep the
+    // toggle the user set while writing that first message.
+    if (previous === null || previous === sessionKey) return
+    setUltracodeEnabled(false)
+  }, [sessionKey])
+
+  useEffect(() => {
+    if (!pendingDirName) return
+    setUltracodeEnabled(false)
+  }, [pendingDirName])
+
   const handleCodexModelRejected = useCallback((rejectedModel: string) => {
     setSelectedModel((current) => current === rejectedModel ? "" : current)
     setModelFallbackNotice(
