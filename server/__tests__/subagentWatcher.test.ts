@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { basename } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const { appendFile, open, readdir, stat, watch } = vi.hoisted(() => ({
@@ -45,7 +46,9 @@ function mockSource(readSource: () => Buffer, readSizes: number[] = []): void {
 /** Serve a distinct body per agent file, keyed by file name. */
 function mockFiles(files: Record<string, string>): void {
   const buffers = new Map(Object.entries(files).map(([name, body]) => [name, Buffer.from(body)]))
-  const bufferFor = (p: string): Buffer => buffers.get(p.slice(p.lastIndexOf("/") + 1)) ?? Buffer.alloc(0)
+  // The watcher builds each path with join(), which emits backslashes on
+  // Windows, so the base name has to be taken platform-natively.
+  const bufferFor = (p: string): Buffer => buffers.get(basename(p)) ?? Buffer.alloc(0)
   readdir.mockResolvedValue([...buffers.keys()])
   stat.mockImplementation(async (p: string) => ({ size: bufferFor(p).length }))
   open.mockImplementation(async (p: string) => ({
