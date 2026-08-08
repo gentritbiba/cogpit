@@ -38,11 +38,17 @@ async function readStoredConfig(key: string): Promise<Record<string, unknown>> {
 const SESSION_KEY_SUFFIX = ".jsonl"
 
 /**
- * Overlay the effort the session actually last ran at.
+ * Fall back to the effort the session last ran at when no client has chosen one.
  *
- * The transcript is the source of truth: resolving it server-side means every
- * client receives the same value instead of seeding its own default and writing
- * it back, which is how desktop and iOS previously overwrote each other.
+ * Clients used to seed divergent defaults (web "high", iOS "xhigh") and write
+ * them back, so opening a session on one device silently rewrote the other.
+ * Resolving the transcript server-side gives every client the same value.
+ *
+ * A stored effort wins, because it is the only value that can be newer than the
+ * transcript: a freshly picked effort has not run a turn yet, so overlaying the
+ * recorded one would revert the user's choice on the next hydration. An empty
+ * string is not a choice — it means "use the provider default" — so it still
+ * takes the transcript value.
  *
  * Skipped under ultracode, which pins effectiveEffort to xhigh — that is what
  * the transcript records, so overlaying it would overwrite the underlying
@@ -54,6 +60,7 @@ async function withTranscriptEffort(
 ): Promise<Record<string, unknown>> {
   // Keys are session fileNames or project dirNames; only the former have a transcript.
   if (!key.endsWith(SESSION_KEY_SUFFIX) || stored.ultracode === true) return stored
+  if (typeof stored.effort === "string" && stored.effort) return stored
 
   try {
     const filePath = await findJsonlPath(key.slice(0, -SESSION_KEY_SUFFIX.length))

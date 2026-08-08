@@ -4,6 +4,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
   CanUseTool,
+  EffortLevel,
   PermissionResult,
   PermissionMode,
   PermissionUpdate,
@@ -785,10 +786,11 @@ async function pushSessionUpdates(
       defaultMode: (state.permissionMode || "default") as PermissionMode,
     }
   }
-  // Max is intentionally session-scoped and is not accepted by the persisted
-  // effortLevel setting. Keep it staged for the next resumed query instead.
-  if (changes.effortChanged && changes.nextEffort && changes.nextEffort !== "max") {
-    flagSettings.effortLevel = changes.nextEffort
+  // applyFlagSettings takes "max" even though the persisted effortLevel setting
+  // excludes it — the SDK scopes it to the session. An empty effort means "use
+  // the provider default", which null expresses by clearing the flag layer.
+  if (changes.effortChanged) {
+    flagSettings.effortLevel = changes.nextEffort || null
   }
   if (Object.keys(flagSettings).length > 0) {
     await queryHandle.applyFlagSettings(
@@ -910,9 +912,9 @@ export function sendSDKMessage(
     if (changes.fastModeChanged) {
       q.applyFlagSettings({ fastMode: state.fastMode ?? false }).catch(() => {})
     }
-    if (changes.effortChanged && changes.nextEffort !== undefined && changes.nextEffort !== "max") {
+    if (changes.effortChanged) {
       q.applyFlagSettings({
-        effortLevel: changes.nextEffort as "low" | "medium" | "high" | "xhigh",
+        effortLevel: (changes.nextEffort || null) as EffortLevel | null,
       }).catch(() => {})
     }
     if (changes.permissionModeChanged) {

@@ -198,8 +198,19 @@ describe("session-config transcript effort overlay", () => {
     expect(mockFindJsonlPath).toHaveBeenCalledWith("abc-123")
   })
 
-  it("overrides a stored effort, because the transcript is what actually ran", async () => {
+  it("keeps an explicitly chosen effort, which no transcript can have recorded yet", async () => {
     await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ model: "opus", effort: "low" }))
+    mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
+    mockReadTranscriptEffort.mockResolvedValue("xhigh")
+
+    const res = await invoke("GET", "/abc-123.jsonl")
+
+    expect(res.json()).toEqual({ model: "opus", effort: "low" })
+    expect(mockReadTranscriptEffort).not.toHaveBeenCalled()
+  })
+
+  it("supplies effort when the stored value is empty, which means 'provider default'", async () => {
+    await invoke("PUT", "/abc-123.jsonl", JSON.stringify({ model: "opus", effort: "" }))
     mockFindJsonlPath.mockResolvedValue("/transcripts/abc-123.jsonl")
     mockReadTranscriptEffort.mockResolvedValue("xhigh")
 

@@ -26,9 +26,16 @@ it. `shared/session/codex.ts` already destructures `turn_context.payload.model`;
 
 ## Decision
 
-The transcript is the source of truth for a session's effort, and it **wins on
-open**. This replaces two divergent client-side guesses with one fact both
+The transcript is the source of truth for a session's effort **when no client has
+chosen one**. This replaces two divergent client-side guesses with one fact both
 clients receive identically from the server.
+
+> **Amended 2026-08-06.** As first shipped, the transcript won unconditionally on
+> open. That reverted deliberate effort changes (see the first trade-off below),
+> which is a bug, not a trade-off: a freshly picked effort cannot be in the
+> transcript yet, so it is always the newer value. A non-empty stored `effort`
+> now wins and the transcript is the fallback. An empty stored effort still takes
+> the transcript value — it means "provider default", not a choice.
 
 Where effort lives in each transcript:
 
@@ -89,11 +96,11 @@ what the server returns.
 
 ## Accepted trade-offs
 
-- **Pending choices lose to the transcript.** Set an effort → switch sessions →
-  switch back without sending, and the transcript's older value wins. Hydration
-  runs once per session open (`useSessionConfigSync.ts`), so mid-session edits are
-  safe; only the switch-away-and-back path is exposed. Accepted rather than adding
-  timestamp comparison.
+- ~~**Pending choices lose to the transcript.** Set an effort → switch sessions →
+  switch back without sending, and the transcript's older value wins.~~ Retracted
+  2026-08-06: the exposure was wider than "switch away and back" — a reload or a
+  second device hit it too, and the reverted value was then written back over the
+  stored choice on the next composer edit. A stored effort now wins.
 - **Untranscripted sessions still use client defaults.** A session with no
   assistant turn yet has no transcript effort, so web (`high`) and iOS (`xhigh`)
   still differ at that moment. Unifying those constants is deliberately out of

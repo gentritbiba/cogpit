@@ -765,6 +765,64 @@ describe("sdk-session effort propagation", () => {
     )
   })
 
+  it("sendSDKMessage applies Max live — applyFlagSettings accepts it session-scoped", async () => {
+    const { createSDKSession, sendSDKMessage } = await loadModule()
+
+    createSDKSession({
+      sessionId: "s4-max",
+      cwd: "/tmp",
+      message: "first",
+      effort: "high",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    sendSDKMessage("s4-max", "follow-up", undefined, { effort: "max" })
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ effortLevel: "max" }),
+    )
+  })
+
+  it("updateSDKSession applies Max live instead of staging it for the next resume", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+
+    createSDKSession({
+      sessionId: "live-max",
+      cwd: "/tmp",
+      message: "first",
+      effort: "high",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    const result = await updateSDKSession("live-max", { effort: "max" })
+
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ effortLevel: "max" }),
+    )
+    expect(result.appliedLive).toContain("effortLevel")
+  })
+
+  it("clears the effort override live when the user picks the provider default", async () => {
+    const { createSDKSession, updateSDKSession } = await loadModule()
+
+    createSDKSession({
+      sessionId: "live-default-effort",
+      cwd: "/tmp",
+      message: "first",
+      effort: "max",
+    })
+    await waitUntil(() => captured.length === 1)
+
+    await updateSDKSession("live-default-effort", { effort: "" })
+
+    expect(applyFlagSettingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ effortLevel: null }),
+    )
+  })
+
   it("sendSDKMessage during a running turn calls setModel when the model changes", async () => {
     const { createSDKSession, sendSDKMessage } = await loadModule()
 
