@@ -1396,6 +1396,161 @@ describe("parseCodexSession", () => {
     })
   })
 
+  it("parses native Codex tool-search call and output records", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.147.0" }),
+      turnContext(),
+      userMessage("find a tool"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "tool_search_call",
+          id: "ts_item_1",
+          call_id: "ts_call_1",
+          status: "completed",
+          execution: "client",
+          arguments: { query: "resource readers" },
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:04.000Z",
+        payload: {
+          type: "tool_search_output",
+          call_id: "ts_call_1",
+          status: "completed",
+          execution: "client",
+          tools: [{ name: "read_mcp_resource" }, { name: "list_mcp_resources" }],
+        },
+      }),
+    ].join("\n")
+
+    expect(parseCodexSession(text).turns[0].toolCalls[0]).toMatchObject({
+      id: "ts_call_1",
+      name: "ToolSearch",
+      input: { query: "resource readers" },
+      result: "Found 2 tools: read_mcp_resource, list_mcp_resources",
+      isError: false,
+    })
+  })
+
+  it("parses MCP completion events that have no response-item pair", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.147.0" }),
+      turnContext(),
+      userMessage("inspect the design"),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "mcp_tool_call_end",
+          call_id: "mcp_call_1",
+          invocation: {
+            server: "figma",
+            tool: "get_metadata",
+            arguments: { nodeId: "12:34" },
+          },
+          result: {
+            Ok: {
+              content: [{ type: "text", text: "Frame metadata" }],
+              isError: false,
+            },
+          },
+        },
+      }),
+    ].join("\n")
+
+    expect(parseCodexSession(text).turns[0].toolCalls[0]).toMatchObject({
+      id: "mcp_call_1",
+      name: "mcp__figma__get_metadata",
+      input: { nodeId: "12:34" },
+      result: "Frame metadata",
+      isError: false,
+    })
+  })
+
+  it("marks failed MCP completion events as errors", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.147.0" }),
+      turnContext(),
+      userMessage("inspect the design"),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "mcp_tool_call_end",
+          call_id: "mcp_call_failed",
+          invocation: { server: "figma", tool: "get_metadata", arguments: {} },
+          result: { Err: "Connection refused" },
+        },
+      }),
+    ].join("\n")
+
+    expect(parseCodexSession(text).turns[0].toolCalls[0]).toMatchObject({
+      result: "Connection refused",
+      isError: true,
+    })
+  })
+
+  it("ignores completed-item records, which only restate what an exec call ran", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.147.0" }),
+      turnContext(),
+      userMessage("run and research"),
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02.000Z",
+        payload: {
+          type: "custom_tool_call",
+          call_id: "exec_call_1",
+          name: "exec",
+          input: 'await tools.exec_command({ cmd: "bun run test" })',
+        },
+      }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "item_completed",
+          item: {
+            type: "CommandExecution",
+            id: "exec-00000000-0000-4000-8000-000000000001",
+            command: ["bun", "run", "test"],
+            cwd: "/workspace",
+            aggregated_output: "3165 passed",
+            status: "completed",
+            exit_code: 0,
+          },
+        },
+      }),
+    ].join("\n")
+
+    const { toolCalls } = parseCodexSession(text).turns[0]
+    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls[0]).toMatchObject({ name: "exec" })
+  })
+
+  it("skips synthesizing an MCP call that already ran inside an exec script", () => {
+    const text = [
+      sessionMeta({ cli_version: "0.147.0" }),
+      turnContext(),
+      userMessage("inspect the design"),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2024-01-01T00:00:03.000Z",
+        payload: {
+          type: "mcp_tool_call_end",
+          call_id: "exec-00000000-0000-4000-8000-000000000002",
+          invocation: { server: "figma", tool: "get_metadata", arguments: {} },
+          result: { Ok: { content: [{ type: "text", text: "Frame metadata" }] } },
+        },
+      }),
+    ].join("\n")
+
+    expect(parseCodexSession(text).turns[0].toolCalls).toEqual([])
+  })
+
   it("handles empty local_images gracefully", () => {
     const text = [sessionMeta(), turnContext(), userMessage("just text", undefined, []), assistantMessage("ok")].join(
       "\n",

@@ -12,6 +12,7 @@ import type { Turn, ToolCall } from "@/lib/types"
 import { truncate } from "@/lib/format"
 import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
 import { getToolColor } from "@/lib/parser"
+import { getToolPresentation, getToolSummary } from "../../../shared/session/toolSummary"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,8 @@ function getToolCallPreview(tc: ToolCall): string {
     return truncate(input.query, 40)
   if (input.url && typeof input.url === "string")
     return truncate(input.url, 40)
-  return ""
+  // Covers Codex exec scripts and MCP calls, whose inputs have no familiar key.
+  return truncate(getToolSummary(tc), 40)
 }
 
 function computeTurnCostShares(turns: Turn[]): number[] {
@@ -50,16 +52,23 @@ interface ToolCallGroup {
   calls: Array<{ tc: ToolCall; turnIndex: number }>
   count: number
   estimatedCost: number
+  styleName: string
 }
 
 function groupToolCalls(turns: Turn[], turnCostShares: number[]): Array<[string, ToolCallGroup]> {
   const groups = new Map<string, ToolCallGroup>()
   for (let i = 0; i < turns.length; i++) {
     for (const tc of turns[i].toolCalls) {
-      if (!groups.has(tc.name)) {
-        groups.set(tc.name, { calls: [], count: 0, estimatedCost: 0 })
+      const presentation = getToolPresentation(tc)
+      if (!groups.has(presentation.label)) {
+        groups.set(presentation.label, {
+          calls: [],
+          count: 0,
+          estimatedCost: 0,
+          styleName: presentation.styleName,
+        })
       }
-      const g = groups.get(tc.name)!
+      const g = groups.get(presentation.label)!
       g.calls.push({ tc, turnIndex: i })
       g.count++
       g.estimatedCost += turnCostShares[i]
@@ -91,7 +100,7 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): Reac
       <div className="max-h-[320px] overflow-y-auto">
         <div className="flex flex-col gap-0.5 pr-2">
           {toolCallGroups.map(([name, group]) => {
-            const colorClass = getToolColor(name)
+            const colorClass = getToolColor(group.styleName)
             return (
               <Collapsible key={name}>
                 <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">

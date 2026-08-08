@@ -2,8 +2,9 @@ import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Turn } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { toolSummary } from "./branchStyles"
+import { toolInputPreview } from "./branchStyles"
 import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
+import { getToolPresentation } from "../../../shared/session/toolSummary"
 
 // ─── Full Turn Card (parsed from JSONL) ───────────────────────
 
@@ -62,17 +63,18 @@ export function FullTurnCard({
             <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 mt-1.5 shrink-0" />
             <div className="flex flex-wrap gap-x-2 gap-y-1">
               {turn.toolCalls.map((tc, i) => {
-                const summary = toolSummary(tc)
+                const presentation = getToolPresentation(tc)
+                const summary = toolInputPreview(tc) || presentation.summary
                 return (
                   <span
                     key={i}
                     className={cn(
                       "font-mono text-[10px]",
-                      getToolTextStyle(tc.name),
+                      getToolTextStyle(presentation.styleName),
                       tc.isError && "text-red-400"
                     )}
                   >
-                    {tc.name}{summary ? ` ${summary}` : ""}
+                    {presentation.label}{summary ? ` ${summary}` : ""}
                   </span>
                 )
               })}

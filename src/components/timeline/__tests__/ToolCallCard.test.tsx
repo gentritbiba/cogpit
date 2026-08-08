@@ -285,6 +285,18 @@ describe("ToolCallCard Bash input rendering", () => {
 })
 
 describe("ToolCallCard Codex exec input rendering", () => {
+  it("shows the semantic operation and target instead of exec source", () => {
+    const script = 'const r = await tools.web__run({ search_query: [{ q: "Codex app-server items" }] }); text(r);'
+    const toolCall = makeToolCall("exec", { raw: script })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByText("Search web")).toBeTruthy()
+    expect(screen.getByText("Codex app-server items")).toBeTruthy()
+    expect(screen.queryByText("exec")).toBeNull()
+    expect(screen.queryByText(/const r = await/)).toBeNull()
+  })
+
   it("renders the raw Codex orchestration as readable code", () => {
     const script = `const r = await tools.exec_command({
   cmd: "npm test",
@@ -316,7 +328,7 @@ text(r.output);`
     render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
 
     expect(screen.getByLabelText("Codex exec script").textContent).toContain("tools.view_image")
-    expect(screen.getByText("View image")).toBeTruthy()
+    expect(screen.getAllByText("View image")).toHaveLength(2)
   })
 })
 

@@ -8,6 +8,7 @@ import type { ActivityItem } from "@/lib/timelineHelpers"
 import type { ActivitySummary } from "@/lib/activitySummary"
 import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
+import { getToolPresentation } from "../../../shared/session/toolSummary"
 
 const THINKING_TEXT_STYLE = "text-violet-400/70"
 
@@ -91,11 +92,14 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   }, [])
 
   const toolCounts = useMemo(() => {
-    const counts: Record<string, number> = {}
+    const counts = new Map<string, { count: number; styleName: string }>()
     for (const tc of toolCalls) {
-      counts[tc.name] = (counts[tc.name] || 0) + 1
+      const { label, styleName } = getToolPresentation(tc)
+      const current = counts.get(label)
+      if (current) current.count++
+      else counts.set(label, { count: 1, styleName })
     }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1])
+    return [...counts].sort((a, b) => b[1].count - a[1].count)
   }, [toolCalls])
 
   const summary = useMemo(
@@ -178,8 +182,8 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
               Thinking{thinkingCount > 1 ? ` ×${thinkingCount}` : ""}
             </span>
           )}
-          {toolCounts.map(([name, count]) => (
-            <span key={name} className={cn("font-mono text-[10px]", getToolTextStyle(name))}>
+          {toolCounts.map(([name, { count, styleName }]) => (
+            <span key={name} className={cn("font-mono text-[10px]", getToolTextStyle(styleName))}>
               {name}
               {count > 1 ? ` ×${count}` : ""}
             </span>

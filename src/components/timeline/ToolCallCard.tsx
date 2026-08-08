@@ -23,7 +23,7 @@ import {
   ReadResultHighlighted,
   tryPrettyJson,
 } from "./ToolCallResult"
-import { getToolSummary } from "../../../shared/session/toolSummary"
+import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
 
 export { getToolSummary }
 
@@ -61,6 +61,10 @@ const TOOL_TEXT_STYLES: Record<string, string> = {
   ExitWorktree: "text-emerald-400/70",
   Skill: "text-indigo-400/80",
   ToolSearch: "text-slate-400/70",
+  TodoWrite: "text-violet-400/70",
+  Mcp: "text-teal-400/70",
+  Image: "text-pink-400/70",
+  exec: "text-slate-400/70",
 }
 
 const DEFAULT_TOOL_TEXT_STYLE = "text-muted-foreground/60"
@@ -153,13 +157,22 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const [mobileExpanded, setMobileExpanded] = useState(false)
   const isHistoricalTool = toolCall.result !== null || !isAgentActive
   const isCompactMobile = isMobile && isHistoricalTool && !expandAll && !mobileExpanded
-  const displayName = isMobile ? (MOBILE_TOOL_LABELS[toolCall.name] ?? toolCall.name) : toolCall.name
+  const presentation = useMemo(() => getToolPresentation(toolCall), [toolCall])
+  const isCodexExec = isCodexExecCall(toolCall)
+  // Abbreviate only when the presentation kept the raw tool name. A derived
+  // label is already short and more accurate than the mobile stand-in.
+  const displayName = isMobile && presentation.label === toolCall.name
+    ? MOBILE_TOOL_LABELS[toolCall.name] ?? toolCall.name
+    : presentation.label
+  const nameTitle = presentation.label === toolCall.name
+    ? toolCall.name
+    : `${presentation.label} (${toolCall.name})`
 
   const showInput = expandAll || inputOpen
   const showResult = expandAll || resultOpen
   const showDiff = expandAll || diffOpen
 
-  const summary = getToolSummary(toolCall)
+  const summary = presentation.summary
   const skillMeta = toolCall.name === "Skill" && skillMetadata
     ? skillMetadata.get(summary) ?? null
     : null
@@ -216,8 +229,8 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
-              className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(toolCall.name))}
-              title={toolCall.name}
+              className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(presentation.styleName))}
+              title={nameTitle}
             >
               {displayName}
             </span>
@@ -237,9 +250,9 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             className={cn(
               "shrink-0 font-mono",
               isMobile ? "text-[10px]" : "text-[11px]",
-              getToolTextStyle(toolCall.name)
+              getToolTextStyle(presentation.styleName)
             )}
-            title={toolCall.name}
+            title={nameTitle}
           >
             {displayName}
           </span>
@@ -326,7 +339,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       {showInput && (
         toolCall.name === "Bash" && (typeof toolCall.input.command === "string" || typeof toolCall.input.cmd === "string") ? (
           <BashToolInput input={toolCall.input} />
-        ) : (toolCall.name === "exec" || /(?:^|__|[.:/])exec$/.test(toolCall.name)) && typeof toolCall.input.raw === "string" ? (
+        ) : isCodexExec ? (
           <CodexExecToolInput input={toolCall.input} />
         ) : (
           <JsonResultHighlighted

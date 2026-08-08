@@ -207,6 +207,12 @@ const TOOL_COLORS: Record<string, string> = {
   EnterPlanMode: "text-purple-400",
   ExitPlanMode: "text-purple-400",
   AskUserQuestion: "text-pink-400",
+  TodoWrite: "text-violet-400",
+  ToolSearch: "text-slate-400",
+  Skill: "text-indigo-400",
+  Mcp: "text-teal-400",
+  Image: "text-pink-400",
+  exec: "text-slate-400",
 }
 
 export function getToolColor(toolName: string): string {

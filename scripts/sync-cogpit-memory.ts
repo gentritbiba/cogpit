@@ -16,6 +16,7 @@ const FILES = [
   "parser.ts",
   "codex.ts",
   "codex-patches.ts",
+  "codex-exec.ts",
   "codex-tool-normalization.ts",
   "turnBuilder.ts",
   "types.ts",

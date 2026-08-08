@@ -5,7 +5,13 @@ import type { ToolCall as ParsedToolCall } from "@/lib/types"
 export const BRANCH_COLORS = ["#3b82f6", "#a855f7", "#f59e0b", "#06b6d4", "#ec4899", "#22c55e"]
 export const BRANCH_INNER = ["#60a5fa", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#4ade80"]
 
-export function toolSummary(tc: ParsedToolCall): string {
+/**
+ * Compact preview for tools that carry a familiar input key.
+ *
+ * Preferred over the shared presentation summary, which spells paths out in
+ * full; callers fall back to that summary when this returns "".
+ */
+export function toolInputPreview(tc: ParsedToolCall): string {
   const fp = (tc.input.file_path ?? tc.input.path ?? "") as string
   if (fp) return fp.split("/").pop() || fp
   const cmd = tc.input.command as string | undefined

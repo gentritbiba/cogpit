@@ -365,6 +365,39 @@ function parseToolInput(argumentsText: unknown): Record<string, unknown> {
   }
 }
 
+function safeStringify(value: unknown): string {
+  if (typeof value === "string") return value
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value ?? "")
+  }
+}
+
+function findString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string")
+}
+
+/** Code mode nests operations inside an `exec` script, which renders them itself. */
+function isCodeModeChild(callId: string): boolean {
+  return callId.startsWith("exec-")
+}
+
+function parseMcpEventResult(value: unknown): { text: string; isError: boolean } {
+  if (!isObject(value)) return { text: safeStringify(value), isError: false }
+  if ("Err" in value) return { text: safeStringify(value.Err), isError: true }
+  const ok = isObject(value.Ok) ? value.Ok : null
+  if (!ok) return { text: safeStringify(value), isError: false }
+
+  const parsedContent = parseCustomToolOutput(ok.content)
+  const text = parsedContent.text
+    || (ok.structuredContent !== undefined ? safeStringify(ok.structuredContent) : safeStringify(ok))
+  return {
+    text,
+    isError: ok.isError === true || parsedContent.isError,
+  }
+}
+
 function createTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
   return {
     id: turnId || randomTurnId("codex-turn"),
@@ -721,6 +754,35 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
 
     if (
       record.type === "event_msg"
+      && payload?.type === "mcp_tool_call_end"
+      && typeof payload.call_id === "string"
+      && isObject(payload.invocation)
+    ) {
+      const invocation = payload.invocation
+      const server = typeof invocation.server === "string" ? invocation.server : "mcp"
+      const tool = typeof invocation.tool === "string" ? invocation.tool : "tool"
+      const input = isObject(invocation.arguments) ? invocation.arguments : {}
+      const result = parseMcpEventResult(payload.result)
+      const existing = pendingToolCalls.get(payload.call_id)
+      if (existing) {
+        existing.result = result.text
+        existing.isError = result.isError
+        pendingToolCalls.delete(payload.call_id)
+      } else if (!isCodeModeChild(payload.call_id)) {
+        appendToolCall(current, {
+          id: payload.call_id,
+          name: `mcp__${server}__${tool}`,
+          input,
+          result: result.text,
+          isError: result.isError,
+          timestamp,
+        }, timestamp)
+      }
+      continue
+    }
+
+    if (
+      record.type === "event_msg"
       && payload?.type === "sub_agent_activity"
       && typeof payload.agent_thread_id === "string"
       && typeof payload.agent_path === "string"
@@ -795,6 +857,40 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       if (isObject(payload.action)) input.action = payload.action
       const status = typeof payload.status === "string" ? payload.status : "completed"
       upsertWebSearchCall(current, payload.id, input, status, timestamp)
+      continue
+    }
+
+    if (payload.type === "tool_search_call") {
+      const callId = findString(payload.call_id, payload.id) ?? ""
+      if (callId) {
+        const toolCall: ToolCall = {
+          id: callId,
+          name: "ToolSearch",
+          input: isObject(payload.arguments) ? payload.arguments : {},
+          result: null,
+          isError: false,
+          timestamp,
+        }
+        pendingToolCalls.set(callId, toolCall)
+        appendToolCall(current, toolCall, timestamp)
+      }
+      continue
+    }
+
+    if (payload.type === "tool_search_output" && typeof payload.call_id === "string") {
+      const toolCall = pendingToolCalls.get(payload.call_id)
+      if (toolCall) {
+        const tools = Array.isArray(payload.tools) ? payload.tools : []
+        const names = tools
+          .filter(isObject)
+          .map((tool) => findString(tool.name) ?? "")
+          .filter(Boolean)
+        const count = names.length > 0 ? names.length : tools.length
+        const found = `Found ${count} tool${count === 1 ? "" : "s"}`
+        toolCall.result = names.length > 0 ? `${found}: ${names.join(", ")}` : found
+        toolCall.isError = payload.status === "failed"
+        pendingToolCalls.delete(payload.call_id)
+      }
       continue
     }
 
