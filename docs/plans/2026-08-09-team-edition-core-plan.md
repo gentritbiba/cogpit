@@ -192,6 +192,7 @@ export function getRequestPrincipal(req: IncomingMessage): SessionPrincipal | nu
 - `SessionPrincipal` + `SESSION_ABSOLUTE_TTL_MS` live in `server/team/constants.ts` (the plan's constants-module option) and are re-exported from security.ts; `requestPrincipal.ts`/`sessionPersistence.ts` import the type from there, not from `../security` as sketched — the sketch would cycle at Task 6.
 - sessionPersistence removals mutate the in-memory rows synchronously with only the file write queued: a queued removal let `validateSessionToken` rehydrate a just-revoked session from the still-present row (caught by the revokeSessionsForUser test).
 - Added test hooks `__resetSessionsForTest` (security.ts, in-memory map only) and `__flushForTest` (sessionPersistence) for the restart simulation.
+- Review follow-up (fix(team): propagate live session invalidations to persistence): every live-process invalidation — idle/absolute expiry in `getLiveSession`, UA-mismatch in `validateSessionToken`, the 60s sweeper, and explicit revocation — discards the persisted row too, via a private `discardSession` in security.ts. Persisted rows exist solely so sessions survive process death; a session invalidated while the process is alive stays invalid across restarts. Restart tests now also do a true disk round-trip (reset both modules' state, re-init from the file) plus a prune-on-load test.
 
 ---
 

@@ -27,7 +27,7 @@ const FORWARDING_HEADERS = [
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 const BROWSER_SESSION_COOKIE = "__Host-cogpit_session"
-const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
+export const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
 
 // Defined in ./team/constants so the team modules can share them without
 // importing this file back (security.ts imports them — the reverse edge
@@ -238,17 +238,33 @@ interface SessionInfo {
 
 const activeSessions = new Map<string, SessionInfo>()
 
+function logPersistenceFailure(error: unknown): void {
+  console.error("[team-sessions] Failed to write the persisted session store:", error)
+}
+
+/**
+ * A live-process invalidation (idle/absolute expiry, UA mismatch, revocation,
+ * sweep) must also drop the persisted row, or the team-edition restore path
+ * would resurrect the session the next time the token is presented. Only
+ * process death skips this — which is exactly what leaves not-yet-expired
+ * sessions restorable after a restart.
+ */
+function discardSession(token: string): void {
+  activeSessions.delete(token)
+  if (isTeamEdition()) void removeSession(token).catch(logPersistenceFailure)
+}
+
 export function createSessionToken(ip: string, userAgent?: string, principal?: SessionPrincipal): string {
   const token = randomBytes(32).toString("hex")
   const now = Date.now()
   activeSessions.set(token, { createdAt: now, ip, userAgent: userAgent || "", lastActivity: now, principal })
   if (principal && isTeamEdition()) {
-    void persistSession(token, principal, now).catch(() => {})
+    void persistSession(token, principal, now).catch(logPersistenceFailure)
   }
   return token
 }
 
-/** The live in-memory session for a token, or null once expired (expiry deletes it). */
+/** The live in-memory session for a token, or null once expired (expiry discards it). */
 function getLiveSession(token: string): SessionInfo | null {
   const session = activeSessions.get(token)
   if (!session) return null
@@ -257,7 +273,7 @@ function getLiveSession(token: string): SessionInfo | null {
     now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
     || now - session.lastActivity > SESSION_IDLE_TTL_MS
   ) {
-    activeSessions.delete(token)
+    discardSession(token)
     return null
   }
   return session
@@ -293,7 +309,7 @@ export function validateSessionToken(token: string, userAgent?: string): boolean
     ?? (isTeamEdition() ? restorePersistedSession(token, userAgent) : null)
   if (!session) return false
   if (userAgent !== undefined && session.userAgent !== userAgent) {
-    activeSessions.delete(token)
+    discardSession(token)
     return false
   }
   session.lastActivity = Date.now()
@@ -306,20 +322,19 @@ export function getSessionPrincipal(token: string): SessionPrincipal | null {
 }
 
 export function revokeSessionToken(token: string): void {
-  activeSessions.delete(token)
-  if (isTeamEdition()) void removeSession(token).catch(() => {})
+  discardSession(token)
 }
 
 export function revokeAllSessions(): void {
   activeSessions.clear()
-  if (isTeamEdition()) void clearAllSessions().catch(() => {})
+  if (isTeamEdition()) void clearAllSessions().catch(logPersistenceFailure)
 }
 
 export function revokeSessionsForUser(userId: string): void {
   for (const [token, session] of activeSessions) {
     if (session.principal?.userId === userId) activeSessions.delete(token)
   }
-  if (isTeamEdition()) void removeSessionsForUser(userId).catch(() => {})
+  if (isTeamEdition()) void removeSessionsForUser(userId).catch(logPersistenceFailure)
 }
 
 /** Clears only the in-memory session map — simulates a process restart in tests. */
@@ -368,7 +383,7 @@ setInterval(() => {
     if (
       now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
       || now - session.lastActivity > SESSION_IDLE_TTL_MS
-    ) activeSessions.delete(token)
+    ) discardSession(token)
   }
 }, 60_000).unref()
 

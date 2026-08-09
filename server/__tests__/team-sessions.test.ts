@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import type { IncomingMessage } from "node:http"
 import { createHash } from "node:crypto"
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -14,6 +14,7 @@ import {
   revokeAllSessions,
   revokeSessionsForUser,
   SESSION_ABSOLUTE_TTL_MS,
+  SESSION_IDLE_TTL_MS,
   __resetSessionsForTest,
   type SessionPrincipal,
 } from "../security"
@@ -60,10 +61,22 @@ async function createPrincipal(
   return { userId: user.id, username: user.username, role: user.role }
 }
 
+function sha256(token: string): string {
+  return createHash("sha256").update(token).digest("hex")
+}
+
 /** Wait for fire-and-forget persistence writes, then wipe only the in-memory map. */
 async function simulateRestart(): Promise<void> {
   await __flushForTest()
   __resetSessionsForTest()
+}
+
+/** True restart: flush writes, drop BOTH modules' state, reload rows from the file. */
+async function simulateFullRestart(): Promise<void> {
+  await __flushForTest()
+  __resetSessionsForTest()
+  __resetForTest()
+  await initSessionPersistence(teamDir)
 }
 
 beforeEach(async () => {
@@ -199,6 +212,101 @@ describe("restart survival (team edition)", () => {
     vi.advanceTimersByTime(2)
     expect(validateSessionToken(token, UA)).toBe(false)
   })
+
+  it("restores from the sessions file itself after a true restart of both modules", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+    const token = createSessionToken("127.0.0.1", UA, principal)
+
+    await simulateFullRestart()
+    expect(getSessionPrincipal(token)).toBeNull()
+
+    expect(validateSessionToken(token, UA)).toBe(true)
+    expect(getSessionPrincipal(token)).toEqual(principal)
+  })
+})
+
+// ── Live invalidation propagation ───────────────────────────────────────
+
+describe("live invalidation propagation (team edition)", () => {
+  it("does not resurrect an idle-expired session from persistence", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+
+    vi.useFakeTimers()
+    const token = createSessionToken("127.0.0.1", UA, principal)
+
+    vi.advanceTimersByTime(SESSION_IDLE_TTL_MS + 1)
+    expect(validateSessionToken(token, UA)).toBe(false)
+    // The idle logout must stick: the persisted row goes with the live
+    // session, so the restore path cannot revive it for the 8h window.
+    expect(validateSessionToken(token, UA)).toBe(false)
+  })
+
+  it("removes the persisted row when a user-agent mismatch invalidates the session", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+    const token = createSessionToken("127.0.0.1", UA, principal)
+    await __flushForTest()
+
+    expect(validateSessionToken(token, "Attacker/1")).toBe(false)
+    // Even the original user agent cannot restore it — the row is gone.
+    expect(validateSessionToken(token, UA)).toBe(false)
+
+    await __flushForTest()
+    const raw = await readFile(join(teamDir, "sessions.json"), "utf-8")
+    expect(raw).not.toContain(sha256(token))
+  })
+})
+
+// ── Load-time pruning ───────────────────────────────────────────────────
+
+describe("load-time pruning (team edition)", () => {
+  it("restores live rows from the file and drops expired ones", async () => {
+    enterTeamEdition()
+    await initUsersStore(teamDir)
+    const principal = await createPrincipal("alice", "admin")
+
+    const liveToken = "live-token"
+    const expiredToken = "expired-token"
+    const now = Date.now()
+    await writeFile(
+      join(teamDir, "sessions.json"),
+      JSON.stringify({
+        sessions: [
+          {
+            tokenHash: sha256(liveToken),
+            userId: principal.userId,
+            createdAt: now,
+            expiresAt: now + SESSION_ABSOLUTE_TTL_MS,
+          },
+          {
+            tokenHash: sha256(expiredToken),
+            userId: principal.userId,
+            createdAt: now - SESSION_ABSOLUTE_TTL_MS - 1000,
+            expiresAt: now - 1000,
+          },
+        ],
+      }),
+    )
+
+    await initSessionPersistence(teamDir)
+
+    expect(validateSessionToken(liveToken, UA)).toBe(true)
+    expect(getSessionPrincipal(liveToken)).toEqual(principal)
+    expect(validateSessionToken(expiredToken, UA)).toBe(false)
+
+    // The expired row is pruned from the loaded state, not merely rejected
+    // at validate time: the next durable write drops it from the file.
+    createSessionToken("127.0.0.1", UA, principal)
+    await __flushForTest()
+    const raw = await readFile(join(teamDir, "sessions.json"), "utf-8")
+    expect(raw).toContain(sha256(liveToken))
+    expect(raw).not.toContain(sha256(expiredToken))
+  })
 })
 
 // ── Revocation ──────────────────────────────────────────────────────────
@@ -265,7 +373,7 @@ describe("on-disk format (team edition)", () => {
     const parsed = JSON.parse(raw)
     expect(parsed.sessions).toHaveLength(1)
     const row = parsed.sessions[0]
-    expect(row.tokenHash).toBe(createHash("sha256").update(token).digest("hex"))
+    expect(row.tokenHash).toBe(sha256(token))
     expect(row.userId).toBe(principal.userId)
     expect(row.expiresAt).toBe(row.createdAt + SESSION_ABSOLUTE_TTL_MS)
   })

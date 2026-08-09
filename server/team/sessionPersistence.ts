@@ -129,6 +129,10 @@ export async function initSessionPersistence(dir: string): Promise<void> {
 
 // ── Operations ───────────────────────────────────────────────────────
 
+// Init ordering: initSessionPersistence's queued load replaces the row map
+// wholesale, so a row persisted while that load is still pending would be
+// silently dropped (and before init there is no sessionsPath to write to).
+// Server boot awaits init before any login can create sessions.
 export function persistSession(
   token: string,
   principal: SessionPrincipal,
