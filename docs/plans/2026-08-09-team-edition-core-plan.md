@@ -187,6 +187,12 @@ export function getRequestPrincipal(req: IncomingMessage): SessionPrincipal | nu
 
 **Import-cycle guard:** `security.ts` → `team/sessionPersistence.ts` → must NOT import `security.ts` back (take TTL as an argument or a re-exported constant module `server/team/constants.ts` if needed). `bun run check:architecture` must stay green.
 
+**Status: DONE.** Deviations, all cycle-guard or race driven:
+- `validatePasswordStrength`/`MIN_PASSWORD_LENGTH` moved to `password-utils.ts` (security.ts re-exports both unchanged) — `team/users.ts` importing security.ts would have closed a cycle once security.ts imported `team/users.ts` for rehydrate.
+- `SessionPrincipal` + `SESSION_ABSOLUTE_TTL_MS` live in `server/team/constants.ts` (the plan's constants-module option) and are re-exported from security.ts; `requestPrincipal.ts`/`sessionPersistence.ts` import the type from there, not from `../security` as sketched — the sketch would cycle at Task 6.
+- sessionPersistence removals mutate the in-memory rows synchronously with only the file write queued: a queued removal let `validateSessionToken` rehydrate a just-revoked session from the still-present row (caught by the revokeSessionsForUser test).
+- Added test hooks `__resetSessionsForTest` (security.ts, in-memory map only) and `__flushForTest` (sessionPersistence) for the restart simulation.
+
 ---
 
 ### Task 6: Team-edition auth middleware behavior

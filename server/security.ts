@@ -2,6 +2,16 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
 import type { NextFn } from "./http"
+import { SESSION_ABSOLUTE_TTL_MS, type SessionPrincipal } from "./team/constants"
+import { isTeamEdition } from "./team/edition"
+import {
+  clearAllSessions,
+  persistSession,
+  removeSession,
+  removeSessionsForUser,
+  restoreSession,
+} from "./team/sessionPersistence"
+import { getUserById } from "./team/users"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -16,8 +26,13 @@ const FORWARDING_HEADERS = [
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 const BROWSER_SESSION_COOKIE = "__Host-cogpit_session"
-const SESSION_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000
 const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
+
+// Defined in ./team/constants so the team modules can share them without
+// importing this file back (security.ts imports them — the reverse edge
+// would be an import cycle). This module stays their public home.
+export { SESSION_ABSOLUTE_TTL_MS }
+export type { SessionPrincipal }
 
 export function isLocalRequest(req: IncomingMessage): boolean {
   return LOCAL_ADDRS.has(req.socket.remoteAddress || "")
@@ -195,38 +210,97 @@ interface SessionInfo {
   ip: string
   userAgent: string
   lastActivity: number
+  principal?: SessionPrincipal
 }
 
 const activeSessions = new Map<string, SessionInfo>()
 
-export function createSessionToken(ip: string, userAgent?: string): string {
+export function createSessionToken(ip: string, userAgent?: string, principal?: SessionPrincipal): string {
   const token = randomBytes(32).toString("hex")
   const now = Date.now()
-  activeSessions.set(token, { createdAt: now, ip, userAgent: userAgent || "", lastActivity: now })
+  activeSessions.set(token, { createdAt: now, ip, userAgent: userAgent || "", lastActivity: now, principal })
+  if (principal && isTeamEdition()) {
+    void persistSession(token, principal, now).catch(() => {})
+  }
   return token
 }
 
-export function validateSessionToken(token: string, userAgent?: string): boolean {
+/** The live in-memory session for a token, or null once expired (expiry deletes it). */
+function getLiveSession(token: string): SessionInfo | null {
   const session = activeSessions.get(token)
-  if (!session) return false
+  if (!session) return null
   const now = Date.now()
   if (
     now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
     || now - session.lastActivity > SESSION_IDLE_TTL_MS
-    || (userAgent !== undefined && session.userAgent !== userAgent)
   ) {
+    activeSessions.delete(token)
+    return null
+  }
+  return session
+}
+
+/**
+ * Rehydrate a persisted team-edition session after a restart. Username and
+ * role are re-read from the users store so role changes apply and disabled
+ * users stay out; the original createdAt is kept so the absolute TTL spans
+ * restarts. The presenting request's user agent becomes the pinned one — the
+ * original was never persisted.
+ */
+function restorePersistedSession(token: string, userAgent: string | undefined): SessionInfo | null {
+  const restored = restoreSession(token)
+  if (!restored) return null
+  const now = Date.now()
+  if (now - restored.createdAt > SESSION_ABSOLUTE_TTL_MS) return null
+  const user = getUserById(restored.userId)
+  if (!user || user.disabled) return null
+  const session: SessionInfo = {
+    createdAt: restored.createdAt,
+    ip: "",
+    userAgent: userAgent ?? "",
+    lastActivity: now,
+    principal: { userId: user.id, username: user.username, role: user.role },
+  }
+  activeSessions.set(token, session)
+  return session
+}
+
+export function validateSessionToken(token: string, userAgent?: string): boolean {
+  const session = getLiveSession(token)
+    ?? (isTeamEdition() ? restorePersistedSession(token, userAgent) : null)
+  if (!session) return false
+  if (userAgent !== undefined && session.userAgent !== userAgent) {
     activeSessions.delete(token)
     return false
   }
-  session.lastActivity = now
+  session.lastActivity = Date.now()
   return true
+}
+
+/** Principal of a currently valid session; does not refresh lastActivity. */
+export function getSessionPrincipal(token: string): SessionPrincipal | null {
+  return getLiveSession(token)?.principal ?? null
 }
 
 export function revokeSessionToken(token: string): void {
   activeSessions.delete(token)
+  if (isTeamEdition()) void removeSession(token).catch(() => {})
 }
 
 export function revokeAllSessions(): void {
+  activeSessions.clear()
+  if (isTeamEdition()) void clearAllSessions().catch(() => {})
+}
+
+export function revokeSessionsForUser(userId: string): void {
+  for (const [token, session] of activeSessions) {
+    if (session.principal?.userId === userId) activeSessions.delete(token)
+  }
+  if (isTeamEdition()) void removeSessionsForUser(userId).catch(() => {})
+}
+
+/** Clears only the in-memory session map — simulates a process restart in tests. */
+export function __resetSessionsForTest(): void {
   activeSessions.clear()
 }
 
@@ -281,21 +355,12 @@ export {
   hashPassword,
   isMalformedPasswordHash,
   isPasswordHashed,
+  MIN_PASSWORD_LENGTH,
   needsPasswordRehash,
+  validatePasswordStrength,
   verifyPassword,
   verifyPasswordAsync,
 } from "./password-utils"
-
-// ── Password validation ─────────────────────────────────────────────
-
-export const MIN_PASSWORD_LENGTH = 16
-
-export function validatePasswordStrength(password: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
-  }
-  return null
-}
 
 // ── Security headers middleware ──────────────────────────────────────
 

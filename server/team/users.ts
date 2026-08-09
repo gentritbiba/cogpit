@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
-import { hashPassword, validatePasswordStrength } from "../security"
+import { hashPassword, validatePasswordStrength } from "../password-utils"
 import type { TeamRole, TeamUserPublic } from "../../shared/contracts/team"
 
 /**
