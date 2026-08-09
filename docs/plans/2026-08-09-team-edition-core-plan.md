@@ -304,6 +304,8 @@ export function teamAuthzMiddleware(req, res, next) {
 
 **Steps:** failing tests (JSON login ok → cookie for browser client over HTTPS-forwarded request; Bearer `user:pass` ok → token in body; bad password → 401; unknown user → 401 (and both take the scrypt path — assert via timing is flaky, instead assert `verifyPasswordAsync` called via spy or accept behavioral-only); disabled → 403; bare Bearer password (no colon) → 401 in team edition; local request without credentials → 401 in team edition; rate limit still applies) → implement → green → commit `feat(team): username login flow`.
 
+**Status: DONE.** Deviations: `DUMMY_HASH` is a module-scope cell computed lazily on the first unknown-user login — hashing at import time would tax every boot, personal edition included; `verifyRemotePassword` is reused unrenamed (it is already generic over password+stored). The cookie/token fork is extracted as exported `issueSessionResponse` ahead of Task 9's bootstrap reuse. Review hardening rode along: a pin test proving POST `/api/config` cannot inject `edition` into a config that has none.
+
 ---
 
 ### Task 9: `/api/me` + team management routes

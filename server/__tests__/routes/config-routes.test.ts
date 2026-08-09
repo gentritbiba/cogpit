@@ -651,6 +651,26 @@ describe("config routes", () => {
       }))
     })
 
+    it("never adopts a client-supplied edition (file/env only)", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const body = JSON.stringify({ claudeDir: "/home/.claude", edition: "team" })
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      mockedValidateClaudeDir.mockResolvedValueOnce({
+        valid: true, resolved: "/home/.claude",
+      })
+      mockedGetConfig.mockReturnValueOnce({ claudeDir: "/home/.claude" })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => {
+        expect(res.end).toHaveBeenCalled()
+      })
+      expect(mockedSaveConfig).toHaveBeenCalledOnce()
+      expect(mockedSaveConfig.mock.calls[0][0].edition).toBeUndefined()
+    })
+
     it("returns 400 for weak password", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({

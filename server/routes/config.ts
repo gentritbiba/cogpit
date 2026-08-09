@@ -1,4 +1,5 @@
-import type { UseFn } from "../http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { readJsonBody, type UseFn } from "../http"
 import {
   refreshDirs,
   isTrustedDirectLocalRequest,
@@ -17,6 +18,9 @@ import {
   revokeAllSessions,
   getConnectedDevices,
 } from "../helpers"
+import type { SessionPrincipal } from "../security"
+import { isTeamEdition } from "../team/edition"
+import { getUserByUsername } from "../team/users"
 import { getConfig, saveConfig, validateClaudeDir } from "../config"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
@@ -35,6 +39,116 @@ async function verifyRemotePassword(
   } finally {
     activePasswordVerifications -= 1
   }
+}
+
+// Logins for unknown users verify against this hash so both outcomes cost one
+// scrypt derivation and response timing cannot enumerate usernames. Computed on
+// first use: hashing at import time would tax every boot, including personal
+// edition, which never reaches this path.
+let dummyHash: string | null = null
+
+function getDummyHash(): string {
+  dummyHash ??= hashPassword("cogpit-dummy-timing-pad")
+  return dummyHash
+}
+
+/**
+ * Session issuance shared by password login and the first-admin bootstrap.
+ * Browser clients get the HttpOnly cookie and never see the token body;
+ * machine clients keep the documented bearer-token contract.
+ */
+export function issueSessionResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  browserLogin: boolean,
+  principal?: SessionPrincipal,
+): void {
+  const sessionToken = createSessionToken(
+    req.socket.remoteAddress || "unknown",
+    req.headers["user-agent"],
+    principal,
+  )
+  res.setHeader("Content-Type", "application/json")
+  if (browserLogin) {
+    setBrowserSessionCookie(res, sessionToken)
+    res.end(JSON.stringify({ valid: true }))
+  } else {
+    res.end(JSON.stringify({ valid: true, token: sessionToken }))
+  }
+}
+
+/**
+ * Team edition authenticates a named user instead of the shared network
+ * password; the networkAccess config gate is irrelevant here. Credentials
+ * arrive either as `Authorization: Bearer user:pass` (machine clients) or as
+ * a `{ username, password }` JSON body (the login form).
+ */
+async function handleTeamLogin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  browserLogin: boolean,
+): Promise<void> {
+  const authHeader = req.headers.authorization
+  let username: unknown
+  let password: unknown
+  if (authHeader?.startsWith("Bearer ")) {
+    const credentials = authHeader.slice(7)
+    const separator = credentials.indexOf(":")
+    if (separator === -1) {
+      res.statusCode = 401
+      res.end(JSON.stringify({ valid: false, error: "Username required" }))
+      return
+    }
+    username = credentials.slice(0, separator)
+    password = credentials.slice(separator + 1)
+  } else {
+    let body: { username?: unknown; password?: unknown }
+    try {
+      body = await readJsonBody<{ username?: unknown; password?: unknown }>(req, { allowEmpty: true })
+    } catch {
+      res.statusCode = 400
+      res.end(JSON.stringify({ valid: false, error: "Invalid request body" }))
+      return
+    }
+    username = body.username
+    password = body.password
+  }
+
+  if (typeof username !== "string" || !username.trim()) {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Username required" }))
+    return
+  }
+  if (typeof password !== "string" || !password) {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Password required" }))
+    return
+  }
+
+  const user = getUserByUsername(username)
+  const verification = await verifyRemotePassword(password, user?.passwordHash ?? getDummyHash())
+  if (verification === "busy") {
+    res.statusCode = 429
+    res.end(JSON.stringify({ valid: false, error: "Authentication is busy. Try again shortly." }))
+    return
+  }
+  if (!user || verification === "invalid") {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Invalid credentials" }))
+    return
+  }
+  // Checked only after password proof, so bad guesses cannot probe status.
+  if (user.disabled) {
+    res.statusCode = 403
+    res.end(JSON.stringify({ valid: false, error: "Account disabled" }))
+    return
+  }
+
+  issueSessionResponse(req, res, browserLogin, {
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+  })
 }
 
 function getLanIp(): string | null {
@@ -78,7 +192,8 @@ export function registerConfigRoutes(use: UseFn) {
 
     // Direct local clients do not need a network password. Requests forwarded
     // by a loopback reverse proxy remain remote and must authenticate below.
-    if (isTrustedDirectLocalRequest(req)) {
+    // Team edition never grants local trust — every login names a user.
+    if (!isTeamEdition() && isTrustedDirectLocalRequest(req)) {
       res.end(JSON.stringify({ valid: true }))
       return
     }
@@ -103,6 +218,11 @@ export function registerConfigRoutes(use: UseFn) {
     if (isRateLimited(req)) {
       res.statusCode = 429
       res.end(JSON.stringify({ valid: false, error: "Too many attempts. Try again in 1 minute." }))
+      return
+    }
+
+    if (isTeamEdition()) {
+      await handleTeamLogin(req, res, browserLogin)
       return
     }
 
