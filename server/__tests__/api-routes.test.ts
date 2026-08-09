@@ -19,6 +19,7 @@ const CANONICAL_ROUTE_IDS = [
   "hub",
   "performance",
   "config",
+  "team-admin",
   "projects",
   "claude",
   "claude-new",

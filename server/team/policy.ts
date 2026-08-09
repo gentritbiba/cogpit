@@ -42,6 +42,14 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
       "/api/connected-devices",
     ),
   ],
+  // Longest prefix puts bootstrap above the /api/team/ admin catch-all; the
+  // "public" is inert protection — authMiddleware already gates bootstrap by
+  // the zero-users window, authz just must not demand a principal for it.
+  "team-admin": [
+    { prefix: "/api/me", requires: "authed" },
+    { prefix: "/api/team/bootstrap", requires: "public" },
+    { prefix: "/api/team/", requires: "admin" },
+  ],
   projects: authed(
     "/api/projects",
     "/api/codex-subagents",

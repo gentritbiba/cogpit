@@ -41,8 +41,14 @@ export function sessionApiPlugin(): Plugin {
       // Guard middleware: block data APIs when not configured
       server.middlewares.use((req, res, next) => {
         const url = req.url || ""
-        // Allow config endpoints through without guard
-        if (url.startsWith("/api/config") || url.startsWith("/api/notify") || url.startsWith("/api/hello")) return next()
+        // Allow config/identity/bootstrap endpoints through without guard
+        if (
+          url.startsWith("/api/config")
+          || url.startsWith("/api/notify")
+          || url.startsWith("/api/hello")
+          || url.startsWith("/api/me")
+          || url.startsWith("/api/team/bootstrap")
+        ) return next()
         // Allow non-API requests through (HTML, JS, CSS)
         if (!url.startsWith("/api/")) return next()
         // Block data APIs when not configured

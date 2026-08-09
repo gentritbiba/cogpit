@@ -352,6 +352,7 @@ export {
   validateSessionToken,
   revokeSessionToken,
   revokeAllSessions,
+  revokeSessionsForUser,
   getConnectedDevices,
   hashPassword,
   isPasswordHashed,

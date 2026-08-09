@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
-import { hashPassword, validatePasswordStrength } from "../password-utils"
+import { hashPassword, isPasswordHashed, validatePasswordStrength } from "../password-utils"
 import type { TeamRole, TeamUserPublic } from "../../shared/contracts/team"
 
 /**
@@ -36,6 +36,7 @@ export interface CreateUserInput {
 
 // Also excludes ":" — usernames travel as `user:pass` Bearer credentials.
 const USERNAME_PATTERN = /^[a-z0-9._-]{2,32}$/
+const MAX_DISPLAY_NAME_LENGTH = 64
 
 // ── Module state ─────────────────────────────────────────────────────
 
@@ -81,6 +82,9 @@ function commitUserMutation<T>(
   mutate: (draft: Map<string, TeamUser>) => UserMutation<T>,
 ): Promise<T> {
   return enqueueUsersOperation(async () => {
+    // Never mutate memory-only: without a store path the change could not
+    // persist and would silently vanish on restart.
+    if (!usersPath) throw new Error("Users store is not initialized")
     // Clone records as well as the map so an existing user reference cannot
     // change the candidate while its atomic write is in flight.
     const draft = new Map(
@@ -94,6 +98,23 @@ function commitUserMutation<T>(
     replaceUsers(draft)
     return mutation.value
   })
+}
+
+/**
+ * A record whose identity fields or password hash cannot be trusted must fail
+ * the whole load, exactly like an unparseable file: dropping it would shrink
+ * the store and could reopen the unauthenticated first-admin bootstrap, and an
+ * unhashed passwordHash would let a tampered file plant plaintext credentials.
+ */
+function isValidStoredUser(user: unknown): user is TeamUser {
+  if (typeof user !== "object" || user === null) return false
+  const candidate = user as Partial<TeamUser>
+  return (
+    typeof candidate.id === "string" && candidate.id.length > 0
+    && typeof candidate.username === "string" && candidate.username.length > 0
+    && typeof candidate.passwordHash === "string"
+    && isPasswordHashed(candidate.passwordHash)
+  )
 }
 
 /**
@@ -124,7 +145,10 @@ export async function initUsersStore(dir: string): Promise<void> {
       if (!parsed || !Array.isArray(parsed.users)) {
         throw new Error("Malformed team users store")
       }
-      for (const user of parsed.users as TeamUser[]) loaded.set(user.id, user)
+      for (const user of parsed.users) {
+        if (!isValidStoredUser(user)) throw new Error("Malformed team users store")
+        loaded.set(user.id, user)
+      }
     }
 
     usersPath = nextPath
@@ -147,14 +171,26 @@ export function isUsersStoreInitialized(): boolean {
   return usersPath !== null
 }
 
+/**
+ * Allow-list projection to exactly the TeamUserPublic fields. Unlike a
+ * block-list destructure, a secret added to the record later — or an unknown
+ * key smuggled in via the loaded file — can never reach an API response.
+ */
+export function toPublicUser(user: TeamUser): TeamUserPublic {
+  const publicUser: TeamUserPublic = {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    createdAt: user.createdAt,
+  }
+  if (user.disabled) publicUser.disabled = true
+  return publicUser
+}
+
 /** Users safe to serialize to API clients: NEVER includes `passwordHash`. */
 export function listUsers(): TeamUserPublic[] {
-  return [...users.values()].map((user) => {
-    // Explicitly destructure the hash out so it can never leak.
-    const { passwordHash: _passwordHash, ...safe } = user
-    void _passwordHash
-    return safe
-  })
+  return [...users.values()].map(toPublicUser)
 }
 
 /** Full record including the hash — for internal (server-side) use only. */
@@ -198,6 +234,11 @@ export async function createUser(input: CreateUserInput): Promise<TeamUserPublic
   if (input.role !== "admin" && input.role !== "member") {
     throw new UserValidationError("Role must be admin or member")
   }
+  let displayName = username
+  if (input.displayName !== undefined) {
+    displayName = input.displayName.trim().slice(0, MAX_DISPLAY_NAME_LENGTH)
+    if (!displayName) throw new UserValidationError("Display name cannot be empty")
+  }
   const strengthError = validatePasswordStrength(input.password)
   if (strengthError) throw new UserValidationError(strengthError)
   const passwordHash = hashPassword(input.password)
@@ -211,15 +252,13 @@ export async function createUser(input: CreateUserInput): Promise<TeamUserPublic
     const user: TeamUser = {
       id: `u_${randomBytes(6).toString("hex")}`,
       username,
-      displayName: input.displayName?.trim() || username,
+      displayName,
       role: input.role,
       createdAt: Date.now(),
       passwordHash,
     }
     draft.set(user.id, user)
-    const { passwordHash: _passwordHash, ...publicUser } = user
-    void _passwordHash
-    return { changed: true, value: publicUser }
+    return { changed: true, value: toPublicUser(user) }
   })
 }
 

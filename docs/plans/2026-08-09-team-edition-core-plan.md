@@ -339,6 +339,8 @@ export function computeCapabilities(principal: SessionPrincipal | null, edition:
 
 **Steps:** failing tests (me personal shape; me team member shape incl. MEMBER_CAPABILITIES; bootstrap creates admin + issues token + second call 410; concurrent bootstrap race → exactly one admin; member GET /api/team/users → 403 via authz; admin create/disable member; disable revokes sessions — validate token invalid after; parity test auto-covers the policy entry) → implement → green ✋ full suite → commit `feat(team): /api/me, bootstrap, and user management routes`.
 
+**Status: DONE.** Deviations: `/api/team/*` management surfaces answer 404 `Team edition only` in personal edition instead of erroring deep inside the never-initialized users store; `computeCapabilities` takes `SessionPrincipal` from `team/constants` (Task 5's cycle-guard home, not `../security` as sketched); an app-server integration test pins the 503-gate exemption for `/api/me` + bootstrap. Users-store review hardening rode along: per-record shape validation on load (string id/username + recognized password hash, else fail closed), allow-list `toPublicUser()` projection replacing the block-list destructures, displayName trim/cap-64/reject-empty, and `commitUserMutation` refusing an uninitialized store.
+
 ---
 
 ### Task 10: Boot wiring + shells

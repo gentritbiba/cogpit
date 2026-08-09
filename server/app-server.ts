@@ -62,6 +62,8 @@ export async function createServerComposition(
       req.path.startsWith("/config")
       || req.path.startsWith("/notify")
       || req.path.startsWith("/hello")
+      || req.path.startsWith("/me")
+      || req.path.startsWith("/team/bootstrap")
     ) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })

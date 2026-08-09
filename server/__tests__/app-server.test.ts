@@ -250,6 +250,42 @@ describe("app-server initialization and proxy failures", () => {
     }
   })
 
+  it("leaves /api/me and the team bootstrap reachable before configuration", async () => {
+    const previousCodexHome = process.env.CODEX_HOME
+    process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+    try {
+      const appServer = await createStandaloneAppServer(staticDir, userDataDir)
+      const baseUrl = await listen(appServer.httpServer)
+
+      // Same unconfigured server: data APIs stay 503-gated…
+      const blocked = await fetch(`${baseUrl}/api/projects`)
+      expect(blocked.status).toBe(503)
+
+      // …while identity discovery answers.
+      const me = await fetch(`${baseUrl}/api/me`)
+      expect(me.status).toBe(200)
+      await expect(me.json()).resolves.toMatchObject({
+        authenticated: true,
+        edition: "personal",
+      })
+
+      // Personal edition has no bootstrap (404 from the route itself); the
+      // point is that the NOT_CONFIGURED guard did not answer 503.
+      const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: "alice", password: "irrelevant" }),
+      })
+      expect(bootstrap.status).toBe(404)
+
+      await appServer.dispose()
+      openServers.delete(appServer.httpServer)
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = previousCodexHome
+    }
+  })
+
   it("returns 502 when the configured Vite development server is unavailable", async () => {
     const unavailable = createServer()
     const unavailableUrl = await listen(unavailable)

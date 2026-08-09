@@ -26,6 +26,8 @@ const POSIX_MODES_UNSUPPORTED = process.platform === "win32"
 
 const STRONG_PASSWORD = "correct-horse-battery-staple"
 const OTHER_PASSWORD = "another-long-passphrase"
+// A recognized (legacy sha256) hash format without paying a real scrypt run.
+const CHEAP_VALID_HASH = `$sha256$${"a".repeat(32)}:${"b".repeat(64)}`
 
 let root: string
 let dir: string
@@ -104,6 +106,32 @@ describe("createUser", () => {
     await expect(createUser({ username: "alice", password: "short", role: "admin" }))
       .rejects.toThrow(UserValidationError)
     expect(userCount()).toBe(0)
+  })
+
+  it("trims the display name and caps it at 64 characters", async () => {
+    const created = await createUser({
+      username: "alice",
+      displayName: `  ${"x".repeat(80)}  `,
+      password: STRONG_PASSWORD,
+      role: "admin",
+    })
+    expect(created.displayName).toBe("x".repeat(64))
+  })
+
+  it("rejects a display name that is empty after trimming", async () => {
+    await expect(createUser({
+      username: "alice",
+      displayName: "   ",
+      password: STRONG_PASSWORD,
+      role: "admin",
+    })).rejects.toThrow(UserValidationError)
+    expect(userCount()).toBe(0)
+  })
+
+  it("refuses mutations before the store is initialized", async () => {
+    __resetUsersForTest()
+    await expect(createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" }))
+      .rejects.toThrow("Users store is not initialized")
   })
 
   it("allows only one of two concurrent creates with the same username", async () => {
@@ -237,6 +265,49 @@ describe("persistence", () => {
 
     await expect(initUsersStore(dir)).rejects.toThrow()
     expect(isUsersStoreInitialized()).toBe(false)
+  })
+
+  it("fails closed on records missing required fields or a recognized hash", async () => {
+    const malformedRecords = [
+      { username: "alice", passwordHash: CHEAP_VALID_HASH },
+      { id: 42, username: "alice", passwordHash: CHEAP_VALID_HASH },
+      { id: "u_1", passwordHash: CHEAP_VALID_HASH },
+      { id: "u_1", username: "" , passwordHash: CHEAP_VALID_HASH },
+      { id: "u_1", username: "alice" },
+      { id: "u_1", username: "alice", passwordHash: "plaintext-password" },
+    ]
+    for (const record of malformedRecords) {
+      __resetUsersForTest()
+      await writeFile(join(dir, "users.json"), JSON.stringify({ users: [record] }), "utf-8")
+
+      await expect(initUsersStore(dir)).rejects.toThrow("Malformed team users store")
+      expect(isUsersStoreInitialized()).toBe(false)
+    }
+  })
+
+  it("never exposes unknown keys from a loaded record through listUsers", async () => {
+    __resetUsersForTest()
+    await writeFile(join(dir, "users.json"), JSON.stringify({
+      users: [{
+        id: "u_1",
+        username: "alice",
+        displayName: "Alice",
+        role: "admin",
+        createdAt: 123,
+        passwordHash: CHEAP_VALID_HASH,
+        apiToken: "super-secret",
+      }],
+    }), "utf-8")
+
+    await initUsersStore(dir)
+
+    const serialized = JSON.stringify(listUsers())
+    expect(serialized).not.toContain("apiToken")
+    expect(serialized).not.toContain("super-secret")
+    expect(serialized).not.toContain("passwordHash")
+    expect(listUsers()[0]).toEqual({
+      id: "u_1", username: "alice", displayName: "Alice", role: "admin", createdAt: 123,
+    })
   })
 
   it("reports initialization only after a successful initUsersStore", async () => {
