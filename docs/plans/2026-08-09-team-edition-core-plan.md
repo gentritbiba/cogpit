@@ -227,6 +227,8 @@ export function getRequestPrincipal(req: IncomingMessage): SessionPrincipal | nu
    - personal edition regression pin: trusted local GET → next with no principal set.
 2. FAIL → implement → green ✋ full suite (existing `helpers.test.ts` security tests must stay green untouched) → commit `feat(team): authenticate every request in team edition`.
 
+**Status: DONE.** Deviations: `isBootstrapOpen()` realized as inline `userCount() === 0` (users.ts exports `userCount`, and Task 6's files list touches only security.ts); the team branches live in private `teamAuthMiddleware`/`teamWebsocketUpgradeRejection` entered by a one-line `isTeamEdition()` guard so the personal path stays byte-identical; a principal-less token on the websocket gets 403 via `getSessionPrincipal(token)?.role !== "admin"` (not an admin → no PTY).
+
 ---
 
 ### Task 7: Route policy table + authz middleware

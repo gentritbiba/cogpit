@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-import type { NextFn } from "./http"
+import { sendJson, type NextFn } from "./http"
 import { SESSION_ABSOLUTE_TTL_MS, type SessionPrincipal } from "./team/constants"
 import { isTeamEdition } from "./team/edition"
+import { setRequestPrincipal } from "./team/requestPrincipal"
 import {
   clearAllSessions,
   persistSession,
@@ -11,7 +12,7 @@ import {
   removeSessionsForUser,
   restoreSession,
 } from "./team/sessionPersistence"
-import { getUserById } from "./team/users"
+import { getUserById, userCount } from "./team/users"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -167,6 +168,8 @@ export function websocketUpgradeRejection(
 ): 401 | 403 | null {
   if (isUnforwardedUntrustedLoopback(req)) return 403
 
+  if (isTeamEdition()) return teamWebsocketUpgradeRejection(req, url)
+
   if (isTrustedDirectLocalRequest(req)) {
     if (req.headers.origin && !hasSameOrigin(req)) return 403
     return null
@@ -191,6 +194,26 @@ export function websocketUpgradeRejection(
     return 401
   }
   return null
+}
+
+/**
+ * Team edition: the PTY is admin-only and local trust is off. Browser clients
+ * need a same-origin upgrade with a valid session cookie; machine clients keep
+ * the ?token= handshake. The networkAccess config gate does not apply — user
+ * credentials replace the network password entirely.
+ */
+function teamWebsocketUpgradeRejection(req: IncomingMessage, url: URL): 401 | 403 | null {
+  let token: string | null
+  if (req.headers.origin) {
+    if (!hasSameOrigin(req)) return 403
+    token = cookieValue(req, BROWSER_SESSION_COOKIE)
+    if (!token || !validateSessionToken(token, req.headers["user-agent"])) return 401
+  } else {
+    token = url.searchParams.get("token")
+    if (!token || !validateSessionToken(token)) return 401
+  }
+  // Principal-less legacy tokens fall in here too: not an admin, no PTY.
+  return getSessionPrincipal(token)?.role === "admin" ? null : 403
 }
 
 export function safeCompare(a: string, b: string): boolean {
@@ -447,6 +470,8 @@ function isPublicPath(url: string): boolean {
 }
 
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  if (isTeamEdition()) return teamAuthMiddleware(req, res, next)
+
   const url = req.url || "/"
   const publicPath = isPublicPath(url)
 
@@ -499,6 +524,53 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify({ error: "Untrusted request source" }))
     return
+  }
+
+  next()
+}
+
+/**
+ * Team edition flips the trust model: a loopback socket is no longer a trust
+ * boundary, so every request must present a valid principal-carrying session
+ * token regardless of where it came from. Local trust survives only for the
+ * /api/notify agent hooks, and the first-admin bootstrap stays reachable only
+ * while no users exist. The networkAccess/networkPassword config is ignored —
+ * user credentials replace the network password entirely.
+ */
+function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  const url = req.url || "/"
+  const publicPath = isPublicPath(url)
+
+  if (!publicPath && isUnforwardedUntrustedLoopback(req)) {
+    return sendJson(res, 403, { error: "Untrusted local host" })
+  }
+
+  const path = url.split("?")[0]
+  if (path === "/api/notify" && isTrustedDirectLocalRequest(req)) return next()
+  if (path === "/api/team/bootstrap" && userCount() === 0) return next()
+
+  if (publicPath) return next()
+
+  const bearer = bearerToken(req)
+  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
+  const token = bearer ?? browserCookie
+  if (!token || !validateSessionToken(
+    token,
+    browserCookie && !bearer ? req.headers["user-agent"] : undefined,
+  )) {
+    return sendJson(res, 401, { error: "Authentication required" })
+  }
+
+  // A token issued before team edition carries no principal — force re-login.
+  const principal = getSessionPrincipal(token)
+  if (!principal) {
+    return sendJson(res, 401, { error: "Authentication required" })
+  }
+  setRequestPrincipal(req, principal)
+
+  const method = (req.method || "GET").toUpperCase()
+  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    return sendJson(res, 403, { error: "Untrusted request source" })
   }
 
   next()
