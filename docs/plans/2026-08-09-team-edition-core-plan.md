@@ -112,6 +112,8 @@ export function getDataRoot(): string {
 
 **Steps:** failing tests (load round-trips edition; POST /api/config does not drop edition — follow the existing config.test.ts pattern for POST; getDataRoot returns setDataRoot value) → implement → green → commit `feat(team): persist edition in config and expose data root`.
 
+**Status: DONE** (commit c81abd1). Deviation: the POST does-not-drop-edition test lives in `server/__tests__/routes/config-routes.test.ts` — that is where POST /api/config route tests actually live (config.test.ts only covers the module).
+
 ---
 
 ### Task 4: Users store (`server/team/users.ts`)
@@ -134,6 +136,8 @@ export function getDataRoot(): string {
 - Typed errors: export `class UserValidationError extends Error` for all validation failures so routes map them to 400.
 
 **Steps:** failing tests (create+list without hash; duplicate rejected; bad username rejected; colon rejected; weak password rejected; disable last admin rejected; persistence round-trip via re-init; file mode 0600 on POSIX) → implement → green ✋ full suite → commit `feat(team): user accounts store`.
+
+**Status: DONE** (commit c433d20). Deviations: last-admin errors throw `UserValidationError("Cannot remove the last admin")` so Task 9 can map them to 400; a corrupt/unreadable users.json makes `initUsersStore` throw (fail closed) instead of starting empty, because an empty store would silently reopen the unauthenticated first-admin bootstrap (only ENOENT → empty).
 
 ---
 
