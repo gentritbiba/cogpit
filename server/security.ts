@@ -12,7 +12,7 @@ import {
   removeSessionsForUser,
   restoreSession,
 } from "./team/sessionPersistence"
-import { getUserById, userCount } from "./team/users"
+import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -549,8 +549,11 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
  * boundary, so every request must present a valid principal-carrying session
  * token regardless of where it came from. Local trust survives only for the
  * /api/notify agent hooks, and the first-admin bootstrap stays reachable only
- * while no users exist. The networkAccess/networkPassword config is ignored —
- * user credentials replace the network password entirely.
+ * while the users store is initialized and empty. Both carve-outs admit
+ * unauthenticated requests, so they still demand a trusted mutation source:
+ * a cross-site page in a local browser gets 403 while headerless curl/agent
+ * clients pass. The networkAccess/networkPassword config is ignored — user
+ * credentials replace the network password entirely.
  */
 function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   const url = req.url || "/"
@@ -561,8 +564,15 @@ function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: Nex
   }
 
   const path = url.split("?")[0]
-  if (path === "/api/notify" && isTrustedDirectLocalRequest(req)) return next()
-  if (path === "/api/team/bootstrap" && userCount() === 0) return next()
+  const notifyCarveOut = path === "/api/notify" && isTrustedDirectLocalRequest(req)
+  const bootstrapCarveOut =
+    path === "/api/team/bootstrap" && isUsersStoreInitialized() && userCount() === 0
+  if (notifyCarveOut || bootstrapCarveOut) {
+    if (!hasTrustedMutationSource(req)) {
+      return sendJson(res, 403, { error: "Untrusted request source" })
+    }
+    return next()
+  }
 
   if (publicPath) return next()
 

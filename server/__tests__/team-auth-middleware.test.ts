@@ -134,6 +134,32 @@ describe("authMiddleware (team edition)", () => {
     expect(r.statusCode).toBe(401)
   })
 
+  it("rejects a cross-origin /api/notify POST from trusted local with 403", () => {
+    // A drive-by cross-site page POSTing through a local browser must not
+    // reach the notify handler — same screen the personal edition applies.
+    enterTeamEdition()
+    const r = run("/api/notify", { method: "POST", origin: "https://evil.example" })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Untrusted request source")
+  })
+
+  it("does not extend the /api/notify carve-out to sibling paths", () => {
+    enterTeamEdition()
+    const r = run("/api/notifyx", { method: "POST" })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("does not extend the /api/notify carve-out to case variants", () => {
+    // Express routes case-insensitively, so /API/NOTIFY would still reach the
+    // handler if the carve-out matched loosely — it must fall through to auth.
+    enterTeamEdition()
+    const r = run("/API/NOTIFY", { method: "POST" })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
   it("keeps /api/hello public", () => {
     enterTeamEdition()
     const r = run("/api/hello", { ip: REMOTE_IP })
@@ -158,6 +184,34 @@ describe("authMiddleware (team edition)", () => {
     const r = run("/api/team/bootstrap", { method: "POST", ip: REMOTE_IP })
     expect(r.next).not.toHaveBeenCalled()
     expect(r.statusCode).toBe(401)
+  })
+
+  it("rejects a cross-origin /api/team/bootstrap POST even while no users exist", () => {
+    // First-admin takeover: a cross-site page in the browser of anyone who can
+    // reach the box must not be able to bootstrap during the zero-users window.
+    enterTeamEdition()
+    const r = run("/api/team/bootstrap", {
+      method: "POST",
+      ip: REMOTE_IP,
+      origin: "https://evil.example",
+    })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Untrusted request source")
+  })
+
+  it("keeps /api/team/bootstrap closed until the users store is initialized", async () => {
+    // Before initUsersStore runs, userCount() === 0 even with users on disk —
+    // a boot-ordering regression must not reopen the bootstrap window.
+    enterTeamEdition()
+    __resetUsersForTest()
+    const closed = run("/api/team/bootstrap", { method: "POST", ip: REMOTE_IP })
+    expect(closed.next).not.toHaveBeenCalled()
+    expect(closed.statusCode).toBe(401)
+
+    await initUsersStore(join(root, "team"))
+    const open = run("/api/team/bootstrap", { method: "POST", ip: REMOTE_IP })
+    expect(open.next).toHaveBeenCalledOnce()
   })
 
   it("keeps the untrusted-loopback 403 ahead of the bootstrap carve-out", () => {

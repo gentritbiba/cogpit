@@ -138,6 +138,15 @@ export function userCount(): number {
   return users.size
 }
 
+/**
+ * False until initUsersStore has succeeded. Callers gating on "no users yet"
+ * (the bootstrap carve-out) must also check this: before init, userCount() is
+ * trivially 0 even when users exist on disk.
+ */
+export function isUsersStoreInitialized(): boolean {
+  return usersPath !== null
+}
+
 /** Users safe to serialize to API clients: NEVER includes `passwordHash`. */
 export function listUsers(): TeamUserPublic[] {
   return [...users.values()].map((user) => {

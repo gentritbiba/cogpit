@@ -260,6 +260,48 @@ describe("live invalidation propagation (team edition)", () => {
     const raw = await readFile(join(teamDir, "sessions.json"), "utf-8")
     expect(raw).not.toContain(sha256(token))
   })
+
+  it("the 60s sweeper discards the persisted row of an idle-expired session", async () => {
+    // The sweeper interval is registered at security.ts module scope, so the
+    // module graph must be re-imported while fake timers are installed for
+    // advanceTimersByTime to fire it. Everything below uses the fresh copies.
+    vi.resetModules()
+    vi.useFakeTimers()
+    const security = await import("../security")
+    const edition = await import("../team/edition")
+    const users = await import("../team/users")
+    const persistence = await import("../team/sessionPersistence")
+    try {
+      edition.initEdition({ shell: "standalone", configEdition: "team" })
+      await users.initUsersStore(teamDir)
+      await persistence.initSessionPersistence(teamDir)
+      const user = await users.createUser({
+        username: "alice",
+        password: STRONG_PASSWORD,
+        role: "admin",
+      })
+      const token = security.createSessionToken("127.0.0.1", UA, {
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+      })
+      await persistence.__flushForTest()
+      expect(await readFile(join(teamDir, "sessions.json"), "utf-8")).toContain(sha256(token))
+
+      // The token is never presented again: only the sweep can notice the
+      // idle expiry, and it must take the persisted row down with the live
+      // session or a restart would resurrect it for the rest of the 8h TTL.
+      vi.advanceTimersByTime(SESSION_IDLE_TTL_MS + 60_000)
+      await persistence.__flushForTest()
+
+      expect(await readFile(join(teamDir, "sessions.json"), "utf-8")).not.toContain(sha256(token))
+    } finally {
+      security.__resetSessionsForTest()
+      persistence.__resetForTest()
+      users.__resetUsersForTest()
+      edition.__resetEditionForTest()
+    }
+  })
 })
 
 // ── Load-time pruning ───────────────────────────────────────────────────

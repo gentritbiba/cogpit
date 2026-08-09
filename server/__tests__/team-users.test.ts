@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { verifyPassword } from "../security"
 import {
   initUsersStore,
+  isUsersStoreInitialized,
   createUser,
   listUsers,
   userCount,
@@ -235,5 +236,16 @@ describe("persistence", () => {
     __resetUsersForTest()
 
     await expect(initUsersStore(dir)).rejects.toThrow()
+    expect(isUsersStoreInitialized()).toBe(false)
+  })
+
+  it("reports initialization only after a successful initUsersStore", async () => {
+    expect(isUsersStoreInitialized()).toBe(true)
+
+    __resetUsersForTest()
+    expect(isUsersStoreInitialized()).toBe(false)
+
+    await initUsersStore(dir)
+    expect(isUsersStoreInitialized()).toBe(true)
   })
 })

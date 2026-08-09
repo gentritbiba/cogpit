@@ -205,9 +205,9 @@ export function getRequestPrincipal(req: IncomingMessage): SessionPrincipal | nu
 **Spec — `authMiddleware` team branch.** Current flow (see `server/security.ts:384-440`). Insert edition branch: when `isTeamEdition()`:
 
 1. Untrusted-loopback 403 check stays (line 388-393 behavior).
-2. **Skip the `isTrustedDirectLocalRequest` bypass** with two carve-outs, checked in order:
+2. **Skip the `isTrustedDirectLocalRequest` bypass** with two carve-outs, checked in order — both additionally require `hasTrustedMutationSource(req)` (a cross-origin browser source → 403 `Untrusted request source`, same as every other mutation screen; headerless curl/agent clients pass):
    - `path === "/api/notify"` AND `isTrustedDirectLocalRequest(req)` → `next()` (agent hooks).
-   - `isBootstrapOpen()` (import from `./team/users`: `userCount() === 0`) AND `path === "/api/team/bootstrap"` → `next()` (first-run; also add to nothing else).
+   - `isBootstrapOpen()` (import from `./team/users`: `isUsersStoreInitialized() && userCount() === 0` — an uninitialized store keeps bootstrap closed, since `userCount()` is trivially 0 before `initUsersStore` runs) AND `path === "/api/team/bootstrap"` → `next()` (first-run; also add to nothing else).
 3. Public paths (`/api/auth/verify`, `/api/hello`) → `next()` as today.
 4. Do NOT require `config.networkAccess`/`networkPassword` in team edition (user credentials replace the network password entirely). Instead: token = bearer ?? cookie → `validateSessionToken` (same UA pinning rules) → miss → 401. Valid → `const p = getSessionPrincipal(token)`; if `!p` → 401 (legacy principal-less token). `setRequestPrincipal(req, p)`.
 5. Mutation-source check (existing lines 431-437) applies unchanged.
@@ -228,7 +228,7 @@ export function getRequestPrincipal(req: IncomingMessage): SessionPrincipal | nu
    - personal edition regression pin: trusted local GET → next with no principal set.
 2. FAIL → implement → green ✋ full suite (existing `helpers.test.ts` security tests must stay green untouched) → commit `feat(team): authenticate every request in team edition`.
 
-**Status: DONE.** Deviations: `isBootstrapOpen()` realized as inline `userCount() === 0` (users.ts exports `userCount`, and Task 6's files list touches only security.ts); the team branches live in private `teamAuthMiddleware`/`teamWebsocketUpgradeRejection` entered by a one-line `isTeamEdition()` guard so the personal path stays byte-identical; a principal-less token on the websocket gets 403 via `getSessionPrincipal(token)?.role !== "admin"` (not an admin → no PTY).
+**Status: DONE.** Deviations: `isBootstrapOpen()` realized as inline `isUsersStoreInitialized() && userCount() === 0` (both exported from users.ts, and Task 6's files list touches only security.ts); the team branches live in private `teamAuthMiddleware`/`teamWebsocketUpgradeRejection` entered by a one-line `isTeamEdition()` guard so the personal path stays byte-identical; a principal-less token on the websocket gets 403 via `getSessionPrincipal(token)?.role !== "admin"` (not an admin → no PTY). Review follow-up: both carve-outs now also require `hasTrustedMutationSource(req)` (closes cross-site notify spoofing and drive-by first-admin takeover) and bootstrap gates on `isUsersStoreInitialized()` (new export) so a boot-ordering regression cannot reopen it.
 
 ---
 
@@ -328,7 +328,7 @@ export function computeCapabilities(principal: SessionPrincipal | null, edition:
 
 **Spec — routes (all mounted by `registerTeamAdminRoutes(use)`):**
 - `GET /api/me` → `MeResponse`. Personal: `{ authenticated: true, edition: "personal", user: null, capabilities: ALL }`. Team: principal from `getRequestPrincipal` → user record → `{ authenticated: true, edition: "team", user: TeamUserPublic, capabilities }`.
-- `POST /api/team/bootstrap` — body `{ username, password, displayName? }`. Only while `userCount() === 0`; otherwise `410 { error: "Already bootstrapped" }`. **Race-safe:** serialize through a module-level single-flight promise so two concurrent calls cannot both create admins (second sees count>0 → 410). Creates role `"admin"`, then immediately issues a session (same cookie/token fork as login) so the founder lands logged-in. Validation errors (`UserValidationError`) → 400 with message.
+- `POST /api/team/bootstrap` — body `{ username, password, displayName? }`. Only while `userCount() === 0`; otherwise `410 { error: "Already bootstrapped" }`. **Race-safe:** serialize through a module-level single-flight promise so two concurrent calls cannot both create admins (second sees count>0 → 410). Creates role `"admin"`, then immediately issues a session (same cookie/token fork as login) so the founder lands logged-in. Validation errors (`UserValidationError`) → 400 with message. The trusted-mutation-source requirement is enforced upstream in `authMiddleware`'s carve-out (cross-origin browser sources → 403 before the route runs), so the route needn't re-check it — but it MUST still re-check `userCount()` inside the single-flight as above.
 - `GET /api/team/users` → `{ users: listUsers() }`.
 - `POST /api/team/users` — `{ username, password, role, displayName? }` → create → `{ user }`; 400 on `UserValidationError`.
 - `PATCH /api/team/users/:id` — accepts `{ disabled?, role?, password? }`; disable/role-change/password-reset call `revokeSessionsForUser(id)`; "last admin" errors → 400.
