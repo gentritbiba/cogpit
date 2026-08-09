@@ -299,6 +299,8 @@ export function registerConfigRoutes(use: UseFn) {
           await saveConfig({
             claudeDir: resolvedClaudeDir,
             codexOnly: reusingCodexFallback || undefined,
+            // The API cannot set the edition (file/env only) but must not drop it.
+            edition: currentConfig?.edition,
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,

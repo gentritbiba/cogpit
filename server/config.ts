@@ -29,6 +29,10 @@ export function setDataRoot(dir: string): void {
   DATA_ROOT = dir
 }
 
+export function getDataRoot(): string {
+  return DATA_ROOT
+}
+
 /**
  * Override the config file path at runtime (used by Electron main process
  * to store config in userData instead of the app bundle directory).
@@ -45,6 +49,8 @@ export interface AppConfig {
    * existing directory contract intact without requiring Claude Code.
    */
   codexOnly?: boolean
+  /** Team-edition opt-in; only the standalone shell honors it. */
+  edition?: "team"
   networkAccess?: boolean
   networkPassword?: string
   terminalApp?: string
@@ -177,6 +183,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
       cachedConfig = {
         claudeDir: parsed.claudeDir,
         codexOnly: !!parsed.codexOnly,
+        edition: parsed.edition === "team" ? "team" : undefined,
         networkAccess: !!parsed.networkAccess,
         networkPassword,
         terminalApp: parsed.terminalApp || undefined,

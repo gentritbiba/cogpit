@@ -627,6 +627,30 @@ describe("config routes", () => {
       }))
     })
 
+    it("carries the persisted edition through an unrelated config save", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const body = JSON.stringify({ claudeDir: "/home/.claude", terminalApp: "Ghostty" })
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      mockedValidateClaudeDir.mockResolvedValueOnce({
+        valid: true, resolved: "/home/.claude",
+      })
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        edition: "team",
+      })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => {
+        expect(res.end).toHaveBeenCalled()
+      })
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        edition: "team",
+      }))
+    })
+
     it("returns 400 for weak password", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({

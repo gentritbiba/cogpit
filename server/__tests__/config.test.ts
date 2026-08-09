@@ -314,6 +314,30 @@ describe("loadConfig", () => {
 
     expect(config?.codexOnly).toBe(true)
   })
+
+  it("loads the team edition flag", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/.claude",
+      edition: "team",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.edition).toBe("team")
+  })
+
+  it("drops unknown edition values", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/.claude",
+      edition: "enterprise",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.edition).toBeUndefined()
+  })
 })
 
 describe("saveConfig", () => {
@@ -343,6 +367,31 @@ describe("saveConfig", () => {
     await saveConfig({ claudeDir: "/home/.claude" })
 
     expect(mockedChmod).toHaveBeenCalledWith(expect.any(String), 0o600)
+  })
+
+  it("persists the team edition flag", async () => {
+    const { saveConfig } = await import("../config")
+    mockedWriteFile.mockResolvedValueOnce(undefined)
+
+    await saveConfig({ claudeDir: "/home/.claude", edition: "team" })
+
+    const written = JSON.parse(mockedWriteFile.mock.calls[0][1] as string)
+    expect(written.edition).toBe("team")
+  })
+})
+
+// ── getDataRoot ─────────────────────────────────────────────────────────
+
+describe("getDataRoot", () => {
+  it("returns the value set by setDataRoot", async () => {
+    const { getDataRoot, setDataRoot } = await import("../config")
+    const original = getDataRoot()
+    setDataRoot("/data/cogpit")
+    try {
+      expect(getDataRoot()).toBe("/data/cogpit")
+    } finally {
+      setDataRoot(original)
+    }
   })
 })
 
