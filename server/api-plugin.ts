@@ -5,6 +5,7 @@ import { loadConfig, getConfig } from "./config"
 import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
+import { teamAuthzMiddleware } from "./team/authz"
 import { initDeviceRegistry } from "./hub/registry"
 import { codexAppServer } from "./codex-app-server"
 
@@ -33,6 +34,9 @@ export function sessionApiPlugin(): Plugin {
       server.middlewares.use(securityHeaders)
       server.middlewares.use(bodySizeLimit)
       server.middlewares.use(authMiddleware)
+      // Parity with app-server: a no-op here since the dev shell is always
+      // personal edition, but the middleware order stays identical.
+      server.middlewares.use(teamAuthzMiddleware)
 
       // Guard middleware: block data APIs when not configured
       server.middlewares.use((req, res, next) => {

@@ -280,6 +280,8 @@ export function teamAuthzMiddleware(req, res, next) {
 
 **Steps:** failing tests (parity both directions; member GET `/api/projects` → next; member POST `/api/config` → 403; admin POST `/api/config` → next; member GET `/api/config` → next; member `/api/kill-all` → 403; member `/api/stop-session` → next; unknown `/api/never-registered` → admin-only; personal edition → middleware no-ops even for garbage paths) → implement → green ✋ → commit `feat(team): route policy table and authz enforcement`.
 
+**Status: DONE.** Deviations: none material. Notes: performance's bare `use("/api", requestMonitor)` metrics tap is deliberately absent from `ROUTE_POLICIES` (listing `/api` would defeat the fail-safe default); config's auxiliary mounts (`/api/network-info`, `/api/auth/*`, `/api/connected-devices`, `/api/config/validate`) enumerated as `authed`; `config-browser` encoded as one shared-prefix pair (`GET` → authed, method-agnostic → admin) covering all four of its mounts; `/api/running-processes` (claude-manage read-only inventory) → `authed`.
+
 ---
 
 ### Task 8: Team login on `/api/auth/verify`

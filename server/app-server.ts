@@ -15,6 +15,7 @@ import {
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
 import { websocketUpgradeRejection } from "./security"
+import { teamAuthzMiddleware } from "./team/authz"
 import { initDeviceRegistry } from "./hub/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
@@ -52,6 +53,7 @@ export async function createServerComposition(
   app.use(securityHeaders)
   app.use(bodySizeLimit)
   app.use(authMiddleware)
+  app.use(teamAuthzMiddleware)
 
   // Block data APIs until configuration exists, while leaving bootstrap and
   // discovery endpoints available.
