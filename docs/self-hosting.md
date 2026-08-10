@@ -132,11 +132,15 @@ it.
 
 ### First boot
 
-With zero users the server prints a URL to open. That page creates the founding admin
-account, and then the bootstrap is closed for good — restarts do not reopen it. Browser
-logins, the bootstrap included, need HTTPS for the same `Secure`-cookie reason as
+With zero users the server prints a URL to open. Opening it gives you a create-the-first-admin
+page in place of the login form; filling it in creates the founding admin and signs you in.
+The bootstrap is then closed for good — restarts do not reopen it, and a second attempt gets
+`410 Already bootstrapped`.
+
+Browser logins, the bootstrap included, need HTTPS for the same `Secure`-cookie reason as
 [above](#remote-browser-access-needs-https), so put the TLS proxy in front first and open
-the server through it.
+the server through it. Set `COGPIT_PUBLIC_URL` and the printed address is that URL rather
+than the LAN one.
 
 ### Users
 
@@ -172,7 +176,8 @@ because logins are the authentication.
 
 A team server can be added as a device from a personal Cogpit. Enter the username and
 password of the team account to connect as; everything done through the hub acts as that
-user.
+user. Prefer a dedicated team account per hub over a person's own — the hub machine stores
+that password, and a dedicated account can be rotated or disabled on its own.
 
 ### Agent hooks
 
@@ -209,7 +214,7 @@ Every one of these is read by the server. There are no others.
 | `COGPIT_NTFY_TOPIC` | none | ntfy topic for phone push. Push is off until set. |
 | `COGPIT_NTFY_URL` | `https://ntfy.sh` | ntfy base URL. Self-hosted works. |
 | `COGPIT_NTFY_TOKEN` | none | Sent as `Authorization: Bearer` for protected topics. |
-| `COGPIT_PUBLIC_URL` | none | Reachable Cogpit base URL. Without it, pushes carry no click target instead of a dead `127.0.0.1` link. |
+| `COGPIT_PUBLIC_URL` | none | Reachable Cogpit base URL. Printed as the team-edition first-boot address; without it, pushes carry no click target instead of a dead `127.0.0.1` link. |
 
 Env changes to the ntfy settings take effect without a restart.
 

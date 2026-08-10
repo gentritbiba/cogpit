@@ -270,7 +270,7 @@ WantedBy=multi-user.target</code></pre>
     <tr><td><code>COGPIT_PORT</code></td><td><code>19384</code></td><td>Bind port.</td></tr>
     <tr><td><code>COGPIT_DATA_DIR</code></td><td><code>~/.config/cogpit</code></td><td>Config and the <code>team/</code> directory (accounts, sessions).</td></tr>
     <tr><td><code>COGPIT_NETWORK_PASSWORD</code></td><td>none</td><td><b>Ignored in team edition.</b> User accounts replace it; the boot log says so if you set it.</td></tr>
-    <tr><td><code>COGPIT_PUBLIC_URL</code></td><td>none</td><td>Reachable base URL, used as the click target for push notifications.</td></tr>
+    <tr><td><code>COGPIT_PUBLIC_URL</code></td><td>none</td><td>Reachable base URL. Printed as the first-boot bootstrap address, and used as the click target for push notifications.</td></tr>
   </table>
 
   <p class="muted">You can also set <code>"edition": "team"</code> in <code>config.local.json</code>. The environment variable wins when they disagree. A typo in either — <code>"TEAM"</code>, <code>"enterprise"</code> — boots personal and logs a warning rather than failing silently.</p>
@@ -287,10 +287,13 @@ WantedBy=multi-user.target</code></pre>
 
 <section id="firstboot">
   <h2><span class="num">04</span>First boot &amp; the founding admin</h2>
-  <p>With zero accounts, the server prints a banner with the URL to open. That page creates the first admin and logs them in immediately. Then the bootstrap closes <b>for good</b> — restarts do not reopen it, and a second attempt gets <code>410 Already bootstrapped</code>.</p>
+  <p>With zero accounts, the server prints a banner with the URL to open. Opening it gives you a create-the-first-admin page instead of the login form — you pick a username and password, and land signed in as an admin. Then the bootstrap closes <b>for good</b> — restarts do not reopen it, and a second attempt gets <code>410 Already bootstrapped</code>.</p>
 
 <pre><code>Team edition: no users yet.
-Open https://cogpit.yourcompany.com to create the first admin.</code></pre>
+Open http://192.168.1.42:19384 to create the first admin.
+Browser logins need HTTPS: put a TLS proxy in front and open that address instead.</code></pre>
+
+  <p class="muted">Set <code>COGPIT_PUBLIC_URL</code> and the banner names your real address — <code>Open https://cogpit.yourcompany.com to create the first admin.</code> — with no reminder attached, because that URL already terminates TLS.</p>
 
   <p>Prefer curl? The same endpoint works for machine clients, and hands back a bearer token:</p>
 
@@ -421,6 +424,8 @@ curl https://cogpit.yourcompany.com/api/projects -H <span class="s">"Authorizati
     <li><b>Enter the username and password</b> of the team account to connect as. A live probe tells you immediately whether it is reachable, whether the credentials work, and whether the account is disabled.</li>
     <li><b>Switch with ⌘⇧1–9</b>, cycle with ⌘⇧0.</li>
   </ol>
+
+  <p class="muted">Give each hub a team account of its own rather than reusing a person's: that password is stored on the hub machine, and a dedicated account can be disabled or rotated without cutting anybody's browser session.</p>
 
   <p>Everything you do through the hub acts as that account. Connect as your admin account and you see everything; connect as a member and you get exactly a member's surface. Your browser never talks to the team box directly — the hub proxies, and the stored credential never reaches the front end.</p>
 
