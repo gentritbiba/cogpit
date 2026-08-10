@@ -53,6 +53,7 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { can } from "@/lib/capabilities"
 import {
   agentKindFromDirName,
 } from "@/lib/sessionSource"
@@ -759,7 +760,7 @@ export default function App() {
     scroll,
   ])
 
-  // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
+  // ─── AUTH GATE (remote clients + team-edition local browsers) ───────────────
   if (!networkAuth.authChecked) {
     return (
       <div
@@ -877,7 +878,7 @@ export default function App() {
       onSetActive={processPanel.setActive}
       onRemove={processPanel.removeProcess}
       onToggleCollapse={processPanel.toggleCollapse}
-      onRequestTerminal={handleNewIntegratedTerminal}
+      onRequestTerminal={can("terminal") ? handleNewIntegratedTerminal : undefined}
       onAddTerminalContext={(selection) => {
         const value = selection.trim()
         if (!value) return

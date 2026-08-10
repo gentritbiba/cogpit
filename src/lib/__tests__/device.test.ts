@@ -7,6 +7,7 @@ import {
   withBase,
   deviceScopedKey,
   setActiveIdentity,
+  getActiveIdentity,
   __resetIdentityForTest,
   saveLastPath,
   switchDevice,
@@ -160,6 +161,61 @@ describe("device", () => {
       setActiveIdentity(null)
       setPath("/")
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions")
+    })
+  })
+
+  // ── setActiveIdentity ─────────────────────────────────────────────────
+
+  describe("setActiveIdentity", () => {
+    afterEach(() => {
+      __resetIdentityForTest()
+      localStorage.clear()
+    })
+
+    it("exposes the active identity through getActiveIdentity", () => {
+      expect(getActiveIdentity()).toBeNull()
+      setActiveIdentity("u_1")
+      expect(getActiveIdentity()).toBe("u_1")
+    })
+
+    it("dispatches cogpit-identity-changed when the identity actually changes", () => {
+      const handler = vi.fn()
+      window.addEventListener("cogpit-identity-changed", handler)
+
+      setActiveIdentity("u_1")
+      expect(handler).toHaveBeenCalledOnce()
+      setActiveIdentity(null)
+      expect(handler).toHaveBeenCalledTimes(2)
+
+      window.removeEventListener("cogpit-identity-changed", handler)
+    })
+
+    it("stays silent when the identity is unchanged (personal never remounts)", () => {
+      const handler = vi.fn()
+      window.addEventListener("cogpit-identity-changed", handler)
+
+      setActiveIdentity(null)
+      setActiveIdentity(null)
+      expect(handler).not.toHaveBeenCalled()
+      // The post-remount useMe re-resolve reports the same user — no loop.
+      setActiveIdentity("u_1")
+      setActiveIdentity("u_1")
+      expect(handler).toHaveBeenCalledOnce()
+
+      window.removeEventListener("cogpit-identity-changed", handler)
+    })
+
+    it("reads a scoped write back after a simulated reload once the same identity resolves", () => {
+      setPath("/")
+      setActiveIdentity("u_1")
+      localStorage.setItem(deviceScopedKey("cogpit:pref"), "written")
+
+      // Simulated reload: the module cell resets, then /api/me resolves the
+      // same user again — reads must land on the identical scoped key.
+      __resetIdentityForTest()
+      expect(deviceScopedKey("cogpit:pref")).toBe("cogpit:pref")
+      setActiveIdentity("u_1")
+      expect(localStorage.getItem(deviceScopedKey("cogpit:pref"))).toBe("written")
     })
   })
 

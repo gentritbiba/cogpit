@@ -99,13 +99,23 @@ export async function logoutSession(): Promise<void> {
   }
 }
 
+/** Scrub legacy tokens, announce the login requirement, and fail the call. */
+function failAuthRequired(): Promise<never> {
+  clearToken()
+  window.dispatchEvent(new Event("cogpit-auth-required"))
+  return Promise.reject(new Error("Authentication required"))
+}
+
 /**
  * Shared fetch core for {@link authFetch} and {@link hubFetch}.
  *
  * - Always sends `X-Cogpit-Client: 1` (drive-by-localhost CSRF guard; the hub
  *   requires it on state-changing `/hub/*` requests).
- * - Browser credentials stay in an HttpOnly same-origin cookie. A 401 emits
- *   `cogpit-auth-required`; JavaScript never reads or attaches the token.
+ * - Browser credentials stay in an HttpOnly same-origin cookie. A gated 401
+ *   emits `cogpit-auth-required`; JavaScript never reads or attaches the token.
+ * - A local 401 while the edition is still unknown (the boot hello probe
+ *   failed) re-probes once — a team server then gates this tab instead of
+ *   leaving it permanently on raw errors.
  * - A `502` carrying `X-Cogpit-Device` means the hub could not reach that remote
  *   device; dispatch `cogpit-device-unreachable` (banner signal) and still
  *   return the response.
@@ -119,10 +129,6 @@ function requestWithAuth(
   init: RequestInit | undefined,
   applyBase: boolean,
 ): Promise<Response> {
-  // A 401 means "session required" for remote clients always, and for local
-  // browsers once the server is known to be team edition (team gates localhost).
-  const sessionRequired = isRemoteClient() || knownEdition === "team"
-
   if (applyBase && typeof input === "string" && input.startsWith("/api")) {
     input = withBase(input)
   }
@@ -132,10 +138,18 @@ function requestWithAuth(
   headers.set("X-Cogpit-Client", "1")
 
   return fetch(input, { ...init, headers, credentials: "same-origin" }).then((res) => {
-    if (sessionRequired && res.status === 401) {
-      clearToken()
-      window.dispatchEvent(new Event("cogpit-auth-required"))
-      return Promise.reject(new Error("Authentication required"))
+    if (res.status === 401) {
+      // A 401 means "session required" for remote clients always, and for local
+      // browsers once the server is known to be team edition (team gates localhost).
+      if (isRemoteClient() || knownEdition === "team") return failAuthRequired()
+      // Unknown edition on a local client means the hello probe failed and
+      // "personal" was assumed without being cached — re-probe before trusting
+      // the assumption (a failed probe leaves no cache, so this fetches fresh).
+      if (knownEdition === null) {
+        return getServerEdition().then((edition) =>
+          edition === "team" ? failAuthRequired() : res,
+        )
+      }
     }
     if (res.status === 502) {
       const deviceId = res.headers.get("X-Cogpit-Device")

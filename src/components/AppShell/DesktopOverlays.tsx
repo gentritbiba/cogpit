@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { can } from "@/lib/capabilities"
 import { dirNameToPath } from "@/lib/format"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
@@ -108,7 +109,7 @@ export function DesktopOverlays({
           onExpandAll={chrome.onExpandAll}
           onCollapseAll={chrome.onCollapseAll}
           canFocusComposer={Boolean(session || state.pendingDirName)}
-          canOpenTerminal={Boolean(
+          canOpenTerminal={can("terminal") && Boolean(
             session?.cwd
             ?? pendingPath
             ?? sessionSource?.dirName

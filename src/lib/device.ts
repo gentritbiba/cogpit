@@ -56,10 +56,19 @@ let activeUserId: string | null = null
 /**
  * Record the signed-in team user (written by useMe). Personal edition and
  * logged-out states pass null, keeping every storage key byte-identical to
- * pre-team builds so existing localStorage survives.
+ * pre-team builds so existing localStorage survives. Actual transitions
+ * dispatch `cogpit-identity-changed` so DeviceRoot can remount the App
+ * subtree — mount-time storage reads must re-run through the new scope.
  */
 export function setActiveIdentity(userId: string | null): void {
+  if (userId === activeUserId) return
   activeUserId = userId
+  window.dispatchEvent(new Event("cogpit-identity-changed"))
+}
+
+/** The signed-in team user id, or null in personal/logged-out states. */
+export function getActiveIdentity(): string | null {
+  return activeUserId
 }
 
 export function __resetIdentityForTest(): void {

@@ -52,7 +52,7 @@ describe("LoginScreen", () => {
     const fetchSpy = mockServer()
     render(<LoginScreen onAuthenticated={onAuthenticated} />)
 
-    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "correct horse battery staple" } })
+    fireEvent.change(await screen.findByPlaceholderText("Password"), { target: { value: "correct horse battery staple" } })
     fireEvent.click(screen.getByRole("button", { name: "Connect" }))
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledOnce())
@@ -74,7 +74,7 @@ describe("LoginScreen", () => {
     })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
-    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "password" } })
+    fireEvent.change(await screen.findByPlaceholderText("Password"), { target: { value: "password" } })
     fireEvent.click(screen.getByRole("button", { name: "Connect" }))
 
     expect(await screen.findByText("Secure HTTPS is required for remote browser access")).toBeInTheDocument()
@@ -84,7 +84,7 @@ describe("LoginScreen", () => {
     const fetchSpy = mockServer({ edition: "personal" })
     render(<LoginScreen onAuthenticated={vi.fn()} />)
 
-    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "correct horse battery staple" } })
+    fireEvent.change(await screen.findByPlaceholderText("Password"), { target: { value: "correct horse battery staple" } })
     fireEvent.click(screen.getByRole("button", { name: "Connect" }))
 
     await waitFor(() => expect(verifyCall(fetchSpy)).toBeTruthy())
@@ -128,6 +128,34 @@ describe("LoginScreen", () => {
     // Success clears both credentials from state
     expect(screen.getByPlaceholderText("Username")).toHaveValue("")
     expect(screen.getByPlaceholderText("Password")).toHaveValue("")
+  })
+
+  it("holds the credential fields until the edition resolves so a late team answer cannot steal focus", async () => {
+    let resolveHello!: (r: Response) => void
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input) === "/api/hello") {
+        return new Promise<Response>((resolve) => { resolveHello = resolve })
+      }
+      throw new Error(`Unexpected fetch: ${String(input)}`)
+    })
+    render(<LoginScreen onAuthenticated={vi.fn()} />)
+
+    // No credential fields while the edition is unknown — nothing to focus,
+    // nothing to start typing a password into.
+    expect(screen.queryByPlaceholderText("Password")).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Username")).not.toBeInTheDocument()
+
+    resolveHello(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+    const username = await screen.findByPlaceholderText("Username")
+    expect(username).toHaveFocus()
+  })
+
+  it("autofocuses the password field once a personal edition resolves", async () => {
+    mockServer({ edition: "personal" })
+    render(<LoginScreen onAuthenticated={vi.fn()} />)
+
+    const password = await screen.findByPlaceholderText("Password")
+    expect(password).toHaveFocus()
   })
 
   it("shows the server's team login error verbatim and keeps the username", async () => {

@@ -221,6 +221,50 @@ describe("auth", () => {
       await expect(authFetch("/api/secure")).resolves.toBe(response)
     })
 
+    it("re-probes the edition after a failed hello when a local request gets a 401, and gates if it resolves team", async () => {
+      setHostname("localhost")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new Error("offline")) // boot hello probe fails → assumed personal, uncached
+        .mockResolvedValueOnce(new Response("", { status: 401 })) // the gated API request
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "team" }), { status: 200 })) // re-probe
+      await expect(getServerEdition()).resolves.toBe("personal")
+      const handler = vi.fn()
+      window.addEventListener("cogpit-auth-required", handler)
+
+      await expect(authFetch("/api/secure")).rejects.toThrow("Authentication required")
+      expect(handler).toHaveBeenCalledOnce()
+      expect(fetchSpy.mock.calls[2][0]).toBe("/api/hello")
+      window.removeEventListener("cogpit-auth-required", handler)
+    })
+
+    it("passes the 401 through when the re-probe still cannot identify a team server", async () => {
+      setHostname("localhost")
+      vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockRejectedValueOnce(new Error("still offline"))
+      await expect(getServerEdition()).resolves.toBe("personal")
+      const handler = vi.fn()
+      window.addEventListener("cogpit-auth-required", handler)
+
+      const res = await authFetch("/api/secure")
+      expect(res.status).toBe(401)
+      expect(handler).not.toHaveBeenCalled()
+      window.removeEventListener("cogpit-auth-required", handler)
+    })
+
+    it("does not re-probe on a local 401 when the server is positively known personal", async () => {
+      setHostname("localhost")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "personal" }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+      await expect(getServerEdition()).resolves.toBe("personal")
+
+      const res = await authFetch("/api/secure")
+      expect(res.status).toBe(401)
+      expect(fetchSpy).toHaveBeenCalledTimes(2) // hello + request — no re-probe
+    })
+
     it("fires auth-required on a local 401 once the server is known team edition", async () => {
       setHostname("localhost")
       vi.spyOn(globalThis, "fetch")
