@@ -449,6 +449,8 @@ Tasks 8-9 review fixes:
 5. Update `docs/self-hosting.md`: new "Team edition" section — env `COGPIT_EDITION=team`, bootstrap flow, users API, hub add-as-user, the ignored-network-password note. Update the env-var table (it claims to be exhaustive).
 6. Commit `docs: team edition self-hosting guide` and a final `chore: team edition core gates green`.
 
+**Status: DONE** (commits ee1f398 polish, 2527996 docs). All gates green with no fixes needed: lint, typecheck, typecheck:tests, check:architecture, check:duplicates (79/80 ratchet), full vitest suite (222 files / 3401 tests), build:web. Also landed three review polish minors under `fix(team)`: describeEditionSuppression flags unrecognized config.local.json edition values, the disabled-account login 403 carries `code: "ACCOUNT_DISABLED"` (devices.ts matches the code with the error-string fallback), and POST/PATCH hub devices reject a username without a password with 400 `USERNAME_REQUIRES_PASSWORD`.
+
 ---
 
 ## Explicitly out of scope (next plans)
