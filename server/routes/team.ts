@@ -15,6 +15,7 @@ import {
   toPublicUser,
   userCount,
   UserValidationError,
+  validateUserChanges,
 } from "../team/users"
 import { issueSessionResponse } from "./config"
 
@@ -188,12 +189,18 @@ export function registerTeamAdminRoutes(use: UseFn) {
       if (body.password !== undefined && typeof body.password !== "string") {
         return sendJson(res, 400, { error: "Password must be a string" })
       }
-      // A mixed payload is all-or-nothing: a weak password must reject before
-      // the disabled/role mutations below persist anything.
+      // A mixed payload is all-or-nothing, and the mutations below persist one
+      // field at a time — so every rule the payload could trip is checked here,
+      // against the combined result, before any of it is applied.
       if (typeof body.password === "string") {
         const strengthError = validatePasswordStrength(body.password)
         if (strengthError) return sendJson(res, 400, { error: strengthError })
       }
+      const changeError = validateUserChanges(id, {
+        disabled: typeof body.disabled === "boolean" ? body.disabled : undefined,
+        role: body.role === "admin" || body.role === "member" ? body.role : undefined,
+      })
+      if (changeError) return sendJson(res, 400, { error: changeError })
 
       try {
         // Every applied change invalidates that user's live sessions: a

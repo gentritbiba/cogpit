@@ -137,6 +137,19 @@ describe("device usernames", () => {
     await updateDevice(id, { auth: "none" })
     expect(getDevice(id)?.username).toBeUndefined()
   })
+
+  it("detaches the username on an explicit null while keeping password auth", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+
+    await updateDevice(id, { username: null })
+
+    expect(getDevice(id)?.username).toBeUndefined()
+    expect(getDevice(id)).toMatchObject({ auth: "password", password: "memberpass1234" })
+    await initDeviceRegistry(dir)
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
 })
 
 // ── listDevices ──────────────────────────────────────────────────────

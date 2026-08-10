@@ -55,7 +55,12 @@ export interface AddDeviceInput {
   username?: string
 }
 
-export type UpdateDeviceInput = Partial<Pick<HubDevice, "name" | "host" | "port" | "tls" | "auth" | "password" | "username">>
+export type UpdateDeviceInput =
+  Partial<Pick<HubDevice, "name" | "host" | "port" | "tls" | "auth" | "password">>
+  & {
+    /** `null` detaches the stored username; absent leaves it unchanged. */
+    username?: string | null
+  }
 
 const DEFAULT_PORT = 19384
 const DEFAULT_TLS_PORT = 443
@@ -249,7 +254,7 @@ export async function updateDevice(id: string, patch: UpdateDeviceInput): Promis
     if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
     if (patch.auth !== undefined) next.auth = patch.auth
     if (patch.password !== undefined) next.password = patch.password
-    if (patch.username !== undefined) next.username = patch.username
+    if (patch.username !== undefined) next.username = patch.username ?? undefined
     // A device switched to token-less auth must not keep stale credentials.
     if (next.auth === "none") {
       next.password = undefined

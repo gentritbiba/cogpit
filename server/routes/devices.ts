@@ -10,6 +10,7 @@ import {
   validateDeviceHost,
   setDeviceRuntime,
   type HubDevice,
+  type UpdateDeviceInput,
 } from "../hub/registry"
 import {
   getDeviceToken,
@@ -192,9 +193,17 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
-/** Device usernames are normalized exactly like the team users store. */
-function readUsername(value: unknown): string | undefined {
-  return readString(value)?.toLowerCase()
+/**
+ * Device usernames, normalized exactly like the team users store. Tri-state so
+ * a patch can say all three things: an absent field leaves the stored username
+ * alone, an explicit "" or null detaches it (keeping password auth), and a
+ * value sets it.
+ */
+function readUsername(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return null
+  if (typeof value !== "string") return undefined
+  return value.trim().toLowerCase() || null
 }
 
 /** Strip the password before a device ever leaves the server. */
@@ -257,7 +266,8 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
   const port = normalizePort(body.port, tls)
   const allowLocalTunnel = body.allowLocalTunnel === true
   const password = readString(body.password)
-  const username = readUsername(body.username)
+  // On an add there is nothing to detach: a blank username is simply none.
+  const username = readUsername(body.username) ?? undefined
   const name = readString(body.name)
 
   const hostError = validateDeviceHost(host, allowLocalTunnel)
@@ -325,7 +335,7 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
     return sendJson(res, 400, { error: "Invalid JSON body", code: "BAD_REQUEST" })
   }
 
-  const patch: Partial<HubDevice> = {}
+  const patch: UpdateDeviceInput = {}
   const newName = readString(body.name)
   if (newName) patch.name = newName
 
@@ -338,7 +348,8 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
 
   // An auth:none device has no stored password to pair a username with, so
   // accepting one would store a credential that is never verified or sent.
-  if (newUsername !== undefined && !newPassword && device.auth === "none") {
+  // Detaching is always fine — such a device has no username to begin with.
+  if (typeof newUsername === "string" && !newPassword && device.auth === "none") {
     return sendJson(res, 400, {
       error: "This device has no password. Send a password together with the username.",
       code: "USERNAME_REQUIRES_PASSWORD",
@@ -347,10 +358,11 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
 
   const host = newHost ?? device.host
   const port = newPort ?? device.port
+  const username = newUsername === undefined ? device.username : (newUsername ?? undefined)
   const hostChanged = !!newHost && newHost !== device.host
   const portChanged = newPort !== undefined && newPort !== device.port
   const tlsChanged = newTls !== undefined && newTls !== (device.tls === true)
-  const usernameChanged = newUsername !== undefined && newUsername !== device.username
+  const usernameChanged = username !== device.username
   const sensitiveChanged = hostChanged || portChanged || tlsChanged || !!newPassword || usernameChanged
 
   if (hostChanged) {
@@ -376,12 +388,11 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
       })
     }
     // A username change without a new password re-verifies with the stored
-    // one, so a typo'd user is caught here instead of on the next proxy call.
+    // one, so a typo'd user — or a detachment the device will not accept — is
+    // caught here instead of on the next proxy call.
     const verifyPassword = newPassword ?? device.password
     if ((newPassword || usernameChanged) && verifyPassword) {
-      const verify = await verifyDevicePassword(
-        host, port, tls, verifyPassword, newUsername ?? device.username,
-      )
+      const verify = await verifyDevicePassword(host, port, tls, verifyPassword, username)
       if (!verify.ok) {
         return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
           error: AUTH_MESSAGES[verify.code],
@@ -397,7 +408,7 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   }
 
   await updateDevice(id, patch)
-  return sendJson(res, 200, { device: toPublic({ ...device, ...patch }) })
+  return sendJson(res, 200, { device: toPublic({ ...device, ...patch, username }) })
 }
 
 async function handleDelete(id: string, res: ServerResponse): Promise<void> {

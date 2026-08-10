@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -9,6 +9,7 @@ import {
   createSessionToken,
   validateSessionToken,
   getSessionPrincipal,
+  hashPassword,
   verifyPassword,
   __resetSessionsForTest,
   type SessionPrincipal,
@@ -467,6 +468,58 @@ describe("/api/team/users", () => {
     // 400 must mean nothing changed: role intact, sessions not revoked.
     expect(getUserById(bob.id)?.role).toBe("member")
     expect(validateSessionToken(token)).toBe(true)
+  })
+
+  it("applies nothing from a mixed patch that would end up without an enabled admin", async () => {
+    enterTeamEdition()
+    // A store whose only admin is disabled. The API refuses to create this
+    // state (it never disables the last enabled admin), but an edited or
+    // restored users.json can hold it — and re-enabling that admin while
+    // demoting them in one patch is exactly what must not half-apply.
+    await writeFile(join(root, "team", "users.json"), JSON.stringify({
+      users: [
+        {
+          id: "u_alice", username: "alice", displayName: "alice", role: "admin",
+          createdAt: 1, disabled: true, passwordHash: hashPassword(STRONG_PASSWORD),
+        },
+        {
+          id: "u_bob", username: "bob", displayName: "bob", role: "member",
+          createdAt: 2, passwordHash: hashPassword(STRONG_PASSWORD),
+        },
+      ],
+    }))
+    await initUsersStore(join(root, "team"))
+
+    const body = JSON.stringify({ disabled: false, role: "member" })
+    const { req, res, next, sendBody } = createMockReqRes("PATCH", "/u_alice", body)
+    const pending = usersHandler()(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).error).toBe("Cannot remove the last admin")
+    expect(getUserById("u_alice")).toMatchObject({ disabled: true, role: "admin" })
+  })
+
+  it("still enables a disabled admin when the patch leaves them an admin", async () => {
+    enterTeamEdition()
+    await writeFile(join(root, "team", "users.json"), JSON.stringify({
+      users: [{
+        id: "u_alice", username: "alice", displayName: "alice", role: "admin",
+        createdAt: 1, disabled: true, passwordHash: hashPassword(STRONG_PASSWORD),
+      }],
+    }))
+    await initUsersStore(join(root, "team"))
+
+    const { req, res, next, sendBody } = createMockReqRes(
+      "PATCH", "/u_alice", JSON.stringify({ disabled: false }),
+    )
+    const pending = usersHandler()(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(200)
+    expect(getUserById("u_alice")?.disabled).toBeUndefined()
   })
 
   it("maps a weak password reset to 400", async () => {

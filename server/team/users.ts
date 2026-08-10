@@ -215,13 +215,47 @@ function requireUser(draft: Map<string, TeamUser>, id: string): TeamUser {
   return user
 }
 
-function isLastEnabledAdmin(draft: Map<string, TeamUser>, id: string): boolean {
-  const user = draft.get(id)
-  if (!user || user.role !== "admin" || user.disabled) return false
-  for (const other of draft.values()) {
-    if (other.id !== id && other.role === "admin" && !other.disabled) return false
+/**
+ * The last-admin rule, in one place: no change to an admin account may leave
+ * the store without an enabled admin. Evaluated against the *result* of the
+ * change, so a patch that both re-enables and demotes the only admin is caught
+ * as one step instead of passing its halves.
+ *
+ * Only admin accounts can trip it — changing a member never removes an admin,
+ * and a store that somehow holds none must stay manageable.
+ */
+function findLastAdminViolation(
+  users: ReadonlyMap<string, TeamUser>,
+  id: string,
+  next: TeamUser,
+): string | null {
+  if (users.get(id)?.role !== "admin" && next.role !== "admin") return null
+  for (const user of users.values()) {
+    const after = user.id === id ? next : user
+    if (after.role === "admin" && !after.disabled) return null
   }
-  return true
+  return "Cannot remove the last admin"
+}
+
+/** The fields a single request may change together. */
+export interface UserChanges {
+  disabled?: boolean
+  role?: TeamRole
+}
+
+/**
+ * The error a change set would raise, or null. Callers applying several fields
+ * must check this first: the mutations below persist one field at a time, so a
+ * rule tripped by a later field would otherwise leave the earlier ones written.
+ */
+export function validateUserChanges(id: string, changes: UserChanges): string | null {
+  const user = users.get(id)
+  if (!user) return "User not found"
+  return findLastAdminViolation(users, id, {
+    ...user,
+    role: changes.role ?? user.role,
+    disabled: (changes.disabled ?? user.disabled) || undefined,
+  })
 }
 
 export async function createUser(input: CreateUserInput): Promise<TeamUserPublic> {
@@ -265,10 +299,10 @@ export async function createUser(input: CreateUserInput): Promise<TeamUserPublic
 export async function setUserDisabled(id: string, disabled: boolean): Promise<void> {
   await commitUserMutation((draft) => {
     const user = requireUser(draft, id)
-    if (disabled && isLastEnabledAdmin(draft, id)) {
-      throw new UserValidationError("Cannot remove the last admin")
-    }
-    draft.set(id, { ...user, disabled: disabled || undefined })
+    const next = { ...user, disabled: disabled || undefined }
+    const violation = findLastAdminViolation(draft, id, next)
+    if (violation) throw new UserValidationError(violation)
+    draft.set(id, next)
     return { changed: true, value: undefined }
   })
 }
@@ -291,10 +325,10 @@ export async function setUserRole(id: string, role: TeamRole): Promise<void> {
   }
   await commitUserMutation((draft) => {
     const user = requireUser(draft, id)
-    if (role === "member" && isLastEnabledAdmin(draft, id)) {
-      throw new UserValidationError("Cannot remove the last admin")
-    }
-    draft.set(id, { ...user, role })
+    const next = { ...user, role }
+    const violation = findLastAdminViolation(draft, id, next)
+    if (violation) throw new UserValidationError(violation)
+    draft.set(id, next)
     return { changed: true, value: undefined }
   })
 }

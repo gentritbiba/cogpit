@@ -552,6 +552,44 @@ describe("device usernames", () => {
     )
   })
 
+  it.each([["an empty string", ""], ["null", null]])(
+    "detaches the username when the patch sends %s",
+    async (_label, value) => {
+      const fetchFn = mockFetch()
+      fetchFn
+        .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+        .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+      mockedGetDevice.mockReturnValue({
+        id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+        auth: "password", password: "pw", username: "alice", addedAt: 1,
+      } as never)
+
+      const { res } = await drive("PATCH", "/dev_1", { username: value })
+
+      expect(res._getStatus()).toBe(200)
+      // Dropping a credential is a sensitive change: the cached token must go,
+      // and the password alone has to still authenticate.
+      expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+      const [, verifyInit] = fetchFn.mock.calls[1]
+      expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer pw" })
+      expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ username: null }))
+      expect(JSON.parse(res._getData()).device.username).toBeUndefined()
+    },
+  )
+
+  it("leaves an already-username-less device alone when the patch clears it", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "", name: "renamed" })
+
+    expect(res._getStatus()).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+  })
+
   it("treats an unchanged username as a non-sensitive patch", async () => {
     const fetchFn = mockFetch()
     mockedGetDevice.mockReturnValue({
