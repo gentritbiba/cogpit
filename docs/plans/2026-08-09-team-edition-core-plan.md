@@ -411,6 +411,8 @@ Tasks 8-9 review fixes:
 
 **Steps:** failing tests (team hello → username field rendered; personal → no username field; team submit posts JSON body; useNetworkAuth gates on team even when local) → implement → green → commit `feat(team): username login screen`.
 
+**Status: DONE** (commit d3c409b). Deviations/notes: the shared hello cache is `getServerEdition()` in `src/lib/auth.ts` (in-flight promise shared by hook + LoginScreen; a failed probe resolves "personal" without being cached so the next caller retries). Two adjacent behaviors rode along so team-local works end to end: `checkAuthSession` skips its trusted-local short-circuit once the server is known team (a cookieless localhost browser must not self-report authenticated), and `requestWithAuth` fires `cogpit-auth-required` on local 401s in team edition (mid-session expiry re-renders LoginScreen instead of raw errors). Local clients now start `authChecked:false` until hello resolves (one spinner frame; personal then renders exactly as before — pinned by the updated local-trust tests).
+
 ---
 
 ### Task 13: Renderer — capabilities, gates, identity-scoped keys
@@ -432,6 +434,8 @@ Tasks 8-9 review fixes:
 - `src/lib/device.ts` `deviceScopedKey(base)`: incorporate active identity — `` `${base}::${deviceId}::${userId}` `` when a team userId is set (personal/no-user → exactly today's output, byte-identical, so existing localStorage survives). Add `setActiveIdentity(userId | null)` + `__resetForTest`.
 
 **Steps:** failing tests (useMe fetch/refresh/failure-default; can() defaults true; deviceScopedKey unchanged without identity, scoped with; a representative gate hides on member capabilities) → implement → green ✋ full suite → commit `feat(team): capability-gated renderer and identity-scoped storage`.
+
+**Status: DONE** (commit 8dfb213). Deviations/notes: device.ts reset hook named `__resetIdentityForTest` (self-describing, matches the `__resetXForTest` convention) instead of the sketch's bare `__resetForTest`. Gate sites landed: SessionInfoBar open-terminal button, CommandPaletteHost integrated-terminal action, DesktopWorkspace pending-view Terminal button, ScriptsDock as a whole (every affordance spawns through the PTY), ConfigDialog (network section + Save hidden, inputs disabled — read-only view), DeviceSwitcher add/manage entries + DevicesDialog mount, DesktopHeader kill-all. PowerMonitor's system-process kill buttons needed no client gate — Task 7 already withholds `snapshot.system` from members, so the whole card never renders. Editor/reveal buttons and the LiveSessions per-pid kill stay ungated (outside the spec's four mappings; the server 403s members). Representative member gate pinned in DeviceSwitcher.test.tsx; all-true `can()` default pinned in capabilities.test.ts.
 
 ---
 
