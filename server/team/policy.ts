@@ -31,9 +31,9 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     ...authed("/api/performance"),
   ],
   config: [
-    { prefix: "/api/config", methods: ["POST"], requires: "admin" },
+    { prefix: "/api/config", methods: ["GET"], requires: "authed" },
+    { prefix: "/api/config", requires: "admin" },
     ...authed(
-      "/api/config",
       "/api/config/validate",
       "/api/network-info",
       "/api/auth/verify",
@@ -126,6 +126,17 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()
 
 /**
+ * A prefix only matches at a path-segment boundary: the path equals it, the
+ * prefix already ends in "/", or the next character is "/". Keeps /api/hellox
+ * from riding the /api/hello rule.
+ */
+function prefixMatches(path: string, prefix: string): boolean {
+  if (!path.startsWith(prefix)) return false
+  if (path.length === prefix.length || prefix.endsWith("/")) return true
+  return path[prefix.length] === "/"
+}
+
+/**
  * Resolve the requirement for a query-stripped, lowercased path. Longest
  * matching prefix wins; at equal prefix length a method-specific rule beats a
  * method-agnostic one. No match at all means "admin".
@@ -133,7 +144,7 @@ const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()
 export function requirementFor(path: string, method: string): PolicyRequirement {
   let best: PolicyRule | null = null
   for (const rule of ALL_RULES) {
-    if (!path.startsWith(rule.prefix)) continue
+    if (!prefixMatches(path, rule.prefix)) continue
     if (rule.methods && !rule.methods.includes(method)) continue
     if (
       !best

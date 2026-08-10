@@ -43,6 +43,21 @@ describe("requirementFor", () => {
     expect(requirementFor("/api/config", "GET")).toBe("authed")
   })
 
+  it("treats unknown /api/config methods as admin (conservative default)", () => {
+    expect(requirementFor("/api/config", "DELETE")).toBe("admin")
+    expect(requirementFor("/api/config", "PUT")).toBe("admin")
+    expect(requirementFor("/api/auth/logout", "POST")).toBe("authed")
+  })
+
+  it("only matches prefixes at path-segment boundaries", () => {
+    // Bare startsWith would let /api/hellox ride the /api/hello public rule.
+    expect(requirementFor("/api/hellox", "GET")).toBe("admin")
+    expect(requirementFor("/api/hello", "GET")).toBe("public")
+    expect(requirementFor("/api/config-browserx", "GET")).toBe("admin")
+    expect(requirementFor("/api/config-browser/file", "GET")).toBe("authed")
+    expect(requirementFor("/api/config-browser/file", "DELETE")).toBe("admin")
+  })
+
   it("lets the longest prefix win", () => {
     // /api/config-browser and /api/config/validate both start with /api/config;
     // their own longer-prefix rules must win over the config POST admin rule.
@@ -138,6 +153,11 @@ describe("teamAuthzMiddleware (team edition)", () => {
 
   it("lets a member GET /api/config", () => {
     const r = run("/api/config", { principal: MEMBER })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("keeps member logout reachable", () => {
+    const r = run("/api/auth/logout", { method: "POST", principal: MEMBER })
     expect(r.next).toHaveBeenCalledOnce()
   })
 

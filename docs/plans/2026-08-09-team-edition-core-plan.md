@@ -282,6 +282,8 @@ export function teamAuthzMiddleware(req, res, next) {
 
 **Status: DONE.** Deviations: none material. Notes: performance's bare `use("/api", requestMonitor)` metrics tap is deliberately absent from `ROUTE_POLICIES` (listing `/api` would defeat the fail-safe default); config's auxiliary mounts (`/api/network-info`, `/api/auth/*`, `/api/connected-devices`, `/api/config/validate`) enumerated as `authed`; `config-browser` encoded as one shared-prefix pair (`GET` → authed, method-agnostic → admin) covering all four of its mounts; `/api/running-processes` (claude-manage read-only inventory) → `authed`.
 
+Post-review hardening (policy review follow-up): (1) GET `/api/performance` no longer embeds the system-wide process snapshot for non-admins — in team edition `snapshot.system` (same data as admin-only `/api/system-processes`) is attached only when the request principal is admin, gated in the route handler itself since the rest of the snapshot stays member-visible; personal edition unchanged, and the member perf panel degrades gracefully (`system` is already optional — the Agent processes card just hides). (2) `requirementFor` prefixes now match only at path-segment boundaries (path equals the prefix, prefix ends in `/`, or next char is `/`), so `/api/hellox` no longer rides the `/api/hello` public rule — unmatched paths fall to the admin default. (3) `config` re-encoded to the conservative `config-browser` shape: exact `/api/config` prefix is `GET` → authed, method-agnostic → admin, so unknown future methods (PUT/DELETE) default to admin instead of authed; auxiliary mounts keep their own authed rules, and member POST `/api/auth/logout` stays reachable (pinned by test).
+
 ---
 
 ### Task 8: Team login on `/api/auth/verify`
