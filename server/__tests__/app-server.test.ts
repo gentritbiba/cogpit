@@ -10,7 +10,13 @@ import { join } from "node:path"
 import { createAppServer } from "../../electron/server"
 import { createStandaloneAppServer } from "../standalone-app-server"
 import { WebSocket } from "ws"
-import { hashPassword } from "../security"
+import { hashPassword, __resetSessionsForTest } from "../security"
+import { __resetEditionForTest } from "../team/edition"
+import { __resetUsersForTest } from "../team/users"
+import {
+  __flushForTest as flushSessionPersistence,
+  __resetForTest as __resetSessionPersistenceForTest,
+} from "../team/sessionPersistence"
 
 type AppServerFactory = (
   staticDir: string,
@@ -300,6 +306,75 @@ describe("app-server initialization and proxy failures", () => {
     await expect(response.text()).resolves.toBe("Vite dev server not ready")
     await appServer.dispose()
     openServers.delete(appServer.httpServer)
+  })
+})
+
+describe("app-server team edition composition", () => {
+  const originalEdition = process.env.COGPIT_EDITION
+
+  afterEach(async () => {
+    if (originalEdition === undefined) delete process.env.COGPIT_EDITION
+    else process.env.COGPIT_EDITION = originalEdition
+    await flushSessionPersistence()
+    __resetEditionForTest()
+    __resetUsersForTest()
+    __resetSessionsForTest()
+    __resetSessionPersistenceForTest()
+  })
+
+  it("boots the standalone shell in team edition with the first-admin bootstrap open", async () => {
+    process.env.COGPIT_EDITION = "team"
+    const { httpServer, dispose } = await createStandaloneAppServer(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+
+    // The trust model flipped: a local unauthenticated data request is refused…
+    const projects = await fetch(`${baseUrl}/api/projects`)
+    expect(projects.status).toBe(401)
+
+    // …the public handshake advertises the edition…
+    const hello = await fetch(`${baseUrl}/api/hello`)
+    await expect(hello.json()).resolves.toMatchObject({ app: "cogpit", edition: "team" })
+
+    // …and the zero-user bootstrap works, proving the users store initialized
+    // before requests were served.
+    const bootstrap = await fetch(`${baseUrl}/api/team/bootstrap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "founder", password: "founder-passphrase-1" }),
+    })
+    expect(bootstrap.status).toBe(200)
+    const issued = await bootstrap.json() as { valid: boolean; token?: string }
+    expect(issued.valid).toBe(true)
+    expect(issued.token).toMatch(/^[0-9a-f]{64}$/)
+
+    await dispose()
+    openServers.delete(httpServer)
+  })
+
+  it("fails the team boot loudly when the users store is corrupt", async () => {
+    process.env.COGPIT_EDITION = "team"
+    await mkdir(join(userDataDir, "team"), { recursive: true })
+
+    // A corrupt store must abort composition (fail closed), never boot with an
+    // empty user list that would reopen the unauthenticated bootstrap.
+    await writeFile(join(userDataDir, "team", "users.json"), '{"users":42}')
+    await expect(createStandaloneAppServer(staticDir, userDataDir))
+      .rejects.toThrow("Malformed team users store")
+
+    await writeFile(join(userDataDir, "team", "users.json"), "not-json{{{")
+    await expect(createStandaloneAppServer(staticDir, userDataDir)).rejects.toThrow()
+  })
+
+  it("forces personal composition for the electron shell even when env says team", async () => {
+    process.env.COGPIT_EDITION = "team"
+    const { httpServer, dispose } = await createAppServer(staticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+
+    const hello = await fetch(`${baseUrl}/api/hello`)
+    await expect(hello.json()).resolves.toMatchObject({ edition: "personal" })
+
+    await dispose()
+    openServers.delete(httpServer)
   })
 })
 

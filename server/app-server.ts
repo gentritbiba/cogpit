@@ -6,7 +6,7 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
-import { setConfigPath, setDataRoot, loadConfig, getConfig } from "./config"
+import { setConfigPath, setDataRoot, loadConfig, getConfig, getDataRoot } from "./config"
 import {
   authMiddleware,
   securityHeaders,
@@ -16,6 +16,9 @@ import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
 import { websocketUpgradeRejection } from "./security"
 import { teamAuthzMiddleware } from "./team/authz"
+import { describeEditionSuppression, initEdition, isTeamEdition } from "./team/edition"
+import { initSessionPersistence } from "./team/sessionPersistence"
+import { initUsersStore } from "./team/users"
 import { initDeviceRegistry } from "./hub/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
@@ -42,7 +45,24 @@ export async function createServerComposition(
   // those paths correct across later config reloads.
   setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
-  await loadConfig()
+  const config = await loadConfig()
+
+  // Edition resolves before any route registers; only the standalone shell can
+  // honor a team request, and a suppressed request is logged, never silent.
+  initEdition({ shell: environment.mode, configEdition: config?.edition })
+  const suppression = describeEditionSuppression(process.env, config?.edition, environment.mode)
+  if (suppression) console.warn(suppression)
+
+  if (isTeamEdition()) {
+    // Users must load before any request can authenticate, sessions before any
+    // login can persist. A corrupt users store rejects here on purpose: booting
+    // with an empty list would reopen the unauthenticated first-admin
+    // bootstrap, so the shell must die loudly instead.
+    const teamDir = join(getDataRoot(), "team")
+    await initUsersStore(teamDir)
+    await initSessionPersistence(teamDir)
+  }
+
   await initDeviceRegistry(userDataDir)
   refreshDirs()
 

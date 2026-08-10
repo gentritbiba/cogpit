@@ -18,6 +18,31 @@ export function resolveEdition(
   return configEdition === "team" ? "team" : "personal"
 }
 
+/**
+ * One-line boot diagnostic for a team request that resolveEdition did not
+ * honor, so an operator never wonders why their team flag "did nothing".
+ * Returns null when team was granted, when nothing asked for team, or when an
+ * explicit valid COGPIT_EDITION=personal overrode the config (honored, not
+ * suppressed).
+ */
+export function describeEditionSuppression(
+  env: NodeJS.ProcessEnv,
+  configEdition: string | undefined,
+  shell: EditionShell,
+): string | null {
+  if (resolveEdition(env, configEdition, shell) === "team") return null
+  const envEdition = env.COGPIT_EDITION
+  if (envEdition && envEdition !== "team" && envEdition !== "personal") {
+    return `COGPIT_EDITION="${envEdition}" is not recognized (use "team" or "personal") — running personal edition`
+  }
+  const teamRequested = envEdition === "team"
+    || (configEdition === "team" && envEdition !== "personal")
+  if (teamRequested && shell !== "standalone") {
+    return `Team edition was requested but suppressed: the ${shell} shell always runs personal edition (only the standalone server supports team)`
+  }
+  return null
+}
+
 // Personal until initEdition runs — the safe no-op default.
 let edition: CogpitEdition = "personal"
 

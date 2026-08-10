@@ -8,6 +8,7 @@ vi.mock("../../config", () => ({
 import { getConfig } from "../../config"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerHelloRoutes, getInstanceId } from "../../routes/hello"
+import { initEdition, __resetEditionForTest } from "../../team/edition"
 
 const mockedGetConfig = vi.mocked(getConfig)
 
@@ -40,9 +41,12 @@ describe("GET /api/hello", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     delete process.env.COGPIT_DEVICE_NAME
+    delete process.env.COGPIT_EDITION
   })
   afterEach(() => {
     delete process.env.COGPIT_DEVICE_NAME
+    delete process.env.COGPIT_EDITION
+    __resetEditionForTest()
   })
 
   it("calls next for non-GET methods", () => {
@@ -68,6 +72,27 @@ describe("GET /api/hello", () => {
     expect(body.version.length).toBeGreaterThan(0)
     expect(body.instanceId).toMatch(/^[0-9a-f]{16}$/)
     expect(res._getHeaders()["Content-Type"]).toBe("application/json")
+  })
+
+  it("reports the personal edition before any initEdition runs", () => {
+    const handler = register()
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).edition).toBe("personal")
+  })
+
+  it("reports the team edition once resolved for the standalone shell", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    const handler = register("standalone")
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).edition).toBe("team")
   })
 
   it("reports networkAccess:false and configured:false when unconfigured", () => {

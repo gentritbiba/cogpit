@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import type { UseFn } from "../http"
 import { getConfig } from "../config"
+import { getEdition } from "../team/edition"
 
 export type HubMode = "electron" | "standalone" | "dev"
 
@@ -58,6 +59,9 @@ export function registerHelloRoutes(use: UseFn, opts: { mode: HubMode }) {
       version: VERSION,
       hubApi: 1,
       mode: opts.mode,
+      // Read per request: initEdition runs during composition, after modules
+      // load — a value captured at import time could freeze stale "personal".
+      edition: getEdition(),
       name: getDeviceName(),
       instanceId: INSTANCE_ID,
       networkAccess: config?.networkAccess ?? false,

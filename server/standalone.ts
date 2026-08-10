@@ -16,12 +16,15 @@ import {
   applyEnvNetworkOverrides,
 } from "./config"
 import { validatePasswordStrength } from "./security"
+import { getEdition, initEdition, isTeamEdition } from "./team/edition"
+import { userCount } from "./team/users"
 import { removePortFile, writePortFile } from "./lib/portFile"
 import {
   resolveEnvPassword,
   hasUsableNetworkCredentials,
   shouldFailClosed,
   buildBootBanner,
+  buildTeamBootNotices,
   resolveDeviceName,
 } from "./lib/standalone-bootstrap"
 
@@ -55,6 +58,10 @@ if (!configExisted) {
   }
 }
 
+// Resolved here (server composition re-resolves the same inputs, harmlessly)
+// because the fail-closed decision below depends on the edition.
+initEdition({ shell: "standalone", configEdition: getConfig()?.edition })
+
 // ── Env-derived network credentials (in-memory only) ──────────────────────
 let envPassword: string | null = null
 try {
@@ -66,7 +73,10 @@ try {
   process.exit(1)
 }
 
-if (envPassword) {
+// Team edition ignores the network password entirely (users sign in with
+// their own accounts), so it is neither strength-checked nor applied there —
+// buildTeamBootNotices logs that it was ignored.
+if (envPassword && !isTeamEdition()) {
   const strengthError = validatePasswordStrength(envPassword)
   if (strengthError) {
     console.error(`Refusing to start: network password is too weak — ${strengthError}.`)
@@ -77,7 +87,7 @@ if (envPassword) {
 
 // ── Fail closed: never bind a passwordless server off loopback ─────────────
 const hasNetworkCredentials = hasUsableNetworkCredentials(envPassword, getConfig())
-if (shouldFailClosed(host, hasNetworkCredentials)) {
+if (shouldFailClosed(host, hasNetworkCredentials, getEdition())) {
   console.error(
     [
       `Refusing to bind ${host}:${port} without a network password.`,
@@ -93,7 +103,14 @@ if (shouldFailClosed(host, hasNetworkCredentials)) {
   process.exit(1)
 }
 
+// A rejected composition must abort the boot. In team edition this covers a
+// corrupt users store: starting anyway would look "empty" and reopen the
+// unauthenticated first-admin bootstrap, so fail loudly instead.
 const { httpServer, dispose } = await createStandaloneAppServer(staticDir, dataDir)
+  .catch((error): never => {
+    console.error(`Failed to start: ${(error as Error).message}`)
+    process.exit(1)
+  })
 
 httpServer.listen(port, host, () => {
   // Published so agent hooks can find us without hard-coding a port.
@@ -102,9 +119,18 @@ httpServer.listen(port, host, () => {
   const banner = buildBootBanner({ deviceName, host, port, interfaces: networkInterfaces() })
   for (const line of banner) console.log(line)
   console.log(`Data directory: ${dataDir}`)
-  if (envPassword) {
+  if (envPassword && !isTeamEdition()) {
     console.log("Network access: enabled via environment (password kept in memory only)")
   }
+  const teamNotices = buildTeamBootNotices({
+    edition: getEdition(),
+    userCount: userCount(),
+    envPasswordSet: envPassword !== null,
+    host,
+    port,
+    interfaces: networkInterfaces(),
+  })
+  for (const line of teamNotices) console.log(line)
 })
 
 // Graceful shutdown

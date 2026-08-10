@@ -9,6 +9,7 @@ import {
   firstNonInternalIPv4,
   resolveAdvertisedHost,
   buildBootBanner,
+  buildTeamBootNotices,
   resolveDeviceName,
 } from "../lib/standalone-bootstrap"
 
@@ -95,6 +96,16 @@ describe("shouldFailClosed", () => {
     expect(shouldFailClosed("127.0.0.1", false)).toBe(false)
     expect(shouldFailClosed("localhost", false)).toBe(false)
   })
+
+  it("never fails closed in team edition (user accounts replace the network password)", () => {
+    expect(shouldFailClosed("0.0.0.0", false, "team")).toBe(false)
+    expect(shouldFailClosed("192.168.1.10", false, "team")).toBe(false)
+  })
+
+  it("still fails closed for an explicit personal edition (regression pin)", () => {
+    expect(shouldFailClosed("0.0.0.0", false, "personal")).toBe(true)
+    expect(shouldFailClosed("192.168.1.10", false, "personal")).toBe(true)
+  })
 })
 
 describe("hasUsableNetworkCredentials", () => {
@@ -160,6 +171,47 @@ describe("buildBootBanner", () => {
   it("uses the explicit host for a non-wildcard bind", () => {
     const lines = buildBootBanner({ deviceName: "box", host: "192.168.1.7", port: 8080, interfaces: IFACES })
     expect(lines.join("\n")).toContain("Devices → Add device → 192.168.1.7:8080")
+  })
+})
+
+describe("buildTeamBootNotices", () => {
+  const base = { host: "0.0.0.0", port: 19384, interfaces: IFACES }
+
+  it("is silent in personal edition regardless of the other inputs", () => {
+    expect(
+      buildTeamBootNotices({ ...base, edition: "personal", userCount: 0, envPasswordSet: true }),
+    ).toEqual([])
+  })
+
+  it("announces the first-admin bootstrap URL when no users exist", () => {
+    const text = buildTeamBootNotices({
+      ...base, edition: "team", userCount: 0, envPasswordSet: false,
+    }).join("\n")
+    expect(text).toContain("no users yet")
+    expect(text).toContain("http://192.168.1.42:19384")
+    expect(text).toContain("first admin")
+  })
+
+  it("advertises the loopback URL for a loopback bind", () => {
+    const text = buildTeamBootNotices({
+      edition: "team", userCount: 0, envPasswordSet: false,
+      host: "127.0.0.1", port: 20000, interfaces: IFACES,
+    }).join("\n")
+    expect(text).toContain("http://127.0.0.1:20000")
+  })
+
+  it("warns that a set network password is ignored in team edition", () => {
+    const text = buildTeamBootNotices({
+      ...base, edition: "team", userCount: 3, envPasswordSet: true,
+    }).join("\n")
+    expect(text).toContain("COGPIT_NETWORK_PASSWORD")
+    expect(text).toContain("ignored")
+  })
+
+  it("stays quiet for a team boot with users and no env password", () => {
+    expect(
+      buildTeamBootNotices({ ...base, edition: "team", userCount: 2, envPasswordSet: false }),
+    ).toEqual([])
   })
 })
 

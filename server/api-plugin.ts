@@ -6,6 +6,7 @@ import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
 import { teamAuthzMiddleware } from "./team/authz"
+import { describeEditionSuppression, initEdition } from "./team/edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { codexAppServer } from "./codex-app-server"
 
@@ -24,11 +25,17 @@ export function sessionApiPlugin(): Plugin {
       // Vite awaits async configureServer hooks. Complete initialization before
       // registering middleware so the first request observes the same ready
       // config/registry state as Electron and standalone composition.
-      await Promise.all([
+      const [config] = await Promise.all([
         loadConfig(),
         initDeviceRegistry(fileURLToPath(new URL("..", import.meta.url))),
       ])
       refreshDirs()
+
+      // The dev shell always resolves personal (team is standalone-only), but
+      // a team request must still be visibly suppressed, never silently eaten.
+      initEdition({ shell: "dev", configEdition: config?.edition })
+      const suppression = describeEditionSuppression(process.env, config?.edition, "dev")
+      if (suppression) console.warn(suppression)
 
       // Security middleware (before all routes)
       server.middlewares.use(securityHeaders)

@@ -362,6 +362,14 @@ export function computeCapabilities(principal: SessionPrincipal | null, edition:
 
 **Steps:** failing tests (bootstrap helpers: team+non-loopback+no password → allowed; personal+non-loopback+no password → still fails closed (regression pin); hello payload carries edition) → implement → green → commit `feat(team): standalone team boot, shell forcing, hello edition`.
 
+**Status: DONE.** Deviations/notes:
+- Composition (`createServerComposition`) owns the canonical init order (setDataRoot → setConfigPath → loadConfig → initEdition → team stores → registry → routes); `server/standalone.ts` additionally calls `initEdition` right after its own loadConfig because the fail-closed decision needs the edition pre-composition (same-input duplicate, mirroring the existing setConfigPath/loadConfig re-run).
+- `shouldFailClosed` gained an optional `edition` param defaulting to `"personal"` — 2-arg callers keep fail-closed semantics (regression-pinned).
+- In team edition a set COGPIT_NETWORK_PASSWORD is neither strength-checked nor applied — only logged as ignored via pure `buildTeamBootNotices` (which also builds the zero-users first-admin banner).
+- Review follow-ups landed here: (1) a corrupt users store rejects `createServerComposition` (pinned in app-server.test.ts against both malformed-shape and unparseable files) and standalone exits 1 via a `.catch` on the composition; (2) suppressed team requests print one boot warning via pure `describeEditionSuppression` (wrong shell / unrecognized value; an explicit valid `COGPIT_EDITION=personal` override is honored silently), logged from app-server + api-plugin so every shell reports exactly once; also added the `resolveEdition({}, "TEAM", "standalone") → personal` config-garbage pin.
+- Accepted (no code change): in team edition, POST /api/config networkAccess/password revocations still call `revokeAllSessions`, which wipes team sessions too — fail-safe, users just re-login.
+- No dedicated api-plugin test exists (none did before); the dev-shell forcing is pinned at the resolveEdition/initEdition level.
+
 ---
 
 ### Task 11: Hub user-auth (add a team device from personal Cogpit)
