@@ -8,7 +8,9 @@ import {
   hubFetch,
   authUrl,
   getServerEdition,
-  __resetServerEditionForTest,
+  getServerHello,
+  refreshServerHello,
+  __resetServerHelloForTest,
 } from "@/lib/auth"
 
 function setHostname(hostname: string) {
@@ -32,10 +34,52 @@ describe("auth", () => {
     localStorage.clear()
     sessionStorage.clear()
     vi.restoreAllMocks()
-    __resetServerEditionForTest()
+    __resetServerHelloForTest()
   })
 
   afterEach(() => setHostname("localhost"))
+
+  describe("getServerHello", () => {
+    it("reports the open first-admin bootstrap from the same cached probe", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ edition: "team", needsBootstrap: true }), { status: 200 }),
+      )
+
+      await expect(getServerHello()).resolves.toEqual({ edition: "team", needsBootstrap: true })
+      await expect(getServerEdition()).resolves.toBe("team")
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    it("treats a missing or non-boolean needsBootstrap as closed", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ edition: "team", needsBootstrap: "yes" }), { status: 200 }),
+      )
+      await expect(getServerHello()).resolves.toEqual({ edition: "team", needsBootstrap: false })
+    })
+
+    it("never reports a bootstrap for a personal server", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ needsBootstrap: true }), { status: 200 }),
+      )
+      await expect(getServerHello()).resolves.toEqual({ edition: "personal", needsBootstrap: false })
+    })
+
+    it("refreshes the cache after the bootstrap closes", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ edition: "team", needsBootstrap: true }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ edition: "team", needsBootstrap: false }), { status: 200 }),
+        )
+
+      await expect(getServerHello()).resolves.toMatchObject({ needsBootstrap: true })
+      await expect(refreshServerHello()).resolves.toMatchObject({ needsBootstrap: false })
+      // The refreshed answer replaces the cache — later readers see it too.
+      await expect(getServerHello()).resolves.toMatchObject({ needsBootstrap: false })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+  })
 
   describe("getServerEdition", () => {
     it("fetches /api/hello once and caches the result", async () => {

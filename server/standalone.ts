@@ -129,6 +129,7 @@ httpServer.listen(port, host, () => {
     host,
     port,
     interfaces: networkInterfaces(),
+    publicUrl: process.env.COGPIT_PUBLIC_URL,
   })
   for (const line of teamNotices) console.log(line)
 })

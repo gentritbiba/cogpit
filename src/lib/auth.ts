@@ -32,20 +32,22 @@ export function clearToken(): void {
 // loads. Session credentials must never be readable by page JavaScript.
 if (typeof window !== "undefined") clearToken()
 
-// ── Server edition (public /api/hello handshake) ────────────────────────
+// ── Server handshake (public /api/hello) ────────────────────────────────
 
-let editionPromise: Promise<CogpitEdition> | null = null
+/** The pre-authentication facts the renderer needs from `/api/hello`. */
+export interface ServerHello {
+  edition: CogpitEdition
+  /** Team server with no accounts yet: the first-admin screen is open. */
+  needsBootstrap: boolean
+}
+
+const PERSONAL_HELLO: ServerHello = { edition: "personal", needsBootstrap: false }
+
+let helloPromise: Promise<ServerHello> | null = null
 let knownEdition: CogpitEdition | null = null
 
-/**
- * Resolve the server edition from the public `/api/hello` handshake — needed
- * BEFORE authentication because a team server gates even localhost browsers.
- * Fetched once and shared by every consumer (auth gate + login screen); a
- * failed probe resolves "personal" (the no-op path) without being cached so
- * the next caller retries.
- */
-export function getServerEdition(): Promise<CogpitEdition> {
-  editionPromise ??= fetch("/api/hello", {
+function probeServerHello(): Promise<ServerHello> {
+  return fetch("/api/hello", {
     method: "GET",
     credentials: "same-origin",
     cache: "no-store",
@@ -53,19 +55,48 @@ export function getServerEdition(): Promise<CogpitEdition> {
   })
     .then(async (res) => {
       if (!res.ok) throw new Error(`Hello handshake failed (${res.status})`)
-      const data = await res.json() as { edition?: unknown }
+      const data = await res.json() as { edition?: unknown; needsBootstrap?: unknown }
       knownEdition = data.edition === "team" ? "team" : "personal"
-      return knownEdition
+      return {
+        edition: knownEdition,
+        needsBootstrap: knownEdition === "team" && data.needsBootstrap === true,
+      }
     })
     .catch(() => {
-      editionPromise = null
-      return "personal" as const
+      helloPromise = null
+      return PERSONAL_HELLO
     })
-  return editionPromise
 }
 
-export function __resetServerEditionForTest(): void {
-  editionPromise = null
+/**
+ * Resolve the public `/api/hello` handshake — needed BEFORE authentication
+ * because a team server gates even localhost browsers and may have no accounts
+ * to log into yet. Fetched once and shared by every consumer (auth gate, login
+ * screen, bootstrap screen); a failed probe resolves as personal (the no-op
+ * path) without being cached so the next caller retries.
+ */
+export function getServerHello(): Promise<ServerHello> {
+  helloPromise ??= probeServerHello()
+  return helloPromise
+}
+
+/**
+ * Re-run the handshake and replace the cache. Bootstrap state changes the
+ * moment the first admin is created — by this browser or another one — so the
+ * cached answer must be discarded rather than trusted for the session.
+ */
+export function refreshServerHello(): Promise<ServerHello> {
+  helloPromise = probeServerHello()
+  return helloPromise
+}
+
+/** The server edition alone, from the same shared handshake. */
+export function getServerEdition(): Promise<CogpitEdition> {
+  return getServerHello().then((hello) => hello.edition)
+}
+
+export function __resetServerHelloForTest(): void {
+  helloPromise = null
   knownEdition = null
 }
 

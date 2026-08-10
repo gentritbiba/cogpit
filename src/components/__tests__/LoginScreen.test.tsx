@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { LoginScreen } from "@/components/LoginScreen"
-import { __resetServerEditionForTest } from "@/lib/auth"
+import { __resetServerHelloForTest } from "@/lib/auth"
 
 interface MockServerOptions {
   edition?: "personal" | "team"
@@ -43,7 +43,7 @@ describe("LoginScreen", () => {
     localStorage.clear()
     sessionStorage.clear()
     vi.restoreAllMocks()
-    __resetServerEditionForTest()
+    __resetServerHelloForTest()
   })
 
   it("authenticates with a secure cookie request and never stores a token", async () => {

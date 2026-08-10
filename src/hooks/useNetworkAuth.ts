@@ -1,32 +1,42 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { checkAuthSession, getServerEdition, isRemoteClient, logoutSession } from "@/lib/auth"
+import {
+  checkAuthSession,
+  getServerHello,
+  isRemoteClient,
+  logoutSession,
+  refreshServerHello,
+  type ServerHello,
+} from "@/lib/auth"
 import type { NetworkAuth } from "@/contexts/AppContext"
 
 export function useNetworkAuth(): NetworkAuth {
   const remote = isRemoteClient()
-  // Whether requests must carry an authenticated session: always for remote
-  // clients, and for local browsers when the server is team edition. null
-  // while the edition handshake is still resolving for a local client.
-  const [gated, setGated] = useState<boolean | null>(remote ? true : null)
+  // null until the public handshake resolves. It decides two things: whether
+  // requests must carry a session (always for remote clients, and for local
+  // browsers on a team server) and whether the founding admin still has to be
+  // created before anyone can log in at all.
+  const [hello, setHello] = useState<ServerHello | null>(null)
   const [authenticated, setAuthenticated] = useState(false)
-  const [authChecked, setAuthChecked] = useState(false)
+  const [sessionChecked, setSessionChecked] = useState(false)
   const authVersionRef = useRef(0)
 
   useEffect(() => {
-    if (remote) return
-
     let cancelled = false
-    void getServerEdition().then((edition) => {
-      if (!cancelled) setGated(edition === "team")
+    void getServerHello().then((resolved) => {
+      if (!cancelled) setHello(resolved)
     })
     return () => { cancelled = true }
-  }, [remote])
+  }, [])
+
+  // Remote clients are gated regardless of edition, so their session check
+  // starts immediately instead of waiting on the handshake.
+  const gated = remote ? true : hello === null ? null : hello.edition === "team"
 
   useEffect(() => {
     if (gated === null) return
     if (!gated) {
       setAuthenticated(true)
-      setAuthChecked(true)
+      setSessionChecked(true)
       return
     }
 
@@ -35,14 +45,14 @@ export function useNetworkAuth(): NetworkAuth {
     void checkAuthSession().then((valid) => {
       if (!cancelled && authVersionRef.current === version) {
         setAuthenticated(valid)
-        setAuthChecked(true)
+        setSessionChecked(true)
       }
     })
 
     const handler = () => {
       authVersionRef.current += 1
       setAuthenticated(false)
-      setAuthChecked(true)
+      setSessionChecked(true)
     }
     window.addEventListener("cogpit-auth-required", handler)
     return () => {
@@ -54,14 +64,18 @@ export function useNetworkAuth(): NetworkAuth {
   const handleAuthenticated = useCallback(() => {
     authVersionRef.current += 1
     setAuthenticated(true)
-    setAuthChecked(true)
+    setSessionChecked(true)
     window.dispatchEvent(new Event("cogpit-auth-changed"))
+  }, [])
+
+  const refreshServerState = useCallback(async () => {
+    setHello(await refreshServerHello())
   }, [])
 
   const logout = useCallback(() => {
     authVersionRef.current += 1
     setAuthenticated(false)
-    setAuthChecked(true)
+    setSessionChecked(true)
     void logoutSession().finally(() => {
       window.dispatchEvent(new Event("cogpit-auth-changed"))
     })
@@ -69,9 +83,11 @@ export function useNetworkAuth(): NetworkAuth {
 
   return {
     isRemote: remote,
-    authChecked,
+    authChecked: sessionChecked && hello !== null,
     authenticated,
+    needsBootstrap: hello?.needsBootstrap === true,
     handleAuthenticated,
+    refreshServerState,
     logout,
   }
 }

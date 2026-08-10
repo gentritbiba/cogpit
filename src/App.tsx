@@ -58,6 +58,7 @@ import {
   agentKindFromDirName,
 } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
+import { BootstrapScreen } from "@/components/BootstrapScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import type { PanelSize } from "react-resizable-panels"
 import { AppProvider } from "@/contexts/AppContext"
@@ -774,6 +775,16 @@ export default function App() {
   }
 
   if (!networkAuth.authenticated) {
+    // A team server with no accounts has nobody to log in as yet, so the
+    // founding admin is created first. Personal edition never reports this.
+    if (networkAuth.needsBootstrap) {
+      return (
+        <BootstrapScreen
+          onAuthenticated={networkAuth.handleAuthenticated}
+          onBootstrapClosed={networkAuth.refreshServerState}
+        />
+      )
+    }
     return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
   }
 

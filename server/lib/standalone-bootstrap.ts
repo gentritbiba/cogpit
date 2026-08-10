@@ -135,6 +135,8 @@ export interface TeamBootInfo {
   host: string
   port: number
   interfaces: InterfaceMap
+  /** COGPIT_PUBLIC_URL — the address browsers actually reach this server on. */
+  publicUrl?: string | null
 }
 
 /**
@@ -142,6 +144,11 @@ export interface TeamBootInfo {
  * are silent. Team boots warn when a network password env is set (it is
  * ignored — users sign in with their own accounts) and, on a zero-user store,
  * print a prominent banner pointing at the first-admin bootstrap URL.
+ *
+ * That URL is the configured public one when there is one. The LAN fallback is
+ * still worth printing — it names the right port and host — but a browser
+ * cannot be issued a `Secure` session cookie over plain HTTP, so it comes with
+ * the reason it will not log anyone in on its own.
  */
 export function buildTeamBootNotices(info: TeamBootInfo): string[] {
   if (info.edition !== "team") return []
@@ -152,14 +159,21 @@ export function buildTeamBootNotices(info: TeamBootInfo): string[] {
     )
   }
   if (info.userCount === 0) {
+    const publicUrl = info.publicUrl?.trim().replace(/\/+$/, "")
     const advertised = resolveAdvertisedHost(info.host, info.interfaces)
     const target = advertised && !isLoopbackHost(advertised) ? advertised : "127.0.0.1"
     const divider = "─".repeat(64)
     lines.push(
       divider,
-      `Team edition: no users yet. Open http://${target}:${info.port} to create the first admin.`,
-      divider,
+      "Team edition: no users yet.",
+      `Open ${publicUrl || `http://${target}:${info.port}`} to create the first admin.`,
     )
+    if (!publicUrl) {
+      lines.push(
+        "Browser logins need HTTPS: put a TLS proxy in front and open that address instead.",
+      )
+    }
+    lines.push(divider)
   }
   return lines
 }

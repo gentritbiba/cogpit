@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { hubFetch } from "@/lib/auth"
 import { getActiveDeviceId, LOCAL_DEVICE_ID } from "@/lib/device"
+import type { CogpitEdition } from "../../shared/contracts/team"
 
 // ── Types (mirror server/hub/registry.ts + server/routes/devices.ts) ─────────
 
@@ -10,6 +11,9 @@ export interface DeviceHello {
   version?: string
   hubApi?: number
   mode?: string
+  edition?: CogpitEdition
+  /** Team device with no accounts yet — nothing can authenticate to it. */
+  needsBootstrap?: boolean
   name?: string
   instanceId?: string
   networkAccess?: boolean

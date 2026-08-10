@@ -37,7 +37,11 @@ export interface NetworkAuth {
   isRemote: boolean
   authChecked: boolean
   authenticated: boolean
+  /** Team server with no accounts: the gate shows the first-admin screen. */
+  needsBootstrap: boolean
   handleAuthenticated: () => void
+  /** Re-read the public handshake after the bootstrap state changes. */
+  refreshServerState: () => Promise<void>
   logout: () => void
 }
 

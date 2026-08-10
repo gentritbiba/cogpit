@@ -192,6 +192,31 @@ describe("buildTeamBootNotices", () => {
     expect(text).toContain("first admin")
   })
 
+  it("says a plain-HTTP bootstrap URL cannot log a browser in", () => {
+    const text = buildTeamBootNotices({
+      ...base, edition: "team", userCount: 0, envPasswordSet: false,
+    }).join("\n")
+    expect(text).toContain("HTTPS")
+  })
+
+  it("prefers COGPIT_PUBLIC_URL — the address a browser can actually log in on", () => {
+    const text = buildTeamBootNotices({
+      ...base, edition: "team", userCount: 0, envPasswordSet: false,
+      publicUrl: "https://cogpit.example.com/",
+    }).join("\n")
+    expect(text).toContain("https://cogpit.example.com to create the first admin")
+    expect(text).not.toContain("192.168.1.42")
+    // The public URL is already HTTPS-capable: no proxy nag on top of it.
+    expect(text).not.toContain("HTTPS")
+  })
+
+  it("ignores a blank public URL", () => {
+    const text = buildTeamBootNotices({
+      ...base, edition: "team", userCount: 0, envPasswordSet: false, publicUrl: "  ",
+    }).join("\n")
+    expect(text).toContain("http://192.168.1.42:19384")
+  })
+
   it("advertises the loopback URL for a loopback bind", () => {
     const text = buildTeamBootNotices({
       edition: "team", userCount: 0, envPasswordSet: false,
