@@ -28,6 +28,7 @@ import { parseSubAgentPath, projectName } from "@/lib/format"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { ContextBadge, HeaderIconButton } from "@/components/header-shared"
 import { authFetch } from "@/lib/auth"
+import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -334,7 +335,7 @@ function SessionActions({
           />
         </>
       )}
-      {onOpenTerminal && !isRemoteDeviceActive() && (
+      {onOpenTerminal && !isRemoteDeviceActive() && can("terminal") && (
         <HeaderIconButton
           icon={TerminalSquare}
           label="Open terminal in project"

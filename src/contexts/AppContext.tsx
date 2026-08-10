@@ -1,6 +1,7 @@
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
 import type { AgentKind } from "@/lib/sessionSource"
+import type { MeResponse } from "../../shared/contracts/team"
 
 // ── App Config ──────────────────────────────────────────────────────────────
 
@@ -48,6 +49,8 @@ export interface AppContextValue {
   config: AppConfig
   theme: ThemeContext
   networkAuth: NetworkAuth
+  /** Signed-in identity + capabilities from /api/me (personal parity defaults). */
+  me: MeResponse
   isMobile: boolean
 }
 

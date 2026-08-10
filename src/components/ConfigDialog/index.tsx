@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { authFetch } from "@/lib/auth"
+import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
 
@@ -57,6 +58,8 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   // Editing a remote device's network access through the proxy could rotate its
   // password or disable its network access — either one locks this hub out.
   const remoteDevice = isRemoteDeviceActive()
+  // Team members without configWrite get a read-only view (server 403s anyway).
+  const canWriteConfig = can("configWrite")
 
   // Network access state
   const [networkAccess, setNetworkAccess] = useState(false)
@@ -181,6 +184,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               onChange={handleChange}
               placeholder="/Users/you/.claude"
               className="pl-10 bg-elevation-0 border-border/70 focus:border-border"
+              disabled={!canWriteConfig}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canSave && !saving) handleSave()
               }}
@@ -203,6 +207,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               onChange={(e) => setTerminalApp(e.target.value)}
               placeholder="Ghostty, iTerm, or /path/to/binary"
               className="bg-elevation-0 border-border/70 focus:border-border text-sm"
+              disabled={!canWriteConfig}
             />
           </div>
 
@@ -220,12 +225,14 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               onChange={(e) => setEditorApp(e.target.value)}
               placeholder="cursor, code, zed, or /path/to/binary"
               className="bg-elevation-0 border-border/70 focus:border-border text-sm"
+              disabled={!canWriteConfig}
             />
           </div>
 
           {/* Network Access — hidden for remote devices: changing it through the
-              proxy would revoke the very sessions this hub depends on */}
-          {!remoteDevice && <NetworkAccessSection
+              proxy would revoke the very sessions this hub depends on. Hidden
+              without configWrite: the section is pure editing surface. */}
+          {!remoteDevice && canWriteConfig && <NetworkAccessSection
             networkAccess={networkAccess}
             setNetworkAccess={setNetworkAccess}
             networkPassword={networkPassword}
@@ -243,16 +250,18 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           <Button variant="ghost" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             Cancel
           </Button>
-          <Button disabled={!canSave || saving} onClick={handleSave}>
-            {saving ? (
-              <>
-                <Loader2 className="size-4 animate-spin mr-2" />
-                Saving...
-              </>
-            ) : (
-              "Save"
-            )}
-          </Button>
+          {canWriteConfig && (
+            <Button disabled={!canSave || saving} onClick={handleSave}>
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

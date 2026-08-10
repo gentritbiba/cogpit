@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, memo } from "react"
 import { ChevronDown, ChevronRight, Search, Play, Square, Loader2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { can } from "@/lib/capabilities"
 import { useScriptDiscovery, type ScriptEntry } from "@/hooks/useScriptDiscovery"
 import { useScriptRunner, type ManagedProcess } from "@/hooks/useScriptRunner"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
@@ -136,6 +137,9 @@ export const ScriptsDock = memo(function ScriptsDock({
     return lookup
   }, [runningProcesses])
 
+  // Every dock affordance (script rows, new-terminal) spawns through the PTY,
+  // which is a terminal capability — members without it get no dock at all.
+  if (!can("terminal")) return null
   if (scripts.length === 0 && !loading) return null
 
   return (

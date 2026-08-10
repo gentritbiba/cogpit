@@ -30,6 +30,7 @@ import { usePermissions } from "@/hooks/usePermissions"
 import { usePermissionRequests } from "@/hooks/usePermissionRequests"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { useAppConfig } from "@/hooks/useAppConfig"
+import { useMe } from "@/hooks/useMe"
 import { useWorktrees } from "@/hooks/useWorktrees"
 import { useKillAll } from "@/hooks/useKillAll"
 import { useMcpServers } from "@/hooks/useMcpServers"
@@ -70,6 +71,7 @@ const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m =
 export default function App() {
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()
+  const me = useMe()
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
@@ -685,6 +687,7 @@ export default function App() {
     config,
     theme: themeCtx,
     networkAuth,
+    me,
     isMobile,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
@@ -694,7 +697,7 @@ export default function App() {
     state.dashboardProject, state.pendingDirName, state.pendingCwd,
     state.currentMemberName, state.loadingMember,
     state.selectedTeam, state.configFilePath, state.sessionChangeKey,
-    dispatch, config, themeCtx, networkAuth, isMobile,
+    dispatch, config, themeCtx, networkAuth, me, isMobile,
   ])
 
   // Stable context — session data, undo/redo, actions. Does NOT include chat/scroll

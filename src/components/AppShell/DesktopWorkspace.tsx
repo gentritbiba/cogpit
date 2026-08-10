@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/resizable"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { dirNameToPath, shortPath } from "@/lib/format"
 import { SessionInputFooter } from "./SessionInputFooter"
@@ -174,15 +175,17 @@ function DesktopMainView({
             <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
             {!isRemoteDeviceActive() && (
               <div className="flex items-center gap-1 mt-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                  onClick={project.onOpenTerminal}
-                >
-                  <TerminalSquare className="size-3" />
-                  Terminal
-                </Button>
+                {can("terminal") && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                    onClick={project.onOpenTerminal}
+                  >
+                    <TerminalSquare className="size-3" />
+                    Terminal
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

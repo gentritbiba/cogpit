@@ -49,12 +49,32 @@ export function withBase(url: string): string {
   return url
 }
 
+// ── Active identity (team edition) ───────────────────────────────────────
+
+let activeUserId: string | null = null
+
+/**
+ * Record the signed-in team user (written by useMe). Personal edition and
+ * logged-out states pass null, keeping every storage key byte-identical to
+ * pre-team builds so existing localStorage survives.
+ */
+export function setActiveIdentity(userId: string | null): void {
+  activeUserId = userId
+}
+
+export function __resetIdentityForTest(): void {
+  activeUserId = null
+}
+
 /**
  * Scope a cache/storage key to the active device so per-device state does not
- * collide. Local device keeps the bare key (warm switch-back for free).
+ * collide. Local device keeps the bare key (warm switch-back for free). When a
+ * team identity is active, keys are additionally scoped per user so two users
+ * sharing a browser never read each other's state.
  */
 export function deviceScopedKey(base: string): string {
   const id = getActiveDeviceId()
+  if (activeUserId !== null) return `${base}::${id}::${activeUserId}`
   return id === LOCAL_DEVICE_ID ? base : `${base}::${id}`
 }
 

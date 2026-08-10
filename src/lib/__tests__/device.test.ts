@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   LOCAL_DEVICE_ID,
   getActiveDeviceId,
@@ -6,6 +6,8 @@ import {
   devicePrefix,
   withBase,
   deviceScopedKey,
+  setActiveIdentity,
+  __resetIdentityForTest,
   saveLastPath,
   switchDevice,
 } from "@/lib/device"
@@ -125,6 +127,8 @@ describe("device", () => {
   // ── deviceScopedKey ───────────────────────────────────────────────────
 
   describe("deviceScopedKey", () => {
+    afterEach(() => __resetIdentityForTest())
+
     it("returns the bare key on the local device", () => {
       setPath("/")
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions")
@@ -133,6 +137,29 @@ describe("device", () => {
     it("suffixes the key with the device id on a remote device", () => {
       setPath("/d/dev_x/")
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x")
+    })
+
+    it("stays byte-identical to the legacy shapes when no identity is set", () => {
+      setActiveIdentity(null)
+      setPath("/")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions")
+      setPath("/d/dev_x/")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x")
+    })
+
+    it("scopes keys to device and user when a team identity is active", () => {
+      setActiveIdentity("u_1")
+      setPath("/")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::local::u_1")
+      setPath("/d/dev_x/")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x::u_1")
+    })
+
+    it("returns to the bare key when the identity is cleared", () => {
+      setActiveIdentity("u_1")
+      setActiveIdentity(null)
+      setPath("/")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions")
     })
   })
 
