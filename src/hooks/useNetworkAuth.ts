@@ -1,15 +1,34 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { checkAuthSession, isRemoteClient, logoutSession } from "@/lib/auth"
+import { checkAuthSession, getServerEdition, isRemoteClient, logoutSession } from "@/lib/auth"
 import type { NetworkAuth } from "@/contexts/AppContext"
 
 export function useNetworkAuth(): NetworkAuth {
   const remote = isRemoteClient()
-  const [authenticated, setAuthenticated] = useState(!remote)
-  const [authChecked, setAuthChecked] = useState(!remote)
+  // Whether requests must carry an authenticated session: always for remote
+  // clients, and for local browsers when the server is team edition. null
+  // while the edition handshake is still resolving for a local client.
+  const [gated, setGated] = useState<boolean | null>(remote ? true : null)
+  const [authenticated, setAuthenticated] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
   const authVersionRef = useRef(0)
 
   useEffect(() => {
-    if (!remote) return
+    if (remote) return
+
+    let cancelled = false
+    void getServerEdition().then((edition) => {
+      if (!cancelled) setGated(edition === "team")
+    })
+    return () => { cancelled = true }
+  }, [remote])
+
+  useEffect(() => {
+    if (gated === null) return
+    if (!gated) {
+      setAuthenticated(true)
+      setAuthChecked(true)
+      return
+    }
 
     let cancelled = false
     const version = authVersionRef.current
@@ -30,7 +49,7 @@ export function useNetworkAuth(): NetworkAuth {
       cancelled = true
       window.removeEventListener("cogpit-auth-required", handler)
     }
-  }, [remote])
+  }, [gated])
 
   const handleAuthenticated = useCallback(() => {
     authVersionRef.current += 1

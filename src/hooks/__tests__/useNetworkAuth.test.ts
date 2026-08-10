@@ -5,27 +5,63 @@ vi.mock("@/lib/auth", () => ({
   isRemoteClient: vi.fn(),
   checkAuthSession: vi.fn(),
   logoutSession: vi.fn(),
+  getServerEdition: vi.fn(),
 }))
 
-import { isRemoteClient, checkAuthSession, logoutSession } from "@/lib/auth"
+import { isRemoteClient, checkAuthSession, logoutSession, getServerEdition } from "@/lib/auth"
 import { useNetworkAuth } from "../useNetworkAuth"
 
 const mockedIsRemoteClient = vi.mocked(isRemoteClient)
 const mockedCheckAuthSession = vi.mocked(checkAuthSession)
 const mockedLogoutSession = vi.mocked(logoutSession)
+const mockedGetServerEdition = vi.mocked(getServerEdition)
 
 describe("useNetworkAuth", () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockedCheckAuthSession.mockResolvedValue(false)
     mockedLogoutSession.mockResolvedValue()
+    mockedGetServerEdition.mockResolvedValue("personal")
   })
 
-  it("trusts a direct local client without checking a cookie", () => {
+  it("trusts a direct local client on a personal server without checking a cookie", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
     const { result } = renderHook(() => useNetworkAuth())
-    expect(result.current).toMatchObject({ isRemote: false, authenticated: true })
+
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+    expect(result.current).toMatchObject({ isRemote: false, authChecked: true })
     expect(mockedCheckAuthSession).not.toHaveBeenCalled()
+  })
+
+  it("gates a local client when the server is team edition", async () => {
+    mockedIsRemoteClient.mockReturnValue(false)
+    mockedGetServerEdition.mockResolvedValue("team")
+    const { result } = renderHook(() => useNetworkAuth())
+
+    expect(result.current.authChecked).toBe(false)
+    await waitFor(() => expect(result.current.authChecked).toBe(true))
+    expect(result.current.authenticated).toBe(false)
+    expect(mockedCheckAuthSession).toHaveBeenCalledOnce()
+  })
+
+  it("restores a local team session from the HttpOnly cookie", async () => {
+    mockedIsRemoteClient.mockReturnValue(false)
+    mockedGetServerEdition.mockResolvedValue("team")
+    mockedCheckAuthSession.mockResolvedValue(true)
+    const { result } = renderHook(() => useNetworkAuth())
+
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+  })
+
+  it("responds to auth-required on a local team client", async () => {
+    mockedIsRemoteClient.mockReturnValue(false)
+    mockedGetServerEdition.mockResolvedValue("team")
+    mockedCheckAuthSession.mockResolvedValue(true)
+    const { result } = renderHook(() => useNetworkAuth())
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+
+    act(() => window.dispatchEvent(new Event("cogpit-auth-required")))
+    expect(result.current.authenticated).toBe(false)
   })
 
   it("restores a valid remote HttpOnly-cookie session", async () => {
@@ -102,9 +138,11 @@ describe("useNetworkAuth", () => {
     expect(result.current.authenticated).toBe(false)
   })
 
-  it("does not respond to auth-required for local clients", () => {
+  it("does not respond to auth-required for local personal clients", async () => {
     mockedIsRemoteClient.mockReturnValue(false)
     const { result } = renderHook(() => useNetworkAuth())
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+
     act(() => window.dispatchEvent(new Event("cogpit-auth-required")))
     expect(result.current.authenticated).toBe(true)
   })

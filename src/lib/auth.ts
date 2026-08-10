@@ -1,6 +1,7 @@
 // ── Network auth utilities ──────────────────────────────────────────────
 
 import { withBase } from "./device"
+import type { CogpitEdition } from "../../shared/contracts/team"
 
 const LEGACY_TOKEN_KEY = "cogpit-network-token"
 const LOCAL_HOSTNAMES = new Set([
@@ -31,8 +32,47 @@ export function clearToken(): void {
 // loads. Session credentials must never be readable by page JavaScript.
 if (typeof window !== "undefined") clearToken()
 
+// ── Server edition (public /api/hello handshake) ────────────────────────
+
+let editionPromise: Promise<CogpitEdition> | null = null
+let knownEdition: CogpitEdition | null = null
+
+/**
+ * Resolve the server edition from the public `/api/hello` handshake — needed
+ * BEFORE authentication because a team server gates even localhost browsers.
+ * Fetched once and shared by every consumer (auth gate + login screen); a
+ * failed probe resolves "personal" (the no-op path) without being cached so
+ * the next caller retries.
+ */
+export function getServerEdition(): Promise<CogpitEdition> {
+  editionPromise ??= fetch("/api/hello", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "X-Cogpit-Client": "1" },
+  })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Hello handshake failed (${res.status})`)
+      const data = await res.json() as { edition?: unknown }
+      knownEdition = data.edition === "team" ? "team" : "personal"
+      return knownEdition
+    })
+    .catch(() => {
+      editionPromise = null
+      return "personal" as const
+    })
+  return editionPromise
+}
+
+export function __resetServerEditionForTest(): void {
+  editionPromise = null
+  knownEdition = null
+}
+
 export async function checkAuthSession(): Promise<boolean> {
-  if (!isRemoteClient()) return true
+  // Team edition authenticates local browsers too; the trusted-local
+  // short-circuit only applies while the server is (or is assumed) personal.
+  if (!isRemoteClient() && knownEdition !== "team") return true
   try {
     const response = await fetch("/api/auth/session", {
       method: "GET",
@@ -79,7 +119,9 @@ function requestWithAuth(
   init: RequestInit | undefined,
   applyBase: boolean,
 ): Promise<Response> {
-  const remote = isRemoteClient()
+  // A 401 means "session required" for remote clients always, and for local
+  // browsers once the server is known to be team edition (team gates localhost).
+  const sessionRequired = isRemoteClient() || knownEdition === "team"
 
   if (applyBase && typeof input === "string" && input.startsWith("/api")) {
     input = withBase(input)
@@ -90,7 +132,7 @@ function requestWithAuth(
   headers.set("X-Cogpit-Client", "1")
 
   return fetch(input, { ...init, headers, credentials: "same-origin" }).then((res) => {
-    if (remote && res.status === 401) {
+    if (sessionRequired && res.status === 401) {
       clearToken()
       window.dispatchEvent(new Event("cogpit-auth-required"))
       return Promise.reject(new Error("Authentication required"))
