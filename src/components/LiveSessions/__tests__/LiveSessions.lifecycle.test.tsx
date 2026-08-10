@@ -10,6 +10,12 @@ import {
 } from "@/lib/sessionListCache"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { LiveSessions } from "../index"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
+import {
+  __resetDeviceRevisionsForTest,
+  recordDeviceConnectionRevision,
+} from "@/lib/device"
 
 /**
  * The inventory (fetching, aborting, caching) moved to SessionInventoryProvider
@@ -87,18 +93,22 @@ vi.mock("../SessionRow", () => ({
       >
         Delete {session.sessionId}
       </button>
-      <button
-        type="button"
-        onClick={(event) => onKill?.(4242, event)}
-      >
-        Kill {session.sessionId}
-      </button>
-      <button
-        type="button"
-        onClick={() => onResumeSession?.(session.sessionId, session.cwd)}
-      >
-        Resume {session.sessionId}
-      </button>
+      {onKill && (
+        <button
+          type="button"
+          onClick={(event) => onKill(4242, event)}
+        >
+          Kill {session.sessionId}
+        </button>
+      )}
+      {onResumeSession && (
+        <button
+          type="button"
+          onClick={() => onResumeSession(session.sessionId, session.cwd)}
+        >
+          Resume {session.sessionId}
+        </button>
+      )}
     </div>
   ),
 }))
@@ -137,6 +147,8 @@ function session(sessionId: string): ActiveSessionInfo {
 }
 
 beforeEach(() => {
+  __resetCapabilitiesForTest()
+  __resetDeviceRevisionsForTest()
   localStorage.clear()
   clearSessionListCache()
   vi.clearAllMocks()
@@ -144,11 +156,35 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  __resetCapabilitiesForTest()
+  __resetDeviceRevisionsForTest()
   cleanup()
   clearSessionListCache()
 })
 
 describe("LiveSessions committed-state synchronization", () => {
+  it("does not expose or send a PTY resume action for a member", () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    writeCachedList(sessionListCacheKeys.activeSessions, [session("member-session")])
+
+    renderLive(
+      <LiveSessions
+        activeSessionKey={null}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: "Resume member-session" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Kill member-session" })).not.toBeInTheDocument()
+    expect(mocks.ptySend).not.toHaveBeenCalled()
+    expect(mocks.authFetch.mock.calls.some(([url]) => url === "/api/kill-process")).toBe(false)
+  })
+
   it("keeps consecutive delete events and the cached inventory in lockstep", () => {
     writeCachedList(sessionListCacheKeys.activeSessions, [session("one"), session("two")])
 
@@ -210,6 +246,47 @@ describe("LiveSessions committed-state synchronization", () => {
 })
 
 describe("LiveSessions device and unmount lifecycle", () => {
+  it("rejects an old inventory completion after a same-id connection revision remount", async () => {
+    window.history.replaceState(null, "", "/d/device-a/")
+    recordDeviceConnectionRevision("device-a", 1)
+    clearSessionListCache()
+    const oldSessions = deferred<Response>()
+    const oldProcesses = deferred<Response>()
+    mocks.authFetch
+      .mockReset()
+      .mockReturnValueOnce(oldSessions.promise)
+      .mockReturnValueOnce(oldProcesses.promise)
+      .mockResolvedValueOnce(jsonResponse([session("new-target")]))
+      .mockResolvedValueOnce(jsonResponse([]))
+
+    const oldView = renderLive(
+      <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />,
+    )
+    recordDeviceConnectionRevision("device-a", 2)
+    oldView.unmount()
+    const newView = renderLive(
+      <LiveSessions activeSessionKey={null} onSelectSession={vi.fn()} />,
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions)).toEqual([
+      session("new-target"),
+    ])
+
+    await act(async () => {
+      oldSessions.resolve(jsonResponse([session("old-target")]))
+      oldProcesses.resolve(jsonResponse([]))
+      await Promise.all([oldSessions.promise, oldProcesses.promise])
+      await Promise.resolve()
+    })
+    expect(readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions)).toEqual([
+      session("new-target"),
+    ])
+    newView.unmount()
+  })
+
   it("aborts the old device request and never writes its deferred result into the new device cache", async () => {
     clearCacheAt("/d/device-a/")
     clearCacheAt("/d/device-b/")

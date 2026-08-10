@@ -15,7 +15,7 @@ import type { SessionSource } from "@/hooks/useLiveSession"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { agentKindFromDirName } from "@/lib/sessionSource"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 export interface TailResponse {
   headerLines: string[]
@@ -82,13 +82,19 @@ export async function loadSessionTailCached(
   if (cached) {
     return { parsed: cached.parsed, source: cached.source }
   }
-  const deviceId = getActiveDeviceId()
+  const deviceScope = getActiveDeviceScope()
+  const identity = getActiveIdentity()
   const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
     dirName,
     fileName,
     workerParse,
     errorLabel,
   )
+  // The old App subtree may finish after a login/logout remount. Never read a
+  // raced entry from, or write this response into, the newly active identity.
+  if (getActiveDeviceScope() !== deviceScope || getActiveIdentity() !== identity) {
+    return { parsed, source }
+  }
   // Another load (hover-prefetch vs click) may have populated the cache while
   // we were fetching — and if that session is open and live, the SSE watcher
   // has been advancing the entry's watchOffset. Never clobber a mid-flight
@@ -99,18 +105,16 @@ export async function loadSessionTailCached(
   }
   // Only populate the cache if we're still on the same device as when the
   // fetch started (see loadSessionTailFresh for why).
-  if (getActiveDeviceId() === deviceId) {
-    sessionCache.set(
-      dirName,
-      fileName,
-      parsed,
-      source.rawText,
-      byteOffset,
-      hasMore,
-      source.agentKind,
-      source.watchOffset,
-    )
-  }
+  sessionCache.set(
+    dirName,
+    fileName,
+    parsed,
+    source.rawText,
+    byteOffset,
+    hasMore,
+    source.agentKind,
+    source.watchOffset,
+  )
   return { parsed, source }
 }
 
@@ -130,7 +134,8 @@ export async function loadSessionTailFresh(
   // device-scoped and computed at set-time; if the user switches devices while
   // this tail-load is in flight, caching now would write device B's data under
   // device A's key (or vice-versa).
-  const deviceId = getActiveDeviceId()
+  const deviceScope = getActiveDeviceScope()
+  const identity = getActiveIdentity()
   const { parsed, source, byteOffset, hasMore } = await fetchTailAndParse(
     dirName,
     fileName,
@@ -140,7 +145,7 @@ export async function loadSessionTailFresh(
   // Only populate the cache if we're still on the same device. On a mid-flight
   // switch we skip the write but still return the parsed data so the caller can
   // render what it fetched.
-  if (getActiveDeviceId() === deviceId) {
+  if (getActiveDeviceScope() === deviceScope && getActiveIdentity() === identity) {
     sessionCache.set(
       dirName,
       fileName,

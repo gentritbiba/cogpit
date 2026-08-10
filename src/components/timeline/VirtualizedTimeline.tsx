@@ -37,7 +37,7 @@ function MaybeContextMenuTurn({
   const { requestUndo, branchesAtTurn } = undoRedo
   const { handleOpenBranches, handleBranchFromHere } = actions
 
-  if (isSubAgentView || !requestUndo || !handleOpenBranches) {
+  if (!undoRedo.enabled || isSubAgentView || !requestUndo || !handleOpenBranches) {
     return <>{children}</>
   }
 
@@ -61,7 +61,7 @@ function RedoSection() {
   const { canRedo, redoTurnCount, redoGhostTurns, requestRedoAll, requestRedoUpTo } = undoRedo
   const sessionTurnCount = session?.turns.length ?? 0
 
-  if (isSubAgentView || !canRedo || !requestRedoAll) return null
+  if (!undoRedo.enabled || isSubAgentView || !canRedo || !requestRedoAll) return null
   return (
     <>
       <UndoRedoBar

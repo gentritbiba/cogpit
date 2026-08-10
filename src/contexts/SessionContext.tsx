@@ -69,9 +69,9 @@ export interface SessionContextValue {
   /** Session actions */
   actions: {
     handleStopSession: () => Promise<void>
-    handleEditConfig: (filePath: string) => void
-    handleEditCommand: (commandName: string) => void
-    handleExpandCommand: (commandName: string, args?: string) => Promise<string | null>
+    handleEditConfig?: (filePath: string) => void
+    handleEditCommand?: (commandName: string) => void
+    handleExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
     handleOpenBranches: (turnIndex: number) => void
     handleBranchFromHere: (turnIndex: number) => void
     handleToggleExpandAll: () => void

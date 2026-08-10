@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
+import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
+import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 
 const mocks = vi.hoisted(() => ({ switchDevice: vi.fn(), useDevices: vi.fn() }))
 
@@ -48,6 +50,8 @@ describe("DeviceSwitcher", () => {
     mocks.useDevices.mockReturnValue(hookValue())
   })
 
+  afterEach(() => __resetCapabilitiesForTest())
+
   it("shows the local device name on the trigger", () => {
     render(<DeviceSwitcher />)
     expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("This machine")
@@ -81,5 +85,32 @@ describe("DeviceSwitcher", () => {
     )
     render(<DeviceSwitcher />)
     expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("Studio")
+  })
+
+  it("shows the add/manage entries with default (personal) capabilities", async () => {
+    const user = userEvent.setup()
+    render(<DeviceSwitcher />)
+
+    await user.click(screen.getByRole("button", { name: "Switch device" }))
+
+    expect(await screen.findByText("Add device…")).toBeInTheDocument()
+    expect(screen.getByText("Manage devices…")).toBeInTheDocument()
+  })
+
+  it("hides the add/manage entries for a member without manageDevices", async () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    const user = userEvent.setup()
+    render(<DeviceSwitcher />)
+
+    await user.click(screen.getByRole("button", { name: "Switch device" }))
+    await screen.findByText("Studio")
+
+    expect(screen.queryByText("Add device…")).not.toBeInTheDocument()
+    expect(screen.queryByText("Manage devices…")).not.toBeInTheDocument()
   })
 })

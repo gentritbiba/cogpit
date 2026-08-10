@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { authFetch } from "@/lib/auth"
 import type { AgentKind } from "@/lib/sessionSource"
+import { useCapability } from "@/hooks/useCapability"
 
 interface UsageBucket {
   utilization: number
@@ -160,6 +161,7 @@ export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageDat
 const POLL_INTERVAL = 5 * 60 * 1000
 
 export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageResult {
+  const canViewUsage = useCapability("viewUsage")
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [loading, setLoading] = useState(false)
   const [available, setAvailable] = useState(false)
@@ -167,6 +169,7 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
   const activeRequestRef = useRef<AbortController | null>(null)
 
   const fetchUsage = useCallback(async () => {
+    if (!canViewUsage) return
     const requestId = ++requestIdRef.current
     activeRequestRef.current?.abort()
     const controller = new AbortController()
@@ -216,11 +219,18 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
         setLoading(false)
       }
     }
-  }, [agentKind])
+  }, [agentKind, canViewUsage])
 
   useEffect(() => {
     setUsage(null)
     setAvailable(false)
+    if (!canViewUsage) {
+      setLoading(false)
+      requestIdRef.current += 1
+      activeRequestRef.current?.abort()
+      activeRequestRef.current = null
+      return
+    }
     fetchUsage()
     const id = setInterval(fetchUsage, POLL_INTERVAL)
     return () => {
@@ -229,7 +239,12 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
       activeRequestRef.current?.abort()
       activeRequestRef.current = null
     }
-  }, [fetchUsage])
+  }, [canViewUsage, fetchUsage])
 
-  return { usage, loading, available, refresh: fetchUsage }
+  return {
+    usage: canViewUsage ? usage : null,
+    loading: canViewUsage && loading,
+    available: canViewUsage && available,
+    refresh: fetchUsage,
+  }
 }

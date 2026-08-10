@@ -1,4 +1,5 @@
-import type { UseFn } from "../http"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 import {
   refreshDirs,
   isTrustedDirectLocalRequest,
@@ -17,7 +18,11 @@ import {
   revokeAllSessions,
   getConnectedDevices,
 } from "../helpers"
-import { getConfig, saveConfig, validateClaudeDir } from "../config"
+import type { SessionPrincipal } from "../security"
+import { isTeamEdition } from "../team/edition"
+import { getUserByUsername, withVerifiedUser } from "../team/users"
+import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
+import { flushSessionPersistence } from "../team/sessionPersistence"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
 
@@ -34,6 +39,132 @@ async function verifyRemotePassword(
     return await verifyPasswordAsync(password, stored) ? "valid" : "invalid"
   } finally {
     activePasswordVerifications -= 1
+  }
+}
+
+// Logins for unknown users verify against this hash so both outcomes cost one
+// scrypt derivation and response timing cannot enumerate usernames. Computed on
+// first use: hashing at import time would tax every boot, including personal
+// edition, which never reaches this path.
+let dummyHash: string | null = null
+
+function getDummyHash(): string {
+  dummyHash ??= hashPassword("cogpit-dummy-timing-pad")
+  return dummyHash
+}
+
+/**
+ * Session issuance shared by password login and the first-admin bootstrap.
+ * Browser clients get the HttpOnly cookie and never see the token body;
+ * machine clients keep the documented bearer-token contract.
+ */
+export function issueSessionResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  browserLogin: boolean,
+  principal?: SessionPrincipal,
+): Promise<void> {
+  const sessionToken = createSessionToken(
+    req.socket.remoteAddress || "unknown",
+    req.headers["user-agent"],
+    principal,
+  )
+  return (async () => {
+    // A team login is not acknowledged until its hashed session row is on
+    // disk. This closes the shutdown race where a successful response could
+    // otherwise outlive the process without a restart-restorable session.
+    if (principal && isTeamEdition()) await flushSessionPersistence()
+
+    res.setHeader("Content-Type", "application/json")
+    if (browserLogin) {
+      setBrowserSessionCookie(res, sessionToken)
+      res.end(JSON.stringify({ valid: true }))
+    } else {
+      res.end(JSON.stringify({ valid: true, token: sessionToken }))
+    }
+  })()
+}
+
+/**
+ * Team edition authenticates a named user instead of the shared network
+ * password; the networkAccess config gate is irrelevant here. Credentials
+ * arrive either as `Authorization: Bearer user:pass` (machine clients) or as
+ * a `{ username, password }` JSON body (the login form).
+ */
+async function handleTeamLogin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  browserLogin: boolean,
+): Promise<void> {
+  const authHeader = req.headers.authorization
+  let username: unknown
+  let password: unknown
+  if (authHeader?.startsWith("Bearer ")) {
+    const credentials = authHeader.slice(7)
+    const separator = credentials.indexOf(":")
+    if (separator === -1) {
+      res.statusCode = 401
+      res.end(JSON.stringify({ valid: false, error: "Username required" }))
+      return
+    }
+    username = credentials.slice(0, separator)
+    password = credentials.slice(separator + 1)
+  } else {
+    let body: { username?: unknown; password?: unknown }
+    try {
+      body = await readJsonBody<{ username?: unknown; password?: unknown }>(req, { allowEmpty: true })
+    } catch (error) {
+      res.statusCode = error instanceof HttpBodyError ? error.statusCode : 400
+      res.end(JSON.stringify({
+        valid: false,
+        error: error instanceof Error ? error.message : "Invalid request body",
+      }))
+      return
+    }
+    username = body.username
+    password = body.password
+  }
+
+  if (typeof username !== "string" || !username.trim()) {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Username required" }))
+    return
+  }
+  if (typeof password !== "string" || !password) {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Password required" }))
+    return
+  }
+
+  const user = getUserByUsername(username)
+  const verification = await verifyRemotePassword(password, user?.passwordHash ?? getDummyHash())
+  if (verification === "busy") {
+    res.statusCode = 429
+    res.end(JSON.stringify({ valid: false, error: "Authentication is busy. Try again shortly." }))
+    return
+  }
+  if (!user || verification === "invalid") {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Invalid credentials" }))
+    return
+  }
+  const issuance = await withVerifiedUser(user.id, user.passwordHash, async (current) => {
+    await issueSessionResponse(req, res, browserLogin, {
+      userId: current.id,
+      username: current.username,
+      role: current.role,
+    })
+  })
+  if (issuance.status === "invalid") {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Invalid credentials" }))
+    return
+  }
+  // Checked only after password proof, so bad guesses cannot probe status.
+  if (issuance.status === "disabled") {
+    res.statusCode = 403
+    res.end(JSON.stringify({ valid: false, error: "Account disabled", code: "ACCOUNT_DISABLED" }))
+    return
   }
 }
 
@@ -78,7 +209,8 @@ export function registerConfigRoutes(use: UseFn) {
 
     // Direct local clients do not need a network password. Requests forwarded
     // by a loopback reverse proxy remain remote and must authenticate below.
-    if (isTrustedDirectLocalRequest(req)) {
+    // Team edition never grants local trust — every login names a user.
+    if (!isTeamEdition() && isTrustedDirectLocalRequest(req)) {
       res.end(JSON.stringify({ valid: true }))
       return
     }
@@ -103,6 +235,11 @@ export function registerConfigRoutes(use: UseFn) {
     if (isRateLimited(req)) {
       res.statusCode = 429
       res.end(JSON.stringify({ valid: false, error: "Too many attempts. Try again in 1 minute." }))
+      return
+    }
+
+    if (isTeamEdition()) {
+      await handleTeamLogin(req, res, browserLogin)
       return
     }
 
@@ -181,10 +318,10 @@ export function registerConfigRoutes(use: UseFn) {
 
   // POST /api/auth/logout — revoke only the current session and expire the
   // browser cookie. Password changes still revoke every session below.
-  use("/api/auth/logout", (req, res, next) => {
+  use("/api/auth/logout", async (req, res, next) => {
     if (req.method !== "POST") return next()
     const token = getRequestSessionToken(req)
-    if (token) revokeSessionToken(token)
+    if (token) await revokeSessionToken(token)
     clearBrowserSessionCookie(res)
     res.setHeader("Content-Type", "application/json")
     res.setHeader("Cache-Control", "no-store")
@@ -281,7 +418,7 @@ export function registerConfigRoutes(use: UseFn) {
             // Hash the new password before storing
             finalPassword = hashPassword(parsed.networkPassword)
             // Revoke all existing sessions when password changes
-            revokeAllSessions()
+            await revokeAllSessions()
           }
 
           if (parsed.networkAccess && !finalPassword) {
@@ -293,12 +430,15 @@ export function registerConfigRoutes(use: UseFn) {
 
           // If disabling network access, revoke all sessions
           if (!parsed.networkAccess && currentConfig?.networkAccess) {
-            revokeAllSessions()
+            await revokeAllSessions()
           }
 
           await saveConfig({
             claudeDir: resolvedClaudeDir,
             codexOnly: reusingCodexFallback || undefined,
+            // The API cannot set the edition (file/env only) but must not drop it.
+            edition: currentConfig?.edition
+              ?? (getConfiguredEditionValue() === "team" ? "team" : undefined),
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,

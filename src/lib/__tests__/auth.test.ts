@@ -7,6 +7,10 @@ import {
   authFetch,
   hubFetch,
   authUrl,
+  getServerEdition,
+  getServerHello,
+  refreshServerHello,
+  __resetServerHelloForTest,
 } from "@/lib/auth"
 
 function setHostname(hostname: string) {
@@ -30,9 +34,100 @@ describe("auth", () => {
     localStorage.clear()
     sessionStorage.clear()
     vi.restoreAllMocks()
+    __resetServerHelloForTest()
   })
 
   afterEach(() => setHostname("localhost"))
+
+  describe("getServerHello", () => {
+    it("reports the open first-admin bootstrap from the same cached probe", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ edition: "team", needsBootstrap: true }), { status: 200 }),
+      )
+
+      await expect(getServerHello()).resolves.toEqual({ edition: "team", needsBootstrap: true })
+      await expect(getServerEdition()).resolves.toBe("team")
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    it("treats a missing or non-boolean needsBootstrap as closed", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ edition: "team", needsBootstrap: "yes" }), { status: 200 }),
+      )
+      await expect(getServerHello()).resolves.toEqual({ edition: "team", needsBootstrap: false })
+    })
+
+    it("never reports a bootstrap for a personal server", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ needsBootstrap: true }), { status: 200 }),
+      )
+      await expect(getServerHello()).resolves.toEqual({ edition: "personal", needsBootstrap: false })
+    })
+
+    it("refreshes the cache after the bootstrap closes", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ edition: "team", needsBootstrap: true }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ edition: "team", needsBootstrap: false }), { status: 200 }),
+        )
+
+      await expect(getServerHello()).resolves.toMatchObject({ needsBootstrap: true })
+      await expect(refreshServerHello()).resolves.toMatchObject({ needsBootstrap: false })
+      // The refreshed answer replaces the cache — later readers see it too.
+      await expect(getServerHello()).resolves.toMatchObject({ needsBootstrap: false })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  describe("getServerEdition", () => {
+    it("fetches /api/hello once and caches the result", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ edition: "team" }), { status: 200 }),
+      )
+
+      await expect(getServerEdition()).resolves.toBe("team")
+      await expect(getServerEdition()).resolves.toBe("team")
+      expect(fetchSpy).toHaveBeenCalledOnce()
+      expect(fetchSpy).toHaveBeenCalledWith("/api/hello", expect.objectContaining({
+        credentials: "same-origin",
+        cache: "no-store",
+      }))
+    })
+
+    it("shares one in-flight request between concurrent callers", async () => {
+      let resolveHello!: (r: Response) => void
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockReturnValue(
+        new Promise((resolve) => { resolveHello = resolve }),
+      )
+
+      const first = getServerEdition()
+      const second = getServerEdition()
+      resolveHello(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+
+      await expect(first).resolves.toBe("team")
+      await expect(second).resolves.toBe("team")
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
+    it("treats a failed probe as personal without caching the failure", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+
+      await expect(getServerEdition()).resolves.toBe("personal")
+      await expect(getServerEdition()).resolves.toBe("team")
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it("treats a missing or unknown edition value as personal", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ app: "cogpit" }), { status: 200 }),
+      )
+      await expect(getServerEdition()).resolves.toBe("personal")
+    })
+  })
 
   describe("isRemoteClient", () => {
     it.each(["localhost", "127.0.0.1", "::1"])("treats %s as local", (hostname) => {
@@ -95,6 +190,19 @@ describe("auth", () => {
       await expect(checkAuthSession()).resolves.toBe(false)
     })
 
+    it("checks the session endpoint for local clients once the server is known team edition", async () => {
+      setHostname("localhost")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+
+      await getServerEdition()
+      await expect(checkAuthSession()).resolves.toBe(true)
+      expect(fetchSpy).toHaveBeenLastCalledWith("/api/auth/session", expect.objectContaining({
+        credentials: "same-origin",
+      }))
+    })
+
     it("logs out through the protected endpoint without exposing a token", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"))
       await logoutSession()
@@ -155,6 +263,64 @@ describe("auth", () => {
       const response = new Response("", { status: 401 })
       vi.spyOn(globalThis, "fetch").mockResolvedValue(response)
       await expect(authFetch("/api/secure")).resolves.toBe(response)
+    })
+
+    it("re-probes the edition after a failed hello when a local request gets a 401, and gates if it resolves team", async () => {
+      setHostname("localhost")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new Error("offline")) // boot hello probe fails → assumed personal, uncached
+        .mockResolvedValueOnce(new Response("", { status: 401 })) // the gated API request
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "team" }), { status: 200 })) // re-probe
+      await expect(getServerEdition()).resolves.toBe("personal")
+      const handler = vi.fn()
+      window.addEventListener("cogpit-auth-required", handler)
+
+      await expect(authFetch("/api/secure")).rejects.toThrow("Authentication required")
+      expect(handler).toHaveBeenCalledOnce()
+      expect(fetchSpy.mock.calls[2][0]).toBe("/api/hello")
+      window.removeEventListener("cogpit-auth-required", handler)
+    })
+
+    it("passes the 401 through when the re-probe still cannot identify a team server", async () => {
+      setHostname("localhost")
+      vi.spyOn(globalThis, "fetch")
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockRejectedValueOnce(new Error("still offline"))
+      await expect(getServerEdition()).resolves.toBe("personal")
+      const handler = vi.fn()
+      window.addEventListener("cogpit-auth-required", handler)
+
+      const res = await authFetch("/api/secure")
+      expect(res.status).toBe(401)
+      expect(handler).not.toHaveBeenCalled()
+      window.removeEventListener("cogpit-auth-required", handler)
+    })
+
+    it("does not re-probe on a local 401 when the server is positively known personal", async () => {
+      setHostname("localhost")
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "personal" }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+      await expect(getServerEdition()).resolves.toBe("personal")
+
+      const res = await authFetch("/api/secure")
+      expect(res.status).toBe(401)
+      expect(fetchSpy).toHaveBeenCalledTimes(2) // hello + request — no re-probe
+    })
+
+    it("fires auth-required on a local 401 once the server is known team edition", async () => {
+      setHostname("localhost")
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(JSON.stringify({ edition: "team" }), { status: 200 }))
+        .mockResolvedValue(new Response("", { status: 401 }))
+      await getServerEdition()
+      const handler = vi.fn()
+      window.addEventListener("cogpit-auth-required", handler)
+
+      await expect(authFetch("/api/secure")).rejects.toThrow("Authentication required")
+      expect(handler).toHaveBeenCalledOnce()
+      window.removeEventListener("cogpit-auth-required", handler)
     })
 
     it("preserves request options and headers", async () => {

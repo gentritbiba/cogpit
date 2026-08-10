@@ -8,6 +8,8 @@ import {
 } from "../lib/activityMonitor"
 import { captureSystemProcesses } from "../lib/systemProcesses"
 import { getRecentlyReaped, killPids, startLeakReaper } from "../lib/leakReaper"
+import { isTeamEdition } from "../team/edition"
+import { getRequestPrincipal } from "../team/requestPrincipal"
 
 const requestMonitor: Middleware = (req, res, next) => {
   const label = normalizeApiPath(req.url ?? "/", req.method)
@@ -101,10 +103,14 @@ export function registerPerformanceRoutes(use: UseFn): void {
 
     void (async () => {
       const snapshot = createServerPerformanceSnapshot()
-      try {
-        snapshot.system = await captureSystemProcesses()
-      } catch {
-        // System-wide process listing is best-effort; the core snapshot still ships.
+      // The system-wide process list mirrors GET /api/system-processes, which
+      // is admin-only in team edition — gate it the same way here.
+      if (!isTeamEdition() || getRequestPrincipal(req)?.role === "admin") {
+        try {
+          snapshot.system = await captureSystemProcesses()
+        } catch {
+          // System-wide process listing is best-effort; the core snapshot still ships.
+        }
       }
       res.setHeader("Content-Type", "application/json")
       res.end(JSON.stringify(snapshot))

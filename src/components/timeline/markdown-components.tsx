@@ -7,6 +7,7 @@ import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
+import { useCapability } from "@/hooks/useCapability"
 
 const IMAGE_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
@@ -98,11 +99,17 @@ function ExternalLink({
   children,
   ...props
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const canAccessHostFiles = useCapability("hostFiles")
+  const fileTarget = parseLocalFileHref(href)
+
+  if (fileTarget && !canAccessHostFiles) {
+    return <span className="text-muted-foreground" title={href}>{children}</span>
+  }
+
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!href) return
 
     e.preventDefault()
-    const fileTarget = parseLocalFileHref(href)
     if (fileTarget) {
       openInEditor(fileTarget.path, "file", {
         line: fileTarget.line,
@@ -131,9 +138,11 @@ function ExternalLink({
  * and supports click-to-expand in a dialog.
  */
 function LocalImage({ src, alt }: { src?: string; alt?: string }) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const [expanded, setExpanded] = useState(false)
   const imageGallery = useOptionalImageGallery()
-  const resolved = resolveImageSrc(src)
+  const localImageBlocked = isLocalImagePath(src) && !canAccessHostFiles
+  const resolved = localImageBlocked ? undefined : resolveImageSrc(src)
   const viewerImage: ImageViewerItem | null = resolved
     ? { id: "markdown-image", src: resolved, alt: alt ?? "Rendered image", label: alt || "Rendered image" }
     : null
@@ -145,6 +154,10 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
     } else {
       setExpanded(true)
     }
+  }
+
+  if (localImageBlocked) {
+    return alt ? <span className="text-muted-foreground">{alt}</span> : null
   }
 
   return (

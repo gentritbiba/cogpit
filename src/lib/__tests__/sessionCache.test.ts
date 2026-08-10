@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import type { ParsedSession } from "@/lib/types"
 import { sessionCache } from "@/lib/sessionCache"
+import {
+  __resetDeviceRevisionsForTest,
+  __resetIdentityForTest,
+  recordDeviceConnectionRevision,
+  setActiveIdentity,
+} from "@/lib/device"
 
 function setPath(pathname: string) {
   Object.defineProperty(window, "location", {
@@ -19,6 +25,8 @@ function seed(dirName: string, fileName: string) {
 describe("sessionCache device scoping", () => {
   beforeEach(() => {
     sessionCache.clear()
+    __resetDeviceRevisionsForTest()
+    __resetIdentityForTest()
     setPath("/")
   })
 
@@ -57,5 +65,30 @@ describe("sessionCache device scoping", () => {
     // The local scope was never populated, so it stays empty too.
     setPath("/")
     expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeUndefined()
+  })
+
+  it("keeps cached transcripts isolated between signed-in users", () => {
+    setActiveIdentity("u_1")
+    seed("-Users-foo", "sess.jsonl")
+
+    setActiveIdentity("u_2")
+    expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeUndefined()
+
+    setActiveIdentity("u_1")
+    expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeDefined()
+  })
+
+  it("isolates the same device id across sensitive connection revisions", () => {
+    setPath("/d/dev_x/")
+    recordDeviceConnectionRevision("dev_x", 4)
+    seed("-Users-foo", "sess.jsonl")
+
+    recordDeviceConnectionRevision("dev_x", 5)
+    expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeUndefined()
+
+    // A duplicate/name-only registry notification keeps the same scope.
+    recordDeviceConnectionRevision("dev_x", 5)
+    seed("-Users-foo", "sess.jsonl")
+    expect(sessionCache.get("-Users-foo", "sess.jsonl")).toBeDefined()
   })
 })

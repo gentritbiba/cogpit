@@ -1,5 +1,5 @@
 import type { ParsedSession, Turn } from "@/lib/types"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 export interface CacheEntry {
   parsed: ParsedSession
@@ -27,7 +27,10 @@ const MAX_ENTRIES = 5
 // back to a device keeps its entries warm. This module is a singleton that
 // survives the DeviceRoot remount, so the prefix is the only isolation.
 function makeKey(dirName: string, fileName: string): string {
-  return `${getActiveDeviceId()}:${dirName}/${fileName}`
+  const device = getActiveDeviceScope()
+  const identity = getActiveIdentity()
+  const scope = identity === null ? device : `${device}:${identity}`
+  return `${scope}:${dirName}/${fileName}`
 }
 
 class SessionCache {

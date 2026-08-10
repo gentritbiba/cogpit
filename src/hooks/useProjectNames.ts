@@ -32,12 +32,14 @@ const listeners = new Set<() => void>()
 // device's scoped key and notify subscribers — otherwise a rename would merge
 // the previous device's names into the new device's storage.
 if (typeof window !== "undefined") {
-  window.addEventListener("cogpit-device-changed", () => {
+  const reloadNames = () => {
     currentNames = loadNames()
     for (const listener of listeners) {
       listener()
     }
-  })
+  }
+  window.addEventListener("cogpit-device-changed", reloadNames)
+  window.addEventListener("cogpit-identity-changed", reloadNames)
 }
 
 function subscribe(listener: () => void): () => void {

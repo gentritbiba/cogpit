@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
+import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
+import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { SessionAction } from "@/hooks/useSessionState"
 import type { RefObject, Dispatch } from "react"
@@ -349,6 +351,43 @@ describe("useKeyboardShortcuts", () => {
 
       fireKey("t", { ctrlKey: true, metaKey: true })
       expect(opts.onOpenTerminal).toHaveBeenCalled()
+    })
+  })
+
+  describe("terminal capability gate (team member)", () => {
+    afterEach(() => __resetCapabilitiesForTest())
+
+    it("ignores both terminal shortcuts without the terminal capability", () => {
+      setMe({
+        authenticated: true,
+        edition: "team",
+        user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
+        capabilities: MEMBER_CAPABILITIES,
+      })
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("t", { ctrlKey: true, metaKey: true })
+      fireKey("j", { metaKey: true })
+
+      expect(opts.onOpenTerminal).not.toHaveBeenCalled()
+      expect(opts.onToggleIntegratedTerminal).not.toHaveBeenCalled()
+    })
+
+    it("ignores the project-files shortcut without host-file access", () => {
+      setMe({
+        authenticated: true,
+        edition: "team",
+        user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
+        capabilities: MEMBER_CAPABILITIES,
+      })
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("f", { metaKey: true, shiftKey: true })
+
+      expect(opts.onToggleProjectFiles).not.toHaveBeenCalled()
+      expect(event.defaultPrevented).toBe(false)
     })
   })
 

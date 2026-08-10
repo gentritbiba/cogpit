@@ -2,10 +2,19 @@ import { request as httpRequest, type IncomingMessage, type ServerResponse, type
 import { request as httpsRequest } from "node:https"
 import type { Duplex } from "node:stream"
 
-import { getDevice, type HubDevice } from "./registry"
-import { getDeviceToken, invalidateDeviceToken, DeviceAuthError, DeviceUnreachableError } from "./device-client"
-import { websocketUpgradeRejection } from "../security"
+import { getDevice, sameDeviceConnection, type HubDevice } from "./registry"
+import {
+  getDeviceTokenLease,
+  invalidateDeviceTokenGeneration,
+  DeviceAuthError,
+  type DeviceTokenLease,
+} from "./device-client"
+import { onDeviceConnectionsInvalidated } from "./connection-invalidation"
+import { rejectWebsocketUpgrade } from "../security"
 import type { NextFn } from "../http"
+import { isTeamEdition } from "../team/edition"
+import { requirementFor } from "../team/policy"
+import { getRequestPrincipal } from "../team/requestPrincipal"
 
 /**
  * Multi-device hub reverse proxy.
@@ -133,6 +142,48 @@ function filterResponseHeaders(incoming: IncomingHttpHeaders): OutgoingHttpHeade
   return out
 }
 
+function normalizedDownstreamPath(downstreamPath: string): string | null {
+  try {
+    // URL parsing collapses literal and encoded dot segments. Decode the
+    // resulting pathname as well so encoded route names cannot bypass a hub
+    // boundary that the downstream router would later decode.
+    const decoded = decodeURIComponent(new URL(downstreamPath, "http://cogpit.invalid").pathname)
+    // Decoding an encoded slash/backslash can reveal dot segments that were
+    // not segments during the first parse. Normalize once more after decode.
+    return new URL(decoded, "http://cogpit.invalid").pathname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/** Device auth/session routes must never receive the hub's service token. */
+export function isForbiddenHubDownstreamPath(downstreamPath: string): boolean {
+  const path = normalizedDownstreamPath(downstreamPath)
+  return path === "/api/auth" || path?.startsWith("/api/auth/") === true
+}
+
+/**
+ * The outer `/hub/:deviceId` policy only proves that the caller may use the
+ * proxy. In team edition the downstream API path must still be authorized as
+ * that caller before the hub replaces their credential with a device-admin
+ * token. Personal edition intentionally keeps its existing proxy behaviour.
+ */
+export function hubProxyAuthorizationRejection(
+  req: IncomingMessage,
+  downstreamPath: string,
+  method: string,
+): 401 | 403 | null {
+  if (!isTeamEdition()) return null
+  const principal = getRequestPrincipal(req)
+  if (!principal) return 401
+  // Malformed paths fall through to the policy table's admin default.
+  const policyPath = normalizedDownstreamPath(downstreamPath) ?? "/api/__invalid-hub-path"
+  return requirementFor(policyPath, method.toUpperCase()) === "admin"
+    && principal.role !== "admin"
+    ? 403
+    : null
+}
+
 // ── HTTP proxy handler ───────────────────────────────────────────────
 
 /**
@@ -165,7 +216,25 @@ export function createHubProxyHandler(): (req: IncomingMessage, res: ServerRespo
       return sendJson(res, 404, { error: "Hub requests must target /api/*", code: "BAD_HUB_PATH" }, device.id)
     }
 
+    if (isForbiddenHubDownstreamPath(rest)) {
+      return sendJson(res, 403, {
+        error: "Device authentication routes cannot be proxied",
+        code: "HUB_AUTH_ROUTE_FORBIDDEN",
+      }, device.id)
+    }
+
     const method = (req.method || "GET").toUpperCase()
+    const authorizationRejection = hubProxyAuthorizationRejection(req, rest, method)
+    if (authorizationRejection) {
+      return sendJson(
+        res,
+        authorizationRejection,
+        authorizationRejection === 401
+          ? { error: "Authentication required", code: "AUTH_REQUIRED" }
+          : { error: "Admin access required", code: "FORBIDDEN" },
+        device.id,
+      )
+    }
     if (method !== "GET" && method !== "HEAD" && !req.headers["x-cogpit-client"]) {
       return sendJson(res, 403, { error: "Missing X-Cogpit-Client header", code: "MISSING_CLIENT_HEADER" }, device.id)
     }
@@ -182,7 +251,9 @@ export function createHubProxyHandler(): (req: IncomingMessage, res: ServerRespo
     })
     req.on("end", () => {
       if (requestFailed) return
-      dispatch(req, res, device, method, rest, rawQuery, Buffer.concat(chunks))
+      // Do not carry the admission-time device snapshot across a slow request
+      // body. An admin may have changed its host or credentials meanwhile.
+      dispatch(req, res, device.id, method, rest, rawQuery, Buffer.concat(chunks))
     })
   }
 }
@@ -190,7 +261,7 @@ export function createHubProxyHandler(): (req: IncomingMessage, res: ServerRespo
 function dispatch(
   req: IncomingMessage,
   res: ServerResponse,
-  device: HubDevice,
+  deviceId: string,
   method: string,
   rest: string,
   rawQuery: string,
@@ -202,8 +273,24 @@ function dispatch(
   // `responded` guards the single client-facing outcome: either a JSON error or
   // the start of a piped response. Once set, later errors only tear down.
   let responded = false
+  let invalidated = false
   let currentProxyReq: ClientRequest | null = null
   let currentProxyRes: IncomingMessage | null = null
+  let unsubscribeInvalidation = (): void => {}
+
+  const cleanupInvalidation = (): void => unsubscribeInvalidation()
+  unsubscribeInvalidation = onDeviceConnectionsInvalidated((changedDeviceId) => {
+    if (changedDeviceId !== deviceId || invalidated) return
+    invalidated = true
+    currentProxyReq?.destroy()
+    currentProxyRes?.destroy()
+    if (responded || res.headersSent) {
+      if (!res.writableEnded) res.destroy()
+    } else {
+      failGateway("DEVICE_CONNECTION_CHANGED", "Device connection settings changed")
+    }
+  })
+  res.once("finish", cleanupInvalidation)
 
   // Client went away before we finished → tear down the upstream (no leaked
   // sockets). res 'close' with writableFinished === true is a normal finish and
@@ -211,6 +298,7 @@ function dispatch(
   // the request stream closes ~immediately after 'end', long before the response
   // is done — using it would abort every streaming request.
   res.on("close", () => {
+    cleanupInvalidation()
     if (!res.writableFinished) {
       currentProxyReq?.destroy()
       currentProxyRes?.destroy()
@@ -224,17 +312,27 @@ function dispatch(
       return
     }
     responded = true
-    sendJson(res, 502, { error: message, code }, device.id)
+    sendJson(res, 502, { error: message, code }, deviceId)
   }
 
-  function attempt(token: string | null, allowRetry: boolean): void {
+  function failUnknownDevice(): void {
+    if (responded) {
+      if (!res.writableEnded) res.destroy()
+      return
+    }
+    responded = true
+    sendJson(res, 404, { error: `Unknown device "${deviceId}"`, code: "UNKNOWN_DEVICE" }, deviceId)
+  }
+
+  function attempt(device: HubDevice, lease: DeviceTokenLease, allowRetry: boolean): void {
+    if (invalidated) return
     const requestFn = device.tls ? httpsRequest : httpRequest
     const proxyReq = requestFn({
       hostname: device.host,
       port: device.port,
       method,
       path: outboundPath,
-      headers: buildOutboundHeaders(req.headers, body, token, device),
+      headers: buildOutboundHeaders(req.headers, body, lease.token, device),
     })
     currentProxyReq = proxyReq
     // No idle timeout: send-message holds the response open for minutes.
@@ -262,22 +360,22 @@ function dispatch(
     proxyReq.on("response", (proxyRes) => {
       clearWatchdog()
       currentProxyRes = proxyRes
+      if (invalidated) {
+        proxyRes.destroy()
+        return
+      }
 
-      if (proxyRes.statusCode === 401 && allowRetry && device.auth === "password") {
+      if (proxyRes.statusCode === 401 && allowRetry) {
         // Device token expired/rotated: drain, re-mint once (single-flight in
         // device-client), and replay the buffered request exactly once.
         proxyRes.resume()
-        invalidateDeviceToken(device.id)
-        getDeviceToken(device)
-          .then((newToken) => attempt(newToken, false))
-          .catch((err) => {
-            if (err instanceof DeviceAuthError) {
-              failGateway("DEVICE_AUTH_FAILED", `Device "${device.name}" rejected the hub credentials`)
-            } else {
-              failGateway("DEVICE_UNREACHABLE", `Device "${device.name}" is unreachable`)
-            }
-          })
-        return
+        const retryDevice = getDevice(deviceId)
+        if (!retryDevice) return failUnknownDevice()
+        if (retryDevice.auth === "password") {
+          invalidateDeviceTokenGeneration(deviceId, lease.generation)
+          resolveTokenAndAttempt(false)
+          return
+        }
       }
 
       if (proxyRes.statusCode === 401) {
@@ -318,18 +416,37 @@ function dispatch(
     proxyReq.end(body)
   }
 
-  // Mint (or reuse) the device token, then fire the first attempt.
-  getDeviceToken(device)
-    .then((token) => attempt(token, true))
-    .catch((err) => {
-      if (err instanceof DeviceAuthError) {
-        failGateway("DEVICE_AUTH_FAILED", `Device "${device.name}" rejected the hub credentials`)
-      } else if (err instanceof DeviceUnreachableError) {
-        failGateway("DEVICE_UNREACHABLE", `Device "${device.name}" is unreachable`)
-      } else {
-        failGateway("DEVICE_UNREACHABLE", `Device "${device.name}" is unreachable`)
-      }
-    })
+  function resolveTokenAndAttempt(allowRetry: boolean): void {
+    const snapshot = getDevice(deviceId)
+    if (!snapshot) return failUnknownDevice()
+
+    getDeviceTokenLease(snapshot)
+      .then((lease) => {
+        if (invalidated) return
+        const current = getDevice(deviceId)
+        if (!current) return failUnknownDevice()
+        if (!sameDeviceConnection(snapshot, current)) {
+          // The generation guard rejects changes during a mint. This second
+          // comparison closes the smaller gap between a resolved token and the
+          // actual outbound request (and covers auth:none, which does not mint).
+          resolveTokenAndAttempt(allowRetry)
+          return
+        }
+        attempt(current, lease, allowRetry)
+      })
+      .catch((err) => {
+        if (invalidated) return
+        if (err instanceof DeviceAuthError) {
+          failGateway("DEVICE_AUTH_FAILED", `Device "${snapshot.name}" rejected the hub credentials`)
+        } else {
+          failGateway("DEVICE_UNREACHABLE", `Device "${snapshot.name}" is unreachable`)
+        }
+      })
+  }
+
+  // Resolve after the request body is complete, mint (or reuse) the token, and
+  // verify that the registry snapshot is still current before connecting.
+  resolveTokenAndAttempt(true)
 }
 
 // ── WebSocket upgrade proxy ──────────────────────────────────────────
@@ -350,23 +467,16 @@ export function handleHubUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
   const deviceId = match[1]
 
   // Hub-side trust check FIRST — identical semantics to the local /__pty branch.
-  const rejection = websocketUpgradeRejection(req, url)
-  if (rejection) {
-    const reason = rejection === 401 ? "Unauthorized" : "Forbidden"
-    socket.write(`HTTP/1.1 ${rejection} ${reason}\r\n\r\n`)
-    socket.destroy()
-    return true
-  }
+  if (rejectWebsocketUpgrade(req, url, socket)) return true
 
-  const device = getDevice(deviceId)
-  if (!device) {
+  if (!getDevice(deviceId)) {
     socket.write("HTTP/1.1 404 Not Found\r\n\r\n")
     socket.destroy()
     return true
   }
 
   // Mint asynchronously; we already own the socket, so return true now.
-  void openDeviceUpgrade(req, socket, head, device)
+  void openDeviceUpgrade(req, socket, head, deviceId)
   return true
 }
 
@@ -377,16 +487,30 @@ function writeSocketError(socket: Duplex, line: string): void {
   }
 }
 
-async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, device: HubDevice): Promise<void> {
-  let token: string | null
-  try {
-    token = await getDeviceToken(device)
-  } catch {
-    writeSocketError(socket, "502 Bad Gateway")
-    return
-  }
+async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer, deviceId: string): Promise<void> {
+  let invalidated = false
+  let currentProxyReq: ClientRequest | null = null
+  let currentProxySocket: Duplex | null = null
+  let unsubscribeInvalidation = (): void => {}
 
-  const buildUpgradeHeaders = (): OutgoingHttpHeaders => {
+  const closeTransport = (): void => {
+    if (invalidated) return
+    invalidated = true
+    unsubscribeInvalidation()
+    currentProxyReq?.destroy()
+    currentProxySocket?.destroy()
+    socket.destroy()
+  }
+  unsubscribeInvalidation = onDeviceConnectionsInvalidated((changedDeviceId) => {
+    if (changedDeviceId === deviceId) closeTransport()
+  })
+  socket.once("close", () => {
+    unsubscribeInvalidation()
+    currentProxyReq?.destroy()
+    currentProxySocket?.destroy()
+  })
+
+  const buildUpgradeHeaders = (device: HubDevice): OutgoingHttpHeaders => {
     const headers: OutgoingHttpHeaders = {}
     for (const [key, value] of Object.entries(req.headers)) {
       if (value === undefined) continue
@@ -410,23 +534,27 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
     return headers
   }
 
-  const attemptUpgrade = (tok: string | null, allowRetry: boolean): void => {
+  const attemptUpgrade = (device: HubDevice, lease: DeviceTokenLease, allowRetry: boolean): void => {
+    if (invalidated || socket.destroyed) return
     // auth:"none" devices read no token; password devices carry it in the query.
-    const devicePath = tok ? `/__pty?token=${encodeURIComponent(tok)}` : "/__pty"
+    const devicePath = lease.token ? `/__pty?token=${encodeURIComponent(lease.token)}` : "/__pty"
     const requestFn = device.tls ? httpsRequest : httpRequest
     const proxyReq = requestFn({
       hostname: device.host,
       port: device.port,
       method: "GET",
       path: devicePath,
-      headers: buildUpgradeHeaders(),
+      headers: buildUpgradeHeaders(device),
     })
+    currentProxyReq = proxyReq
 
     proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-      if (socket.destroyed) {
+      currentProxyReq = null
+      if (invalidated || socket.destroyed) {
         proxySocket.destroy()
         return
       }
+      currentProxySocket = proxySocket
       // Splice: replay the device's 101 to the client, then bridge both ways.
       const statusLine = `HTTP/1.1 101 ${proxyRes.statusMessage || "Switching Protocols"}\r\n`
       const headerLines = Object.entries(proxyRes.headers)
@@ -455,22 +583,46 @@ async function openDeviceUpgrade(req: IncomingMessage, socket: Duplex, head: Buf
     })
 
     proxyReq.on("response", (proxyRes) => {
+      currentProxyReq = null
       // Device answered without upgrading (non-101).
-      if (proxyRes.statusCode === 401 && allowRetry && device.auth === "password") {
+      if (proxyRes.statusCode === 401 && allowRetry) {
         proxyRes.resume()
-        invalidateDeviceToken(device.id)
-        getDeviceToken(device)
-          .then((newTok) => attemptUpgrade(newTok, false))
-          .catch(() => writeSocketError(socket, "502 Bad Gateway"))
-        return
+        const retryDevice = getDevice(deviceId)
+        if (!retryDevice) return writeSocketError(socket, "404 Not Found")
+        if (retryDevice.auth === "password") {
+          invalidateDeviceTokenGeneration(deviceId, lease.generation)
+          resolveTokenAndUpgrade(false)
+          return
+        }
       }
       proxyRes.resume()
       writeSocketError(socket, "502 Bad Gateway")
     })
 
-    proxyReq.on("error", () => writeSocketError(socket, "502 Bad Gateway"))
+    proxyReq.on("error", () => {
+      currentProxyReq = null
+      writeSocketError(socket, "502 Bad Gateway")
+    })
     proxyReq.end()
   }
 
-  attemptUpgrade(token, true)
+  const resolveTokenAndUpgrade = (allowRetry: boolean): void => {
+    const snapshot = getDevice(deviceId)
+    if (!snapshot) return writeSocketError(socket, "404 Not Found")
+
+    getDeviceTokenLease(snapshot)
+      .then((lease) => {
+        if (invalidated || socket.destroyed) return
+        const current = getDevice(deviceId)
+        if (!current) return writeSocketError(socket, "404 Not Found")
+        if (!sameDeviceConnection(snapshot, current)) {
+          resolveTokenAndUpgrade(allowRetry)
+          return
+        }
+        attemptUpgrade(current, lease, allowRetry)
+      })
+      .catch(() => writeSocketError(socket, "502 Bad Gateway"))
+  }
+
+  resolveTokenAndUpgrade(true)
 }

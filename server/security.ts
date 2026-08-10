@@ -1,7 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import type { Duplex } from "node:stream"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-import type { NextFn } from "./http"
+import { sendJson, type NextFn } from "./http"
+import {
+  SESSION_ABSOLUTE_TTL_MS,
+  SESSION_IDLE_TTL_MS,
+  type SessionPrincipal,
+} from "./team/constants"
+import { isTeamEdition } from "./team/edition"
+import { setRequestPrincipal } from "./team/requestPrincipal"
+import {
+  clearAllSessions,
+  persistSession,
+  removeSession,
+  removeSessionsForUser,
+  restoreSession,
+  touchSession,
+} from "./team/sessionPersistence"
+import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -16,8 +33,13 @@ const FORWARDING_HEADERS = [
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 const BROWSER_SESSION_COOKIE = "__Host-cogpit_session"
-const SESSION_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000
-const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
+const SESSION_ACTIVITY_PERSIST_INTERVAL_MS = 60 * 1000
+
+// Defined in ./team/constants so the team modules can share them without
+// importing this file back (security.ts imports them — the reverse edge
+// would be an import cycle). This module stays their public home.
+export { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS }
+export type { SessionPrincipal }
 
 export function isLocalRequest(req: IncomingMessage): boolean {
   return LOCAL_ADDRS.has(req.socket.remoteAddress || "")
@@ -152,6 +174,8 @@ export function websocketUpgradeRejection(
 ): 401 | 403 | null {
   if (isUnforwardedUntrustedLoopback(req)) return 403
 
+  if (isTeamEdition()) return teamWebsocketUpgradeRejection(req, url)
+
   if (isTrustedDirectLocalRequest(req)) {
     if (req.headers.origin && !hasSameOrigin(req)) return 403
     return null
@@ -178,6 +202,41 @@ export function websocketUpgradeRejection(
   return null
 }
 
+/** Write and close an unauthorized WebSocket upgrade, returning true when handled. */
+export function rejectWebsocketUpgrade(
+  req: IncomingMessage,
+  url: URL,
+  socket: Duplex,
+): boolean {
+  const status = websocketUpgradeRejection(req, url)
+  if (!status) return false
+
+  const reason = status === 401 ? "Unauthorized" : "Forbidden"
+  socket.write(`HTTP/1.1 ${status} ${reason}\r\n\r\n`)
+  socket.destroy()
+  return true
+}
+
+/**
+ * Team edition: the PTY is admin-only and local trust is off. Browser clients
+ * need a same-origin upgrade with a valid session cookie; machine clients keep
+ * the ?token= handshake. The networkAccess config gate does not apply — user
+ * credentials replace the network password entirely.
+ */
+function teamWebsocketUpgradeRejection(req: IncomingMessage, url: URL): 401 | 403 | null {
+  let token: string | null
+  if (req.headers.origin) {
+    if (!hasSameOrigin(req)) return 403
+    token = cookieValue(req, BROWSER_SESSION_COOKIE)
+    if (!token || !validateSessionToken(token, req.headers["user-agent"])) return 401
+  } else {
+    token = url.searchParams.get("token")
+    if (!token || !validateSessionToken(token)) return 401
+  }
+  // Principal-less legacy tokens fall in here too: not an admin, no PTY.
+  return getSessionPrincipal(token)?.role === "admin" ? null : 403
+}
+
 export function safeCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a)
   const bufB = Buffer.from(b)
@@ -195,49 +254,245 @@ interface SessionInfo {
   ip: string
   userAgent: string
   lastActivity: number
+  persistedActivityAt: number
+  principal?: SessionPrincipal
 }
 
 const activeSessions = new Map<string, SessionInfo>()
+type SessionRevocationListener = (token: string | null) => void
+const sessionRevocationListeners = new Set<SessionRevocationListener>()
 
-export function createSessionToken(ip: string, userAgent?: string): string {
+function logPersistenceFailure(error: unknown): void {
+  console.error("[team-sessions] Failed to write the persisted session store:", error)
+}
+
+/**
+ * A live-process invalidation (idle/absolute expiry, UA mismatch, revocation,
+ * sweep) must also drop the persisted row, or the team-edition restore path
+ * would resurrect the session the next time the token is presented. Only
+ * process death skips this — which is exactly what leaves not-yet-expired
+ * sessions restorable after a restart.
+ */
+function notifySessionRevoked(token: string | null): void {
+  for (const listener of sessionRevocationListeners) {
+    try {
+      listener(token)
+    } catch (error) {
+      console.error("[sessions] Revocation listener failed:", error)
+    }
+  }
+}
+
+/** Subscribe upgraded transports that must close when their token is revoked. */
+export function onSessionRevoked(listener: SessionRevocationListener): () => void {
+  sessionRevocationListeners.add(listener)
+  return () => sessionRevocationListeners.delete(listener)
+}
+
+const HTTP_STREAM_AUTHORIZATION_RECHECK_MS = 5_000
+
+function authenticatedStreamApiPath(rawUrl: string): string | null {
+  try {
+    const decoded = decodeURIComponent(new URL(rawUrl, "http://cogpit.invalid").pathname)
+    const normalized = new URL(decoded, "http://cogpit.invalid").pathname.toLowerCase()
+    const hub = /^\/hub\/[^/]+(\/api(?:\/.*)?)$/.exec(normalized)
+    return hub?.[1] ?? normalized
+  } catch {
+    return null
+  }
+}
+
+/** Only endpoints whose successful GET response is intentionally long-lived. */
+export function isAuthenticatedHttpStreamRequest(req: IncomingMessage): boolean {
+  if ((req.method || "GET").toUpperCase() !== "GET") return false
+  const path = authenticatedStreamApiPath(req.url || "/")
+  return path === "/api/task-output"
+    || path === "/api/watch"
+    || path?.startsWith("/api/watch/") === true
+    || path === "/api/team-watch"
+    || path?.startsWith("/api/team-watch/") === true
+    || path === "/api/workflow-watch"
+    || path?.startsWith("/api/workflow-watch/") === true
+}
+
+/**
+ * Bind an authenticated long-lived HTTP response to the session that admitted
+ * it. Normal responses unregister on finish; SSE responses are destroyed on
+ * logout, disable/demotion/password reset, global revocation, or expiry.
+ */
+function trackAuthenticatedHttpStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+): void {
+  if (!isAuthenticatedHttpStreamRequest(req)) return
+
+  let cleaned = false
+  let timer: ReturnType<typeof setInterval> | null = null
+  let unsubscribe = (): void => {}
+  const cleanup = (): void => {
+    if (cleaned) return
+    cleaned = true
+    if (timer) clearInterval(timer)
+    unsubscribe()
+  }
+  const terminate = (): void => {
+    cleanup()
+    if (!res.writableEnded) res.destroy()
+  }
+  unsubscribe = onSessionRevoked((revokedToken) => {
+    if (revokedToken === null || revokedToken === token) terminate()
+  })
+  timer = setInterval(() => {
+    if (!isSessionTokenActive(token)) terminate()
+  }, HTTP_STREAM_AUTHORIZATION_RECHECK_MS)
+  timer.unref?.()
+  res.once("finish", cleanup)
+  res.once("close", cleanup)
+}
+
+function discardSession(token: string): Promise<void> {
+  if (activeSessions.delete(token)) notifySessionRevoked(token)
+  return isTeamEdition() ? removeSession(token) : Promise.resolve()
+}
+
+function discardSessionBestEffort(token: string): void {
+  void discardSession(token).catch(logPersistenceFailure)
+}
+
+export function createSessionToken(ip: string, userAgent?: string, principal?: SessionPrincipal): string {
   const token = randomBytes(32).toString("hex")
   const now = Date.now()
-  activeSessions.set(token, { createdAt: now, ip, userAgent: userAgent || "", lastActivity: now })
+  activeSessions.set(token, {
+    createdAt: now,
+    ip,
+    userAgent: userAgent || "",
+    lastActivity: now,
+    persistedActivityAt: now,
+    principal,
+  })
+  if (principal && isTeamEdition()) {
+    void persistSession(token, principal, now).catch(logPersistenceFailure)
+  }
   return token
 }
 
-export function validateSessionToken(token: string, userAgent?: string): boolean {
+/** The live in-memory session for a token, or null once expired (expiry discards it). */
+function getLiveSession(token: string): SessionInfo | null {
   const session = activeSessions.get(token)
-  if (!session) return false
+  if (!session) return null
   const now = Date.now()
   if (
     now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
     || now - session.lastActivity > SESSION_IDLE_TTL_MS
-    || (userAgent !== undefined && session.userAgent !== userAgent)
   ) {
-    activeSessions.delete(token)
+    discardSessionBestEffort(token)
+    return null
+  }
+  return session
+}
+
+/**
+ * Rehydrate a persisted team-edition session after a restart. Username and
+ * role are re-read from the users store so role changes apply and disabled
+ * users stay out; the original createdAt is kept so the absolute TTL spans
+ * restarts. The presenting request's user agent becomes the pinned one — the
+ * original was never persisted.
+ */
+function restorePersistedSession(token: string, userAgent: string | undefined): SessionInfo | null {
+  const restored = restoreSession(token)
+  if (!restored) return null
+  const now = Date.now()
+  if (
+    now - restored.createdAt > SESSION_ABSOLUTE_TTL_MS
+    || now - restored.lastActivity > SESSION_IDLE_TTL_MS
+  ) {
+    discardSessionBestEffort(token)
+    return null
+  }
+  const user = getUserById(restored.userId)
+  if (!user || user.disabled) {
+    discardSessionBestEffort(token)
+    return null
+  }
+  const session: SessionInfo = {
+    createdAt: restored.createdAt,
+    ip: "",
+    userAgent: userAgent ?? "",
+    lastActivity: restored.lastActivity,
+    persistedActivityAt: restored.lastActivity,
+    principal: { userId: user.id, username: user.username, role: user.role },
+  }
+  activeSessions.set(token, session)
+  return session
+}
+
+export function validateSessionToken(token: string, userAgent?: string): boolean {
+  const session = getLiveSession(token)
+    ?? (isTeamEdition() ? restorePersistedSession(token, userAgent) : null)
+  if (!session) return false
+  if (userAgent !== undefined && session.userAgent !== userAgent) {
+    discardSessionBestEffort(token)
     return false
   }
+  const now = Date.now()
   session.lastActivity = now
+  if (
+    session.principal
+    && isTeamEdition()
+    && now - session.persistedActivityAt >= SESSION_ACTIVITY_PERSIST_INTERVAL_MS
+  ) {
+    session.persistedActivityAt = now
+    void touchSession(token, now).catch(logPersistenceFailure)
+  }
   return true
 }
 
-export function revokeSessionToken(token: string): void {
-  activeSessions.delete(token)
+/** Principal of a currently valid session; does not refresh lastActivity. */
+export function getSessionPrincipal(token: string): SessionPrincipal | null {
+  return getLiveSession(token)?.principal ?? null
 }
 
-export function revokeAllSessions(): void {
+/** Validity check for long-lived transports that must not refresh idle time. */
+export function isSessionTokenActive(token: string): boolean {
+  return getLiveSession(token) !== null
+}
+
+export function revokeSessionToken(token: string): Promise<void> {
+  return discardSession(token)
+}
+
+export function revokeAllSessions(): Promise<void> {
+  activeSessions.clear()
+  notifySessionRevoked(null)
+  return isTeamEdition() ? clearAllSessions() : Promise.resolve()
+}
+
+export function revokeSessionsForUser(userId: string): Promise<void> {
+  for (const [token, session] of activeSessions) {
+    if (session.principal?.userId !== userId) continue
+    activeSessions.delete(token)
+    notifySessionRevoked(token)
+  }
+  return isTeamEdition() ? removeSessionsForUser(userId) : Promise.resolve()
+}
+
+/** Clears only the in-memory session map — simulates a process restart in tests. */
+export function __resetSessionsForTest(): void {
   activeSessions.clear()
 }
 
 export function getConnectedDevices(): Array<{ ip: string; userAgent: string; deviceName: string; connectedAt: number; lastActivity: number }> {
   const now = Date.now()
   const devices: Array<{ ip: string; userAgent: string; deviceName: string; connectedAt: number; lastActivity: number }> = []
-  for (const [, session] of activeSessions) {
+  for (const [token, session] of activeSessions) {
     if (
       now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
       || now - session.lastActivity > SESSION_IDLE_TTL_MS
-    ) continue
+    ) {
+      discardSessionBestEffort(token)
+      continue
+    }
     devices.push({
       ip: session.ip.replace(/^::ffff:/, ""),
       userAgent: session.userAgent,
@@ -271,7 +526,7 @@ setInterval(() => {
     if (
       now - session.createdAt > SESSION_ABSOLUTE_TTL_MS
       || now - session.lastActivity > SESSION_IDLE_TTL_MS
-    ) activeSessions.delete(token)
+    ) discardSessionBestEffort(token)
   }
 }, 60_000).unref()
 
@@ -281,21 +536,12 @@ export {
   hashPassword,
   isMalformedPasswordHash,
   isPasswordHashed,
+  MIN_PASSWORD_LENGTH,
   needsPasswordRehash,
+  validatePasswordStrength,
   verifyPassword,
   verifyPasswordAsync,
 } from "./password-utils"
-
-// ── Password validation ─────────────────────────────────────────────
-
-export const MIN_PASSWORD_LENGTH = 16
-
-export function validatePasswordStrength(password: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
-  }
-  return null
-}
 
 // ── Security headers middleware ──────────────────────────────────────
 
@@ -382,6 +628,8 @@ function isPublicPath(url: string): boolean {
 }
 
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  if (isTeamEdition()) return teamAuthMiddleware(req, res, next)
+
   const url = req.url || "/"
   const publicPath = isPublicPath(url)
 
@@ -436,5 +684,65 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
     return
   }
 
+  trackAuthenticatedHttpStream(req, res, token)
+  next()
+}
+
+/**
+ * Team edition flips the trust model: a loopback socket is no longer a trust
+ * boundary, so every request must present a valid principal-carrying session
+ * token regardless of where it came from. Local trust survives only for the
+ * /api/notify agent hooks, and the first-admin bootstrap stays reachable only
+ * while the users store is initialized and empty (the route then verifies its
+ * process-local one-time token). Both carve-outs admit unauthenticated requests,
+ * so they still demand a trusted mutation source:
+ * a cross-site page in a local browser gets 403 while headerless curl/agent
+ * clients pass. The networkAccess/networkPassword config is ignored — user
+ * credentials replace the network password entirely.
+ */
+function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  const url = req.url || "/"
+  const publicPath = isPublicPath(url)
+
+  if (!publicPath && isUnforwardedUntrustedLoopback(req)) {
+    return sendJson(res, 403, { error: "Untrusted local host" })
+  }
+
+  const path = url.split("?")[0]
+  const notifyCarveOut = path === "/api/notify" && isTrustedDirectLocalRequest(req)
+  const bootstrapCarveOut =
+    path === "/api/team/bootstrap" && isUsersStoreInitialized() && userCount() === 0
+  if (notifyCarveOut || bootstrapCarveOut) {
+    if (!hasTrustedMutationSource(req)) {
+      return sendJson(res, 403, { error: "Untrusted request source" })
+    }
+    return next()
+  }
+
+  if (publicPath) return next()
+
+  const bearer = bearerToken(req)
+  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
+  const token = bearer ?? browserCookie
+  if (!token || !validateSessionToken(
+    token,
+    browserCookie && !bearer ? req.headers["user-agent"] : undefined,
+  )) {
+    return sendJson(res, 401, { error: "Authentication required" })
+  }
+
+  // A token issued before team edition carries no principal — force re-login.
+  const principal = getSessionPrincipal(token)
+  if (!principal) {
+    return sendJson(res, 401, { error: "Authentication required" })
+  }
+  setRequestPrincipal(req, principal)
+
+  const method = (req.method || "GET").toUpperCase()
+  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    return sendJson(res, 403, { error: "Untrusted request source" })
+  }
+
+  trackAuthenticatedHttpStream(req, res, token)
   next()
 }

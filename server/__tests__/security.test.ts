@@ -14,12 +14,24 @@ import {
   isMalformedPasswordHash,
   needsPasswordRehash,
   verifyPasswordAsync,
+  isAuthenticatedHttpStreamRequest,
 } from "../security"
 import { getConfig } from "../config"
 
 vi.mock("../config", () => ({ getConfig: vi.fn() }))
 
 const mockedGetConfig = vi.mocked(getConfig)
+
+describe("authenticated HTTP stream classification", () => {
+  it("recognizes direct and hub SSE routes without tracking ordinary requests", () => {
+    const request = (url: string, method = "GET") => ({ url, method }) as IncomingMessage
+    expect(isAuthenticatedHttpStreamRequest(request("/api/watch/project/session.jsonl"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/api/task-output?path=x"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/hub/dev_1/api/workflow-watch/a/b"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/api/projects"))).toBe(false)
+    expect(isAuthenticatedHttpStreamRequest(request("/api/watch/a/b", "POST"))).toBe(false)
+  })
+})
 
 describe("hashPassword", () => {
   it("produces a versioned scrypt hash", () => {

@@ -1,3 +1,5 @@
+import { deviceScopedKey } from "@/lib/device"
+
 const STORAGE_KEY = "aw:turnCounts"
 const MAX_ENTRIES = 200
 
@@ -20,7 +22,7 @@ function persist() {
 }
 
 export function cacheTurnCount(sessionId: string, count: number): void {
-  cache.set(sessionId, count)
+  cache.set(deviceScopedKey(sessionId), count)
   persist()
 }
 
@@ -29,7 +31,7 @@ export function cacheTurnCount(sessionId: string, count: number): void {
  * and server-provided (cheap partial read). Turns only grow, so max is safest.
  */
 export function resolveTurnCount(sessionId: string, serverCount?: number): number {
-  const cached = cache.get(sessionId)
+  const cached = cache.get(deviceScopedKey(sessionId))
   return Math.max(cached ?? 0, serverCount ?? 0)
 }
 

@@ -10,9 +10,14 @@ import { join } from "node:path"
 import { WebSocketServer, WebSocket } from "ws"
 
 import { createHubProxyHandler, handleHubUpgrade } from "../../hub/proxy"
-import { initDeviceRegistry, addDevice, type HubDevice } from "../../hub/registry"
+import { initDeviceRegistry, addDevice, updateDevice, type HubDevice } from "../../hub/registry"
+import { invalidateDeviceToken } from "../../hub/device-client"
+import { invalidateDeviceConnections } from "../../hub/connection-invalidation"
 import { getConfig } from "../../config"
 import { createSessionToken, revokeAllSessions } from "../../security"
+import { initEdition, __resetEditionForTest } from "../../team/edition"
+import { setRequestPrincipal } from "../../team/requestPrincipal"
+import type { SessionPrincipal } from "../../team/constants"
 
 // TLS devices must route through node:https. A real https upstream would need
 // a trusted cert (validation is deliberately strict), so the https module is
@@ -46,6 +51,7 @@ interface Target {
   port: number
   requests: TargetRequest[]
   mintTokens: string[]
+  mintCredentials: string[]
   get mintCount(): number
   respond: Responder
   server: http.Server
@@ -60,10 +66,12 @@ function listen(server: http.Server): Promise<number> {
 async function makeTarget(respond: Responder): Promise<Target> {
   const requests: TargetRequest[] = []
   const mintTokens: string[] = []
+  const mintCredentials: string[] = []
 
   const target = {
     requests,
     mintTokens,
+    mintCredentials,
     get mintCount() {
       return mintTokens.length
     },
@@ -78,6 +86,7 @@ async function makeTarget(respond: Responder): Promise<Target> {
       if (req.url === "/api/auth/verify" && req.method === "POST") {
         const token = `tok-${mintTokens.length + 1}`
         mintTokens.push(token)
+        mintCredentials.push(String(req.headers.authorization || ""))
         res.writeHead(200, { "Content-Type": "application/json" })
         res.end(JSON.stringify({ valid: true, token }))
         return
@@ -98,10 +107,11 @@ async function makeTarget(respond: Responder): Promise<Target> {
 const handler = createHubProxyHandler()
 let sawSpaFallback = false
 
-async function makeHub(): Promise<{ port: number; server: http.Server }> {
+async function makeHub(principal?: SessionPrincipal): Promise<{ port: number; server: http.Server }> {
   const server = http.createServer((req, res) => {
     // Emulate the mount strip that `use("/hub", handler)` performs in both shells.
     if (req.url?.startsWith("/hub")) req.url = req.url.slice("/hub".length) || "/"
+    if (principal) setRequestPrincipal(req, principal)
     handler(req, res, () => {
       // The proxy must never fall through to the SPA fallback for hub paths.
       sawSpaFallback = true
@@ -141,6 +151,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   sawSpaFallback = false
+  __resetEditionForTest()
   await Promise.all(openServers.splice(0).map(closeServer))
 })
 
@@ -155,6 +166,58 @@ const base = (hubPort: number, deviceId: string, rest: string) => `http://127.0.
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe("createHubProxyHandler — request rewriting", () => {
+  it("uses the current host and credentials when the device changes while a request body is still arriving", async () => {
+    const oldTarget = track(await makeTarget((_req, res) => res.end("old")))
+    const newTarget = track(await makeTarget((_req, res, r) => res.end(r.body)))
+    const device = await addDevice({
+      name: "Moving Device",
+      host: "localhost",
+      port: oldTarget.port,
+      auth: "password",
+      username: "old-user",
+      password: "old-password-123",
+    })
+    const hub = track(await makeHub())
+
+    // The server's first request listener runs the proxy handler before this
+    // listener resolves, proving admission happened against the old record.
+    const admitted = new Promise<void>((resolve) => hub.server.once("request", () => resolve()))
+    const response = new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const proxyReq = http.request(base(hub.port, device.id, "/api/send"), {
+        method: "POST",
+        headers: { "x-cogpit-client": "1" },
+      }, (proxyRes) => {
+        const chunks: Buffer[] = []
+        proxyRes.on("data", (chunk: Buffer) => chunks.push(chunk))
+        proxyRes.on("end", () => resolve({
+          status: proxyRes.statusCode || 0,
+          body: Buffer.concat(chunks).toString(),
+        }))
+      })
+      proxyReq.on("error", reject)
+      proxyReq.write("first-")
+
+      void admitted.then(async () => {
+        await updateDevice(device.id, {
+          host: "127.0.0.1",
+          port: newTarget.port,
+          username: "new-user",
+          password: "new-password-456",
+        })
+        invalidateDeviceToken(device.id)
+        proxyReq.end("second")
+      }).catch(reject)
+    })
+
+    await admitted
+    const result = await response
+    expect(result).toEqual({ status: 200, body: "first-second" })
+    expect(oldTarget.mintCount).toBe(0)
+    expect(oldTarget.requests).toHaveLength(0)
+    expect(newTarget.mintCredentials).toEqual(["Bearer new-user:new-password-456"])
+    expect(newTarget.requests).toHaveLength(1)
+  })
+
   it("strips the hub token query param, injects the device Bearer token, and drops the client Authorization", async () => {
     const target = track(await makeTarget((_req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" })
@@ -224,6 +287,28 @@ describe("createHubProxyHandler — request rewriting", () => {
 })
 
 describe("createHubProxyHandler — routing guards", () => {
+  it.each([
+    ["member", "/api/auth/logout", { userId: "member", username: "bob", role: "member" }],
+    ["member", "/api/auth/verify", { userId: "member", username: "bob", role: "member" }],
+    ["admin", "/api/auth/logout", { userId: "admin", username: "alice", role: "admin" }],
+    ["admin", "/api/auth/verify", { userId: "admin", username: "alice", role: "admin" }],
+  ] as const)("rejects a direct %s request to device auth route %s before credential minting", async (_role, path, principal) => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    const target = track(await makeTarget((_req, res) => res.end("should not arrive")))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub(principal))
+
+    const res = await fetch(base(hub.port, device.id, path), {
+      method: "POST",
+      headers: { "x-cogpit-client": "1" },
+    })
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ code: "HUB_AUTH_ROUTE_FORBIDDEN" })
+    expect(target.mintCount).toBe(0)
+    expect(target.requests).toHaveLength(0)
+  })
+
   it("returns a JSON 404 UNKNOWN_DEVICE for an unregistered device (never SPA)", async () => {
     const hub = track(await makeHub())
     const res = await fetch(base(hub.port, "dev_missing", "/api/x"))
@@ -270,6 +355,36 @@ describe("createHubProxyHandler — routing guards", () => {
 })
 
 describe("createHubProxyHandler — device auth failures", () => {
+  it("single-flights one replacement mint across concurrent 401 responses", async () => {
+    const pendingExpiredResponses: ServerResponse[] = []
+    const target = track(await makeTarget((_req, res, r) => {
+      if (r.headers.authorization === "Bearer tok-1") {
+        pendingExpiredResponses.push(res)
+        if (pendingExpiredResponses.length === 3) {
+          for (const expired of pendingExpiredResponses) {
+            expired.writeHead(401)
+            expired.end("expired")
+          }
+        }
+        return
+      }
+      res.end("ok")
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const responses = await Promise.all(Array.from({ length: 3 }, () =>
+      fetch(base(hub.port, device.id, "/api/x")),
+    ))
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200])
+    expect(await Promise.all(responses.map((response) => response.text())))
+      .toEqual(["ok", "ok", "ok"])
+    expect(target.mintCount).toBe(2)
+    expect(target.requests.filter((request) => request.headers.authorization === "Bearer tok-1")).toHaveLength(3)
+    expect(target.requests.filter((request) => request.headers.authorization === "Bearer tok-2")).toHaveLength(3)
+  })
+
   it("re-mints once and replays the buffered POST body after a device 401", async () => {
     let proxied = 0
     const target = track(await makeTarget((_req, res, r) => {
@@ -368,6 +483,29 @@ describe("createHubProxyHandler — streaming", () => {
     expect(rest).toContain("BBB")
   })
 
+  it("keeps an SSE stream on rename but closes it when device connection settings change", async () => {
+    let streamResponse: ServerResponse | undefined
+    const target = track(await makeTarget((_req, res) => {
+      streamResponse = res
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
+      res.write("initial")
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+    const response = await fetch(base(hub.port, device.id, "/api/stream"))
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+
+    expect(decoder.decode((await reader.read()).value)).toContain("initial")
+    await updateDevice(device.id, { name: "Renamed Stream Device" })
+    streamResponse!.write("after-rename")
+    expect(decoder.decode((await reader.read()).value)).toContain("after-rename")
+
+    const closed = reader.read().then(({ done }) => done, () => true)
+    invalidateDeviceConnections(device.id)
+    await expect(closed).resolves.toBe(true)
+  })
+
   it("passes non-401 error statuses (503) through verbatim", async () => {
     const target = track(await makeTarget((_req, res) => {
       res.writeHead(503, { "Content-Type": "application/json" })
@@ -431,6 +569,52 @@ describe("handleHubUpgrade", () => {
       expect(forwardedHeaders.origin).toBeUndefined()
     } finally {
       ws.close()
+      wss.close()
+    }
+  })
+
+  it("keeps a tunnel on name-only changes but closes it on device connection invalidation", async () => {
+    const wss = new WebSocketServer({ noServer: true })
+    wss.on("connection", (peer) => {
+      peer.on("message", (message) => peer.send(`echo:${message}`))
+    })
+    const targetServer = http.createServer((_req, res) => res.end())
+    targetServer.on("upgrade", (req, socket, head) => {
+      wss.handleUpgrade(req, socket, head, (peer) => wss.emit("connection", peer, req))
+    })
+    openServers.push(targetServer)
+    const targetPort = await listen(targetServer)
+    const device = await addDevice({
+      name: "Tunnel",
+      host: "127.0.0.1",
+      port: targetPort,
+      auth: "none",
+    })
+    const hub = track(await makeHub())
+    const ws = new WebSocket(`ws://127.0.0.1:${hub.port}/hub/${device.id}/__pty`)
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", resolve)
+        ws.once("error", reject)
+      })
+
+      // Neither another device's invalidation nor a cosmetic update may tear
+      // down this established terminal.
+      invalidateDeviceConnections("dev_other")
+      await updateDevice(device.id, { name: "Renamed Tunnel" })
+      const reply = new Promise<string>((resolve) => {
+        ws.once("message", (message) => resolve(message.toString()))
+      })
+      ws.send("still-open")
+      await expect(reply).resolves.toBe("echo:still-open")
+
+      const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()))
+      invalidateDeviceConnections(device.id)
+      await closed
+      expect(ws.readyState).toBe(WebSocket.CLOSED)
+    } finally {
+      if (ws.readyState !== WebSocket.CLOSED) ws.terminate()
       wss.close()
     }
   })
@@ -619,17 +803,25 @@ describe("tls devices", () => {
   }
 
   function fakeLocalUpgrade(url: string) {
-    const socket = {
-      write: () => true,
-      destroy: () => {},
-      get destroyed() { return false },
-    } as never
+    let destroyed = false
+    const socket = new EventEmitter() as EventEmitter & {
+      write: () => boolean
+      destroy: () => void
+      readonly destroyed: boolean
+    }
+    socket.write = () => true
+    socket.destroy = () => {
+      if (destroyed) return
+      destroyed = true
+      socket.emit("close")
+    }
+    Object.defineProperty(socket, "destroyed", { get: () => destroyed })
     const req = {
       url,
       headers: { host: "127.0.0.1:19384", origin: "http://127.0.0.1:19384" },
       socket: { remoteAddress: "127.0.0.1" },
     } as unknown as IncomingMessage
-    return { req, socket }
+    return { req, socket: socket as never }
   }
 
   beforeEach(() => {

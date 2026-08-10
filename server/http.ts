@@ -97,3 +97,14 @@ export function sendJson(res: ServerResponse, status: number, data: unknown): vo
   res.setHeader("Content-Type", "application/json")
   res.end(JSON.stringify(data))
 }
+
+/**
+ * A prefix only matches at a path-segment boundary: the path equals it, the
+ * prefix already ends in "/", or the next character starts a subpath ("/") or
+ * query ("?"). Keeps /api/messages from riding an /api/me rule.
+ */
+export function prefixMatches(path: string, prefix: string): boolean {
+  if (!path.startsWith(prefix)) return false
+  if (path.length === prefix.length || prefix.endsWith("/")) return true
+  return path[prefix.length] === "/" || path[prefix.length] === "?"
+}

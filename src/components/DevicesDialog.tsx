@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   AlertTriangle,
   CheckCircle2,
+  KeyRound,
   Loader2,
   Pencil,
   Plus,
@@ -22,10 +23,14 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { switchDevice } from "@/lib/device"
 import {
+  deviceEdition,
   deviceVersion,
   useDevices,
+  type DeviceHello,
+  type MutationResult,
   type ProbeResult,
   type PublicDevice,
+  type UpdateDeviceInput,
 } from "@/hooks/useDevices"
 import packageJson from "../../package.json"
 
@@ -38,7 +43,8 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navig
 const SWITCH_TIP = `${IS_MAC ? "⌘⇧" : "Ctrl+Shift+"}1–9`
 
 // Which field an add-error code belongs under.
-const PASSWORD_CODES = new Set(["BAD_PASSWORD", "PASSWORD_REQUIRED"])
+const PASSWORD_CODES = new Set(["BAD_PASSWORD", "PASSWORD_REQUIRED", "USERNAME_REQUIRES_PASSWORD"])
+const USERNAME_CODES = new Set(["ACCOUNT_DISABLED"])
 
 interface DevicesDialogProps {
   open: boolean
@@ -62,6 +68,12 @@ export function parseHostPort(input: string): { host: string; port?: number; tls
 
 type ProbeTone = "ok" | "warn" | "info" | "error"
 
+interface ProbeDisplayState {
+  tone: ProbeTone
+  text: string
+  hello?: DeviceHello
+}
+
 /** Turn a probe result into actionable, human copy. */
 export function probeMessage(
   result: ProbeResult,
@@ -69,7 +81,13 @@ export function probeMessage(
   port: number,
 ): { tone: ProbeTone; text: string } {
   if (result.ok) {
-    if (result.hello.networkAccess === false) {
+    if (result.hello.edition === "team" && result.hello.needsBootstrap === true) {
+      return {
+        tone: "info",
+        text: "Reachable team server — create its first admin account before adding it here.",
+      }
+    }
+    if (result.hello.edition !== "team" && result.hello.networkAccess === false) {
       return {
         tone: "warn",
         text: "Cogpit is running but network access is disabled — enable it in that device's settings.",
@@ -129,22 +147,32 @@ interface DeviceRowProps {
   device: PublicDevice
   hubVersion: string
   onRename: (id: string, name: string) => Promise<void>
+  onCredentials: (id: string, patch: UpdateDeviceInput) => Promise<MutationResult>
   onRemove: (id: string) => Promise<void>
   onTest: (id: string) => Promise<void>
 }
 
-function DeviceRow({ device, hubVersion, onRename, onRemove, onTest }: DeviceRowProps) {
+function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTest }: DeviceRowProps) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(device.name)
+  const [editingCredentials, setEditingCredentials] = useState(false)
+  const [credentialUsername, setCredentialUsername] = useState(device.username ?? "")
+  const [credentialPassword, setCredentialPassword] = useState("")
+  const [credentialError, setCredentialError] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
-  const [busy, setBusy] = useState<null | "rename" | "remove" | "test">(null)
+  const [busy, setBusy] = useState<null | "rename" | "credentials" | "remove" | "test">(null)
 
   useEffect(() => {
     setName(device.name)
   }, [device.name])
 
+  useEffect(() => {
+    setCredentialUsername(device.username ?? "")
+  }, [device.username])
+
   const version = deviceVersion(device)
   const skewed = version !== undefined && version !== hubVersion
+  const teamDevice = deviceEdition(device) === "team"
 
   async function saveName() {
     const trimmed = name.trim()
@@ -159,109 +187,221 @@ function DeviceRow({ device, hubVersion, onRename, onRemove, onTest }: DeviceRow
     setEditing(false)
   }
 
+  async function saveCredentials() {
+    const username = credentialUsername.trim()
+    const currentUsername = device.username ?? ""
+    const usernameChanged = username !== currentUsername
+    const passwordChanged = credentialPassword.length > 0
+    if (!usernameChanged && !passwordChanged) {
+      setEditingCredentials(false)
+      setCredentialPassword("")
+      setCredentialError(null)
+      return
+    }
+    if (device.auth === "none" && !passwordChanged) {
+      setCredentialError("Enter a password when adding an account to an unauthenticated device.")
+      return
+    }
+
+    const patch: UpdateDeviceInput = {}
+    if (usernameChanged) patch.username = username || null
+    if (passwordChanged) patch.password = credentialPassword
+
+    setBusy("credentials")
+    setCredentialError(null)
+    const result = await onCredentials(device.id, patch)
+    setBusy(null)
+    if (!result.ok) {
+      setCredentialError(result.error)
+      return
+    }
+    setEditingCredentials(false)
+    setCredentialPassword("")
+  }
+
   return (
-    <div className="flex items-center gap-2.5 rounded-md border border-border bg-elevation-0 px-3 py-2">
-      <span
-        aria-label={`Status: ${device.runtime.authState}`}
-        className={cn("size-2 shrink-0 rounded-full", AUTH_STATE_DOT[device.runtime.authState])}
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {editing ? (
-          <Input
-            value={name}
-            autoFocus
-            aria-label={`Rename ${device.name}`}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void saveName()
-              if (event.key === "Escape") {
-                setEditing(false)
-                setName(device.name)
-              }
-            }}
-            onBlur={() => void saveName()}
-            className="h-6 text-sm"
-          />
+    <div className="rounded-md border border-border bg-elevation-0">
+      <div className="flex items-center gap-2.5 px-3 py-2">
+        <span
+          aria-label={`Status: ${device.runtime.authState}`}
+          className={cn("size-2 shrink-0 rounded-full", AUTH_STATE_DOT[device.runtime.authState])}
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {editing ? (
+            <Input
+              value={name}
+              autoFocus
+              aria-label={`Rename ${device.name}`}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void saveName()
+                if (event.key === "Escape") {
+                  setEditing(false)
+                  setName(device.name)
+                }
+              }}
+              onBlur={() => void saveName()}
+              className="h-6 text-sm"
+            />
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className="truncate text-sm text-foreground">{device.name}</span>
+              {version && (
+                <span
+                  className={cn("shrink-0 font-mono text-[10px]", skewed ? "text-amber-400" : "text-muted-foreground/60")}
+                  title={skewed ? `Device runs v${version}; hub runs v${hubVersion}` : undefined}
+                >
+                  v{version}
+                  {skewed && " ≠ hub"}
+                </span>
+              )}
+              {device.auth === "none" && (
+                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                  unauthenticated
+                </span>
+              )}
+            </div>
+          )}
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            {device.tls ? "https://" : ""}{device.host}:{device.port}
+          </span>
+          {device.username ? (
+            <span className="truncate text-[11px] text-muted-foreground" title={device.username}>
+              Team account: {device.username}
+            </span>
+          ) : teamDevice ? (
+            <span className="text-[11px] text-amber-400">Team account not configured</span>
+          ) : null}
+        </div>
+
+        {confirmRemove ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-red-400 hover:text-red-300"
+              disabled={busy === "remove"}
+              onClick={async () => {
+                setBusy("remove")
+                await onRemove(device.id)
+                setBusy(null)
+              }}
+            >
+              {busy === "remove" ? <Loader2 className="size-3.5 animate-spin" /> : "Confirm"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-muted-foreground"
+              onClick={() => setConfirmRemove(false)}
+            >
+              Cancel
+            </Button>
+          </div>
         ) : (
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm text-foreground">{device.name}</span>
-            {version && (
-              <span
-                className={cn("shrink-0 font-mono text-[10px]", skewed ? "text-amber-400" : "text-muted-foreground/60")}
-                title={skewed ? `Device runs v${version}; hub runs v${hubVersion}` : undefined}
-              >
-                v{version}
-                {skewed && " ≠ hub"}
-              </span>
-            )}
-            {device.auth === "none" && (
-              <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
-                unauthenticated
-              </span>
-            )}
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Re-test ${device.name}`}
+              disabled={busy === "test"}
+              onClick={async () => {
+                setBusy("test")
+                await onTest(device.id)
+                setBusy(null)
+              }}
+            >
+              <RefreshCw className={cn("size-3.5", busy === "test" && "animate-spin")} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Edit account for ${device.name}`}
+              onClick={() => {
+                setEditingCredentials((value) => !value)
+                setCredentialUsername(device.username ?? "")
+                setCredentialPassword("")
+                setCredentialError(null)
+              }}
+            >
+              <KeyRound className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Rename ${device.name}`}
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Remove ${device.name}`}
+              className="text-muted-foreground hover:text-red-400"
+              onClick={() => setConfirmRemove(true)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
           </div>
         )}
-        <span className="truncate font-mono text-[11px] text-muted-foreground">
-          {device.tls ? "https://" : ""}{device.host}:{device.port}
-        </span>
       </div>
 
-      {confirmRemove ? (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-red-400 hover:text-red-300"
-            disabled={busy === "remove"}
-            onClick={async () => {
-              setBusy("remove")
-              await onRemove(device.id)
-              setBusy(null)
-            }}
-          >
-            {busy === "remove" ? <Loader2 className="size-3.5 animate-spin" /> : "Confirm"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => setConfirmRemove(false)}
-          >
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Re-test ${device.name}`}
-            disabled={busy === "test"}
-            onClick={async () => {
-              setBusy("test")
-              await onTest(device.id)
-              setBusy(null)
-            }}
-          >
-            <RefreshCw className={cn("size-3.5", busy === "test" && "animate-spin")} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Rename ${device.name}`}
-            onClick={() => setEditing(true)}
-          >
-            <Pencil className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Remove ${device.name}`}
-            className="text-muted-foreground hover:text-red-400"
-            onClick={() => setConfirmRemove(true)}
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
+      {editingCredentials && (
+        <div className="space-y-2 border-t border-border/60 px-3 py-2.5">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground" htmlFor={`device-username-${device.id}`}>
+                Username <span className="text-muted-foreground/60">(team devices)</span>
+              </label>
+              <Input
+                id={`device-username-${device.id}`}
+                aria-label={`Username for ${device.name}`}
+                value={credentialUsername}
+                onChange={(event) => setCredentialUsername(event.target.value)}
+                placeholder="Leave empty for password-only auth"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground" htmlFor={`device-password-${device.id}`}>
+                New password <span className="text-muted-foreground/60">(optional)</span>
+              </label>
+              <Input
+                id={`device-password-${device.id}`}
+                aria-label={`New password for ${device.name}`}
+                type="password"
+                value={credentialPassword}
+                onChange={(event) => setCredentialPassword(event.target.value)}
+                placeholder="Leave blank to keep the stored password"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+          {device.username && credentialUsername.trim() === "" && (
+            <p className="text-[11px] text-amber-400">
+              Clearing the username switches this device back to password-only authentication.
+            </p>
+          )}
+          {credentialError && <p role="alert" className="text-xs text-red-400">{credentialError}</p>}
+          <div className="flex justify-end gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEditingCredentials(false)
+                setCredentialUsername(device.username ?? "")
+                setCredentialPassword("")
+                setCredentialError(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" disabled={busy === "credentials"} onClick={() => void saveCredentials()}>
+              {busy === "credentials" ? <Loader2 className="size-3.5 animate-spin" /> : "Save account"}
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -275,12 +415,13 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
 
   const [name, setName] = useState("")
   const [hostInput, setHostInput] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [allowLocalTunnel, setAllowLocalTunnel] = useState(false)
   const [probing, setProbing] = useState(false)
-  const [probeState, setProbeState] = useState<{ tone: ProbeTone; text: string } | null>(null)
+  const [probeState, setProbeState] = useState<ProbeDisplayState | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<{ field: "host" | "password"; message: string } | null>(null)
+  const [submitError, setSubmitError] = useState<{ field: "host" | "username" | "password"; message: string } | null>(null)
 
   const hostRef = useRef<HTMLInputElement>(null)
   const probeSeq = useRef(0)
@@ -290,6 +431,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
     if (!open) return
     setName("")
     setHostInput("")
+    setUsername("")
     setPassword("")
     setAllowLocalTunnel(false)
     setProbing(false)
@@ -311,7 +453,10 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
     setProbing(true)
     const result = await probe(host, port, allowLocalTunnel, tls)
     if (seq !== probeSeq.current) return // a newer probe superseded this one
-    setProbeState(probeMessage(result, host, port ?? (tls ? DEFAULT_TLS_PORT : DEFAULT_PORT)))
+    setProbeState({
+      ...probeMessage(result, host, port ?? (tls ? DEFAULT_TLS_PORT : DEFAULT_PORT)),
+      hello: result.ok ? result.hello : undefined,
+    })
     setProbing(false)
   }, [hostInput, probe, allowLocalTunnel])
 
@@ -320,19 +465,27 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
     if (!open) return
     if (!parseHostPort(hostInput).host) {
       setProbeState(null)
+      setProbing(false)
       return
     }
     const timer = window.setTimeout(() => void runProbe(), PROBE_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [open, hostInput, runProbe])
 
+  const targetIsTeam = probeState?.hello?.edition === "team"
+  const targetNeedsBootstrap = targetIsTeam && probeState?.hello?.needsBootstrap === true
+  const credentialsRequired = targetIsTeam || !allowLocalTunnel
+
   const canSubmit = useMemo(() => {
     if (submitting) return false
     if (!parseHostPort(hostInput).host) return false
-    if (!allowLocalTunnel && !password) return false
+    if (probing || !probeState) return false
+    if (targetNeedsBootstrap) return false
+    if (credentialsRequired && !password) return false
+    if (targetIsTeam && !username.trim()) return false
     if (probeState?.tone === "error") return false
     return true
-  }, [submitting, hostInput, allowLocalTunnel, password, probeState])
+  }, [submitting, hostInput, probing, probeState, targetNeedsBootstrap, credentialsRequired, targetIsTeam, username, password])
 
   async function handleSubmit() {
     const { host, port, tls } = parseHostPort(hostInput)
@@ -344,7 +497,8 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
       host,
       port,
       tls,
-      password: allowLocalTunnel ? undefined : password || undefined,
+      username: targetIsTeam ? username.trim() : undefined,
+      password: credentialsRequired ? password || undefined : undefined,
       allowLocalTunnel,
     })
     setSubmitting(false)
@@ -354,7 +508,9 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
       return
     }
     setSubmitError({
-      field: PASSWORD_CODES.has(result.code) ? "password" : "host",
+      field: USERNAME_CODES.has(result.code)
+        ? "username"
+        : PASSWORD_CODES.has(result.code) ? "password" : "host",
       message: result.error,
     })
   }
@@ -399,6 +555,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
                 device={device}
                 hubVersion={HUB_VERSION}
                 onRename={handleRename}
+                onCredentials={updateDevice}
                 onRemove={handleRemove}
                 onTest={handleTest}
               />
@@ -421,7 +578,13 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
               id="device-host"
               ref={hostRef}
               value={hostInput}
-              onChange={(event) => setHostInput(event.target.value)}
+              onChange={(event) => {
+                probeSeq.current += 1
+                setHostInput(event.target.value)
+                setUsername("")
+                setProbeState(null)
+                setSubmitError(null)
+              }}
               onBlur={() => void runProbe()}
               placeholder="192.168.1.42, my-mac.local:19384 or https://cogpit.example.com"
               spellCheck={false}
@@ -455,7 +618,29 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
             />
           </div>
 
-          {!allowLocalTunnel && (
+          {targetIsTeam && (
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="device-username">
+                Username
+              </label>
+              <Input
+                id="device-username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="Team account username"
+                autoComplete="username"
+                spellCheck={false}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Requests through this hub will act as this account on the team server.
+              </p>
+              {submitError?.field === "username" && (
+                <p role="alert" className="text-xs text-red-400">{submitError.message}</p>
+              )}
+            </div>
+          )}
+
+          {credentialsRequired && (
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground" htmlFor="device-password">
                 Password
@@ -465,8 +650,8 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Network access password for that device"
-                autoComplete="off"
+                placeholder={targetIsTeam ? "Password for that team account" : "Network access password for that device"}
+                autoComplete={targetIsTeam ? "current-password" : "off"}
               />
               {submitError?.field === "password" && (
                 <p role="alert" className="text-xs text-red-400">{submitError.message}</p>
@@ -478,17 +663,25 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
             <input
               type="checkbox"
               checked={allowLocalTunnel}
-              onChange={(event) => setAllowLocalTunnel(event.target.checked)}
+              onChange={(event) => {
+                probeSeq.current += 1
+                setAllowLocalTunnel(event.target.checked)
+                setProbeState(null)
+                setSubmitError(null)
+              }}
               className="mt-0.5"
             />
-            <span>This is a local tunnel — no password</span>
+            <span>This is a local tunnel{targetIsTeam ? "" : " — no password"}</span>
           </label>
           {allowLocalTunnel && (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
               <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-amber-400" />
               <p className="text-[11px] text-amber-300/90">
-                Traffic to this device is forwarded <strong>unauthenticated</strong>. Only use this for
-                an SSH tunnel or another already-secured local channel.
+                {targetIsTeam ? (
+                  <>The loopback address is allowed because the tunnel is local; team account authentication still applies.</>
+                ) : (
+                  <>Traffic to this device is forwarded <strong>unauthenticated</strong>. Only use this for an SSH tunnel or another already-secured local channel.</>
+                )}
               </p>
             </div>
           )}

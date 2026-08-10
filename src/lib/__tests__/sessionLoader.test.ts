@@ -5,7 +5,10 @@ vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
   sessionCache: { get: vi.fn(() => undefined), set: vi.fn(), evict: vi.fn() },
 }))
-vi.mock("@/lib/device", () => ({ getActiveDeviceId: vi.fn(() => "local") }))
+vi.mock("@/lib/device", () => ({
+  getActiveDeviceScope: vi.fn(() => "local"),
+  getActiveIdentity: vi.fn(() => null),
+}))
 
 import {
   fetchTailAndParse,
@@ -14,13 +17,14 @@ import {
 } from "@/lib/sessionLoader"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
 const mockSet = vi.mocked(sessionCache.set)
 const mockEvict = vi.mocked(sessionCache.evict)
-const mockDeviceId = vi.mocked(getActiveDeviceId)
+const mockDeviceScope = vi.mocked(getActiveDeviceScope)
+const mockIdentity = vi.mocked(getActiveIdentity)
 
 function tailResponse(overrides: Record<string, unknown> = {}) {
   return new Response(
@@ -41,7 +45,8 @@ const parsed = { turns: [] } as unknown as ParsedSession
 beforeEach(() => {
   vi.clearAllMocks()
   mockGet.mockReturnValue(undefined)
-  mockDeviceId.mockReturnValue("local")
+  mockDeviceScope.mockReturnValue("local")
+  mockIdentity.mockReturnValue(null)
 })
 
 describe("fetchTailAndParse", () => {
@@ -160,9 +165,8 @@ describe("loadSessionTailFresh", () => {
     mockAuthFetch.mockResolvedValue(tailResponse())
     const workerParse = vi.fn(async () => parsed)
 
-    // getActiveDeviceId call order: (1) snapshot before fetch, (2) guard after
-    // parse. Simulate a device switch between the two.
-    mockDeviceId
+    // Scope call order: (1) snapshot before fetch, (2) guard after parse.
+    mockDeviceScope
       .mockReturnValueOnce("device-a") // snapshot
       .mockReturnValueOnce("device-b") // guard (switched!)
 
@@ -171,6 +175,30 @@ describe("loadSessionTailFresh", () => {
     // Still returns the fetched data for the caller to render…
     expect(result.parsed).toBe(parsed)
     // …but must NOT poison the other device's cache.
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it("does not accept a same-id tail completion after the connection revision changes", async () => {
+    mockAuthFetch.mockResolvedValue(tailResponse())
+    const workerParse = vi.fn(async () => parsed)
+    mockDeviceScope
+      .mockReturnValueOnce("device-a@4")
+      .mockReturnValueOnce("device-a@5")
+
+    await loadSessionTailFresh("-dir", "sess.jsonl", workerParse, "session")
+
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it("does not write the cache when the signed-in identity changes mid-flight", async () => {
+    mockAuthFetch.mockResolvedValue(tailResponse())
+    const workerParse = vi.fn(async () => parsed)
+    mockIdentity
+      .mockReturnValueOnce("u_1")
+      .mockReturnValueOnce("u_2")
+
+    await loadSessionTailFresh("-dir", "sess.jsonl", workerParse, "session")
+
     expect(mockSet).not.toHaveBeenCalled()
   })
 })

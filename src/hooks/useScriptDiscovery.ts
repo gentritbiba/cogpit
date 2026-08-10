@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { authFetch } from "@/lib/auth"
+import { useCapability } from "@/hooks/useCapability"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,11 +15,12 @@ export interface ScriptEntry {
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useScriptDiscovery(projectDir: string | null | undefined) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const [scripts, setScripts] = useState<ScriptEntry[]>([])
   const [loading, setLoading] = useState(false)
 
   const fetchScripts = useCallback(async () => {
-    if (!projectDir) {
+    if (!canAccessHostFiles || !projectDir) {
       setScripts([])
       return
     }
@@ -37,7 +39,7 @@ export function useScriptDiscovery(projectDir: string | null | undefined) {
     } finally {
       setLoading(false)
     }
-  }, [projectDir])
+  }, [canAccessHostFiles, projectDir])
 
   useEffect(() => {
     fetchScripts()

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
 
 export interface SkillMeta {
   source: string
@@ -12,18 +13,18 @@ const cache = new Map<string, { data: Map<string, SkillMeta>; expiresAt: number 
 
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
-function getCached(cwd: string): Map<string, SkillMeta> | null {
-  const entry = cache.get(cwd)
+function getCached(scopeKey: string): Map<string, SkillMeta> | null {
+  const entry = cache.get(scopeKey)
   if (!entry) return null
   if (Date.now() > entry.expiresAt) {
-    cache.delete(cwd)
+    cache.delete(scopeKey)
     return null
   }
   return entry.data
 }
 
-function setCached(cwd: string, data: Map<string, SkillMeta>): void {
-  cache.set(cwd, { data, expiresAt: Date.now() + CACHE_TTL_MS })
+function setCached(scopeKey: string, data: Map<string, SkillMeta>): void {
+  cache.set(scopeKey, { data, expiresAt: Date.now() + CACHE_TTL_MS })
 }
 
 interface SlashSuggestionRaw {
@@ -42,16 +43,17 @@ interface SlashSuggestionRaw {
 export function useSkillMetadata(cwd: string): Map<string, SkillMeta> {
   const [metadata, setMetadata] = useState<Map<string, SkillMeta>>(() => {
     if (!cwd) return new Map()
-    return getCached(cwd) ?? new Map()
+    return getCached(deviceScopedKey(cwd)) ?? new Map()
   })
 
   const fetchedCwdRef = useRef<string>("")
 
   useEffect(() => {
     if (!cwd) return
+    const scopeKey = deviceScopedKey(cwd)
 
     // Return cached data immediately (no fetch needed)
-    const cached = getCached(cwd)
+    const cached = getCached(scopeKey)
     if (cached) {
       setMetadata(cached)
       return
@@ -77,7 +79,7 @@ export function useSkillMetadata(cwd: string): Map<string, SkillMeta> {
             })
           }
         }
-        setCached(cwd, map)
+        setCached(scopeKey, map)
         setMetadata(map)
       })
       .catch(() => { /* ignore fetch errors */ })

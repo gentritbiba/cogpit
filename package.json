@@ -87,7 +87,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "@vitejs/plugin-react": "^4.3.4",
     "babel-plugin-react-compiler": "^1.0.0",
-    "electron": "^40.10.6",
+    "electron": "^41.10.4",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^9.17.0",
@@ -104,21 +104,24 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "@babel/core": "7.29.7",
     "@hono/node-server": "1.19.13",
     "@xmldom/xmldom": "0.8.13",
     "app-builder-lib": "26.15.3",
     "body-parser": "2.3.0",
     "builder-util-runtime": "9.7.0",
-    "fast-uri": "3.1.4",
+    "fast-uri": "3.1.5",
     "flatted": "3.4.2",
     "form-data": "4.0.6",
-    "hono": "4.12.31",
-    "js-yaml": "4.3.0",
+    "hono": "4.13.1",
+    "ip-address": "10.5.0",
+    "js-yaml": "4.3.1",
     "lodash": "4.18.1",
-    "postcss": "8.5.20",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
     "qs": "6.15.3",
     "tar": "7.5.21",
     "tmp": "0.2.7",
-    "undici": "7.28.0"
+    "undici": "7.29.0"
   }
 }

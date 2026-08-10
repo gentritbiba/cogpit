@@ -9,13 +9,19 @@ export interface SlashSuggestion {
   filePath: string
 }
 
-export function useSlashSuggestions(cwd: string | undefined) {
+export function useSlashSuggestions(cwd: string | undefined, enabled = true) {
   const [suggestions, setSuggestions] = useState<SlashSuggestion[]>([])
   const [loading, setLoading] = useState(false)
   const fetchedCwdRef = useRef<string | undefined>(undefined)
 
   // Fetch suggestions when cwd changes
   useEffect(() => {
+    if (!enabled) {
+      fetchedCwdRef.current = undefined
+      setSuggestions([])
+      setLoading(false)
+      return
+    }
     if (fetchedCwdRef.current === cwd) return
     fetchedCwdRef.current = cwd
 
@@ -26,7 +32,7 @@ export function useSlashSuggestions(cwd: string | undefined) {
       .then((data) => setSuggestions(data.suggestions || []))
       .catch(() => setSuggestions([]))
       .finally(() => setLoading(false))
-  }, [cwd])
+  }, [cwd, enabled])
 
   return { suggestions, loading }
 }

@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
+import { useCapability } from "@/hooks/useCapability"
 import {
   Sheet,
   SheetContent,
@@ -52,12 +53,13 @@ export function WorktreePanel({
   onRefetch,
   onOpenSession,
 }: WorktreePanelProps) {
+  const canManageHostFiles = useCapability("hostFiles")
   const [deleting, setDeleting] = useState<string | null>(null)
   const [creatingPr, setCreatingPr] = useState<string | null>(null)
   const [cleaningUp, setCleaningUp] = useState(false)
 
   const handleDelete = async (wt: WorktreeInfo) => {
-    if (!dirName) return
+    if (!canManageHostFiles || !dirName) return
     const force = wt.isDirty
     if (wt.isDirty && !confirm(`"${wt.name}" has uncommitted changes. Delete anyway?`)) return
     if (wt.commitsAhead > 0 && !confirm(`"${wt.name}" has ${wt.commitsAhead} unpushed commit(s). Delete anyway?`)) return
@@ -77,7 +79,7 @@ export function WorktreePanel({
   }
 
   const handleCreatePr = async (wt: WorktreeInfo) => {
-    if (!dirName) return
+    if (!canManageHostFiles || !dirName) return
     setCreatingPr(wt.name)
     try {
       const res = await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/create-pr`, {
@@ -106,7 +108,7 @@ export function WorktreePanel({
   }
 
   const handleCleanup = async () => {
-    if (!dirName) return
+    if (!canManageHostFiles || !dirName) return
     setCleaningUp(true)
     try {
       const listRes = await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/cleanup`, {
@@ -143,14 +145,16 @@ export function WorktreePanel({
               Worktrees
             </SheetTitle>
             <div className="flex items-center gap-1">
-              <button
-                onClick={handleCleanup}
-                disabled={cleaningUp}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
-                title="Cleanup stale worktrees"
-              >
-                <Sparkles className="size-3.5" />
-              </button>
+              {canManageHostFiles && (
+                <button
+                  onClick={handleCleanup}
+                  disabled={cleaningUp}
+                  className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
+                  title="Cleanup stale worktrees"
+                >
+                  <Sparkles className="size-3.5" />
+                </button>
+              )}
               <button
                 onClick={onRefetch}
                 disabled={loading}
@@ -213,22 +217,26 @@ export function WorktreePanel({
                         <ExternalLink className="size-3.5" />
                       </button>
                     )}
-                    <button
-                      onClick={() => handleCreatePr(wt)}
-                      disabled={creatingPr === wt.name || wt.commitsAhead === 0}
-                      className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors disabled:opacity-30"
-                      title="Create PR"
-                    >
-                      <GitPullRequest className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(wt)}
-                      disabled={deleting === wt.name}
-                      className="rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      title="Delete worktree"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    {canManageHostFiles && (
+                      <>
+                        <button
+                          onClick={() => handleCreatePr(wt)}
+                          disabled={creatingPr === wt.name || wt.commitsAhead === 0}
+                          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors disabled:opacity-30"
+                          title="Create PR"
+                        >
+                          <GitPullRequest className="size-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(wt)}
+                          disabled={deleting === wt.name}
+                          className="rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          title="Delete worktree"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
