@@ -78,6 +78,23 @@ describe("describeEditionSuppression", () => {
     expect(message).toContain("not recognized")
   })
 
+  it("flags an unrecognized config edition value", () => {
+    const message = describeEditionSuppression({}, "TEAM", "standalone")
+    expect(message).toContain(`"TEAM"`)
+    expect(message).toContain("not recognized")
+    expect(message).toContain("config.local.json")
+  })
+
+  it("prefers the env warning when both env and config are unrecognized", () => {
+    const message = describeEditionSuppression({ COGPIT_EDITION: "prod" }, "TEAM", "standalone")
+    expect(message).toContain("COGPIT_EDITION")
+    expect(message).not.toContain("config.local.json")
+  })
+
+  it("is silent when an unrecognized config edition still resolves to team via env", () => {
+    expect(describeEditionSuppression({ COGPIT_EDITION: "team" }, "TEAM", "standalone")).toBeNull()
+  })
+
   it("is silent when team is granted", () => {
     expect(describeEditionSuppression({ COGPIT_EDITION: "team" }, undefined, "standalone")).toBeNull()
     expect(describeEditionSuppression({}, "team", "standalone")).toBeNull()

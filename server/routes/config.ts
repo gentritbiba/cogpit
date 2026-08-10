@@ -143,7 +143,7 @@ async function handleTeamLogin(
   // Checked only after password proof, so bad guesses cannot probe status.
   if (user.disabled) {
     res.statusCode = 403
-    res.end(JSON.stringify({ valid: false, error: "Account disabled" }))
+    res.end(JSON.stringify({ valid: false, error: "Account disabled", code: "ACCOUNT_DISABLED" }))
     return
   }
 

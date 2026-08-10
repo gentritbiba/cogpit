@@ -35,6 +35,9 @@ export function describeEditionSuppression(
   if (envEdition && envEdition !== "team" && envEdition !== "personal") {
     return `COGPIT_EDITION="${envEdition}" is not recognized (use "team" or "personal") — running personal edition`
   }
+  if (configEdition && configEdition !== "team" && configEdition !== "personal") {
+    return `config.local.json edition "${configEdition}" is not recognized (use "team" or "personal") — running personal edition`
+  }
   const teamRequested = envEdition === "team"
     || (configEdition === "team" && envEdition !== "personal")
   if (teamRequested && shell !== "standalone") {

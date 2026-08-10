@@ -239,7 +239,11 @@ describe("POST /api/auth/verify (team edition)", () => {
     await handler(req, res, next)
 
     expect(res._getStatus()).toBe(403)
-    expect(JSON.parse(res._getData())).toEqual({ valid: false, error: "Account disabled" })
+    expect(JSON.parse(res._getData())).toEqual({
+      valid: false,
+      error: "Account disabled",
+      code: "ACCOUNT_DISABLED",
+    })
     expect(mockedCreateSessionToken).not.toHaveBeenCalled()
   })
 

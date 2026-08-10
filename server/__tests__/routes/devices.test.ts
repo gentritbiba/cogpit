@@ -445,7 +445,24 @@ describe("device usernames", () => {
     expect(body.device.password).toBeUndefined()
   })
 
-  it("surfaces ACCOUNT_DISABLED distinctly from NETWORK_DISABLED on a device 403", async () => {
+  it("surfaces ACCOUNT_DISABLED from the machine-readable code on a device 403", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      // The error text is free-form; the code alone must be enough.
+      .mockResolvedValueOnce(fakeResponse({
+        status: 403,
+        json: { valid: false, error: "Your account was disabled by an admin", code: "ACCOUNT_DISABLED" },
+      }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("surfaces ACCOUNT_DISABLED via the error-string fallback (older team devices)", async () => {
     const fetchFn = mockFetch()
     fetchFn
       .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
@@ -476,6 +493,63 @@ describe("device usernames", () => {
     expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer bob:pw" })
     expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ username: "bob" }))
     expect(JSON.parse(res._getData()).device.username).toBe("bob")
+  })
+
+  it("rejects a POST username without a password before probing", async () => {
+    const fetchFn = mockFetch()
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a POST username on a tunnel add (allowLocalTunnel without password)", async () => {
+    const fetchFn = mockFetch()
+
+    const { res } = await drive("POST", "/", { host: "127.0.0.1", username: "alice", allowLocalTunnel: true })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a PATCH username on an auth:none device without a password", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedUpdateDevice).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+  })
+
+  it("upgrades an auth:none device when a PATCH carries username and password", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "alice", password: "pw" })
+
+    expect(res._getStatus()).toBe(200)
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer alice:pw" })
+    expect(mockedUpdateDevice).toHaveBeenCalledWith(
+      "dev_t",
+      expect.objectContaining({ username: "alice", password: "pw", auth: "password" }),
+    )
   })
 
   it("treats an unchanged username as a non-sensitive patch", async () => {

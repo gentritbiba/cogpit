@@ -150,16 +150,20 @@ async function verifyDevicePassword(
   }
 
   if (res.status === 403) {
-    // A team device answers 403 { error: "Account disabled" } for a disabled
-    // user; a personal device 403s when network access is off.
+    // A team device marks a disabled user with code ACCOUNT_DISABLED (older
+    // team devices only send error: "Account disabled"); a personal device
+    // 403s when network access is off.
     let body: unknown = null
     try {
       body = await res.json()
     } catch {
       body = null
     }
-    const disabled = !!body && typeof body === "object"
-      && (body as { error?: unknown }).error === "Account disabled"
+    const payload = body && typeof body === "object"
+      ? body as { code?: unknown; error?: unknown }
+      : null
+    const disabled = payload?.code === "ACCOUNT_DISABLED"
+      || payload?.error === "Account disabled"
     return { ok: false, code: disabled ? "ACCOUNT_DISABLED" : "NETWORK_DISABLED" }
   }
   if (res.status === 503) return { ok: false, code: "NOT_CONFIGURED" }
@@ -261,6 +265,15 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
     return sendJson(res, 400, { error: hostError, code: "INVALID_HOST" })
   }
 
+  // A username is only meaningful as one half of a credential pair; without a
+  // password it would be stored but never verified or sent.
+  if (username && !password) {
+    return sendJson(res, 400, {
+      error: "A username requires a password.",
+      code: "USERNAME_REQUIRES_PASSWORD",
+    })
+  }
+
   const probe = await probeDevice(host, port, tls)
   if (!probe.ok) {
     return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
@@ -322,6 +335,15 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   const newPort = body.port !== undefined ? normalizePort(body.port, tls) : undefined
   const newPassword = readString(body.password)
   const newUsername = readUsername(body.username)
+
+  // An auth:none device has no stored password to pair a username with, so
+  // accepting one would store a credential that is never verified or sent.
+  if (newUsername !== undefined && !newPassword && device.auth === "none") {
+    return sendJson(res, 400, {
+      error: "This device has no password. Send a password together with the username.",
+      code: "USERNAME_REQUIRES_PASSWORD",
+    })
+  }
 
   const host = newHost ?? device.host
   const port = newPort ?? device.port
