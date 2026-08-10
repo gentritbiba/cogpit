@@ -175,7 +175,8 @@ describe("buildBootBanner", () => {
 })
 
 describe("buildTeamBootNotices", () => {
-  const base = { host: "0.0.0.0", port: 19384, interfaces: IFACES }
+  const bootstrapToken = "test-bootstrap-token-at-least-32-characters"
+  const base = { host: "0.0.0.0", port: 19384, interfaces: IFACES, bootstrapToken }
 
   it("is silent in personal edition regardless of the other inputs", () => {
     expect(
@@ -189,6 +190,7 @@ describe("buildTeamBootNotices", () => {
     }).join("\n")
     expect(text).toContain("no users yet")
     expect(text).toContain("http://192.168.1.42:19384")
+    expect(text).toContain(`#bootstrap=${bootstrapToken}`)
     expect(text).toContain("first admin")
   })
 
@@ -204,7 +206,7 @@ describe("buildTeamBootNotices", () => {
       ...base, edition: "team", userCount: 0, envPasswordSet: false,
       publicUrl: "https://cogpit.example.com/",
     }).join("\n")
-    expect(text).toContain("https://cogpit.example.com to create the first admin")
+    expect(text).toContain(`https://cogpit.example.com#bootstrap=${bootstrapToken} to create the first admin`)
     expect(text).not.toContain("192.168.1.42")
     // The public URL is already HTTPS-capable: no proxy nag on top of it.
     expect(text).not.toContain("HTTPS")
@@ -220,7 +222,7 @@ describe("buildTeamBootNotices", () => {
   it("advertises the loopback URL for a loopback bind", () => {
     const text = buildTeamBootNotices({
       edition: "team", userCount: 0, envPasswordSet: false,
-      host: "127.0.0.1", port: 20000, interfaces: IFACES,
+      host: "127.0.0.1", port: 20000, interfaces: IFACES, bootstrapToken,
     }).join("\n")
     expect(text).toContain("http://127.0.0.1:20000")
   })

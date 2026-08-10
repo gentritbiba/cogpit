@@ -8,6 +8,10 @@ import {
   deviceScopedKey,
   setActiveIdentity,
   getActiveIdentity,
+  getActiveDeviceScope,
+  getDeviceConnectionRevision,
+  recordDeviceConnectionRevision,
+  __resetDeviceRevisionsForTest,
   __resetIdentityForTest,
   saveLastPath,
   switchDevice,
@@ -26,6 +30,7 @@ describe("device", () => {
     sessionStorage.clear()
     vi.restoreAllMocks()
     setPath("/")
+    __resetDeviceRevisionsForTest()
   })
 
   // ── getActiveDeviceId ─────────────────────────────────────────────────
@@ -154,6 +159,29 @@ describe("device", () => {
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::local::u_1")
       setPath("/d/dev_x/")
       expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x::u_1")
+    })
+
+    it("adds the server connection revision only after a sensitive update", () => {
+      setPath("/d/dev_x/")
+      expect(getActiveDeviceScope()).toBe("dev_x")
+      expect(getDeviceConnectionRevision("dev_x")).toBe(0)
+
+      recordDeviceConnectionRevision("dev_x", 2)
+
+      expect(getActiveDeviceScope()).toBe("dev_x@2")
+      expect(deviceScopedKey("cogpit:permissions")).toBe("cogpit:permissions::dev_x@2")
+    })
+
+    it("ignores duplicate or older revisions", () => {
+      const handler = vi.fn()
+      window.addEventListener("cogpit-device-scope-changed", handler)
+      recordDeviceConnectionRevision("dev_x", 3)
+      recordDeviceConnectionRevision("dev_x", 3)
+      recordDeviceConnectionRevision("dev_x", 2)
+
+      expect(getDeviceConnectionRevision("dev_x")).toBe(3)
+      expect(handler).toHaveBeenCalledOnce()
+      window.removeEventListener("cogpit-device-scope-changed", handler)
     })
 
     it("returns to the bare key when the identity is cleared", () => {

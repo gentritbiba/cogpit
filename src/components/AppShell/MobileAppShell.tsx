@@ -195,7 +195,7 @@ export function MobileAppShell({
       {chrome.undoDialog}
       {chrome.branchModal}
       {chrome.status}
-      {session && (
+      {session && project.hasFileChanges && (
         <Suspense fallback={null}>
           <MobileFileChanges
             open={chrome.fileChangesOpen}

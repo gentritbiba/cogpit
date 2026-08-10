@@ -328,7 +328,7 @@ describe("loadConfig", () => {
   })
 
   it("drops unknown edition values", async () => {
-    const { loadConfig } = await import("../config")
+    const { getConfiguredEditionValue, loadConfig } = await import("../config")
     mockedReadFile.mockResolvedValueOnce(JSON.stringify({
       claudeDir: "/home/.claude",
       edition: "enterprise",
@@ -337,6 +337,7 @@ describe("loadConfig", () => {
     const config = await loadConfig()
 
     expect(config?.edition).toBeUndefined()
+    expect(getConfiguredEditionValue()).toBe("enterprise")
   })
 })
 

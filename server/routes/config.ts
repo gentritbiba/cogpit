@@ -20,8 +20,9 @@ import {
 } from "../helpers"
 import type { SessionPrincipal } from "../security"
 import { isTeamEdition } from "../team/edition"
-import { getUserByUsername } from "../team/users"
-import { getConfig, saveConfig, validateClaudeDir } from "../config"
+import { getUserByUsername, withVerifiedUser } from "../team/users"
+import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
+import { flushSessionPersistence } from "../team/sessionPersistence"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
 
@@ -62,19 +63,26 @@ export function issueSessionResponse(
   res: ServerResponse,
   browserLogin: boolean,
   principal?: SessionPrincipal,
-): void {
+): Promise<void> {
   const sessionToken = createSessionToken(
     req.socket.remoteAddress || "unknown",
     req.headers["user-agent"],
     principal,
   )
-  res.setHeader("Content-Type", "application/json")
-  if (browserLogin) {
-    setBrowserSessionCookie(res, sessionToken)
-    res.end(JSON.stringify({ valid: true }))
-  } else {
-    res.end(JSON.stringify({ valid: true, token: sessionToken }))
-  }
+  return (async () => {
+    // A team login is not acknowledged until its hashed session row is on
+    // disk. This closes the shutdown race where a successful response could
+    // otherwise outlive the process without a restart-restorable session.
+    if (principal && isTeamEdition()) await flushSessionPersistence()
+
+    res.setHeader("Content-Type", "application/json")
+    if (browserLogin) {
+      setBrowserSessionCookie(res, sessionToken)
+      res.end(JSON.stringify({ valid: true }))
+    } else {
+      res.end(JSON.stringify({ valid: true, token: sessionToken }))
+    }
+  })()
 }
 
 /**
@@ -140,18 +148,24 @@ async function handleTeamLogin(
     res.end(JSON.stringify({ valid: false, error: "Invalid credentials" }))
     return
   }
+  const issuance = await withVerifiedUser(user.id, user.passwordHash, async (current) => {
+    await issueSessionResponse(req, res, browserLogin, {
+      userId: current.id,
+      username: current.username,
+      role: current.role,
+    })
+  })
+  if (issuance.status === "invalid") {
+    res.statusCode = 401
+    res.end(JSON.stringify({ valid: false, error: "Invalid credentials" }))
+    return
+  }
   // Checked only after password proof, so bad guesses cannot probe status.
-  if (user.disabled) {
+  if (issuance.status === "disabled") {
     res.statusCode = 403
     res.end(JSON.stringify({ valid: false, error: "Account disabled", code: "ACCOUNT_DISABLED" }))
     return
   }
-
-  issueSessionResponse(req, res, browserLogin, {
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-  })
 }
 
 function getLanIp(): string | null {
@@ -304,10 +318,10 @@ export function registerConfigRoutes(use: UseFn) {
 
   // POST /api/auth/logout — revoke only the current session and expire the
   // browser cookie. Password changes still revoke every session below.
-  use("/api/auth/logout", (req, res, next) => {
+  use("/api/auth/logout", async (req, res, next) => {
     if (req.method !== "POST") return next()
     const token = getRequestSessionToken(req)
-    if (token) revokeSessionToken(token)
+    if (token) await revokeSessionToken(token)
     clearBrowserSessionCookie(res)
     res.setHeader("Content-Type", "application/json")
     res.setHeader("Cache-Control", "no-store")
@@ -404,7 +418,7 @@ export function registerConfigRoutes(use: UseFn) {
             // Hash the new password before storing
             finalPassword = hashPassword(parsed.networkPassword)
             // Revoke all existing sessions when password changes
-            revokeAllSessions()
+            await revokeAllSessions()
           }
 
           if (parsed.networkAccess && !finalPassword) {
@@ -416,14 +430,15 @@ export function registerConfigRoutes(use: UseFn) {
 
           // If disabling network access, revoke all sessions
           if (!parsed.networkAccess && currentConfig?.networkAccess) {
-            revokeAllSessions()
+            await revokeAllSessions()
           }
 
           await saveConfig({
             claudeDir: resolvedClaudeDir,
             codexOnly: reusingCodexFallback || undefined,
             // The API cannot set the edition (file/env only) but must not drop it.
-            edition: currentConfig?.edition,
+            edition: currentConfig?.edition
+              ?? (getConfiguredEditionValue() === "team" ? "team" : undefined),
             networkAccess: !!parsed.networkAccess,
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,

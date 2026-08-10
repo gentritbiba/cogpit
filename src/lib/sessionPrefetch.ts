@@ -1,7 +1,7 @@
 import type { ParsedSession } from "./types"
 import { sessionCache } from "./sessionCache"
 import { loadSessionTailCached } from "./sessionLoader"
-import { getActiveDeviceId } from "./device"
+import { getActiveDeviceScope, getActiveIdentity } from "./device"
 
 /** Keys currently being fetched — de-duplicates concurrent prefetch calls. */
 const inflight = new Set<string>()
@@ -9,7 +9,10 @@ const inflight = new Set<string>()
 // Device-scoped to match sessionCache — a concurrent prefetch for the same
 // (dirName, fileName) on a different device must not de-dup against this one.
 function makeKey(dirName: string, fileName: string): string {
-  return `${getActiveDeviceId()}:${dirName}/${fileName}`
+  const device = getActiveDeviceScope()
+  const identity = getActiveIdentity()
+  const scope = identity === null ? device : `${device}:${identity}`
+  return `${scope}:${dirName}/${fileName}`
 }
 
 /**

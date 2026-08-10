@@ -29,6 +29,10 @@ vi.mock("../config", () => ({
   validateClaudeDir: vi.fn(),
 }))
 
+vi.mock("../team/sessionPersistence", () => ({
+  flushSessionPersistence: vi.fn(),
+}))
+
 import {
   isTrustedDirectLocalRequest,
   hasTrustedMutationSource,
@@ -40,12 +44,15 @@ import {
   hashPassword,
 } from "../helpers"
 import { getConfig } from "../config"
+import { flushSessionPersistence } from "../team/sessionPersistence"
 import { initEdition, __resetEditionForTest } from "../team/edition"
 import {
   initUsersStore,
   createUser,
   getUserByUsername,
   setUserDisabled,
+  setUserPassword,
+  setUserRole,
   __resetUsersForTest,
 } from "../team/users"
 
@@ -58,6 +65,7 @@ const mockedSetBrowserSessionCookie = vi.mocked(setBrowserSessionCookie)
 const mockedVerifyPasswordAsync = vi.mocked(verifyPasswordAsync)
 const mockedHashPassword = vi.mocked(hashPassword)
 const mockedGetConfig = vi.mocked(getConfig)
+const mockedFlushSessionPersistence = vi.mocked(flushSessionPersistence)
 
 import type { UseFn, Middleware } from "../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "./http-fixtures"
@@ -125,6 +133,7 @@ describe("POST /api/auth/verify (team edition)", () => {
     mockedGetConfig.mockReturnValue(null)
     mockedHashPassword.mockReturnValue("dummy-timing-hash")
     mockedVerifyPasswordAsync.mockResolvedValue(false)
+    mockedFlushSessionPersistence.mockResolvedValue(undefined)
 
     handlers = new Map()
     const use: UseFn = (path: string, routeHandler: Middleware) => {
@@ -184,6 +193,29 @@ describe("POST /api/auth/verify (team edition)", () => {
       { userId: alice.id, username: "alice", role: "member" },
     )
     expect(JSON.parse(res._getData())).toEqual({ valid: true, token: "team-machine-session" })
+  })
+
+  it("does not acknowledge a team login until its session is durable", async () => {
+    await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
+    const { req, res, next } = createMockReqRes("POST", "/")
+    req.headers.authorization = `Bearer alice:${STRONG_PASSWORD}`
+    mockedVerifyPasswordAsync.mockResolvedValueOnce(true)
+    mockedCreateSessionToken.mockReturnValueOnce("durable-team-session")
+    let releaseFlush!: () => void
+    mockedFlushSessionPersistence.mockReturnValueOnce(new Promise<void>((resolve) => {
+      releaseFlush = resolve
+    }))
+
+    const pending = handler(req, res, next)
+    await vi.waitFor(() => expect(mockedFlushSessionPersistence).toHaveBeenCalledOnce())
+    expect(res.end).not.toHaveBeenCalled()
+
+    releaseFlush()
+    await pending
+    expect(JSON.parse(res._getData())).toEqual({
+      valid: true,
+      token: "durable-team-session",
+    })
   })
 
   it("splits Bearer credentials at the first colon only", async () => {
@@ -259,6 +291,73 @@ describe("POST /api/auth/verify (team edition)", () => {
 
     expect(res._getStatus()).toBe(401)
     expect(JSON.parse(res._getData())).toEqual({ valid: false, error: "Invalid credentials" })
+  })
+
+  it("does not issue a session when the user is disabled during password verification", async () => {
+    await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
+    const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
+    const { req, res, next } = createMockReqRes("POST", "/")
+    req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
+    let finishVerification!: (valid: boolean) => void
+    mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
+      finishVerification = resolve
+    }))
+
+    const pending = handler(req, res, next)
+    await vi.waitFor(() => expect(mockedVerifyPasswordAsync).toHaveBeenCalledOnce())
+    await setUserDisabled(bob.id, true)
+    finishVerification(true)
+    await pending
+
+    expect(res._getStatus()).toBe(403)
+    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(mockedCreateSessionToken).not.toHaveBeenCalled()
+  })
+
+  it("issues only the current role when a user is demoted during password verification", async () => {
+    await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
+    const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "admin" })
+    const { req, res, next } = createMockReqRes("POST", "/")
+    req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
+    let finishVerification!: (valid: boolean) => void
+    mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
+      finishVerification = resolve
+    }))
+    mockedCreateSessionToken.mockReturnValueOnce("member-session")
+
+    const pending = handler(req, res, next)
+    await vi.waitFor(() => expect(mockedVerifyPasswordAsync).toHaveBeenCalledOnce())
+    await setUserRole(bob.id, "member")
+    finishVerification(true)
+    await pending
+
+    expect(mockedCreateSessionToken).toHaveBeenCalledWith(
+      "192.168.1.100",
+      undefined,
+      { userId: bob.id, username: "bob", role: "member" },
+    )
+    expect(JSON.parse(res._getData())).toEqual({ valid: true, token: "member-session" })
+  })
+
+  it("rejects old credentials when the password changes during verification", async () => {
+    await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
+    const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
+    const { req, res, next } = createMockReqRes("POST", "/")
+    req.headers.authorization = `Bearer bob:${STRONG_PASSWORD}`
+    let finishVerification!: (valid: boolean) => void
+    mockedVerifyPasswordAsync.mockReturnValueOnce(new Promise((resolve) => {
+      finishVerification = resolve
+    }))
+
+    const pending = handler(req, res, next)
+    await vi.waitFor(() => expect(mockedVerifyPasswordAsync).toHaveBeenCalledOnce())
+    await setUserPassword(bob.id, "new-correct-horse-battery-staple")
+    finishVerification(true)
+    await pending
+
+    expect(res._getStatus()).toBe(401)
+    expect(JSON.parse(res._getData())).toEqual({ valid: false, error: "Invalid credentials" })
+    expect(mockedCreateSessionToken).not.toHaveBeenCalled()
   })
 
   it("rejects a bare Bearer password (no colon) with 401 Username required", async () => {

@@ -373,6 +373,22 @@ describe("useKeyboardShortcuts", () => {
       expect(opts.onOpenTerminal).not.toHaveBeenCalled()
       expect(opts.onToggleIntegratedTerminal).not.toHaveBeenCalled()
     })
+
+    it("ignores the project-files shortcut without host-file access", () => {
+      setMe({
+        authenticated: true,
+        edition: "team",
+        user: { id: "u_1", username: "alice", displayName: "Alice", role: "member", createdAt: 1 },
+        capabilities: MEMBER_CAPABILITIES,
+      })
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      const event = fireKey("f", { metaKey: true, shiftKey: true })
+
+      expect(opts.onToggleProjectFiles).not.toHaveBeenCalled()
+      expect(event.defaultPrevented).toBe(false)
+    })
   })
 
   describe("Cmd+Shift+Digit - jump to live session", () => {

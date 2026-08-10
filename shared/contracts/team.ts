@@ -14,11 +14,15 @@ export interface TeamUserPublic {
 export interface Capabilities {
   terminal: boolean
   configWrite: boolean
+  /** Access to caller-selected host paths (project files, diffs, undo, scripts). */
+  hostFiles: boolean
   manageUsers: boolean
   manageWorkspaces: boolean
   manageDevices: boolean
   killAny: boolean
   viewAllSessions: boolean
+  /** Inspect provider account identity, quota, credit, and usage metadata. */
+  viewUsage: boolean
   share: boolean
   runFlows: boolean
 }
@@ -26,11 +30,13 @@ export interface Capabilities {
 export const ALL_CAPABILITIES: Capabilities = {
   terminal: true,
   configWrite: true,
+  hostFiles: true,
   manageUsers: true,
   manageWorkspaces: true,
   manageDevices: true,
   killAny: true,
   viewAllSessions: true,
+  viewUsage: true,
   share: true,
   runFlows: true,
 }
@@ -38,13 +44,30 @@ export const ALL_CAPABILITIES: Capabilities = {
 export const MEMBER_CAPABILITIES: Capabilities = {
   terminal: false,
   configWrite: false,
+  hostFiles: false,
   manageUsers: false,
   manageWorkspaces: false,
   manageDevices: false,
   killAny: false,
   viewAllSessions: false,
+  viewUsage: false,
   share: true,
   runFlows: true,
+}
+
+/** Fail-closed renderer state while a team identity is unresolved. */
+export const NO_CAPABILITIES: Capabilities = {
+  terminal: false,
+  configWrite: false,
+  hostFiles: false,
+  manageUsers: false,
+  manageWorkspaces: false,
+  manageDevices: false,
+  killAny: false,
+  viewAllSessions: false,
+  viewUsage: false,
+  share: false,
+  runFlows: false,
 }
 
 export interface MeResponse {

@@ -8,6 +8,7 @@ import type { TeamRole } from "../../shared/contracts/team"
  */
 
 export const SESSION_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000
+export const SESSION_IDLE_TTL_MS = 30 * 60 * 1000
 
 /** The authenticated user a team-edition session token was issued to. */
 export interface SessionPrincipal {

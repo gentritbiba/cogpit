@@ -104,4 +104,10 @@ describe("CommandPalette", () => {
     expect(screen.queryByText("Hide file changes")).not.toBeInTheDocument()
     expect(screen.queryByText("Show worktrees")).not.toBeInTheDocument()
   })
+
+  it("hides raw configuration navigation when no authorized callback is provided", () => {
+    render(<CommandPalette {...createProps()} onOpenConfig={undefined} />)
+
+    expect(screen.queryByText("Open agent configuration")).not.toBeInTheDocument()
+  })
 })

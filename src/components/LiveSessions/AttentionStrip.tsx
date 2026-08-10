@@ -163,7 +163,7 @@ interface AttentionStripProps {
   sessionNames: Record<string, string>
   projectNames: Record<string, string>
   onSelectSession: (dirName: string, fileName: string) => void
-  onKill: (pid: number, e: React.MouseEvent) => void
+  onKill?: (pid: number, e: React.MouseEvent) => void
   onResumeSession?: (sessionId: string, cwd?: string) => void
   onPrefetchSession?: (dirName: string, fileName: string) => void
 }

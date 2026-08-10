@@ -41,6 +41,16 @@ export class DeviceUnreachableError extends Error {
   }
 }
 
+/** A credential update superseded this mint before its token could be used. */
+export class DeviceCredentialsChangedError extends Error {
+  readonly deviceId: string
+  constructor(deviceId: string) {
+    super(`Credentials changed while minting a token for device "${deviceId}"`)
+    this.name = "DeviceCredentialsChangedError"
+    this.deviceId = deviceId
+  }
+}
+
 // ── Tuning ───────────────────────────────────────────────────────────
 
 /** Reuse a minted token for this long before re-minting. */
@@ -55,16 +65,42 @@ const MINT_TIMEOUT_MS = 5000
 interface CachedToken {
   token: string
   mintedAt: number
+  generation: number
 }
 
 interface AttemptRecord {
   at: number
+  generation: number
   error?: Error
 }
 
+interface InflightMint {
+  generation: number
+  promise: Promise<string | null>
+}
+
+export interface DeviceTokenLease {
+  token: string | null
+  generation: number
+}
+
+interface DeviceTokenAcquisition {
+  generation: number
+  promise: Promise<string | null>
+}
+
 const tokenCache = new Map<string, CachedToken>()
-const inflight = new Map<string, Promise<string | null>>()
+const inflight = new Map<string, InflightMint>()
 const lastAttempt = new Map<string, AttemptRecord>()
+const credentialGenerations = new Map<string, number>()
+
+function currentGeneration(id: string): number {
+  return credentialGenerations.get(id) ?? 0
+}
+
+function generationIsCurrent(id: string, generation: number): boolean {
+  return currentGeneration(id) === generation
+}
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -74,44 +110,81 @@ const lastAttempt = new Map<string, AttemptRecord>()
  * - A cached token younger than {@link TOKEN_TTL_MS} is reused.
  * - Otherwise a mint is performed, single-flighted per device.
  */
-export function getDeviceToken(device: HubDevice): Promise<string | null> {
-  if (device.auth === "none") return Promise.resolve(null)
-
+function acquireDeviceToken(device: HubDevice): DeviceTokenAcquisition {
   const id = device.id
+  const generation = currentGeneration(id)
+  if (device.auth === "none") return { generation, promise: Promise.resolve(null) }
 
   const cached = tokenCache.get(id)
-  if (cached && Date.now() - cached.mintedAt < TOKEN_TTL_MS) {
-    return Promise.resolve(cached.token)
+  if (
+    cached
+    && cached.generation === generation
+    && Date.now() - cached.mintedAt < TOKEN_TTL_MS
+  ) {
+    return { generation, promise: Promise.resolve(cached.token) }
   }
 
   const existing = inflight.get(id)
-  if (existing) return existing
+  if (existing?.generation === generation) return { generation, promise: existing.promise }
 
-  const promise = mint(device).finally(() => {
-    inflight.delete(id)
+  const promise: Promise<string | null> = mint(device, generation).finally(() => {
+    // An invalidation may have installed a newer generation's mint while this
+    // one was still in flight. The stale completion must not delete it.
+    if (inflight.get(id)?.promise === promise) inflight.delete(id)
   })
-  inflight.set(id, promise)
-  return promise
+  inflight.set(id, { generation, promise })
+  return { generation, promise }
 }
 
-/** Drop any cached token for a device, forcing the next call to re-mint. */
+export function getDeviceToken(device: HubDevice): Promise<string | null> {
+  return acquireDeviceToken(device).promise
+}
+
+/** Resolve a token together with the exact generation it belongs to. */
+export function getDeviceTokenLease(device: HubDevice): Promise<DeviceTokenLease> {
+  const acquisition = acquireDeviceToken(device)
+  return acquisition.promise.then((token) => ({ token, generation: acquisition.generation }))
+}
+
+/**
+ * Advance the device's credential generation and drop generation-bound state.
+ * Existing network requests cannot be cancelled reliably, but their eventual
+ * completion can no longer overwrite the new generation's cache or runtime.
+ */
 export function invalidateDeviceToken(id: string): void {
+  credentialGenerations.set(id, currentGeneration(id) + 1)
   tokenCache.delete(id)
+  lastAttempt.delete(id)
+}
+
+/**
+ * Invalidate a token generation only if it is still current. Concurrent 401s
+ * from the same expired token therefore advance once and share the replacement
+ * generation's single-flight mint.
+ */
+export function invalidateDeviceTokenGeneration(id: string, generation: number): boolean {
+  if (!generationIsCurrent(id, generation)) return false
+  invalidateDeviceToken(id)
+  return true
 }
 
 // ── Minting ──────────────────────────────────────────────────────────
 
-async function mint(device: HubDevice): Promise<string> {
+async function mint(device: HubDevice, generation: number): Promise<string> {
   const id = device.id
 
   // Cooldown: if the previous attempt failed recently, rethrow without hitting
   // the network so we never trip the device's auth rate limit.
   const prev = lastAttempt.get(id)
-  if (prev?.error && Date.now() - prev.at < MINT_COOLDOWN_MS) {
+  if (
+    prev?.generation === generation
+    && prev.error
+    && Date.now() - prev.at < MINT_COOLDOWN_MS
+  ) {
     throw prev.error
   }
 
-  const record: AttemptRecord = { at: Date.now() }
+  const record: AttemptRecord = { at: Date.now(), generation }
   lastAttempt.set(id, record)
 
   const url = `${device.tls ? "https" : "http"}://${device.host}:${device.port}/api/auth/verify`
@@ -137,7 +210,9 @@ async function mint(device: HubDevice): Promise<string> {
       { cause: err },
     )
     record.error = error
-    setDeviceRuntime(id, { lastProbe: Date.now() })
+    if (generationIsCurrent(id, generation)) {
+      setDeviceRuntime(id, { lastProbe: Date.now() })
+    }
     throw error
   }
 
@@ -145,7 +220,9 @@ async function mint(device: HubDevice): Promise<string> {
   if (res.status === 401 || res.status === 403) {
     const error = new DeviceAuthError(id, `Device "${device.name}" rejected the password`, res.status)
     record.error = error
-    setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now() })
+    if (generationIsCurrent(id, generation)) {
+      setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now() })
+    }
     throw error
   }
 
@@ -155,7 +232,9 @@ async function mint(device: HubDevice): Promise<string> {
       `Device "${device.name}" returned HTTP ${res.status} while minting a token`,
     )
     record.error = error
-    setDeviceRuntime(id, { lastProbe: Date.now() })
+    if (generationIsCurrent(id, generation)) {
+      setDeviceRuntime(id, { lastProbe: Date.now() })
+    }
     throw error
   }
 
@@ -169,11 +248,19 @@ async function mint(device: HubDevice): Promise<string> {
   if (!body || body.valid === false || typeof body.token !== "string" || !body.token) {
     const error = new DeviceAuthError(id, `Device "${device.name}" did not return a valid token`, res.status)
     record.error = error
-    setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now() })
+    if (generationIsCurrent(id, generation)) {
+      setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now() })
+    }
     throw error
   }
 
-  tokenCache.set(id, { token: body.token, mintedAt: Date.now() })
+  if (!generationIsCurrent(id, generation)) {
+    // Reject the caller as well as skipping the cache. Otherwise an HTTP/WS
+    // proxy waiting on this promise could dispatch the old principal's token
+    // after a credential PATCH has already committed.
+    throw new DeviceCredentialsChangedError(id)
+  }
+  tokenCache.set(id, { token: body.token, mintedAt: Date.now(), generation })
   setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now() })
   return body.token
 }

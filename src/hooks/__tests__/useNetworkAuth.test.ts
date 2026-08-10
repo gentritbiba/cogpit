@@ -42,7 +42,7 @@ describe("useNetworkAuth", () => {
     const { result } = renderHook(() => useNetworkAuth())
 
     await waitFor(() => expect(result.current.authenticated).toBe(true))
-    expect(result.current).toMatchObject({ isRemote: false, authChecked: true })
+    expect(result.current).toMatchObject({ isRemote: false, edition: "personal", authChecked: true })
     expect(mockedCheckAuthSession).not.toHaveBeenCalled()
   })
 
@@ -53,6 +53,7 @@ describe("useNetworkAuth", () => {
 
     expect(result.current.authChecked).toBe(false)
     await waitFor(() => expect(result.current.authChecked).toBe(true))
+    expect(result.current.edition).toBe("team")
     expect(result.current.authenticated).toBe(false)
     expect(mockedCheckAuthSession).toHaveBeenCalledOnce()
   })
@@ -186,7 +187,21 @@ describe("useNetworkAuth", () => {
     await waitFor(() => expect(result.current.authenticated).toBe(true))
 
     act(() => window.dispatchEvent(new Event("cogpit-auth-required")))
+    await waitFor(() => expect(mockedRefreshServerHello).toHaveBeenCalledOnce())
     expect(result.current.authenticated).toBe(true)
+  })
+
+  it("upgrades a transient local hello fallback when a later request requires auth", async () => {
+    mockedIsRemoteClient.mockReturnValue(false)
+    mockedGetServerHello.mockResolvedValue(PERSONAL_HELLO)
+    mockedRefreshServerHello.mockResolvedValue(TEAM_HELLO)
+    const { result } = renderHook(() => useNetworkAuth())
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+
+    act(() => window.dispatchEvent(new Event("cogpit-auth-required")))
+
+    await waitFor(() => expect(result.current.authenticated).toBe(false))
+    expect(mockedRefreshServerHello).toHaveBeenCalledOnce()
   })
 
   it("cleans up its auth-required listener", () => {

@@ -18,6 +18,11 @@ import {
   validateUserChanges,
 } from "../team/users"
 import { issueSessionResponse } from "./config"
+import {
+  BOOTSTRAP_TOKEN_HEADER,
+  consumeBootstrapToken,
+  verifyBootstrapToken,
+} from "../team/bootstrapToken"
 
 interface UserPayload {
   username?: unknown
@@ -100,6 +105,13 @@ export function registerTeamAdminRoutes(use: UseFn) {
     // no cache may store it — same rule as /api/auth/verify.
     res.setHeader("Cache-Control", "no-store")
 
+    if (!verifyBootstrapToken(req.headers[BOOTSTRAP_TOKEN_HEADER])) {
+      return sendJson(res, 403, {
+        error: "Valid bootstrap token required. Open the one-time setup URL shown in the server log.",
+        code: "INVALID_BOOTSTRAP_TOKEN",
+      })
+    }
+
     // Mirror login's HTTPS gate: a plain-HTTP remote browser cannot store the
     // session cookie, so reject before the admin is created rather than
     // strand a bootstrapped-but-unauthenticated founder.
@@ -125,7 +137,8 @@ export function registerTeamAdminRoutes(use: UseFn) {
           displayName: typeof body.displayName === "string" ? body.displayName : undefined,
           role: "admin",
         })
-        issueSessionResponse(req, res, browserLogin, {
+        consumeBootstrapToken()
+        await issueSessionResponse(req, res, browserLogin, {
           userId: user.id,
           username: user.username,
           role: user.role,
@@ -208,15 +221,15 @@ export function registerTeamAdminRoutes(use: UseFn) {
         // must force a fresh login under the new identity facts.
         if (typeof body.disabled === "boolean") {
           await setUserDisabled(id, body.disabled)
-          if (body.disabled) revokeSessionsForUser(id)
+          if (body.disabled) await revokeSessionsForUser(id)
         }
         if (body.role === "admin" || body.role === "member") {
           await setUserRole(id, body.role)
-          revokeSessionsForUser(id)
+          await revokeSessionsForUser(id)
         }
         if (typeof body.password === "string") {
           await setUserPassword(id, body.password)
-          revokeSessionsForUser(id)
+          await revokeSessionsForUser(id)
         }
       } catch (error) {
         if (error instanceof UserValidationError) {

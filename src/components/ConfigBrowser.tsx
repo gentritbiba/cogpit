@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from "react"
 import { Search, X } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { authFetch } from "@/lib/auth"
+import { useCapability } from "@/hooks/useCapability"
 import type { ConfigTreeSection, Category, ConfigItem } from "@/components/config/config-types"
 import { CATEGORY_ORDER, CATEGORY_DIR_MAP, flattenItems, categorizeItems } from "@/components/config/config-types"
 import { CategorySection } from "@/components/config/CategorySection"
@@ -29,6 +30,7 @@ interface ConfigBrowserProps {
 }
 
 export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialFilePath }: ConfigBrowserProps) {
+  const canWriteConfig = useCapability("configWrite")
   const [sections, setSections] = useState<ConfigTreeSection[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedFile, setSelectedFile] = useState<ConfigItem | null>(null)
@@ -40,6 +42,12 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
   // Fetch tree
   const fetchTree = useCallback(async () => {
+    if (!canWriteConfig) {
+      setSections([])
+      setSelectedFile(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const url = projectPath
@@ -53,7 +61,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
     } finally {
       setLoading(false)
     }
-  }, [projectPath])
+  }, [canWriteConfig, projectPath])
 
   useEffect(() => { fetchTree() }, [fetchTree])
 
@@ -96,6 +104,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
   }, [fetchTree])
 
   const handleNewFile = useCallback((category: Category) => {
+    if (!canWriteConfig) return
     if (!globalBaseDir && !projectBaseDir) return
     const mapping = CATEGORY_DIR_MAP[category]
     if (!mapping) return
@@ -106,10 +115,10 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
       projectDir: projectBaseDir ? `${projectBaseDir}/${mapping.subdir}` : null,
       fileType: mapping.fileType,
     })
-  }, [globalBaseDir, projectBaseDir])
+  }, [canWriteConfig, globalBaseDir, projectBaseDir])
 
   const handleDeleteItem = useCallback(async (item: ConfigItem) => {
-    if (item.readOnly) return
+    if (!canWriteConfig || item.readOnly) return
     if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
     try {
       const res = await authFetch(`/api/config-browser/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" })
@@ -118,19 +127,19 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
         fetchTree()
       }
     } catch { /* ignore */ }
-  }, [fetchTree, selectedFile])
+  }, [canWriteConfig, fetchTree, selectedFile])
 
   const handleStartRename = useCallback((item: ConfigItem) => {
-    if (item.readOnly) return
+    if (!canWriteConfig || item.readOnly) return
     const name = item.name === "SKILL.md"
       ? item.path.split("/").slice(-2, -1)[0] || item.name
       : item.name.replace(/\.[^.]+$/, "")
     setRenamingItem(item)
     setRenameValue(name)
-  }, [])
+  }, [canWriteConfig])
 
   const handleRenameSubmit = useCallback(async () => {
-    if (!renamingItem || !renameValue.trim()) return
+    if (!canWriteConfig || !renamingItem || !renameValue.trim()) return
     try {
       const res = await authFetch("/api/config-browser/rename", {
         method: "POST",
@@ -151,12 +160,20 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
         }
       }
     } catch { /* ignore */ }
-  }, [renamingItem, renameValue, fetchTree])
+  }, [canWriteConfig, renamingItem, renameValue, fetchTree])
 
   const handleRenameCancel = useCallback(() => {
     setRenamingItem(null)
     setRenameValue("")
   }, [])
+
+  if (!canWriteConfig) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        Server configuration is available to administrators only.
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-1 min-h-0 min-w-0">
@@ -201,15 +218,15 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
                     items={filteredCategories[cat]}
                     selectedPath={selectedFile?.path ?? null}
                     onSelect={handleSelect}
-                    onNewFile={canCreate ? () => handleNewFile(cat) : undefined}
-                    onDeleteItem={handleDeleteItem}
-                    onRenameItem={handleStartRename}
+                    onNewFile={canWriteConfig && canCreate ? () => handleNewFile(cat) : undefined}
+                    onDeleteItem={canWriteConfig ? handleDeleteItem : undefined}
+                    onRenameItem={canWriteConfig ? handleStartRename : undefined}
                     renamingPath={renamingItem?.path ?? null}
                     renameValue={renameValue}
                     onRenameValueChange={setRenameValue}
                     onRenameSubmit={handleRenameSubmit}
                     onRenameCancel={handleRenameCancel}
-                    creatingInCategory={creating?.category === cat ? creating : null}
+                    creatingInCategory={canWriteConfig && creating?.category === cat ? creating : null}
                     onCreated={handleFileCreated}
                     onCancelCreate={() => setCreating(null)}
                   />
@@ -222,7 +239,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
       {/* Editor area */}
       {selectedFile ? (
-        <ConfigEditor file={selectedFile} onDeleted={handleDeleted} />
+        <ConfigEditor file={selectedFile} onDeleted={handleDeleted} readOnly={!canWriteConfig} />
       ) : (
         <EmptyState />
       )}

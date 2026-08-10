@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, memo } from "react"
 import { ChevronDown, ChevronRight, Search, Play, Square, Loader2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { can } from "@/lib/capabilities"
+import { useCapability } from "@/hooks/useCapability"
 import { useScriptDiscovery, type ScriptEntry } from "@/hooks/useScriptDiscovery"
 import { useScriptRunner, type ManagedProcess } from "@/hooks/useScriptRunner"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
@@ -76,6 +76,8 @@ export const ScriptsDock = memo(function ScriptsDock({
   projectDir,
   onScriptStarted,
 }: ScriptsDockProps) {
+  const canUseTerminal = useCapability("terminal")
+  const canAccessHostFiles = useCapability("hostFiles")
   const [collapsed, setCollapsed] = useLocalStorage(COLLAPSED_KEY, false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
@@ -83,7 +85,7 @@ export const ScriptsDock = memo(function ScriptsDock({
 
   const pty = usePty()
 
-  const { scripts, loading } = useScriptDiscovery(projectDir)
+  const { scripts, loading } = useScriptDiscovery(canAccessHostFiles ? projectDir : null)
   const { runningProcesses, runScript, stopScript } = useScriptRunner(onScriptStarted)
 
   const toggleCollapsed = useCallback(() => {
@@ -139,7 +141,7 @@ export const ScriptsDock = memo(function ScriptsDock({
 
   // Every dock affordance (script rows, new-terminal) spawns through the PTY,
   // which is a terminal capability — members without it get no dock at all.
-  if (!can("terminal")) return null
+  if (!canUseTerminal || !canAccessHostFiles) return null
   if (scripts.length === 0 && !loading) return null
 
   return (

@@ -207,6 +207,32 @@ export function getUserById(id: string): TeamUser | null {
   return users.get(id) ?? null
 }
 
+export type VerifiedUserOperationResult<T> =
+  | { status: "current"; value: T }
+  | { status: "invalid" }
+  | { status: "disabled" }
+
+/**
+ * Linearize session issuance with user mutations after an asynchronous password
+ * check. Mutations that committed during verification are observed here; once
+ * the callback starts, later mutations wait and will revoke the issued session
+ * after they commit.
+ */
+export function withVerifiedUser<T>(
+  id: string,
+  verifiedPasswordHash: string,
+  operation: (user: TeamUser) => Promise<T>,
+): Promise<VerifiedUserOperationResult<T>> {
+  return enqueueUsersOperation(async () => {
+    const current = users.get(id)
+    if (!current || current.passwordHash !== verifiedPasswordHash) {
+      return { status: "invalid" }
+    }
+    if (current.disabled) return { status: "disabled" }
+    return { status: "current", value: await operation({ ...current }) }
+  })
+}
+
 // ── Mutations ────────────────────────────────────────────────────────
 
 function requireUser(draft: Map<string, TeamUser>, id: string): TeamUser {

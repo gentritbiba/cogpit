@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { authFetch } from "@/lib/auth"
+import { useCapability } from "@/hooks/useCapability"
 
 /** Extract the string file list from a `/api/project-files` response body. */
 export function parseProjectFilesResponse(data: unknown): string[] {
@@ -12,11 +13,12 @@ export function useProjectFileSuggestions(
   query: string,
   enabled: boolean,
 ) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const [files, setFiles] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (!enabled || !cwd) {
+    if (!canAccessHostFiles || !enabled || !cwd) {
       setFiles([])
       setLoading(false)
       return
@@ -43,7 +45,7 @@ export function useProjectFileSuggestions(
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [cwd, enabled, query])
+  }, [canAccessHostFiles, cwd, enabled, query])
 
   return { files, loading }
 }

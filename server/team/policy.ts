@@ -24,7 +24,10 @@ function admin(...prefixes: string[]): PolicyRule[] {
  */
 export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   hello: [{ prefix: "/api/hello", requires: "public" }],
-  devices: admin("/api/hub/devices"),
+  devices: [
+    { prefix: "/api/hub/devices", methods: ["GET"], requires: "authed" },
+    { prefix: "/api/hub/devices", requires: "admin" },
+  ],
   hub: authed("/hub/"),
   // The bare use("/api", requestMonitor) mount is a pass-through metrics tap,
   // not a request surface — listing it would defeat the fail-safe default.
@@ -35,8 +38,8 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   config: [
     { prefix: "/api/config", methods: ["GET"], requires: "authed" },
     { prefix: "/api/config", requires: "admin" },
+    ...admin("/api/config/validate"),
     ...authed(
-      "/api/config/validate",
       "/api/network-info",
       "/api/auth/verify",
       "/api/auth/session",
@@ -66,10 +69,9 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     "/api/branch-session",
   ),
   "claude-manage": [
-    ...admin("/api/kill-all", "/api/kill-process"),
+    ...admin("/api/kill-all", "/api/kill-process", "/api/claude/checkpoints"),
     ...authed(
       "/api/claude/settings",
-      "/api/claude/checkpoints",
       "/api/claude/tasks",
       "/api/interrupt-session",
       "/api/stop-session",
@@ -89,40 +91,54 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     "/api/workflow-watch",
     "/api/workflow-stop",
   ),
-  undo: authed(
+  // These routes accept caller-selected host paths and can read, overwrite, or
+  // delete files. Until project roots are server-owned and path-confined, they
+  // are administrative host-management capabilities, not member workspace APIs.
+  undo: admin(
     "/api/undo-state",
     "/api/undo/apply",
     "/api/undo/truncate-jsonl",
     "/api/undo/append-jsonl",
     "/api/undo/transaction",
   ),
-  files: authed("/api/check-files-exist"),
+  files: admin("/api/check-files-exist"),
   "files-watch": authed("/api/task-output", "/api/watch"),
-  "session-file-changes": authed("/api/session-file-changes"),
+  // Returns exact before/after content and absolute host paths parsed from the
+  // shared transcript, so it belongs to the same hostFiles boundary as diffs.
+  "session-file-changes": admin("/api/session-file-changes"),
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
   editor: admin("/api/reveal-in-folder", "/api/open-terminal", "/api/open-in-editor"),
-  worktrees: authed("/api/worktrees"),
-  usage: admin("/api/usage"),
-  "slash-suggestions": authed("/api/slash-suggestions", "/api/expand-command"),
-  "config-browser": [
-    { prefix: "/api/config-browser", methods: ["GET"], requires: "authed" },
-    { prefix: "/api/config-browser", requires: "admin" },
+  worktrees: [
+    { prefix: "/api/worktrees", methods: ["GET"], requires: "authed" },
+    { prefix: "/api/worktrees", requires: "admin" },
   ],
-  "local-file": authed("/api/local-file"),
-  "file-content": authed("/api/file-content"),
-  "project-files": authed("/api/project-files"),
-  "project-file": authed("/api/project-file"),
-  "git-status": authed("/api/git-status"),
-  mcp: authed("/api/mcp-servers"),
+  usage: admin("/api/usage"),
+  "slash-suggestions": [
+    ...authed("/api/slash-suggestions"),
+    ...admin("/api/expand-command"),
+  ],
+  // Config files and MCP definitions commonly embed bearer tokens, command
+  // environment variables, and other machine credentials. Read access is a
+  // secret-bearing administrative surface, not a member read-only feature.
+  "config-browser": admin("/api/config-browser"),
+  "local-file": admin("/api/local-file"),
+  "file-content": admin("/api/file-content"),
+  "project-files": admin("/api/project-files"),
+  "project-file": admin("/api/project-file"),
+  "git-status": admin("/api/git-status"),
+  mcp: admin("/api/mcp-servers"),
   notify: authed("/api/notify"),
-  scripts: authed("/api/scripts"),
+  scripts: admin("/api/scripts"),
   permissions: authed("/api/permissions"),
   "mission-control": authed("/api/mission-control"),
   "ask-user": authed("/api/user-questions", "/api/ask-user-answer"),
   models: authed("/api/models"),
-  "codex-runtime": authed("/api/codex/runtime", "/api/codex/goals", "/api/codex/threads"),
-  "claude-runtime": authed("/api/claude/runtime"),
+  "codex-runtime": [
+    ...admin("/api/codex/runtime"),
+    ...authed("/api/codex/goals", "/api/codex/threads"),
+  ],
+  "claude-runtime": admin("/api/claude/runtime"),
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()

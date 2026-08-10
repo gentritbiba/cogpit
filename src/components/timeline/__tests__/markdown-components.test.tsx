@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import ReactMarkdown from "react-markdown"
 import { authFetch, authUrl } from "@/lib/auth"
 import { markdownComponents, parseLocalFileHref } from "../markdown-components"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { MEMBER_CAPABILITIES } from "../../../../shared/contracts/team"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn().mockResolvedValue({ ok: true }),
@@ -11,6 +13,8 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 const mockedAuthUrl = vi.mocked(authUrl)
+
+afterEach(() => __resetCapabilitiesForTest())
 
 describe("markdown file links", () => {
   beforeEach(() => {
@@ -69,6 +73,24 @@ describe("markdown file links", () => {
     expect(authFetch).not.toHaveBeenCalled()
     open.mockRestore()
   })
+
+  it("renders local file paths without a dead editor link for members", () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"[Open app.ts](/Users/me/project/app.ts)"}
+      </ReactMarkdown>,
+    )
+
+    expect(screen.queryByRole("link", { name: "Open app.ts" })).not.toBeInTheDocument()
+    expect(screen.getByText("Open app.ts")).toBeInTheDocument()
+    expect(authFetch).not.toHaveBeenCalled()
+  })
 })
 
 describe("markdown images", () => {
@@ -92,6 +114,24 @@ describe("markdown images", () => {
     expect(img.getAttribute("src")).toBe(
       "/api/local-file?path=%2Ftmp%2Fscreenshot.png"
     )
+  })
+
+  it("does not request a local image proxy for members", () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "u_member", username: "member", displayName: "Member", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![shot](/tmp/screenshot.png)"}
+      </ReactMarkdown>,
+    )
+
+    expect(screen.queryByRole("img", { name: "shot" })).not.toBeInTheDocument()
+    expect(screen.getByText("shot")).toBeInTheDocument()
+    expect(mockedAuthUrl).not.toHaveBeenCalled()
   })
 
   it("does not route external/data image URLs through authUrl (no token leak)", () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
+import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "@/lib/types"
 import { isCodexSessionText, parseCodexSession } from "@/lib/codex"
@@ -164,7 +165,7 @@ export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean
 
     const toFetch: Array<{ agentId: string; cacheKey: string }> = []
     for (const m of agentsToLoad) {
-      const cacheKey = `${dirName}/${sessionId}/${m.agentId}`
+      const cacheKey = deviceScopedKey(`${dirName}/${sessionId}/${m.agentId}`)
       if (fetchedRef.current.has(cacheKey)) continue
       if (subagentCache.has(cacheKey)) {
         // Already cached at module level — pull into local state

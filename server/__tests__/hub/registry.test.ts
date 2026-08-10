@@ -27,6 +27,7 @@ import {
   getDevice,
   listDevices,
   updateDevice,
+  updateDeviceIfConnectionMatches,
   removeDevice,
   setDeviceRuntime,
   validateDeviceHost,
@@ -197,6 +198,7 @@ describe("updateDevice", () => {
     const updated = await updateDevice(id, { name: "Studio Mac", host: "10.0.0.6" })
     expect(updated?.name).toBe("Studio Mac")
     expect(updated?.host).toBe("10.0.0.6")
+    expect(updated?.connectionRevision).toBe(1)
     expect(getDevice(id)?.host).toBe("10.0.0.6")
   })
 
@@ -208,6 +210,57 @@ describe("updateDevice", () => {
 
   it("returns undefined for an unknown id", async () => {
     expect(await updateDevice("dev_nope", { name: "x" })).toBeUndefined()
+  })
+
+  it("conditionally updates only the connection snapshot that was verified", async () => {
+    const original = await addDevice({
+      name: "Team box",
+      host: "10.0.0.5",
+      auth: "password",
+      password: "old-password",
+      username: "alice",
+    })
+
+    const first = await updateDeviceIfConnectionMatches(original.id, original, {
+      password: "new-password",
+    })
+    const stale = await updateDeviceIfConnectionMatches(original.id, original, {
+      username: "bob",
+    })
+
+    expect(first.status).toBe("updated")
+    if (first.status === "updated") expect(first.device.connectionRevision).toBe(1)
+    expect(stale).toEqual({ status: "conflict" })
+    expect(getDevice(original.id)).toMatchObject({
+      username: "alice",
+      password: "new-password",
+      connectionRevision: 1,
+    })
+  })
+
+  it("keeps the revision stable for a name-only update", async () => {
+    const original = await addDevice({
+      name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret",
+    })
+    const sensitive = await updateDeviceIfConnectionMatches(original.id, original, { host: "10.0.0.6" })
+    expect(sensitive.status).toBe("updated")
+
+    const renamed = await updateDevice(original.id, { name: "Renamed" })
+    expect(renamed?.connectionRevision).toBe(1)
+    expect(listDevices()[0]?.connectionRevision).toBe(1)
+  })
+
+  it("reports a missing conditional target after deletion", async () => {
+    const original = await addDevice({
+      name: "Team box",
+      host: "10.0.0.5",
+      auth: "password",
+      password: "old-password",
+    })
+    await removeDevice(original.id)
+
+    expect(await updateDeviceIfConnectionMatches(original.id, original, { host: "10.0.0.6" }))
+      .toEqual({ status: "missing" })
   })
 })
 

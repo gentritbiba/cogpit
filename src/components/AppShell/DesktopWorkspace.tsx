@@ -186,24 +186,28 @@ function DesktopMainView({
                     Terminal
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                  onClick={() => project.onPostProjectAction("/api/open-in-editor")}
-                >
-                  <Code2 className="size-3" />
-                  Open
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                  onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
-                >
-                  <FolderSearch className="size-3" />
-                  Reveal
-                </Button>
+                {can("hostFiles") && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
+                      onClick={() => project.onPostProjectAction("/api/open-in-editor")}
+                    >
+                      <Code2 className="size-3" />
+                      Open
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+                      onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
+                    >
+                      <FolderSearch className="size-3" />
+                      Reveal
+                    </Button>
+                  </>
+                )}
               </div>
             )}
           </div>

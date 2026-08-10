@@ -132,8 +132,8 @@ export function CommandPaletteHost({
           ? handleOpenIntegratedTerminal
           : undefined
       }
-      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() ? handleOpenProjectInEditor : undefined}
-      onRevealProject={terminalCwd && !isRemoteDeviceActive() ? handleRevealProject : undefined}
+      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleOpenProjectInEditor : undefined}
+      onRevealProject={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleRevealProject : undefined}
       onCopyProjectPath={terminalCwd ? handleCopyProjectPath : undefined}
     />
   )

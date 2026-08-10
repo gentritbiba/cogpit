@@ -28,6 +28,10 @@ import { setRequestPrincipal } from "../team/requestPrincipal"
 import { requirementFor } from "../team/policy"
 import { teamAuthzMiddleware } from "../team/authz"
 import { ALL_CAPABILITIES, MEMBER_CAPABILITIES } from "../../shared/contracts/team"
+import {
+  __resetBootstrapTokenForTest,
+  initializeBootstrapToken,
+} from "../team/bootstrapToken"
 
 import type { UseFn, Middleware } from "../helpers"
 import { asIncomingMessage, asServerResponse, getRouteHandler } from "./http-fixtures"
@@ -35,6 +39,7 @@ import { registerTeamAdminRoutes } from "../routes/team"
 
 const STRONG_PASSWORD = "correct-horse-battery-staple"
 const SECOND_PASSWORD = "another-long-passphrase"
+const BOOTSTRAP_TOKEN = "test-bootstrap-token-at-least-32-characters"
 const originalEditionEnv = process.env.COGPIT_EDITION
 
 function enterTeamEdition(): void {
@@ -56,7 +61,7 @@ function createMockReqRes(method: string, url: string, body?: string) {
       return req
     }),
     socket: { remoteAddress: "192.168.1.100" },
-    headers: {} as Record<string, string>,
+    headers: { "x-cogpit-bootstrap-token": BOOTSTRAP_TOKEN } as Record<string, string>,
   }
   const res = {
     get statusCode() { return statusCode },
@@ -84,6 +89,7 @@ beforeEach(async () => {
   delete process.env.COGPIT_EDITION
   root = await mkdtemp(join(tmpdir(), "cogpit-team-routes-"))
   await initUsersStore(join(root, "team"))
+  initializeBootstrapToken(0, { COGPIT_BOOTSTRAP_TOKEN: BOOTSTRAP_TOKEN })
   handlers = new Map()
   const use: UseFn = (path: string, handler: Middleware) => {
     handlers.set(path, handler)
@@ -96,6 +102,7 @@ afterEach(async () => {
   __resetSessionPersistenceForTest()
   __resetUsersForTest()
   __resetEditionForTest()
+  __resetBootstrapTokenForTest()
   if (originalEditionEnv === undefined) delete process.env.COGPIT_EDITION
   else process.env.COGPIT_EDITION = originalEditionEnv
   await rm(root, { recursive: true, force: true })
@@ -167,6 +174,21 @@ describe("POST /api/team/bootstrap", () => {
   function bootstrapHandler(): Middleware {
     return getRouteHandler(handlers, "/api/team/bootstrap")
   }
+
+  it("requires the one-time bootstrap token", async () => {
+    enterTeamEdition()
+    const body = JSON.stringify({ username: "mallory", password: STRONG_PASSWORD })
+    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    req.headers["x-cogpit-bootstrap-token"] = "wrong-token"
+
+    const pending = bootstrapHandler()(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(403)
+    expect(JSON.parse(res._getData())).toMatchObject({ code: "INVALID_BOOTSTRAP_TOKEN" })
+    expect(userCount()).toBe(0)
+  })
 
   it("creates the first admin and issues a machine token", async () => {
     enterTeamEdition()

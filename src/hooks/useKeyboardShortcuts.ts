@@ -106,6 +106,7 @@ export function useKeyboardShortcuts({
       }
 
       if (matchesKeybinding("projectFiles", e)) {
+        if (!can("hostFiles")) return
         e.preventDefault()
         onToggleProjectFiles()
         return

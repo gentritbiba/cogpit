@@ -20,7 +20,7 @@ interface ProjectGroupSharedProps {
   projectNames: Record<string, string>
   onToggleCollapsed: (key: string, collapsed: boolean) => void
   onSelectSession: (dirName: string, fileName: string) => void
-  onKill: (pid: number, event: MouseEvent) => void
+  onKill?: (pid: number, event: MouseEvent) => void
   onDuplicateSession?: (dirName: string, fileName: string) => void
   onDeleteSession?: (session: ActiveSessionInfo) => void
   onRenameSession?: (sessionId: string, name: string) => void

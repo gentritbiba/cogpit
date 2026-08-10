@@ -12,12 +12,14 @@ import {
   setConfigPath,
   loadConfig,
   getConfig,
+  getConfiguredEditionValue,
   saveConfig,
   applyEnvNetworkOverrides,
 } from "./config"
 import { validatePasswordStrength } from "./security"
 import { getEdition, initEdition, isTeamEdition } from "./team/edition"
 import { userCount } from "./team/users"
+import { getBootstrapToken } from "./team/bootstrapToken"
 import { removePortFile, writePortFile } from "./lib/portFile"
 import {
   resolveEnvPassword,
@@ -60,7 +62,7 @@ if (!configExisted) {
 
 // Resolved here (server composition re-resolves the same inputs, harmlessly)
 // because the fail-closed decision below depends on the edition.
-initEdition({ shell: "standalone", configEdition: getConfig()?.edition })
+initEdition({ shell: "standalone", configEdition: getConfiguredEditionValue() })
 
 // ── Env-derived network credentials (in-memory only) ──────────────────────
 let envPassword: string | null = null
@@ -130,6 +132,7 @@ httpServer.listen(port, host, () => {
     port,
     interfaces: networkInterfaces(),
     publicUrl: process.env.COGPIT_PUBLIC_URL,
+    bootstrapToken: getBootstrapToken(),
   })
   for (const line of teamNotices) console.log(line)
 })

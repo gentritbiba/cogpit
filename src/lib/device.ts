@@ -9,6 +9,7 @@
 export const LOCAL_DEVICE_ID = "local"
 
 const LAST_PATH_PREFIX = "cogpit-last-path::"
+const deviceConnectionRevisions = new Map<string, number>()
 
 /**
  * The active device id, parsed from the leading "/d/:id" segment of the URL
@@ -71,8 +72,41 @@ export function getActiveIdentity(): string | null {
   return activeUserId
 }
 
+/** Latest server-backed connection revision observed for a registry device. */
+export function getDeviceConnectionRevision(deviceId: string): number {
+  return deviceId === LOCAL_DEVICE_ID ? 0 : (deviceConnectionRevisions.get(deviceId) ?? 0)
+}
+
+/**
+ * Publish a registry revision before renderer state consumes the corresponding
+ * device summary. Revisions are monotonic, so a slower list response cannot
+ * roll the active scope backwards. Changes notify DeviceRoot, which filters
+ * for the active id and remounts on a same-id host/account update.
+ */
+export function recordDeviceConnectionRevision(deviceId: string, revision: number): boolean {
+  if (deviceId === LOCAL_DEVICE_ID || !Number.isSafeInteger(revision) || revision < 0) return false
+  const current = deviceConnectionRevisions.get(deviceId)
+  if (current !== undefined && revision <= current) return false
+  deviceConnectionRevisions.set(deviceId, revision)
+  window.dispatchEvent(new CustomEvent("cogpit-device-scope-changed", {
+    detail: { deviceId, connectionRevision: revision },
+  }))
+  return true
+}
+
+/** Device id plus connection revision, used by async guards and module caches. */
+export function getActiveDeviceScope(): string {
+  const id = getActiveDeviceId()
+  const revision = getDeviceConnectionRevision(id)
+  return revision === 0 ? id : `${id}@${revision}`
+}
+
 export function __resetIdentityForTest(): void {
   activeUserId = null
+}
+
+export function __resetDeviceRevisionsForTest(): void {
+  deviceConnectionRevisions.clear()
 }
 
 /**
@@ -83,8 +117,9 @@ export function __resetIdentityForTest(): void {
  */
 export function deviceScopedKey(base: string): string {
   const id = getActiveDeviceId()
-  if (activeUserId !== null) return `${base}::${id}::${activeUserId}`
-  return id === LOCAL_DEVICE_ID ? base : `${base}::${id}`
+  const scope = getActiveDeviceScope()
+  if (activeUserId !== null) return `${base}::${scope}::${activeUserId}`
+  return id === LOCAL_DEVICE_ID ? base : `${base}::${scope}`
 }
 
 /**

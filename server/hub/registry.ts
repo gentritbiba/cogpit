@@ -33,7 +33,25 @@ export interface HubDevice {
   password?: string
   /** team-edition device login: authenticate as this user (Bearer user:pass) */
   username?: string
+  /** Monotonic scope version; advances only when the connection/account tuple changes. */
+  connectionRevision?: number
   addedAt: number
+}
+
+/**
+ * Whether two registry records target the same endpoint with the same
+ * credentials. Long-running proxy and probe operations use this to reject a
+ * stale snapshot before connecting or publishing runtime state.
+ */
+export function sameDeviceConnection(a: HubDevice, b: HubDevice): boolean {
+  return a.id === b.id
+    && a.host === b.host
+    && a.port === b.port
+    && a.tls === b.tls
+    && a.auth === b.auth
+    && a.username === b.username
+    && a.password === b.password
+    && (a.connectionRevision ?? 0) === (b.connectionRevision ?? 0)
 }
 
 export interface DeviceRuntime {
@@ -62,6 +80,11 @@ export type UpdateDeviceInput =
     username?: string | null
   }
 
+export type ConditionalDeviceUpdateResult =
+  | { status: "updated"; device: HubDevice }
+  | { status: "missing" }
+  | { status: "conflict" }
+
 const DEFAULT_PORT = 19384
 const DEFAULT_TLS_PORT = 443
 
@@ -88,6 +111,11 @@ function normalizeDevice(entry: unknown): HubDevice | null {
     auth,
     password: auth === "password" && typeof e.password === "string" ? e.password : undefined,
     username: auth === "password" && typeof e.username === "string" ? e.username : undefined,
+    connectionRevision: typeof e.connectionRevision === "number"
+      && Number.isSafeInteger(e.connectionRevision)
+      && e.connectionRevision >= 0
+      ? e.connectionRevision
+      : 0,
     addedAt: typeof e.addedAt === "number" ? e.addedAt : 0,
   }
 }
@@ -231,6 +259,7 @@ export async function addDevice(input: AddDeviceInput): Promise<HubDevice> {
       auth: input.auth,
       password: input.auth === "password" ? input.password : undefined,
       username: input.auth === "password" ? input.username : undefined,
+      connectionRevision: 0,
       addedAt: Date.now(),
     }
     draft.set(device.id, device)
@@ -242,27 +271,63 @@ export async function addDevice(input: AddDeviceInput): Promise<HubDevice> {
   })
 }
 
+function applyDevicePatch(existing: HubDevice, patch: UpdateDeviceInput): HubDevice {
+  const next: HubDevice = { ...existing }
+  if (patch.name !== undefined) next.name = patch.name
+  if (patch.host !== undefined) next.host = patch.host
+  if (patch.port !== undefined) next.port = patch.port
+  if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
+  if (patch.auth !== undefined) next.auth = patch.auth
+  if (patch.password !== undefined) next.password = patch.password
+  if (patch.username !== undefined) next.username = patch.username ?? undefined
+  // A device switched to token-less auth must not keep stale credentials.
+  if (next.auth === "none") {
+    next.password = undefined
+    next.username = undefined
+  }
+  return next
+}
+
 export async function updateDevice(id: string, patch: UpdateDeviceInput): Promise<HubDevice | undefined> {
+  const touchesConnection = patch.host !== undefined
+    || patch.port !== undefined
+    || patch.tls !== undefined
+    || patch.auth !== undefined
+    || patch.password !== undefined
+    || patch.username !== undefined
+  if (touchesConnection) {
+    const expected = getDevice(id)
+    if (!expected) return undefined
+    const result = await updateDeviceIfConnectionMatches(id, expected, patch)
+    return result.status === "updated" ? result.device : undefined
+  }
   return commitDeviceMutation((draft) => {
     const existing = draft.get(id)
     if (!existing) return { changed: false, value: undefined }
 
-    const next: HubDevice = { ...existing }
-    if (patch.name !== undefined) next.name = patch.name
-    if (patch.host !== undefined) next.host = patch.host
-    if (patch.port !== undefined) next.port = patch.port
-    if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
-    if (patch.auth !== undefined) next.auth = patch.auth
-    if (patch.password !== undefined) next.password = patch.password
-    if (patch.username !== undefined) next.username = patch.username ?? undefined
-    // A device switched to token-less auth must not keep stale credentials.
-    if (next.auth === "none") {
-      next.password = undefined
-      next.username = undefined
-    }
-
+    const next = applyDevicePatch(existing, patch)
     draft.set(id, next)
     return { changed: true, value: next }
+  })
+}
+
+/** Commit only if the connection tuple verified by the caller is still current. */
+export async function updateDeviceIfConnectionMatches(
+  id: string,
+  expected: HubDevice,
+  patch: UpdateDeviceInput,
+): Promise<ConditionalDeviceUpdateResult> {
+  return commitDeviceMutation<ConditionalDeviceUpdateResult>((draft) => {
+    const existing = draft.get(id)
+    if (!existing) return { changed: false, value: { status: "missing" } }
+    if (!sameDeviceConnection(existing, expected)) {
+      return { changed: false, value: { status: "conflict" } }
+    }
+
+    const next = applyDevicePatch(existing, patch)
+    next.connectionRevision = (existing.connectionRevision ?? 0) + 1
+    draft.set(id, next)
+    return { changed: true, value: { status: "updated", device: next } }
   })
 }
 

@@ -73,7 +73,13 @@ const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m =
 export default function App() {
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()
-  const me = useMe()
+  const me = useMe(networkAuth.edition)
+  const identityReady = me.checked
+    && (networkAuth.edition !== "team"
+      || (me.authenticated && me.edition === "team" && me.user !== null))
+  const configAdminEnabled = identityReady && me.capabilities.configWrite
+  const hostFilesEnabled = identityReady && me.capabilities.hostFiles
+  const terminalEnabled = identityReady && me.capabilities.terminal
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
@@ -139,14 +145,19 @@ export default function App() {
     ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
   const supportsWorktrees = currentAgentKind === "claude"
   const supportsMcp = currentAgentKind === "claude"
-  const slashSuggestions = useSlashSuggestions(state.session?.cwd ?? pendingPath ?? undefined)
+  const slashSuggestions = useSlashSuggestions(
+    configAdminEnabled ? state.session?.cwd ?? pendingPath ?? undefined : undefined,
+    configAdminEnabled,
+  )
 
   const handleEditCommand = useCallback((commandName: string) => {
+    if (!configAdminEnabled) return
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
     dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
-  }, [dispatch, slashSuggestions.suggestions])
+  }, [configAdminEnabled, dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
+    if (!configAdminEnabled) return null
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
     if (!match?.filePath) return null
     try {
@@ -161,7 +172,7 @@ export default function App() {
     } catch {
       return null
     }
-  }, [slashSuggestions.suggestions])
+  }, [configAdminEnabled, slashSuggestions.suggestions])
 
   // Project-scoped process panel, terminal/editor actions, and right workspace.
   const {
@@ -195,7 +206,9 @@ export default function App() {
   const currentDirName = state.sessionSource?.dirName ?? state.pendingDirName ?? state.dashboardProject ?? null
 
   // Worktree data — only fetched when panel is open
-  const worktreeData = useWorktrees(supportsWorktrees && panels.showWorktrees ? currentDirName : null)
+  const worktreeData = useWorktrees(
+    identityReady && supportsWorktrees && panels.showWorktrees ? currentDirName : null,
+  )
 
   // Check if session has any Edit/Write tool calls for the file changes panel
   const hasFileChanges = useMemo(() => {
@@ -249,6 +262,7 @@ export default function App() {
   // Force-show file changes panel when a file is clicked in TurnChangedFiles
   const setShowFileChanges = panels.setShowFileChanges
   useEffect(() => {
+    if (!hostFilesEnabled) return
     const handler = () => {
       if (isMobile) {
         setShowMobileFileChanges(true)
@@ -259,7 +273,7 @@ export default function App() {
     }
     window.addEventListener(FOCUS_FILE_EVENT, handler)
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
-  }, [setShowFileChanges, isMobile])
+  }, [hostFilesEnabled, setShowFileChanges, isMobile])
 
   // Detect pending interactive prompts (plan approval, user questions)
   const pendingInteraction = useMemo(
@@ -356,9 +370,10 @@ export default function App() {
 
   // MCP server selection
   const mcpData = useMcpServers(
-    supportsMcp ? currentCwd : undefined,
-    supportsMcp ? (currentDirName ?? undefined) : undefined,
-    supportsMcp ? state.sessionSource?.fileName ?? undefined : undefined
+    supportsMcp && configAdminEnabled ? currentCwd : undefined,
+    supportsMcp && configAdminEnabled ? (currentDirName ?? undefined) : undefined,
+    supportsMcp && configAdminEnabled ? state.sessionSource?.fileName ?? undefined : undefined,
+    configAdminEnabled,
   )
   const { showWorktrees, setShowWorktrees, showWorkflows } = panels
 
@@ -402,7 +417,7 @@ export default function App() {
     effort: effectiveEffort,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
+    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
   })
 
   // Active agent chat
@@ -416,7 +431,7 @@ export default function App() {
     effort: effectiveEffort,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
+    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
     onCodexModelRejected: handleCodexModelRejected,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
@@ -547,7 +562,7 @@ export default function App() {
     selectedEffort: effectiveEffort,
     fastMode: fastModeActive,
     ultracode: ultracodeActive,
-    mcpConfig: supportsMcp ? mcpData.mcpConfigJson : null,
+    mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
     scrollRequestScrollToTop: scroll.requestScrollToTop,
     handleDashboardSelect: actions.handleDashboardSelect,
     workerParse,
@@ -559,7 +574,7 @@ export default function App() {
   // We intentionally do NOT auto-apply when switching between sessions or when
   // the user changes MCP selection — those require explicit "Apply Settings".
   const { hasSettingsChanges, handleApplySettings } = handlers
-  const mcpHasRestrictions = supportsMcp && mcpData.mcpConfigJson !== null
+  const mcpHasRestrictions = supportsMcp && configAdminEnabled && mcpData.mcpConfigJson !== null
   const mcpPrevLoadedRef = useRef(false)
   useEffect(() => {
     const justLoaded = mcpData.loaded && !mcpPrevLoadedRef.current
@@ -583,7 +598,12 @@ export default function App() {
   }, [handlers.reloadSession])
 
   // Undo/redo system
-  const undoRedo = useUndoRedo(state.session, state.sessionSource, handlers.reloadSession)
+  const undoRedo = useUndoRedo(
+    state.session,
+    state.sessionSource,
+    handlers.reloadSession,
+    hostFilesEnabled,
+  )
 
   // Wire up branch switch now that undoRedo is available
   // We need to re-create handlers that depend on undoRedo.requestBranchSwitch
@@ -722,9 +742,9 @@ export default function App() {
     slashSuggestionsLoading: slashSuggestions.loading,
     actions: {
       handleStopSession: handlers.handleStopSession,
-      handleEditConfig: panels.handleEditConfig,
-      handleEditCommand,
-      handleExpandCommand,
+      handleEditConfig: configAdminEnabled ? panels.handleEditConfig : undefined,
+      handleEditCommand: configAdminEnabled ? handleEditCommand : undefined,
+      handleExpandCommand: configAdminEnabled ? handleExpandCommand : undefined,
       handleOpenBranches: handlers.handleOpenBranches,
       handleBranchFromHere: handlers.handleBranchFromHere,
       handleToggleExpandAll,
@@ -736,7 +756,7 @@ export default function App() {
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
-    handlers.handleStopSession, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
+    handlers.handleStopSession, configAdminEnabled, panels.handleEditConfig, handleEditCommand, handleExpandCommand,
     handlers.handleOpenBranches, handlers.handleBranchFromHere, handleToggleExpandAll,
     handlers.handleLoadSessionScrollAware,
   ])
@@ -788,6 +808,20 @@ export default function App() {
     return <LoginScreen onAuthenticated={networkAuth.handleAuthenticated} />
   }
 
+  // Do not mount privileged providers or child fetch effects under the
+  // optimistic personal defaults while a team member's capabilities load.
+  if (!identityReady) {
+    return (
+      <div
+        className="dark flex h-dvh items-center justify-center bg-elevation-0"
+        role="status"
+        aria-label="Loading identity"
+      >
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
     return (
@@ -821,7 +855,12 @@ export default function App() {
   }
 
   if (!config.claudeDir) {
-    return <SetupScreen onConfigured={config.setClaudeDir} />
+    if (configAdminEnabled) return <SetupScreen onConfigured={config.setClaudeDir} />
+    return (
+      <div className="dark flex h-dvh items-center justify-center bg-elevation-0 text-sm text-muted-foreground">
+        Cogpit is waiting for an administrator to finish server setup.
+      </div>
+    )
   }
 
   // ─── Shared elements ──────────────────────────────────────────────────────
@@ -854,7 +893,7 @@ export default function App() {
       </button>
     </div>
   )
-  const undoConfirmDialog = (
+  const undoConfirmDialog = hostFilesEnabled ? (
     <UndoConfirmDialog
       state={undoRedo.confirmState}
       isApplying={undoRedo.isApplying}
@@ -862,13 +901,13 @@ export default function App() {
       onConfirm={undoRedo.confirmApply}
       onCancel={undoRedo.confirmCancel}
     />
-  )
+  ) : null
 
   const branchModalCurrentTurns = handlers.branchModalTurn !== null && state.session
     ? state.session.turns.slice(handlers.branchModalTurn)
     : []
 
-  const branchModal = handlers.branchModalTurn !== null && branchModalBranches.length > 0 && (
+  const branchModal = hostFilesEnabled && handlers.branchModalTurn !== null && branchModalBranches.length > 0 && (
     <Suspense fallback={null}>
       <BranchModal
         branches={branchModalBranches}
@@ -971,12 +1010,12 @@ export default function App() {
       onUltracodeEnabledChange={ultracodeAvailable ? setUltracodeEnabled : undefined}
       onApplySettings={handlers.handleApplySettings}
       activeModelId={state.session?.model}
-      mcpServers={supportsMcp ? mcpData.servers : undefined}
-      selectedMcpServers={supportsMcp ? mcpData.selectedServers : undefined}
-      onToggleMcpServer={supportsMcp ? mcpData.toggleServer : undefined}
-      onRefreshMcpServers={supportsMcp ? mcpData.refresh : undefined}
-      mcpLoading={supportsMcp ? mcpData.loading : undefined}
-      onMcpAuth={supportsMcp ? handleMcpAuth : undefined}
+      mcpServers={supportsMcp && configAdminEnabled ? mcpData.servers : undefined}
+      selectedMcpServers={supportsMcp && configAdminEnabled ? mcpData.selectedServers : undefined}
+      onToggleMcpServer={supportsMcp && configAdminEnabled ? mcpData.toggleServer : undefined}
+      onRefreshMcpServers={supportsMcp && configAdminEnabled ? mcpData.refresh : undefined}
+      mcpLoading={supportsMcp && configAdminEnabled ? mcpData.loading : undefined}
+      onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
       mobileExtra={isMobile ? goalBarNode : undefined}
@@ -1023,7 +1062,7 @@ export default function App() {
   if (isMobile) {
     return (
       <AppProvider value={appContextValue}>
-      <PtyProvider>
+      <PtyProvider enabled={terminalEnabled}>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider value={streamingOverlay}>
         <MobileAppShell
@@ -1061,7 +1100,7 @@ export default function App() {
           project={{
             processPanel,
             backgroundAgents,
-            hasFileChanges,
+            hasFileChanges: hostFilesEnabled && hasFileChanges,
             onOpenTerminal: handleOpenTerminal,
           }}
           chrome={{
@@ -1087,7 +1126,7 @@ export default function App() {
   // ─── DESKTOP LAYOUT ─────────────────────────────────────────────────────────
   return (
     <AppProvider value={appContextValue}>
-    <PtyProvider>
+    <PtyProvider enabled={terminalEnabled}>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
       <StreamingOverlayProvider value={streamingOverlay}>
         <DesktopAppShell
@@ -1132,10 +1171,10 @@ export default function App() {
             worktrees: worktreeData,
             backgroundAgents,
             supportsWorktrees,
-            hasFileChanges,
+            hasFileChanges: hostFilesEnabled && hasFileChanges,
             currentCwd,
             showPreview,
-            showProjectFiles,
+            showProjectFiles: hostFilesEnabled && showProjectFiles,
             launchTerminalRequest,
             onOpenTerminal: handleOpenTerminal,
             onTogglePreview: handleTogglePreview,

@@ -22,6 +22,7 @@ vi.mock("../../helpers", () => ({
 
 vi.mock("../../config", () => ({
   getConfig: vi.fn(),
+  getConfiguredEditionValue: vi.fn(),
   saveConfig: vi.fn(),
   validateClaudeDir: vi.fn(),
 }))
@@ -47,7 +48,7 @@ import {
   validatePasswordStrength,
   revokeAllSessions,
 } from "../../helpers"
-import { getConfig, saveConfig, validateClaudeDir } from "../../config"
+import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../../config"
 import { networkInterfaces } from "node:os"
 
 const mockedIsTrustedDirectLocalRequest = vi.mocked(isTrustedDirectLocalRequest)
@@ -66,6 +67,7 @@ const mockedValidatePasswordStrength = vi.mocked(validatePasswordStrength)
 const mockedRevokeAllSessions = vi.mocked(revokeAllSessions)
 const mockedRefreshDirs = vi.mocked(refreshDirs)
 const mockedGetConfig = vi.mocked(getConfig)
+const mockedGetConfiguredEditionValue = vi.mocked(getConfiguredEditionValue)
 const mockedSaveConfig = vi.mocked(saveConfig)
 const mockedValidateClaudeDir = vi.mocked(validateClaudeDir)
 const mockedNetworkInterfaces = vi.mocked(networkInterfaces)
@@ -119,6 +121,7 @@ describe("config routes", () => {
     vi.resetAllMocks()
     mockedHasTrustedMutationSource.mockReturnValue(true)
     mockedCanIssueBrowserSession.mockReturnValue(true)
+    mockedGetConfiguredEditionValue.mockReturnValue(undefined)
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
@@ -407,12 +410,12 @@ describe("config routes", () => {
       expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store")
     })
 
-    it("revokes only the current session and expires its cookie", () => {
+    it("revokes only the current session and expires its cookie", async () => {
       const handler = getRouteHandler(handlers, "/api/auth/logout")
       const { req, res, next } = createMockReqRes("POST", "/")
       mockedGetRequestSessionToken.mockReturnValueOnce("current-session")
 
-      handler(req, res, next)
+      await handler(req, res, next)
 
       expect(mockedRevokeSessionToken).toHaveBeenCalledWith("current-session")
       expect(mockedClearBrowserSessionCookie).toHaveBeenCalledWith(res)
@@ -647,6 +650,27 @@ describe("config routes", () => {
         expect(res.end).toHaveBeenCalled()
       })
       expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        edition: "team",
+      }))
+    })
+
+    it("preserves an edition-only team bootstrap when the first full config is saved", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const body = JSON.stringify({ claudeDir: "/home/.claude" })
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      mockedGetConfig.mockReturnValueOnce(null)
+      mockedGetConfiguredEditionValue.mockReturnValueOnce("team")
+      mockedValidateClaudeDir.mockResolvedValueOnce({
+        valid: true, resolved: "/home/.claude",
+      })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        claudeDir: "/home/.claude",
         edition: "team",
       }))
     })

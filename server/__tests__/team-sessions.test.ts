@@ -13,6 +13,7 @@ import {
   revokeSessionToken,
   revokeAllSessions,
   revokeSessionsForUser,
+  onSessionRevoked,
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
   __resetSessionsForTest,
@@ -87,6 +88,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.useRealTimers()
+  await __flushForTest()
   __resetSessionsForTest()
   __resetForTest()
   __resetUsersForTest()
@@ -206,11 +208,47 @@ describe("restart survival (team edition)", () => {
     const token = createSessionToken("127.0.0.1", UA, principal)
     await simulateRestart()
 
-    vi.advanceTimersByTime(SESSION_ABSOLUTE_TTL_MS - 1)
+    let elapsed = 0
+    const activityStep = SESSION_IDLE_TTL_MS - 1
+    while (elapsed + activityStep < SESSION_ABSOLUTE_TTL_MS - 1) {
+      vi.advanceTimersByTime(activityStep)
+      elapsed += activityStep
+      expect(validateSessionToken(token, UA)).toBe(true)
+    }
+    vi.advanceTimersByTime(SESSION_ABSOLUTE_TTL_MS - 1 - elapsed)
     expect(validateSessionToken(token, UA)).toBe(true)
 
     vi.advanceTimersByTime(2)
     expect(validateSessionToken(token, UA)).toBe(false)
+  })
+
+  it("does not grant a fresh idle window after a full process restart", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+
+    vi.useFakeTimers()
+    const token = createSessionToken("127.0.0.1", UA, principal)
+    await __flushForTest()
+    vi.advanceTimersByTime(SESSION_IDLE_TTL_MS + 1)
+    await simulateFullRestart()
+
+    expect(validateSessionToken(token, UA)).toBe(false)
+    expect(await readFile(join(teamDir, "sessions.json"), "utf-8")).not.toContain(sha256(token))
+  })
+
+  it("persists meaningful activity so a live session survives a restart", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+
+    vi.useFakeTimers()
+    const token = createSessionToken("127.0.0.1", UA, principal)
+    vi.advanceTimersByTime(60_001)
+    expect(validateSessionToken(token, UA)).toBe(true)
+    await simulateFullRestart()
+
+    expect(validateSessionToken(token, UA)).toBe(true)
   })
 
   it("restores from the sessions file itself after a true restart of both modules", async () => {
@@ -354,6 +392,20 @@ describe("load-time pruning (team edition)", () => {
 // ── Revocation ──────────────────────────────────────────────────────────
 
 describe("revocation (team edition)", () => {
+  it("notifies upgraded transports when a user's sessions are revoked", async () => {
+    enterTeamEdition()
+    await initTeamStores()
+    const principal = await createPrincipal("alice", "admin")
+    const token = createSessionToken("127.0.0.1", UA, principal)
+    const listener = vi.fn()
+    const unsubscribe = onSessionRevoked(listener)
+
+    await revokeSessionsForUser(principal.userId)
+
+    expect(listener).toHaveBeenCalledWith(token)
+    unsubscribe()
+  })
+
   it("revokeSessionToken removes the persisted row too", async () => {
     enterTeamEdition()
     await initTeamStores()
@@ -361,7 +413,7 @@ describe("revocation (team edition)", () => {
     const token = createSessionToken("127.0.0.1", UA, principal)
     await __flushForTest()
 
-    revokeSessionToken(token)
+    await revokeSessionToken(token)
     await simulateRestart()
 
     expect(validateSessionToken(token, UA)).toBe(false)
@@ -374,7 +426,7 @@ describe("revocation (team edition)", () => {
     const token = createSessionToken("127.0.0.1", UA, principal)
     await __flushForTest()
 
-    revokeAllSessions()
+    await revokeAllSessions()
     await simulateRestart()
 
     expect(validateSessionToken(token, UA)).toBe(false)
@@ -389,7 +441,7 @@ describe("revocation (team edition)", () => {
     const bobToken = createSessionToken("127.0.0.1", UA, bob)
     await __flushForTest()
 
-    revokeSessionsForUser(bob.userId)
+    await revokeSessionsForUser(bob.userId)
     expect(validateSessionToken(bobToken, UA)).toBe(false)
     expect(validateSessionToken(aliceToken, UA)).toBe(true)
 
@@ -418,6 +470,7 @@ describe("on-disk format (team edition)", () => {
     expect(row.tokenHash).toBe(sha256(token))
     expect(row.userId).toBe(principal.userId)
     expect(row.expiresAt).toBe(row.createdAt + SESSION_ABSOLUTE_TTL_MS)
+    expect(row.lastActivity).toBe(row.createdAt)
   })
 
   it.skipIf(POSIX_MODES_UNSUPPORTED)("keeps sessions.json 0600", async () => {

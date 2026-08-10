@@ -15,6 +15,35 @@ import { Spinner } from "@/components/ui/Spinner"
 
 /** Mirrors the server rule so the button is not disabled without saying why. */
 const MIN_PASSWORD_LENGTH = 16
+const BOOTSTRAP_TOKEN_STATE_KEY = "__cogpitBootstrapToken"
+
+function takeBootstrapToken(): string {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""))
+  const fromFragment = params.get("bootstrap") || ""
+  const priorState = (window.history.state || {}) as Record<string, unknown>
+  const token = fromFragment
+    || (typeof priorState[BOOTSTRAP_TOKEN_STATE_KEY] === "string"
+      ? priorState[BOOTSTRAP_TOKEN_STATE_KEY] as string
+      : "")
+
+  if (fromFragment) {
+    // Fragments are not sent to the server, proxies, or referrers. Remove the
+    // credential from the visible URL immediately, retaining it in this
+    // history entry so React StrictMode's development remount does not lose it.
+    window.history.replaceState(
+      { ...priorState, [BOOTSTRAP_TOKEN_STATE_KEY]: fromFragment },
+      "",
+      `${window.location.pathname}${window.location.search}`,
+    )
+  }
+  return token
+}
+
+function forgetBootstrapToken(): void {
+  const next = { ...((window.history.state || {}) as Record<string, unknown>) }
+  delete next[BOOTSTRAP_TOKEN_STATE_KEY]
+  window.history.replaceState(next, "", `${window.location.pathname}${window.location.search}`)
+}
 
 interface BootstrapScreenProps {
   /** Same handler LoginScreen uses — the session cookie is already set. */
@@ -24,6 +53,7 @@ interface BootstrapScreenProps {
 }
 
 export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: BootstrapScreenProps) {
+  const [bootstrapToken] = useState(takeBootstrapToken)
   const [username, setUsername] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
@@ -33,7 +63,8 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
   const [loading, setLoading] = useState(false)
 
   const mismatch = confirmPassword.length > 0 && confirmPassword !== password
-  const incomplete = !username.trim()
+  const incomplete = !bootstrapToken
+    || !username.trim()
     || password.length < MIN_PASSWORD_LENGTH
     || confirmPassword !== password
 
@@ -52,6 +83,7 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
         headers: {
           "Content-Type": "application/json",
           "X-Cogpit-Client": "1",
+          "X-Cogpit-Bootstrap-Token": bootstrapToken,
         },
         body: JSON.stringify({
           username: username.trim(),
@@ -62,6 +94,7 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
 
       const data = await res.json() as { error?: string }
       if (res.ok) {
+        forgetBootstrapToken()
         setPassword("")
         setConfirmPassword("")
         setUsername("")
@@ -73,6 +106,7 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
       if (res.status === 410) {
         // Someone else founded the server first. Re-reading the handshake
         // closes this screen and hands the browser to the login form.
+        forgetBootstrapToken()
         await onBootstrapClosed()
         return
       }
@@ -82,7 +116,7 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
     } finally {
       setLoading(false)
     }
-  }, [username, displayName, password, incomplete, onAuthenticated, onBootstrapClosed])
+  }, [username, displayName, password, bootstrapToken, incomplete, onAuthenticated, onBootstrapClosed])
 
   return (
     <div className="dark flex h-dvh items-center justify-center bg-elevation-0">
@@ -98,6 +132,12 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
             </p>
           </div>
         </div>
+
+        {!bootstrapToken && (
+          <p className="text-sm text-amber-400">
+            Open the one-time setup URL shown in the Cogpit server log.
+          </p>
+        )}
 
         <div className="space-y-1.5">
           <Input

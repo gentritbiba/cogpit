@@ -6,7 +6,9 @@ import {
   listDevices,
   addDevice,
   updateDevice,
+  updateDeviceIfConnectionMatches,
   removeDevice,
+  sameDeviceConnection,
   validateDeviceHost,
   setDeviceRuntime,
   type HubDevice,
@@ -18,6 +20,7 @@ import {
   DeviceAuthError,
   DeviceUnreachableError,
 } from "../hub/device-client"
+import { invalidateDeviceConnections } from "../hub/connection-invalidation"
 
 const DEFAULT_PORT = 19384
 const DEFAULT_TLS_PORT = 443
@@ -376,10 +379,8 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   if (tlsChanged) patch.tls = newTls
   if (usernameChanged) patch.username = newUsername
 
+  let verifiedHello: unknown
   if (sensitiveChanged) {
-    // Any credential-affecting change invalidates the cached device token so
-    // the next request re-mints against the new host/user/password.
-    invalidateDeviceToken(id)
     const probe = await probeDevice(host, port, tls)
     if (!probe.ok) {
       return sendJson(res, probe.code === "UNREACHABLE" ? 502 : 400, {
@@ -404,73 +405,129 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
         patch.auth = "password"
       }
     }
-    setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
+    verifiedHello = probe.hello
   }
 
-  await updateDevice(id, patch)
-  return sendJson(res, 200, { device: toPublic({ ...device, ...patch, username }) })
+  const update = sensitiveChanged
+    ? await updateDeviceIfConnectionMatches(id, device, patch)
+    : null
+  const updated = sensitiveChanged
+    ? update?.status === "updated" ? update.device : undefined
+    : await updateDevice(id, patch)
+  if (sensitiveChanged && update?.status === "conflict") {
+    return sendJson(res, 409, {
+      error: "Device connection settings changed while this update was being verified. Try again.",
+      code: "DEVICE_CHANGED",
+    })
+  }
+  if (!updated) {
+    return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
+  }
+  if (sensitiveChanged) {
+    // Commit first, then advance the credential generation synchronously. This
+    // keeps requests during verification on the still-current old credentials,
+    // while preventing an old in-flight mint from caching after the new record
+    // becomes visible.
+    invalidateDeviceToken(id)
+    invalidateDeviceConnections(id)
+    setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: verifiedHello })
+  }
+  return sendJson(res, 200, { device: toPublic(updated) })
 }
 
 async function handleDelete(id: string, res: ServerResponse): Promise<void> {
   if (!getDevice(id)) {
     return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
   }
-  await removeDevice(id)
+  if (!await removeDevice(id)) {
+    return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
+  }
   invalidateDeviceToken(id)
+  invalidateDeviceConnections(id)
   return sendJson(res, 200, { success: true })
 }
 
 async function handleTest(id: string, res: ServerResponse): Promise<void> {
-  const device = getDevice(id)
+  let device = getDevice(id)
   if (!device) {
     return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
   }
 
-  const probe = await probeDevice(device.host, device.port, device.tls === true)
-  if (!probe.ok) {
-    setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
-    return sendJson(res, 200, {
-      ok: false,
-      reachable: false,
-      authState: "unknown",
-      code: probe.code,
-      error: PROBE_MESSAGES[probe.code],
-    })
-  }
-
-  // No password to check for tunnel devices — reachability is the whole test.
-  if (device.auth === "none") {
-    setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
-    return sendJson(res, 200, { ok: true, reachable: true, authState: "ok", hello: probe.hello })
-  }
-
-  try {
-    await getDeviceToken(device)
-    setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
-    return sendJson(res, 200, { ok: true, reachable: true, authState: "ok", hello: probe.hello })
-  } catch (err) {
-    if (err instanceof DeviceAuthError) {
-      setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now(), lastHello: probe.hello })
-      return sendJson(res, 200, {
-        ok: false,
-        reachable: true,
-        authState: "bad-password",
-        code: "BAD_PASSWORD",
-        error: AUTH_MESSAGES.BAD_PASSWORD,
-      })
+  for (;;) {
+    const probe = await probeDevice(device.host, device.port, device.tls === true)
+    const afterProbe = getDevice(id)
+    if (!afterProbe) {
+      return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
     }
-    if (err instanceof DeviceUnreachableError) {
+    if (!sameDeviceConnection(device, afterProbe)) {
+      // The test request may overlap a PATCH. Discard the stale probe and test
+      // the newly committed host and credentials as one coherent snapshot.
+      device = afterProbe
+      continue
+    }
+    device = afterProbe
+
+    if (!probe.ok) {
       setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
       return sendJson(res, 200, {
         ok: false,
         reachable: false,
         authState: "unknown",
-        code: "UNREACHABLE",
-        error: AUTH_MESSAGES.UNREACHABLE,
+        code: probe.code,
+        error: PROBE_MESSAGES[probe.code],
       })
     }
-    setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
-    return sendJson(res, 502, { error: "Device test failed", code: "TEST_FAILED" })
+
+    // No password to check for tunnel devices — reachability is the whole test.
+    if (device.auth === "none") {
+      setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
+      return sendJson(res, 200, { ok: true, reachable: true, authState: "ok", hello: probe.hello })
+    }
+
+    try {
+      await getDeviceToken(device)
+      const afterMint = getDevice(id)
+      if (!afterMint) {
+        return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
+      }
+      if (!sameDeviceConnection(device, afterMint)) {
+        device = afterMint
+        continue
+      }
+      setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
+      return sendJson(res, 200, { ok: true, reachable: true, authState: "ok", hello: probe.hello })
+    } catch (err) {
+      const current = getDevice(id)
+      if (!current) {
+        return sendJson(res, 404, { error: "Device not found", code: "UNKNOWN_DEVICE" })
+      }
+      if (!sameDeviceConnection(device, current)) {
+        device = current
+        continue
+      }
+      if (err instanceof DeviceAuthError) {
+        setDeviceRuntime(id, { authState: "bad-password", lastProbe: Date.now(), lastHello: probe.hello })
+        return sendJson(res, 200, {
+          ok: false,
+          reachable: true,
+          authState: "bad-password",
+          code: "BAD_PASSWORD",
+          error: AUTH_MESSAGES.BAD_PASSWORD,
+        })
+      }
+      if (err instanceof DeviceUnreachableError) {
+        setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
+        return sendJson(res, 200, {
+          ok: false,
+          reachable: false,
+          authState: "unknown",
+          code: "UNREACHABLE",
+          error: AUTH_MESSAGES.UNREACHABLE,
+        })
+      }
+      setDeviceRuntime(id, { authState: "unknown", lastProbe: Date.now() })
+      return sendJson(res, 502, { error: "Device test failed", code: "TEST_FAILED" })
+    }
   }
 }
 

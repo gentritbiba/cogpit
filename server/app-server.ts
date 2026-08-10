@@ -6,7 +6,14 @@ import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
 
 import { registerApiRoutes } from "./api-routes"
-import { setConfigPath, setDataRoot, loadConfig, getConfig, getDataRoot } from "./config"
+import {
+  setConfigPath,
+  setDataRoot,
+  loadConfig,
+  getConfig,
+  getConfiguredEditionValue,
+  getDataRoot,
+} from "./config"
 import {
   authMiddleware,
   securityHeaders,
@@ -15,15 +22,17 @@ import {
 import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
-import { websocketUpgradeRejection } from "./security"
+import { rejectWebsocketUpgrade } from "./security"
 import { teamAuthzMiddleware } from "./team/authz"
 import { describeEditionSuppression, initEdition, isTeamEdition } from "./team/edition"
-import { initSessionPersistence } from "./team/sessionPersistence"
-import { initUsersStore } from "./team/users"
+import { flushSessionPersistence, initSessionPersistence } from "./team/sessionPersistence"
+import { initUsersStore, userCount } from "./team/users"
+import { initializeBootstrapToken } from "./team/bootstrapToken"
 import { initDeviceRegistry } from "./hub/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
 import { PtySessionManager } from "./pty-server"
+import { PtyAuthorizationController } from "./pty-authorization"
 import type { HubMode } from "./routes/hello"
 
 export interface AppServerEnvironment {
@@ -46,12 +55,13 @@ export async function createServerComposition(
   // those paths correct across later config reloads.
   setDataRoot(userDataDir)
   setConfigPath(join(userDataDir, "config.local.json"))
-  const config = await loadConfig()
+  await loadConfig()
+  const configEdition = getConfiguredEditionValue()
 
   // Edition resolves before any route registers; only the standalone shell can
   // honor a team request, and a suppressed request is logged, never silent.
-  initEdition({ shell: environment.mode, configEdition: config?.edition })
-  const suppression = describeEditionSuppression(process.env, config?.edition, environment.mode)
+  initEdition({ shell: environment.mode, configEdition })
+  const suppression = describeEditionSuppression(process.env, configEdition, environment.mode)
   if (suppression) console.warn(suppression)
 
   if (isTeamEdition()) {
@@ -62,6 +72,7 @@ export async function createServerComposition(
     const teamDir = join(getDataRoot(), "team")
     await initUsersStore(teamDir)
     await initSessionPersistence(teamDir)
+    initializeBootstrapToken(userCount())
   }
 
   await initDeviceRegistry(userDataDir)
@@ -79,7 +90,7 @@ export async function createServerComposition(
   // Block data APIs until configuration exists, while leaving bootstrap and
   // discovery endpoints available.
   app.use("/api", (req, res, next) => {
-    const exempt = ["/config", "/notify", "/hello", "/me", "/team/bootstrap"]
+    const exempt = ["/config", "/notify", "/hello", "/me", "/team/bootstrap", "/auth"]
     if (exempt.some((prefix) => prefixMatches(req.path, prefix))) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
@@ -124,22 +135,24 @@ export async function createServerComposition(
 
   const wss = new WebSocketServer({ noServer: true })
   const ptyManager = new PtySessionManager(wss)
+  const ptyAuthorization = new PtyAuthorizationController()
   const upgradedSockets = new Set<Duplex>()
 
   httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     upgradedSockets.add(socket)
     socket.once("close", () => upgradedSockets.delete(socket))
 
-    if (handleHubUpgrade(req, socket, head)) return
     const url = new URL(req.url || "/", "http://localhost")
-    if (url.pathname === "/__pty") {
-      const rejection = websocketUpgradeRejection(req, url)
-      if (rejection) {
-        const reason = rejection === 401 ? "Unauthorized" : "Forbidden"
-        socket.write(`HTTP/1.1 ${rejection} ${reason}\r\n\r\n`)
-        socket.destroy()
-        return
+    if (handleHubUpgrade(req, socket, head)) {
+      // Hub PTY upgrades bypass the local WebSocketServer and splice raw
+      // sockets, so track the caller's outer team session here as well.
+      if (!socket.destroyed && /^\/hub\/[^/]+\/__pty$/.test(url.pathname)) {
+        ptyAuthorization.trackHubUpgrade(req, url, socket)
       }
+      return
+    }
+    if (url.pathname === "/__pty") {
+      if (rejectWebsocketUpgrade(req, url, socket)) return
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req))
       return
     }
@@ -179,13 +192,14 @@ export async function createServerComposition(
     socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
   })
 
-  wss.on("connection", (ws) => ptyManager.handleConnection(ws))
+  wss.on("connection", (ws, req) => ptyAuthorization.handleConnection(ws, req, ptyManager))
 
   let cleanupPromise: Promise<void> | null = null
   const cleanupRuntime = (): Promise<void> => {
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
       ptyManager.cleanup()
+      ptyAuthorization.cleanup()
       for (const client of wss.clients) client.terminate()
       for (const socket of upgradedSockets) socket.destroy()
       upgradedSockets.clear()
@@ -194,6 +208,7 @@ export async function createServerComposition(
         new Promise<void>((resolve) => wss.close(() => resolve())),
         cleanupProcesses(),
         codexAppServer.shutdown(),
+        flushSessionPersistence(),
       ])
     })()
     return cleanupPromise
@@ -212,6 +227,10 @@ export async function createServerComposition(
 
     await cleanupRuntime()
     await serverClosed
+    // httpServer.close() drains active requests. Flush once more afterwards so
+    // a login/config mutation that completed during runtime cleanup cannot be
+    // acknowledged without its durable session state reaching disk.
+    await flushSessionPersistence()
   }
 
   return { httpServer, dispose }

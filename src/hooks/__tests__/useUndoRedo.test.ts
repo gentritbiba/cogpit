@@ -189,6 +189,18 @@ describe("useUndoRedo", () => {
       expect(result.current.applyError).toBeNull()
     })
 
+    it("does not fetch undo state or expose enabled controls without host-file access", () => {
+      const { result } = renderHook(() =>
+        useUndoRedo(makeSession(), makeSource(), vi.fn(), false)
+      )
+
+      expect(result.current.enabled).toBe(false)
+      expect(result.current.undoState).toBeNull()
+      expect(mockAuthFetch).not.toHaveBeenCalled()
+      act(() => result.current.requestUndo(1))
+      expect(result.current.confirmState).toBeNull()
+    })
+
     it("fetches undo state when session is provided", async () => {
       const session = makeSession()
       const undoState = makeUndoState()

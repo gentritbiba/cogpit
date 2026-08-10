@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { WifiOff, Loader2 } from "lucide-react"
 import App from "@/App"
-import { getActiveDeviceId, getActiveIdentity, switchDevice, LOCAL_DEVICE_ID } from "@/lib/device"
+import {
+  getActiveDeviceId,
+  getActiveIdentity,
+  getDeviceConnectionRevision,
+  switchDevice,
+  LOCAL_DEVICE_ID,
+} from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
 import { useDevices } from "@/hooks/useDevices"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
@@ -39,6 +45,9 @@ import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
  */
 export function DeviceRoot() {
   const [activeDeviceId, setActiveDeviceId] = useState(getActiveDeviceId)
+  const [connectionRevision, setConnectionRevision] = useState(
+    () => getDeviceConnectionRevision(getActiveDeviceId()),
+  )
   const [identityKey, setIdentityKey] = useState(getActiveIdentity)
   const [retryNonce, setRetryNonce] = useState(0)
   const [unreachable, setUnreachable] = useState(false)
@@ -52,6 +61,7 @@ export function DeviceRoot() {
     const sync = () => {
       const next = getActiveDeviceId()
       setActiveDeviceId((prev) => (prev === next ? prev : next))
+      setConnectionRevision(getDeviceConnectionRevision(next))
     }
     window.addEventListener("cogpit-device-changed", sync)
     window.addEventListener("popstate", sync)
@@ -59,6 +69,19 @@ export function DeviceRoot() {
       window.removeEventListener("cogpit-device-changed", sync)
       window.removeEventListener("popstate", sync)
     }
+  }, [])
+
+  useEffect(() => {
+    const syncScope = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        deviceId?: string
+        connectionRevision?: number
+      }>).detail
+      if (detail?.deviceId !== getActiveDeviceId()) return
+      setConnectionRevision(getDeviceConnectionRevision(detail.deviceId))
+    }
+    window.addEventListener("cogpit-device-scope-changed", syncScope)
+    return () => window.removeEventListener("cogpit-device-scope-changed", syncScope)
   }, [])
 
   useEffect(() => {
@@ -103,7 +126,7 @@ export function DeviceRoot() {
     setUnreachable(false)
     setBadPassword(false)
     setRetrying(false)
-  }, [activeDeviceId])
+  }, [activeDeviceId, connectionRevision])
 
   const retry = useCallback(async () => {
     setRetrying(true)
@@ -164,7 +187,7 @@ export function DeviceRoot() {
           </button>
         </div>
       )}
-      <SessionInventoryProvider key={`${activeDeviceId}:${retryNonce}:${identityKey ?? ""}`}>
+      <SessionInventoryProvider key={`${activeDeviceId}:${connectionRevision}:${retryNonce}:${identityKey ?? ""}`}>
         <PendingHumanInputProvider>
           <App />
         </PendingHumanInputProvider>

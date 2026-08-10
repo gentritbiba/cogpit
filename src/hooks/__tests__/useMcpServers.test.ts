@@ -54,6 +54,14 @@ describe("useMcpServers", () => {
     configStore.clear()
   })
 
+  it("does not fetch secret-bearing MCP definitions when disabled", () => {
+    const { result } = renderHook(() => useMcpServers("/test/path", "test-dir", undefined, false))
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(result.current.servers).toEqual([])
+    expect(result.current.mcpConfigJson).toBeNull()
+  })
+
   it("fetches servers and auto-selects connected ones", async () => {
     mockServerResponse([
       { name: "clickup", status: "connected" },

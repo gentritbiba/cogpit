@@ -137,6 +137,8 @@ export interface TeamBootInfo {
   interfaces: InterfaceMap
   /** COGPIT_PUBLIC_URL — the address browsers actually reach this server on. */
   publicUrl?: string | null
+  /** One-time founding-admin credential, placed in a URL fragment. */
+  bootstrapToken: string | null
 }
 
 /**
@@ -163,10 +165,12 @@ export function buildTeamBootNotices(info: TeamBootInfo): string[] {
     const advertised = resolveAdvertisedHost(info.host, info.interfaces)
     const target = advertised && !isLoopbackHost(advertised) ? advertised : "127.0.0.1"
     const divider = "─".repeat(64)
+    const setupUrl = `${publicUrl || `http://${target}:${info.port}`}`
+      + (info.bootstrapToken ? `#bootstrap=${encodeURIComponent(info.bootstrapToken)}` : "")
     lines.push(
       divider,
       "Team edition: no users yet.",
-      `Open ${publicUrl || `http://${target}:${info.port}`} to create the first admin.`,
+      `Open ${setupUrl} to create the first admin.`,
     )
     if (!publicUrl) {
       lines.push(

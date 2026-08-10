@@ -1,7 +1,13 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen, act, waitFor } from "@testing-library/react"
 import { DeviceRoot } from "@/components/DeviceRoot"
-import { deviceScopedKey, setActiveIdentity, __resetIdentityForTest } from "@/lib/device"
+import {
+  __resetDeviceRevisionsForTest,
+  __resetIdentityForTest,
+  deviceScopedKey,
+  recordDeviceConnectionRevision,
+  setActiveIdentity,
+} from "@/lib/device"
 
 const mocks = vi.hoisted(() => ({
   getActiveDeviceId: vi.fn(() => "dev_1"),
@@ -120,10 +126,12 @@ describe("DeviceRoot identity-keyed remount", () => {
     vi.clearAllMocks()
     mocks.getActiveDeviceId.mockReturnValue("local")
     localStorage.clear()
+    __resetDeviceRevisionsForTest()
     __resetIdentityForTest()
   })
   afterEach(() => {
     __resetIdentityForTest()
+    __resetDeviceRevisionsForTest()
     localStorage.clear()
   })
 
@@ -169,5 +177,24 @@ describe("DeviceRoot identity-keyed remount", () => {
     expect(screen.getByTestId("app")).toHaveTextContent("empty")
     act(() => setActiveIdentity("u_1"))
     expect(screen.getByTestId("app")).toHaveTextContent("written-by-u1")
+  })
+
+  it("remounts a same-id remote on a sensitive revision change but not a rename notification", () => {
+    window.history.replaceState(null, "", "/d/dev_1/")
+    mocks.getActiveDeviceId.mockReturnValue("dev_1")
+    recordDeviceConnectionRevision("dev_1", 4)
+    localStorage.setItem("cogpit:test-pref::dev_1@4", "old-target")
+    localStorage.setItem("cogpit:test-pref::dev_1@5", "new-target")
+
+    render(<DeviceRoot />)
+    expect(screen.getByTestId("app")).toHaveTextContent("old-target")
+
+    act(() => { recordDeviceConnectionRevision("dev_1", 5) })
+    expect(screen.getByTestId("app")).toHaveTextContent("new-target")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+
+    // A rename response repeats the same server revision and must stay warm.
+    act(() => { recordDeviceConnectionRevision("dev_1", 5) })
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
   })
 })

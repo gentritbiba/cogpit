@@ -9,8 +9,11 @@ vi.mock("../../hub/registry", () => ({
 
 import {
   getDeviceToken,
+  getDeviceTokenLease,
   invalidateDeviceToken,
+  invalidateDeviceTokenGeneration,
   DeviceAuthError,
+  DeviceCredentialsChangedError,
   DeviceUnreachableError,
 } from "../../hub/device-client"
 import { setDeviceRuntime, type HubDevice } from "../../hub/registry"
@@ -140,6 +143,61 @@ describe("getDeviceToken — caching", () => {
     expect(await getDeviceToken(device)).toBe("tok1")
     invalidateDeviceToken(device.id)
     expect(await getDeviceToken(device)).toBe("tok2")
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("conditionally invalidates an expired generation only once", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okResponse("same-token"))
+      .mockResolvedValueOnce(okResponse("same-token"))
+    const device = makeDevice()
+
+    const expired = await getDeviceTokenLease(device)
+    expect(invalidateDeviceTokenGeneration(device.id, expired.generation)).toBe(true)
+    const replacement = await getDeviceTokenLease(device)
+
+    // A late 401 for the old lease must not invalidate the replacement, even
+    // if the device happens to mint the same opaque token string again.
+    expect(invalidateDeviceTokenGeneration(device.id, expired.generation)).toBe(false)
+    expect(replacement.generation).toBe(expired.generation + 1)
+    expect(await getDeviceToken(device)).toBe("same-token")
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("never lets an invalidated in-flight mint overwrite the new credential generation", async () => {
+    let resolveOld!: (response: Response) => void
+    mockFetch
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveOld = resolve }))
+      .mockResolvedValueOnce(okResponse("new-user-token"))
+    const oldDevice = makeDevice({ username: "alice", password: "alice-password" })
+
+    const oldMint = getDeviceToken(oldDevice)
+    invalidateDeviceToken(oldDevice.id)
+    const newDevice = { ...oldDevice, username: "bob", password: "bob-password" }
+
+    // The new generation must not single-flight behind the old account.
+    expect(await getDeviceToken(newDevice)).toBe("new-user-token")
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+
+    // Completing the old request last must reject its waiting proxy caller,
+    // neither overwriting the new cache nor dispatching the old principal.
+    resolveOld(okResponse("old-user-token"))
+    await expect(oldMint).rejects.toBeInstanceOf(DeviceCredentialsChangedError)
+    expect(await getDeviceToken(newDevice)).toBe("new-user-token")
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockSetRuntime).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears a failed generation's cooldown when credentials change", async () => {
+    const device = makeDevice({ username: "alice" })
+    mockFetch
+      .mockResolvedValueOnce(statusResponse(401))
+      .mockResolvedValueOnce(okResponse("bob-token"))
+
+    await expect(getDeviceToken(device)).rejects.toBeInstanceOf(DeviceAuthError)
+    invalidateDeviceToken(device.id)
+
+    await expect(getDeviceToken({ ...device, username: "bob" })).resolves.toBe("bob-token")
     expect(mockFetch).toHaveBeenCalledTimes(2)
   })
 })

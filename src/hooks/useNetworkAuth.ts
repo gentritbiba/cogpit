@@ -49,17 +49,44 @@ export function useNetworkAuth(): NetworkAuth {
       }
     })
 
-    const handler = () => {
-      authVersionRef.current += 1
-      setAuthenticated(false)
-      setSessionChecked(true)
+    return () => {
+      cancelled = true
     }
+  }, [gated])
+
+  // Listen even while a local client is provisionally treated as personal.
+  // A failed startup hello intentionally falls back to personal, but a later
+  // API 401 can successfully re-probe the same server as team edition and emit
+  // this event. Re-probing here upgrades the gate instead of leaving the app in
+  // an authenticated-looking state. A genuinely personal server stays open.
+  useEffect(() => {
+    let cancelled = false
+    const handler = () => {
+      const version = ++authVersionRef.current
+      const requireAuthentication = () => {
+        if (cancelled || authVersionRef.current !== version) return
+        setAuthenticated(false)
+        setSessionChecked(true)
+      }
+
+      if (remote || hello?.edition === "team") {
+        requireAuthentication()
+        return
+      }
+
+      void refreshServerHello().then((resolved) => {
+        if (cancelled || authVersionRef.current !== version) return
+        setHello(resolved)
+        if (resolved.edition === "team") requireAuthentication()
+      })
+    }
+
     window.addEventListener("cogpit-auth-required", handler)
     return () => {
       cancelled = true
       window.removeEventListener("cogpit-auth-required", handler)
     }
-  }, [gated])
+  }, [hello?.edition, remote])
 
   const handleAuthenticated = useCallback(() => {
     authVersionRef.current += 1
@@ -83,6 +110,7 @@ export function useNetworkAuth(): NetworkAuth {
 
   return {
     isRemote: remote,
+    edition: hello?.edition ?? null,
     authChecked: sessionChecked && hello !== null,
     authenticated,
     needsBootstrap: hello?.needsBootstrap === true,

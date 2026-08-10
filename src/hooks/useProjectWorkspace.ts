@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { useProcessPanel } from "@/hooks/useProcessPanel"
+import { can } from "@/lib/capabilities"
 
 interface UseProjectWorkspaceOptions {
   sessionId: string | null | undefined
@@ -45,6 +46,7 @@ export function useProjectWorkspace({
 
   /** Fire-and-forget POST for actions exposed on a pending project. */
   const postProjectAction = useCallback((endpoint: PendingProjectActionEndpoint) => {
+    if (!can("hostFiles")) return
     authFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

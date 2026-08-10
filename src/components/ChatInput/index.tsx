@@ -15,6 +15,7 @@ import type { AgentKind } from "@/lib/sessionSource"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
+import { useCapability } from "@/hooks/useCapability"
 
 export interface ChatInputHandle {
   focus: () => void
@@ -94,6 +95,7 @@ function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, compact = false }, ref) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const {
     session,
     isLive,
@@ -140,7 +142,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   }, [showSlash, slashFilter, slashSuggestions])
 
   const fileMention = useMemo(() => findFileMention(text), [text])
-  const showFiles = Boolean(fileMention && projectCwd && !fileSuggestionsDismissed)
+  const showFiles = Boolean(canAccessHostFiles && fileMention && projectCwd && !fileSuggestionsDismissed)
   const fileSuggestions = useProjectFileSuggestions(
     projectCwd,
     fileMention?.query ?? "",

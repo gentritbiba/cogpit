@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { BootstrapScreen } from "@/components/BootstrapScreen"
 
 const STRONG_PASSWORD = "correct horse battery staple"
+const BOOTSTRAP_TOKEN = "bootstrap-token-with-at-least-32-characters"
 
 interface MockServerOptions {
   status?: number
@@ -43,6 +44,7 @@ describe("BootstrapScreen", () => {
     localStorage.clear()
     sessionStorage.clear()
     vi.restoreAllMocks()
+    window.history.replaceState({}, "", `/#bootstrap=${BOOTSTRAP_TOKEN}`)
   })
 
   it("creates the first admin and enters the app on the shared auth path", async () => {
@@ -59,6 +61,7 @@ describe("BootstrapScreen", () => {
     expect(init?.headers).toMatchObject({
       "Content-Type": "application/json",
       "X-Cogpit-Client": "1",
+      "X-Cogpit-Bootstrap-Token": BOOTSTRAP_TOKEN,
     })
     expect(JSON.parse(String(init?.body))).toEqual({
       username: "Gent",
@@ -68,6 +71,19 @@ describe("BootstrapScreen", () => {
     // or a later logout would land back on a bootstrap that no longer exists.
     expect(onBootstrapClosed).toHaveBeenCalledBefore(onAuthenticated)
     expect(screen.getByPlaceholderText("Password")).toHaveValue("")
+    expect(window.location.hash).toBe("")
+  })
+
+  it("removes the setup credential from the URL and refuses submission without one", () => {
+    window.history.replaceState({}, "", "/")
+    const fetchSpy = mockServer()
+    renderScreen()
+
+    fillCredentials()
+
+    expect(screen.getByText(/one-time setup URL/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create admin account" })).toBeDisabled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it("sends an optional display name when one is given", async () => {

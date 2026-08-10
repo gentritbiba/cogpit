@@ -1,11 +1,13 @@
 import { act, renderHook } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/lib/auth", () => ({
   authFetch: vi.fn(),
 }))
 
 import { authFetch } from "@/lib/auth"
+import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import { mapClaudeRuntimeResponse, mapCodexRuntimeResponse, useTokenUsage } from "../useTokenUsage"
 
 const mockedAuthFetch = vi.mocked(authFetch)
@@ -84,6 +86,30 @@ describe("mapClaudeRuntimeResponse", () => {
 describe("useTokenUsage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    __resetCapabilitiesForTest()
+  })
+
+  afterEach(() => {
+    __resetCapabilitiesForTest()
+    vi.restoreAllMocks()
+  })
+
+  it("does not fetch or schedule polling when provider usage is unavailable to a member", async () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: { id: "member-1", username: "bob", displayName: "Bob", role: "member", createdAt: 1 },
+      capabilities: MEMBER_CAPABILITIES,
+    })
+    const intervalSpy = vi.spyOn(globalThis, "setInterval")
+
+    const { result } = renderHook(() => useTokenUsage("claude"))
+    await act(async () => { await Promise.resolve() })
+    result.current.refresh()
+
+    expect(mockedAuthFetch).not.toHaveBeenCalled()
+    expect(intervalSpy).not.toHaveBeenCalled()
+    expect(result.current).toMatchObject({ usage: null, loading: false, available: false })
   })
 
   it("ignores a stale provider response after the selected agent changes", async () => {

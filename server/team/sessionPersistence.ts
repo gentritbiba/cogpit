@@ -2,7 +2,11 @@ import { createHash } from "node:crypto"
 import { chmod, mkdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
-import { SESSION_ABSOLUTE_TTL_MS, type SessionPrincipal } from "./constants"
+import {
+  SESSION_ABSOLUTE_TTL_MS,
+  SESSION_IDLE_TTL_MS,
+  type SessionPrincipal,
+} from "./constants"
 
 /**
  * Restart-surviving login sessions for team edition.
@@ -10,9 +14,9 @@ import { SESSION_ABSOLUTE_TTL_MS, type SessionPrincipal } from "./constants"
  * Persists `{ sessions: Row[] }` to `<dataRoot>/team/sessions.json` (0600 in a
  * 0700 directory). Rows carry only a sha256 token hash — the token itself
  * already has 256 bits of entropy, so a fast hash is the right primitive and
- * a leaked file never yields usable tokens. Only userId and createdAt are
- * persisted per session: username and role are re-read from the users store at
- * rehydrate time so role changes and disables apply across restarts.
+ * a leaked file never yields usable tokens. Username and role are re-read from
+ * the users store at rehydrate time so role changes and disables apply across
+ * restarts; last activity is durable so a restart cannot reset the idle TTL.
  *
  * Mutations hit the in-memory rows synchronously — a revoked token must not be
  * restorable even for an instant — while the durable snapshot writes trail
@@ -24,6 +28,7 @@ interface PersistedSession {
   userId: string
   createdAt: number
   expiresAt: number
+  lastActivity: number
 }
 
 // ── Module state ─────────────────────────────────────────────────────
@@ -31,16 +36,25 @@ interface PersistedSession {
 let sessionsPath: string | null = null
 const sessions = new Map<string, PersistedSession>()
 let operationQueue: Promise<void> = Promise.resolve()
+let stateVersion = 0
+let persistedVersion = 0
 
 export function __resetForTest(): void {
   sessionsPath = null
   sessions.clear()
   operationQueue = Promise.resolve()
+  stateVersion = 0
+  persistedVersion = 0
 }
 
 /** Resolves once every mutation enqueued so far has settled. */
 export function __flushForTest(): Promise<void> {
-  return operationQueue
+  return flushSessionPersistence()
+}
+
+/** Wait for all queued durable mutations (also used during graceful shutdown). */
+export function flushSessionPersistence(): Promise<void> {
+  return schedulePersist()
 }
 
 // ── Persistence ──────────────────────────────────────────────────────
@@ -69,21 +83,43 @@ function replaceSessions(next: ReadonlyMap<string, PersistedSession>): void {
 // coalesce and the last write always reflects the final in-memory state.
 function schedulePersist(): Promise<void> {
   return enqueueOperation(async () => {
-    if (!sessionsPath) return
+    if (!sessionsPath || persistedVersion === stateVersion) return
+    const version = stateVersion
     await writeOwnerOnlyJson(sessionsPath, { sessions: [...sessions.values()] }, 0o600)
+    persistedVersion = version
   })
 }
 
-function isLiveRow(row: unknown, now: number): row is PersistedSession {
-  if (typeof row !== "object" || row === null) return false
+function markDirty(): void {
+  stateVersion += 1
+}
+
+function parseLiveRow(row: unknown, now: number): PersistedSession | null {
+  if (typeof row !== "object" || row === null) return null
   const candidate = row as Partial<PersistedSession>
-  return (
-    typeof candidate.tokenHash === "string"
-    && typeof candidate.userId === "string"
-    && Number.isFinite(candidate.createdAt)
-    && Number.isFinite(candidate.expiresAt)
-    && (candidate.expiresAt as number) > now
-  )
+  if (
+    typeof candidate.tokenHash !== "string"
+    || typeof candidate.userId !== "string"
+    || !Number.isFinite(candidate.createdAt)
+    || !Number.isFinite(candidate.expiresAt)
+  ) return null
+
+  // Rows written before idle persistence existed conservatively inherit their
+  // creation time. They may require an earlier re-login, but can never gain a
+  // fresh idle window merely because the process restarted.
+  const lastActivity = Number.isFinite(candidate.lastActivity)
+    ? candidate.lastActivity as number
+    : candidate.createdAt as number
+  if ((candidate.expiresAt as number) <= now || now - lastActivity > SESSION_IDLE_TTL_MS) {
+    return null
+  }
+  return {
+    tokenHash: candidate.tokenHash,
+    userId: candidate.userId,
+    createdAt: candidate.createdAt as number,
+    expiresAt: candidate.expiresAt as number,
+    lastActivity,
+  }
 }
 
 /**
@@ -108,22 +144,37 @@ export async function initSessionPersistence(dir: string): Promise<void> {
     }
 
     const loaded = new Map<string, PersistedSession>()
+    let needsRewrite = false
     if (raw !== null) {
       const now = Date.now()
       try {
         const parsed = JSON.parse(raw)
         if (parsed && Array.isArray(parsed.sessions)) {
           for (const row of parsed.sessions) {
-            if (isLiveRow(row, now)) loaded.set(row.tokenHash, row)
+            const live = parseLiveRow(row, now)
+            if (live) {
+              loaded.set(live.tokenHash, live)
+              if (!Number.isFinite((row as Partial<PersistedSession>).lastActivity)) needsRewrite = true
+            } else {
+              needsRewrite = true
+            }
           }
+        } else {
+          needsRewrite = true
         }
       } catch {
-        // Corrupt store: start empty and let the next mutation rewrite it.
+        // Corrupt session state fails toward re-login and is repaired now.
+        needsRewrite = true
       }
     }
 
     sessionsPath = nextPath
     replaceSessions(loaded)
+    if (raw !== null && needsRewrite) {
+      await writeOwnerOnlyJson(nextPath, { sessions: [...loaded.values()] }, 0o600)
+    }
+    stateVersion = 0
+    persistedVersion = 0
   })
 }
 
@@ -137,6 +188,7 @@ export function persistSession(
   token: string,
   principal: SessionPrincipal,
   createdAt: number,
+  lastActivity: number = createdAt,
 ): Promise<void> {
   const tokenHash = hashToken(token)
   sessions.set(tokenHash, {
@@ -144,19 +196,29 @@ export function persistSession(
     userId: principal.userId,
     createdAt,
     expiresAt: createdAt + SESSION_ABSOLUTE_TTL_MS,
+    lastActivity,
   })
+  markDirty()
   return schedulePersist()
 }
 
-/** Synchronous lookup for the validate path; expired rows are treated as gone. */
-export function restoreSession(token: string): { userId: string; createdAt: number } | null {
+/** Synchronous lookup; the security layer applies TTLs and removes stale rows. */
+export function restoreSession(token: string): { userId: string; createdAt: number; lastActivity: number } | null {
   const row = sessions.get(hashToken(token))
-  if (!row || row.expiresAt <= Date.now()) return null
-  return { userId: row.userId, createdAt: row.createdAt }
+  if (!row) return null
+  return { userId: row.userId, createdAt: row.createdAt, lastActivity: row.lastActivity }
+}
+
+export function touchSession(token: string, lastActivity: number): Promise<void> {
+  const row = sessions.get(hashToken(token))
+  if (!row || lastActivity <= row.lastActivity) return schedulePersist()
+  row.lastActivity = lastActivity
+  markDirty()
+  return schedulePersist()
 }
 
 export function removeSession(token: string): Promise<void> {
-  if (!sessions.delete(hashToken(token))) return Promise.resolve()
+  if (sessions.delete(hashToken(token))) markDirty()
   return schedulePersist()
 }
 
@@ -167,11 +229,14 @@ export function removeSessionsForUser(userId: string): Promise<void> {
     sessions.delete(tokenHash)
     changed = true
   }
-  return changed ? schedulePersist() : Promise.resolve()
+  if (changed) markDirty()
+  return schedulePersist()
 }
 
 export function clearAllSessions(): Promise<void> {
-  if (sessions.size === 0) return Promise.resolve()
-  sessions.clear()
+  if (sessions.size > 0) {
+    sessions.clear()
+    markDirty()
+  }
   return schedulePersist()
 }
