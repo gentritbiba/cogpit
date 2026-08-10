@@ -292,6 +292,30 @@ describe("app-server initialization and proxy failures", () => {
     }
   })
 
+  it("matches 503-gate exemptions on segment boundaries only", async () => {
+    const previousCodexHome = process.env.CODEX_HOME
+    process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+    try {
+      const appServer = await createStandaloneAppServer(staticDir, userDataDir)
+      const baseUrl = await listen(appServer.httpServer)
+
+      // /api/messages must not inherit the /api/me exemption.
+      const messages = await fetch(`${baseUrl}/api/messages`)
+      expect(messages.status).toBe(503)
+      await expect(messages.json()).resolves.toMatchObject({ code: "NOT_CONFIGURED" })
+
+      // The exempt path itself stays reachable, query string included.
+      const me = await fetch(`${baseUrl}/api/me?probe=1`)
+      expect(me.status).toBe(200)
+
+      await appServer.dispose()
+      openServers.delete(appServer.httpServer)
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+      else process.env.CODEX_HOME = previousCodexHome
+    }
+  })
+
   it("returns 502 when the configured Vite development server is unavailable", async () => {
     const unavailable = createServer()
     const unavailableUrl = await listen(unavailable)

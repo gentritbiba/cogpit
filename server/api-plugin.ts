@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 import { registerApiRoutes } from "./api-routes"
 import { loadConfig, getConfig } from "./config"
 import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
 import { teamAuthzMiddleware } from "./team/authz"
@@ -49,13 +50,8 @@ export function sessionApiPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = req.url || ""
         // Allow config/identity/bootstrap endpoints through without guard
-        if (
-          url.startsWith("/api/config")
-          || url.startsWith("/api/notify")
-          || url.startsWith("/api/hello")
-          || url.startsWith("/api/me")
-          || url.startsWith("/api/team/bootstrap")
-        ) return next()
+        const exempt = ["/api/config", "/api/notify", "/api/hello", "/api/me", "/api/team/bootstrap"]
+        if (exempt.some((prefix) => prefixMatches(url, prefix))) return next()
         // Allow non-API requests through (HTML, JS, CSS)
         if (!url.startsWith("/api/")) return next()
         // Block data APIs when not configured

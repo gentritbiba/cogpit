@@ -343,6 +343,13 @@ export function computeCapabilities(principal: SessionPrincipal | null, edition:
 
 **Status: DONE.** Deviations: `/api/team/*` management surfaces answer 404 `Team edition only` in personal edition instead of erroring deep inside the never-initialized users store; `computeCapabilities` takes `SessionPrincipal` from `team/constants` (Task 5's cycle-guard home, not `../security` as sketched); an app-server integration test pins the 503-gate exemption for `/api/me` + bootstrap. Users-store review hardening rode along: per-record shape validation on load (string id/username + recognized password hash, else fail closed), allow-list `toPublicUser()` projection replacing the block-list destructures, displayName trim/cap-64/reject-empty, and `commitUserMutation` refusing an uninitialized store.
 
+Tasks 8-9 review fixes:
+- Bootstrap browser logins now hit login's `canIssueBrowserSession` 426 gate before `createUser`, so a plain-HTTP remote founder is never bootstrapped-but-cookieless.
+- `PATCH /api/team/users/:id` validates field types and password strength before applying any mutation — a 400 on a mixed payload means nothing changed.
+- Both shells' NOT_CONFIGURED 503-gate exemptions match on segment boundaries via `prefixMatches` (shared from `server/http.ts`, also consolidating the policy-table copy); `/api/messages` no longer rides `/api/me`, and `/api/config-browser` no longer rides `/api/config`.
+- Team login body reads preserve `HttpBodyError` statuses (oversized body stays 413, not 400).
+- Bootstrap responses carry `Cache-Control: no-store` like `/api/auth/verify` (the machine response bodies a token).
+
 ---
 
 ### Task 10: Boot wiring + shells

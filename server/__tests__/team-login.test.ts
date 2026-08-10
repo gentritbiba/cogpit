@@ -268,6 +268,21 @@ describe("POST /api/auth/verify (team edition)", () => {
     expect(mockedVerifyPasswordAsync).not.toHaveBeenCalled()
   })
 
+  it("preserves the 413 status for an oversized JSON login body", async () => {
+    const body = JSON.stringify({ username: "alice", password: "x".repeat(70_000) })
+    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+
+    const pending = handler(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(413)
+    expect(JSON.parse(res._getData())).toEqual({
+      valid: false,
+      error: "Request body too large",
+    })
+  })
+
   it("requires a password when the JSON body omits it", async () => {
     const body = JSON.stringify({ username: "alice" })
     const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)

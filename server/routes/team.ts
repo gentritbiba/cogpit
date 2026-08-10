@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { HttpBodyError, readJsonBody, sendJson, type UseFn } from "../http"
-import { revokeSessionsForUser } from "../helpers"
+import { canIssueBrowserSession, revokeSessionsForUser, validatePasswordStrength } from "../helpers"
 import { type MeResponse, type TeamRole } from "../../shared/contracts/team"
 import { computeCapabilities } from "../team/capabilities"
 import { getEdition, isTeamEdition } from "../team/edition"
@@ -95,6 +95,21 @@ export function registerTeamAdminRoutes(use: UseFn) {
     if (!isTeamEdition()) {
       return sendJson(res, 404, { error: "Team edition only" })
     }
+    // Session material can ride in the response body for machine clients, so
+    // no cache may store it — same rule as /api/auth/verify.
+    res.setHeader("Cache-Control", "no-store")
+
+    // Mirror login's HTTPS gate: a plain-HTTP remote browser cannot store the
+    // session cookie, so reject before the admin is created rather than
+    // strand a bootstrapped-but-unauthenticated founder.
+    const browserLogin = req.headers["x-cogpit-client"] === "1"
+    if (browserLogin && !canIssueBrowserSession(req)) {
+      return sendJson(res, 426, {
+        valid: false,
+        error: "Secure HTTPS is required for remote browser access",
+      })
+    }
+
     const body = await readBodyOrRespond(req, res)
     if (body === null) return
 
@@ -109,7 +124,7 @@ export function registerTeamAdminRoutes(use: UseFn) {
           displayName: typeof body.displayName === "string" ? body.displayName : undefined,
           role: "admin",
         })
-        issueSessionResponse(req, res, req.headers["x-cogpit-client"] === "1", {
+        issueSessionResponse(req, res, browserLogin, {
           userId: user.id,
           username: user.username,
           role: user.role,
@@ -172,6 +187,12 @@ export function registerTeamAdminRoutes(use: UseFn) {
       }
       if (body.password !== undefined && typeof body.password !== "string") {
         return sendJson(res, 400, { error: "Password must be a string" })
+      }
+      // A mixed payload is all-or-nothing: a weak password must reject before
+      // the disabled/role mutations below persist anything.
+      if (typeof body.password === "string") {
+        const strengthError = validatePasswordStrength(body.password)
+        if (strengthError) return sendJson(res, 400, { error: strengthError })
       }
 
       try {

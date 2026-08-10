@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { readJsonBody, type UseFn } from "../http"
+import { HttpBodyError, readJsonBody, type UseFn } from "../http"
 import {
   refreshDirs,
   isTrustedDirectLocalRequest,
@@ -105,9 +105,12 @@ async function handleTeamLogin(
     let body: { username?: unknown; password?: unknown }
     try {
       body = await readJsonBody<{ username?: unknown; password?: unknown }>(req, { allowEmpty: true })
-    } catch {
-      res.statusCode = 400
-      res.end(JSON.stringify({ valid: false, error: "Invalid request body" }))
+    } catch (error) {
+      res.statusCode = error instanceof HttpBodyError ? error.statusCode : 400
+      res.end(JSON.stringify({
+        valid: false,
+        error: error instanceof Error ? error.message : "Invalid request body",
+      }))
       return
     }
     username = body.username

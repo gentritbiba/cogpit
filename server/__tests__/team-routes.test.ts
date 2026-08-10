@@ -177,6 +177,8 @@ describe("POST /api/team/bootstrap", () => {
     await pending
 
     expect(res._getStatus()).toBe(200)
+    // The token rides in the body, so no cache may store the response.
+    expect(res._getHeaders()["Cache-Control"]).toBe("no-store")
     const payload = JSON.parse(res._getData())
     expect(payload.valid).toBe(true)
     expect(payload.token).toMatch(/^[0-9a-f]{64}$/)
@@ -192,11 +194,12 @@ describe("POST /api/team/bootstrap", () => {
     })
   })
 
-  it("sets the HttpOnly cookie for browser clients and withholds the token", async () => {
+  it("sets the HttpOnly cookie for HTTPS-forwarded browser clients and withholds the token", async () => {
     enterTeamEdition()
     const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD })
     const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
     req.headers["x-cogpit-client"] = "1"
+    req.headers["x-forwarded-proto"] = "https"
 
     const pending = bootstrapHandler()(req, res, next)
     sendBody()
@@ -205,6 +208,26 @@ describe("POST /api/team/bootstrap", () => {
     expect(res._getStatus()).toBe(200)
     expect(JSON.parse(res._getData())).toEqual({ valid: true })
     expect(res._getHeaders()["Set-Cookie"]).toContain("__Host-cogpit_session=")
+  })
+
+  it("rejects a plain-HTTP remote browser bootstrap with 426 before creating the admin", async () => {
+    enterTeamEdition()
+    const body = JSON.stringify({ username: "alice", password: STRONG_PASSWORD })
+    const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+    req.headers["x-cogpit-client"] = "1"
+    // Remote socket, no HTTPS forwarding headers: the cookie could never be
+    // stored, so the admin must not be created either.
+
+    const pending = bootstrapHandler()(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(426)
+    expect(JSON.parse(res._getData())).toEqual({
+      valid: false,
+      error: "Secure HTTPS is required for remote browser access",
+    })
+    expect(userCount()).toBe(0)
   })
 
   it("answers 410 once a user exists", async () => {
@@ -425,6 +448,25 @@ describe("/api/team/users", () => {
     await pending
 
     expect(res._getStatus()).toBe(404)
+  })
+
+  it("applies nothing from a mixed patch whose password is weak", async () => {
+    enterTeamEdition()
+    await createUser({ username: "alice", password: STRONG_PASSWORD, role: "admin" })
+    const bob = await createUser({ username: "bob", password: STRONG_PASSWORD, role: "member" })
+    const token = await createSessionFor({ id: bob.id, username: "bob", role: "member" })
+
+    const body = JSON.stringify({ role: "admin", password: "short" })
+    const { req, res, next, sendBody } = createMockReqRes("PATCH", `/${bob.id}`, body)
+    const pending = usersHandler()(req, res, next)
+    sendBody()
+    await pending
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).error).toContain("16 characters")
+    // 400 must mean nothing changed: role intact, sessions not revoked.
+    expect(getUserById(bob.id)?.role).toBe("member")
+    expect(validateSessionToken(token)).toBe(true)
   })
 
   it("maps a weak password reset to 400", async () => {

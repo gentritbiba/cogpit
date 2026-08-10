@@ -12,6 +12,7 @@ import {
   securityHeaders,
   bodySizeLimit,
 } from "./helpers"
+import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
 import { websocketUpgradeRejection } from "./security"
@@ -78,13 +79,8 @@ export async function createServerComposition(
   // Block data APIs until configuration exists, while leaving bootstrap and
   // discovery endpoints available.
   app.use("/api", (req, res, next) => {
-    if (
-      req.path.startsWith("/config")
-      || req.path.startsWith("/notify")
-      || req.path.startsWith("/hello")
-      || req.path.startsWith("/me")
-      || req.path.startsWith("/team/bootstrap")
-    ) return next()
+    const exempt = ["/config", "/notify", "/hello", "/me", "/team/bootstrap"]
+    if (exempt.some((prefix) => prefixMatches(req.path, prefix))) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })
       return

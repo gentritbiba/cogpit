@@ -1,3 +1,5 @@
+import { prefixMatches } from "../http"
+
 export type PolicyRequirement = "public" | "authed" | "admin"
 
 export interface PolicyRule {
@@ -124,17 +126,6 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()
-
-/**
- * A prefix only matches at a path-segment boundary: the path equals it, the
- * prefix already ends in "/", or the next character is "/". Keeps /api/hellox
- * from riding the /api/hello rule.
- */
-function prefixMatches(path: string, prefix: string): boolean {
-  if (!path.startsWith(prefix)) return false
-  if (path.length === prefix.length || prefix.endsWith("/")) return true
-  return path[prefix.length] === "/"
-}
 
 /**
  * Resolve the requirement for a query-stripped, lowercased path. Longest
