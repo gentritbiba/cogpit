@@ -109,6 +109,16 @@ describe("getDeviceToken — single-flight", () => {
 
     expect(mockFetch.mock.calls[0][0]).toBe("https://cogpit.example.com:443/api/auth/verify")
   })
+
+  it("sends user:password Bearer credentials when the device names a team user", async () => {
+    mockFetch.mockResolvedValue(okResponse("tok1"))
+    const device = makeDevice({ username: "alice", password: "hunter2secret" })
+
+    await getDeviceToken(device)
+
+    const [, init] = mockFetch.mock.calls[0]
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer alice:hunter2secret" })
+  })
 })
 
 // ── Cache reuse ──────────────────────────────────────────────────────

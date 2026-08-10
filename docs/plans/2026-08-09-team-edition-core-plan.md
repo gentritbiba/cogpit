@@ -386,6 +386,8 @@ export function computeCapabilities(principal: SessionPrincipal | null, edition:
 
 **Steps:** failing tests (registry round-trips username; mint sends `user:pass` Bearer when username present, bare password otherwise — assert via the mocked fetch/request the existing tests use; add-device passes username through) → implement → green ✋ full suite → commit `feat(team): hub devices authenticate as a named user`.
 
+**Status: DONE.** Deviations/notes: `username` is stored only for `auth: "password"` devices and cleared alongside the password when a device switches to `auth: "none"`; a PATCH that changes only the username still counts as a sensitive change (token invalidated, device re-probed) and re-verifies with the stored password so a typo'd user fails at edit time, not on the next proxy call; a device 403 whose body says `Account disabled` surfaces as new code `ACCOUNT_DISABLED` (distinct from `NETWORK_DISABLED`, which keeps its meaning for personal devices) — the renderer shows the server's `error` string, so no client change was needed.
+
 ---
 
 ### Task 12: Renderer — team login

@@ -100,6 +100,45 @@ describe("addDevice", () => {
   })
 })
 
+// ── Device usernames (team devices) ──────────────────────────────────
+
+describe("device usernames", () => {
+  it("round-trips the username through persistence", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    expect(getDevice(id)?.username).toBe("alice")
+
+    await initDeviceRegistry(dir)
+    expect(getDevice(id)?.username).toBe("alice")
+  })
+
+  it("lists the username while still stripping the password", async () => {
+    await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    const entry = listDevices()[0]
+    expect(entry.username).toBe("alice")
+    expect("password" in entry).toBe(false)
+  })
+
+  it("does not store a username for auth: none devices", async () => {
+    const { id } = await addDevice({ name: "Tunnel", host: "10.0.0.9", auth: "none", username: "ignored" })
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
+
+  it("patches the username and clears it when switching to auth: none", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    await updateDevice(id, { username: "bob" })
+    expect(getDevice(id)?.username).toBe("bob")
+
+    await updateDevice(id, { auth: "none" })
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
+})
+
 // ── listDevices ──────────────────────────────────────────────────────
 
 describe("listDevices", () => {

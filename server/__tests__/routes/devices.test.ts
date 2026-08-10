@@ -419,6 +419,81 @@ describe("POST /api/hub/devices", () => {
   })
 })
 
+// ── Device usernames (team devices) ─────────────────────────────────────────
+
+describe("device usernames", () => {
+  it("verifies and saves a username-carrying device (trimmed + lowercased)", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedAddDevice.mockReturnValue({
+      id: "dev_user", name: "remote-mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 123,
+    } as never)
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: " Alice " })
+
+    expect(res._getStatus()).toBe(201)
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer alice:pw" })
+    expect(mockedAddDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "alice", password: "pw", auth: "password" }),
+    )
+    const body = JSON.parse(res._getData())
+    expect(body.device.username).toBe("alice")
+    expect(body.device.password).toBeUndefined()
+  })
+
+  it("surfaces ACCOUNT_DISABLED distinctly from NETWORK_DISABLED on a device 403", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: "Account disabled" } }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("re-verifies with the stored password and invalidates the token on a username change", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { username: "Bob " })
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer bob:pw" })
+    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ username: "bob" }))
+    expect(JSON.parse(res._getData()).device.username).toBe("bob")
+  })
+
+  it("treats an unchanged username as a non-sensitive patch", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { username: "alice", name: "renamed" })
+
+    expect(res._getStatus()).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ name: "renamed" }))
+  })
+})
+
 // ── PATCH /api/hub/devices/:id ──────────────────────────────────────────────
 
 describe("PATCH /api/hub/devices/:id", () => {

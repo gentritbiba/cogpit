@@ -104,7 +104,7 @@ async function probeDevice(host: string, port: number, tls: boolean, timeoutMs =
 
 // ── Password verification (device /api/auth/verify) ──────────────────────
 
-type AuthCode = "BAD_PASSWORD" | "NETWORK_DISABLED" | "NOT_CONFIGURED" | "UNREACHABLE"
+type AuthCode = "BAD_PASSWORD" | "ACCOUNT_DISABLED" | "NETWORK_DISABLED" | "NOT_CONFIGURED" | "UNREACHABLE"
 
 type AuthResult =
   | { ok: true; token?: string }
@@ -112,17 +112,23 @@ type AuthResult =
 
 const AUTH_MESSAGES: Record<AuthCode, string> = {
   BAD_PASSWORD: "The password was rejected by the device.",
+  ACCOUNT_DISABLED: "That user account is disabled on the device.",
   NETWORK_DISABLED: "Network access is disabled on that device. Enable it there first.",
   NOT_CONFIGURED: "That device has not finished setup yet.",
   UNREACHABLE: "Could not reach the device to verify the password.",
 }
 
-/** POST the password to the device's `/api/auth/verify` and classify the result. */
+/**
+ * POST the credentials to the device's `/api/auth/verify` and classify the
+ * result. When `username` is set the device is a team edition and the Bearer
+ * carries `user:pass` (usernames reject ":", so the split is unambiguous).
+ */
 async function verifyDevicePassword(
   host: string,
   port: number,
   tls: boolean,
   password: string,
+  username?: string,
   timeoutMs = PROBE_TIMEOUT_MS,
 ): Promise<AuthResult> {
   const controller = new AbortController()
@@ -133,7 +139,7 @@ async function verifyDevicePassword(
       method: "POST",
       signal: controller.signal,
       headers: {
-        authorization: `Bearer ${password}`,
+        authorization: `Bearer ${username ? `${username}:${password}` : password}`,
         "content-type": "application/json",
       },
     })
@@ -143,7 +149,19 @@ async function verifyDevicePassword(
     clearTimeout(timer)
   }
 
-  if (res.status === 403) return { ok: false, code: "NETWORK_DISABLED" }
+  if (res.status === 403) {
+    // A team device answers 403 { error: "Account disabled" } for a disabled
+    // user; a personal device 403s when network access is off.
+    let body: unknown = null
+    try {
+      body = await res.json()
+    } catch {
+      body = null
+    }
+    const disabled = !!body && typeof body === "object"
+      && (body as { error?: unknown }).error === "Account disabled"
+    return { ok: false, code: disabled ? "ACCOUNT_DISABLED" : "NETWORK_DISABLED" }
+  }
   if (res.status === 503) return { ok: false, code: "NOT_CONFIGURED" }
   if (!res.ok) return { ok: false, code: "BAD_PASSWORD" }
 
@@ -168,6 +186,11 @@ function normalizePort(value: unknown, tls: boolean): number {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+/** Device usernames are normalized exactly like the team users store. */
+function readUsername(value: unknown): string | undefined {
+  return readString(value)?.toLowerCase()
 }
 
 /** Strip the password before a device ever leaves the server. */
@@ -230,6 +253,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
   const port = normalizePort(body.port, tls)
   const allowLocalTunnel = body.allowLocalTunnel === true
   const password = readString(body.password)
+  const username = readUsername(body.username)
   const name = readString(body.name)
 
   const hostError = validateDeviceHost(host, allowLocalTunnel)
@@ -247,7 +271,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
 
   let auth: "password" | "none"
   if (password) {
-    const verify = await verifyDevicePassword(host, port, tls, password)
+    const verify = await verifyDevicePassword(host, port, tls, password, username)
     if (!verify.ok) {
       return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
         error: AUTH_MESSAGES[verify.code],
@@ -272,6 +296,7 @@ async function handleAdd(req: IncomingMessage, res: ServerResponse): Promise<voi
     tls,
     auth,
     password,
+    username,
   })
   setDeviceRuntime(device.id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
   return sendJson(res, 201, { device: toPublic(device) })
@@ -296,13 +321,15 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   const tls = newTls ?? device.tls === true
   const newPort = body.port !== undefined ? normalizePort(body.port, tls) : undefined
   const newPassword = readString(body.password)
+  const newUsername = readUsername(body.username)
 
   const host = newHost ?? device.host
   const port = newPort ?? device.port
   const hostChanged = !!newHost && newHost !== device.host
   const portChanged = newPort !== undefined && newPort !== device.port
   const tlsChanged = newTls !== undefined && newTls !== (device.tls === true)
-  const sensitiveChanged = hostChanged || portChanged || tlsChanged || !!newPassword
+  const usernameChanged = newUsername !== undefined && newUsername !== device.username
+  const sensitiveChanged = hostChanged || portChanged || tlsChanged || !!newPassword || usernameChanged
 
   if (hostChanged) {
     const hostError = validateDeviceHost(newHost, device.auth === "none")
@@ -313,10 +340,11 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
   }
   if (portChanged) patch.port = newPort
   if (tlsChanged) patch.tls = newTls
+  if (usernameChanged) patch.username = newUsername
 
   if (sensitiveChanged) {
     // Any credential-affecting change invalidates the cached device token so
-    // the next request re-mints against the new host/password.
+    // the next request re-mints against the new host/user/password.
     invalidateDeviceToken(id)
     const probe = await probeDevice(host, port, tls)
     if (!probe.ok) {
@@ -325,16 +353,23 @@ async function handlePatch(id: string, req: IncomingMessage, res: ServerResponse
         code: probe.code,
       })
     }
-    if (newPassword) {
-      const verify = await verifyDevicePassword(host, port, tls, newPassword)
+    // A username change without a new password re-verifies with the stored
+    // one, so a typo'd user is caught here instead of on the next proxy call.
+    const verifyPassword = newPassword ?? device.password
+    if ((newPassword || usernameChanged) && verifyPassword) {
+      const verify = await verifyDevicePassword(
+        host, port, tls, verifyPassword, newUsername ?? device.username,
+      )
       if (!verify.ok) {
         return sendJson(res, verify.code === "UNREACHABLE" ? 502 : 400, {
           error: AUTH_MESSAGES[verify.code],
           code: verify.code,
         })
       }
-      patch.password = newPassword
-      patch.auth = "password"
+      if (newPassword) {
+        patch.password = newPassword
+        patch.auth = "password"
+      }
     }
     setDeviceRuntime(id, { authState: "ok", lastProbe: Date.now(), lastHello: probe.hello })
   }

@@ -116,11 +116,18 @@ async function mint(device: HubDevice): Promise<string> {
 
   const url = `${device.tls ? "https" : "http"}://${device.host}:${device.port}/api/auth/verify`
 
+  // A team device authenticates as a named user (`user:pass` — usernames
+  // reject ":", so the first colon always splits correctly); a personal
+  // device takes the bare network password.
+  const credential = device.username
+    ? `${device.username}:${device.password ?? ""}`
+    : device.password ?? ""
+
   let res: Response
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${device.password ?? ""}` },
+      headers: { Authorization: `Bearer ${credential}` },
       signal: AbortSignal.timeout(MINT_TIMEOUT_MS),
     })
   } catch (err) {

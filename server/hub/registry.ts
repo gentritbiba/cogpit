@@ -31,6 +31,8 @@ export interface HubDevice {
   auth: "password" | "none"
   /** only present for auth === "password"; never serialized by listDevices */
   password?: string
+  /** team-edition device login: authenticate as this user (Bearer user:pass) */
+  username?: string
   addedAt: number
 }
 
@@ -50,9 +52,10 @@ export interface AddDeviceInput {
   tls?: boolean
   auth: "password" | "none"
   password?: string
+  username?: string
 }
 
-export type UpdateDeviceInput = Partial<Pick<HubDevice, "name" | "host" | "port" | "tls" | "auth" | "password">>
+export type UpdateDeviceInput = Partial<Pick<HubDevice, "name" | "host" | "port" | "tls" | "auth" | "password" | "username">>
 
 const DEFAULT_PORT = 19384
 const DEFAULT_TLS_PORT = 443
@@ -79,6 +82,7 @@ function normalizeDevice(entry: unknown): HubDevice | null {
     tls: e.tls === true ? true : undefined,
     auth,
     password: auth === "password" && typeof e.password === "string" ? e.password : undefined,
+    username: auth === "password" && typeof e.username === "string" ? e.username : undefined,
     addedAt: typeof e.addedAt === "number" ? e.addedAt : 0,
   }
 }
@@ -221,6 +225,7 @@ export async function addDevice(input: AddDeviceInput): Promise<HubDevice> {
       tls: input.tls ? true : undefined,
       auth: input.auth,
       password: input.auth === "password" ? input.password : undefined,
+      username: input.auth === "password" ? input.username : undefined,
       addedAt: Date.now(),
     }
     draft.set(device.id, device)
@@ -244,8 +249,12 @@ export async function updateDevice(id: string, patch: UpdateDeviceInput): Promis
     if (patch.tls !== undefined) next.tls = patch.tls ? true : undefined
     if (patch.auth !== undefined) next.auth = patch.auth
     if (patch.password !== undefined) next.password = patch.password
-    // A device switched to token-less auth must not keep a stale password.
-    if (next.auth === "none") next.password = undefined
+    if (patch.username !== undefined) next.username = patch.username
+    // A device switched to token-less auth must not keep stale credentials.
+    if (next.auth === "none") {
+      next.password = undefined
+      next.username = undefined
+    }
 
     draft.set(id, next)
     return { changed: true, value: next }
