@@ -16,6 +16,18 @@ export interface SessionConfig {
   mcpServers?: string[]
 }
 
+/**
+ * Use the provider-neutral session ID for persisted controls. Claude's
+ * historical key was already `<session-id>.jsonl`; this preserves that layout
+ * while avoiding nested Codex rollout paths that are invalid storage keys.
+ */
+export function getSessionConfigKey(
+  sessionId: string | null | undefined,
+  fileName: string | null | undefined,
+): string | null {
+  return sessionId ? `${sessionId}.jsonl` : fileName ?? null
+}
+
 export async function fetchSessionConfig(key: string): Promise<SessionConfig | null> {
   try {
     const res = await authFetch(`/api/session-config/${encodeURIComponent(key)}`)

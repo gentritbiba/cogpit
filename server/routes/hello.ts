@@ -14,13 +14,21 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url))
 
 /** App version, read once at module init. Never throws — "unknown" on failure. */
 const VERSION: string = (() => {
-  try {
-    const pkgPath = join(__dirname, "../../package.json")
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: unknown }
-    return typeof pkg.version === "string" ? pkg.version : "unknown"
-  } catch {
-    return "unknown"
+  // Source builds live at server/routes/hello.ts; the install-free npm bundle
+  // lives at dist/cli.js. Support both layouts without baking a version into
+  // the server bundle.
+  for (const pkgPath of [
+    join(__dirname, "../../package.json"),
+    join(__dirname, "../package.json"),
+  ]) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: unknown }
+      if (typeof pkg.version === "string") return pkg.version
+    } catch {
+      // Try the next supported package layout.
+    }
   }
+  return "unknown"
 })()
 
 /**

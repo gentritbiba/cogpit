@@ -1,11 +1,12 @@
 # Cogpit architecture
 
-Cogpit is one product with four runtime surfaces: the React renderer, the HTTP/WebSocket server, the Electron host, and the published `cogpit-memory` CLI. The target structure is a directed dependency graph rather than a collection of mutually importing folders.
+Cogpit is one product with five runtime surfaces: the React renderer, the HTTP/WebSocket server, the Electron host, the install-free `cogpit` launcher, and the published `cogpit-memory` CLI. The target structure is a directed dependency graph rather than a collection of mutually importing folders.
 
 ```text
 React features ───────┐
 HTTP route adapters ──┼──> shared contracts + session core
 Electron composition ─┤                │
+install-free CLI ──────┤                │
 cogpit-memory CLI ─────┘                └──> provider-specific adapters
 
 HTTP route adapters -> application services -> filesystem/process infrastructure
@@ -18,7 +19,7 @@ Electron composition -> server public composition API
 2. `src/` never imports `server/` or `electron/`.
 3. `server/` never imports `src/` or `electron/`. Standalone server composition belongs in `server/`, not the Electron layer.
 4. `electron/` is a composition shell. It may import the server public API, but server code must not depend on Electron.
-5. `packages/*` are independently consumable and never reach into application source roots.
+5. Published package artifacts are independently consumable. Package build adapters may import a canonical server composition point so the packaged runtime does not fork application logic; the resulting bundle must not depend on repository source files.
 6. Route registration has one canonical manifest. Platform roots supply context; they do not maintain parallel route lists.
 7. Session parsing, turn construction, status, token, and pricing semantics have one governed implementation consumed by the app and CLI.
 8. Circular imports are not allowed.
@@ -40,6 +41,7 @@ Electron composition -> server public composition API
 | Undo/redo contracts and mutation | `shared/contracts/undo.ts`, `server/routes/undo/` | The route coordinates one optimistic, rollback-capable transaction; clients carry compact operations rather than archived transcripts. |
 | Network trust boundary | `server/security.ts`, `server/password-utils.ts` | Every server composition installs it before routes; WebSocket upgrades use the same trust policy. |
 | Notification contract and fan-out | `shared/notifications.ts`, `server/lib/notificationDelivery.ts` | The server only *describes* a notification and posts it over the utilityProcess parent port; `electron/notifications.ts` owns the `Notification` API and reports desktop presence back. Server code never imports Electron, so the standalone server degrades to `osascript` plus ntfy push. |
+| Install-free npm launcher | `packages/cogpit-cli/`, `server/standalone-runtime.ts` | The package bundles the web app and canonical standalone server at publish time; the installed artifact runs on Node.js without repository files or a pre-existing Cogpit process. |
 | Renderer orchestration | feature hooks plus `src/components/AppShell/` | `src/App.tsx` composes state and feature boundaries; feature logic should not move back into it. |
 | Renderer live-event lifecycle | `src/hooks/useLiveEventStream.ts` | Team and workflow hooks supply parsing/domain state only; connection, stale-timer, and cleanup semantics stay shared. |
 | Quality and release policy | `.github/workflows/quality.yml`, `.github/workflows/release.yml` | Releases cannot package or publish until the reusable quality workflow passes. Third-party actions and build containers are immutable references. |
@@ -63,7 +65,7 @@ bun run build:web
 bun run electron:build
 ```
 
-Changes under `packages/cogpit-memory` additionally run its tests, standalone build, npm build, and package-contract script. Security-sensitive changes require trust-boundary tests for literal loopback hosts, same-origin mutations, remote authentication, WebSocket upgrades, and shutdown cleanup.
+Changes under `packages/cogpit-memory` additionally run its tests, standalone build, npm build, and package-contract script. Changes under `packages/cogpit-cli` additionally run its unit tests and package-contract script. Security-sensitive changes require trust-boundary tests for literal loopback hosts, same-origin mutations, remote authentication, WebSocket upgrades, and shutdown cleanup.
 
 ## Change strategy
 

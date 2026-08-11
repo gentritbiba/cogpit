@@ -1,8 +1,10 @@
-import { useEffect, useRef, useCallback, type Dispatch } from "react"
+import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
 import type { ParsedSession } from "@/lib/types"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
 import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
+import { authFetch } from "@/lib/auth"
+import { previewSessionIdFromPath } from "@/lib/previewMode"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -19,6 +21,7 @@ interface UseUrlSyncOpts {
 //   /{dirName}                 → project sessions list
 //   /{dirName}/{sessionId}     → viewing a specific session
 //   /team/{teamName}           → team view
+//   /preview/{sessionId}       → local session-only preview
 //
 // A remote device carries a leading "/d/:deviceId" segment in front of any of
 // the above (e.g. "/d/dev_x/-Users-foo/sess"). Device identity itself is owned
@@ -28,7 +31,7 @@ interface UseUrlSyncOpts {
 // "codex__").
 
 interface ParsedUrl {
-  type: "home" | "session" | "project" | "team"
+  type: "home" | "session" | "project" | "team" | "preview"
   dirName?: string
   /** sessionId (UUID) — we append .jsonl to get the fileName for the API */
   sessionId?: string
@@ -89,6 +92,11 @@ function parsePath(rawPathname: string): ParsedUrl {
   // Device identity is owned by DeviceRoot — parse the remainder of the path.
   const pathname = stripDevicePrefix(rawPathname)
 
+  const previewSessionId = previewSessionIdFromPath(pathname)
+  if (previewSessionId) {
+    return { type: "preview", sessionId: previewSessionId }
+  }
+
   // Team routes are prefixed to avoid ambiguity
   const teamMatch = pathname.match(/^\/team\/([^/]+)$/)
   if (teamMatch) {
@@ -129,6 +137,7 @@ export function useUrlSync({
   scrollToBottomInstant,
   workerParse,
 }: UseUrlSyncOpts) {
+  const [previewLoadError, setPreviewLoadError] = useState<string | null>(null)
   const skipNextPushRef = useRef(false)
   const lastPushedRef = useRef(window.location.pathname)
   const initialLoadDone = useRef(false)
@@ -137,7 +146,45 @@ export function useUrlSync({
     async (parsed: ParsedUrl) => {
       skipNextPushRef.current = true
       try {
-        if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
+        if (parsed.type === "preview" && parsed.sessionId) {
+          setPreviewLoadError(null)
+          try {
+            const lookup = await authFetch(
+              `/api/find-session/${encodeURIComponent(parsed.sessionId)}`,
+            )
+            if (!lookup.ok) {
+              throw new Error(
+                lookup.status === 404
+                  ? `Session ${parsed.sessionId} was not found.`
+                  : `Failed to resolve session (${lookup.status}).`,
+              )
+            }
+            const location = await lookup.json() as { dirName?: string; fileName?: string }
+            if (!location.dirName || !location.fileName) {
+              throw new Error("Cogpit returned an invalid session location.")
+            }
+            const loaded = await loadSessionTailCached(
+              location.dirName,
+              location.fileName,
+              workerParse,
+              "session preview",
+            )
+            dispatch({
+              type: "LOAD_SESSION",
+              session: loaded.parsed,
+              source: loaded.source,
+              isMobile,
+            })
+            resetTurnCount(loaded.parsed.turns.length)
+            scrollToBottomInstant()
+          } catch (error) {
+            dispatch({ type: "GO_HOME", isMobile })
+            setPreviewLoadError(
+              error instanceof Error ? error.message : "Failed to load session preview.",
+            )
+          }
+        } else if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
+          setPreviewLoadError(null)
           const fileName = fileNameFromSessionId(parsed.sessionId)
           let loaded: Awaited<ReturnType<typeof loadSessionTailCached>>
           try {
@@ -161,10 +208,13 @@ export function useUrlSync({
           resetTurnCount(loaded.parsed.turns.length)
           scrollToBottomInstant()
         } else if (parsed.type === "project" && parsed.dirName) {
+          setPreviewLoadError(null)
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: parsed.dirName })
         } else if (parsed.type === "team" && parsed.teamName) {
+          setPreviewLoadError(null)
           dispatch({ type: "SELECT_TEAM", teamName: parsed.teamName, isMobile })
         } else {
+          setPreviewLoadError(null)
           dispatch({ type: "GO_HOME", isMobile })
         }
       } finally {
@@ -192,6 +242,9 @@ export function useUrlSync({
   // Sync state changes → URL (pushState)
   useEffect(() => {
     if (skipNextPushRef.current) return
+    // Preview owns a stable session-ID URL. Loading its resolved dirName/fileName
+    // must not rewrite the address into the full Cogpit navigation scheme.
+    if (previewSessionIdFromPath(stripDevicePrefix(window.location.pathname))) return
 
     const newPath = stateToPath(state)
     if (newPath !== lastPushedRef.current) {
@@ -214,4 +267,6 @@ export function useUrlSync({
     window.addEventListener("popstate", handlePopstate)
     return () => window.removeEventListener("popstate", handlePopstate)
   }, [loadFromUrl])
+
+  return { previewLoadError }
 }

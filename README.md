@@ -164,6 +164,24 @@ Dark, Deep OLED, and Light themes with a Malewicz-inspired elevation system, gla
 
 ## Getting Started
 
+### Without installing
+
+Run the full local web app directly from npm:
+
+```bash
+npx cogpit@latest
+```
+
+Or open one existing Claude Code or Codex session in a focused chat-only view:
+
+```bash
+npx cogpit@latest preview <session-id>
+```
+
+Both commands start a loopback-only Cogpit server on an available port, open
+your browser, and read session history from the provider directories already
+on your machine. Nothing is uploaded. Press `Ctrl+C` to stop the server.
+
 ### From Releases (recommended)
 
 Download from the [Releases page](https://github.com/gentritbiba/cogpit/releases) and open.

@@ -4,13 +4,18 @@ import { renderHook } from "@testing-library/react"
 vi.mock("@/lib/sessionLoader", () => ({
   loadSessionTailCached: vi.fn(),
 }))
+vi.mock("@/lib/auth", () => ({
+  authFetch: vi.fn(),
+}))
 
+import { authFetch } from "@/lib/auth"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
 import type { ParsedSession } from "@/lib/types"
 import { useUrlSync } from "../useUrlSync"
 import type { SessionState } from "../useSessionState"
 
 const mockedLoadTail = vi.mocked(loadSessionTailCached)
+const mockedAuthFetch = vi.mocked(authFetch)
 
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
   return {
@@ -87,6 +92,46 @@ describe("useUrlSync", () => {
         })
       )
     })
+  })
+
+  it("resolves a preview session ID and preserves the preview URL", async () => {
+    window.history.replaceState(null, "", "/preview/session-123")
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ dirName: "my-project", fileName: "session-123.jsonl" }),
+    } as Response)
+    mockedLoadTail.mockResolvedValueOnce(loadedSession("my-project", "session-123.jsonl"))
+
+    renderUrlSync()
+
+    await vi.waitFor(() => {
+      expect(mockedAuthFetch).toHaveBeenCalledWith("/api/find-session/session-123")
+      expect(mockedLoadTail).toHaveBeenCalledWith(
+        "my-project",
+        "session-123.jsonl",
+        workerParse,
+        "session preview",
+      )
+      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "LOAD_SESSION" }))
+    })
+    expect(window.location.pathname).toBe("/preview/session-123")
+    expect(pushStateSpy).not.toHaveBeenCalled()
+    pushStateSpy.mockRestore()
+  })
+
+  it("surfaces a missing preview session without leaving preview mode", async () => {
+    window.history.replaceState(null, "", "/preview/missing-session")
+    mockedAuthFetch.mockResolvedValueOnce({ ok: false, status: 404 } as Response)
+
+    const { result } = renderUrlSync()
+
+    await vi.waitFor(() => {
+      expect(result.current.previewLoadError).toBe("Session missing-session was not found.")
+    })
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "GO_HOME" }))
+    expect(window.location.pathname).toBe("/preview/missing-session")
   })
 
   it("dispatches SET_DASHBOARD_PROJECT for project-only path", async () => {
