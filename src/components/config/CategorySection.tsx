@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils"
 import type { Category, ConfigItem } from "./config-types"
 import { CATEGORY_META } from "./config-types"
 import { ScopeBadge } from "./ScopeBadge"
+import { CliBadge } from "./CliBadge"
+import { LinkIndicator } from "./LinkIndicator"
 import { NewFileDialog } from "./NewFileDialog"
 import { ItemContextPopup } from "./ItemContextPopup"
 
@@ -121,12 +123,14 @@ export function CategorySection({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs truncate">{item.name}</span>
+                <LinkIndicator linkTarget={item.linkTarget} />
                 {item.readOnly && <Lock className="size-2.5 text-muted-foreground/40 shrink-0" />}
               </div>
               {item.description && (
                 <p className="text-[10px] text-muted-foreground/50 truncate mt-0.5">{item.description}</p>
               )}
             </div>
+            <CliBadge cli={item.cli} />
             <ScopeBadge scope={item.scope} pluginName={item.pluginName} />
           </button>
         )

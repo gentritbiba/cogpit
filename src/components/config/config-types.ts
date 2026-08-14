@@ -2,14 +2,19 @@ import { BookOpen, Bot, Sparkles, Terminal, FileJson } from "lucide-react"
 
 // ── Types ──────────────────────────────────────────────────────────────
 
+/** CLI that loads a config entry. Mirrors ConfigCli on the server. */
+export type ConfigCli = "claude" | "codex"
+
 interface ConfigTreeItem {
   name: string
   path: string
   type: "file" | "directory"
-  fileType?: "command" | "skill" | "agent" | "claude-md" | "settings" | "unknown"
+  fileType?: "command" | "skill" | "agent" | "instructions" | "settings" | "theme" | "monitor" | "bin" | "unknown"
   description?: string
   children?: ConfigTreeItem[]
   readOnly?: boolean
+  cli?: ConfigCli[]
+  linkTarget?: string
 }
 
 export interface ConfigTreeSection {
@@ -29,6 +34,10 @@ export interface ConfigItem {
   scope: "global" | "project" | "plugin" | string
   pluginName?: string
   readOnly: boolean
+  /** CLIs that load this entry. Empty means it is linked into neither. */
+  cli?: ConfigCli[]
+  /** Canonical target when this entry reaches the file through a symlink. */
+  linkTarget?: string
 }
 
 export type Category = "instructions" | "agents" | "skills" | "commands" | "settings"
@@ -39,7 +48,7 @@ export const BADGE_COLORS: Record<string, string> = {
   agent: "bg-purple-500/20 text-purple-300 border-purple-500/30",
   skill: "bg-amber-500/20 text-amber-300 border-amber-500/30",
   command: "bg-green-500/20 text-green-300 border-green-500/30",
-  "claude-md": "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  instructions: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   settings: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
 }
 
@@ -79,6 +88,8 @@ export function flattenItems(
         scope,
         pluginName,
         readOnly: item.readOnly ?? (scope === "plugin"),
+        cli: item.cli,
+        linkTarget: item.linkTarget,
       })
     }
   }
@@ -98,7 +109,7 @@ export function categorizeItems(sections: ConfigTreeSection[]): Record<Category,
     const items = flattenItems(section.items, section.scope, section.pluginName)
     for (const item of items) {
       switch (item.fileType) {
-        case "claude-md":
+        case "instructions":
           categories.instructions.push(item)
           break
         case "agent":

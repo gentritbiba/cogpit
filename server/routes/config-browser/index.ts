@@ -181,7 +181,7 @@ export function registerConfigBrowserRoutes(use: UseFn) {
           const safeNewDir = await resolveConfigBrowserPath(newDir, {
             allowMissing: true,
             writable: true,
-            requireClaudeDirectory: true,
+            requireConfigDirectory: true,
           })
           if (!safeNewDir) {
             sendJson(res, 400, { error: "Invalid destination" })
@@ -248,7 +248,7 @@ export function registerConfigBrowserRoutes(use: UseFn) {
         const safeDir = await resolveConfigBrowserPath(dir, {
           allowMissing: true,
           writable: true,
-          requireClaudeDirectory: true,
+          requireConfigDirectory: true,
         })
         if (!safeDir) {
           sendJson(res, 403, { error: "Access denied: config directory is not writable" })
@@ -274,7 +274,7 @@ export function registerConfigBrowserRoutes(use: UseFn) {
         let safeFilePath = await resolveConfigBrowserPath(filePath, {
           allowMissing: true,
           writable: true,
-          requireClaudeDirectory: true,
+          requireConfigDirectory: true,
         })
         if (!safeFilePath) {
           sendJson(res, 403, { error: "Access denied: unsafe destination" })
@@ -287,7 +287,7 @@ export function registerConfigBrowserRoutes(use: UseFn) {
         safeFilePath = await resolveConfigBrowserPath(filePath, {
           allowMissing: true,
           writable: true,
-          requireClaudeDirectory: true,
+          requireConfigDirectory: true,
         })
         if (!safeFilePath) {
           sendJson(res, 403, { error: "Access denied: unsafe destination" })

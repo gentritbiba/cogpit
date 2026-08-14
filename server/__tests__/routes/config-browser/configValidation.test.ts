@@ -3,9 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import {
+  getFileType,
   isAllowedConfigPath,
   isSafeConfigName,
   isUserOwned,
@@ -139,6 +140,111 @@ describe("config-browser path validation", () => {
     await expect(resolveConfigBrowserPath(cachedFile)).resolves.not.toBeNull()
     await expect(resolveConfigBrowserPath(cachedFile, { writable: true })).resolves.toBeNull()
     await expect(resolveConfigBrowserPath(linkPath, { writable: true })).resolves.toBeNull()
+  })
+
+  it("accepts Codex and shared-source config roots", async () => {
+    const codexSkill = join(projectDir, ".codex", "skills", "review", "SKILL.md")
+    const sharedSkill = join(projectDir, ".agents", "skills", "review", "SKILL.md")
+    await Promise.all([
+      mkdir(join(projectDir, ".codex", "skills", "review"), { recursive: true }),
+      mkdir(join(projectDir, ".agents", "skills", "review"), { recursive: true }),
+    ])
+    await Promise.all([
+      writeFile(codexSkill, "codex", "utf-8"),
+      writeFile(sharedSkill, "shared", "utf-8"),
+    ])
+
+    for (const path of [codexSkill, sharedSkill]) {
+      expect(isAllowedConfigPath(path)).toBe(true)
+      expect(isUserOwned(path)).toBe(true)
+      await expect(resolveConfigBrowserPath(path, { writable: true })).resolves.toEqual({
+        resolvedPath: path,
+        canonicalPath: await realpath(path),
+      })
+    }
+  })
+
+  it("follows a skill symlink from one config root into another", async () => {
+    const sharedSkillDir = join(projectDir, ".agents", "skills", "commit")
+    const sharedSkill = join(sharedSkillDir, "SKILL.md")
+    const linkedSkillDir = join(claudeDir, "skills", "commit")
+    await mkdir(sharedSkillDir, { recursive: true })
+    await mkdir(join(claudeDir, "skills"), { recursive: true })
+    await writeFile(sharedSkill, "shared", "utf-8")
+    await symlink(
+      sharedSkillDir,
+      linkedSkillDir,
+      process.platform === "win32" ? "junction" : undefined,
+    )
+
+    await expect(
+      resolveConfigBrowserPath(join(linkedSkillDir, "SKILL.md"), { writable: true }),
+    ).resolves.toEqual({
+      resolvedPath: join(linkedSkillDir, "SKILL.md"),
+      canonicalPath: await realpath(sharedSkill),
+    })
+  })
+
+  it("follows CLAUDE.md linked at a shared AGENTS.md", async () => {
+    const sharedInstructions = join(fixtureRoot, "AGENTS.md")
+    const linkedInstructions = join(claudeDir, "CLAUDE.md")
+    await writeFile(sharedInstructions, "shared", "utf-8")
+    await symlink(
+      sharedInstructions,
+      linkedInstructions,
+      process.platform === "win32" ? "file" : undefined,
+    )
+
+    await expect(resolveConfigBrowserPath(linkedInstructions, { writable: true })).resolves.toEqual({
+      resolvedPath: linkedInstructions,
+      canonicalPath: await realpath(sharedInstructions),
+    })
+  })
+
+  it("still rejects a config symlink that lands outside every config root", async () => {
+    const outsideFile = join(outsideDir, "notes.md")
+    const linkPath = join(claudeDir, "skills", "leak.md")
+    await mkdir(join(claudeDir, "skills"), { recursive: true })
+    await writeFile(outsideFile, "outside", "utf-8")
+    await symlink(outsideFile, linkPath, process.platform === "win32" ? "file" : undefined)
+
+    await expect(resolveConfigBrowserPath(linkPath, { writable: true })).resolves.toBeNull()
+  })
+
+  it("keeps a plugin cache read-only when reached from another config root", async () => {
+    const cacheDir = join(projectDir, ".codex", "plugins", "cache", "plugin")
+    const cachedFile = join(cacheDir, "SKILL.md")
+    const linkPath = join(claudeDir, "agents", "cached.md")
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(cachedFile, "cached", "utf-8")
+    await symlink(cachedFile, linkPath, process.platform === "win32" ? "file" : undefined)
+
+    await expect(resolveConfigBrowserPath(linkPath)).resolves.not.toBeNull()
+    await expect(resolveConfigBrowserPath(linkPath, { writable: true })).resolves.toBeNull()
+  })
+
+  it("keeps a plugin cache read-only when its config root is nested inside another", async () => {
+    // The containment root resolves to the outermost `.agents`, so this cache is
+    // not inside *that* root's plugins/cache — only the segments identify it.
+    const cacheDir = join(projectDir, ".agents", "shared", ".claude", "plugins", "cache", "plugin")
+    const cachedFile = join(cacheDir, "SKILL.md")
+    await mkdir(cacheDir, { recursive: true })
+    await writeFile(cachedFile, "cached", "utf-8")
+
+    expect(isUserOwned(cachedFile)).toBe(false)
+    await expect(resolveConfigBrowserPath(cachedFile)).resolves.not.toBeNull()
+    await expect(resolveConfigBrowserPath(cachedFile, { writable: true })).resolves.toBeNull()
+  })
+
+  it.each([
+    [join("home", ".claude", "settings.json"), "settings"],
+    [join("home", "AGENTS.md"), "instructions"],
+    [join("home", "CLAUDE.md"), "instructions"],
+    [join("home", ".agents", "skills", "commit", "SKILL.md"), "skill"],
+    [join("home", ".claude", "agents", "reviewer.md"), "agent"],
+    [join("home", ".codex", "prompts", "ship.md"), "command"],
+  ])("types %s as %s", (path, expected) => {
+    expect(getFileType(path, dirname(path))).toBe(expected)
   })
 
   it.each([

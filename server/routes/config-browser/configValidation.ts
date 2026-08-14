@@ -15,14 +15,31 @@ export type ConfigFileType =
   | "command"
   | "skill"
   | "agent"
-  | "claude-md"
+  | "instructions"
   | "settings"
   | "unknown"
   | "theme"
   | "monitor"
   | "bin"
 
-type ConfigPathKind = "claude-directory" | "claude-md"
+/**
+ * Directories that hold agent configuration: Claude Code's `.claude`, Codex
+ * CLI's `.codex`, and `.agents`, the shared source of truth both CLIs symlink
+ * into. A path is trusted when it lives inside one of them.
+ */
+const CONFIG_ROOT_DIRS = new Set([".claude", ".codex", ".agents"])
+
+/** Instruction files that sit beside, rather than inside, a config root. */
+const INSTRUCTION_FILES = new Set(["CLAUDE.md", "AGENTS.md"])
+
+/**
+ * Claude's settings files. Codex's `config.toml` is not listed: it only ever
+ * reaches the tree through `buildFileItem`, which types it directly, while
+ * `getFileType` is reached only for the `.md`/`.json` files a scan keeps.
+ */
+const SETTINGS_FILES = new Set(["settings.json", "settings.local.json"])
+
+type ConfigPathKind = "config-directory" | "instructions-file"
 
 interface ConfigPathPolicy {
   kind: ConfigPathKind
@@ -40,40 +57,44 @@ export interface ConfigPathResolution {
 interface ResolveConfigPathOptions {
   allowMissing?: boolean
   writable?: boolean
-  requireClaudeDirectory?: boolean
+  requireConfigDirectory?: boolean
 }
 
-function findClaudeRoot(filePath: string): string | null {
+function findConfigRoot(filePath: string): string | null {
   let current = filePath
-  let claudeRoot: string | null = null
+  let configRoot: string | null = null
   while (true) {
-    // Keep walking after a match. Anchoring to the outermost .claude boundary
+    // Keep walking after a match. Anchoring to the outermost config boundary
     // prevents a nested `.claude` symlink from redefining the trusted root.
-    if (basename(current) === ".claude") claudeRoot = current
+    if (CONFIG_ROOT_DIRS.has(basename(current))) configRoot = current
     const parent = dirname(current)
-    if (parent === current) return claudeRoot
+    if (parent === current) return configRoot
     current = parent
   }
+}
+
+function isInstructionsFile(filePath: string): boolean {
+  return INSTRUCTION_FILES.has(basename(filePath))
 }
 
 function classifyConfigPath(filePath: string): ConfigPathPolicy | null {
   if (!filePath || filePath.includes("\0")) return null
 
   const resolvedPath = resolve(filePath)
-  const claudeRoot = findClaudeRoot(resolvedPath)
-  if (claudeRoot) {
+  const configRoot = findConfigRoot(resolvedPath)
+  if (configRoot) {
     return {
-      kind: "claude-directory",
+      kind: "config-directory",
       resolvedPath,
-      policyRoot: claudeRoot,
+      policyRoot: configRoot,
     }
   }
 
-  // Project-root CLAUDE.md files are intentionally valid even though they sit
-  // beside, rather than inside, the project's .claude directory.
-  if (basename(resolvedPath) === "CLAUDE.md") {
+  // Project-root CLAUDE.md / AGENTS.md files are intentionally valid even
+  // though they sit beside, rather than inside, a config directory.
+  if (isInstructionsFile(resolvedPath)) {
     return {
-      kind: "claude-md",
+      kind: "instructions-file",
       resolvedPath,
       policyRoot: dirname(resolvedPath),
     }
@@ -90,8 +111,16 @@ function isWithin(parent: string, child: string): boolean {
       && !isAbsolute(pathFromParent))
 }
 
-function isPluginCachePath(claudeRoot: string, candidate: string): boolean {
-  return isWithin(join(claudeRoot, "plugins", "cache"), candidate)
+/**
+ * Plugin caches are read-only wherever they sit. Matching the segment pair
+ * rather than a cache under one known root is what makes a nested install
+ * (`~/.agents/x/.claude/plugins/cache/…`) read-only too: `findConfigRoot`
+ * anchors that path to the outermost root, `~/.agents`, whose own plugin cache
+ * it is not inside.
+ */
+function isPluginCachePath(candidate: string): boolean {
+  const segments = candidate.split(/[\\/]/)
+  return segments.some((segment, index) => segment === "plugins" && segments[index + 1] === "cache")
 }
 
 async function canonicalizePath(filePath: string, allowMissing: boolean): Promise<string | null> {
@@ -150,13 +179,18 @@ export function isAllowedConfigPath(filePath: string): boolean {
 export function isUserOwned(filePath: string): boolean {
   const policy = classifyConfigPath(filePath)
   if (!policy) return false
-  if (policy.kind === "claude-md") return true
-  return !isPluginCachePath(policy.policyRoot, policy.resolvedPath)
+  if (policy.kind === "instructions-file") return true
+  return !isPluginCachePath(policy.resolvedPath)
 }
 
 /**
  * Resolve an allowed config-browser path and prove that symlinks do not move it
- * outside the lexical .claude root (or redirect a project-root CLAUDE.md).
+ * outside agent configuration.
+ *
+ * Links are load-bearing here: shared setups point ~/.claude/skills/<name> and
+ * ~/.codex/skills/<name> at one ~/.agents/skills tree, and ~/.claude/CLAUDE.md
+ * at ~/AGENTS.md. A link may therefore cross into a different config root, but
+ * it must still land in some config root or on an instructions file.
  */
 export async function resolveConfigBrowserPath(
   filePath: string,
@@ -164,11 +198,11 @@ export async function resolveConfigBrowserPath(
 ): Promise<ConfigPathResolution | null> {
   const policy = classifyConfigPath(filePath)
   if (!policy) return null
-  if (options.requireClaudeDirectory && policy.kind !== "claude-directory") return null
+  if (options.requireConfigDirectory && policy.kind !== "config-directory") return null
   if (
     options.writable
-    && policy.kind === "claude-directory"
-    && isPluginCachePath(policy.policyRoot, policy.resolvedPath)
+    && policy.kind === "config-directory"
+    && isPluginCachePath(policy.resolvedPath)
   ) return null
 
   const [canonicalRoot, canonicalPath] = await Promise.all([
@@ -177,14 +211,21 @@ export async function resolveConfigBrowserPath(
   ])
   if (!canonicalRoot || !canonicalPath) return null
 
-  if (policy.kind === "claude-directory") {
-    if (!isWithin(canonicalRoot, canonicalPath)) return null
-    if (options.writable && isPluginCachePath(canonicalRoot, canonicalPath)) return null
+  if (policy.kind === "config-directory") {
+    // A target outside the starting root is trusted only if it is itself inside
+    // a config root, whose plugin cache must then govern writability.
+    const canonicalTargetRoot = isWithin(canonicalRoot, canonicalPath)
+      ? canonicalRoot
+      : findConfigRoot(canonicalPath)
+    if (!canonicalTargetRoot && !isInstructionsFile(canonicalPath)) return null
+    if (options.writable && isPluginCachePath(canonicalPath)) return null
   } else {
     // Resolve the parent independently so a project directory may itself be a
     // symlink, while a CLAUDE.md symlink to some other file is still rejected.
     const canonicalParent = await canonicalizePath(dirname(policy.resolvedPath), false)
-    if (!canonicalParent || canonicalPath !== join(canonicalParent, "CLAUDE.md")) return null
+    if (!canonicalParent) return null
+    const stayedInPlace = canonicalPath === join(canonicalParent, basename(policy.resolvedPath))
+    if (!stayedInPlace && !isInstructionsFile(canonicalPath)) return null
   }
 
   return { resolvedPath: policy.resolvedPath, canonicalPath }
@@ -198,14 +239,22 @@ export function isSafeConfigName(name: string): boolean {
   return true
 }
 
+/** Whether a directory named `dirName` appears anywhere in the path. */
+function isUnderDir(parentDir: string, dirName: string): boolean {
+  return parentDir.includes(`${sep}${dirName}`) || parentDir.endsWith(`/${dirName}`)
+}
+
 /** Get file type from path and context */
 export function getFileType(filePath: string, parentDir: string): ConfigFileType {
   const name = basename(filePath)
-  if (name === "CLAUDE.md") return "claude-md"
-  if (name === "settings.json" || name === "settings.local.json") return "settings"
-  if (parentDir.includes(`${sep}agents`) || parentDir.endsWith("/agents")) return "agent"
+  if (isInstructionsFile(name)) return "instructions"
+  if (SETTINGS_FILES.has(name)) return "settings"
+  // Checked before the agents directory so a skill stored under a shared
+  // `.agents` tree is still typed as a skill.
   if (name === "SKILL.md") return "skill"
-  if (parentDir.includes(`${sep}commands`) || parentDir.endsWith("/commands")) return "command"
+  if (isUnderDir(parentDir, "agents")) return "agent"
+  // Codex calls its commands "prompts".
+  if (isUnderDir(parentDir, "commands") || isUnderDir(parentDir, "prompts")) return "command"
   return "unknown"
 }
 
@@ -237,7 +286,7 @@ model: sonnet
 
 Agent instructions here.
 `,
-  "claude-md": `# Project Instructions
+  instructions: `# Project Instructions
 
 Add your project-specific instructions here.
 `,

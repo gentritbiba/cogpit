@@ -10,15 +10,25 @@ import { EmptyState } from "@/components/config/EmptyState"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
+/** Lets "claude", "codex" and "unlinked" narrow to one CLI's view of the config. */
+function cliSearchText(item: ConfigItem): string {
+  if (!item.cli) return ""
+  return item.cli.length > 0 ? item.cli.join(" ") : "unlinked"
+}
+
 function filterItemsByQuery(items: ConfigItem[], query: string): ConfigItem[] {
   if (!query) return items
   const q = query.toLowerCase()
-  return items.filter(
-    (item) =>
-      item.name.toLowerCase().includes(q) ||
-      item.description.toLowerCase().includes(q) ||
-      item.path.toLowerCase().includes(q),
-  )
+  return items.filter((item) => {
+    const haystack = [
+      item.name,
+      item.description,
+      item.path,
+      item.linkTarget ?? "",
+      cliSearchText(item),
+    ]
+    return haystack.some((field) => field.toLowerCase().includes(q))
+  })
 }
 
 // ── Main component ──────────────────────────────────────────────────────

@@ -1,13 +1,15 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { join } from "node:path"
-import { mkdtemp, writeFile, mkdir, rm, chmod } from "node:fs/promises"
+import { mkdtemp, writeFile, mkdir, rm, chmod, realpath, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
 import {
   buildPluginSections,
+  buildProjectSection,
   scanDir,
 } from "../../../routes/config-browser/configTree"
+import type { ConfigTreeItem } from "../../../routes/config-browser/configTree"
 
 // ── helpers ────────────────────────────────────────────────────────────
 
@@ -89,12 +91,170 @@ describe("scanDir", () => {
     ])
   })
 
+  it("skips loose files at the root of a skills directory", async () => {
+    const skillDir = join(tmpDir, "my-skill")
+    await mkdirp(skillDir)
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: my-skill\n---\n")
+    await writeFile(join(tmpDir, "README.md"), "# Not a skill")
+
+    const result = await scanDir(tmpDir, { isSkillsDir: true })
+
+    expect(result.map((i) => i.name)).toEqual(["my-skill"])
+  })
+
+  it("reads skills nested one level down, as Codex ships its system skills", async () => {
+    const systemSkill = join(tmpDir, ".system", "imagegen")
+    await mkdirp(systemSkill)
+    await writeFile(
+      join(systemSkill, "SKILL.md"),
+      "---\nname: imagegen\ndescription: Generate images\n---\n",
+    )
+
+    const result = await scanDir(tmpDir, { isSkillsDir: true, cli: ["codex"] })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe("directory")
+    expect(result[0].children).toEqual([
+      expect.objectContaining({
+        name: "imagegen",
+        fileType: "skill",
+        description: "Generate images",
+        cli: ["codex"],
+      }),
+    ])
+  })
+
+  it("records the CLI and the canonical target of a symlinked skill", async () => {
+    const sharedRoot = await mkdtemp(join(tmpdir(), "configTree-shared-"))
+    try {
+      const sharedSkill = join(sharedRoot, "commit")
+      await mkdirp(sharedSkill)
+      await writeFile(join(sharedSkill, "SKILL.md"), "---\nname: commit\n---\n")
+      await symlink(
+        sharedSkill,
+        join(tmpDir, "commit"),
+        process.platform === "win32" ? "junction" : undefined,
+      )
+
+      const result = await scanDir(tmpDir, { isSkillsDir: true, cli: ["claude"] })
+
+      expect(result).toHaveLength(1)
+      expect(result[0].cli).toEqual(["claude"])
+      expect(result[0].linkTarget).toBe(await realpath(join(sharedSkill, "SKILL.md")))
+    } finally {
+      await rm(sharedRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves linkTarget unset for a real file", async () => {
+    const skillDir = join(tmpDir, "local-skill")
+    await mkdirp(skillDir)
+    await writeFile(join(skillDir, "SKILL.md"), "---\nname: local-skill\n---\n")
+
+    const result = await scanDir(tmpDir, { isSkillsDir: true })
+
+    expect(result[0].linkTarget).toBeUndefined()
+  })
+
   it("omits nested directories with no relevant files", async () => {
     const emptyDir = join(tmpDir, "empty")
     await mkdirp(emptyDir)
     await writeFile(join(emptyDir, "ignored.txt"), "ignored")
 
     await expect(scanDir(tmpDir)).resolves.toEqual([])
+  })
+})
+
+// ── buildProjectSection (Claude + Codex + shared source) ───────────────
+
+describe("buildProjectSection", () => {
+  let cwd: string
+
+  function flatten(items: ConfigTreeItem[]): ConfigTreeItem[] {
+    return items.flatMap((item) =>
+      item.type === "directory" && item.children ? flatten(item.children) : [item],
+    )
+  }
+
+  async function writeSkill(dir: string, name: string) {
+    await mkdirp(join(dir, name))
+    await writeFile(join(dir, name, "SKILL.md"), `---\nname: ${name}\n---\n`)
+  }
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "configTree-project-"))
+  })
+
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true })
+  })
+
+  it("lists instructions and settings for both CLIs", async () => {
+    await mkdirp(join(cwd, ".claude"))
+    await mkdirp(join(cwd, ".codex"))
+    await writeFile(join(cwd, "CLAUDE.md"), "claude")
+    await writeFile(join(cwd, "AGENTS.md"), "codex")
+    await writeFile(join(cwd, ".claude", "settings.local.json"), "{}")
+    await writeFile(join(cwd, ".codex", "config.toml"), "model = 'x'")
+
+    const section = await buildProjectSection(cwd)
+    const byName = new Map(section.items.map((item) => [item.name, item]))
+
+    expect(byName.get("CLAUDE.md")).toMatchObject({ fileType: "instructions", cli: ["claude"] })
+    expect(byName.get("AGENTS.md")).toMatchObject({ fileType: "instructions", cli: ["codex"] })
+    expect(byName.get("settings.local.json")).toMatchObject({ fileType: "settings", cli: ["claude"] })
+    expect(byName.get("config.toml")).toMatchObject({ fileType: "settings", cli: ["codex"] })
+  })
+
+  it("merges a skill both CLIs link at the shared source into one entry", async () => {
+    const sharedSkills = join(cwd, ".agents", "skills")
+    await writeSkill(sharedSkills, "commit")
+    await mkdirp(join(cwd, ".claude", "skills"))
+    await mkdirp(join(cwd, ".codex", "skills"))
+    const linkType = process.platform === "win32" ? "junction" : undefined
+    await symlink(join(sharedSkills, "commit"), join(cwd, ".claude", "skills", "commit"), linkType)
+    await symlink(join(sharedSkills, "commit"), join(cwd, ".codex", "skills", "commit"), linkType)
+
+    const skills = flatten(await buildProjectSection(cwd).then((s) => s.items))
+      .filter((item) => item.fileType === "skill")
+
+    expect(skills).toHaveLength(1)
+    expect(skills[0]).toMatchObject({
+      name: "commit",
+      cli: ["claude", "codex"],
+      path: join(cwd, ".claude", "skills", "commit", "SKILL.md"),
+      linkTarget: await realpath(join(sharedSkills, "commit", "SKILL.md")),
+    })
+  })
+
+  it("surfaces a shared skill that neither CLI links, and each CLI's own skills", async () => {
+    await writeSkill(join(cwd, ".agents", "skills"), "orphan")
+    await writeSkill(join(cwd, ".claude", "skills"), "claude-only")
+    await writeSkill(join(cwd, ".codex", "skills"), "codex-only")
+
+    const skills = flatten(await buildProjectSection(cwd).then((s) => s.items))
+      .filter((item) => item.fileType === "skill")
+
+    expect(skills.map((item) => [item.name, item.cli])).toEqual([
+      ["claude-only", ["claude"]],
+      ["codex-only", ["codex"]],
+      ["orphan", []],
+    ])
+  })
+
+  it("reads Codex prompts as commands alongside Claude commands", async () => {
+    await mkdirp(join(cwd, ".claude", "commands"))
+    await mkdirp(join(cwd, ".codex", "prompts"))
+    await writeFile(join(cwd, ".claude", "commands", "ship.md"), "---\ndescription: Ship\n---\n")
+    await writeFile(join(cwd, ".codex", "prompts", "review.md"), "---\ndescription: Review\n---\n")
+
+    const commands = flatten(await buildProjectSection(cwd).then((s) => s.items))
+      .filter((item) => item.fileType === "command")
+
+    expect(commands.map((item) => [item.name, item.cli])).toEqual([
+      ["review.md", ["codex"]],
+      ["ship.md", ["claude"]],
+    ])
   })
 })
 

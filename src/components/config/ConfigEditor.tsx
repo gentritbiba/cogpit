@@ -7,6 +7,8 @@ import { authFetch } from "@/lib/auth"
 import type { ConfigItem } from "./config-types"
 import { BADGE_COLORS } from "./config-types"
 import { ScopeBadge } from "./ScopeBadge"
+import { CliBadge } from "./CliBadge"
+import { LinkIndicator } from "./LinkIndicator"
 import { HighlightedEditor } from "./HighlightedEditor"
 
 interface ConfigEditorProps {
@@ -111,6 +113,7 @@ export function ConfigEditor({
           {file.fileType}
         </Badge>
         <ScopeBadge scope={file.scope} pluginName={file.pluginName} />
+        <CliBadge cli={file.cli} variant="full" />
         {file.readOnly && (
           <Badge variant="outline" className="text-[10px] h-5 bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
             <Lock className="size-2.5 mr-0.5" /> read-only
@@ -119,9 +122,12 @@ export function ConfigEditor({
         {hasChanges && (
           <span className="size-2 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
         )}
-        <span className="text-[11px] font-mono text-muted-foreground/50 truncate ml-auto" title={file.path}>
-          {file.path}
-        </span>
+        <div className="flex items-center gap-2 ml-auto min-w-0">
+          <LinkIndicator linkTarget={file.linkTarget} variant="full" />
+          <span className="text-[11px] font-mono text-muted-foreground/50 truncate" title={file.path}>
+            {file.path}
+          </span>
+        </div>
       </div>
 
       {/* Editor */}

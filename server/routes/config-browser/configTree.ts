@@ -1,10 +1,21 @@
-import { readdir, readFile, stat, access } from "node:fs/promises"
+import { readdir, readFile, stat, lstat, realpath, access } from "node:fs/promises"
 import { constants } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { parseFrontmatter } from "../slash-suggestions"
 import { hasExecutableExtension } from "../../lib/binaryResolver"
 import { getFileType, type ConfigFileType } from "./configValidation"
+import { globalLayout, projectLayout, mergeCliItems } from "./configSources"
+import type {
+  ConfigCli,
+  ConfigScopeLayout,
+  ConfigTreeItem,
+  ConfigTreeSection,
+  CliSourceDir,
+  CliSourceFile,
+} from "./configTypes"
+
+export type { ConfigTreeItem, ConfigTreeSection } from "./configTypes"
 
 /**
  * Windows has no execute bit, and fs.access(X_OK) degrades to an existence
@@ -22,30 +33,24 @@ async function isExecutableFile(fullPath: string, fileName: string): Promise<boo
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-export interface ConfigTreeItem {
-  name: string
-  path: string
-  type: "file" | "directory"
-  fileType?: ConfigFileType
-  description?: string
-  children?: ConfigTreeItem[]
-  readOnly?: boolean
-}
-
-export interface ConfigTreeSection {
-  label: string
-  scope: "global" | "project" | "plugin"
-  pluginName?: string
-  baseDir?: string
-  items: ConfigTreeItem[]
-}
-
 interface ScanDirOptions {
   readOnly?: boolean
   isSkillsDir?: boolean
   isMonitorsDir?: boolean
   isBinDir?: boolean
   isThemesDir?: boolean
+  /**
+   * Set when recursing into a directory inside a skills root. Loose files are
+   * noise at the root but are the only way to show a skill missing its SKILL.md.
+   */
+  includeLooseFiles?: boolean
+  cli?: ConfigCli[]
+}
+
+/** Canonical target of an entry reached through a symlink, if it moved. */
+async function resolveLinkTarget(path: string): Promise<string | undefined> {
+  const target = await realpath(path).catch(() => null)
+  return target && target !== path ? target : undefined
 }
 
 // ── Directory scanner ──────────────────────────────────────────────────
@@ -63,6 +68,7 @@ async function scanChildDirectory(
     type: "directory",
     children,
     readOnly: opts.readOnly,
+    cli: opts.cli,
   }
 }
 
@@ -93,10 +99,16 @@ export async function scanDir(
               fileType: "skill",
               description: fm.description || "",
               readOnly: opts.readOnly,
+              cli: opts.cli,
+              linkTarget: resolved ? await resolveLinkTarget(skillPath) : undefined,
             })
           } catch {
-            // Not a valid skill dir — still show the directory
-            const directory = await scanChildDirectory(entry.name, fullPath, opts)
+            // Not a valid skill dir — still show the directory, which may hold
+            // either a malformed skill or a nested group of real skills.
+            const directory = await scanChildDirectory(entry.name, fullPath, {
+              ...opts,
+              includeLooseFiles: true,
+            })
             if (directory) items.push(directory)
           }
         } else if (opts.isMonitorsDir) {
@@ -115,12 +127,16 @@ export async function scanDir(
             fileType: "monitor",
             description,
             readOnly: opts.readOnly,
+            cli: opts.cli,
           })
         } else {
           const directory = await scanChildDirectory(entry.name, fullPath, opts)
           if (directory) items.push(directory)
         }
       } else if (entry.isFile() || resolved?.isFile()) {
+        // A skills root holds skill directories; loose files beside them
+        // (README.md, marker files) are not configuration.
+        if (opts.isSkillsDir && !opts.includeLooseFiles) continue
         if (opts.isBinDir) {
           // bin/ entries: only include executable files
           if (await isExecutableFile(fullPath, entry.name)) {
@@ -130,6 +146,8 @@ export async function scanDir(
               type: "file",
               fileType: "bin",
               readOnly: opts.readOnly,
+              cli: opts.cli,
+              linkTarget: resolved ? await resolveLinkTarget(fullPath) : undefined,
             })
           }
           continue
@@ -159,6 +177,8 @@ export async function scanDir(
           fileType,
           description,
           readOnly: opts.readOnly,
+          cli: opts.cli,
+          linkTarget: resolved ? await resolveLinkTarget(fullPath) : undefined,
         })
       }
     }
@@ -168,104 +188,97 @@ export async function scanDir(
 
 // ── Section builders ───────────────────────────────────────────────────
 
-/** Build the global section tree */
-export async function buildGlobalSection(): Promise<ConfigTreeSection> {
-  const globalDir = join(homedir(), ".claude")
-  const items: ConfigTreeItem[] = []
-
-  // CLAUDE.md
-  const claudeMdPath = join(globalDir, "CLAUDE.md")
+/** Build a tree item for a single known config file, following a symlink to it. */
+async function buildFileItem(
+  source: CliSourceFile,
+  fileType: ConfigFileType,
+): Promise<ConfigTreeItem | null> {
+  let info
   try {
-    await stat(claudeMdPath)
-    items.push({ name: "CLAUDE.md", path: claudeMdPath, type: "file", fileType: "claude-md" })
-  } catch { /* doesn't exist */ }
-
-  // settings.json
-  const settingsPath = join(globalDir, "settings.json")
-  try {
-    await stat(settingsPath)
-    items.push({ name: "settings.json", path: settingsPath, type: "file", fileType: "settings" })
-  } catch { /* doesn't exist */ }
-
-  // agents/
-  const agentsDir = join(globalDir, "agents")
-  const agents = await scanDir(agentsDir)
-  if (agents.length > 0) {
-    items.push({ name: "agents", path: agentsDir, type: "directory", children: agents })
+    info = await lstat(source.path)
+  } catch {
+    return null
   }
 
-  // commands/
-  const commandsDir = join(globalDir, "commands")
-  const commands = await scanDir(commandsDir)
-  if (commands.length > 0) {
-    items.push({ name: "commands", path: commandsDir, type: "directory", children: commands })
+  let linkTarget: string | undefined
+  if (info.isSymbolicLink()) {
+    // A broken link points at nothing editable — leave it out.
+    const target = await realpath(source.path).catch(() => null)
+    if (!target) return null
+    linkTarget = target !== source.path ? target : undefined
+  } else if (!info.isFile()) {
+    return null
   }
 
-  // skills/
-  const skillsDir = join(globalDir, "skills")
-  const skills = await scanDir(skillsDir, { isSkillsDir: true })
-  if (skills.length > 0) {
-    items.push({ name: "skills", path: skillsDir, type: "directory", children: skills })
+  return {
+    name: source.name,
+    path: source.path,
+    type: "file",
+    fileType,
+    cli: source.cli,
+    linkTarget,
   }
+}
 
-  // themes/ (since Claude Code 2.1.118)
-  const themesDir = join(globalDir, "themes")
-  const themes = await scanDir(themesDir, { isThemesDir: true })
-  if (themes.length > 0) {
+/** Scan every CLI's copy of one directory and merge entries that share a target. */
+async function buildMergedDirectory(
+  name: string,
+  sources: CliSourceDir[],
+  opts: Omit<ScanDirOptions, "cli"> = {},
+): Promise<ConfigTreeItem | null> {
+  const groups = await Promise.all(
+    sources.map((source) => scanDir(source.dir, { ...opts, cli: source.cli })),
+  )
+  const children = await mergeCliItems(groups)
+  if (children.length === 0) return null
+  children.sort((a, b) => a.name.localeCompare(b.name))
+  return {
+    name,
+    path: sources[0].dir,
+    type: "directory",
+    children,
+    readOnly: opts.readOnly,
+  }
+}
+
+async function buildScopeItems(layout: ConfigScopeLayout): Promise<ConfigTreeItem[]> {
+  const themesDir = layout.themesDir
+  const [instructions, settings, agents, commands, skills, themes] = await Promise.all([
+    Promise.all(layout.instructions.map((file) => buildFileItem(file, "instructions"))),
+    Promise.all(layout.settings.map((file) => buildFileItem(file, "settings"))),
+    buildMergedDirectory("agents", layout.agents),
+    buildMergedDirectory("commands", layout.commands),
+    buildMergedDirectory("skills", layout.skills, { isSkillsDir: true }),
+    themesDir ? scanDir(themesDir, { isThemesDir: true, cli: ["claude"] }) : [],
+  ])
+
+  // Shared setups link ~/.claude/CLAUDE.md at ~/AGENTS.md, so the two files
+  // collapse into one entry carrying both CLIs.
+  const items = await mergeCliItems([
+    [...instructions, ...settings].filter((item): item is ConfigTreeItem => item !== null),
+  ])
+
+  for (const directory of [agents, commands, skills]) {
+    if (directory) items.push(directory)
+  }
+  if (themesDir && themes.length > 0) {
     items.push({ name: "themes", path: themesDir, type: "directory", children: themes })
   }
+  return items
+}
 
-  return { label: "Global", scope: "global", baseDir: globalDir, items }
+/** Build the global section tree */
+export async function buildGlobalSection(): Promise<ConfigTreeSection> {
+  const layout = globalLayout()
+  const items = await buildScopeItems(layout)
+  return { label: "Global", scope: "global", baseDir: layout.baseDir, items }
 }
 
 /** Build the project section tree */
 export async function buildProjectSection(cwd: string): Promise<ConfigTreeSection> {
-  const projectClaudeDir = join(cwd, ".claude")
-  const items: ConfigTreeItem[] = []
-
-  // CLAUDE.md (project root)
-  const claudeMdPath = join(cwd, "CLAUDE.md")
-  try {
-    await stat(claudeMdPath)
-    items.push({ name: "CLAUDE.md", path: claudeMdPath, type: "file", fileType: "claude-md" })
-  } catch { /* doesn't exist */ }
-
-  // .claude/CLAUDE.md
-  const innerClaudeMd = join(projectClaudeDir, "CLAUDE.md")
-  try {
-    await stat(innerClaudeMd)
-    items.push({ name: ".claude/CLAUDE.md", path: innerClaudeMd, type: "file", fileType: "claude-md" })
-  } catch { /* doesn't exist */ }
-
-  // .claude/settings.local.json
-  const settingsPath = join(projectClaudeDir, "settings.local.json")
-  try {
-    await stat(settingsPath)
-    items.push({ name: "settings.local.json", path: settingsPath, type: "file", fileType: "settings" })
-  } catch { /* doesn't exist */ }
-
-  // .claude/agents/
-  const agentsDir = join(projectClaudeDir, "agents")
-  const agents = await scanDir(agentsDir)
-  if (agents.length > 0) {
-    items.push({ name: "agents", path: agentsDir, type: "directory", children: agents })
-  }
-
-  // .claude/commands/
-  const commandsDir = join(projectClaudeDir, "commands")
-  const commands = await scanDir(commandsDir)
-  if (commands.length > 0) {
-    items.push({ name: "commands", path: commandsDir, type: "directory", children: commands })
-  }
-
-  // .claude/skills/
-  const skillsDir = join(projectClaudeDir, "skills")
-  const skills = await scanDir(skillsDir, { isSkillsDir: true })
-  if (skills.length > 0) {
-    items.push({ name: "skills", path: skillsDir, type: "directory", children: skills })
-  }
-
-  return { label: "Project", scope: "project", baseDir: projectClaudeDir, items }
+  const layout = projectLayout(cwd)
+  const items = await buildScopeItems(layout)
+  return { label: "Project", scope: "project", baseDir: layout.baseDir, items }
 }
 
 /** Build plugin sections */
@@ -288,42 +301,42 @@ export async function buildPluginSections(): Promise<ConfigTreeSection[]> {
 
       // skills/
       const skillsDir = join(installPath, "skills")
-      const skills = await scanDir(skillsDir, { readOnly: true, isSkillsDir: true })
+      const skills = await scanDir(skillsDir, { readOnly: true, isSkillsDir: true, cli: ["claude"] })
       if (skills.length > 0) {
         items.push({ name: "skills", path: skillsDir, type: "directory", children: skills, readOnly: true })
       }
 
       // commands/
       const commandsDir = join(installPath, "commands")
-      const commands = await scanDir(commandsDir, { readOnly: true })
+      const commands = await scanDir(commandsDir, { readOnly: true, cli: ["claude"] })
       if (commands.length > 0) {
         items.push({ name: "commands", path: commandsDir, type: "directory", children: commands, readOnly: true })
       }
 
       // agents/
       const agentsDir = join(installPath, "agents")
-      const agents = await scanDir(agentsDir, { readOnly: true })
+      const agents = await scanDir(agentsDir, { readOnly: true, cli: ["claude"] })
       if (agents.length > 0) {
         items.push({ name: "agents", path: agentsDir, type: "directory", children: agents, readOnly: true })
       }
 
       // themes/ (since Claude Code 2.1.118)
       const pluginThemesDir = join(installPath, "themes")
-      const pluginThemes = await scanDir(pluginThemesDir, { readOnly: true, isThemesDir: true })
+      const pluginThemes = await scanDir(pluginThemesDir, { readOnly: true, isThemesDir: true, cli: ["claude"] })
       if (pluginThemes.length > 0) {
         items.push({ name: "themes", path: pluginThemesDir, type: "directory", children: pluginThemes, readOnly: true })
       }
 
       // monitors/ (each subdir is a monitor)
       const monitorsDir = join(installPath, "monitors")
-      const monitors = await scanDir(monitorsDir, { readOnly: true, isMonitorsDir: true })
+      const monitors = await scanDir(monitorsDir, { readOnly: true, isMonitorsDir: true, cli: ["claude"] })
       if (monitors.length > 0) {
         items.push({ name: "monitors", path: monitorsDir, type: "directory", children: monitors, readOnly: true })
       }
 
       // bin/ (executable files only)
       const binDir = join(installPath, "bin")
-      const bins = await scanDir(binDir, { readOnly: true, isBinDir: true })
+      const bins = await scanDir(binDir, { readOnly: true, isBinDir: true, cli: ["claude"] })
       if (bins.length > 0) {
         items.push({ name: "bin", path: binDir, type: "directory", children: bins, readOnly: true })
       }
