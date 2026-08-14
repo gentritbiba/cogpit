@@ -1,29 +1,9 @@
 import { BookOpen, Bot, Sparkles, Terminal, FileJson } from "lucide-react"
+import type { ConfigCli, ConfigTreeItem, ConfigTreeSection } from "../../../shared/contracts/configBrowser"
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-/** CLI that loads a config entry. Mirrors ConfigCli on the server. */
-export type ConfigCli = "claude" | "codex"
-
-interface ConfigTreeItem {
-  name: string
-  path: string
-  type: "file" | "directory"
-  fileType?: "command" | "skill" | "agent" | "instructions" | "settings" | "theme" | "monitor" | "bin" | "unknown"
-  description?: string
-  children?: ConfigTreeItem[]
-  readOnly?: boolean
-  cli?: ConfigCli[]
-  linkTarget?: string
-}
-
-export interface ConfigTreeSection {
-  label: string
-  scope: "global" | "project" | "plugin"
-  pluginName?: string
-  baseDir?: string
-  items: ConfigTreeItem[]
-}
+export type { ConfigCli, ConfigTreeSection }
 
 /** A flattened config item for the category view and editor selection */
 export interface ConfigItem {

@@ -11,16 +11,9 @@ import {
   win32,
 } from "node:path"
 
-export type ConfigFileType =
-  | "command"
-  | "skill"
-  | "agent"
-  | "instructions"
-  | "settings"
-  | "unknown"
-  | "theme"
-  | "monitor"
-  | "bin"
+import type { ConfigFileType } from "../../../shared/contracts/configBrowser"
+
+export type { ConfigFileType }
 
 /**
  * Directories that hold agent configuration: Claude Code's `.claude`, Codex
