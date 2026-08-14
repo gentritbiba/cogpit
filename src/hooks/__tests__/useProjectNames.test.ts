@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useProjectNames, renameProject } from "@/hooks/useProjectNames"
+import { __resetIdentityForTest, setActiveIdentity } from "@/lib/device"
 
 function setPath(pathname: string) {
   Object.defineProperty(window, "location", {
@@ -13,6 +14,7 @@ function setPath(pathname: string) {
 describe("useProjectNames device scoping", () => {
   beforeEach(() => {
     localStorage.clear()
+    __resetIdentityForTest()
     setPath("/")
     // Reset the module-level snapshot to the (now empty) local scope.
     window.dispatchEvent(new Event("cogpit-device-changed"))
@@ -70,5 +72,25 @@ describe("useProjectNames device scoping", () => {
     setPath("/")
     act(() => window.dispatchEvent(new Event("cogpit-device-changed")))
     expect(result.current.names).toEqual({ "-dir-a": "Local A" })
+  })
+
+  it("reloads the module snapshot when the signed-in identity changes", () => {
+    setActiveIdentity("u_1")
+    act(() => renameProject("-dir-a", "User One"))
+    const { result } = renderHook(() => useProjectNames())
+
+    act(() => setActiveIdentity("u_2"))
+    expect(result.current.names).toEqual({})
+    act(() => renameProject("-dir-a", "User Two"))
+
+    expect(localStorage.getItem("project-custom-names::local::u_1")).toBe(
+      JSON.stringify({ "-dir-a": "User One" }),
+    )
+    expect(localStorage.getItem("project-custom-names::local::u_2")).toBe(
+      JSON.stringify({ "-dir-a": "User Two" }),
+    )
+
+    act(() => setActiveIdentity("u_1"))
+    expect(result.current.names).toEqual({ "-dir-a": "User One" })
   })
 })

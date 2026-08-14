@@ -14,7 +14,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-async function fixture() {
+async function fixture(config: Record<string, unknown> = {}) {
   const root = await mkdtemp(join(tmpdir(), "cogpit-runtime-"))
   temporaryDirs.push(root)
   const staticDir = join(root, "web")
@@ -27,7 +27,7 @@ async function fixture() {
   ])
   await Promise.all([
     writeFile(join(staticDir, "index.html"), "<main>portable cogpit</main>"),
-    writeFile(join(dataDir, "config.local.json"), JSON.stringify({ claudeDir })),
+    writeFile(join(dataDir, "config.local.json"), JSON.stringify({ claudeDir, ...config })),
   ])
   return { staticDir, dataDir }
 }
@@ -70,5 +70,27 @@ describe("startStandaloneServer", () => {
       port: 0,
       env: {},
     })).rejects.toThrow("Refusing to bind")
+  })
+
+  it("preserves team-edition boot policy in the reusable runtime", async () => {
+    const { staticDir, dataDir } = await fixture({ edition: "team" })
+    const runtime = await startStandaloneServer({
+      staticDir,
+      dataDir,
+      host: "127.0.0.1",
+      port: 0,
+      // Team members authenticate individually, so the shared password is
+      // ignored rather than rejected for being weak or applied to the config.
+      env: { COGPIT_NETWORK_PASSWORD: "weak" },
+    })
+    runningServers.push(runtime)
+
+    const hello = await fetch(`${runtime.url}/api/hello`)
+    expect(hello.status).toBe(200)
+    expect(await hello.json()).toMatchObject({
+      edition: "team",
+      needsBootstrap: true,
+    })
+    expect(runtime.envPassword).toBe(true)
   })
 })

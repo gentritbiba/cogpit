@@ -11,6 +11,7 @@ import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
+import { can } from "@/lib/capabilities"
 import { hapticLight } from "@/lib/haptics"
 import { shortPath } from "@/lib/format"
 import type { MobileAppShellProps } from "./mobileTypes"
@@ -122,17 +123,19 @@ export function MobileAppShell({
                   <div className="flex-1 flex flex-col items-center justify-center gap-1">
                     <p className="text-sm text-muted-foreground">New session — type your first message below</p>
                     <p className="text-xs text-muted-foreground font-mono">{shortPath(sessionView.pendingPath ?? "")}</p>
-                    <div className="flex items-center gap-1 mt-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                        onClick={project.onOpenTerminal}
-                      >
-                        <TerminalSquare className="size-3" />
-                        Terminal
-                      </Button>
-                    </div>
+                    {can("terminal") && (
+                      <div className="flex items-center gap-1 mt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                          onClick={project.onOpenTerminal}
+                        >
+                          <TerminalSquare className="size-3" />
+                          Terminal
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -192,7 +195,7 @@ export function MobileAppShell({
       {chrome.undoDialog}
       {chrome.branchModal}
       {chrome.status}
-      {session && (
+      {session && project.hasFileChanges && (
         <Suspense fallback={null}>
           <MobileFileChanges
             open={chrome.fileChangesOpen}

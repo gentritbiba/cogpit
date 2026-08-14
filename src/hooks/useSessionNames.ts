@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { deviceScopedKey } from "@/lib/device"
 
 interface SessionNamesResult {
   names: Record<string, string>
@@ -9,7 +10,7 @@ const STORAGE_KEY = "session-custom-names"
 
 function loadNames(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(deviceScopedKey(STORAGE_KEY))
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -17,12 +18,21 @@ function loadNames(): Record<string, string> {
 }
 
 function saveNames(names: Record<string, string>): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(names))
+  localStorage.setItem(deviceScopedKey(STORAGE_KEY), JSON.stringify(names))
 }
 
 // Module-level store shared across all hook instances
 let currentNames: Record<string, string> = loadNames()
 const listeners = new Set<() => void>()
+
+if (typeof window !== "undefined") {
+  const reloadNames = () => {
+    currentNames = loadNames()
+    for (const listener of listeners) listener()
+  }
+  window.addEventListener("cogpit-device-changed", reloadNames)
+  window.addEventListener("cogpit-identity-changed", reloadNames)
+}
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)

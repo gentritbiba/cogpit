@@ -1,6 +1,7 @@
 // ── Network auth utilities ──────────────────────────────────────────────
 
 import { withBase } from "./device"
+import type { CogpitEdition } from "../../shared/contracts/team"
 
 const LEGACY_TOKEN_KEY = "cogpit-network-token"
 const LOCAL_HOSTNAMES = new Set([
@@ -31,8 +32,78 @@ export function clearToken(): void {
 // loads. Session credentials must never be readable by page JavaScript.
 if (typeof window !== "undefined") clearToken()
 
+// ── Server handshake (public /api/hello) ────────────────────────────────
+
+/** The pre-authentication facts the renderer needs from `/api/hello`. */
+export interface ServerHello {
+  edition: CogpitEdition
+  /** Team server with no accounts yet: the first-admin screen is open. */
+  needsBootstrap: boolean
+}
+
+const PERSONAL_HELLO: ServerHello = { edition: "personal", needsBootstrap: false }
+
+let helloPromise: Promise<ServerHello> | null = null
+let knownEdition: CogpitEdition | null = null
+
+function probeServerHello(): Promise<ServerHello> {
+  return fetch("/api/hello", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "X-Cogpit-Client": "1" },
+  })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Hello handshake failed (${res.status})`)
+      const data = await res.json() as { edition?: unknown; needsBootstrap?: unknown }
+      knownEdition = data.edition === "team" ? "team" : "personal"
+      return {
+        edition: knownEdition,
+        needsBootstrap: knownEdition === "team" && data.needsBootstrap === true,
+      }
+    })
+    .catch(() => {
+      helloPromise = null
+      return PERSONAL_HELLO
+    })
+}
+
+/**
+ * Resolve the public `/api/hello` handshake — needed BEFORE authentication
+ * because a team server gates even localhost browsers and may have no accounts
+ * to log into yet. Fetched once and shared by every consumer (auth gate, login
+ * screen, bootstrap screen); a failed probe resolves as personal (the no-op
+ * path) without being cached so the next caller retries.
+ */
+export function getServerHello(): Promise<ServerHello> {
+  helloPromise ??= probeServerHello()
+  return helloPromise
+}
+
+/**
+ * Re-run the handshake and replace the cache. Bootstrap state changes the
+ * moment the first admin is created — by this browser or another one — so the
+ * cached answer must be discarded rather than trusted for the session.
+ */
+export function refreshServerHello(): Promise<ServerHello> {
+  helloPromise = probeServerHello()
+  return helloPromise
+}
+
+/** The server edition alone, from the same shared handshake. */
+export function getServerEdition(): Promise<CogpitEdition> {
+  return getServerHello().then((hello) => hello.edition)
+}
+
+export function __resetServerHelloForTest(): void {
+  helloPromise = null
+  knownEdition = null
+}
+
 export async function checkAuthSession(): Promise<boolean> {
-  if (!isRemoteClient()) return true
+  // Team edition authenticates local browsers too; the trusted-local
+  // short-circuit only applies while the server is (or is assumed) personal.
+  if (!isRemoteClient() && knownEdition !== "team") return true
   try {
     const response = await fetch("/api/auth/session", {
       method: "GET",
@@ -59,13 +130,23 @@ export async function logoutSession(): Promise<void> {
   }
 }
 
+/** Scrub legacy tokens, announce the login requirement, and fail the call. */
+function failAuthRequired(): Promise<never> {
+  clearToken()
+  window.dispatchEvent(new Event("cogpit-auth-required"))
+  return Promise.reject(new Error("Authentication required"))
+}
+
 /**
  * Shared fetch core for {@link authFetch} and {@link hubFetch}.
  *
  * - Always sends `X-Cogpit-Client: 1` (drive-by-localhost CSRF guard; the hub
  *   requires it on state-changing `/hub/*` requests).
- * - Browser credentials stay in an HttpOnly same-origin cookie. A 401 emits
- *   `cogpit-auth-required`; JavaScript never reads or attaches the token.
+ * - Browser credentials stay in an HttpOnly same-origin cookie. A gated 401
+ *   emits `cogpit-auth-required`; JavaScript never reads or attaches the token.
+ * - A local 401 while the edition is still unknown (the boot hello probe
+ *   failed) re-probes once — a team server then gates this tab instead of
+ *   leaving it permanently on raw errors.
  * - A `502` carrying `X-Cogpit-Device` means the hub could not reach that remote
  *   device; dispatch `cogpit-device-unreachable` (banner signal) and still
  *   return the response.
@@ -79,8 +160,6 @@ function requestWithAuth(
   init: RequestInit | undefined,
   applyBase: boolean,
 ): Promise<Response> {
-  const remote = isRemoteClient()
-
   if (applyBase && typeof input === "string" && input.startsWith("/api")) {
     input = withBase(input)
   }
@@ -90,10 +169,18 @@ function requestWithAuth(
   headers.set("X-Cogpit-Client", "1")
 
   return fetch(input, { ...init, headers, credentials: "same-origin" }).then((res) => {
-    if (remote && res.status === 401) {
-      clearToken()
-      window.dispatchEvent(new Event("cogpit-auth-required"))
-      return Promise.reject(new Error("Authentication required"))
+    if (res.status === 401) {
+      // A 401 means "session required" for remote clients always, and for local
+      // browsers once the server is known to be team edition (team gates localhost).
+      if (isRemoteClient() || knownEdition === "team") return failAuthRequired()
+      // Unknown edition on a local client means the hello probe failed and
+      // "personal" was assumed without being cached — re-probe before trusting
+      // the assumption (a failed probe leaves no cache, so this fetches fresh).
+      if (knownEdition === null) {
+        return getServerEdition().then((edition) =>
+          edition === "team" ? failAuthRequired() : res,
+        )
+      }
     }
     if (res.status === 502) {
       const deviceId = res.headers.get("X-Cogpit-Device")

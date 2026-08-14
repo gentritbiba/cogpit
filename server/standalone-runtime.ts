@@ -8,6 +8,7 @@ import {
   applyEnvNetworkOverrides,
   clearEnvNetworkOverrides,
   getConfig,
+  getConfiguredEditionValue,
   loadConfig,
   saveConfig,
   setConfigPath,
@@ -19,6 +20,7 @@ import {
   shouldFailClosed,
 } from "./lib/standalone-bootstrap"
 import { validatePasswordStrength } from "./security"
+import { getEdition, initEdition, isTeamEdition } from "./team/edition"
 
 export interface StartStandaloneServerOptions {
   staticDir: string
@@ -34,6 +36,7 @@ export interface RunningStandaloneServer {
   port: number
   url: string
   dataDir: string
+  createdConfig?: string
   envPassword: boolean
   dispose: () => Promise<void>
 }
@@ -82,12 +85,19 @@ export async function startStandaloneServer({
 
   // Prefer a real Claude installation when both providers are available. The
   // config module already synthesizes an in-memory Codex-only configuration.
+  let createdConfig: string | undefined
   if (!configExisted) {
     const claudeDir = join(homedir(), ".claude")
     if (existsSync(join(claudeDir, "projects"))) {
       await saveConfig({ claudeDir })
+      createdConfig = `${configPath} for ${claudeDir}`
     }
   }
+
+  // Resolve the edition before applying network-password policy. Team edition
+  // authenticates named users and deliberately ignores the shared password.
+  // Server composition resolves the same inputs again before registering routes.
+  initEdition({ shell: "standalone", configEdition: getConfiguredEditionValue() })
 
   let envPassword: string | null
   try {
@@ -99,7 +109,7 @@ export async function startStandaloneServer({
   }
 
   clearEnvNetworkOverrides()
-  if (envPassword) {
+  if (envPassword && !isTeamEdition()) {
     const strengthError = validatePasswordStrength(envPassword)
     if (strengthError) {
       throw new Error(`Network password is too weak — ${strengthError}.`)
@@ -107,7 +117,11 @@ export async function startStandaloneServer({
     applyEnvNetworkOverrides({ password: envPassword })
   }
 
-  if (shouldFailClosed(host, hasUsableNetworkCredentials(envPassword, getConfig()))) {
+  if (shouldFailClosed(
+    host,
+    hasUsableNetworkCredentials(envPassword, getConfig()),
+    getEdition(),
+  )) {
     throw new Error(
       `Refusing to bind ${host}:${port} without a network password. Bind loopback or configure COGPIT_NETWORK_PASSWORD.`,
     )
@@ -131,6 +145,7 @@ export async function startStandaloneServer({
     port: boundPort,
     url: `http://${urlHost}:${boundPort}`,
     dataDir,
+    createdConfig,
     envPassword: !!envPassword,
     dispose: async () => {
       if (disposed) return

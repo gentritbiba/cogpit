@@ -60,6 +60,10 @@ interface SessionInfo {
   metadata?: PtySessionMetadata
 }
 
+/** `touch=true` only for client activity; periodic/output checks must not keep a session alive. */
+export type PtyConnectionAuthorizer = (touch: boolean) => boolean
+const AUTHORIZATION_RECHECK_MS = 5_000
+
 function toSessionInfo(s: PtySession): SessionInfo {
   return {
     id: s.id,
@@ -75,13 +79,22 @@ function toSessionInfo(s: PtySession): SessionInfo {
 export class PtySessionManager {
   private sessions = new Map<string, PtySession>()
   private wss: WebSocketServer
+  private authorizers = new Map<WebSocket, PtyConnectionAuthorizer>()
+  private authorizationTimers = new Map<WebSocket, ReturnType<typeof setInterval>>()
 
   constructor(wss: WebSocketServer) {
     this.wss = wss
   }
 
-  handleConnection(ws: WebSocket): void {
+  handleConnection(ws: WebSocket, authorize?: PtyConnectionAuthorizer): void {
+    if (authorize) {
+      this.authorizers.set(ws, authorize)
+      const timer = setInterval(() => this.ensureAuthorized(ws, false), AUTHORIZATION_RECHECK_MS)
+      timer.unref?.()
+      this.authorizationTimers.set(ws, timer)
+    }
     ws.on("message", (raw) => {
+      if (!this.ensureAuthorized(ws, true)) return
       try {
         const msg = JSON.parse(raw.toString()) as Record<string, unknown>
         this.handleMessage(ws, msg)
@@ -91,10 +104,27 @@ export class PtySessionManager {
     })
 
     ws.on("close", () => {
+      this.authorizers.delete(ws)
+      const timer = this.authorizationTimers.get(ws)
+      if (timer) clearInterval(timer)
+      this.authorizationTimers.delete(ws)
       for (const session of this.sessions.values()) {
         session.clients.delete(ws)
       }
     })
+  }
+
+  private ensureAuthorized(ws: WebSocket, touch: boolean): boolean {
+    const authorize = this.authorizers.get(ws)
+    if (!authorize) return true
+    try {
+      if (authorize(touch)) return true
+    } catch {
+      // Authorization checks fail closed; a timer callback must never crash
+      // the process and leave the privileged transport running.
+    }
+    if (ws.readyState === WebSocket.OPEN) ws.close(1008, "Session authorization expired")
+    return false
   }
 
   private handleMessage(ws: WebSocket, msg: Record<string, unknown>): void {
@@ -187,7 +217,7 @@ export class PtySessionManager {
       }
       const out = JSON.stringify({ type: "output", id, data })
       for (const client of session.clients) {
-        if (client.readyState === WebSocket.OPEN) {
+        if (this.ensureAuthorized(client, false) && client.readyState === WebSocket.OPEN) {
           client.send(out)
         }
       }
@@ -198,7 +228,7 @@ export class PtySessionManager {
       session.exitCode = exitCode
       const exitMsg = JSON.stringify({ type: "exit", id, code: exitCode })
       for (const client of session.clients) {
-        if (client.readyState === WebSocket.OPEN) {
+        if (this.ensureAuthorized(client, false) && client.readyState === WebSocket.OPEN) {
           client.send(exitMsg)
         }
       }
@@ -292,7 +322,7 @@ export class PtySessionManager {
   private broadcastToAll(msg: object): void {
     const data = JSON.stringify(msg)
     for (const client of this.wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
+      if (this.ensureAuthorized(client, false) && client.readyState === WebSocket.OPEN) {
         client.send(data)
       }
     }
@@ -306,6 +336,9 @@ export class PtySessionManager {
   }
 
   cleanup(): void {
+    for (const timer of this.authorizationTimers.values()) clearInterval(timer)
+    this.authorizationTimers.clear()
+    this.authorizers.clear()
     for (const session of this.sessions.values()) {
       if (session.status === "running") {
         killPty(session.pty)

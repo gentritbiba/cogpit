@@ -12,11 +12,13 @@ import { HighlightedEditor } from "./HighlightedEditor"
 interface ConfigEditorProps {
   file: ConfigItem
   onDeleted: () => void
+  readOnly?: boolean
 }
 
 export function ConfigEditor({
   file,
   onDeleted,
+  readOnly = false,
 }: ConfigEditorProps) {
   const [content, setContent] = useState<string | null>(null)
   const [originalContent, setOriginalContent] = useState<string | null>(null)
@@ -26,6 +28,7 @@ export function ConfigEditor({
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const hasChanges = content !== null && content !== originalContent
+  const isReadOnly = readOnly || file.readOnly
 
   // Load file content
   useEffect(() => {
@@ -49,7 +52,7 @@ export function ConfigEditor({
   }, [file.path])
 
   const handleSave = useCallback(async () => {
-    if (!hasChanges || file.readOnly) return
+    if (!hasChanges || isReadOnly) return
     setSaving(true)
     try {
       const res = await authFetch("/api/config-browser/file", {
@@ -65,7 +68,7 @@ export function ConfigEditor({
     } finally {
       setSaving(false)
     }
-  }, [content, file.path, file.readOnly, hasChanges])
+  }, [content, file.path, hasChanges, isReadOnly])
 
   const handleDiscard = useCallback(() => {
     setContent(originalContent)
@@ -73,6 +76,7 @@ export function ConfigEditor({
   }, [originalContent])
 
   const handleDelete = useCallback(async () => {
+    if (isReadOnly) return
     if (!confirmDelete) {
       setConfirmDelete(true)
       return
@@ -83,19 +87,19 @@ export function ConfigEditor({
       })
       if (res.ok) onDeleted()
     } catch { /* ignore */ }
-  }, [confirmDelete, file.path, onDeleted])
+  }, [confirmDelete, file.path, isReadOnly, onDeleted])
 
   // Ctrl+S / Cmd+S to save
   useEffect(() => {
     function handler(e: KeyboardEvent): void {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      if (!isReadOnly && (e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault()
         handleSave()
       }
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [handleSave])
+  }, [handleSave, isReadOnly])
 
   function getSaveLabel(): string {
     if (saved) return "Saved!"
@@ -111,7 +115,7 @@ export function ConfigEditor({
           {file.fileType}
         </Badge>
         <ScopeBadge scope={file.scope} pluginName={file.pluginName} />
-        {file.readOnly && (
+        {isReadOnly && (
           <Badge variant="outline" className="text-[10px] h-5 bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
             <Lock className="size-2.5 mr-0.5" /> read-only
           </Badge>
@@ -134,12 +138,12 @@ export function ConfigEditor({
           <HighlightedEditor
             value={content ?? ""}
             onChange={setContent}
-            readOnly={file.readOnly}
+            readOnly={isReadOnly}
             filePath={file.path}
           />
 
           {/* Action bar */}
-          {!file.readOnly && (
+          {!isReadOnly && (
             <div className="flex items-center gap-2 px-4 py-2 border-t border-border/50 bg-elevation-1 shrink-0">
               <Button
                 variant="ghost"

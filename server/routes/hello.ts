@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { randomBytes } from "node:crypto"
 import type { UseFn } from "../http"
 import { getConfig } from "../config"
+import { getEdition, isTeamEdition } from "../team/edition"
+import { isUsersStoreInitialized, userCount } from "../team/users"
 
 export type HubMode = "electron" | "standalone" | "dev"
 
@@ -66,6 +68,14 @@ export function registerHelloRoutes(use: UseFn, opts: { mode: HubMode }) {
       version: VERSION,
       hubApi: 1,
       mode: opts.mode,
+      // Read per request: initEdition runs during composition, after modules
+      // load — a value captured at import time could freeze stale "personal".
+      edition: getEdition(),
+      // Mirrors authMiddleware's bootstrap carve-out so the renderer can show
+      // the first-admin screen instead of a login nobody can pass yet. It only
+      // says "this team server has no accounts", which that carve-out already
+      // implies to anyone who can reach the endpoint.
+      needsBootstrap: isTeamEdition() && isUsersStoreInitialized() && userCount() === 0,
       name: getDeviceName(),
       instanceId: INSTANCE_ID,
       networkAccess: config?.networkAccess ?? false,

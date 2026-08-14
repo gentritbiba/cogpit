@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cogpit Team Edition — Operator's Guide</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #13171d;
+    --panel-2: #171c23;
+    --line: #242b35;
+    --text: #e7eaee;
+    --muted: #98a2ae;
+    --accent: #5eead4;
+    --accent-2: #a78bfa;
+    --warn: #fbbf24;
+    --danger: #fb7185;
+    --ok: #4ade80;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { display: grid; grid-template-columns: 264px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; gap: 48px; }
+
+  /* Sidebar */
+  nav {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    padding: 40px 0 40px 24px; border-right: 1px solid var(--line);
+  }
+  nav .brand { font-weight: 700; font-size: 15px; letter-spacing: .01em; margin-bottom: 4px; }
+  nav .brand span { color: var(--accent); }
+  nav .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 26px; }
+  nav a {
+    display: block; color: var(--muted); text-decoration: none; font-size: 13.5px;
+    padding: 6px 10px; border-radius: 6px; border-left: 2px solid transparent; margin-left: -2px;
+  }
+  nav a:hover { color: var(--text); background: var(--panel); }
+  nav a.active { color: var(--accent); border-left-color: var(--accent); background: var(--panel); }
+  nav .grp { color: #5d6773; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin: 22px 0 8px 10px; }
+
+  main { padding: 40px 24px 120px; min-width: 0; }
+
+  header.hero { padding: 24px 0 8px; }
+  header.hero h1 { font-size: 34px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -0.02em; }
+  header.hero p.lede { color: var(--muted); font-size: 17px; max-width: 62ch; margin: 0 0 18px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .pill {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill.on { color: var(--accent); border-color: #1f4d47; background: #0f201e; }
+
+  section { padding-top: 44px; }
+  h2 { font-size: 23px; margin: 0 0 6px; letter-spacing: -0.01em; scroll-margin-top: 24px; }
+  h2 .num { color: var(--accent-2); font-family: var(--mono); font-size: 15px; margin-right: 10px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p { max-width: 74ch; }
+  .muted { color: var(--muted); }
+  a.link { color: var(--accent); }
+
+  pre {
+    position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  }
+  pre .c { color: #6b7683; }      /* comment */
+  pre .k { color: var(--accent-2); } /* key/flag */
+  pre .s { color: var(--accent); }   /* string */
+  code:not(pre code) {
+    font-family: var(--mono); font-size: 12.5px; background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 5px; padding: 1.5px 6px; color: #cfe9e4;
+  }
+  .copy {
+    position: absolute; top: 8px; right: 8px; font-size: 11px; font-family: inherit;
+    background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 9px; cursor: pointer;
+  }
+  .copy:hover { color: var(--text); border-color: #364150; }
+  .copy.done { color: var(--ok); border-color: #1e4030; }
+
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td code { white-space: nowrap; }
+  .yes { color: var(--ok); font-weight: 600; }
+  .no { color: var(--danger); }
+
+  .note, .warn, .tip {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; font-size: 14.5px;
+  }
+  .warn { border-left-color: var(--warn); }
+  .tip { border-left-color: var(--accent-2); }
+  .note b, .warn b, .tip b { display: block; margin-bottom: 3px; font-size: 13px; letter-spacing: .01em; }
+  .warn b { color: var(--warn); }
+  .tip b { color: var(--accent-2); }
+  .note b { color: var(--accent); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 18px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 14.5px; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .card .tag { font-family: var(--mono); font-size: 11px; color: var(--accent-2); }
+
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 18px 0; }
+  ol.steps > li {
+    counter-increment: s; position: relative; padding-left: 42px; margin-bottom: 22px;
+  }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: 0;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--panel-2);
+    border: 1px solid var(--line); color: var(--accent); font-family: var(--mono);
+    font-size: 12px; display: grid; place-items: center;
+  }
+  ol.steps > li b { display: block; margin-bottom: 4px; }
+
+  .roadmap li { margin-bottom: 10px; }
+  .done { color: var(--ok); }
+  footer { margin-top: 70px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: 1fr; gap: 0; }
+    nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 24px; }
+    nav a { display: inline-block; }
+    main { padding: 24px 20px 80px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">Cogpit <span>Team Edition</span></div>
+  <div class="sub">Operator's guide</div>
+  <div class="grp">Get running</div>
+  <a href="#what">What this is</a>
+  <a href="#quickstart">Quick start</a>
+  <a href="#deploy">Deploy properly</a>
+  <a href="#firstboot">First boot</a>
+  <div class="grp">Run it</div>
+  <a href="#roles">Roles &amp; capabilities</a>
+  <a href="#users">Managing users</a>
+  <a href="#login">Logging in</a>
+  <a href="#hub">Your desktop app</a>
+  <a href="#agents">Agents &amp; hooks</a>
+  <div class="grp">Know it</div>
+  <a href="#security">Security model</a>
+  <a href="#trouble">Troubleshooting</a>
+  <a href="#roadmap">What's next</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>Cogpit Team Edition</h1>
+  <p class="lede">One Cogpit on a shared box, a login for every person using it. Your team drives Claude Code and Codex sessions through the browser; the machine, the CLI logins, and the MCP connections stay in one place.</p>
+  <div class="pills">
+    <span class="pill on">Personal edition unchanged</span>
+    <span class="pill">cogpit-server only</span>
+    <span class="pill">Local accounts</span>
+    <span class="pill">Admin / member roles</span>
+    <span class="pill">Hub-compatible</span>
+  </div>
+</header>
+
+<section id="what">
+  <h2><span class="num">01</span>What this is</h2>
+  <p>Cogpit ships as one binary with two <b>editions</b>. Nothing about your desktop app changes — personal edition is the default and behaves exactly as it always has. Team edition is a flag you set on the headless server.</p>
+
+  <div class="cards">
+    <div class="card">
+      <div class="tag">personal</div>
+      <h4>What you use today</h4>
+      <p>Desktop app or local server. One user, no login on the machine itself, everything unlocked.</p>
+    </div>
+    <div class="card">
+      <div class="tag">team</div>
+      <h4>The business box</h4>
+      <p>Named accounts, everyone logs in, roles gate the dangerous surfaces. Standalone server only.</p>
+    </div>
+  </div>
+
+  <p>The important consequence: in team edition <b>"local" is no longer trusted</b>. On a personal box, any process on the machine can talk to Cogpit without a password. That is fine on your laptop and unacceptable on a shared server, so team edition requires a session for every request — including from a browser running on the box itself.</p>
+
+  <div class="note">
+    <b>One agent login, many people</b>
+    Claude Code and Codex are logged in once, as the server's OS user. Every team member's sessions run under that login; Cogpit records who started what. That is the model — it is not per-user credential isolation.
+  </div>
+</section>
+
+<section id="quickstart">
+  <h2><span class="num">02</span>Quick start</h2>
+  <p>The five-minute version. Read <a href="#deploy" class="link">Deploy properly</a> before you let anyone else in.</p>
+
+  <ol class="steps">
+    <li>
+      <b>Install Claude Code and/or Codex on the server, and log them in.</b>
+      Cogpit drives those CLIs — it has no models of its own and needs no API keys.
+    </li>
+    <li>
+      <b>Build Cogpit.</b>
+<pre><code>git clone https://github.com/gentritbiba/cogpit.git
+cd cogpit
+bun install
+bun run build</code></pre>
+    </li>
+    <li>
+      <b>Start it in team edition, bound to loopback.</b>
+<pre><code><span class="k">COGPIT_EDITION</span>=team bun server/standalone.ts</code></pre>
+      The boot log tells you the edition, the address, and — on a fresh box — the URL to create the first admin.
+    </li>
+    <li>
+      <b>Put TLS in front of it.</b> Browser logins need HTTPS; see below. A Caddy one-liner is enough.
+    </li>
+    <li>
+      <b>Open the HTTPS URL and create the founding admin.</b> Then add your team from the users API.
+    </li>
+  </ol>
+</section>
+
+<section id="deploy">
+  <h2><span class="num">03</span>Deploy properly</h2>
+
+  <h3>HTTPS is not optional</h3>
+  <p>Cogpit keeps the browser session in a <code>__Host-</code>, <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code> cookie. A <code>Secure</code> cookie cannot be issued over plaintext, so a plain <code>http://ip:19384</code> URL <b>cannot log anyone in</b>, by design — including the first-admin bootstrap, which now refuses up front rather than creating an admin you can't log in as.</p>
+
+<pre><code><span class="c"># Caddyfile — terminates TLS, proxies to the loopback listener</span>
+cogpit.yourcompany.com {
+    reverse_proxy 127.0.0.1:19384
+}</code></pre>
+
+  <div class="warn">
+    <b>nginx users</b>
+    Set <code>proxy_buffering off;</code> or session timelines will freeze and arrive in lumps — Cogpit streams over SSE. Your proxy must also forward <code>X-Forwarded-For</code> / <code>Forwarded</code> and <code>X-Forwarded-Proto</code>.
+  </div>
+
+  <h3>Run as a dedicated OS user</h3>
+  <p>This is the real security boundary. Because every agent runs as the server's OS user, that user's filesystem access <i>is</i> your blast radius. Give it a home of its own, the work directories it needs, and nothing else.</p>
+
+<pre><code><span class="c"># /etc/systemd/system/cogpit.service</span>
+[Unit]
+Description=Cogpit Team
+After=network-online.target
+
+[Service]
+Type=simple
+User=cogpit
+WorkingDirectory=/opt/cogpit
+Environment=<span class="k">COGPIT_EDITION</span>=team
+Environment=<span class="k">COGPIT_HOST</span>=127.0.0.1
+Environment=<span class="k">COGPIT_DEVICE_NAME</span>=team-box
+ExecStart=/usr/local/bin/bun server/standalone.ts
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+  <h3>Environment</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Does</th></tr>
+    <tr><td><code>COGPIT_EDITION</code></td><td><code>personal</code></td><td>Set <code>team</code> to enable multi-user mode. Honored by the standalone server only.</td></tr>
+    <tr><td><code>COGPIT_HOST</code></td><td><code>127.0.0.1</code></td><td>Bind address. Team edition does not require a network password to bind wider.</td></tr>
+    <tr><td><code>COGPIT_PORT</code></td><td><code>19384</code></td><td>Bind port.</td></tr>
+    <tr><td><code>COGPIT_DATA_DIR</code></td><td><code>~/.config/cogpit</code></td><td>Config and the <code>team/</code> directory (accounts, sessions).</td></tr>
+    <tr><td><code>COGPIT_BOOTSTRAP_TOKEN</code></td><td>random per empty-store start</td><td>Optional one-time founding-admin token for curl/headless setup. 32–256 printable non-space ASCII characters.</td></tr>
+    <tr><td><code>COGPIT_NETWORK_PASSWORD</code></td><td>none</td><td><b>Ignored in team edition.</b> User accounts replace it; the boot log says so if you set it.</td></tr>
+    <tr><td><code>COGPIT_PUBLIC_URL</code></td><td>none</td><td>Reachable base URL. Printed as the first-boot bootstrap address, and used as the click target for push notifications.</td></tr>
+  </table>
+
+  <p class="muted">You can also set <code>"edition": "team"</code> in <code>config.local.json</code>. The environment variable wins when they disagree. A typo in either — <code>"TEAM"</code>, <code>"enterprise"</code> — boots personal and logs a warning rather than failing silently.</p>
+
+  <h3>Back up</h3>
+  <p>Everything team edition owns lives in one place, all owner-only:</p>
+<pre><code>&lt;dataDir&gt;/
+  config.local.json      <span class="c"># edition, paths, settings</span>
+  devices.local.json     <span class="c"># hub devices</span>
+  team/
+    users.json           <span class="c"># accounts (scrypt hashes)</span>
+    sessions.json        <span class="c"># login tokens, hashed — survives restarts</span></code></pre>
+</section>
+
+<section id="firstboot">
+  <h2><span class="num">04</span>First boot &amp; the founding admin</h2>
+  <p>With zero accounts, the server prints a one-time setup URL. Its <code>#bootstrap=...</code> fragment contains a random process-local credential; the browser removes it from the address bar and sends it as <code>X-Cogpit-Bootstrap-Token</code>. Opening that exact URL gives you a create-the-first-admin page instead of the login form — you pick a username and password, and land signed in as an admin. Then the bootstrap closes <b>for good</b> — restarts do not reopen it, and a second attempt gets <code>410 Already bootstrapped</code>. Restarting an empty server rotates the token.</p>
+
+<pre><code>Team edition: no users yet.
+Open http://192.168.1.42:19384#bootstrap=&lt;one-time-token&gt; to create the first admin.
+Browser logins need HTTPS: put a TLS proxy in front and open that address instead.</code></pre>
+
+  <p class="muted">Set <code>COGPIT_PUBLIC_URL</code> and the banner names your real address — <code>Open https://cogpit.yourcompany.com#bootstrap=&lt;one-time-token&gt; to create the first admin.</code> — with no reminder attached, because that URL already terminates TLS.</p>
+
+  <p>Prefer curl? Set <code>COGPIT_BOOTSTRAP_TOKEN</code> before starting the empty server, send it in the setup header, and the endpoint hands back a bearer token:</p>
+
+<pre><code>curl -X POST https://cogpit.yourcompany.com/api/team/bootstrap \
+  -H <span class="s">'Content-Type: application/json'</span> \
+  -H <span class="s">"X-Cogpit-Bootstrap-Token: $COGPIT_BOOTSTRAP_TOKEN"</span> \
+  -d <span class="s">'{"username":"gent","password":"a genuinely long passphrase","displayName":"Gent"}'</span></code></pre>
+
+  <div class="note">
+    <b>Race-safe by construction</b>
+    Only a holder of the process-local setup token can enter the race. Concurrent valid attempts are serialized: exactly one admin is ever created, and every loser gets a clean 410. If the accounts file is ever corrupt or unreadable, the server refuses to start rather than booting into a state where bootstrap looks open again.
+  </div>
+</section>
+
+<section id="roles">
+  <h2><span class="num">05</span>Roles &amp; capabilities</h2>
+  <p>Two roles. Every gate is enforced on the server; the UI simply hides what you cannot use, so a member never stares at a button that 403s.</p>
+
+  <table>
+    <tr><th>Surface</th><th>Admin</th><th>Member</th><th>Why</th></tr>
+    <tr><td>Run agent sessions</td><td class="yes">Yes</td><td class="yes">Yes</td><td>The point of the product.</td></tr>
+    <tr><td>All permission modes</td><td class="yes">Yes</td><td class="yes">Yes</td><td>Members are trusted operators, not tourists.</td></tr>
+    <tr><td>Built-in terminal (PTY)</td><td class="yes">Yes</td><td class="no">No</td><td>A raw shell on the box as the shared OS user — the biggest escape hatch.</td></tr>
+    <tr><td>Host files, exact transcript diffs, undo, and scripts</td><td class="yes">Yes</td><td class="no">No</td><td>These expose absolute paths or exact before/after content and are not yet confined to server-owned workspaces.</td></tr>
+    <tr><td>Inspect or edit server / MCP config</td><td class="yes">Yes</td><td class="no">No</td><td>Definitions can contain bearer tokens, headers, and command environment secrets.</td></tr>
+    <tr><td>List worktrees / mutate worktrees</td><td class="yes">Yes / Yes</td><td class="yes">Yes / <span class="no">No</span></td><td>Members may inspect and start isolated sessions; delete, cleanup, and create-PR cross the host-management boundary.</td></tr>
+    <tr><td>Expand command files / restore checkpoints</td><td class="yes">Yes</td><td class="no">No</td><td>Both read or rewrite host-managed files; raw slash commands remain usable.</td></tr>
+    <tr><td>Manage hub devices</td><td class="yes">Yes</td><td class="no">No</td><td>Devices carry stored credentials.</td></tr>
+    <tr><td>Fleet kills (kill-all, kill-process)</td><td class="yes">Yes</td><td class="no">No</td><td>Machine-wide blast radius.</td></tr>
+    <tr><td>System process listing</td><td class="yes">Yes</td><td class="no">No</td><td>Leaks what else runs on the host.</td></tr>
+    <tr><td>Provider account, limits, and usage</td><td class="yes">Yes</td><td class="no">No</td><td>Runtime responses include the shared provider account, plan, credits, rate limits, and aggregate usage. Codex goals and threads remain available.</td></tr>
+    <tr><td>Manage users</td><td class="yes">Yes</td><td class="no">No</td><td>—</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>Today, everyone sees the same sessions</b>
+    Roles currently gate <i>machine access</i>, not <i>visibility</i>. Per-user session ownership, workspaces, and sharing land in the next phase — see <a href="#roadmap" class="link">What's next</a>. Deploy accordingly: this is a trusted-team tool right now, not a client-isolation boundary.
+  </div>
+
+  <p class="muted">Under the hood every route group carries a declared policy, and CI fails if a new endpoint forgets to declare one. Unlisted paths default to admin-only, so the failure mode of forgetting is "locked", never "wide open".</p>
+</section>
+
+<section id="users">
+  <h2><span class="num">06</span>Managing users</h2>
+  <p>Admin-only, over the API. A management UI is a later phase. All examples assume you are logged in as an admin (see <a href="#login" class="link">Logging in</a> for how to get <code>$TOKEN</code>).</p>
+
+  <h3>Create an account</h3>
+<pre><code>curl -X POST https://cogpit.yourcompany.com/api/team/users \
+  -H <span class="s">"Authorization: Bearer $TOKEN"</span> \
+  -H <span class="s">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"username":"maria","password":"another long passphrase","role":"member"}'</span></code></pre>
+
+  <table>
+    <tr><th>Field</th><th>Rules</th></tr>
+    <tr><td><code>username</code></td><td>Lowercase, 2–32 chars, <code>a-z 0-9 . _ -</code>. Normalized on the way in.</td></tr>
+    <tr><td><code>password</code></td><td>Minimum 16 characters. Stored as a versioned scrypt hash (OWASP profile).</td></tr>
+    <tr><td><code>role</code></td><td><code>"admin"</code> or <code>"member"</code>.</td></tr>
+    <tr><td><code>displayName</code></td><td>Optional, trimmed, capped at 64 chars. Defaults to the username.</td></tr>
+  </table>
+
+  <h3>List accounts</h3>
+<pre><code>curl https://cogpit.yourcompany.com/api/team/users \
+  -H <span class="s">"Authorization: Bearer $TOKEN"</span></code></pre>
+  <p class="muted">Password hashes are never serialized — the response is an explicit allow-list of public fields.</p>
+
+  <h3>Disable, promote, or reset a password</h3>
+<pre><code><span class="c"># Someone left — cut them off right now</span>
+curl -X PATCH https://cogpit.yourcompany.com/api/team/users/u_9f2c1a4b \
+  -H <span class="s">"Authorization: Bearer $TOKEN"</span> \
+  -H <span class="s">'Content-Type: application/json'</span> \
+  -d <span class="s">'{"disabled":true}'</span>
+
+<span class="c"># Promote</span>
+  -d <span class="s">'{"role":"admin"}'</span>
+
+<span class="c"># New password</span>
+  -d <span class="s">'{"password":"a replacement long passphrase"}'</span></code></pre>
+
+  <div class="note">
+    <b>Changes take effect immediately</b>
+    Disabling a user, changing their role, or resetting their password revokes that person's live sessions on the spot — no waiting for a token to expire. Mixed updates are all-or-nothing: if any field is invalid, nothing is applied.
+  </div>
+
+  <p>You cannot disable or demote the last remaining enabled admin — the server refuses with a 400 rather than locking everyone out of their own box.</p>
+
+  <h3>Who am I?</h3>
+<pre><code>curl https://cogpit.yourcompany.com/api/me -H <span class="s">"Authorization: Bearer $TOKEN"</span></code></pre>
+<pre><code>{
+  <span class="k">"authenticated"</span>: true,
+  <span class="k">"edition"</span>: <span class="s">"team"</span>,
+  <span class="k">"user"</span>: { <span class="k">"id"</span>: <span class="s">"u_9f2c1a4b"</span>, <span class="k">"username"</span>: <span class="s">"maria"</span>, <span class="k">"role"</span>: <span class="s">"member"</span>, ... },
+  <span class="k">"capabilities"</span>: { <span class="k">"terminal"</span>: false, <span class="k">"configWrite"</span>: false, <span class="k">"hostFiles"</span>: false, ... }
+}</code></pre>
+  <p class="muted">This is what the UI gates itself on. Personal edition returns full capabilities and a null user, which is why the same renderer serves both editions unchanged.</p>
+</section>
+
+<section id="login">
+  <h2><span class="num">07</span>Logging in</h2>
+
+  <h3>People</h3>
+  <p>Open the HTTPS URL. The login screen shows a username field in team edition and password-only in personal — it asks the server which it is. The session lands in an <code>HttpOnly</code> cookie that JavaScript never touches.</p>
+
+  <h3>Scripts and agents</h3>
+  <p>Machine clients use one Bearer round-trip and get a token back. Username and password are separated by the first colon — passwords may contain colons.</p>
+
+<pre><code>TOKEN=$(curl -s -X POST https://cogpit.yourcompany.com/api/auth/verify \
+  -H <span class="s">"Authorization: Bearer maria:another long passphrase"</span> \
+  | jq -r .token)
+
+curl https://cogpit.yourcompany.com/api/projects -H <span class="s">"Authorization: Bearer $TOKEN"</span></code></pre>
+
+  <table>
+    <tr><th>Session rule</th><th>Value</th></tr>
+    <tr><td>Absolute lifetime</td><td>8 hours</td></tr>
+    <tr><td>Idle timeout</td><td>30 minutes</td></tr>
+    <tr><td>Survives a server restart</td><td>Yes — tokens are stored hashed, and role changes re-apply on restore</td></tr>
+    <tr><td>Failed-login rate limit</td><td>5 per minute, per client</td></tr>
+  </table>
+
+  <div class="tip">
+    <b>Wrong password and unknown user look identical</b>
+    Both return <code>401 Invalid credentials</code> and both do the same cryptographic work, so the login endpoint can't be used to enumerate who has an account. A disabled account only reveals itself <i>after</i> the correct password.
+  </div>
+</section>
+
+<section id="hub">
+  <h2><span class="num">08</span>Driving it from your desktop app</h2>
+  <p>You do not have to live in a browser tab. Your existing personal Cogpit can add the team server as a device and drive it from the app you already use.</p>
+
+  <ol class="steps">
+    <li><b>Devices → Add device</b> in your desktop Cogpit.</li>
+    <li><b>Enter the host</b> — <code>https://cogpit.yourcompany.com</code> for a TLS-fronted box.</li>
+    <li><b>Enter the username and password</b> of the team account to connect as. A live probe tells you immediately whether it is reachable, whether the credentials work, and whether the account is disabled.</li>
+    <li><b>Switch with ⌘⇧1–9</b>, cycle with ⌘⇧0.</li>
+  </ol>
+
+  <p class="muted">Give each hub a team account of its own rather than reusing a person's: that password is stored on the hub machine, and a dedicated account can be disabled or rotated without cutting anybody's browser session.</p>
+
+  <p>Everything you do through the hub acts as that account. Connect as your admin account and you see everything; connect as a member and you get exactly a member's surface. Your browser never talks to the team box directly — the hub proxies, and the stored credential never reaches the front end.</p>
+
+  <div class="note">
+    <b>Machine-local actions are hidden while remote</b>
+    Open-in-editor, reveal-in-folder and open-terminal would act on the <i>server</i>, so they disappear when a remote device is selected. Copy-path is offered instead.
+  </div>
+</section>
+
+<section id="agents">
+  <h2><span class="num">09</span>Agents, hooks &amp; MCP</h2>
+
+  <h3>MCP connectors</h3>
+  <p>Configure your connectors once on the server, as the Cogpit OS user. Everyone's sessions inherit them — that shared connector pool is a large part of why a team box is worth running. Connector definitions and the per-session selector are admin-only because definitions may contain bearer tokens, headers, and command environment secrets.</p>
+
+  <h3>Agent hooks keep working</h3>
+  <p>Claude Code and Codex stop-hooks post notifications to <code>/api/notify</code>. That endpoint still accepts unauthenticated posts <b>from local processes only</b>, so hooks on the box work without a login — while cross-site browser requests to it are rejected.</p>
+
+  <h3>Other agents driving Cogpit</h3>
+  <p>The external session API is unchanged; it just needs a token now. Same endpoints as always:</p>
+  <table>
+    <tr><th>Endpoint</th><th>Does</th></tr>
+    <tr><td><code>POST /api/create-and-send</code></td><td>Start a session with a first message</td></tr>
+    <tr><td><code>POST /api/send-message</code></td><td>Follow-up turn in an existing session</td></tr>
+    <tr><td><code>POST /api/stop-session</code></td><td>Stop a running session</td></tr>
+    <tr><td><code>GET /api/projects</code></td><td>List projects and their dirNames</td></tr>
+  </table>
+</section>
+
+<section id="security">
+  <h2><span class="num">10</span>Security model, stated plainly</h2>
+
+  <h3>What is actually enforced</h3>
+  <ul>
+    <li>Every request authenticates as a named user. No local bypass, no shared password.</li>
+    <li>Passwords: 16-character minimum, versioned scrypt on the OWASP profile. Login tokens are stored as SHA-256 hashes — the raw token never touches disk.</li>
+    <li>Every route group declares an access policy; unlisted paths are admin-only by default and CI blocks a route that forgets to declare one.</li>
+    <li>The terminal is admin-only at the WebSocket upgrade itself, not just in the UI; established standalone, hub, and Vite-development PTY sockets and authenticated live HTTP streams are closed on logout, disable, demotion, or expiry.</li>
+    <li>A failed team identity lookup stays zero-capability; it never falls back to the personal-edition admin surface.</li>
+    <li>Disable a user and their sessions die immediately, everywhere, including through the hub. Absolute and idle expiry survive restarts.</li>
+    <li>Cross-site request screening on every mutation, including the unauthenticated hook and bootstrap paths.</li>
+    <li>Account files are owner-only; a corrupt accounts file stops the server instead of degrading into an open state.</li>
+  </ul>
+
+  <h3>What is not there yet</h3>
+  <ul>
+    <li><b>No per-user session isolation.</b> Every member can see and drive every session on the box today. Phase 2.</li>
+    <li><b>No audit trail.</b> Who-sent-what logging is Phase 3.</li>
+    <li><b>No agent sandboxing.</b> Cogpit surfaces the CLI's own approval prompts; it cannot sandbox what the CLI cannot. Members can still ask an agent to read anything the OS user can read — which is why the dedicated OS user matters more than any role gate.</li>
+    <li><b>No security audit or pentest.</b> This is one team's threat model, reviewed adversarially but not professionally assessed.</li>
+  </ul>
+
+  <div class="warn">
+    <b>Do not expose this directly to the internet</b>
+    Put it behind Tailscale, WireGuard, or a Cloudflare tunnel with access control, and treat it as the most sensitive service on that network. It runs agents with real filesystem access.
+  </div>
+</section>
+
+<section id="trouble">
+  <h2><span class="num">11</span>Troubleshooting</h2>
+  <table>
+    <tr><th>Symptom</th><th>Cause &amp; fix</th></tr>
+    <tr><td>Login page loads, password never sticks</td><td>Plaintext HTTP. The session cookie is <code>Secure</code> and cannot be set. Put TLS in front.</td></tr>
+    <tr><td><code>426</code> on login or bootstrap</td><td>Same thing, stated explicitly — a browser client on plain HTTP. Use the HTTPS origin.</td></tr>
+    <tr><td>Server booted personal when you asked for team</td><td>Check the boot log — it names the reason. Either the value was misspelled, or you're running the desktop app / <code>bun run dev</code>, which always run personal.</td></tr>
+    <tr><td><code>403 Admin access required</code></td><td>Working as intended: a member hit an admin surface. Their session stays valid.</td></tr>
+    <tr><td><code>403 INVALID_BOOTSTRAP_TOKEN</code></td><td>Open the current one-time URL from the server log, or restart the empty server with <code>COGPIT_BOOTSTRAP_TOKEN</code> and send that value in the header.</td></tr>
+    <tr><td><code>410 Already bootstrapped</code></td><td>An admin already exists. Use the users API, or reset by editing <code>team/users.json</code> on the box.</td></tr>
+    <tr><td>Server refuses to start, mentions the users store</td><td><code>team/users.json</code> is corrupt. Deliberate fail-closed — fix or restore the file from backup.</td></tr>
+    <tr><td>Timeline freezes then jumps</td><td>Proxy buffering. <code>proxy_buffering off;</code> in nginx.</td></tr>
+    <tr><td>Local requests asked for a password unexpectedly</td><td>Expected in team edition. Everyone logs in, including clients on the machine.</td></tr>
+  </table>
+</section>
+
+<section id="roadmap">
+  <h2><span class="num">12</span>What's next</h2>
+  <p>Team edition ships in phases. This guide documents Phase 1, which is complete and deployable.</p>
+  <ul class="roadmap">
+    <li><b class="done">Phase 1 — Core ✓</b> — editions, accounts, authentication, roles, policy enforcement, hub user-auth, capability-gated UI.</li>
+    <li><b>Phase 2 — Workspaces &amp; visibility</b> — admin-curated project directories assigned to people, session ownership, members see their own plus what's shared, path scoping on the file APIs.</li>
+    <li><b>Phase 3 — Sharing, audit &amp; usage</b> — share a session to a teammate (view or full handoff), a full-fidelity record of who sent what, per-member token and cost APIs.</li>
+    <li><b>Phase 4 — Plugins</b> — a typed extension surface so a fork can add its own views, timeline renderers, and one-click flows (an SEO suite, a client-reporting suite) without diverging from upstream.</li>
+    <li><b>Phase 5 — Admin UI</b> — users and workspaces panels, an audit browser, and a usage dashboard, replacing today's curl commands.</li>
+  </ul>
+</section>
+
+<footer>
+  Cogpit Team Edition · Phase 1 · Generated for the <code>team-edition</code> branch.<br>
+  Canonical reference: <code>docs/self-hosting.md</code> · Design: <code>docs/plans/2026-08-09-team-edition-design.md</code>
+</footer>
+
+</main>
+</div>
+
+<script>
+  // Copy buttons on every code block
+  document.querySelectorAll('pre').forEach(function (pre) {
+    var btn = document.createElement('button');
+    btn.className = 'copy';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', function () {
+      navigator.clipboard.writeText(pre.querySelector('code').innerText).then(function () {
+        btn.textContent = 'copied';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = 'copy'; btn.classList.remove('done'); }, 1400);
+      });
+    });
+    pre.appendChild(btn);
+  });
+
+  // Highlight the section you're reading
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav a'));
+  var sections = links.map(function (a) { return document.querySelector(a.getAttribute('href')); });
+  function sync() {
+    var y = window.scrollY + 140, current = 0;
+    sections.forEach(function (s, i) { if (s && s.offsetTop <= y) current = i; });
+    links.forEach(function (a, i) { a.classList.toggle('active', i === current); });
+  }
+  window.addEventListener('scroll', sync, { passive: true });
+  sync();
+</script>
+</body>
+</html>

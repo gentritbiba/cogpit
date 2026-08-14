@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { can } from "@/lib/capabilities"
 import { dirNameToPath } from "@/lib/format"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
@@ -97,18 +98,18 @@ export function DesktopOverlays({
           onToggleStats={navigation.panels.handleToggleStats}
           onToggleFileChanges={navigation.panels.handleToggleFileChanges}
           onToggleWorktrees={navigation.panels.handleToggleWorktrees}
-          onOpenConfig={navigation.panels.handleToggleConfig}
+          onOpenConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
           onOpenSettings={config.openConfigDialog}
           onOpenKeyboardShortcuts={() => chrome.onKeyboardShortcutsOpenChange(true)}
           onTogglePreview={project.currentCwd ? project.onTogglePreview : undefined}
-          onToggleProjectFiles={project.currentCwd ? project.onToggleProjectFiles : undefined}
+          onToggleProjectFiles={can("hostFiles") && project.currentCwd ? project.onToggleProjectFiles : undefined}
           onOpenTheme={navigation.panels.handleToggleThemeSelector}
           onOpenTerminal={project.onOpenTerminal}
           onFocusComposer={chrome.onFocusComposer}
           onExpandAll={chrome.onExpandAll}
           onCollapseAll={chrome.onCollapseAll}
           canFocusComposer={Boolean(session || state.pendingDirName)}
-          canOpenTerminal={Boolean(
+          canOpenTerminal={can("terminal") && Boolean(
             session?.cwd
             ?? pendingPath
             ?? sessionSource?.dirName
@@ -116,7 +117,7 @@ export function DesktopOverlays({
             ?? state.dashboardProject
           )}
           hasSession={Boolean(session)}
-          hasFileChanges={project.hasFileChanges}
+          hasFileChanges={can("hostFiles") && project.hasFileChanges}
           supportsWorktrees={project.supportsWorktrees}
           showSidebar={navigation.panels.showSidebar}
           showStats={navigation.panels.showStats}

@@ -68,7 +68,7 @@ export interface CommandPaletteProps {
   onToggleStats: () => void
   onToggleFileChanges: () => void
   onToggleWorktrees: () => void
-  onOpenConfig: () => void
+  onOpenConfig?: () => void
   onOpenSettings: () => void
   onOpenKeyboardShortcuts?: () => void
   onTogglePreview?: () => void
@@ -253,13 +253,6 @@ export function CommandPalette(props: CommandPaletteProps) {
   }
 
   const tools = [
-    action(
-      "config",
-      props.showConfig ? "Close agent configuration" : "Open agent configuration",
-      "skills commands claude settings files",
-      SlidersHorizontal,
-      props.onOpenConfig,
-    ),
     action("settings", "Open Cogpit settings", "preferences network", Settings, props.onOpenSettings),
     action(
       "theme",
@@ -272,6 +265,16 @@ export function CommandPalette(props: CommandPaletteProps) {
     action("expand", "Expand all turns", "conversation details", ChevronsDownUp, props.onExpandAll, shortcutLabel("expandAll")),
     action("collapse", "Collapse all turns", "conversation details", ChevronsUpDown, props.onCollapseAll, shortcutLabel("collapseAll")),
   ]
+
+  if (props.onOpenConfig) {
+    tools.unshift(action(
+      "config",
+      props.showConfig ? "Close agent configuration" : "Open agent configuration",
+      "skills commands claude settings files",
+      SlidersHorizontal,
+      props.onOpenConfig,
+    ))
+  }
 
   if (props.onOpenKeyboardShortcuts) {
     tools.unshift(

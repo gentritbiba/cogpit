@@ -6,6 +6,7 @@ import { OpIndicator, SubAgentIndicator } from "@/components/FileChangesPanel/fi
 import { cn } from "@/lib/utils"
 import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
 import type { Turn, ToolCall } from "@/lib/types"
+import { useCapability } from "@/hooks/useCapability"
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -215,6 +216,7 @@ interface TurnChangedFilesProps {
 }
 
 export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex, cwd }: TurnChangedFilesProps) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const fileChanges = useMemo(() => computeTurnFileChanges(turn), [turn])
   const tree = useMemo(() => buildFileTree(fileChanges, cwd), [fileChanges, cwd])
 
@@ -260,7 +262,14 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
       {/* Tree */}
       <div className="py-0.5">
         {tree.map((node) => (
-          <TreeRow key={node.fullPath} node={node} depth={0} allExpanded={allExpanded} turnIndex={turnIndex} />
+          <TreeRow
+            key={node.fullPath}
+            node={node}
+            depth={0}
+            allExpanded={allExpanded}
+            turnIndex={turnIndex}
+            canFocusFiles={canAccessHostFiles}
+          />
         ))}
       </div>
     </div>
@@ -274,11 +283,13 @@ const TreeRow = memo(function TreeRow({
   depth,
   allExpanded,
   turnIndex,
+  canFocusFiles,
 }: {
   node: TreeNode
   depth: number
   allExpanded: boolean
   turnIndex: number
+  canFocusFiles: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -298,10 +309,13 @@ const TreeRow = memo(function TreeRow({
 
     return (
       <div
-        className="flex items-center gap-1.5 py-[3px] text-[11px] font-mono rounded-sm hover:bg-white/[0.05] transition-colors cursor-pointer"
+        className={cn(
+          "flex items-center gap-1.5 py-[3px] text-[11px] font-mono rounded-sm transition-colors",
+          canFocusFiles && "hover:bg-white/[0.05] cursor-pointer",
+        )}
         style={{ paddingLeft }}
-        onClick={handleFileClick}
-        title="Click to focus in sidebar"
+        onClick={canFocusFiles ? handleFileClick : undefined}
+        title={canFocusFiles ? "Click to focus in sidebar" : undefined}
       >
         <FileTypeIndicator name={node.name} />
         <OpIndicator hasEdit={node.hasEdit} hasWrite={node.hasWrite} />
@@ -339,6 +353,7 @@ const TreeRow = memo(function TreeRow({
             depth={depth + 1}
             allExpanded={allExpanded}
             turnIndex={turnIndex}
+            canFocusFiles={canFocusFiles}
           />
         ))}
     </>

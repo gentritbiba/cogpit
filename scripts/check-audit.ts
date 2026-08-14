@@ -33,31 +33,7 @@ const targets: AuditTarget[] = [
   {
     label: "application",
     cwd: repoRoot,
-    acceptedFindings: new Map([
-      ["@babel/core:1123528", "low"],
-      // Windows-only path traversal in serve-static; fixed only in the 2.x
-      // major, which @modelcontextprotocol/sdk still pins out of (^1.19.9).
-      // Reaches the tree solely through that SDK — Cogpit never constructs a
-      // Hono server and never imports serve-static, so no route is exposed.
-      // (Previously justified by "ships no Windows builds", which stopped
-      // being true when the NSIS target started shipping.)
-      ["@hono/node-server:1124006", "moderate"],
-      ["ip-address:1118827", "moderate"],
-      // DoS via unbounded brace expansion — one advisory per affected major
-      // (<1.1.17, 2.0.0–2.1.2, 4.0.0–5.0.7). Every copy arrives through build
-      // tooling (electron-builder, eslint, ts-morph, typescript-eslint), is
-      // never bundled into the app or reachable from a request, and expands
-      // repo globs rather than untrusted input.
-      //
-      // Patched releases now exist in all three lines (1.1.17, 2.1.3, 5.0.8)
-      // and every dependent's caret range already admits them — only stale
-      // lockfile resolutions pin the old ones. Refreshing those re-resolves
-      // the whole lockfile, so it is tracked as follow-up work rather than
-      // done during a release cut.
-      ["brace-expansion:1130588", "high"],
-      ["brace-expansion:1130589", "high"],
-      ["brace-expansion:1130591", "high"],
-    ]),
+    acceptedFindings: new Map<string, AcceptedSeverity>(),
   },
   {
     label: "cogpit-memory",

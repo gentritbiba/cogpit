@@ -5,8 +5,8 @@ type PtyValue = ReturnType<typeof usePtySocket>
 
 const PtyContext = createContext<PtyValue | null>(null)
 
-export function PtyProvider({ children }: { children: ReactNode }): ReactNode {
-  const pty = usePtySocket()
+export function PtyProvider({ children, enabled = true }: { children: ReactNode; enabled?: boolean }): ReactNode {
+  const pty = usePtySocket(enabled)
   return <PtyContext.Provider value={pty}>{children}</PtyContext.Provider>
 }
 

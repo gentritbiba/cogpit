@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { EventEmitter } from "node:events"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WebSocket } from "ws"
 
 const mockPtySpawn = vi.hoisted(() => vi.fn())
@@ -14,10 +14,17 @@ import { PtySessionManager } from "../pty-server"
 
 class FakeSocket extends EventEmitter {
   readonly sent: string[] = []
-  readyState = WebSocket.OPEN
+  readyState: number = WebSocket.OPEN
+  readonly closes: Array<{ code?: number; reason?: string }> = []
 
   send(message: string): void {
     this.sent.push(message)
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closes.push({ code, reason })
+    this.readyState = WebSocket.CLOSING
+    this.emit("close")
   }
 }
 
@@ -61,6 +68,25 @@ describe("PtySessionManager", () => {
   beforeEach(() => {
     mockPtySpawn.mockReset()
     mockExecFileSync.mockReset()
+  })
+
+  afterEach(() => vi.useRealTimers())
+
+  it("closes an established socket when its authorization later expires", () => {
+    vi.useFakeTimers()
+    let authorized = true
+    const socket = new FakeSocket()
+    const manager = new PtySessionManager({ clients: new Set([socket]) } as never)
+    manager.handleConnection(socket as never, () => authorized)
+
+    authorized = false
+    vi.advanceTimersByTime(5_000)
+
+    expect(socket.closes).toEqual([{
+      code: 1008,
+      reason: "Session authorization expired",
+    }])
+    manager.cleanup()
   })
 
   it("rejects a duplicate session ID before spawning or losing the original PTY", () => {

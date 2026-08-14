@@ -17,6 +17,7 @@ import { useProjectNames } from "@/hooks/useProjectNames"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
+import { useCapability } from "@/hooks/useCapability"
 import { countLiveSessions } from "./liveSessionSummary"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
@@ -46,6 +47,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   const { names: sessionNames, rename: renameSession } = useSessionNames()
   const { names: projectNames, rename: renameProject } = useProjectNames()
   const pty = usePty()
+  const canUseTerminal = useCapability("terminal")
+  const canKillAny = useCapability("killAny")
   const {
     sessions,
     procBySession,
@@ -340,8 +343,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 sessionNames={sessionNames}
                 projectNames={projectNames}
                 onSelectSession={handleSelectSession}
-                onKill={handleKill}
-                onResumeSession={handleResumeSession}
+                onKill={canKillAny ? handleKill : undefined}
+                onResumeSession={canUseTerminal ? handleResumeSession : undefined}
                 onPrefetchSession={onPrefetchSession}
               />
               <div className="flex items-center gap-1.5 px-0.5 pt-1">
@@ -367,7 +370,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             projectNames={projectNames}
             onToggleCollapsed={toggleGroupCollapsed}
             onSelectSession={handleSelectSession}
-            onKill={handleKill}
+            onKill={canKillAny ? handleKill : undefined}
             onDuplicateSession={onDuplicateSession}
             onDeleteSession={onDeleteSession ? handleDeleteSession : undefined}
             onRenameSession={renameSession}
@@ -375,7 +378,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             onNewSession={onNewSession}
             creatingSession={creatingSession}
             onPrefetchSession={onPrefetchSession}
-            onResumeSession={handleResumeSession}
+            onResumeSession={canUseTerminal ? handleResumeSession : undefined}
           />
 
         </div>

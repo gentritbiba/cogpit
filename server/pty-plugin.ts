@@ -2,9 +2,10 @@ import type { Plugin, ViteDevServer } from "vite"
 import { WebSocketServer } from "ws"
 import type { IncomingMessage } from "node:http"
 import type { Duplex } from "node:stream"
-import { websocketUpgradeRejection } from "./security"
+import { rejectWebsocketUpgrade } from "./security"
 import { handleHubUpgrade } from "./hub/proxy"
 import { PtySessionManager } from "./pty-server"
+import { PtyAuthorizationController } from "./pty-authorization"
 
 export function ptyPlugin(): Plugin {
   return {
@@ -12,21 +13,21 @@ export function ptyPlugin(): Plugin {
     configureServer(server: ViteDevServer) {
       const wss = new WebSocketServer({ noServer: true })
       const manager = new PtySessionManager(wss)
+      const authorization = new PtyAuthorizationController()
 
       server.httpServer!.on(
         "upgrade",
         (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-          if (handleHubUpgrade(req, socket, head)) return
           const url = new URL(req.url || "/", "http://localhost")
-          if (url.pathname !== "/__pty") return
-
-          const rejection = websocketUpgradeRejection(req, url)
-          if (rejection) {
-            const reason = rejection === 401 ? "Unauthorized" : "Forbidden"
-            socket.write(`HTTP/1.1 ${rejection} ${reason}\r\n\r\n`)
-            socket.destroy()
+          if (handleHubUpgrade(req, socket, head)) {
+            if (/^\/hub\/[^/]+\/__pty$/.test(url.pathname)) {
+              authorization.trackHubUpgrade(req, url, socket)
+            }
             return
           }
+          if (url.pathname !== "/__pty") return
+
+          if (rejectWebsocketUpgrade(req, url, socket)) return
 
           wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit("connection", ws, req)
@@ -34,10 +35,13 @@ export function ptyPlugin(): Plugin {
         }
       )
 
-      wss.on("connection", (ws) => manager.handleConnection(ws))
+      wss.on("connection", (ws, req) => authorization.handleConnection(ws, req, manager))
 
       // Cleanup on server close
-      server.httpServer!.on("close", () => manager.cleanup())
+      server.httpServer!.on("close", () => {
+        authorization.cleanup()
+        manager.cleanup()
+      })
     },
   }
 }

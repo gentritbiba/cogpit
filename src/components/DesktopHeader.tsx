@@ -28,6 +28,7 @@ import { PowerMonitor } from "@/components/PowerMonitor"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { can } from "@/lib/capabilities"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
@@ -202,14 +203,16 @@ export const DesktopHeader = memo(function DesktopHeader({
           onClick={onOpenSettings}
           className="text-muted-foreground hover:text-foreground"
         />
-        <HeaderIconButton
-          icon={Skull}
-          label="Kill all tracked agent processes"
-          onClick={onKillAll}
-          disabled={killing}
-          className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-          iconClassName={killing ? "text-red-400 animate-pulse" : undefined}
-        />
+        {can("killAny") && (
+          <HeaderIconButton
+            icon={Skull}
+            label="Kill all tracked agent processes"
+            onClick={onKillAll}
+            disabled={killing}
+            className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+            iconClassName={killing ? "text-red-400 animate-pulse" : undefined}
+          />
+        )}
         {onToggleWorktrees && (
           <HeaderIconButton
             icon={GitBranch}

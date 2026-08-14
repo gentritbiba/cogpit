@@ -32,6 +32,7 @@ import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
+import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
 import { registerTeamRoutes } from "./routes/teams"
 import { registerUndoRoutes } from "./routes/undo"
@@ -75,6 +76,7 @@ export const API_ROUTE_REGISTRY = [
   },
   apiRoute("performance", registerPerformanceRoutes),
   apiRoute("config", registerConfigRoutes),
+  apiRoute("team-admin", registerTeamAdminRoutes),
   apiRoute("projects", registerProjectRoutes),
   apiRoute("claude", registerClaudeRoutes),
   apiRoute("claude-new", registerClaudeNewRoutes),

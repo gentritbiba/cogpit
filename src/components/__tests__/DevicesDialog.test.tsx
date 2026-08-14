@@ -9,6 +9,7 @@ vi.mock("@/lib/auth", () => ({ hubFetch: mocks.hubFetch }))
 vi.mock("@/lib/device", () => ({
   LOCAL_DEVICE_ID: "local",
   getActiveDeviceId: () => "local",
+  recordDeviceConnectionRevision: vi.fn(),
   switchDevice: mocks.switchDevice,
 }))
 
@@ -17,14 +18,22 @@ function routeHub(options: {
   devices?: unknown[]
   probe?: unknown
   add?: { body: unknown; ok?: boolean; status?: number }
+  update?: { body: unknown; ok?: boolean; status?: number }
 }) {
-  const { devices = [], probe, add } = options
+  const { devices = [], probe, add, update } = options
   mocks.hubFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url === "/api/hub/devices" && init?.method === "POST") {
       return Promise.resolve({
         ok: add?.ok ?? true,
         status: add?.status ?? 201,
         json: async () => add?.body ?? { device: { id: "dev_new" } },
+      })
+    }
+    if (url.startsWith("/api/hub/devices/") && init?.method === "PATCH") {
+      return Promise.resolve({
+        ok: update?.ok ?? true,
+        status: update?.status ?? 200,
+        json: async () => update?.body ?? { device: { id: "dev_updated" } },
       })
     }
     if (url === "/api/hub/devices/probe") {
@@ -123,6 +132,125 @@ describe("DevicesDialog", () => {
 
     await waitFor(() => expect(mocks.switchDevice).toHaveBeenCalledWith("dev_new"))
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it("detects a team device, requires its username, and sends named credentials", async () => {
+    routeHub({
+      probe: {
+        ok: true,
+        hello: {
+          name: "Team Studio",
+          version: "1.0.1",
+          edition: "team",
+          networkAccess: false,
+          configured: true,
+        },
+      },
+      add: { body: { device: { id: "dev_team", username: "alice" } }, status: 201 },
+    })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="add" onClose={vi.fn()} />)
+
+    await user.type(screen.getByLabelText("Host"), "10.0.0.8")
+    await user.tab()
+    expect(await screen.findByText(/Found Cogpit "Team Studio"/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add device" })).toBeDisabled()
+
+    await user.type(screen.getByLabelText("Username"), " Alice ")
+    await user.type(screen.getByLabelText("Password"), "member-password-1")
+    await user.click(screen.getByRole("button", { name: "Add device" }))
+
+    const addCall = mocks.hubFetch.mock.calls.find(
+      ([url, init]) => url === "/api/hub/devices" && init?.method === "POST",
+    )
+    expect(JSON.parse((addCall![1] as RequestInit).body as string)).toMatchObject({
+      host: "10.0.0.8",
+      username: "Alice",
+      password: "member-password-1",
+    })
+  })
+
+  it("keeps add disabled while a team device still needs its first admin", async () => {
+    routeHub({
+      probe: {
+        ok: true,
+        hello: { name: "Fresh Team", edition: "team", needsBootstrap: true, configured: false },
+      },
+    })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="add" onClose={vi.fn()} />)
+
+    await user.type(screen.getByLabelText("Host"), "10.0.0.10")
+    await user.tab()
+    expect(await screen.findByText(/create its first admin account/i)).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Username"), "founder")
+    await user.type(screen.getByLabelText("Password"), "founder-password-1")
+
+    expect(screen.getByRole("button", { name: "Add device" })).toBeDisabled()
+    expect(mocks.hubFetch.mock.calls.some(
+      ([url, init]) => url === "/api/hub/devices" && init?.method === "POST",
+    )).toBe(false)
+  })
+
+  it("edits a stored team account without ever exposing its password", async () => {
+    const device = {
+      id: "dev_team",
+      name: "Team Studio",
+      host: "10.0.0.8",
+      port: 19384,
+      auth: "password",
+      username: "alice",
+      addedAt: 1,
+      runtime: { authState: "ok", lastHello: { edition: "team", version: "1.0.1" } },
+    }
+    routeHub({ devices: [device], update: { body: { device: { ...device, username: "bob" } } } })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
+
+    expect(await screen.findByText("Team account: alice")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Edit account for Team Studio" }))
+    const passwordInput = screen.getByLabelText("New password for Team Studio")
+    expect(passwordInput).toHaveValue("")
+
+    const usernameInput = screen.getByLabelText("Username for Team Studio")
+    await user.clear(usernameInput)
+    await user.type(usernameInput, "bob")
+    await user.type(passwordInput, "bob-password-1")
+    await user.click(screen.getByRole("button", { name: "Save account" }))
+
+    const patchCall = mocks.hubFetch.mock.calls.find(
+      ([url, init]) => url === "/api/hub/devices/dev_team" && init?.method === "PATCH",
+    )
+    expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({
+      username: "bob",
+      password: "bob-password-1",
+    })
+  })
+
+  it("sends null to clear a stored team username", async () => {
+    const device = {
+      id: "dev_team",
+      name: "Team Studio",
+      host: "10.0.0.8",
+      port: 19384,
+      auth: "password",
+      username: "alice",
+      addedAt: 1,
+      runtime: { authState: "ok", lastHello: { edition: "team" } },
+    }
+    routeHub({ devices: [device], update: { body: { device: { ...device, username: undefined } } } })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
+
+    await screen.findByText("Team account: alice")
+    await user.click(screen.getByRole("button", { name: "Edit account for Team Studio" }))
+    await user.clear(screen.getByLabelText("Username for Team Studio"))
+    await user.click(screen.getByRole("button", { name: "Save account" }))
+
+    const patchCall = mocks.hubFetch.mock.calls.find(
+      ([url, init]) => url === "/api/hub/devices/dev_team" && init?.method === "PATCH",
+    )
+    expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ username: null })
   })
 
   it("maps a rejected password to an inline field error", async () => {

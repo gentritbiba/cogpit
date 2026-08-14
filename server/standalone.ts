@@ -9,8 +9,12 @@ import { homedir, hostname, networkInterfaces } from "node:os"
 import { removePortFile } from "./lib/portFile"
 import {
   buildBootBanner,
+  buildTeamBootNotices,
   resolveDeviceName,
 } from "./lib/standalone-bootstrap"
+import { getEdition, isTeamEdition } from "./team/edition"
+import { userCount } from "./team/users"
+import { getBootstrapToken } from "./team/bootstrapToken"
 import { startStandaloneServer } from "./standalone-runtime"
 
 const host = process.env.COGPIT_HOST || "127.0.0.1"
@@ -34,6 +38,9 @@ try {
   process.exit(1)
 }
 
+if (runtime.createdConfig) {
+  console.log(`First run: created ${runtime.createdConfig}`)
+}
 const deviceName = resolveDeviceName(process.env, hostname())
 const banner = buildBootBanner({
   deviceName,
@@ -43,9 +50,20 @@ const banner = buildBootBanner({
 })
 for (const line of banner) console.log(line)
 console.log(`Data directory: ${dataDir}`)
-if (runtime.envPassword) {
+if (runtime.envPassword && !isTeamEdition()) {
   console.log("Network access: enabled via environment (password kept in memory only)")
 }
+const teamNotices = buildTeamBootNotices({
+  edition: getEdition(),
+  userCount: userCount(),
+  envPasswordSet: runtime.envPassword,
+  host,
+  port: runtime.port,
+  interfaces: networkInterfaces(),
+  publicUrl: process.env.COGPIT_PUBLIC_URL,
+  bootstrapToken: getBootstrapToken(),
+})
+for (const line of teamNotices) console.log(line)
 
 // Graceful shutdown
 let shuttingDown = false
