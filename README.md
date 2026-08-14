@@ -51,7 +51,7 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 Start sessions with Claude Code or Codex from the same interface. Model settings come from the installed CLIs, including descriptions, recommended and supported reasoning levels, image support, personality support, and speed tiers. GPT-5.6 Sol, Terra, and Luna are supported, with Ultra and Fast shown only when the selected model and account advertise them. If a Codex model is unavailable, Cogpit visibly reports the fallback and retries with the provider default.
 
 ### Live Session Monitoring
-Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations.
+Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
 
 Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.
 

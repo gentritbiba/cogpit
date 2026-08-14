@@ -1,7 +1,50 @@
-import { describe, it, expect } from "vitest"
+import { beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { SessionStatusBar } from "../SessionStatusBar"
-import type { ParsedSession } from "@/lib/types"
+import type { ActiveSessionInfo } from "../LiveSessions/types"
+import type { ParsedSession, Turn } from "@/lib/types"
+
+const inventorySessions = vi.hoisted(() => ({ current: [] as ActiveSessionInfo[] }))
+
+vi.mock("@/contexts/SessionInventoryContext", () => ({
+  useSessionInventoryOptional: () => ({ sessions: inventorySessions.current }),
+}))
+
+/** Stands in for the whole-file scan the server ships with the session list. */
+function withScannedSession(sessionId: string, pullRequests: ActiveSessionInfo["pullRequests"]) {
+  inventorySessions.current = [{
+    dirName: "d",
+    projectShortName: "P",
+    fileName: "f.jsonl",
+    sessionId,
+    lastModified: "2026-08-14T10:00:00.000Z",
+    size: 1,
+    pullRequests,
+  }]
+}
+
+function prTurn(id: string, command: string, result: string): Turn {
+  return {
+    id,
+    userMessage: null,
+    contentBlocks: [],
+    thinking: [],
+    assistantText: [],
+    toolCalls: [{
+      id: `tool-${id}`,
+      name: "Bash",
+      input: { command },
+      result,
+      isError: false,
+      timestamp: "2026-08-14T10:00:00.000Z",
+    }],
+    subAgentActivity: [],
+    timestamp: "2026-08-14T10:00:00.000Z",
+    durationMs: null,
+    tokenUsage: null,
+    model: null,
+  }
+}
 
 function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
   return {
@@ -30,6 +73,8 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
 }
 
 describe("SessionStatusBar", () => {
+  beforeEach(() => { inventorySessions.current = [] })
+
   it("renders nothing when all optional values are absent and model/gitBranch are empty", () => {
     const { container } = render(
       <SessionStatusBar session={makeSession()} />
@@ -133,5 +178,89 @@ describe("SessionStatusBar", () => {
       <SessionStatusBar session={makeSession({ model: "", gitBranch: "develop" })} />
     )
     expect(screen.getByText("develop")).toBeInTheDocument()
+  })
+
+  it("renders a pull request chip linking to the pull request", () => {
+    render(
+      <SessionStatusBar session={makeSession({
+        turns: [prTurn("1", 'gh pr create --title "Team Edition"', "https://github.com/o/r/pull/13")],
+      })} />
+    )
+    const link = screen.getByRole("link", { name: "Pull request #13" })
+    expect(link).toHaveAttribute("href", "https://github.com/o/r/pull/13")
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveTextContent("#13")
+    expect(link).toHaveAttribute("title", expect.stringContaining("Team Edition"))
+  })
+
+  it("renders the bar for pull requests even when every other field is empty", () => {
+    render(
+      <SessionStatusBar session={makeSession({
+        turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/7")],
+      })} />
+    )
+    expect(screen.getByRole("link", { name: "Pull request #7" })).toBeInTheDocument()
+  })
+
+  it("collapses older pull requests into a +N chip", () => {
+    render(
+      <SessionStatusBar session={makeSession({
+        turns: [1, 2, 3, 4, 5].map((n) =>
+          prTurn(String(n), "gh pr create --fill", `https://github.com/o/r/pull/${n}`)),
+      })} />
+    )
+    expect(screen.getByText("+2")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Pull request #5" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Pull request #1" })).toBeNull()
+  })
+
+  it("does not render pull request chips when the session opened none", () => {
+    render(
+      <SessionStatusBar session={makeSession({ model: "claude-opus-4-5" })} />
+    )
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+})
+
+describe("SessionStatusBar — pull requests backfilled from the server scan", () => {
+  const scanned = {
+    url: "https://github.com/o/r/pull/777",
+    number: 777,
+    repo: "o/r",
+    title: "Early pull request",
+    isDraft: false,
+    toolCallId: "toolu_early",
+    timestamp: "2026-08-14T09:00:00.000Z",
+  }
+
+  beforeEach(() => { inventorySessions.current = [] })
+
+  it("shows a pull request created before the loaded turns", () => {
+    withScannedSession("test-session-id", [scanned])
+    render(<SessionStatusBar session={makeSession({ turns: [] })} />)
+    expect(screen.getByRole("link", { name: "Pull request #777" })).toBeInTheDocument()
+  })
+
+  it("ignores scan results belonging to a different session", () => {
+    withScannedSession("some-other-session", [scanned])
+    render(<SessionStatusBar session={makeSession({ turns: [] })} />)
+    expect(screen.queryByRole("link", { name: "Pull request #777" })).toBeNull()
+  })
+
+  it("does not double up a pull request found by both the scan and the loaded turns", () => {
+    withScannedSession("test-session-id", [{ ...scanned, number: 13, url: "https://github.com/o/r/pull/13" }])
+    render(<SessionStatusBar session={makeSession({
+      turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/13")],
+    })} />)
+    expect(screen.getAllByRole("link", { name: "Pull request #13" })).toHaveLength(1)
+  })
+
+  it("combines a scanned older pull request with a freshly created one", () => {
+    withScannedSession("test-session-id", [scanned])
+    render(<SessionStatusBar session={makeSession({
+      turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/778")],
+    })} />)
+    expect(screen.getByRole("link", { name: "Pull request #777" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Pull request #778" })).toBeInTheDocument()
   })
 })

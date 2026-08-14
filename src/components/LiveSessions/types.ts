@@ -1,4 +1,5 @@
 import type { SessionStatus } from "@/lib/sessionStatus"
+import type { SessionPullRequest } from "../../../shared/session/prLinks"
 
 export interface ActiveSessionInfo {
   dirName: string
@@ -26,6 +27,8 @@ export interface ActiveSessionInfo {
   agentName?: string
   /** Session ID of the team lead that spawned this teammate session. */
   teamLeadSessionId?: string
+  /** Pull requests this session opened, from a whole-file server scan. */
+  pullRequests?: SessionPullRequest[]
 }
 
 export interface RunningProcess {

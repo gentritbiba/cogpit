@@ -153,3 +153,59 @@ describe("SessionRow — deferred state", () => {
     expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
   })
 })
+
+describe("SessionRow — pull requests and turn count", () => {
+  const pr = (number: number, title: string | null = null) => ({
+    url: `https://github.com/o/r/pull/${number}`,
+    number,
+    repo: "o/r",
+    title,
+    isDraft: false,
+    toolCallId: `t${number}`,
+    timestamp: `2026-08-14T1${number}:00:00.000Z`,
+  })
+
+  function renderRow(overrides: Partial<ActiveSessionInfo>, onSelectSession = vi.fn()) {
+    render(
+      <SessionRow
+        session={makeSession(overrides)}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={onSelectSession}
+        onKill={vi.fn()}
+      />
+    )
+  }
+
+  it("links to a pull request the session opened", () => {
+    renderRow({ pullRequests: [pr(13, "Team Edition")] })
+    const link = screen.getByRole("link", { name: "Pull request #13" })
+    expect(link).toHaveAttribute("href", "https://github.com/o/r/pull/13")
+    expect(link).toHaveAttribute("target", "_blank")
+  })
+
+  it("shows the newest pull request and collapses the rest", () => {
+    renderRow({ pullRequests: [pr(1), pr(2), pr(3)] })
+    expect(screen.getByRole("link", { name: "Pull request #3" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Pull request #1" })).toBeNull()
+    expect(screen.getByText("+2")).toBeInTheDocument()
+  })
+
+  it("does not select the session when the pull request link is clicked", () => {
+    const onSelectSession = vi.fn()
+    renderRow({ pullRequests: [pr(13)] }, onSelectSession)
+    fireEvent.click(screen.getByRole("link", { name: "Pull request #13" }))
+    expect(onSelectSession).not.toHaveBeenCalled()
+  })
+
+  it("renders no pull request link when the session opened none", () => {
+    renderRow({})
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+
+  it("keeps the turn count out of the row", () => {
+    renderRow({ turnCount: 42 })
+    expect(screen.queryByText("42")).toBeNull()
+  })
+})

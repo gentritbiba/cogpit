@@ -230,9 +230,17 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
 }
 
 export function useSessionInventory(): SessionInventory {
-  const ctx = useContext(SessionInventoryContext)
+  const ctx = useSessionInventoryOptional()
   if (!ctx) {
     throw new Error("useSessionInventory must be used within a SessionInventoryProvider")
   }
   return ctx
+}
+
+/**
+ * The inventory when one is mounted, otherwise null — for components that can
+ * enrich themselves with session-list data but must still render without it.
+ */
+export function useSessionInventoryOptional(): SessionInventory | null {
+  return useContext(SessionInventoryContext)
 }

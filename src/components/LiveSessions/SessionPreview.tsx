@@ -1,7 +1,9 @@
 import { Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
+import { PullRequestChips } from "@/components/PullRequestChips"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
 import type { SessionStatus } from "@/lib/sessionStatus"
+import { resolveTurnCount } from "@/lib/turnCountCache"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 export function isIdleStatus(status?: SessionStatus): boolean {
@@ -36,7 +38,8 @@ export function SessionPreview({
 }: SessionPreviewProps) {
   const fullTitle = customName || s.aiTitle
   const lastPrompt = s.lastUserMessage || s.firstUserMessage
-  const turnCount = s.turnCount ?? 0
+  // Resolved against the client cache so a live session's count stays accurate.
+  const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
 
   return (
     <div className="flex w-64 flex-col gap-1.5 text-[11px]">
@@ -59,6 +62,7 @@ export function SessionPreview({
           <span className="line-clamp-3 italic leading-snug">{lastPrompt}</span>
         </div>
       )}
+      <PullRequestChips pullRequests={s.pullRequests} layout="list" />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
         {s.gitBranch && (
           <span className="flex items-center gap-0.5">
@@ -69,7 +73,7 @@ export function SessionPreview({
         {turnCount > 0 && (
           <span className="flex items-center gap-0.5">
             <MessageSquare className="size-2.5" />
-            {turnCount} turns
+            {turnCount} {turnCount === 1 ? "turn" : "turns"}
           </span>
         )}
         <span>{formatFileSize(s.size)}</span>

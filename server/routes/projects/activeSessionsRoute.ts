@@ -16,6 +16,7 @@ import {
 } from "../../helpers"
 import type { NextFn } from "../../http"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
+import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
@@ -146,13 +147,16 @@ export async function handleActiveSessions(
     const results = await Promise.all(
       scanPool.map(async (c) => {
         try {
-          const cached = await getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
-            const [meta, status] = await Promise.all([
+          const [cached, pullRequests] = await Promise.all([
+            getOrLoadSessionMeta(c.filePath, c.mtimeMs, async () => {
+              const [meta, status] = await Promise.all([
                 getSessionMeta(c.filePath),
                 getSessionStatus(c.filePath),
-            ])
-            return { meta, status }
-          })
+              ])
+              return { meta, status }
+            }),
+            getSessionPullRequests(c.filePath, c.size),
+          ])
           const { meta, status: statusInfo } = cached
           const shortName = c.dirName.startsWith("codex__")
             ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Codex"} (Codex)`
@@ -206,6 +210,7 @@ export async function handleActiveSessions(
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
             agentTerminalReason: statusInfo.terminalReason,
+            ...(pullRequests.length > 0 && { pullRequests }),
             ...(meta.teamName && {
               teamName: meta.teamName,
               agentName: meta.agentName || undefined,

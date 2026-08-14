@@ -1,11 +1,11 @@
 import { useState } from "react"
-import { X, MessageSquare, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
+import { X, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
-import { resolveTurnCount, turnCountColor } from "@/lib/turnCountCache"
 import { SessionPreview, isIdleStatus, getStatusColor } from "./SessionPreview"
 import { sessionTitle } from "./sessionListView"
 import { useHoverPrefetch } from "./useHoverPrefetch"
@@ -74,7 +74,6 @@ export function SessionRow({
         ? "Running"
         : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Running")
     : null
-  const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
   // Left-edge status dot: amber = needs attention, pulsing green = working,
   // solid green = live but idle/done. Recent (dead) sessions get no dot.
   const statusDot = isDeferred
@@ -210,16 +209,8 @@ export function SessionRow({
             </span>
           )}
 
-          {/* Turn count */}
-          {turnCount > 0 && (
-            <span className={cn(
-              "flex items-center gap-0.5 text-[11px] font-medium shrink-0",
-              turnCountColor(turnCount)
-            )}>
-              <MessageSquare className="size-2.5" />
-              {turnCount}
-            </span>
-          )}
+          {/* Pull requests opened by this session */}
+          <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
 
           {/* Relative time */}
           <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
