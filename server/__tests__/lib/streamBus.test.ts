@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import {
   publish,
+  publishTextDelta,
   completeMessage,
   clear,
   publishError,
@@ -62,6 +63,18 @@ describe("streamBus", () => {
     expect(snapshot![0].blocks).toEqual([
       { index: 0, blockType: "text", text: "Hello world" },
     ])
+  })
+
+  it("publishes runtime-native text deltas without waiting for a block-start flush", () => {
+    const { events } = collect()
+
+    publishTextDelta(SID, "msg_codex", "Hello ")
+    expect(deltasOf(events).map((delta) => delta.delta)).toEqual(["Hello "])
+
+    publishTextDelta(SID, "msg_codex", "Codex")
+    expect(getSnapshot(SID)?.[0].blocks[0].text).toBe("Hello Codex")
+    vi.advanceTimersByTime(80)
+    expect(deltasOf(events).map((delta) => delta.delta).join("")).toBe("Hello Codex")
   })
 
   it("tracks lanes independently: main thread and subagent stream concurrently", () => {
@@ -154,6 +167,17 @@ describe("streamBus", () => {
 
     completeMessage(SID, "msg_1")
     expect(getSnapshot(SID)).toBeNull()
+  })
+
+  it("completeMessage discards throttled deltas superseded by the JSONL record", () => {
+    const { events } = collect()
+    publishTextDelta(SID, "msg_1", "visible")
+    publishTextDelta(SID, "msg_1", " superseded")
+
+    completeMessage(SID, "msg_1")
+    vi.advanceTimersByTime(80)
+
+    expect(deltasOf(events).map((delta) => delta.delta)).toEqual(["visible"])
   })
 
   it("clear wipes state and emits stream_clear", () => {

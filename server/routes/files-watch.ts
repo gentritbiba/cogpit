@@ -22,7 +22,18 @@ const TASK_OUTPUT_BASES: readonly string[] = process.platform === "win32"
   : ["/private/tmp", "/tmp"]
 const TASK_OUTPUT_READ_CHUNK_BYTES = 256 * 1024
 const SESSION_READ_CHUNK_BYTES = 256 * 1024
+const SESSION_UUID_RE = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/
 let canonicalTaskOutputBases: Promise<string[]> | null = null
+
+function streamSessionId(dirName: string, fileName: string): string {
+  if (isCodexDirName(dirName)) {
+    // Codex rollout filenames include timestamps and nested date directories;
+    // app-server notifications use only the trailing thread UUID.
+    const match = SESSION_UUID_RE.exec(fileName)
+    if (match) return match[1]
+  }
+  return fileName.replace(/\.jsonl$/, "")
+}
 
 async function getCanonicalTaskOutputBases(): Promise<string[]> {
   canonicalTaskOutputBases ??= Promise.all(
@@ -354,25 +365,22 @@ export function registerFileWatchRoutes(use: UseFn) {
       return flushInFlight
     }
 
-    // ── Token-level streaming (SDK-driven sessions only) ───────────────
-    // The stream bus carries partial-message events published by
-    // sdk-session.ts. External sessions never publish, so this is inert
-    // for them. Codex sessions have no SDK stream either.
-    let unsubscribeStream: (() => void) | null = null
-    if (!isCodexDirName(dirName)) {
-      const sessionId = fileName.replace(/\.jsonl$/, "")
-      const snapshot = streamBus.getSnapshot(sessionId)
-      if (snapshot && snapshot.length > 0) {
-        res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
-      }
-      unsubscribeStream = streamBus.subscribe(sessionId, (ev) => {
-        if (!closed) {
-          const payload = JSON.stringify(ev)
-          recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })
-          res.write(`data: ${payload}\n\n`)
-        }
-      })
+    // ── Token-level streaming ──────────────────────────────────────────
+    // The stream bus carries partial messages from Claude's SDK and Codex's
+    // app-server. External/fallback sessions never publish, so subscribing is
+    // inert for them and they continue to rely on JSONL file updates.
+    const sessionId = streamSessionId(dirName, fileName)
+    const snapshot = streamBus.getSnapshot(sessionId)
+    if (snapshot && snapshot.length > 0) {
+      res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
     }
+    let unsubscribeStream: (() => void) | null = streamBus.subscribe(sessionId, (ev) => {
+      if (!closed) {
+        const payload = JSON.stringify(ev)
+        recordActivity("Token stream batches", { bytes: Buffer.byteLength(payload) })
+        res.write(`data: ${payload}\n\n`)
+      }
+    })
 
     function cleanup() {
       closed = true

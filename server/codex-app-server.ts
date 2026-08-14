@@ -38,6 +38,7 @@ import {
   wireApprovalDecision,
 } from "./codex-approval-codec"
 import { resolveAgentCommand } from "./lib/binaryResolver"
+import { forwardCodexStreamNotification } from "./lib/codexStreamAdapter"
 
 export { CODEX_CLIENT_CAPABILITIES } from "./codex-app-server-protocol"
 export type * from "./codex-app-server-protocol"
@@ -1021,3 +1022,4 @@ export class CodexAppServer {
 
 /** Shared process-backed client used by the HTTP runtime and approval routes. */
 export const codexAppServer = new CodexAppServer()
+codexAppServer.subscribe(forwardCodexStreamNotification)

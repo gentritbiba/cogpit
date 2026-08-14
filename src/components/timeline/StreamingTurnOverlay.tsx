@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
 import { mainThreadMessages, type OverlayBlock } from "@/lib/streamingOverlay"
+import { StreamingMarkdown } from "./StreamingMarkdown"
 
 /**
  * Renders the in-flight (token-streamed) main-thread assistant output as a
@@ -8,9 +9,9 @@ import { mainThreadMessages, type OverlayBlock } from "@/lib/streamingOverlay"
  * (the streaming message always belongs to the last turn) so growing text
  * never churns the virtualizer's measurements.
  *
- * Deliberately plain rendering: pre-wrapped text with a cursor, no markdown.
- * The fully formatted version appears when the complete JSONL line lands and
- * the overlay reconciles away.
+ * Live text uses a streaming-safe Markdown renderer so formatting appears as
+ * soon as syntax arrives. Expensive code highlighting and image loading wait
+ * for the complete JSONL message and the normal timeline renderer.
  */
 
 function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor: boolean }) {
@@ -34,8 +35,8 @@ function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor
 
   if (!block.text) return null
   return (
-    <div className="text-sm leading-relaxed whitespace-pre-wrap break-words my-2">
-      {block.text}
+    <div className="text-sm leading-relaxed break-words my-2">
+      <StreamingMarkdown text={block.text} />
       {showCursor && <StreamCursor />}
     </div>
   )

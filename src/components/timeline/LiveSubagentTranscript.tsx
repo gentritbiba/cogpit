@@ -1,8 +1,7 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import ReactMarkdown, { type Components } from "react-markdown"
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react"
 import { useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
 import { messagesForToolUse } from "@/lib/streamingOverlay"
-import { markdownComponents, markdownPlugins } from "./markdown-components"
+import { StreamingMarkdown } from "./StreamingMarkdown"
 
 /**
  * Live tail of a running subagent's streamed output, rendered inside its
@@ -16,45 +15,6 @@ const MAX_TAIL_LINES = 400
 
 /** Distance from the bottom, in px, still counted as "following". */
 const FOLLOW_THRESHOLD_PX = 24
-
-function compactHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-  return function CompactHeading({ children }: { children?: ReactNode }) {
-    return <Tag className="mt-2 mb-1 text-xs font-semibold text-foreground first:mt-0">{children}</Tag>
-  }
-}
-
-/**
- * The shared markdown renderer, minus the parts that misbehave on half-written
- * input: Shiki re-tokenizes a language-tagged fence on every flush (and flashes
- * unhighlighted in between) while the fence is still unterminated, and an image
- * whose path is mid-stream resolves to a 404. Headings are flattened to one
- * compact size — the document-scale defaults overwhelm a 256px pane.
- */
-const liveMarkdownComponents: Components = {
-  ...markdownComponents,
-  h1: compactHeading("h1"),
-  h2: compactHeading("h2"),
-  h3: compactHeading("h3"),
-  h4: compactHeading("h4"),
-  h5: compactHeading("h5"),
-  h6: compactHeading("h6"),
-  code({ className, children }) {
-    const isInline = !className && typeof children === "string" && !children.includes("\n")
-    if (isInline) {
-      return (
-        <code className="text-[0.9em] font-mono px-1 py-0.5 rounded bg-elevation-2 text-orange-600 dark:text-orange-300">
-          {children}
-        </code>
-      )
-    }
-    return (
-      <pre className="my-1.5 overflow-x-auto rounded border border-border/40 bg-elevation-1 p-2 text-[11px] leading-[1.5] font-mono">
-        <code>{String(children).replace(/\n$/, "")}</code>
-      </pre>
-    )
-  },
-  img: () => null,
-}
 
 export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
   toolUseId,
@@ -78,17 +38,6 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
   const lines = text.split("\n")
   const isTrimmed = following && lines.length > MAX_TAIL_LINES
   const markdownText = isTrimmed ? lines.slice(-MAX_TAIL_LINES).join("\n") : text
-
-  // Keyed on the text so an unrelated lane's flush re-renders without paying
-  // for a full remark parse.
-  const rendered = useMemo(
-    () => (
-      <ReactMarkdown components={liveMarkdownComponents} remarkPlugins={markdownPlugins}>
-        {markdownText}
-      </ReactMarkdown>
-    ),
-    [markdownText],
-  )
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -126,7 +75,7 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
         className="text-xs break-words max-h-64 overflow-y-auto overscroll-contain pr-1"
       >
         {isTrimmed && <div className="text-muted-foreground/50">…</div>}
-        {rendered}
+        <StreamingMarkdown text={markdownText} compactHeadings />
       </div>
     </div>
   )

@@ -1,8 +1,8 @@
 /**
- * In-memory stream bus: token-level streaming events from SDK-driven Claude
- * sessions, keyed by sessionId.
+ * In-memory stream bus: token-level streaming events from agent runtimes,
+ * keyed by sessionId.
  *
- * `sdk-session.ts` publishes the SDK's raw Anthropic stream events here; the
+ * Claude's SDK and Codex's app-server adapter publish stream events here; the
  * `/api/watch/:dirName/:fileName` SSE route subscribes and forwards batches
  * to the client on the EventSource it already holds. External sessions
  * (started outside Cogpit) never publish, so subscribers see nothing and the
@@ -160,6 +160,15 @@ function queueDelta(state: SessionStreamState, delta: StreamDelta): void {
   scheduleFlush(state)
 }
 
+/** Cap in-flight messages: drop oldest first. */
+function capMessages(state: SessionStreamState): void {
+  while (state.messages.size > MAX_MESSAGES) {
+    const oldest = state.messages.keys().next().value
+    if (oldest === undefined) break
+    state.messages.delete(oldest)
+  }
+}
+
 function blockTypeOf(rawType: string | undefined): StreamBlockType | null {
   if (rawType === "text") return "text"
   if (rawType === "thinking") return "thinking"
@@ -189,12 +198,7 @@ export function publish(
         stopped: false,
         blocks: [],
       })
-      // Cap in-flight messages: drop oldest first
-      while (state.messages.size > MAX_MESSAGES) {
-        const oldest = state.messages.keys().next().value
-        if (oldest === undefined) break
-        state.messages.delete(oldest)
-      }
+      capMessages(state)
       return
     }
 
@@ -278,6 +282,46 @@ export function publish(
 }
 
 /**
+ * Append text from a runtime that supplies its own stable message ids.
+ *
+ * Codex's app-server emits `item/agentMessage/delta` directly instead of the
+ * Anthropic message/block lifecycle `publish()` consumes. Creating the block on
+ * the first delta spends the leading flush on real text rather than on an empty
+ * block-start marker.
+ */
+export function publishTextDelta(
+  sessionId: string,
+  messageId: string,
+  text: string,
+  parentToolUseId: string | null = null,
+): void {
+  if (!sessionId || !messageId || !text) return
+
+  const state = getOrCreate(sessionId)
+  let msg = state.messages.get(messageId)
+  if (!msg) {
+    msg = { messageId, parentToolUseId, stopped: false, blocks: [] }
+    state.messages.set(messageId, msg)
+    capMessages(state)
+  }
+
+  let block = msg.blocks.find((candidate) => candidate.index === 0)
+  if (!block) {
+    block = { index: 0, blockType: "text", text: "" }
+    msg.blocks.push(block)
+  }
+  if (block.text.length < MAX_BLOCK_TEXT) block.text += text
+
+  queueDelta(state, {
+    messageId,
+    parentToolUseId,
+    blockIndex: 0,
+    blockType: "text",
+    delta: text,
+  })
+}
+
+/**
  * Publish an already-complete message (no token stream available for it).
  *
  * Used for subagent messages: the SDK does not emit token-level stream
@@ -308,11 +352,7 @@ export function publishCompleteMessage(
     stopped: true,
     blocks,
   })
-  while (state.messages.size > MAX_MESSAGES) {
-    const oldest = state.messages.keys().next().value
-    if (oldest === undefined) break
-    state.messages.delete(oldest)
-  }
+  capMessages(state)
   for (const b of blocks) {
     queueDelta(state, {
       messageId: msg.messageId,
@@ -341,6 +381,9 @@ export function completeMessage(sessionId: string, messageId: string): void {
   const state = sessions.get(sessionId)
   if (!state) return
   state.messages.delete(messageId)
+  // The complete JSONL record is authoritative. A trailing throttled delta
+  // must not arrive afterward and recreate an overlay the client reconciled.
+  state.pending = state.pending.filter((delta) => delta.messageId !== messageId)
   for (const [lane, id] of state.lanes) {
     if (id === messageId) state.lanes.delete(lane)
   }

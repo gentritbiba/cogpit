@@ -4,7 +4,7 @@
  *
  * Uses the REAL streamBus (pure in-memory) with mocked fs helpers, and
  * verifies the SSE route: snapshot on connect, delta forwarding, cleanup
- * on disconnect, and codex sessions opting out.
+ * on disconnect, and Codex rollout-id routing.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { tmpdir } from "node:os"
@@ -155,13 +155,18 @@ describe("/api/watch stream-bus forwarding", () => {
     expect(frames.length).toBe(countAtClose)
   })
 
-  it("does not subscribe codex sessions to the bus", async () => {
+  it("subscribes codex rollout files using their trailing thread UUID", async () => {
     publish(SESSION, { type: "message_start", message: { id: "msg_4" } }, null)
     publish(SESSION, { type: "content_block_start", index: 0, content_block: { type: "text" } }, null)
+    publish(SESSION, { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "codex live" } }, null)
 
-    const { frames, closeConnection } = await connect(`/codex__proj/${SESSION}.jsonl`)
+    const rollout = `2026/08/14/rollout-2026-08-14T10-00-00-${SESSION}.jsonl`
+    const { frames, closeConnection } = await connect(`/codex__proj/${encodeURIComponent(rollout)}`)
     const events = parseFrames(frames)
-    expect(events.some((e) => e.type === "stream_snapshot")).toBe(false)
+    const snapshot = events.find((e) => e.type === "stream_snapshot") as
+      | { messages: Array<{ blocks: Array<{ text: string }> }> }
+      | undefined
+    expect(snapshot?.messages[0].blocks[0].text).toBe("codex live")
     closeConnection()
   })
 
