@@ -56,6 +56,8 @@ function makeReqRes(urlPath: string) {
   const frames: string[] = []
   const res = {
     statusCode: 200,
+    destroyed: false,
+    writableEnded: false,
     writeHead: vi.fn(),
     setHeader: vi.fn(),
     write: vi.fn((chunk: string) => {
@@ -237,6 +239,20 @@ describe("/api/watch stream-bus forwarding", () => {
 })
 
 describe("/api/task-output streaming", () => {
+  it("does not install stream resources after authorization destroys the response", async () => {
+    const handler = getHandler("/api/task-output")
+    const harness = makeReqRes(
+      `/?path=${encodeURIComponent(join(TASK_OUTPUT_DIR, "revoked.output"))}`,
+    )
+    harness.res.destroyed = true
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+
+    expect(harness.res.writeHead).not.toHaveBeenCalled()
+    expect(mockWatch).not.toHaveBeenCalled()
+    expect(harness.res.write).not.toHaveBeenCalled()
+  })
+
   it("serializes and bounds reads while delivering the complete output", async () => {
     const totalBytes = 300_000
     const readSizes: number[] = []

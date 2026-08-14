@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { WifiOff, Loader2 } from "lucide-react"
 import App from "@/App"
-import { getActiveDeviceId, switchDevice, LOCAL_DEVICE_ID } from "@/lib/device"
+import {
+  getActiveDeviceId,
+  getActiveIdentity,
+  getDeviceConnectionRevision,
+  switchDevice,
+  LOCAL_DEVICE_ID,
+} from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
 import { useDevices } from "@/hooks/useDevices"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
@@ -23,6 +29,13 @@ import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
  * (back/forward across a device boundary), updating state only when the id
  * actually changes so intra-device navigation never forces a remount.
  *
+ * The key also carries the signed-in team identity (`cogpit-identity-changed`,
+ * dispatched by setActiveIdentity when useMe settles /api/me): login, logout,
+ * and user switches remount App so every mount-time storage read (usePermissions,
+ * useSessionHistory, useLocalStorage consumers) re-runs through the
+ * identity-scoped deviceScopedKey. Personal edition never dispatches — no
+ * remount, no hold, boot behavior is byte-identical to pre-team builds.
+ *
  * Also hosted here because they must survive the remount:
  * - device keyboard shortcuts (mod+shift+1..9 jump, mod+shift+0 cycle)
  * - the offline banner for an unreachable active remote device
@@ -32,6 +45,10 @@ import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
  */
 export function DeviceRoot() {
   const [activeDeviceId, setActiveDeviceId] = useState(getActiveDeviceId)
+  const [connectionRevision, setConnectionRevision] = useState(
+    () => getDeviceConnectionRevision(getActiveDeviceId()),
+  )
+  const [identityKey, setIdentityKey] = useState(getActiveIdentity)
   const [retryNonce, setRetryNonce] = useState(0)
   const [unreachable, setUnreachable] = useState(false)
   const [badPassword, setBadPassword] = useState(false)
@@ -44,6 +61,7 @@ export function DeviceRoot() {
     const sync = () => {
       const next = getActiveDeviceId()
       setActiveDeviceId((prev) => (prev === next ? prev : next))
+      setConnectionRevision(getDeviceConnectionRevision(next))
     }
     window.addEventListener("cogpit-device-changed", sync)
     window.addEventListener("popstate", sync)
@@ -51,6 +69,25 @@ export function DeviceRoot() {
       window.removeEventListener("cogpit-device-changed", sync)
       window.removeEventListener("popstate", sync)
     }
+  }, [])
+
+  useEffect(() => {
+    const syncScope = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        deviceId?: string
+        connectionRevision?: number
+      }>).detail
+      if (detail?.deviceId !== getActiveDeviceId()) return
+      setConnectionRevision(getDeviceConnectionRevision(detail.deviceId))
+    }
+    window.addEventListener("cogpit-device-scope-changed", syncScope)
+    return () => window.removeEventListener("cogpit-device-scope-changed", syncScope)
+  }, [])
+
+  useEffect(() => {
+    const sync = () => setIdentityKey(getActiveIdentity())
+    window.addEventListener("cogpit-identity-changed", sync)
+    return () => window.removeEventListener("cogpit-identity-changed", sync)
   }, [])
 
   // Device shortcuts: slot 1 is always this machine, 2..9 follow registry order.
@@ -89,7 +126,7 @@ export function DeviceRoot() {
     setUnreachable(false)
     setBadPassword(false)
     setRetrying(false)
-  }, [activeDeviceId])
+  }, [activeDeviceId, connectionRevision])
 
   const retry = useCallback(async () => {
     setRetrying(true)
@@ -150,7 +187,7 @@ export function DeviceRoot() {
           </button>
         </div>
       )}
-      <SessionInventoryProvider key={`${activeDeviceId}:${retryNonce}`}>
+      <SessionInventoryProvider key={`${activeDeviceId}:${connectionRevision}:${retryNonce}:${identityKey ?? ""}`}>
         <PendingHumanInputProvider>
           <App />
         </PendingHumanInputProvider>

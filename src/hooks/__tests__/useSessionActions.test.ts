@@ -19,22 +19,24 @@ vi.mock("@/lib/sessionCache", () => ({
   },
 }))
 
-// Mock device module so we can drive getActiveDeviceId for mid-flight switches
+// Mock device scope so we can drive device/revision changes mid-flight.
 vi.mock("@/lib/device", () => ({
-  getActiveDeviceId: vi.fn(() => "local"),
+  getActiveDeviceScope: vi.fn(() => "local"),
+  getActiveIdentity: vi.fn(() => null),
+  deviceScopedKey: (key: string) => key,
 }))
 
 import { useSessionActions } from "@/hooks/useSessionActions"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope } from "@/lib/device"
 import type { ParsedSession, Turn } from "@/lib/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockSessionCache = vi.mocked(sessionCache)
-const mockGetActiveDeviceId = vi.mocked(getActiveDeviceId)
+const mockGetActiveDeviceScope = vi.mocked(getActiveDeviceScope)
 
 function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
   return {
@@ -115,7 +117,7 @@ beforeEach(() => {
   // Default: cache miss
   vi.mocked(sessionCache.get).mockReturnValue(undefined)
   // Default: stay on the local device across a fetch
-  mockGetActiveDeviceId.mockReturnValue("local")
+  mockGetActiveDeviceScope.mockReturnValue("local")
 })
 
 describe("useSessionActions", () => {
@@ -295,7 +297,7 @@ describe("useSessionActions", () => {
 
       // loadSessionTailCached snapshots the device before the fetch, then
       // re-reads it before the cache set. Simulate a switch between the two.
-      mockGetActiveDeviceId
+      mockGetActiveDeviceScope
         .mockReturnValueOnce("device-a") // snapshot before authFetch
         .mockReturnValueOnce("device-b") // guard before sessionCache.set
 

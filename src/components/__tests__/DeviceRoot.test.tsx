@@ -1,6 +1,13 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { render, screen, act, waitFor } from "@testing-library/react"
 import { DeviceRoot } from "@/components/DeviceRoot"
+import {
+  __resetDeviceRevisionsForTest,
+  __resetIdentityForTest,
+  deviceScopedKey,
+  recordDeviceConnectionRevision,
+  setActiveIdentity,
+} from "@/lib/device"
 
 const mocks = vi.hoisted(() => ({
   getActiveDeviceId: vi.fn(() => "dev_1"),
@@ -8,19 +15,40 @@ const mocks = vi.hoisted(() => ({
   testDevice: vi.fn(),
   matchDeviceSwitchIndex: vi.fn(() => null),
   matchDeviceCycle: vi.fn(() => false),
+  onAppMount: vi.fn(),
 }))
 
-vi.mock("@/App", () => ({ default: () => <div data-testid="app" /> }))
+// The stub App mirrors the real one's storage pattern: a useState initializer
+// reads localStorage through deviceScopedKey exactly once per MOUNT, so the
+// identity-keyed remount is observable through the rendered value.
+vi.mock("@/App", async () => {
+  const { useState } = await import("react")
+  const { deviceScopedKey: scopedKey } = await import("@/lib/device")
+  return {
+    default: function AppStub() {
+      const [bootValue] = useState(() => {
+        mocks.onAppMount()
+        return localStorage.getItem(scopedKey("cogpit:test-pref"))
+      })
+      return <div data-testid="app">{bootValue ?? "empty"}</div>
+    },
+  }
+})
 // These tests cover the offline banner, not the inventory; a pass-through
 // provider keeps them from fetching sessions.
 vi.mock("@/contexts/SessionInventoryContext", () => ({
   SessionInventoryProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
-vi.mock("@/lib/device", () => ({
-  LOCAL_DEVICE_ID: "local",
-  getActiveDeviceId: mocks.getActiveDeviceId,
-  switchDevice: mocks.switchDevice,
-}))
+// Partial mock: device routing is faked, the identity cell stays real so the
+// remount tests exercise the actual setActiveIdentity → event → key path.
+vi.mock("@/lib/device", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/device")>()
+  return {
+    ...actual,
+    getActiveDeviceId: mocks.getActiveDeviceId,
+    switchDevice: mocks.switchDevice,
+  }
+})
 vi.mock("@/lib/keybindings", () => ({
   matchDeviceSwitchIndex: mocks.matchDeviceSwitchIndex,
   matchDeviceCycle: mocks.matchDeviceCycle,
@@ -90,5 +118,83 @@ describe("DeviceRoot offline banner", () => {
       await vi.advanceTimersByTimeAsync(10_000)
     })
     await waitFor(() => expect(screen.queryByText(/retrying/i)).not.toBeInTheDocument())
+  })
+})
+
+describe("DeviceRoot identity-keyed remount", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.getActiveDeviceId.mockReturnValue("local")
+    localStorage.clear()
+    __resetDeviceRevisionsForTest()
+    __resetIdentityForTest()
+  })
+  afterEach(() => {
+    __resetIdentityForTest()
+    __resetDeviceRevisionsForTest()
+    localStorage.clear()
+  })
+
+  it("mounts App immediately without waiting for an identity (personal parity, no hold)", () => {
+    localStorage.setItem("cogpit:test-pref", "unscoped")
+    render(<DeviceRoot />)
+    expect(screen.getByTestId("app")).toHaveTextContent("unscoped")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(1)
+  })
+
+  it("remounts the App subtree when a team identity resolves so store reads re-run scoped", () => {
+    localStorage.setItem("cogpit:test-pref", "stale-shared")
+    localStorage.setItem("cogpit:test-pref::local::u_1", "scoped")
+    render(<DeviceRoot />)
+    expect(screen.getByTestId("app")).toHaveTextContent("stale-shared")
+
+    act(() => setActiveIdentity("u_1"))
+
+    expect(screen.getByTestId("app")).toHaveTextContent("scoped")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not remount when the resolved identity is unchanged", () => {
+    render(<DeviceRoot />)
+    act(() => setActiveIdentity("u_1"))
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+
+    act(() => setActiveIdentity("u_1"))
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+  })
+
+  it("reads a scoped write back after a simulated reload once the same identity resolves", () => {
+    // Session 1: identity resolves, a store persists through the scoped key.
+    const first = render(<DeviceRoot />)
+    act(() => setActiveIdentity("u_1"))
+    localStorage.setItem(deviceScopedKey("cogpit:test-pref"), "written-by-u1")
+    first.unmount()
+
+    // Simulated reload: the identity cell resets, then /api/me resolves the
+    // same user — the remounted App must read the value written last session.
+    __resetIdentityForTest()
+    render(<DeviceRoot />)
+    expect(screen.getByTestId("app")).toHaveTextContent("empty")
+    act(() => setActiveIdentity("u_1"))
+    expect(screen.getByTestId("app")).toHaveTextContent("written-by-u1")
+  })
+
+  it("remounts a same-id remote on a sensitive revision change but not a rename notification", () => {
+    window.history.replaceState(null, "", "/d/dev_1/")
+    mocks.getActiveDeviceId.mockReturnValue("dev_1")
+    recordDeviceConnectionRevision("dev_1", 4)
+    localStorage.setItem("cogpit:test-pref::dev_1@4", "old-target")
+    localStorage.setItem("cogpit:test-pref::dev_1@5", "new-target")
+
+    render(<DeviceRoot />)
+    expect(screen.getByTestId("app")).toHaveTextContent("old-target")
+
+    act(() => { recordDeviceConnectionRevision("dev_1", 5) })
+    expect(screen.getByTestId("app")).toHaveTextContent("new-target")
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
+
+    // A rename response repeats the same server revision and must stay warm.
+    act(() => { recordDeviceConnectionRevision("dev_1", 5) })
+    expect(mocks.onAppMount).toHaveBeenCalledTimes(2)
   })
 })

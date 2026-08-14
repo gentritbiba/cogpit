@@ -139,3 +139,14 @@ export async function verifyPasswordAsync(password: string, stored: string): Pro
   })
   return safeCompareBuffers(candidate, Buffer.from(scryptHash.hash, "hex"))
 }
+
+// ── Password validation ─────────────────────────────────────────────
+
+export const MIN_PASSWORD_LENGTH = 16
+
+export function validatePasswordStrength(password: string): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+  }
+  return null
+}

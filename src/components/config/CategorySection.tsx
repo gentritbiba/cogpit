@@ -21,8 +21,8 @@ interface CategorySectionProps {
   selectedPath: string | null
   onSelect: (item: ConfigItem) => void
   onNewFile?: () => void
-  onDeleteItem: (item: ConfigItem) => void
-  onRenameItem: (item: ConfigItem) => void
+  onDeleteItem?: (item: ConfigItem) => void
+  onRenameItem?: (item: ConfigItem) => void
   renamingPath: string | null
   renameValue: string
   onRenameValueChange: (v: string) => void
@@ -116,6 +116,7 @@ export function CategorySection({
             )}
             onClick={() => onSelect(item)}
             onDoubleClick={(e) => {
+              if (!onDeleteItem || !onRenameItem) return
               e.preventDefault()
               setContextMenu({ item, position: { x: e.clientX, y: e.clientY } })
             }}
@@ -152,7 +153,7 @@ export function CategorySection({
       )}
 
       {/* Context popup */}
-      {contextMenu && (
+      {contextMenu && onDeleteItem && onRenameItem && (
         <ItemContextPopup
           item={contextMenu.item}
           position={contextMenu.position}

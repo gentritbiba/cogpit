@@ -17,7 +17,7 @@ interface SessionRowProps {
   proc: RunningProcess | undefined
   killingPids: Set<number>
   onSelectSession: (dirName: string, fileName: string) => void
-  onKill: (pid: number, e: React.MouseEvent) => void
+  onKill?: (pid: number, e: React.MouseEvent) => void
   isNewlyCompleted?: boolean
   customName?: string
   /** When set, this session belongs to a git worktree — shows an indicator badge. */
@@ -218,7 +218,7 @@ export function SessionRow({
           </span>
 
           {/* Kill button — absolute badge, no layout space */}
-          {hasProcess && (
+          {hasProcess && onKill && (
             <button
               type="button"
               onClick={(e) => onKill(proc.pid, e)}

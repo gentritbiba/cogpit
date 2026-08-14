@@ -27,6 +27,7 @@ import {
   getDevice,
   listDevices,
   updateDevice,
+  updateDeviceIfConnectionMatches,
   removeDevice,
   setDeviceRuntime,
   validateDeviceHost,
@@ -100,6 +101,58 @@ describe("addDevice", () => {
   })
 })
 
+// ── Device usernames (team devices) ──────────────────────────────────
+
+describe("device usernames", () => {
+  it("round-trips the username through persistence", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    expect(getDevice(id)?.username).toBe("alice")
+
+    await initDeviceRegistry(dir)
+    expect(getDevice(id)?.username).toBe("alice")
+  })
+
+  it("lists the username while still stripping the password", async () => {
+    await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    const entry = listDevices()[0]
+    expect(entry.username).toBe("alice")
+    expect("password" in entry).toBe(false)
+  })
+
+  it("does not store a username for auth: none devices", async () => {
+    const { id } = await addDevice({ name: "Tunnel", host: "10.0.0.9", auth: "none", username: "ignored" })
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
+
+  it("patches the username and clears it when switching to auth: none", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+    await updateDevice(id, { username: "bob" })
+    expect(getDevice(id)?.username).toBe("bob")
+
+    await updateDevice(id, { auth: "none" })
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
+
+  it("detaches the username on an explicit null while keeping password auth", async () => {
+    const { id } = await addDevice({
+      name: "Team box", host: "10.0.0.7", auth: "password", password: "memberpass1234", username: "alice",
+    })
+
+    await updateDevice(id, { username: null })
+
+    expect(getDevice(id)?.username).toBeUndefined()
+    expect(getDevice(id)).toMatchObject({ auth: "password", password: "memberpass1234" })
+    await initDeviceRegistry(dir)
+    expect(getDevice(id)?.username).toBeUndefined()
+  })
+})
+
 // ── listDevices ──────────────────────────────────────────────────────
 
 describe("listDevices", () => {
@@ -145,6 +198,7 @@ describe("updateDevice", () => {
     const updated = await updateDevice(id, { name: "Studio Mac", host: "10.0.0.6" })
     expect(updated?.name).toBe("Studio Mac")
     expect(updated?.host).toBe("10.0.0.6")
+    expect(updated?.connectionRevision).toBe(1)
     expect(getDevice(id)?.host).toBe("10.0.0.6")
   })
 
@@ -156,6 +210,57 @@ describe("updateDevice", () => {
 
   it("returns undefined for an unknown id", async () => {
     expect(await updateDevice("dev_nope", { name: "x" })).toBeUndefined()
+  })
+
+  it("conditionally updates only the connection snapshot that was verified", async () => {
+    const original = await addDevice({
+      name: "Team box",
+      host: "10.0.0.5",
+      auth: "password",
+      password: "old-password",
+      username: "alice",
+    })
+
+    const first = await updateDeviceIfConnectionMatches(original.id, original, {
+      password: "new-password",
+    })
+    const stale = await updateDeviceIfConnectionMatches(original.id, original, {
+      username: "bob",
+    })
+
+    expect(first.status).toBe("updated")
+    if (first.status === "updated") expect(first.device.connectionRevision).toBe(1)
+    expect(stale).toEqual({ status: "conflict" })
+    expect(getDevice(original.id)).toMatchObject({
+      username: "alice",
+      password: "new-password",
+      connectionRevision: 1,
+    })
+  })
+
+  it("keeps the revision stable for a name-only update", async () => {
+    const original = await addDevice({
+      name: "Studio", host: "10.0.0.5", auth: "password", password: "hunter2secret",
+    })
+    const sensitive = await updateDeviceIfConnectionMatches(original.id, original, { host: "10.0.0.6" })
+    expect(sensitive.status).toBe("updated")
+
+    const renamed = await updateDevice(original.id, { name: "Renamed" })
+    expect(renamed?.connectionRevision).toBe(1)
+    expect(listDevices()[0]?.connectionRevision).toBe(1)
+  })
+
+  it("reports a missing conditional target after deletion", async () => {
+    const original = await addDevice({
+      name: "Team box",
+      host: "10.0.0.5",
+      auth: "password",
+      password: "old-password",
+    })
+    await removeDevice(original.id)
+
+    expect(await updateDeviceIfConnectionMatches(original.id, original, { host: "10.0.0.6" }))
+      .toEqual({ status: "missing" })
   })
 })
 

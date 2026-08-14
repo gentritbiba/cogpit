@@ -2,6 +2,7 @@ import { DesktopHeader } from "@/components/DesktopHeader"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
 import { shortcutLabel } from "@/lib/keybindings"
+import { can } from "@/lib/capabilities"
 import { DesktopOverlays } from "./DesktopOverlays"
 import { DesktopWorkspace } from "./DesktopWorkspace"
 import type { DesktopAppShellProps } from "./desktopTypes"
@@ -32,7 +33,7 @@ export function DesktopAppShell({
         onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
         onToggleFileChanges={navigation.panels.handleToggleFileChanges}
         showConfig={state.mainView === "config"}
-        onToggleConfig={navigation.panels.handleToggleConfig}
+        onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
         showMission={state.mainView === "mission"}
         onToggleMission={navigation.panels.handleToggleMission}
         onKillAll={chrome.onKillAll}

@@ -23,7 +23,18 @@ vi.mock("../../hub/registry", () => ({
   listDevices: vi.fn(),
   addDevice: vi.fn(),
   updateDevice: vi.fn(),
+  updateDeviceIfConnectionMatches: vi.fn(),
   removeDevice: vi.fn(),
+  sameDeviceConnection: (a: Record<string, unknown>, b: Record<string, unknown>) => (
+    a.id === b.id
+    && a.host === b.host
+    && a.port === b.port
+    && a.tls === b.tls
+    && a.auth === b.auth
+    && a.username === b.username
+    && a.password === b.password
+    && (a.connectionRevision ?? 0) === (b.connectionRevision ?? 0)
+  ),
   validateDeviceHost: vi.fn(),
   setDeviceRuntime: vi.fn(),
 }))
@@ -39,11 +50,16 @@ vi.mock("../../hub/device-client", () => {
   }
 })
 
+vi.mock("../../hub/connection-invalidation", () => ({
+  invalidateDeviceConnections: vi.fn(),
+}))
+
 import {
   getDevice,
   listDevices,
   addDevice,
   updateDevice,
+  updateDeviceIfConnectionMatches,
   removeDevice,
   validateDeviceHost,
   setDeviceRuntime,
@@ -54,6 +70,7 @@ import {
   DeviceAuthError,
   DeviceUnreachableError,
 } from "../../hub/device-client"
+import { invalidateDeviceConnections } from "../../hub/connection-invalidation"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerDeviceRoutes } from "../../routes/devices"
 
@@ -61,11 +78,13 @@ const mockedGetDevice = vi.mocked(getDevice)
 const mockedListDevices = vi.mocked(listDevices)
 const mockedAddDevice = vi.mocked(addDevice)
 const mockedUpdateDevice = vi.mocked(updateDevice)
+const mockedUpdateDeviceIfConnectionMatches = vi.mocked(updateDeviceIfConnectionMatches)
 const mockedRemoveDevice = vi.mocked(removeDevice)
 const mockedValidateDeviceHost = vi.mocked(validateDeviceHost)
 const mockedSetDeviceRuntime = vi.mocked(setDeviceRuntime)
 const mockedGetDeviceToken = vi.mocked(getDeviceToken)
 const mockedInvalidateDeviceToken = vi.mocked(invalidateDeviceToken)
+const mockedInvalidateDeviceConnections = vi.mocked(invalidateDeviceConnections)
 
 // ── fetch helpers ──────────────────────────────────────────────────────────
 
@@ -167,6 +186,28 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
   mockedValidateDeviceHost.mockReturnValue(null)
+  mockedUpdateDevice.mockImplementation(async (id, patch) => {
+    const current = mockedGetDevice(id)
+    if (!current) return undefined
+    return {
+      ...current,
+      ...patch,
+      username: patch.username === null ? undefined : (patch.username ?? current.username),
+    }
+  })
+  mockedUpdateDeviceIfConnectionMatches.mockImplementation(async (id, _expected, patch) => {
+    const current = mockedGetDevice(id)
+    if (!current) return { status: "missing" }
+    return {
+      status: "updated",
+      device: {
+        ...current,
+        ...patch,
+        connectionRevision: (current.connectionRevision ?? 0) + 1,
+        username: patch.username === null ? undefined : (patch.username ?? current.username),
+      },
+    }
+  })
 })
 
 // ── GET /api/hub/devices ────────────────────────────────────────────────────
@@ -419,6 +460,207 @@ describe("POST /api/hub/devices", () => {
   })
 })
 
+// ── Device usernames (team devices) ─────────────────────────────────────────
+
+describe("device usernames", () => {
+  it("verifies and saves a username-carrying device (trimmed + lowercased)", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedAddDevice.mockReturnValue({
+      id: "dev_user", name: "remote-mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 123,
+    } as never)
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: " Alice " })
+
+    expect(res._getStatus()).toBe(201)
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer alice:pw" })
+    expect(mockedAddDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "alice", password: "pw", auth: "password" }),
+    )
+    const body = JSON.parse(res._getData())
+    expect(body.device.username).toBe("alice")
+    expect(body.device.password).toBeUndefined()
+  })
+
+  it("surfaces ACCOUNT_DISABLED from the machine-readable code on a device 403", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      // The error text is free-form; the code alone must be enough.
+      .mockResolvedValueOnce(fakeResponse({
+        status: 403,
+        json: { valid: false, error: "Your account was disabled by an admin", code: "ACCOUNT_DISABLED" },
+      }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("surfaces ACCOUNT_DISABLED via the error-string fallback (older team devices)", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))
+      .mockResolvedValueOnce(fakeResponse({ status: 403, json: { valid: false, error: "Account disabled" } }))
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", password: "pw", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("ACCOUNT_DISABLED")
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("re-verifies with the stored password and invalidates only after committing a username change", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { username: "Bob " })
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledWith("dev_1")
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer bob:pw" })
+    expect(mockedUpdateDeviceIfConnectionMatches).toHaveBeenCalledWith(
+      "dev_1",
+      expect.objectContaining({ username: "alice", password: "pw" }),
+      expect.objectContaining({ username: "bob" }),
+    )
+    expect(mockedUpdateDeviceIfConnectionMatches.mock.invocationCallOrder[0])
+      .toBeLessThan(mockedInvalidateDeviceToken.mock.invocationCallOrder[0])
+    expect(JSON.parse(res._getData()).device.username).toBe("bob")
+  })
+
+  it("rejects a POST username without a password before probing", async () => {
+    const fetchFn = mockFetch()
+
+    const { res } = await drive("POST", "/", { host: "10.0.0.2", username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a POST username on a tunnel add (allowLocalTunnel without password)", async () => {
+    const fetchFn = mockFetch()
+
+    const { res } = await drive("POST", "/", { host: "127.0.0.1", username: "alice", allowLocalTunnel: true })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedAddDevice).not.toHaveBeenCalled()
+  })
+
+  it("rejects a PATCH username on an auth:none device without a password", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "alice" })
+
+    expect(res._getStatus()).toBe(400)
+    expect(JSON.parse(res._getData()).code).toBe("USERNAME_REQUIRES_PASSWORD")
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedUpdateDevice).not.toHaveBeenCalled()
+    expect(mockedUpdateDeviceIfConnectionMatches).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+  })
+
+  it("upgrades an auth:none device when a PATCH carries username and password", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+      .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "alice", password: "pw" })
+
+    expect(res._getStatus()).toBe(200)
+    const [, verifyInit] = fetchFn.mock.calls[1]
+    expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer alice:pw" })
+    expect(mockedUpdateDeviceIfConnectionMatches).toHaveBeenCalledWith(
+      "dev_t",
+      expect.objectContaining({ auth: "none" }),
+      expect.objectContaining({ username: "alice", password: "pw", auth: "password" }),
+    )
+  })
+
+  it.each([["an empty string", ""], ["null", null]])(
+    "detaches the username when the patch sends %s",
+    async (_label, value) => {
+      const fetchFn = mockFetch()
+      fetchFn
+        .mockResolvedValueOnce(fakeResponse({ json: helloOk }))                       // re-probe
+        .mockResolvedValueOnce(fakeResponse({ json: { valid: true, token: "tok" } })) // verify
+      mockedGetDevice.mockReturnValue({
+        id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+        auth: "password", password: "pw", username: "alice", addedAt: 1,
+      } as never)
+
+      const { res } = await drive("PATCH", "/dev_1", { username: value })
+
+      expect(res._getStatus()).toBe(200)
+      // Dropping a credential is a sensitive change: the cached token must go,
+      // and the password alone has to still authenticate.
+      expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+      const [, verifyInit] = fetchFn.mock.calls[1]
+      expect((verifyInit as RequestInit).headers).toMatchObject({ authorization: "Bearer pw" })
+      expect(mockedUpdateDeviceIfConnectionMatches).toHaveBeenCalledWith(
+        "dev_1",
+        expect.objectContaining({ username: "alice" }),
+        expect.objectContaining({ username: null }),
+      )
+      expect(JSON.parse(res._getData()).device.username).toBeUndefined()
+    },
+  )
+
+  it("leaves an already-username-less device alone when the patch clears it", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_t", name: "tunnel", host: "127.0.0.1", port: 19384, auth: "none", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_t", { username: "", name: "renamed" })
+
+    expect(res._getStatus()).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceConnections).not.toHaveBeenCalled()
+  })
+
+  it("treats an unchanged username as a non-sensitive patch", async () => {
+    const fetchFn = mockFetch()
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password", password: "pw", username: "alice", addedAt: 1,
+    } as never)
+
+    const { res } = await drive("PATCH", "/dev_1", { username: "alice", name: "renamed" })
+
+    expect(res._getStatus()).toBe(200)
+    expect(fetchFn).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ name: "renamed" }))
+  })
+})
+
 // ── PATCH /api/hub/devices/:id ──────────────────────────────────────────────
 
 describe("PATCH /api/hub/devices/:id", () => {
@@ -456,9 +698,96 @@ describe("PATCH /api/hub/devices/:id", () => {
 
     expect(res._getStatus()).toBe(200)
     expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledWith("dev_1")
     expect(mockedValidateDeviceHost).toHaveBeenCalledWith("10.0.0.9", true)
     expect(fetchFn).toHaveBeenCalledWith("http://10.0.0.9:19384/api/hello", expect.anything())
-    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ host: "10.0.0.9" }))
+    expect(mockedUpdateDeviceIfConnectionMatches).toHaveBeenCalledWith(
+      "dev_1",
+      expect.objectContaining({ host: "10.0.0.2" }),
+      expect.objectContaining({ host: "10.0.0.9" }),
+    )
+  })
+
+  it("rejects a concurrently verified credential patch instead of committing an unverified combination", async () => {
+    const initial = {
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password" as const, password: "old-password", username: "alice", addedAt: 1,
+      connectionRevision: 0,
+    }
+    mockedGetDevice.mockReturnValue(initial)
+    let current = { ...initial }
+    mockedUpdateDeviceIfConnectionMatches.mockImplementation(async (_id, expected, patch) => {
+      const matches = ["host", "port", "tls", "auth", "password", "username", "connectionRevision"]
+        .every((field) => current[field as keyof typeof current] === expected[field as keyof typeof expected])
+      if (!matches) return { status: "conflict" }
+      current = {
+        ...current,
+        ...patch,
+        connectionRevision: current.connectionRevision + 1,
+        username: patch.username === null ? undefined : (patch.username ?? current.username),
+      } as typeof current
+      return { status: "updated", device: current }
+    })
+
+    let finishUsernameVerify!: (response: ReturnType<typeof fakeResponse>) => void
+    let finishPasswordVerify!: (response: ReturnType<typeof fakeResponse>) => void
+    const fetchFn = mockFetch()
+    fetchFn.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/api/hello")) return fakeResponse({ json: helloOk })
+      const authorization = (init?.headers as Record<string, string>)?.authorization
+      return new Promise((resolve) => {
+        if (authorization === "Bearer bob:old-password") finishUsernameVerify = resolve
+        else if (authorization === "Bearer alice:new-password") finishPasswordVerify = resolve
+      })
+    })
+
+    const usernamePatch = drive("PATCH", "/dev_1", { username: "bob" })
+    const passwordPatch = drive("PATCH", "/dev_1", { password: "new-password" })
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(4))
+
+    finishPasswordVerify(fakeResponse({ json: { valid: true, token: "new-token" } }))
+    const passwordResult = await passwordPatch
+    expect(passwordResult.res._getStatus()).toBe(200)
+
+    finishUsernameVerify(fakeResponse({ json: { valid: true, token: "bob-token" } }))
+    const usernameResult = await usernamePatch
+    expect(usernameResult.res._getStatus()).toBe(409)
+    expect(JSON.parse(usernameResult.res._getData()).code).toBe("DEVICE_CHANGED")
+    expect(current.username).toBe("alice")
+    expect(current.password).toBe("new-password")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns 404 when deletion wins while a sensitive patch is being verified", async () => {
+    const initial = {
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384,
+      auth: "password" as const, password: "old-password", username: "alice", addedAt: 1,
+    }
+    mockedGetDevice.mockReturnValue(initial)
+    let removed = false
+    mockedRemoveDevice.mockImplementation(async () => {
+      removed = true
+      return true
+    })
+    mockedUpdateDeviceIfConnectionMatches.mockImplementation(async () =>
+      removed ? { status: "missing" } : { status: "updated", device: initial })
+    let finishVerify!: (response: ReturnType<typeof fakeResponse>) => void
+    const fetchFn = mockFetch()
+    fetchFn.mockImplementation(async (url: string) => {
+      if (url.endsWith("/api/hello")) return fakeResponse({ json: helloOk })
+      return new Promise((resolve) => { finishVerify = resolve })
+    })
+
+    const patch = drive("PATCH", "/dev_1", { username: "bob" })
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2))
+    const deletion = await drive("DELETE", "/dev_1")
+    expect(deletion.res._getStatus()).toBe(200)
+
+    finishVerify(fakeResponse({ json: { valid: true, token: "bob-token" } }))
+    const patchResult = await patch
+    expect(patchResult.res._getStatus()).toBe(404)
+    expect(JSON.parse(patchResult.res._getData()).code).toBe("UNKNOWN_DEVICE")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledTimes(1)
   })
 
   it("re-probes over https and patches tls on a tls change", async () => {
@@ -472,8 +801,13 @@ describe("PATCH /api/hub/devices/:id", () => {
 
     expect(res._getStatus()).toBe(200)
     expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledWith("dev_1")
     expect(fetchFn).toHaveBeenCalledWith("https://cogpit.example.com:443/api/hello", expect.anything())
-    expect(mockedUpdateDevice).toHaveBeenCalledWith("dev_1", expect.objectContaining({ tls: true }))
+    expect(mockedUpdateDeviceIfConnectionMatches).toHaveBeenCalledWith(
+      "dev_1",
+      expect.not.objectContaining({ tls: expect.anything() }),
+      expect.objectContaining({ tls: true }),
+    )
   })
 
   it("surfaces a bad password when re-verifying on password change", async () => {
@@ -489,8 +823,9 @@ describe("PATCH /api/hub/devices/:id", () => {
 
     expect(res._getStatus()).toBe(400)
     expect(JSON.parse(res._getData()).code).toBe("BAD_PASSWORD")
-    expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
     expect(mockedUpdateDevice).not.toHaveBeenCalled()
+    expect(mockedUpdateDeviceIfConnectionMatches).not.toHaveBeenCalled()
   })
 })
 
@@ -516,6 +851,21 @@ describe("DELETE /api/hub/devices/:id", () => {
     expect(JSON.parse(res._getData()).success).toBe(true)
     expect(mockedRemoveDevice).toHaveBeenCalledWith("dev_1")
     expect(mockedInvalidateDeviceToken).toHaveBeenCalledWith("dev_1")
+    expect(mockedInvalidateDeviceConnections).toHaveBeenCalledWith("dev_1")
+  })
+
+  it("returns 404 without invalidation when a concurrent delete wins", async () => {
+    mockedGetDevice.mockReturnValue({
+      id: "dev_1", name: "mac", host: "10.0.0.2", port: 19384, auth: "password", addedAt: 1,
+    } as never)
+    mockedRemoveDevice.mockResolvedValue(false)
+
+    const { res } = await drive("DELETE", "/dev_1")
+
+    expect(res._getStatus()).toBe(404)
+    expect(JSON.parse(res._getData()).code).toBe("UNKNOWN_DEVICE")
+    expect(mockedInvalidateDeviceToken).not.toHaveBeenCalled()
+    expect(mockedInvalidateDeviceConnections).not.toHaveBeenCalled()
   })
 })
 
@@ -541,6 +891,37 @@ describe("POST /api/hub/devices/:id/test", () => {
     const body = JSON.parse(res._getData())
     expect(body).toMatchObject({ ok: true, reachable: true, authState: "ok" })
     expect(mockedSetDeviceRuntime).toHaveBeenCalledWith("dev_1", expect.objectContaining({ authState: "ok" }))
+  })
+
+  it("re-probes and mints from the current device when credentials change during the probe", async () => {
+    const fetchFn = mockFetch()
+    fetchFn
+      .mockResolvedValueOnce(fakeResponse({ json: { ...helloOk, name: "old" } }))
+      .mockResolvedValueOnce(fakeResponse({ json: { ...helloOk, name: "new" } }))
+    const oldDevice = {
+      id: "dev_1", name: "old", host: "old.example.com", port: 19384,
+      auth: "password", password: "old-pw", username: "old-user", addedAt: 1,
+    } as const
+    const newDevice = {
+      ...oldDevice,
+      name: "new",
+      host: "new.example.com",
+      port: 443,
+      tls: true,
+      password: "new-pw",
+      username: "new-user",
+    } as const
+    mockedGetDevice.mockReturnValueOnce(oldDevice).mockReturnValue(newDevice)
+    mockedGetDeviceToken.mockResolvedValue("tok")
+
+    const { res } = await drive("POST", "/dev_1/test")
+
+    expect(res._getStatus()).toBe(200)
+    expect(fetchFn).toHaveBeenNthCalledWith(1, "http://old.example.com:19384/api/hello", expect.anything())
+    expect(fetchFn).toHaveBeenNthCalledWith(2, "https://new.example.com:443/api/hello", expect.anything())
+    expect(mockedGetDeviceToken).toHaveBeenCalledTimes(1)
+    expect(mockedGetDeviceToken).toHaveBeenCalledWith(newDevice)
+    expect(JSON.parse(res._getData()).hello.name).toBe("new")
   })
 
   it("reports bad-password when the token mint throws DeviceAuthError", async () => {

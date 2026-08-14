@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import type { NetworkInterfaceInfo } from "node:os"
+import type { CogpitEdition } from "../../shared/contracts/team"
 
 /**
  * Pure, side-effect-light helpers for the headless standalone bootstrap.
@@ -50,8 +51,15 @@ export function isLoopbackHost(host: string): boolean {
 /**
  * A passwordless server must never bind a non-loopback interface. Returns true
  * when the requested host is reachable off-box but no network password exists.
+ * Team edition never fails closed here: every request authenticates as a named
+ * user, so user credentials replace the network password entirely.
  */
-export function shouldFailClosed(host: string, hasNetworkPassword: boolean): boolean {
+export function shouldFailClosed(
+  host: string,
+  hasNetworkPassword: boolean,
+  edition: CogpitEdition = "personal",
+): boolean {
+  if (edition === "team") return false
   return !isLoopbackHost(host) && !hasNetworkPassword
 }
 
@@ -116,4 +124,60 @@ export function buildBootBanner(info: BannerInfo): string[] {
 export function resolveDeviceName(env: NodeJS.ProcessEnv, hostname: string): string {
   const name = env.COGPIT_DEVICE_NAME
   return name && name.trim().length > 0 ? name.trim() : hostname
+}
+
+// ── Team-edition boot notices ────────────────────────────────────────────
+
+export interface TeamBootInfo {
+  edition: CogpitEdition
+  userCount: number
+  envPasswordSet: boolean
+  host: string
+  port: number
+  interfaces: InterfaceMap
+  /** COGPIT_PUBLIC_URL — the address browsers actually reach this server on. */
+  publicUrl?: string | null
+  /** One-time founding-admin credential, placed in a URL fragment. */
+  bootstrapToken: string | null
+}
+
+/**
+ * Team-edition startup notices (no I/O — caller prints them). Personal boots
+ * are silent. Team boots warn when a network password env is set (it is
+ * ignored — users sign in with their own accounts) and, on a zero-user store,
+ * print a prominent banner pointing at the first-admin bootstrap URL.
+ *
+ * That URL is the configured public one when there is one. The LAN fallback is
+ * still worth printing — it names the right port and host — but a browser
+ * cannot be issued a `Secure` session cookie over plain HTTP, so it comes with
+ * the reason it will not log anyone in on its own.
+ */
+export function buildTeamBootNotices(info: TeamBootInfo): string[] {
+  if (info.edition !== "team") return []
+  const lines: string[] = []
+  if (info.envPasswordSet) {
+    lines.push(
+      "Team edition: COGPIT_NETWORK_PASSWORD is ignored — team members sign in with their user accounts.",
+    )
+  }
+  if (info.userCount === 0) {
+    const publicUrl = info.publicUrl?.trim().replace(/\/+$/, "")
+    const advertised = resolveAdvertisedHost(info.host, info.interfaces)
+    const target = advertised && !isLoopbackHost(advertised) ? advertised : "127.0.0.1"
+    const divider = "─".repeat(64)
+    const setupUrl = `${publicUrl || `http://${target}:${info.port}`}`
+      + (info.bootstrapToken ? `#bootstrap=${encodeURIComponent(info.bootstrapToken)}` : "")
+    lines.push(
+      divider,
+      "Team edition: no users yet.",
+      `Open ${setupUrl} to create the first admin.`,
+    )
+    if (!publicUrl) {
+      lines.push(
+        "Browser logins need HTTPS: put a TLS proxy in front and open that address instead.",
+      )
+    }
+    lines.push(divider)
+  }
+  return lines
 }

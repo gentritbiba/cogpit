@@ -141,6 +141,9 @@ export function registerFileWatchRoutes(use: UseFn) {
     // /tmp/claude-*. Revalidate before every read because the output file may
     // not exist yet when the stream is opened.
     const resolved = await resolveTaskOutputPath(requestedOutputPath)
+    // Session revocation may destroy the response while canonicalization is in
+    // flight. Do not resurrect a closed request by installing SSE resources.
+    if (res.destroyed || res.writableEnded) return
     if (!resolved) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied - only task output files allowed" }))
@@ -260,6 +263,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     }
 
     const filePath = await resolveSessionFilePath(dirName, fileName)
+    if (res.destroyed || res.writableEnded) return
     if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied" }))

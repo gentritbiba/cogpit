@@ -1,10 +1,13 @@
 import type { Plugin } from "vite"
 import { fileURLToPath } from "node:url"
 import { registerApiRoutes } from "./api-routes"
-import { loadConfig, getConfig } from "./config"
+import { getConfiguredEditionValue, loadConfig, getConfig } from "./config"
 import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
+import { teamAuthzMiddleware } from "./team/authz"
+import { describeEditionSuppression, initEdition } from "./team/edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { codexAppServer } from "./codex-app-server"
 
@@ -28,17 +31,35 @@ export function sessionApiPlugin(): Plugin {
         initDeviceRegistry(fileURLToPath(new URL("..", import.meta.url))),
       ])
       refreshDirs()
+      const configEdition = getConfiguredEditionValue()
+
+      // The dev shell always resolves personal (team is standalone-only), but
+      // a team request must still be visibly suppressed, never silently eaten.
+      initEdition({ shell: "dev", configEdition })
+      const suppression = describeEditionSuppression(process.env, configEdition, "dev")
+      if (suppression) console.warn(suppression)
 
       // Security middleware (before all routes)
       server.middlewares.use(securityHeaders)
       server.middlewares.use(bodySizeLimit)
       server.middlewares.use(authMiddleware)
+      // Parity with app-server: a no-op here since the dev shell is always
+      // personal edition, but the middleware order stays identical.
+      server.middlewares.use(teamAuthzMiddleware)
 
       // Guard middleware: block data APIs when not configured
       server.middlewares.use((req, res, next) => {
         const url = req.url || ""
-        // Allow config endpoints through without guard
-        if (url.startsWith("/api/config") || url.startsWith("/api/notify") || url.startsWith("/api/hello")) return next()
+        // Allow config/identity/bootstrap endpoints through without guard
+        const exempt = [
+          "/api/config",
+          "/api/notify",
+          "/api/hello",
+          "/api/me",
+          "/api/team/bootstrap",
+          "/api/auth",
+        ]
+        if (exempt.some((prefix) => prefixMatches(url, prefix))) return next()
         // Allow non-API requests through (HTML, JS, CSS)
         if (!url.startsWith("/api/")) return next()
         // Block data APIs when not configured

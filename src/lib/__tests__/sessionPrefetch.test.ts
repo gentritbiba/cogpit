@@ -5,17 +5,21 @@ vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({
   sessionCache: { get: vi.fn(() => undefined), set: vi.fn(), evict: vi.fn() },
 }))
-vi.mock("@/lib/device", () => ({ getActiveDeviceId: vi.fn(() => "local") }))
+vi.mock("@/lib/device", () => ({
+  getActiveDeviceScope: vi.fn(() => "local"),
+  getActiveIdentity: vi.fn(() => null),
+}))
 
 import { prefetchSession } from "@/lib/sessionPrefetch"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const mockGet = vi.mocked(sessionCache.get)
 const mockSet = vi.mocked(sessionCache.set)
-const mockDeviceId = vi.mocked(getActiveDeviceId)
+const mockDeviceScope = vi.mocked(getActiveDeviceScope)
+const mockIdentity = vi.mocked(getActiveIdentity)
 
 function tailResponse() {
   return new Response(
@@ -35,7 +39,8 @@ const parsed = { turns: [] } as unknown as ParsedSession
 beforeEach(() => {
   vi.clearAllMocks()
   mockGet.mockReturnValue(undefined)
-  mockDeviceId.mockReturnValue("local")
+  mockDeviceScope.mockReturnValue("local")
+  mockIdentity.mockReturnValue(null)
 })
 
 describe("prefetchSession device scoping", () => {
@@ -53,9 +58,9 @@ describe("prefetchSession device scoping", () => {
     mockAuthFetch.mockResolvedValue(tailResponse())
     const workerParse = vi.fn(async () => parsed)
 
-    // getActiveDeviceId is called: (1) makeKey, (2) pre-fetch snapshot,
+    // The scope is read for: (1) makeKey, (2) pre-fetch snapshot,
     // (3) post-parse guard. Simulate a switch between the snapshot and the guard.
-    mockDeviceId
+    mockDeviceScope
       .mockReturnValueOnce("device-a") // makeKey
       .mockReturnValueOnce("device-a") // snapshot before authFetch
       .mockReturnValueOnce("device-b") // guard after parse (switched!)
@@ -66,6 +71,19 @@ describe("prefetchSession device scoping", () => {
     expect(mockAuthFetch).toHaveBeenCalledOnce()
     expect(workerParse).toHaveBeenCalledOnce()
     // …but must NOT poison device-a's cache with the completion.
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it("does not write the cache when the identity changes mid-flight", async () => {
+    mockAuthFetch.mockResolvedValue(tailResponse())
+    const workerParse = vi.fn(async () => parsed)
+    mockIdentity
+      .mockReturnValueOnce("u_1") // prefetch de-dupe key
+      .mockReturnValueOnce("u_1") // loader snapshot
+      .mockReturnValueOnce("u_2") // loader guard
+
+    await prefetchSession("-dir", "identity-session.jsonl", workerParse)
+
     expect(mockSet).not.toHaveBeenCalled()
   })
 })

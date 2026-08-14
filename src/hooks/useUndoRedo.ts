@@ -21,6 +21,7 @@ export type { UndoConfirmState } from "./undo/undoHelpers"
 const EMPTY_BRANCHES: Branch[] = []
 
 export interface UseUndoRedoResult {
+  enabled: boolean
   undoState: UndoState | null
   canRedo: boolean
   redoTurnCount: number
@@ -48,6 +49,7 @@ export function useUndoRedo(
   session: ParsedSession | null,
   sessionSource: SessionSource | null,
   onReloadSession: () => Promise<void>,
+  enabled = true,
 ): UseUndoRedoResult {
   const [undoState, setUndoState] = useState<UndoState | null>(null)
   const [confirmState, setConfirmState] = useState<UndoConfirmState | null>(null)
@@ -57,8 +59,10 @@ export function useUndoRedo(
 
   // Load undo state when session changes
   useEffect(() => {
-    if (!session) {
+    if (!enabled || !session) {
       setUndoState(null)
+      setConfirmState(null)
+      setApplyError(null)
       sessionIdRef.current = null
       return
     }
@@ -88,7 +92,7 @@ export function useUndoRedo(
 
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fetch when sessionId changes, not on every session object update
-  }, [session?.sessionId])
+  }, [enabled, session?.sessionId])
 
   const commitUndoTransaction = useCallback(async (transaction: UndoTransaction) => {
     try {
@@ -154,7 +158,7 @@ export function useUndoRedo(
 
   // Request undo: "Restore to here" on turn N keeps turns 0..(N-1)
   const requestUndo = useCallback((targetTurnIndex: number) => {
-    if (!session) return
+    if (!enabled || !session) return
     const effectiveTarget = targetTurnIndex - 1
     if (effectiveTarget >= session.turns.length - 1 || effectiveTarget < -1) return
 
@@ -164,11 +168,11 @@ export function useUndoRedo(
       summary: buildSummary(ops, session.turns.length - 1 - effectiveTarget),
       targetTurnIndex: effectiveTarget,
     })
-  }, [session])
+  }, [enabled, session])
 
   // Request redo: restore the entire most recent branch
   const requestRedoAll = useCallback(() => {
-    if (!canRedo || !redoBranch || !session) return
+    if (!enabled || !canRedo || !redoBranch || !session) return
 
     const ops = buildRedoFromArchived(redoBranch.turns)
     setConfirmState({
@@ -177,11 +181,11 @@ export function useUndoRedo(
       targetTurnIndex: redoBranch.branchPointTurnIndex + redoBranch.turns.length,
       branchId: redoBranch.id,
     })
-  }, [canRedo, redoBranch, session])
+  }, [enabled, canRedo, redoBranch, session])
 
   // Request partial redo: restore ghost turns up to and including ghostTurnIndex
   const requestRedoUpTo = useCallback((ghostTurnIndex: number) => {
-    if (!canRedo || !redoBranch || !session) return
+    if (!enabled || !canRedo || !redoBranch || !session) return
 
     const turnCount = ghostTurnIndex + 1
     const ops = buildRedoFromArchived(redoBranch.turns, ghostTurnIndex)
@@ -192,11 +196,11 @@ export function useUndoRedo(
       branchId: redoBranch.id,
       redoUpToArchiveIndex: ghostTurnIndex,
     })
-  }, [canRedo, redoBranch, session])
+  }, [enabled, canRedo, redoBranch, session])
 
   // Request branch switch (from branch modal)
   const requestBranchSwitch = useCallback((branchId: string, archiveTurnIndex?: number) => {
-    if (!session) return
+    if (!enabled || !session) return
     const branch = branches.find((b) => b.id === branchId)
     if (!branch) return
 
@@ -214,11 +218,11 @@ export function useUndoRedo(
       branchId,
       branchTurnIndex: targetArchiveIdx,
     })
-  }, [session, branches])
+  }, [enabled, session, branches])
 
   // Confirm and apply the pending operation
   const confirmApply = useCallback(async () => {
-    if (!confirmState || !session || !sessionSource) {
+    if (!enabled || !confirmState || !session || !sessionSource) {
       setConfirmState(null)
       return
     }
@@ -273,7 +277,7 @@ export function useUndoRedo(
     } finally {
       setIsApplying(false)
     }
-  }, [confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
+  }, [enabled, confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
 
   const confirmCancel = useCallback(() => {
     setConfirmState(null)
@@ -281,6 +285,7 @@ export function useUndoRedo(
   }, [])
 
   return {
+    enabled,
     undoState,
     canRedo,
     redoTurnCount,

@@ -68,6 +68,10 @@ jobs:
         working-directory: packages/cogpit-memory
         run: bun run test
 
+      - name: Test install-free Cogpit CLI
+        working-directory: packages/cogpit-cli
+        run: bun run test
+
       - name: Build cogpit-memory standalone binary
         working-directory: packages/cogpit-memory
         run: bun run build
@@ -85,6 +89,10 @@ jobs:
       - name: Verify cogpit-memory package and CLI contracts
         working-directory: packages/cogpit-memory
         run: node scripts/test-package-contract.mjs
+
+      - name: Verify install-free Cogpit package contract
+        working-directory: packages/cogpit-cli
+        run: bun run test:contracts
 
   # Windows is a release target, but nothing used to exercise it — the win NSIS
   # config sat unbuilt while POSIX assumptions (/tmp, /bin/zsh, "/" joins, bare
@@ -119,4 +127,8 @@ jobs:
         run: bun run typecheck
 
       - name: Test application and server
+        run: bun run test
+
+      - name: Test install-free Cogpit CLI
+        working-directory: packages/cogpit-cli
         run: bun run test

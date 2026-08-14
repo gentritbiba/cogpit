@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from "react"
 import { authFetch } from "@/lib/auth"
-import { getActiveDeviceId } from "@/lib/device"
+import { getActiveDeviceScope } from "@/lib/device"
 import { hasUnfinishedWork } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import {
@@ -61,7 +61,7 @@ export interface SessionInventory {
 const SessionInventoryContext = createContext<SessionInventory | null>(null)
 
 export function SessionInventoryProvider({ children }: { children: ReactNode }) {
-  const [mountedDeviceId] = useState(getActiveDeviceId)
+  const [mountedDeviceScope] = useState(getActiveDeviceScope)
   const [sessions, setSessions] = useState<ActiveSessionInfo[]>(
     () => readCachedList<ActiveSessionInfo>(sessionListCacheKeys.activeSessions) ?? [],
   )
@@ -86,7 +86,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const fetchInventory = useCallback(async () => {
-    if (!mountedRef.current || getActiveDeviceId() !== mountedDeviceId) return
+    if (!mountedRef.current || getActiveDeviceScope() !== mountedDeviceScope) return
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
@@ -94,7 +94,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       mountedRef.current
       && !ac.signal.aborted
       && abortRef.current === ac
-      && getActiveDeviceId() === mountedDeviceId
+      && getActiveDeviceScope() === mountedDeviceScope
     )
 
     setLoading(true)
@@ -123,7 +123,7 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
       if (isCurrentRequest()) setLoading(false)
       if (abortRef.current === ac) abortRef.current = null
     }
-  }, [mountedDeviceId])
+  }, [mountedDeviceScope])
 
   const refresh = useCallback(() => { void fetchInventory() }, [fetchInventory])
 
@@ -200,12 +200,12 @@ export function SessionInventoryProvider({ children }: { children: ReactNode }) 
   const removeSession = useCallback((sessionId: string) => {
     setSessions((prev) => {
       const next = prev.filter((s) => s.sessionId !== sessionId)
-      if (getActiveDeviceId() === mountedDeviceId) {
+      if (getActiveDeviceScope() === mountedDeviceScope) {
         writeCachedList(sessionListCacheKeys.activeSessions, next)
       }
       return next
     })
-  }, [mountedDeviceId])
+  }, [mountedDeviceScope])
 
   const value = useMemo<SessionInventory>(() => ({
     sessions,

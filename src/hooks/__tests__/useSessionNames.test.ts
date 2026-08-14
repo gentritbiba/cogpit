@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
+import { __resetIdentityForTest, setActiveIdentity } from "@/lib/device"
 
 // Reset module state between tests so module-level `currentNames` is re-initialized
 // from localStorage each time the module is imported fresh.
 beforeEach(() => {
   localStorage.clear()
+  __resetIdentityForTest()
+  window.history.replaceState(null, "", "/")
+  window.dispatchEvent(new Event("cogpit-device-changed"))
 })
 
 // We re-import the module after clearing localStorage so the module-level store
@@ -177,6 +181,25 @@ describe("useSessionNames", () => {
 
       // hook2 should also reflect this change since they share the same store
       expect(hook2.result.current.names["session-from-hook1"]).toBe("Via Hook1")
+    })
+  })
+
+  describe("identity scoping", () => {
+    it("does not retain another signed-in user's custom session names", async () => {
+      const { useSessionNames, rename } = await getHook()
+      setActiveIdentity("u_1")
+      const { result } = renderHook(() => useSessionNames())
+      act(() => rename("shared-session", "User One Name"))
+
+      act(() => setActiveIdentity("u_2"))
+      expect(result.current.names).toEqual({})
+      act(() => rename("shared-session", "User Two Name"))
+
+      expect(localStorage.getItem("session-custom-names::local::u_1")).toContain("User One Name")
+      expect(localStorage.getItem("session-custom-names::local::u_2")).toContain("User Two Name")
+
+      act(() => setActiveIdentity("u_1"))
+      expect(result.current.names["shared-session"]).toBe("User One Name")
     })
   })
 })

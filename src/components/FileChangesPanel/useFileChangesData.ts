@@ -5,6 +5,8 @@ import { authFetch } from "@/lib/auth"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
 import { isCodexDirName } from "@/lib/sessionSource"
+import { useCapability } from "@/hooks/useCapability"
+import { deviceScopedKey } from "@/lib/device"
 
 interface FileChange {
   turnIndex: number
@@ -16,6 +18,7 @@ interface FileChange {
 const bgAgentCache = new Map<string, ToolCall[]>()
 
 export function useFileChangesData(session: ParsedSession) {
+  const canAccessHostFiles = useCapability("hostFiles")
   const { sessionSource } = useSessionContext()
   const dirName = sessionSource?.dirName
   const isCodexSession = isCodexDirName(dirName)
@@ -58,7 +61,7 @@ export function useFileChangesData(session: ParsedSession) {
 
     const toFetch: Array<{ agentId: string; cacheKey: string }> = []
     for (const { agentId } of bgAgentsToLoad) {
-      const cacheKey = `${dirName}/${session.sessionId}/${agentId}`
+      const cacheKey = deviceScopedKey(`${dirName}/${session.sessionId}/${agentId}`)
       if (fetchedBgRef.current.has(cacheKey)) continue
       if (bgAgentCache.has(cacheKey)) {
         setBgToolCalls((prev) => {
@@ -159,7 +162,10 @@ export function useFileChangesData(session: ParsedSession) {
   const [fileContents, setFileContents] = useState<Map<string, string>>(new Map())
 
   useEffect(() => {
-    if (filePaths.length === 0) return
+    if (!canAccessHostFiles || filePaths.length === 0) {
+      setFileContents(new Map())
+      return
+    }
     let cancelled = false
     Promise.all(
       filePaths.map((p) =>
@@ -177,7 +183,7 @@ export function useFileChangesData(session: ParsedSession) {
       setFileContents(map)
     })
     return () => { cancelled = true }
-  }, [filePaths])
+  }, [canAccessHostFiles, filePaths])
 
   // ── Grouped-by-file view with net diffs ─────────────────────────────────
 

@@ -29,6 +29,10 @@ export function setDataRoot(dir: string): void {
   DATA_ROOT = dir
 }
 
+export function getDataRoot(): string {
+  return DATA_ROOT
+}
+
 /**
  * Override the config file path at runtime (used by Electron main process
  * to store config in userData instead of the app bundle directory).
@@ -45,6 +49,8 @@ export interface AppConfig {
    * existing directory contract intact without requiring Claude Code.
    */
   codexOnly?: boolean
+  /** Team-edition opt-in; only the standalone shell honors it. */
+  edition?: "team"
   networkAccess?: boolean
   networkPassword?: string
   terminalApp?: string
@@ -52,6 +58,12 @@ export interface AppConfig {
 }
 
 let cachedConfig: AppConfig | null = null
+let configuredEditionValue: string | undefined
+
+/** Raw persisted edition value for resolution diagnostics before sanitization. */
+export function getConfiguredEditionValue(): string | undefined {
+  return configuredEditionValue
+}
 
 /**
  * In-memory only network credentials derived from the environment
@@ -129,6 +141,7 @@ async function detectCodexOnlyConfig(): Promise<AppConfig | null> {
 }
 
 export async function loadConfig(): Promise<AppConfig | null> {
+  configuredEditionValue = undefined
   let raw: string
   try {
     raw = await readFile(CONFIG_PATH, "utf-8")
@@ -145,6 +158,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
 
   try {
     const parsed = JSON.parse(raw)
+    configuredEditionValue = typeof parsed.edition === "string" ? parsed.edition : undefined
     if (parsed.claudeDir && typeof parsed.claudeDir === "string") {
       let networkPassword: string | undefined = parsed.networkPassword || undefined
 
@@ -177,6 +191,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
       cachedConfig = {
         claudeDir: parsed.claudeDir,
         codexOnly: !!parsed.codexOnly,
+        edition: parsed.edition === "team" ? "team" : undefined,
         networkAccess: !!parsed.networkAccess,
         networkPassword,
         terminalApp: parsed.terminalApp || undefined,
@@ -195,6 +210,7 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   const toPersist = stripEnvOverride(config)
   await writeOwnerOnlyJson(CONFIG_PATH, toPersist, CONFIG_FILE_MODE)
   cachedConfig = toPersist
+  configuredEditionValue = toPersist.edition
 }
 
 interface ValidationResult {

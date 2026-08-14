@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { Check, ChevronDown, Laptop, Plus, Server, Settings2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { can } from "@/lib/capabilities"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
 import { deviceVersion, useDevices, type PublicDevice } from "@/hooks/useDevices"
 import { DevicesDialog } from "@/components/DevicesDialog"
@@ -41,6 +42,7 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
   const activeName = activeDevice?.name ?? "This machine"
   const activeIsRemote = activeDeviceId !== LOCAL_DEVICE_ID
   const menuItemClass = cn(MENU_ITEM_CLASS, compact && "min-h-10")
+  const canManageDevices = can("manageDevices")
 
   // Probe every device once when the dropdown opens — the only probing that
   // happens; there is no background polling.
@@ -127,28 +129,34 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
                 )
               })}
 
-              <div className="my-1 h-px bg-border/40" />
+              {canManageDevices && (
+                <>
+                  <div className="my-1 h-px bg-border/40" />
 
-              <Menu.Item className={menuItemClass} onClick={() => setDialogMode("add")}>
-                <Plus className="size-4 shrink-0 text-muted-foreground" />
-                <span>Add device…</span>
-              </Menu.Item>
-              {devices.length > 0 && (
-                <Menu.Item className={menuItemClass} onClick={() => setDialogMode("manage")}>
-                  <Settings2 className="size-4 shrink-0 text-muted-foreground" />
-                  <span>Manage devices…</span>
-                </Menu.Item>
+                  <Menu.Item className={menuItemClass} onClick={() => setDialogMode("add")}>
+                    <Plus className="size-4 shrink-0 text-muted-foreground" />
+                    <span>Add device…</span>
+                  </Menu.Item>
+                  {devices.length > 0 && (
+                    <Menu.Item className={menuItemClass} onClick={() => setDialogMode("manage")}>
+                      <Settings2 className="size-4 shrink-0 text-muted-foreground" />
+                      <span>Manage devices…</span>
+                    </Menu.Item>
+                  )}
+                </>
               )}
             </Menu.Popup>
           </Menu.Positioner>
         </Menu.Portal>
       </Menu.Root>
 
-      <DevicesDialog
-        open={dialogMode !== null}
-        initialMode={dialogMode ?? "manage"}
-        onClose={() => setDialogMode(null)}
-      />
+      {canManageDevices && (
+        <DevicesDialog
+          open={dialogMode !== null}
+          initialMode={dialogMode ?? "manage"}
+          onClose={() => setDialogMode(null)}
+        />
+      )}
     </>
   )
 }

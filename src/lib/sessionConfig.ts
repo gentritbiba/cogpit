@@ -1,5 +1,6 @@
 import { authFetch } from "@/lib/auth"
 import type { PermissionMode } from "@/lib/permissions"
+import { deviceScopedKey } from "@/lib/device"
 
 /**
  * Per-session UI configuration persisted on the Cogpit server so every client
@@ -14,6 +15,18 @@ export interface SessionConfig {
   ultracode?: boolean
   permissionMode?: PermissionMode
   mcpServers?: string[]
+}
+
+/**
+ * Use the provider-neutral session ID for persisted controls. Claude's
+ * historical key was already `<session-id>.jsonl`; this preserves that layout
+ * while avoiding nested Codex rollout paths that are invalid storage keys.
+ */
+export function getSessionConfigKey(
+  sessionId: string | null | undefined,
+  fileName: string | null | undefined,
+): string | null {
+  return sessionId ? `${sessionId}.jsonl` : fileName ?? null
 }
 
 export async function fetchSessionConfig(key: string): Promise<SessionConfig | null> {
@@ -36,12 +49,14 @@ const pendingSaves = new Map<string, { patch: SessionConfig; timer: ReturnType<t
  * never clobber each other's fields.
  */
 export function saveSessionConfig(key: string, patch: SessionConfig): void {
-  const pending = pendingSaves.get(key)
+  const pendingKey = deviceScopedKey(key)
+  const pending = pendingSaves.get(pendingKey)
   const merged = pending ? { ...pending.patch, ...patch } : patch
   if (pending) clearTimeout(pending.timer)
 
   const timer = setTimeout(() => {
-    pendingSaves.delete(key)
+    pendingSaves.delete(pendingKey)
+    if (deviceScopedKey(key) !== pendingKey) return
     void (async () => {
       try {
         await authFetch(`/api/session-config/${encodeURIComponent(key)}`, {
@@ -54,5 +69,5 @@ export function saveSessionConfig(key: string, patch: SessionConfig): void {
       }
     })()
   }, SAVE_DEBOUNCE_MS)
-  pendingSaves.set(key, { patch: merged, timer })
+  pendingSaves.set(pendingKey, { patch: merged, timer })
 }

@@ -92,6 +92,7 @@ export function useMcpServers(
   cwd: string | undefined,
   dirName: string | undefined,
   sessionFileName: string | undefined,
+  enabled = true,
 ) {
   const [servers, setServers] = useState<McpServer[]>([])
   const [configs, setConfigs] = useState<McpConfigs>({})
@@ -112,7 +113,16 @@ export function useMcpServers(
 
   // Fetch servers from backend when cwd changes
   useEffect(() => {
-    if (!cwd) return
+    if (!enabled || !cwd) {
+      refreshRequestRef.current?.abort()
+      fetchedCwdRef.current = undefined
+      setServers([])
+      setConfigs({})
+      setSelectedServers([])
+      setLoading(false)
+      setLoaded(false)
+      return
+    }
     const controller = new AbortController()
     refreshRequestRef.current?.abort()
 
@@ -142,7 +152,7 @@ export function useMcpServers(
         setLoaded(true)
       })
     return () => controller.abort()
-  }, [cwd])
+  }, [cwd, enabled])
 
   useEffect(() => () => refreshRequestRef.current?.abort(), [])
 
@@ -176,7 +186,7 @@ export function useMcpServers(
   }, [])
 
   const refresh = useCallback(() => {
-    if (!cwd) return
+    if (!enabled || !cwd) return
     refreshRequestRef.current?.abort()
     const controller = new AbortController()
     refreshRequestRef.current = controller
@@ -203,7 +213,7 @@ export function useMcpServers(
         if (controller.signal.aborted || refreshRequestRef.current !== controller) return
         setLoading(false)
       })
-  }, [cwd])
+  }, [cwd, enabled])
 
   // Compute MCP config JSON for --strict-mcp-config --mcp-config
   // null = use default config (all servers), string = only load these servers

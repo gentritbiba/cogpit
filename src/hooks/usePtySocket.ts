@@ -28,7 +28,7 @@ const MAX_RECONNECT_DELAY = 5000
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function usePtySocket() {
+export function usePtySocket(enabled = true) {
   const [status, setStatus] = useState<PtyConnectionStatus>("disconnected")
   const [sessions, setSessions] = useState<PtySessionInfo[]>([])
 
@@ -56,6 +56,10 @@ export function usePtySocket() {
 
   useEffect(() => {
     unmountedRef.current = false
+
+    if (!enabled) return () => {
+      unmountedRef.current = true
+    }
 
     function buildWsUrl() {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
@@ -115,14 +119,15 @@ export function usePtySocket() {
         wsRef.current = null
       }
     }
-  }, [handleMessage])
+  }, [enabled, handleMessage])
 
   const send = useCallback((msg: object) => {
+    if (!enabled) return
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))
     }
-  }, [])
+  }, [enabled])
 
   const subscribe = useCallback((sessionId: string, handler: SessionHandler) => {
     subscribersRef.current.set(sessionId, handler)

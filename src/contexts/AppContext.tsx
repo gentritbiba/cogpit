@@ -1,6 +1,7 @@
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
 import type { AgentKind } from "@/lib/sessionSource"
+import type { CogpitEdition, MeResponse } from "../../shared/contracts/team"
 
 // ── App Config ──────────────────────────────────────────────────────────────
 
@@ -34,9 +35,15 @@ export interface ThemeContext {
 
 export interface NetworkAuth {
   isRemote: boolean
+  /** Edition reported by the public handshake; null until it resolves. */
+  edition: CogpitEdition | null
   authChecked: boolean
   authenticated: boolean
+  /** Team server with no accounts: the gate shows the first-admin screen. */
+  needsBootstrap: boolean
   handleAuthenticated: () => void
+  /** Re-read the public handshake after the bootstrap state changes. */
+  refreshServerState: () => Promise<void>
   logout: () => void
 }
 
@@ -48,6 +55,8 @@ export interface AppContextValue {
   config: AppConfig
   theme: ThemeContext
   networkAuth: NetworkAuth
+  /** Signed-in identity + capabilities from /api/me. */
+  me: MeResponse
   isMobile: boolean
 }
 

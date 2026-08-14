@@ -1,6 +1,7 @@
 import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { ChatInputHandle } from "@/components/ChatInput"
+import { can } from "@/lib/capabilities"
 import { matchesKeybinding } from "@/lib/keybindings"
 
 interface HistoryEntry {
@@ -92,6 +93,7 @@ export function useKeyboardShortcuts({
       }
 
       if (matchesKeybinding("integratedTerminal", e)) {
+        if (!can("terminal")) return
         e.preventDefault()
         onToggleIntegratedTerminal()
         return
@@ -104,6 +106,7 @@ export function useKeyboardShortcuts({
       }
 
       if (matchesKeybinding("projectFiles", e)) {
+        if (!can("hostFiles")) return
         e.preventDefault()
         onToggleProjectFiles()
         return
@@ -149,6 +152,7 @@ export function useKeyboardShortcuts({
 
       // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open terminal at project
       if (matchesKeybinding("systemTerminal", e)) {
+        if (!can("terminal")) return
         e.preventDefault()
         onOpenTerminal()
       }

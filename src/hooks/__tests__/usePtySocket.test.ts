@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { renderHook } from "@testing-library/react"
+import { act, renderHook } from "@testing-library/react"
 import { usePtySocket } from "@/hooks/usePtySocket"
 
 // Minimal WebSocket stand-in that records the URL it was constructed with and
@@ -57,6 +57,26 @@ describe("usePtySocket buildWsUrl", () => {
     expect(MockWebSocket.instances[0]?.url).toBe(
       "ws://example.host:19384/__pty"
     )
+  })
+
+  it("does not construct a WebSocket when terminal access is disabled", () => {
+    renderHook(() => usePtySocket(false))
+
+    expect(MockWebSocket.instances).toHaveLength(0)
+  })
+
+  it("closes the existing socket when terminal access is revoked", () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }) => usePtySocket(enabled),
+      { initialProps: { enabled: true } },
+    )
+    const ws = MockWebSocket.instances[0]
+
+    act(() => rerender({ enabled: false }))
+
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED)
+    result.current.send({ type: "spawn" })
+    expect(MockWebSocket.instances).toHaveLength(1)
   })
 
   it("inserts the /hub/<id> device prefix before /__pty on a remote device", () => {

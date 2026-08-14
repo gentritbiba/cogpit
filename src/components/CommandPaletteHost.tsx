@@ -7,6 +7,7 @@ import {
 } from "@/components/CommandPalette"
 import { usePty } from "@/contexts/PtyContext"
 import { authFetch } from "@/lib/auth"
+import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
@@ -127,12 +128,12 @@ export function CommandPaletteHost({
       recentSessions={recentSessions}
       loadingNavigation={loadingNavigation}
       onOpenIntegratedTerminal={
-        terminalCwd && pty.status === "connected"
+        terminalCwd && pty.status === "connected" && can("terminal")
           ? handleOpenIntegratedTerminal
           : undefined
       }
-      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() ? handleOpenProjectInEditor : undefined}
-      onRevealProject={terminalCwd && !isRemoteDeviceActive() ? handleRevealProject : undefined}
+      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleOpenProjectInEditor : undefined}
+      onRevealProject={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleRevealProject : undefined}
       onCopyProjectPath={terminalCwd ? handleCopyProjectPath : undefined}
     />
   )

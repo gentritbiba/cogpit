@@ -5,11 +5,20 @@ vi.mock("../../config", () => ({
   getConfig: vi.fn(),
 }))
 
+vi.mock("../../team/users", () => ({
+  isUsersStoreInitialized: vi.fn(() => false),
+  userCount: vi.fn(() => 0),
+}))
+
 import { getConfig } from "../../config"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerHelloRoutes, getInstanceId } from "../../routes/hello"
+import { initEdition, __resetEditionForTest } from "../../team/edition"
+import { isUsersStoreInitialized, userCount } from "../../team/users"
 
 const mockedGetConfig = vi.mocked(getConfig)
+const mockedIsUsersStoreInitialized = vi.mocked(isUsersStoreInitialized)
+const mockedUserCount = vi.mocked(userCount)
 
 function createMockReqRes(method: string, url = "/") {
   let statusCode = 200
@@ -39,10 +48,15 @@ function register(mode: "electron" | "standalone" | "dev" = "electron") {
 describe("GET /api/hello", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockedIsUsersStoreInitialized.mockReturnValue(false)
+    mockedUserCount.mockReturnValue(0)
     delete process.env.COGPIT_DEVICE_NAME
+    delete process.env.COGPIT_EDITION
   })
   afterEach(() => {
     delete process.env.COGPIT_DEVICE_NAME
+    delete process.env.COGPIT_EDITION
+    __resetEditionForTest()
   })
 
   it("calls next for non-GET methods", () => {
@@ -68,6 +82,80 @@ describe("GET /api/hello", () => {
     expect(body.version.length).toBeGreaterThan(0)
     expect(body.instanceId).toMatch(/^[0-9a-f]{16}$/)
     expect(res._getHeaders()["Content-Type"]).toBe("application/json")
+  })
+
+  it("reports the personal edition before any initEdition runs", () => {
+    const handler = register()
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).edition).toBe("personal")
+  })
+
+  it("reports the team edition once resolved for the standalone shell", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    const handler = register("standalone")
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).edition).toBe("team")
+  })
+
+  it("advertises the open first-admin bootstrap for a team server with no users", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    mockedIsUsersStoreInitialized.mockReturnValue(true)
+    mockedUserCount.mockReturnValue(0)
+    const handler = register("standalone")
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).needsBootstrap).toBe(true)
+  })
+
+  it("closes the bootstrap signal once a user exists", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    mockedIsUsersStoreInitialized.mockReturnValue(true)
+    mockedUserCount.mockReturnValue(1)
+    const handler = register("standalone")
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
+  })
+
+  it("keeps the bootstrap signal closed before the users store initializes", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    mockedIsUsersStoreInitialized.mockReturnValue(false)
+    mockedUserCount.mockReturnValue(0)
+    const handler = register("standalone")
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    expect(JSON.parse(res._getData()).needsBootstrap).toBe(false)
+  })
+
+  it("never advertises a bootstrap in personal edition", () => {
+    mockedIsUsersStoreInitialized.mockReturnValue(true)
+    mockedUserCount.mockReturnValue(0)
+    const handler = register()
+    const { req, res, next } = createMockReqRes("GET")
+    mockedGetConfig.mockReturnValueOnce(null)
+
+    handler(req as never, res as never, next)
+
+    const body = JSON.parse(res._getData())
+    expect(body.edition).toBe("personal")
+    expect(body.needsBootstrap).toBe(false)
   })
 
   it("reports networkAccess:false and configured:false when unconfigured", () => {
