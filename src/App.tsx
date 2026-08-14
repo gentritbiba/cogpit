@@ -756,6 +756,16 @@ export default function App() {
     scroll,
   ])
 
+  const isNewSession = !!state.pendingDirName && !state.session
+
+  // Opening a new session should land the caret in the composer right away.
+  // Stays above the early-return gates below so hook order never changes.
+  useEffect(() => {
+    if (!isNewSession || isMobile) return
+    const raf = requestAnimationFrame(() => chatInputRef.current?.focus())
+    return () => cancelAnimationFrame(raf)
+  }, [isNewSession, isMobile, state.pendingDirName])
+
   // ─── AUTH GATE (remote clients only) ────────────────────────────────────────
   if (!networkAuth.authChecked) {
     return (
@@ -928,8 +938,6 @@ export default function App() {
       />
     </Suspense>
   )
-
-  const isNewSession = !!state.pendingDirName && !state.session
 
   const goalBarNode = currentAgentKind && state.session ? (
     <GoalBar
