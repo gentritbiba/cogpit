@@ -1,0 +1,38 @@
+{
+  "name": "cogpit",
+  "version": "0.0.0-preview.1",
+  "description": "Run Cogpit's local Claude Code and Codex interface without installing it",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cogpit": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-npm.mjs",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit --pretty false -p tsconfig.prod.json",
+    "test:contracts": "bun run build && node scripts/test-package-contract.mjs",
+    "prepublishOnly": "bun run test && bun run test:contracts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.215",
+    "express": "^5.2.1",
+    "node-pty": "^1.1.0",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3",
+    "typescript": "~5.6.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

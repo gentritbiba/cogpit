@@ -33,15 +33,7 @@ const targets: AuditTarget[] = [
   {
     label: "application",
     cwd: repoRoot,
-    acceptedFindings: new Map([
-      // Windows-only path traversal in serve-static; fixed only in the 2.x
-      // major, which @modelcontextprotocol/sdk still pins out of (^1.19.9).
-      // Reaches the tree solely through that SDK — Cogpit never constructs a
-      // Hono server and never imports serve-static, so no route is exposed.
-      // (Previously justified by "ships no Windows builds", which stopped
-      // being true when the NSIS target started shipping.)
-      ["@hono/node-server:1124006", "moderate"],
-    ]),
+    acceptedFindings: new Map<string, AcceptedSeverity>(),
   },
   {
     label: "cogpit-memory",

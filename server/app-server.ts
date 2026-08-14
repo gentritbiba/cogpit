@@ -129,7 +129,10 @@ export async function createServerComposition(
   } else {
     app.use(express.static(staticDir))
     app.get("{*path}", (_req, res) => {
-      res.sendFile(join(staticDir, "index.html"))
+      // Resolve relative to the declared static root. Passing an absolute path
+      // makes Express reject valid builds nested under a hidden directory
+      // (for example `.worktrees/.../dist`) as a disallowed dotfile path.
+      res.sendFile("index.html", { root: staticDir })
     })
   }
 

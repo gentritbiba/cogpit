@@ -14,6 +14,7 @@ import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import { DesktopAppShell } from "@/components/AppShell/DesktopAppShell"
 import { MobileAppShell } from "@/components/AppShell/MobileAppShell"
+import { PreviewAppShell } from "@/components/AppShell/PreviewAppShell"
 import { useLiveSession } from "@/hooks/useLiveSession"
 import { useSessionTeam } from "@/hooks/useSessionTeam"
 import { useSessionWorkflows } from "@/hooks/useSessionWorkflows"
@@ -51,8 +52,10 @@ import { detectPendingInteraction } from "@/lib/parser"
 import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
+import { previewSessionIdFromPath } from "@/lib/previewMode"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { authFetch } from "@/lib/auth"
+import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
 import {
   agentKindFromDirName,
@@ -71,6 +74,7 @@ const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ d
 const WorkflowsPanel = lazy(() => import("@/components/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })))
 
 export default function App() {
+  const previewSessionId = previewSessionIdFromPath(window.location.pathname)
   const config = useAppConfig()
   const networkAuth = useNetworkAuth()
   const me = useMe(networkAuth.edition)
@@ -350,8 +354,12 @@ export default function App() {
   // Session-specific config shared across all Cogpit clients: hydrate the
   // composer controls from the server-side store when a session opens, and
   // persist every change back so other devices/browsers see the same state.
+  const sessionConfigKey = getSessionConfigKey(
+    state.session?.sessionId,
+    state.sessionSource?.fileName,
+  )
   useSessionConfigSync({
-    sessionKey: state.sessionSource?.fileName ?? null,
+    sessionKey: sessionConfigKey,
     values: {
       model: selectedModel,
       effort: selectedEffort,
@@ -372,7 +380,7 @@ export default function App() {
   const mcpData = useMcpServers(
     supportsMcp && configAdminEnabled ? currentCwd : undefined,
     supportsMcp && configAdminEnabled ? (currentDirName ?? undefined) : undefined,
-    supportsMcp && configAdminEnabled ? state.sessionSource?.fileName ?? undefined : undefined,
+    supportsMcp && configAdminEnabled ? sessionConfigKey ?? undefined : undefined,
     configAdminEnabled,
   )
   const { showWorktrees, setShowWorktrees, showWorkflows } = panels
@@ -438,7 +446,7 @@ export default function App() {
 
   // Detect if session belongs to a team
   const teamContext = useSessionTeam(
-    state.sessionSource?.fileName ?? null,
+    currentAgentKind === "claude" ? state.sessionSource?.fileName ?? null : null,
     state.sessionSource?.dirName ?? null
   )
 
@@ -529,7 +537,7 @@ export default function App() {
   }, [goHome, handleSelectProject])
 
   // Sync URL <-> state
-  useUrlSync({
+  const { previewLoadError } = useUrlSync({
     state,
     dispatch,
     isMobile,
@@ -993,7 +1001,7 @@ export default function App() {
     />
   ) : null
 
-  const chatInputSettingsNode = (
+  const buildChatInputSettings = (includeMobileGoal: boolean) => (
     <ChatInputSettings
       agentKind={currentAgentKind ?? "claude"}
       onAgentKindChange={isNewSession ? pendingAgentKindChange : undefined}
@@ -1018,10 +1026,12 @@ export default function App() {
       onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
-      mobileExtra={isMobile ? goalBarNode : undefined}
+      mobileExtra={isMobile && includeMobileGoal ? goalBarNode : undefined}
       mobile={isMobile}
     />
   )
+  const chatInputSettingsNode = buildChatInputSettings(true)
+  const previewChatInputSettingsNode = buildChatInputSettings(false)
 
   const chatInputNode = (
     <div className="shrink-0 bg-elevation-1">
@@ -1035,6 +1045,20 @@ export default function App() {
         leadingAccessory={isMobile ? chatInputSettingsNode : undefined}
       />
       {!isMobile && chatInputSettingsNode}
+    </div>
+  )
+
+  const previewChatInputNode = (
+    <div className="shrink-0 bg-elevation-1">
+      <ChatInput
+        ref={chatInputRef}
+        allowImages={imageInputAvailable}
+        agentKind={currentAgentKind}
+        projectCwd={currentCwd}
+        compact={isMobile}
+        leadingAccessory={isMobile ? previewChatInputSettingsNode : undefined}
+      />
+      {!isMobile && previewChatInputSettingsNode}
     </div>
   )
 
@@ -1057,6 +1081,32 @@ export default function App() {
       />
     </div>
   )
+
+  // ─── LOCAL SESSION PREVIEW ────────────────────────────────────────────────
+  // Reuse the exact live-session contexts and composer while removing every
+  // navigation/dashboard surface from the rendered product.
+  if (previewSessionId) {
+    return (
+      <AppProvider value={appContextValue}>
+      <PtyProvider>
+      <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
+      <StreamingOverlayProvider value={streamingOverlay}>
+        <PreviewAppShell
+          sessionId={previewSessionId}
+          loadError={previewLoadError}
+          searchInputRef={searchInputRef}
+          activeComposer={subAgentReadOnlyNode || previewChatInputNode}
+          hasMoreTurns={chunkedSession.hasMore}
+          isLoadingOlderTurns={chunkedSession.isLoadingOlder}
+          onLoadMoreTurns={chunkedSession.loadMore}
+          status={errorToast || modelFallbackToast || sseIndicator}
+        />
+      </StreamingOverlayProvider>
+      </SessionProvider>
+      </PtyProvider>
+      </AppProvider>
+    )
+  }
 
   // ─── MOBILE LAYOUT ──────────────────────────────────────────────────────────
   if (isMobile) {

@@ -102,6 +102,20 @@ describe.each(adapterCases)("%s app-server adapter", (_name, expectedMode, facto
     await close(httpServer)
   })
 
+  it("serves SPA deep links when the build lives under a hidden worktree directory", async () => {
+    const hiddenStaticDir = join(fixtureRoot, ".worktrees", "preview", "dist")
+    await mkdir(hiddenStaticDir, { recursive: true })
+    await writeFile(join(hiddenStaticDir, "index.html"), "<main>hidden-worktree-fixture</main>")
+
+    const { httpServer } = await factory(hiddenStaticDir, userDataDir)
+    const baseUrl = await listen(httpServer)
+    const response = await fetch(`${baseUrl}/preview/session-123`)
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toBe("<main>hidden-worktree-fixture</main>")
+    await close(httpServer)
+  })
+
   // A packaged app runs from a read-only bundle, so anything Cogpit writes for
   // itself has to land in the user-data directory it was handed. Reading the
   // value back proves the composition pointed the store somewhere writable.
