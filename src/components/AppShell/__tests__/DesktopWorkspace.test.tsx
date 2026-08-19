@@ -40,16 +40,6 @@ vi.mock("@/components/ChatArea", () => ({
   ChatArea: () => <div data-testid="chat-area" />,
 }))
 
-vi.mock("@/components/SessionInfoBar", () => ({
-  SessionInfoBar: () => <div data-testid="session-info" />,
-}))
-
-vi.mock("@/components/SessionStatusBar", () => ({
-  SessionStatusBar: ({ session }: { session: ParsedSession }) => (
-    <div data-testid="session-status">{session.sessionId}</div>
-  ),
-}))
-
 vi.mock("@/components/StatsPanel", () => ({
   StatsPanel: () => <div data-testid="stats-panel" />,
 }))
@@ -266,7 +256,7 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...makeProps()} />)
 
     expect(screen.getByTestId("session-browser")).toHaveTextContent("session-1")
-    expect(screen.getByTestId("session-status")).toHaveTextContent("session-1")
+    expect(screen.getByTestId("chat-area")).toBeInTheDocument()
     expect(screen.getByTestId("active-composer")).toBeInTheDocument()
   })
 
@@ -276,7 +266,7 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...makeProps()} />)
 
     expect(await screen.findByTestId("config-browser")).toHaveTextContent("/fresh/session")
-    expect(screen.queryByTestId("session-status")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("chat-area")).not.toBeInTheDocument()
   })
 
   it("renders pending turns and the pending composer before the dashboard", () => {

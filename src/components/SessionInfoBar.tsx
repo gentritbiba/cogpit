@@ -1,252 +1,27 @@
-import { forwardRef, memo } from "react"
-import {
-  FolderOpen,
-  Plus,
-  Copy,
-  Code2,
-  FolderSearch,
-  TerminalSquare,
-  Bot,
-  ChevronRight,
-  Workflow as WorkflowIcon,
-  type LucideProps,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip"
-import { parseSubAgentPath, projectName } from "@/lib/format"
-import { formatAgentLabel } from "@/components/timeline/agent-utils"
-import { ContextBadge, HeaderIconButton } from "@/components/header-shared"
-import { authFetch } from "@/lib/auth"
-import { can } from "@/lib/capabilities"
-import { isRemoteDeviceActive } from "@/lib/device"
+import { memo } from "react"
+import { MobileSessionInfoBar, type SessionInfoBarProps } from "@/components/SessionInfoBar.mobile"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
-import { Spinner } from "@/components/ui/Spinner"
-import {
-  MobileSessionInfoBar,
-  type SessionInfoBarProps,
-} from "@/components/SessionInfoBar.mobile"
+import { parseSubAgentPath } from "@/lib/format"
 import type { RawMessage } from "@/lib/types"
 
-const HeaderSpinnerIcon = forwardRef<SVGSVGElement, LucideProps>(function HeaderSpinnerIcon(
-  props,
-  ref,
-) {
-  return <Spinner ref={ref} {...props} />
-})
-
-export const SessionInfoBar = memo(function SessionInfoBar({
-  creatingSession,
-  onNewSession,
-  onDuplicateSession,
-  onOpenTerminal,
-  onBackToMain,
-  onShowFileChanges,
-  hasFileChanges,
-  onShowWorkflows,
-  workflowCount,
-  onSearch,
-  expandAll,
-  onToggleExpandAll,
-}: SessionInfoBarProps) {
+export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBarProps) {
   const { isMobile } = useAppContext()
-  const { session: sessionOrNull, sessionSource } = useSessionContext()
-  const session = sessionOrNull!
+  const { session, sessionSource } = useSessionContext()
+  if (!isMobile || !session) return null
+
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
-  const isSubAgentView = subAgentInfo !== null
-  const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
   const claudeRawMessages = (
     session.agentKind === "codex" ? [] : session.rawMessages
   ) as readonly RawMessage[]
 
-  if (isMobile) {
-    return (
-      <MobileSessionInfoBar
-        session={session}
-        sessionSource={sessionSource}
-        isSubAgentView={isSubAgentView}
-        claudeRawMessages={claudeRawMessages}
-        creatingSession={creatingSession}
-        onNewSession={onNewSession}
-        onDuplicateSession={onDuplicateSession}
-        onBackToMain={onBackToMain}
-        onShowFileChanges={onShowFileChanges}
-        hasFileChanges={hasFileChanges}
-        onShowWorkflows={onShowWorkflows}
-        workflowCount={workflowCount}
-        onSearch={onSearch}
-        expandAll={expandAll}
-        onToggleExpandAll={onToggleExpandAll}
-      />
-    )
-  }
-
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/50 bg-elevation-1 px-3">
-      {/* Sub-agent navigation */}
-      {isSubAgentView && (
-        <>
-          {onBackToMain && (
-            <button
-              type="button"
-              onClick={onBackToMain}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-400 hover:bg-blue-500/15 transition-colors"
-            >
-              <ChevronRight className="size-3 rotate-180" />
-              Main
-            </button>
-          )}
-          <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-indigo-400 border-indigo-500/30 bg-indigo-500/10 gap-1">
-            <Bot className="size-2.5" />
-            Agent {subAgentLabel}
-          </Badge>
-        </>
-      )}
-
-      {session.branchedFrom && (
-        <Tooltip>
-          <TooltipTrigger render={<Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal text-purple-400 border-purple-700/50 bg-purple-500/5 gap-1" />}>
-              <Copy className="size-2.5" />
-              Duplicated
-          </TooltipTrigger>
-          <TooltipContent>
-            Duplicated from {session.branchedFrom.sessionId.slice(0, 8)}
-            {session.branchedFrom.turnIndex != null ? ` at turn ${session.branchedFrom.turnIndex + 1}` : ""}
-          </TooltipContent>
-        </Tooltip>
-      )}
-
-      <ContextBadge
-        rawMessages={claudeRawMessages}
-        showRemaining
-        showTooltip={!isMobile}
-      />
-
-      <div className="flex-1" />
-
-      {/* Project name */}
-      {session.cwd && (
-        <span className="text-[11px] font-medium text-muted-foreground">
-          {projectName(session.cwd)}
-        </span>
-      )}
-
-      <div className="flex-1" />
-
-      {/* Workflows button */}
-      {onShowWorkflows && (workflowCount ?? 0) > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-          onClick={onShowWorkflows}
-        >
-          <WorkflowIcon className="size-3" />
-          Workflows
-          <Badge variant="outline" className="h-4 min-w-4 justify-center px-1 text-[9px] font-semibold">
-            {workflowCount}
-          </Badge>
-        </Button>
-      )}
-
-      {/* Action buttons */}
-      {sessionSource && (
-        <SessionActions
-          creatingSession={creatingSession}
-          onNewSession={onNewSession}
-          onDuplicateSession={onDuplicateSession}
-          onOpenTerminal={onOpenTerminal}
-        />
-      )}
-    </div>
+    <MobileSessionInfoBar
+      {...props}
+      session={session}
+      sessionSource={sessionSource}
+      isSubAgentView={subAgentInfo !== null}
+      claudeRawMessages={claudeRawMessages}
+    />
   )
 })
-
-// ── SessionActions ───────────────────────────────────────────────────────────
-
-interface SessionActionsProps {
-  creatingSession: boolean
-  onNewSession: (dirName: string, cwd?: string) => void
-  onDuplicateSession?: () => void
-  onOpenTerminal?: () => void
-}
-
-/** Action buttons shown in the desktop session info bar. */
-function SessionActions({
-  creatingSession,
-  onNewSession,
-  onDuplicateSession,
-  onOpenTerminal,
-}: SessionActionsProps): React.ReactNode {
-  const { dispatch } = useAppContext()
-  const { session: sessionOrNull, sessionSource } = useSessionContext()
-  const session = sessionOrNull!
-  const sessionSrc = sessionSource!
-  const hasProject = !!(session.cwd || sessionSrc.dirName)
-
-  /** POST path + dirName to an action endpoint (fire-and-forget). */
-  function postAction(endpoint: string): void {
-    authFetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: session.cwd || undefined, dirName: sessionSrc.dirName }),
-    })
-  }
-
-  function handleNewSession(): void {
-    onNewSession(sessionSrc.dirName, session.cwd)
-  }
-
-  return (
-    <>
-      <HeaderIconButton
-        icon={creatingSession ? HeaderSpinnerIcon : Plus}
-        label="New session in this project"
-        onClick={handleNewSession}
-        disabled={creatingSession}
-      />
-      {onDuplicateSession && (
-        <HeaderIconButton
-          icon={Copy}
-          label="Duplicate this session"
-          onClick={onDuplicateSession}
-        />
-      )}
-      {hasProject && !isRemoteDeviceActive() && (
-        <>
-          <HeaderIconButton
-            icon={Code2}
-            label="Open project in editor"
-            onClick={() => postAction("/api/open-in-editor")}
-          />
-          <HeaderIconButton
-            icon={FolderSearch}
-            label="Reveal in file manager"
-            onClick={() => postAction("/api/reveal-in-folder")}
-          />
-        </>
-      )}
-      {onOpenTerminal && !isRemoteDeviceActive() && can("terminal") && (
-        <HeaderIconButton
-          icon={TerminalSquare}
-          label="Open terminal in project"
-          onClick={onOpenTerminal}
-        />
-      )}
-      <HeaderIconButton
-        icon={FolderOpen}
-        label="View all sessions in this project"
-        onClick={() => {
-          const dirName = sessionSrc.dirName
-          dispatch({ type: "GO_HOME", isMobile: false })
-          dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
-        }}
-      />
-    </>
-  )
-}

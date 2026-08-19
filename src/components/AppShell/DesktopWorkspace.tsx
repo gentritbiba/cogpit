@@ -5,8 +5,6 @@ import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
-import { SessionInfoBar } from "@/components/SessionInfoBar"
-import { SessionStatusBar } from "@/components/SessionStatusBar"
 import { StatsPanel } from "@/components/StatsPanel"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import {
@@ -50,7 +48,7 @@ function DesktopSessionContent({
   project,
 }: DesktopWorkspaceProps) {
   const { state } = useAppContext()
-  const { session, isSubAgentView } = useSessionContext()
+  const { session } = useSessionContext()
   if (!session) return null
 
   return (
@@ -60,19 +58,6 @@ function DesktopSessionContent({
           <div className="relative h-full min-h-0 flex flex-col">
             {sessionView.teamMembersBar}
             {sessionView.agentContextBar}
-            <SessionInfoBar
-              creatingSession={navigation.creatingSession}
-              onNewSession={navigation.onStartNewSession}
-              onDuplicateSession={navigation.handlers.handleDuplicateSession}
-              onOpenTerminal={project.onOpenTerminal}
-              onBackToMain={isSubAgentView ? sessionView.onBackToMain : undefined}
-              onShowWorkflows={sessionView.onShowWorkflows}
-              workflowCount={sessionView.workflowCount}
-            />
-            <SessionStatusBar
-              session={session}
-              thinkingEnabled={session.turns.some((turn) => turn.thinking.length > 0)}
-            />
             <ChatArea
               searchInputRef={sessionView.searchInputRef}
               hasTodos={Boolean(sessionView.todoProgress) && sessionView.todosExpanded}
