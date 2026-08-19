@@ -41,7 +41,7 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 - **See everything at once** — live sessions, token costs, file changes, and agent activity in one screen
 - **Talk to your agents** — send messages, approve plans, answer questions, interrupt or branch at any point
 - **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring
-- **Debug faster** — color-coded tool calls, expandable thinking blocks, line-by-line edit diffs, and complete session history
+- **Debug faster** — compact tool-call summaries, expandable thinking blocks, line-by-line edit diffs, and complete session history
 - **Follow multi-agent work** — see each agent's task, status, available runtime details, and recorded thread without leaving the parent session
 - **Undo anything** — rewind sessions to any turn with full branching support and file operation reversal
 
@@ -64,7 +64,7 @@ Send or steer messages with a model and effort override, toggle Fast where suppo
 Create persistent goals above the composer and monitor status, tokens, elapsed time, and provider-native evaluator feedback. Codex goals can optionally use token budgets and explicit pause/resume controls; Claude goals follow Claude Code's native goal lifecycle.
 
 ### Conversation Timeline
-Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling across long sessions.
+Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, compact tool rows, LCS-based edit diffs, and compaction markers. Mutating calls use normal text, read-only calls stay muted, and red is reserved for failures. Virtualized for smooth scrolling across long sessions.
 
 Agent work stays open while a turn is live. Completed turns with a final answer fold that work behind a duration row, and each turn's file summary is a separate collapsed disclosure.
 
@@ -161,7 +161,7 @@ forwarding header while also rewriting `Host` to `localhost`, because that makes
 the proxy hop indistinguishable from a direct local client.
 
 ### Theming
-Dark, Deep OLED, and Light themes with a Malewicz-inspired elevation system, glassmorphism effects, and gradient borders.
+Dark, Deep OLED, and Light themes use bundled Geist fonts, neutral shadcn tokens, compact radii, and semantic color for status, warnings, and diffs.
 
 ## Getting Started
 
@@ -218,7 +218,7 @@ bun run electron:package:signed
 
 ## Tech Stack
 
-React 19 · TypeScript · Vite 6 · Electron 40 · Tailwind CSS 4 · Radix UI · Express 5 · SSE + WebSocket · Shiki · Vitest
+React 19 · TypeScript · Vite 6 · Electron 41 · Tailwind CSS 4 · shadcn/ui · Base UI · Express 5 · SSE + WebSocket · Shiki · Vitest
 
 ## License
 

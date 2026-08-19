@@ -4,6 +4,23 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-08-19 17:53 UTC — Whole-interface redesign (b328450)
+- **File:** `audit-history/audit-20260819T175302Z-b328450.md`
+- **Status:** PASS AFTER UPDATES
+- **Scope:** Renderer-wide redesign across desktop and mobile dashboards,
+  navigation, session chrome, conversation timeline, composer, panels, dialogs,
+  empty states, and onboarding. Shared shadcn/Base UI components, neutral theme
+  tokens, bundled Geist fonts, and Sonner status toasts replace parallel custom
+  treatments.
+- **Documentation:** Updated `README.md` to describe compact semantic tool-call
+  styling, the neutral theme system, and the current shadcn/Base UI and Electron
+  stack. Architecture, self-hosting, team-edition, and agent guidance remain
+  accurate. Dated design notes and plans were left unchanged.
+- **Risk:** MEDIUM (broad visible and interaction changes; no public API,
+  persisted-data, environment, deployment, or production security contract
+  change)
+- **Commit:** b328450
+
 ### 2026-08-19 16:05 UTC — UI and Navigation Simplification (0985b69)
 - **File:** `audit-history/audit-20260819T160546Z-0985b69.md`
 - **Status:** PASS AFTER UPDATES
