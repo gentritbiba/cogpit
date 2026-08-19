@@ -1,10 +1,6 @@
-import { execFile as execFileCallback } from "node:child_process"
-import { realpath, stat } from "node:fs/promises"
-import { isAbsolute, relative, resolve, sep } from "node:path"
-import { promisify } from "node:util"
+import { relative, sep } from "node:path"
+import { resolveGitProject, runGit } from "../lib/gitProject"
 import { sendJson, type UseFn } from "../http"
-
-const execFile = promisify(execFileCallback)
 
 export interface GitStatusFile {
   path: string
@@ -79,36 +75,17 @@ export function relativizeToCwd(files: GitStatusFile[], root: string, projectPat
   })
 }
 
-async function runGit(cwd: string, args: string[]) {
-  return execFile("git", args, {
-    cwd,
-    encoding: "utf-8",
-    maxBuffer: 8 * 1024 * 1024,
-    timeout: 10_000,
-    windowsHide: true,
-  })
-}
-
 export function registerGitStatusRoutes(use: UseFn) {
   use("/api/git-status", async (req, res, next) => {
     if (req.method !== "GET") return next()
     const url = new URL(req.url || "", "http://localhost")
-    const cwd = url.searchParams.get("cwd") ?? ""
-    if (!isAbsolute(cwd)) return sendJson(res, 400, { error: "cwd must be an absolute path" })
 
-    let projectPath: string
-    try {
-      projectPath = await realpath(resolve(cwd))
-      if (!(await stat(projectPath)).isDirectory()) {
-        return sendJson(res, 400, { error: "cwd must be a directory" })
-      }
-    } catch {
-      return sendJson(res, 404, { error: "Project directory not found" })
-    }
+    const project = await resolveGitProject(url.searchParams.get("cwd") ?? "")
+    if (!project.ok) return sendJson(res, project.status, { error: project.error })
+    const { projectPath, root } = project
+    if (!root) return sendJson(res, 200, { isRepository: false, files: [] })
 
     try {
-      const rootResult = await runGit(projectPath, ["rev-parse", "--show-toplevel"])
-      const root = rootResult.stdout.trim()
       const statusResult = await runGit(root, [
         "-c",
         "color.status=false",
@@ -125,14 +102,7 @@ export function registerGitStatusRoutes(use: UseFn) {
         ...parsed,
         files: relativizeToCwd(parsed.files, root, projectPath),
       })
-    } catch (error) {
-      const candidate = error as NodeJS.ErrnoException & { stderr?: string }
-      if (candidate.code === "ENOENT") {
-        return sendJson(res, 503, { error: "Git is not installed or not available in PATH" })
-      }
-      if (/not a git repository/i.test(candidate.stderr ?? candidate.message)) {
-        return sendJson(res, 200, { isRepository: false, files: [] })
-      }
+    } catch {
       return sendJson(res, 500, { error: "Unable to read git status" })
     }
   })

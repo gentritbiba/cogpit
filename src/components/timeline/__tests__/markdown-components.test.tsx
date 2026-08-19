@@ -146,6 +146,19 @@ describe("markdown images", () => {
     expect(img.getAttribute("src")).toBe("https://cdn.example.com/pic.png")
   })
 
+  it("replaces a failed image with readable fallback text", () => {
+    render(
+      <ReactMarkdown components={markdownComponents}>
+        {"![missing diagram](/tmp/missing.png)"}
+      </ReactMarkdown>,
+    )
+
+    fireEvent.error(screen.getByRole("img", { name: "missing diagram" }))
+
+    expect(screen.queryByRole("img", { name: "missing diagram" })).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("Image unavailable: missing diagram")
+  })
+
   it("opens markdown images in the shared contained viewer", () => {
     render(
       <ReactMarkdown components={markdownComponents}>

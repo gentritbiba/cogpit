@@ -262,6 +262,11 @@ export function useLiveSession(
           setIsCompacting(true)
           clearOverlay()
           resetStaleTimer()
+        } else if (data.type === "subagent_activity") {
+          // Background agents write only to their own transcripts, so the
+          // parent stream goes quiet while they run. Keep the session live.
+          setIsLive(true)
+          resetStaleTimer()
         } else if (data.type === "stream_snapshot") {
           // Mid-turn connect/reconnect: replace the overlay wholesale.
           setIsLive(true)

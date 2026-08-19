@@ -13,13 +13,13 @@ const MENU_ITEM_CLASS =
 
 const HUB_VERSION = packageJson.version
 
-const STATUS_DOT: Record<PublicDevice["runtime"]["authState"], string> = {
+const AUTH_STATE_DOT: Record<PublicDevice["runtime"]["authState"], string> = {
   ok: "bg-green-500",
   unknown: "bg-amber-500",
   "bad-password": "bg-red-500",
 }
 
-const STATUS_LABEL: Record<PublicDevice["runtime"]["authState"], string> = {
+const AUTH_STATE_LABEL: Record<PublicDevice["runtime"]["authState"], string> = {
   ok: "Reachable",
   unknown: "Not reachable",
   "bad-password": "Password rejected",
@@ -28,9 +28,9 @@ const STATUS_LABEL: Record<PublicDevice["runtime"]["authState"], string> = {
 function StatusDot({ state }: { state: PublicDevice["runtime"]["authState"] }) {
   return (
     <span
-      aria-label={STATUS_LABEL[state]}
-      title={STATUS_LABEL[state]}
-      className={cn("size-2 shrink-0 rounded-full", STATUS_DOT[state])}
+      aria-label={AUTH_STATE_LABEL[state]}
+      title={AUTH_STATE_LABEL[state]}
+      className={cn("size-2 shrink-0 rounded-full", AUTH_STATE_DOT[state])}
     />
   )
 }
@@ -55,6 +55,11 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
     },
     [devices, testDevice, refresh],
   )
+
+  // With no remote devices this only ever reads "This machine". Desktop keeps
+  // device management in the command palette; the compact (mobile) variant has
+  // no palette behind it, so it stays put as the only way in.
+  if (!compact && devices.length === 0 && !activeIsRemote) return null
 
   return (
     <>

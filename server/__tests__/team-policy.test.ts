@@ -104,7 +104,8 @@ describe("requirementFor", () => {
     expect(requirementFor("/api/sessions/dir/file.jsonl", "GET")).toBe("authed")
     expect(requirementFor("/api/send-message", "POST")).toBe("authed")
     expect(requirementFor("/api/new-session", "POST")).toBe("authed")
-    expect(requirementFor("/api/notify", "POST")).toBe("authed")
+    expect(requirementFor("/api/notifications", "GET")).toBe("authed")
+    expect(requirementFor("/api/notifications/read", "POST")).toBe("authed")
     expect(requirementFor("/api/undo/apply", "POST")).toBe("admin")
     expect(requirementFor("/hub/", "GET")).toBe("authed")
     expect(requirementFor("/hub/device-1/api/projects", "GET")).toBe("authed")
@@ -281,9 +282,8 @@ describe("teamAuthzMiddleware (team edition)", () => {
   })
 
   it("trusts authMiddleware carve-outs that attach no principal", () => {
-    // Trusted-local /api/notify and first-run /api/team/bootstrap arrive
-    // without a principal; authz must not lock them out.
-    expect(run("/api/notify", { method: "POST" }).next).toHaveBeenCalledOnce()
+    // First-run /api/team/bootstrap arrives without a principal; authz must
+    // not lock it out.
     expect(run("/api/team/bootstrap", { method: "POST" }).next).toHaveBeenCalledOnce()
   })
 

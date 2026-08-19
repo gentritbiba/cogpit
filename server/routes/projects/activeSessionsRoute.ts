@@ -25,6 +25,45 @@ import { codexAppServer } from "../../codex-app-server"
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
 
+/**
+ * Whether a session's background agents are demonstrably still writing their
+ * own transcripts. The parent JSONL goes silent while background agents and
+ * workflows run, so mtime-recency on the parent alone would triage the
+ * session as finished. Checked only for sessions whose derived status is
+ * awaiting_agents, and outside the mtime-keyed meta cache — freshness is
+ * exactly what the cache cannot answer.
+ */
+async function hasFreshAgentTranscripts(sessionFilePath: string, now = Date.now()): Promise<boolean> {
+  const FRESH_MS = 60_000
+  const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
+  const queue = [{ dir: sessionDir, depth: 0 }]
+  let statBudget = 200
+
+  while (queue.length > 0 && statBudget > 0) {
+    const { dir, depth } = queue.shift()!
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      if (statBudget-- <= 0) break
+      const fullPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (depth < 2) queue.push({ dir: fullPath, depth: depth + 1 })
+        continue
+      }
+      if (!entry.name.endsWith(".jsonl")) continue
+      try {
+        const s = await stat(fullPath)
+        if (now - s.mtimeMs < FRESH_MS) return true
+      } catch { /* skip */ }
+    }
+  }
+  return false
+}
+
 export async function handleActiveSessions(
   req: IncomingMessage,
   res: ServerResponse,
@@ -188,6 +227,8 @@ export async function handleActiveSessions(
           const sessionId = meta.sessionId || c.fileName.replace(".jsonl", "")
           const isNativeCodexActive = c.dirName.startsWith("codex__")
             && codexAppServer.getActiveTurnId(sessionId) !== undefined
+          const hasRunningAgents = statusInfo.status === "awaiting_agents"
+            && await hasFreshAgentTranscripts(c.filePath)
 
           return {
             dirName: c.dirName,
@@ -206,10 +247,11 @@ export async function handleActiveSessions(
             lastActivityAt: meta.lastTimestamp || lastModified,
             turnCount: meta.turnCount,
             size: c.size,
-            isActive: isNativeCodexActive,
+            isActive: isNativeCodexActive || hasRunningAgents,
             agentStatus: statusInfo.status,
             agentToolName: statusInfo.toolName,
             agentTerminalReason: statusInfo.terminalReason,
+            agentPendingAgents: statusInfo.pendingAgents,
             ...(pullRequests.length > 0 && { pullRequests }),
             ...(meta.teamName && {
               teamName: meta.teamName,

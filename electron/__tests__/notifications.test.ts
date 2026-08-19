@@ -58,7 +58,7 @@ function fakeWindow(overrides: Record<string, unknown> = {}) {
     focus: vi.fn(),
     flashFrame: vi.fn(),
     once: vi.fn(),
-    webContents: { getURL: () => "http://127.0.0.1:19384/", executeJavaScript: vi.fn() },
+    webContents: { getURL: () => "http://127.0.0.1:19384/", executeJavaScript: vi.fn().mockResolvedValue(true) },
     ...overrides,
   }
 }
@@ -101,7 +101,7 @@ describe("handleWorkerNotification", () => {
   it("suppresses only when focused AND already showing that session", () => {
     const viewing = fakeWindow({
       isFocused: () => true,
-      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/abc-123", executeJavaScript: vi.fn() },
+      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/abc-123", executeJavaScript: vi.fn().mockResolvedValue(true) },
     })
     handleWorkerNotification(MESSAGE, viewing as never)
     expect(created).toHaveLength(0)
@@ -110,7 +110,7 @@ describe("handleWorkerNotification", () => {
   it("still notifies when focused on a different session", () => {
     const elsewhere = fakeWindow({
       isFocused: () => true,
-      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/other", executeJavaScript: vi.fn() },
+      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/other", executeJavaScript: vi.fn().mockResolvedValue(true) },
     })
     handleWorkerNotification(MESSAGE, elsewhere as never)
     expect(created).toHaveLength(1)
@@ -119,7 +119,7 @@ describe("handleWorkerNotification", () => {
   it("still notifies when showing that session but blurred", () => {
     const blurred = fakeWindow({
       isFocused: () => false,
-      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/abc-123", executeJavaScript: vi.fn() },
+      webContents: { getURL: () => "http://127.0.0.1:19384/-Users-me-proj/abc-123", executeJavaScript: vi.fn().mockResolvedValue(true) },
     })
     handleWorkerNotification(MESSAGE, blurred as never)
     expect(created).toHaveLength(1)
@@ -164,7 +164,52 @@ describe("handleWorkerNotification", () => {
 
       const script = (win.webContents.executeJavaScript as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       expect(script).toContain('"/-Users-me-proj/abc-123"')
-      expect(script).toContain("PopStateEvent('popstate')")
+      expect(script).toContain("__cogpitRevealSession")
+    })
+
+    it("retries until the renderer registers the reveal handler", async () => {
+      vi.useFakeTimers()
+      try {
+        const win = fakeWindow()
+        const exec = win.webContents.executeJavaScript as ReturnType<typeof vi.fn>
+        // Renderer still booting: handler absent twice, then ready.
+        exec.mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValue(true)
+        handleWorkerNotification(MESSAGE, win as never)
+        created[0].handlers.click()
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(exec).toHaveBeenCalledTimes(3)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("keeps retrying past a renderer that is mid-load", async () => {
+      vi.useFakeTimers()
+      try {
+        const win = fakeWindow()
+        const exec = win.webContents.executeJavaScript as ReturnType<typeof vi.fn>
+        exec.mockRejectedValueOnce(new Error("navigation in progress")).mockResolvedValue(true)
+        handleWorkerNotification(MESSAGE, win as never)
+        created[0].handlers.click()
+        await vi.advanceTimersByTimeAsync(1_000)
+        expect(exec).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("reports the click back to the worker so history marks it read", () => {
+      const postToWorker = vi.fn()
+      handleWorkerNotification({ ...MESSAGE, historyId: "h-1" }, fakeWindow() as never, postToWorker)
+      created[0].handlers.click()
+      expect(postToWorker).toHaveBeenCalledWith({ type: "notification-clicked", historyId: "h-1" })
+    })
+
+    it("does not report a click when the message carries no history id", () => {
+      const postToWorker = vi.fn()
+      handleWorkerNotification(MESSAGE, fakeWindow() as never, postToWorker)
+      created[0].handlers.click()
+      expect(postToWorker).not.toHaveBeenCalled()
     })
 
     it("raises the window on Windows instead of stealing the foreground", () => {

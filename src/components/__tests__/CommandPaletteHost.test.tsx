@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CommandPaletteHost } from "@/components/CommandPaletteHost"
+import { createCommandPaletteProps } from "./commandPaletteProps"
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
@@ -45,33 +46,9 @@ function response(data: unknown): Response {
 
 function createProps() {
   return {
-    open: true,
-    onOpenChange: vi.fn(),
-    onGoHome: vi.fn(),
-    onNewSession: vi.fn(),
+    ...createCommandPaletteProps(),
     onOpenProject: vi.fn(),
     onOpenSession: vi.fn(),
-    onToggleSidebar: vi.fn(),
-    onToggleStats: vi.fn(),
-    onToggleFileChanges: vi.fn(),
-    onToggleWorktrees: vi.fn(),
-    onOpenConfig: vi.fn(),
-    onOpenSettings: vi.fn(),
-    onOpenTheme: vi.fn(),
-    onOpenTerminal: vi.fn(),
-    onFocusComposer: vi.fn(),
-    onExpandAll: vi.fn(),
-    onCollapseAll: vi.fn(),
-    canFocusComposer: true,
-    canOpenTerminal: true,
-    hasSession: true,
-    hasFileChanges: true,
-    supportsWorktrees: true,
-    showSidebar: true,
-    showStats: false,
-    showFileChanges: true,
-    showWorktrees: false,
-    showConfig: false,
     currentProjectDirName: "-workspace-cogpit",
     projectCwd: "/workspace/cogpit",
     onProcessStarted: vi.fn(),

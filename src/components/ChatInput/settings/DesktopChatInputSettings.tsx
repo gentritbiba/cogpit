@@ -1,3 +1,4 @@
+import { useId } from "react"
 import { GitBranch, Zap } from "lucide-react"
 import { cn, normalizeEffortForAgent } from "@/lib/utils"
 import { AgentModelDropdown } from "./AgentModelDropdown"
@@ -36,10 +37,23 @@ export function DesktopChatInputSettings({
   changeAndApply,
 }: CommonSettingsControlProps) {
   const showWorktree = agentKind === "claude"
+  // Whether a change takes effect now or next turn is the one thing this row
+  // has to tell you. It used to be a permanent caption; `title` alone would
+  // have made it mouse-only, so the group carries it as a description too.
+  const applyHintId = useId()
+  const applyHint = isNewSession
+    ? undefined
+    : agentKind === "claude" ? "Changes apply live" : "Changes apply next turn"
 
   return (
-    <div className="flex items-center pb-2">
-      <div className="w-full flex items-center gap-0.5 flex-wrap">
+    <div
+      className="flex items-center pb-2"
+      role="group"
+      title={applyHint}
+      aria-describedby={applyHint ? applyHintId : undefined}
+    >
+      {applyHint && <span id={applyHintId} className="sr-only">{applyHint}</span>}
+      <div className="w-full flex items-center gap-2 flex-wrap">
         {onAgentKindChange
           ? (
             <AgentModelDropdown
@@ -62,113 +76,89 @@ export function DesktopChatInputSettings({
           )}
 
         {effortOptions.length > 0 && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <MiniDropdown
-              value={normalizeEffortForAgent(agentKind, selectedEffort, selectedModel)}
-              fallbackLabel="Effort"
-              ariaLabel="Reasoning effort"
-              options={effortOptions}
-              onChange={onEffortChange}
-              disabled={ultracodeEnabled}
-              title={ultracodeEnabled ? "Effort is pinned to XHigh while Ultracode is on" : undefined}
-            />
-          </>
+          <MiniDropdown
+            value={normalizeEffortForAgent(agentKind, selectedEffort, selectedModel)}
+            fallbackLabel="Effort"
+            ariaLabel="Reasoning effort"
+            options={effortOptions}
+            onChange={onEffortChange}
+            disabled={ultracodeEnabled}
+            title={ultracodeEnabled ? "Effort is pinned to XHigh while Ultracode is on" : undefined}
+          />
         )}
 
         {fastTier && onFastModeEnabledChange && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <button
-              type="button"
-              aria-pressed={!!fastModeEnabled}
-              onClick={() => changeAndApply(() => onFastModeEnabledChange(!fastModeEnabled))}
-              title={fastTier.description}
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-                fastModeEnabled
-                  ? "text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Zap className={cn("size-3", fastModeEnabled && "fill-current")} />
-              {fastModeEnabled ? "Fast" : "Standard"}
-            </button>
-          </>
+          <button
+            type="button"
+            aria-pressed={!!fastModeEnabled}
+            onClick={() => changeAndApply(() => onFastModeEnabledChange(!fastModeEnabled))}
+            title={fastTier.description}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+              fastModeEnabled
+                ? "text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <Zap className={cn("size-3", fastModeEnabled && "fill-current")} />
+            {fastModeEnabled ? "Fast" : "Standard"}
+          </button>
         )}
 
         {onPermissionModeChange && permissionMode && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <PermissionDropdown
-              agentKind={agentKind}
-              mode={permissionMode}
-              onChange={(mode) => changeAndApply(() => onPermissionModeChange(mode))}
-              autoAvailable={autoModeAvailable}
-            />
-          </>
+          <PermissionDropdown
+            agentKind={agentKind}
+            mode={permissionMode}
+            onChange={(mode) => changeAndApply(() => onPermissionModeChange(mode))}
+            autoAvailable={autoModeAvailable}
+          />
         )}
 
         {showWorktree && isNewSession && onWorktreeEnabledChange && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <button
-              type="button"
-              aria-pressed={!!worktreeEnabled}
-              onClick={() => onWorktreeEnabledChange(!worktreeEnabled)}
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-                worktreeEnabled
-                  ? "text-emerald-400"
-                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
-              )}
-            >
-              <GitBranch className="size-3" />
-              Worktree
-            </button>
-          </>
+          <button
+            type="button"
+            aria-pressed={!!worktreeEnabled}
+            onClick={() => onWorktreeEnabledChange(!worktreeEnabled)}
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+              worktreeEnabled
+                ? "text-emerald-400"
+                : "text-muted-foreground hover:text-foreground hover:bg-white/5",
+            )}
+          >
+            <GitBranch className="size-3" />
+            Worktree
+          </button>
         )}
 
         {showWorktree && onUltracodeEnabledChange && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <button
-              type="button"
-              aria-pressed={!!ultracodeEnabled}
-              onClick={() => changeAndApply(() => onUltracodeEnabledChange(!ultracodeEnabled))}
-              title="Ultracode: XHigh effort + standing multi-agent workflow orchestration"
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-                ultracodeEnabled
-                  ? "text-amber-400"
-                  : "text-muted-foreground hover:text-foreground hover:bg-white/5",
-              )}
-            >
-              <Zap className={cn("size-3", ultracodeEnabled && "fill-amber-400")} />
-              Ultracode
-            </button>
-          </>
+          <button
+            type="button"
+            aria-pressed={!!ultracodeEnabled}
+            onClick={() => changeAndApply(() => onUltracodeEnabledChange(!ultracodeEnabled))}
+            title="Ultracode: XHigh effort + standing multi-agent workflow orchestration"
+            className={cn(
+              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+              ultracodeEnabled
+                ? "text-amber-400"
+                : "text-muted-foreground hover:text-foreground hover:bg-white/5",
+            )}
+          >
+            <Zap className={cn("size-3", ultracodeEnabled && "fill-amber-400")} />
+            Ultracode
+          </button>
         )}
 
         {onToggleMcpServer && onRefreshMcpServers && onMcpAuth &&
          (mcpLoading || (mcpServers && mcpServers.length > 0)) && (
-          <>
-            <span className="text-border/60 text-[10px] select-none">/</span>
-            <McpDropdown
-              servers={mcpServers ?? []}
-              selected={selectedMcpServers ?? []}
-              onToggle={(name) => changeAndApply(() => onToggleMcpServer(name))}
-              onRefresh={onRefreshMcpServers}
-              loading={mcpLoading ?? false}
-              onAuth={onMcpAuth}
-            />
-          </>
-        )}
-
-        {!isNewSession && (
-          <span className="px-1 text-[9px] text-muted-foreground/70">
-            {agentKind === "claude" ? "Changes apply live" : "Changes apply next turn"}
-          </span>
+          <McpDropdown
+            servers={mcpServers ?? []}
+            selected={selectedMcpServers ?? []}
+            onToggle={(name) => changeAndApply(() => onToggleMcpServer(name))}
+            onRefresh={onRefreshMcpServers}
+            loading={mcpLoading ?? false}
+            onAuth={onMcpAuth}
+          />
         )}
       </div>
     </div>

@@ -8,6 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
+import { LiveIndicator } from "@/components/header-shared"
 import { cn } from "@/lib/utils"
 import {
   shortenModel,
@@ -46,9 +47,8 @@ function isRecentlyActive(lastModified: string | null): boolean {
 
 function ActivityIndicator(): React.ReactElement {
   return (
-    <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-      <span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-green-400 opacity-75" />
-      <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+    <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+      <LiveIndicator />
     </span>
   )
 }

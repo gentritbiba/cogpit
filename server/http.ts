@@ -76,6 +76,42 @@ export function readJsonBody<T = unknown>(
   })
 }
 
+/** Distinguishes a failed read from a body that legitimately parsed to undefined. */
+const BODY_FAILED = Symbol("body-failed")
+
+/**
+ * Read a JSON body and hand it to a handler.
+ *
+ * Exists for the many routes written before readJsonBody did, each of which
+ * hand-rolled its own `req.on("data")` accumulator. Those copies shared no body
+ * size limit and decoded a multi-byte character split across two chunks into
+ * U+FFFD. Keeping the callback shape lets a route adopt this without
+ * restructuring the handler around it.
+ */
+export function withJsonBody<T = unknown>(
+  req: IncomingMessage,
+  res: ServerResponse,
+  handler: (body: T) => void | Promise<void>,
+  options: ReadJsonBodyOptions = {},
+): void {
+  void readJsonBody<T>(req, options)
+    .catch((error: unknown) => {
+      if (!res.headersSent) {
+        const bodyError = error instanceof HttpBodyError
+        sendJson(res, bodyError ? error.statusCode : 400, {
+          error: bodyError ? error.message : "Invalid JSON body",
+        })
+      }
+      return BODY_FAILED
+    })
+    .then((body) => (body === BODY_FAILED ? undefined : handler(body as T)))
+    // The handler owns its own failures; this only covers one that gave up
+    // without answering, which would otherwise hang the request.
+    .catch(() => {
+      if (!res.headersSent) sendJson(res, 500, { error: "Request failed" })
+    })
+}
+
 /**
  * Normalize async middleware errors for both Express and Vite's Connect stack.
  * Connect does not observe a returned Promise, so every canonical API handler

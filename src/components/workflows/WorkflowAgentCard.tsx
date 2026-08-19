@@ -1,114 +1,220 @@
-import { useState } from "react"
-import { ChevronRight, Wrench, Coins, Clock, Loader2 } from "lucide-react"
+import { useCallback, useState } from "react"
+import {
+  Check,
+  ChevronDown,
+  Clock,
+  Coins,
+  Copy,
+  FileText,
+  RotateCcw,
+  Wrench,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/Spinner"
+import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
+import { authFetch } from "@/lib/auth"
 import { formatDuration } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import {
   agentStateStyle,
   formatTokens,
   isTerminalAgentState,
   type WorkflowAgent,
 } from "@/lib/workflow-types"
+import {
+  responseSummary,
+  serializeWorkflowResponse,
+  WorkflowResponse,
+} from "./WorkflowResponse"
 
-/** One agent within a workflow phase: state, live tool, metrics, expandable previews. */
-export function WorkflowAgentCard({ agent }: { agent: WorkflowAgent }) {
-  const [showPrompt, setShowPrompt] = useState(false)
-  const [showResult, setShowResult] = useState(false)
+type ResultState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; value: unknown }
+  | { status: "unavailable" }
+
+interface WorkflowAgentCardProps {
+  agent: WorkflowAgent
+  dirName: string
+  sessionId: string
+  runId: string
+}
+
+function cleanModelName(model: string): string {
+  return model.replace(/\[[0-9;]*m\]/g, "")
+}
+
+function readableAgentName(label: string): string {
+  const name = label.includes(":") ? label.slice(label.indexOf(":") + 1) : label
+  return name.replace(/[-_]+/g, " ")
+}
+
+export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: WorkflowAgentCardProps) {
+  const [open, setOpen] = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [resultState, setResultState] = useState<ResultState>({ status: "idle" })
+  const [copied, copy] = useCopyWithFeedback()
   const style = agentStateStyle(agent.state)
   const running = !isTerminalAgentState(agent.state) && agent.state !== "queued"
+  const summary = agent.resultPreview ? responseSummary(agent.resultPreview) : ""
+
+  const loadFullResult = useCallback(async () => {
+    setResultState({ status: "loading" })
+    try {
+      const response = await authFetch(
+        `/api/workflow-agent-result/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}/${encodeURIComponent(runId)}/${encodeURIComponent(agent.agentId)}`,
+      )
+      if (!response.ok) {
+        setResultState({ status: "unavailable" })
+        return
+      }
+      const data = await response.json() as { result?: unknown }
+      setResultState({ status: "loaded", value: data.result })
+    } catch {
+      setResultState({ status: "unavailable" })
+    }
+  }, [agent.agentId, dirName, runId, sessionId])
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen && resultState.status === "idle" && isTerminalAgentState(agent.state)) {
+      void loadFullResult()
+    }
+  }
+
+  const visibleResult = resultState.status === "loaded" ? resultState.value : agent.resultPreview
+  const canRetry = resultState.status === "unavailable"
 
   return (
-    <div className="rounded-md border border-border bg-elevation-1 px-2.5 py-2">
-      {/* Header line: state dot, label, badge */}
-      <div className="flex items-center gap-2">
-        <span className="relative flex size-2 shrink-0">
-          {running && (
-            <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", style.dot)} />
-          )}
-          <span className={cn("relative inline-flex size-2 rounded-full", style.dot)} />
-        </span>
-        <span className="flex-1 min-w-0 truncate text-xs font-medium text-foreground" title={agent.label}>
-          {agent.label}
-        </span>
-        <Badge variant="outline" className={cn("h-4 px-1.5 text-[9px] font-semibold uppercase tracking-wide", style.badge)}>
-          {style.label}
-        </Badge>
-      </div>
+    <Card size="sm" className="gap-0 rounded-lg py-0">
+      <Collapsible open={open} onOpenChange={handleOpenChange}>
+        <CardHeader className="px-0 py-0">
+          <CollapsibleTrigger className="group flex w-full items-start gap-3 rounded-lg px-3.5 py-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50">
+            <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", style.dot)} />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium capitalize text-foreground" title={agent.label}>
+                  {readableAgentName(agent.label)}
+                </span>
+                {agent.attempt && agent.attempt > 1 && (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Attempt {agent.attempt}
+                  </Badge>
+                )}
+              </div>
+              {summary ? (
+                <p className="mt-1 line-clamp-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                  {summary}
+                </p>
+              ) : running && agent.lastToolName ? (
+                <p className="mt-1 truncate text-xs text-muted-foreground">
+                  Working in {agent.lastToolName}
+                  {agent.lastToolSummary ? `: ${agent.lastToolSummary}` : ""}
+                </p>
+              ) : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                {agent.model && <span>{cleanModelName(agent.model)}</span>}
+                {typeof agent.tokens === "number" && agent.tokens > 0 && (
+                  <Metric icon={Coins}>{formatTokens(agent.tokens)} tokens</Metric>
+                )}
+                {typeof agent.toolCalls === "number" && agent.toolCalls > 0 && (
+                  <Metric icon={Wrench}>{agent.toolCalls} tools</Metric>
+                )}
+                {typeof agent.durationMs === "number" && (
+                  <Metric icon={Clock}>{formatDuration(agent.durationMs)}</Metric>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Badge variant="outline" className={cn("hidden sm:inline-flex", style.badge)}>
+                {running && <Spinner data-icon="inline-start" />}
+                {style.label}
+              </Badge>
+              <ChevronDown className="mt-0.5 size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+            </div>
+          </CollapsibleTrigger>
+        </CardHeader>
 
-      {/* Metrics */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-        {agent.model && (
-          <span className="truncate max-w-[140px]" title={agent.model}>{agent.model.replace(/\[1m\]$/, "")}</span>
-        )}
-        {typeof agent.tokens === "number" && agent.tokens > 0 && (
-          <span className="inline-flex items-center gap-1"><Coins className="size-2.5" />{formatTokens(agent.tokens)}</span>
-        )}
-        {typeof agent.toolCalls === "number" && agent.toolCalls > 0 && (
-          <span className="inline-flex items-center gap-1"><Wrench className="size-2.5" />{agent.toolCalls}</span>
-        )}
-        {typeof agent.durationMs === "number" && (
-          <span className="inline-flex items-center gap-1"><Clock className="size-2.5" />{formatDuration(agent.durationMs)}</span>
-        )}
-        {agent.attempt && agent.attempt > 1 && (
-          <span className="text-amber-400/80">attempt {agent.attempt}</span>
-        )}
-      </div>
+        <CollapsibleContent>
+          <Separator />
+          <CardContent className="flex flex-col gap-4 px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h5 className="text-sm font-semibold text-foreground">Response</h5>
+                <p className="text-xs text-muted-foreground">
+                  {resultState.status === "loaded" ? "Complete agent response" : "Saved response preview"}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                {canRetry && (
+                  <Button variant="ghost" size="sm" onClick={() => void loadFullResult()}>
+                    <RotateCcw data-icon="inline-start" />
+                    Retry
+                  </Button>
+                )}
+                {visibleResult !== undefined && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => copy(serializeWorkflowResponse(visibleResult))}
+                    aria-label={copied ? "Response copied" : "Copy response"}
+                    title={copied ? "Copied" : "Copy response"}
+                  >
+                    {copied ? <Check /> : <Copy />}
+                  </Button>
+                )}
+              </div>
+            </div>
 
-      {/* Live tool activity (running only) */}
-      {running && agent.lastToolName && (
-        <div className="mt-1.5 flex items-start gap-1.5 rounded bg-blue-500/5 px-1.5 py-1 text-[10px] text-blue-300/90">
-          <Loader2 className="mt-0.5 size-2.5 shrink-0 animate-spin" />
-          <span className="min-w-0">
-            <span className="font-medium">{agent.lastToolName}</span>
-            {agent.lastToolSummary && <span className="text-muted-foreground"> — {agent.lastToolSummary}</span>}
-          </span>
-        </div>
-      )}
+            {resultState.status === "loading" ? (
+              <div className="flex items-center gap-2 py-5 text-sm text-muted-foreground">
+                <Spinner />
+                Loading the complete response…
+              </div>
+            ) : visibleResult !== undefined ? (
+              <WorkflowResponse value={visibleResult} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {running ? "This agent has not returned a response yet." : "No response was saved for this agent."}
+              </p>
+            )}
 
-      {/* Expandable prompt / result previews */}
-      {(agent.promptPreview || agent.resultPreview) && (
-        <div className="mt-1.5 flex flex-col gap-1">
-          {agent.promptPreview && (
-            <DisclosureLine open={showPrompt} onToggle={() => setShowPrompt((v) => !v)} label="Prompt">
-              {agent.promptPreview}
-            </DisclosureLine>
-          )}
-          {agent.resultPreview && (
-            <DisclosureLine open={showResult} onToggle={() => setShowResult((v) => !v)} label="Result">
-              {agent.resultPreview}
-            </DisclosureLine>
-          )}
-        </div>
-      )}
-    </div>
+            {agent.promptPreview && (
+              <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
+                <CollapsibleTrigger
+                  render={<Button variant="ghost" size="sm" className="w-full justify-start" />}
+                >
+                  <FileText data-icon="inline-start" />
+                  Agent prompt
+                  <ChevronDown data-icon="inline-end" className={cn("ml-auto transition-transform", promptOpen && "rotate-180")} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
+                    <WorkflowResponse value={agent.promptPreview} />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   )
 }
 
-function DisclosureLine({
-  open,
-  onToggle,
-  label,
-  children,
-}: {
-  open: boolean
-  onToggle: () => void
-  label: string
-  children: string
-}) {
+function Metric({ icon: Icon, children }: { icon: typeof Coins; children: React.ReactNode }) {
   return (
-    <div>
-      <button
-        onClick={onToggle}
-        className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
-        {label}
-      </button>
-      {open && (
-        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-elevation-0 p-2 text-[10px] leading-relaxed text-muted-foreground">
-          {children}
-        </pre>
-      )}
-    </div>
+    <span className="inline-flex items-center gap-1">
+      <Icon className="size-3" />
+      {children}
+    </span>
   )
 }

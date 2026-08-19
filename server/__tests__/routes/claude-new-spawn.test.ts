@@ -189,6 +189,7 @@ function createMockReqRes(method: string, body?: string) {
       for (const h of dataHandlers) h(Buffer.from(body))
     }
     for (const h of endHandlers) await h()
+    await drainBodyParse()
   }
 
   return { req, res, next, sendBody }
@@ -207,6 +208,15 @@ function getHandler(registerFn: (use: UseFn) => void, path: string): Middleware 
 // ---------------------------------------------------------------------------
 // Tests: writeTempImageFiles / cleanupTempFiles (real fs, via importActual)
 // ---------------------------------------------------------------------------
+/**
+ * Drain the microtask queue that withJsonBody parses on. Deliberately not
+ * setImmediate: several tests here run with fake timers, which never fire it.
+ * readJsonBody settles through promises only, so yielding is enough.
+ */
+async function drainBodyParse() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve()
+}
+
 describe("writeTempImageFiles / cleanupTempFiles (real fs)", () => {
   it("writeTempImageFiles returns empty array for undefined input", async () => {
     const { writeTempImageFiles } = await vi.importActual<typeof import("../../helpers")>("../../helpers")
@@ -291,7 +301,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const body = JSON.stringify({ message: "hello" })
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     // Wait for the async req.on("end") handler
     await new Promise((r) => setTimeout(r, 20))
     expect(res._getStatus()).toBe(400)
@@ -304,7 +314,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const body = JSON.stringify({ dirName: "test-project" })
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
@@ -369,7 +379,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     // Wait for async req.on("end") to run (sets up listeners etc.)
     await new Promise((r) => setTimeout(r, 20))
 
@@ -390,7 +400,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
 
     // Should be set after spawn
@@ -412,7 +422,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
 
     child.stderr.emit("data", Buffer.from("permission denied"))
@@ -432,7 +442,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
 
     child.emit("close", 0)
@@ -457,7 +467,7 @@ describe("registerNewSessionRoute (Claude)", () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
       handler(req as never, res as never, next)
-      sendBody()
+      await sendBody()
 
       // Drain microtasks so the async req.on("end") handler runs and installs
       // the 60s setTimeout watchdog. advanceTimersByTimeAsync(0) flushes queued
@@ -486,7 +496,7 @@ describe("registerNewSessionRoute (Claude)", () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
       handler(req as never, res as never, next)
-      sendBody()
+      await sendBody()
       await vi.advanceTimersByTimeAsync(0)
 
       // activeProcesses should be set after spawn completes
@@ -514,7 +524,7 @@ describe("registerNewSessionRoute (Claude)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
 
     const err = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }) as NodeJS.ErrnoException
@@ -549,7 +559,7 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((resolve) => setTimeout(resolve, 20))
 
     expect(res._getStatus()).toBe(200)
@@ -567,7 +577,7 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(res._getStatus()).toBe(400)
@@ -584,7 +594,7 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(res._getStatus()).toBe(400)
@@ -629,7 +639,7 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
     const body = JSON.stringify({ message: "hello" })
     const { req, res, next, sendBody } = createMockReqRes("POST", body)
     handler(req as never, res as never, next)
-    sendBody()
+    await sendBody()
     await new Promise((r) => setTimeout(r, 20))
     expect(res._getStatus()).toBe(400)
     const data = res._getData()
@@ -698,7 +708,7 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
       const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
       handler(req as never, res as never, next)
-      sendBody()
+      await sendBody()
       await vi.advanceTimersByTimeAsync(0)
 
       // Crash immediately — no session identity was produced
@@ -744,7 +754,7 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
       const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
       handler(req as never, res as never, next)
-      sendBody()
+      await sendBody()
       await vi.advanceTimersByTimeAsync(0)
 
       child.emit("close", 1)
@@ -776,7 +786,7 @@ describe("registerCreateAndSendRoute (Codex) — crash and image cleanup", () =>
       const { req, res, next, sendBody } = createMockReqRes("POST", body)
 
       handler(req as never, res as never, next)
-      sendBody()
+      await sendBody()
       await vi.advanceTimersByTimeAsync(0)
 
       const err = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }) as NodeJS.ErrnoException

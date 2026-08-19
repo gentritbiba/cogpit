@@ -13,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
   KEYBINDING_DEFINITIONS,
+  KEYBINDING_GROUPS,
   findKeybindingConflict,
   formatShortcut,
   getResolvedKeybindings,
@@ -83,7 +84,7 @@ function KeyboardShortcutsDialogContent() {
       )
     : KEYBINDING_DEFINITIONS
 
-  const groups = ["General", "View", "Tools"] as const
+  const groups = KEYBINDING_GROUPS
 
   return (
     <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0" showCloseButton={false}>

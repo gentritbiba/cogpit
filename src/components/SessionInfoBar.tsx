@@ -242,12 +242,12 @@ export const SessionInfoBar = memo(function SessionInfoBar({
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-violet-400 hover:bg-violet-500/20"
+          className="h-6 px-2 gap-1 text-[11px] text-muted-foreground hover:text-foreground"
           onClick={onShowWorkflows}
         >
           <WorkflowIcon className="size-3" />
           Workflows
-          <Badge variant="outline" className="h-4 min-w-4 justify-center px-1 text-[9px] font-semibold border-violet-700/50 text-violet-300">
+          <Badge variant="outline" className="h-4 min-w-4 justify-center px-1 text-[9px] font-semibold">
             {workflowCount}
           </Badge>
         </Button>
@@ -308,15 +308,12 @@ function SessionActions({
         label="New session in this project"
         onClick={handleNewSession}
         disabled={creatingSession}
-        className="text-muted-foreground hover:text-green-400 hover:bg-green-500/20"
-        // Spinner ignores animate-spin, so we can leave it or remove it. Leaving it is fine.
       />
       {onDuplicateSession && (
         <HeaderIconButton
           icon={Copy}
           label="Duplicate this session"
           onClick={onDuplicateSession}
-          className="text-muted-foreground hover:text-purple-400 hover:bg-purple-500/20"
         />
       )}
       {hasProject && !isRemoteDeviceActive() && (
@@ -325,13 +322,11 @@ function SessionActions({
             icon={Code2}
             label="Open project in editor"
             onClick={() => postAction("/api/open-in-editor")}
-            className="text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
           />
           <HeaderIconButton
             icon={FolderSearch}
             label="Reveal in file manager"
             onClick={() => postAction("/api/reveal-in-folder")}
-            className="text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
           />
         </>
       )}
@@ -340,7 +335,6 @@ function SessionActions({
           icon={TerminalSquare}
           label="Open terminal in project"
           onClick={onOpenTerminal}
-          className="text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
         />
       )}
       <HeaderIconButton
@@ -351,7 +345,6 @@ function SessionActions({
           dispatch({ type: "GO_HOME", isMobile: false })
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
         }}
-        className="text-muted-foreground hover:text-foreground"
       />
     </>
   )

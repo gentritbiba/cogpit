@@ -9,6 +9,7 @@ import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
 import { sessionTitle, projectGroupKey } from "./sessionListView"
 import { SessionPreview } from "./SessionPreview"
+import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 
 /** Working rows shown before the "+N more" expander. */
@@ -37,6 +38,15 @@ const REASON_CHIP: Record<AttentionItem["reason"], { label: string; className: s
   question: { label: "Question", className: "bg-pink-500/15 text-pink-400" },
   waiting: { label: "Waiting", className: "bg-amber-500/10 text-amber-300/90" },
   done: { label: "Done", className: "bg-green-500/10 text-green-400" },
+}
+
+/** Row dot per reason. Anything blocked on a human shares the attention dot. */
+const REASON_DOT: Record<AttentionItem["reason"], string> = {
+  permission: STATUS_DOT.attention,
+  deferred: STATUS_DOT.attention,
+  waiting: STATUS_DOT.attention,
+  question: "bg-pink-400",
+  done: "bg-green-400",
 }
 
 interface StripRowProps {
@@ -70,7 +80,7 @@ function StripRow({
   onResume,
   onPrefetch,
 }: StripRowProps) {
-  const statusLabel = getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? chip.label
+  const statusLabel = getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? chip.label
   const { onHoverStart, onHoverEnd } = useHoverPrefetch(onPrefetch)
   return (
     <Tooltip>
@@ -214,7 +224,7 @@ export function AttentionStrip({
       {groups.needsYou.length > 0 && (
         <div className="flex flex-col gap-1">
           <SectionHeader
-            dotClassName="bg-amber-400"
+            dotClassName={STATUS_DOT.attention}
             labelClassName="text-amber-400/90"
             label="NEEDS YOU"
             count={groups.needsYou.length}
@@ -224,11 +234,7 @@ export function AttentionStrip({
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
               chip={REASON_CHIP[reason]}
-              dotClassName={
-                reason === "done"
-                  ? "bg-green-400"
-                  : reason === "question" ? "bg-pink-400" : "bg-amber-400"
-              }
+              dotClassName={REASON_DOT[reason]}
               cardClassName="border-amber-500/20 bg-amber-500/[0.04] hover:bg-amber-500/[0.08]"
               onKill={onKill}
               onResume={
@@ -244,7 +250,7 @@ export function AttentionStrip({
       {groups.working.length > 0 && (
         <div className="flex flex-col gap-1">
           <SectionHeader
-            dotClassName="bg-green-400 animate-pulse"
+            dotClassName={STATUS_DOT.working}
             labelClassName="text-green-400/90"
             label="WORKING"
             count={groups.working.length}
@@ -254,7 +260,7 @@ export function AttentionStrip({
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
               chip={{ label: workingChip(s), className: "bg-blue-500/10 text-blue-400" }}
-              dotClassName="bg-green-400 animate-pulse"
+              dotClassName={STATUS_DOT.working}
               cardClassName="border-border/40 bg-white/[0.02] hover:bg-white/[0.04]"
               onKill={onKill}
             />

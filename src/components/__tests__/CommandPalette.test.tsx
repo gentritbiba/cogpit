@@ -2,36 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { CommandPalette } from "@/components/CommandPalette"
-
-function createProps() {
-  return {
-    open: true,
-    onOpenChange: vi.fn(),
-    onGoHome: vi.fn(),
-    onNewSession: vi.fn(),
-    onToggleSidebar: vi.fn(),
-    onToggleStats: vi.fn(),
-    onToggleFileChanges: vi.fn(),
-    onToggleWorktrees: vi.fn(),
-    onOpenConfig: vi.fn(),
-    onOpenSettings: vi.fn(),
-    onOpenTheme: vi.fn(),
-    onOpenTerminal: vi.fn(),
-    onFocusComposer: vi.fn(),
-    onExpandAll: vi.fn(),
-    onCollapseAll: vi.fn(),
-    canFocusComposer: true,
-    canOpenTerminal: true,
-    hasSession: true,
-    hasFileChanges: true,
-    supportsWorktrees: true,
-    showSidebar: true,
-    showStats: false,
-    showFileChanges: true,
-    showWorktrees: false,
-    showConfig: false,
-  }
-}
+import { createCommandPaletteProps as createProps } from "./commandPaletteProps"
 
 describe("CommandPalette", () => {
   it("runs an action and closes the palette", async () => {
@@ -109,5 +80,92 @@ describe("CommandPalette", () => {
     render(<CommandPalette {...createProps()} onOpenConfig={undefined} />)
 
     expect(screen.queryByText("Open agent configuration")).not.toBeInTheDocument()
+  })
+
+  it("indexes Mission Control and reflects whether it is already open", async () => {
+    const user = userEvent.setup()
+    const props = createProps()
+    const { rerender } = render(<CommandPalette {...props} />)
+
+    await user.click(screen.getByText("Open Mission Control"))
+    expect(props.onToggleMissionControl).toHaveBeenCalledOnce()
+
+    rerender(<CommandPalette {...props} showMission />)
+    expect(screen.getByText("Exit Mission Control")).toBeInTheDocument()
+  })
+
+  it("indexes the session actions that are otherwise only reachable from chrome", async () => {
+    const user = userEvent.setup()
+    const props = {
+      ...createProps(),
+      onDuplicateSession: vi.fn(),
+      onCopyResumeCommand: vi.fn(),
+      onFindInConversation: vi.fn(),
+      onKillAll: vi.fn(),
+    }
+    render(<CommandPalette {...props} />)
+
+    await user.click(screen.getByText("Duplicate this session"))
+    await user.click(screen.getByText("Copy resume command"))
+    await user.click(screen.getByText("Find in conversation"))
+    await user.click(screen.getByText("Kill all agent processes"))
+
+    expect(props.onDuplicateSession).toHaveBeenCalledOnce()
+    expect(props.onCopyResumeCommand).toHaveBeenCalledOnce()
+    expect(props.onFindInConversation).toHaveBeenCalledOnce()
+    expect(props.onKillAll).toHaveBeenCalledOnce()
+  })
+
+  it("omits session-scoped and privileged actions when their callbacks are absent", () => {
+    render(<CommandPalette {...createProps()} />)
+
+    expect(screen.queryByText("Duplicate this session")).not.toBeInTheDocument()
+    expect(screen.queryByText("Copy resume command")).not.toBeInTheDocument()
+    expect(screen.queryByText("Find in conversation")).not.toBeInTheDocument()
+    expect(screen.queryByText("Kill all agent processes")).not.toBeInTheDocument()
+  })
+
+  it("always offers device management so the first device can be added without the header switcher", async () => {
+    const user = userEvent.setup()
+    const onOpenDevices = vi.fn()
+    render(<CommandPalette {...createProps()} onOpenDevices={onOpenDevices} devices={[]} />)
+
+    await user.click(screen.getByText("Add device…"))
+    await user.click(screen.getByText("Manage devices…"))
+
+    expect(onOpenDevices).toHaveBeenNthCalledWith(1, "add")
+    expect(onOpenDevices).toHaveBeenNthCalledWith(2, "manage")
+  })
+
+  it("lists devices with their switch shortcuts once a remote device exists", async () => {
+    const user = userEvent.setup()
+    const onSwitchDevice = vi.fn()
+    render(
+      <CommandPalette
+        {...createProps()}
+        onSwitchDevice={onSwitchDevice}
+        devices={[
+          { id: "local", name: "This machine", isLocal: true, isActive: true },
+          { id: "dev_1", name: "Studio", isLocal: false, isActive: false },
+        ]}
+      />,
+    )
+
+    expect(screen.getByText("This machine (current)")).toBeInTheDocument()
+    await user.click(screen.getByText("Switch to Studio"))
+
+    expect(onSwitchDevice).toHaveBeenCalledWith("dev_1")
+  })
+
+  it("hides the device group for a single-machine install", () => {
+    render(
+      <CommandPalette
+        {...createProps()}
+        onSwitchDevice={vi.fn()}
+        devices={[{ id: "local", name: "This machine", isLocal: true, isActive: true }]}
+      />,
+    )
+
+    expect(screen.queryByText("This machine (current)")).not.toBeInTheDocument()
   })
 })

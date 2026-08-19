@@ -22,10 +22,12 @@ canonical ordered registry.
 Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. The packaged app binds an ephemeral port unless network access pins 19384, so resolve the port from `$COGPIT_PORT`, then `~/.cogpit/port` (written on start, removed on exit), then `19384`. Key endpoints:
 
 - `POST /api/create-and-send` — Start a new session with a message (responds in 5–15s)
-- `POST /api/send-message` — Send follow-up to an existing session (waits for full turn)
+- `POST /api/send-message` — Send follow-up (returns immediately when the session is live; poll session-status for completion)
+- `GET /api/session-status/:sessionId` — Poll turn status (`running: false` = turn done)
 - `POST /api/stop-session` — Stop a running session
 - `GET /api/projects` — List available projects and their `dirName`s
-- `GET /api/sessions/:dirName/:fileName` — Read session output
+- `GET /api/session-context/:sessionId` — Read session output as parsed turns
+- `GET /api/sessions/:dirName/:fileName` — Read raw session JSONL
 
 See the `cogpit-sessions` skill (`.claude/skills/cogpit-sessions/SKILL.md`) for full usage, timeouts, and permissions.
 

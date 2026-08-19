@@ -96,7 +96,7 @@ Phone push goes out via [ntfy](https://ntfy.sh) only when nobody is at the deskt
 
 Env overrides let a headless box be configured entirely through systemd. Edits take effect without a restart.
 
-Notifications are triggered by provider hooks that `POST /api/notify` (per-session 5 s cooldown; subagent transcripts are skipped). Claude Code's `Stop` and `Notification` hooks send snake_case JSON on stdin; Codex's `notify` config key passes a kebab-case `agent-turn-complete` payload as the final argv element. Point both at one script that forwards its payload verbatim and resolves the port from `$COGPIT_PORT`, then `~/.cogpit/port`, then `19384` — the packaged app binds an ephemeral port unless Network Access pins it, so it publishes the bound port to `~/.cogpit/port` on start and removes it on exit.
+Notifications are raised by Cogpit itself — no agent hooks required. A server-side session activity monitor sweeps recently-modified transcripts (Claude Code and Codex alike, including sessions started in a terminal) and notifies on the working→stopped edge (turn complete) and on entering a permission wait. Every raised notification lands in a persisted inbox (`~/.cogpit/notifications.json`, bell icon in the header, `GET /api/notifications`), where clicking an entry deep-links to its session.
 
 ### Undo / Redo with Branching
 Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.

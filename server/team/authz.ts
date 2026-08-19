@@ -22,7 +22,7 @@ export function teamAuthzMiddleware(
   if (requirement === "public") return next()
   const principal = getRequestPrincipal(req)
   // Principal-less requests past authMiddleware are its explicit carve-outs
-  // (trusted-local /api/notify, first-run /api/team/bootstrap) — admit them.
+  // (first-run /api/team/bootstrap) — admit them.
   if (!principal) return next()
   if (requirement === "admin" && principal.role !== "admin") {
     sendJson(res, 403, { error: "Admin access required", code: "FORBIDDEN" })

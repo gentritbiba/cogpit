@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { Fragment, useMemo } from "react"
 import {
   Cog,
   RefreshCw,
@@ -12,11 +12,22 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, shortPath, projectName } from "@/lib/format"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
-import { SearchInput, ErrorBanner, SkeletonCards, LiveDot, Shortcut, isMac } from "./DashboardWidgets"
+import {
+  DEVICE_CYCLE_COMMAND,
+  DEVICE_SWITCH_COMMANDS,
+  KEYBINDING_DEFINITIONS,
+  KEYBINDING_GROUPS,
+  formatShortcut,
+  shortcutLabel,
+  type KeybindingCommand,
+  type KeybindingShortcut,
+} from "@/lib/keybindings"
+import { SearchInput, ErrorBanner, SkeletonCards, LiveDot, Shortcut } from "./DashboardWidgets"
 
 interface ProjectInfo {
   dirName: string
@@ -32,6 +43,77 @@ interface ActiveSessionInfo {
 }
 
 const LIVE_THRESHOLD_MS = 2 * 60 * 1000
+
+/**
+ * Device switching has its own switcher UI plus nine near-identical chords, so
+ * the quick card leaves that family to the full shortcuts dialog.
+ */
+const DEVICE_COMMANDS = new Set<KeybindingCommand>([...DEVICE_SWITCH_COMMANDS, DEVICE_CYCLE_COMMAND])
+
+/**
+ * The only two chords that cannot live in the keybinding registry, so they are
+ * the only two spelled out here. Session jump matches on `event.code` (the
+ * registry compares `event.key`, which Shift turns into a symbol), and Escape
+ * has no editable-target guard, so allowing a rebind to a printable key would
+ * clear the search on every keystroke. Every other chord is generated from the
+ * registry above — repeating one here would leave a stale row after a rebind.
+ */
+const FIXED_SHORTCUTS: { shortcut: KeybindingShortcut; label: string }[] = [
+  { shortcut: { key: "1\u20139", modKey: true, shiftKey: true }, label: "Jump to Nth live session" },
+  { shortcut: { key: "escape" }, label: "Clear search" },
+]
+
+interface ShortcutSection {
+  title: string
+  rows: { id: string; keys: string; label: string }[]
+}
+
+/**
+ * Chords that only fire once a particular panel is already open, so they are
+ * noise on a dashboard where no panel is. They stay in the full reference that
+ * `?` opens; this card is a starting point, not a manual.
+ */
+const PANEL_SUBACTIONS = new Set<KeybindingCommand>([
+  "newIntegratedTerminal",
+  "closeIntegratedTerminal",
+  "previewRefresh",
+  "previewFocusUrl",
+  "previewZoomIn",
+  "previewZoomOut",
+  "previewResetZoom",
+  "projectFileSave",
+])
+
+/**
+ * The cheat sheet, read out of the keybinding registry so a rebind shows up
+ * here too. Called during render rather than memoized because the resolved
+ * chords change the moment the user edits them.
+ */
+function buildShortcutSections(): ShortcutSection[] {
+  return [
+    ...KEYBINDING_GROUPS.map((group) => ({
+      title: group,
+      rows: KEYBINDING_DEFINITIONS
+        .filter((definition) =>
+          definition.group === group
+          && !DEVICE_COMMANDS.has(definition.command)
+          && !PANEL_SUBACTIONS.has(definition.command))
+        .map((definition) => ({
+          id: definition.command,
+          keys: shortcutLabel(definition.command),
+          label: definition.label,
+        })),
+    })),
+    {
+      title: "Navigation",
+      rows: FIXED_SHORTCUTS.map((item) => ({
+        id: item.label,
+        keys: formatShortcut(item.shortcut),
+        label: item.label,
+      })),
+    },
+  ]
+}
 
 function isLive(lastModified: string | null): boolean {
   if (!lastModified) return false
@@ -74,6 +156,8 @@ export function ProjectsView({
   }, [activeSessions])
 
   const { names: projectNames, rename: renameProject } = useProjectNames()
+
+  const shortcutSections = buildShortcutSections()
 
   const filteredProjects = useMemo(() => {
     if (!searchFilter) return projects
@@ -162,7 +246,13 @@ export function ProjectsView({
                       )}
                     >
                       <div className="flex items-center gap-2.5 mb-2">
-                        <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
+                        <ProjectFavicon
+                          projectPath={project.path}
+                          className="size-4"
+                          fallback={
+                            <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
+                          }
+                        />
                         <span className="text-sm font-medium text-foreground truncate flex-1">
                           {custom || projectName(project.path)}
                         </span>
@@ -212,19 +302,19 @@ export function ProjectsView({
             <span className="text-xs font-medium text-muted-foreground">Keyboard Shortcuts</span>
           </div>
           <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11px]">
-            <Shortcut keys={["Space"]} label="Focus chat input" />
-            <Shortcut keys={["Ctrl", "B"]} label="Toggle sidebar" />
-            <Shortcut keys={["Ctrl", "E"]} label="Expand all turns" />
-            <Shortcut keys={["Ctrl", "Shift", "E"]} label="Collapse all turns" />
-            <Shortcut keys={isMac ? ["\u2303", "\u2318", "T"] : ["Ctrl", "Alt", "T"]} label="Open terminal" />
-            <Shortcut keys={isMac ? ["\u2303", "\u2318", "N"] : ["Ctrl", "Alt", "N"]} label="Switch project" />
-            <Shortcut keys={isMac ? ["\u2303", "\u2318", "S"] : ["Ctrl", "Alt", "S"]} label="Switch theme" />
-            <Shortcut keys={["\u2303", "Tab"]} label="Recent session (back)" />
-            <Shortcut keys={["\u2303", "Shift", "Tab"]} label="Recent session (forward)" />
-            <Shortcut keys={["Ctrl", "Shift", "\u2191 / \u2193"]} label="Navigate live sessions" />
-            <Shortcut keys={["Ctrl", "Shift", "1\u20139"]} label="Jump to Nth live session" />
-            <Shortcut keys={["Ctrl", "Shift", "M"]} label="Toggle voice input" />
-            <Shortcut keys={["Esc"]} label="Clear search" />
+            {shortcutSections.map((section) => (
+              <Fragment key={section.title}>
+                <div className="col-span-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  {section.title}
+                </div>
+                {section.rows.map((row) => (
+                  <Shortcut key={row.id} keys={row.keys} label={row.label} />
+                ))}
+              </Fragment>
+            ))}
+            <div className="col-span-2 pt-2 text-[10px] text-muted-foreground/60">
+              {shortcutLabel("keyboardShortcuts")} shows every shortcut, including the ones scoped to a panel.
+            </div>
           </div>
         </div>
 

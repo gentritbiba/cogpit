@@ -5,7 +5,7 @@ import {
   listUserQuestionSessionIds,
   type UserQuestionAnswers,
 } from "../sdk-session"
-import { sendJson, type UseFn } from "../http"
+import { sendJson, type UseFn, withJsonBody} from "../http"
 import type { MissionControlQuestion } from "../../shared/contracts/missionControl"
 
 export function registerAskUserRoutes(use: UseFn) {
@@ -37,16 +37,12 @@ export function registerAskUserRoutes(use: UseFn) {
       return
     }
 
-    let body = ""
-    req.on("data", (chunk: string) => { body += chunk })
-    req.on("end", () => {
+    withJsonBody<{
+      sessionId?: unknown
+      toolUseId?: unknown
+      answers?: unknown
+    }>(req, res, (parsed) => {
       try {
-        const parsed = JSON.parse(body) as {
-          sessionId?: unknown
-          toolUseId?: unknown
-          answers?: unknown
-        }
-
         const { sessionId, toolUseId, answers } = parsed
 
         if (!sessionId || typeof sessionId !== "string") {

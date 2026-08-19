@@ -138,13 +138,16 @@ export function useUrlSync({
   workerParse,
 }: UseUrlSyncOpts) {
   const [previewLoadError, setPreviewLoadError] = useState<string | null>(null)
-  const skipNextPushRef = useRef(false)
+  // Depth counter, not a boolean: two overlapping loads (e.g. a notification
+  // click landing mid-load) must keep suppressing state→URL pushes until the
+  // *last* one settles, or a stale path from the outgoing session gets pushed.
+  const skipPushDepthRef = useRef(0)
   const lastPushedRef = useRef(window.location.pathname)
   const initialLoadDone = useRef(false)
 
   const loadFromUrl = useCallback(
     async (parsed: ParsedUrl) => {
-      skipNextPushRef.current = true
+      skipPushDepthRef.current++
       try {
         if (parsed.type === "preview" && parsed.sessionId) {
           setPreviewLoadError(null)
@@ -218,7 +221,7 @@ export function useUrlSync({
           dispatch({ type: "GO_HOME", isMobile })
         }
       } finally {
-        skipNextPushRef.current = false
+        skipPushDepthRef.current--
       }
     },
     [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse]
@@ -241,7 +244,7 @@ export function useUrlSync({
 
   // Sync state changes → URL (pushState)
   useEffect(() => {
-    if (skipNextPushRef.current) return
+    if (skipPushDepthRef.current > 0) return
     // Preview owns a stable session-ID URL. Loading its resolved dirName/fileName
     // must not rewrite the address into the full Cogpit navigation scheme.
     if (previewSessionIdFromPath(stripDevicePrefix(window.location.pathname))) return

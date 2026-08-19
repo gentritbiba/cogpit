@@ -26,7 +26,7 @@ function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor
   if (block.blockType === "thinking") {
     if (!block.text) return null
     return (
-      <div className="text-[13px] leading-relaxed text-muted-foreground/70 italic whitespace-pre-wrap break-words border-l-2 border-border/40 pl-3 my-2">
+      <div className="text-[13px] leading-relaxed text-muted-foreground/70 italic whitespace-pre-wrap break-words border-l border-border/40 pl-3 my-2">
         {block.text}
         {showCursor && <StreamCursor />}
       </div>
@@ -44,7 +44,7 @@ function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor
 
 function StreamCursor() {
   return (
-    <span className="inline-block w-[7px] h-[15px] ml-0.5 align-text-bottom bg-blue-400/80 animate-pulse rounded-[1px]" />
+    <span className="inline-block w-[7px] h-[15px] ml-0.5 align-text-bottom bg-blue-400/80 rounded-[1px]" />
   )
 }
 

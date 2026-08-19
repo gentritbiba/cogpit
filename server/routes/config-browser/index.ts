@@ -1,6 +1,6 @@
 import { readFile, writeFile, unlink, mkdir, rename } from "node:fs/promises"
 import { dirname, basename, join } from "node:path"
-import { sendJson, type UseFn } from "../../http"
+import { sendJson, withJsonBody, type UseFn } from "../../http"
 import {
   isSafeConfigName,
   resolveConfigBrowserPath,
@@ -68,11 +68,8 @@ export function registerConfigBrowserRoutes(use: UseFn) {
 
     // POST /api/config-browser/file — save file
     if (req.method === "POST") {
-      let body = ""
-      req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-      req.on("end", async () => {
+      withJsonBody<{ path?: string; content?: unknown }>(req, res, async ({ path: filePath, content }) => {
         try {
-          const { path: filePath, content } = JSON.parse(body)
           if (!filePath || typeof content !== "string") {
             res.statusCode = 400
             res.setHeader("Content-Type", "application/json")
@@ -143,11 +140,8 @@ export function registerConfigBrowserRoutes(use: UseFn) {
   use("/api/config-browser/rename", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-    req.on("end", async () => {
+    withJsonBody<{ oldPath?: unknown; newName?: unknown }>(req, res, async ({ oldPath, newName }) => {
       try {
-        const { oldPath, newName } = JSON.parse(body)
         if (typeof oldPath !== "string" || typeof newName !== "string") {
           res.statusCode = 400
           res.setHeader("Content-Type", "application/json")
@@ -223,11 +217,8 @@ export function registerConfigBrowserRoutes(use: UseFn) {
   use("/api/config-browser/create", async (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: Buffer) => { body += chunk.toString() })
-    req.on("end", async () => {
+    withJsonBody<{ dir?: unknown; fileType?: unknown; name?: unknown }>(req, res, async ({ dir, fileType, name }) => {
       try {
-        const { dir, fileType, name } = JSON.parse(body)
         if (typeof dir !== "string" || typeof fileType !== "string" || typeof name !== "string") {
           res.statusCode = 400
           res.setHeader("Content-Type", "application/json")

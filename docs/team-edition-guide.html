@@ -448,7 +448,7 @@ curl https://cogpit.yourcompany.com/api/projects -H <span class="s">"Authorizati
   <p>Configure your connectors once on the server, as the Cogpit OS user. Everyone's sessions inherit them — that shared connector pool is a large part of why a team box is worth running. Connector definitions and the per-session selector are admin-only because definitions may contain bearer tokens, headers, and command environment secrets.</p>
 
   <h3>Agent hooks keep working</h3>
-  <p>Claude Code and Codex stop-hooks post notifications to <code>/api/notify</code>. That endpoint still accepts unauthenticated posts <b>from local processes only</b>, so hooks on the box work without a login — while cross-site browser requests to it are rejected.</p>
+  <p>Notifications are raised by Cogpit's own session activity monitor — no agent hooks and no unauthenticated ingest endpoint. The notification inbox at <code>/api/notifications</code> requires a logged-in user like any other API.</p>
 
   <h3>Other agents driving Cogpit</h3>
   <p>The external session API is unchanged; it just needs a token now. Same endpoints as always:</p>

@@ -53,7 +53,6 @@ export function sessionApiPlugin(): Plugin {
         // Allow config/identity/bootstrap endpoints through without guard
         const exempt = [
           "/api/config",
-          "/api/notify",
           "/api/hello",
           "/api/me",
           "/api/team/bootstrap",

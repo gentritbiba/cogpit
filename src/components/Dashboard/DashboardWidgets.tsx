@@ -1,21 +1,20 @@
 import { Search, X, AlertTriangle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
+import { LiveIndicator } from "@/components/header-shared"
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
-
-export function Shortcut({ keys, label }: { keys: string[]; label: string }) {
+/** One cheat-sheet row. `keys` is a formatted chord, e.g. "⇧⌘B" or "Ctrl+Shift+B". */
+export function Shortcut({ keys, label }: { keys: string; label: string }) {
   return (
     <div className="flex items-center justify-between gap-3 py-0.5">
       <span className="text-muted-foreground">{label}</span>
       <span className="flex items-center gap-0.5 shrink-0">
-        {keys.map((k, i) => (
+        {keys.split("+").map((k, i) => (
           <kbd
             key={i}
             className="inline-flex items-center justify-center rounded border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground min-w-[20px]"
           >
-            {k === "Ctrl" ? (isMac ? "\u2318" : "Ctrl") : k}
+            {k}
           </kbd>
         ))}
       </span>
@@ -24,13 +23,7 @@ export function Shortcut({ keys, label }: { keys: string[]; label: string }) {
 }
 
 export function LiveDot({ size = "md" }: { size?: "sm" | "md" }) {
-  const dotSize = size === "sm" ? "h-1.5 w-1.5" : "h-2 w-2"
-  return (
-    <span className={cn("relative flex", dotSize)}>
-      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-      <span className={cn("relative inline-flex rounded-full bg-green-500", dotSize)} />
-    </span>
-  )
+  return <LiveIndicator className={size === "sm" ? "size-1.5" : undefined} />
 }
 
 export function SearchInput({ value, onChange, placeholder }: {
@@ -98,6 +91,3 @@ export function SkeletonCards({ count = 3, includeMessagePlaceholder = false }: 
     </div>
   )
 }
-
-/** isMac constant for use by keyboard shortcuts */
-export { isMac }

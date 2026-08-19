@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Virtualizer, type VirtualizerHandle } from "virtua"
 import { Loader2, Redo2 } from "lucide-react"
-import { Separator } from "@/components/ui/separator"
 import { TurnContextMenu } from "@/components/TurnContextMenu"
 import { UndoRedoBar } from "@/components/UndoRedoBar"
 import { TurnSection } from "./TurnSection"
@@ -84,9 +83,6 @@ function RedoSection() {
                   <Redo2 className="size-3" />
                   Redo to here
                 </button>
-              )}
-              {i < redoGhostTurns.length - 1 && (
-                <Separator className="bg-border/60" />
               )}
             </div>
           ))}
@@ -218,7 +214,7 @@ export function VirtualizedTimeline({
           startMargin={startMargin}
           shift={shift}
         >
-          {keyedTurns.map(({ turn, index, key }, i) => (
+          {keyedTurns.map(({ turn, index, key }) => (
             <div key={key} data-turn-index={index}>
               <MaybeContextMenuTurn index={index}>
                 <div>
@@ -230,7 +226,6 @@ export function VirtualizedTimeline({
                     index={index}
                     branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
                   />
-                  {i < keyedTurns.length - 1 && <Separator className="bg-border/60" />}
                 </div>
               </MaybeContextMenuTurn>
             </div>

@@ -14,13 +14,15 @@ import { registerEditorRoutes } from "./routes/editor"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerFileRoutes } from "./routes/files"
+import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
+import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerMissionControlRoutes } from "./routes/mission-control"
 import { registerModelRoutes } from "./routes/models"
-import { registerNotifyRoutes } from "./routes/notify"
+import { registerNotificationRoutes } from "./routes/notifications"
 import { registerPerformanceRoutes } from "./routes/performance"
 import { registerPermissionRoutes } from "./routes/permissions"
 import { registerPortRoutes } from "./routes/ports"
@@ -31,6 +33,7 @@ import { registerScriptRoutes } from "./routes/scripts"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
+import { registerSessionStatusRoutes } from "./routes/session-status"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
@@ -91,6 +94,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
+  apiRoute("session-status", registerSessionStatusRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
   apiRoute("usage", registerUsageRoutes),
@@ -101,8 +105,10 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("project-files", registerProjectFileRoutes),
   apiRoute("project-file", registerProjectFileContentRoutes),
   apiRoute("git-status", registerGitStatusRoutes),
+  apiRoute("project-icon", registerProjectIconRoutes),
+  apiRoute("git-diff", registerGitDiffRoutes),
   apiRoute("mcp", registerMcpRoutes),
-  apiRoute("notify", registerNotifyRoutes),
+  apiRoute("notifications", registerNotificationRoutes),
   apiRoute("scripts", registerScriptRoutes),
   apiRoute("permissions", registerPermissionRoutes),
   apiRoute("mission-control", registerMissionControlRoutes),

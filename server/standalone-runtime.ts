@@ -14,6 +14,7 @@ import {
   setConfigPath,
 } from "./config"
 import { removePortFile, writePortFile } from "./lib/portFile"
+import { startSessionActivityMonitor } from "./lib/sessionActivityMonitor"
 import {
   hasUsableNetworkCredentials,
   resolveEnvPassword,
@@ -137,6 +138,7 @@ export async function startStandaloneServer({
   }
 
   if (publishPort) writePortFile(boundPort)
+  startSessionActivityMonitor()
 
   const urlHost = host.includes(":") ? `[${host}]` : host
   let disposed = false

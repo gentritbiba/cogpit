@@ -3,6 +3,40 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+/**
+ * Every spelling of a Codex collaboration tool seen in rollouts, mapped to its
+ * canonical name: the snake_case name itself, plus the camelCase form older
+ * rollouts emitted.
+ */
+const COLLABORATION_TOOL_NAMES = new Map([
+  ["spawn_agent", "spawn_agent"],
+  ["spawnAgent", "spawn_agent"],
+  ["wait_agent", "wait_agent"],
+  ["waitAgent", "wait_agent"],
+  ["send_message", "send_message"],
+  ["sendMessage", "send_message"],
+  ["followup_task", "followup_task"],
+  ["followupTask", "followup_task"],
+  ["list_agents", "list_agents"],
+  ["listAgents", "list_agents"],
+  ["interrupt_agent", "interrupt_agent"],
+  ["interruptAgent", "interrupt_agent"],
+])
+
+/**
+ * Normalize a Codex function name to its canonical collaboration-tool name.
+ * Current collaboration tools carry a namespace separately, but older and
+ * transitional rollouts also encoded it in the function name itself.
+ */
+export function normalizeFunctionName(rawName: string): string {
+  const leaf = rawName
+    .split(/(?:__|[.:/])+/)
+    .filter(Boolean)
+    .at(-1) ?? rawName
+
+  return COLLABORATION_TOOL_NAMES.get(leaf) ?? rawName
+}
+
 export function inferToolError(output: string | null): boolean {
   if (!output) return false
   const exitMatch = output.match(/Process exited with code (\d+)/)

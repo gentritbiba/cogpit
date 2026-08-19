@@ -73,6 +73,13 @@ describe("classifyAttention", () => {
     expect(working.map((s) => s.sessionId)).toEqual(["a", "b"])
   })
 
+  it("keeps awaiting_agents sessions in working — background agents are still running", () => {
+    const s = makeSession({ agentStatus: "awaiting_agents" })
+    const { needsYou, working } = classifyAttention([s], procs("sess-1"), new Set())
+    expect(needsYou).toEqual([])
+    expect(working).toEqual([s])
+  })
+
   it("treats a live session with unknown status as working, never needsYou", () => {
     const s = makeSession({ sessionId: "x" })
     const { needsYou, working } = classifyAttention([s], procs("x"), new Set())
@@ -125,6 +132,10 @@ describe("workingChip", () => {
 
   it("falls back to a generic label when the tool name is missing", () => {
     expect(workingChip(makeSession({ agentStatus: "tool_use" }))).toBe("Tool")
+  })
+
+  it("labels awaiting_agents as agents running", () => {
+    expect(workingChip(makeSession({ agentStatus: "awaiting_agents" }))).toBe("Agents running")
   })
 
   it("labels phases and defaults to Running", () => {

@@ -4,6 +4,28 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-08-19 — Background Agent Completion Status (awaiting_agents) (a233642)
+- **File:** `audit-history/audit-a233642-awaiting-agents-status.md`
+- **Status:** PASS AFTER UPDATES
+- **Scope:** Feature commit adding derived session status `awaiting_agents` to
+  distinguish sessions whose turn ended from sessions awaiting background
+  agent/workflow completion. Adds pending-agent detection for Claude
+  (async_launched + task-notification matching) and Codex (spawn_agent/wait_agent
+  lifecycle). `/api/session-status` gains `pendingAgents`/`pendingAgentDescriptions`
+  fields; `/api/active-sessions` gains `agentPendingAgents` and fresh-agent
+  detection for `isActive`. SSE endpoint sends new `{type:"subagent_activity"}`
+  event. UI shows persistent "Waiting for your input" indicator and "Waiting on
+  N agents..." status.
+- **Documentation:** `.claude/skills/cogpit-sessions/SKILL.md` listed session
+  status values without `awaiting_agents` and did not distinguish terminal
+  (completed/idle/deferred) from non-terminal (awaiting_agents) statuses. Three
+  targeted edits fix: status enum, /api/session-status response shape,
+  /api/active-sessions fields. Other docs (architecture, README, plans) verified
+  accurate; no contract/config changes.
+- **Risk:** LOW (non-breaking additions; external awareness required for
+  awaiting_agents non-terminal semantics)
+- **Commit:** a233642
+
 ### 2026-07-25 — Session Hang, Compaction Signalling, and Interactive Prompt Answerability (999e0d8)
 - **File:** `audit-history/audit-999e0d8-session-hang-streaming.md`
 - **Status:** PASS
@@ -67,8 +89,8 @@ Chronological record of all documentation audits for the agent-window project.
   - ARCHITECTURE.md: Sub-Agent Panel description updated (lines 268–280), new "Session Caching & Prefetch" section added
   - README.md: Sub-Agent Viewer feature description enhanced (lines 58–59)
 
-### 2026-04-14 13:40 — Permission Flow Refactor: Promise-Based Blocking (PENDING)
-- **File:** `audit-history/audit-20260414T134000Z-PENDING-permission-flow-refactor.md`
+### 2026-04-14 13:40 — Permission Flow Refactor: Promise-Based Blocking (a233642)
+- **File:** `audit-history/audit-20260414T134000Z-a233642-permission-flow-refactor.md`
 - **Status:** DOCUMENTATION UPDATES REQUIRED
 - **Changes:** 4 new files, 15 modified files, ~446 net lines added
 - **Key updates:**

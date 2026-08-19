@@ -25,6 +25,25 @@ export interface NotificationContent {
 
 export interface NotifyMessage extends NotificationContent {
   type: "notify"
+  /** History entry id, echoed back on click so the entry can be marked read. */
+  historyId?: string
+}
+
+/**
+ * Sent by the Electron main process back to the server utilityProcess when the
+ * user clicks a desktop notification, so history reflects the click.
+ */
+export interface NotificationClickedMessage {
+  type: "notification-clicked"
+  historyId: string
+}
+
+export function isNotificationClickedMessage(
+  message: unknown,
+): message is NotificationClickedMessage {
+  if (typeof message !== "object" || message === null) return false
+  const candidate = message as Partial<NotificationClickedMessage>
+  return candidate.type === "notification-clicked" && typeof candidate.historyId === "string"
 }
 
 /**

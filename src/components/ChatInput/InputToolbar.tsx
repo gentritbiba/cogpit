@@ -1,6 +1,7 @@
 import { Send, Square, Power } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { LiveIndicator } from "@/components/header-shared"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
@@ -31,10 +32,7 @@ export function InputToolbar({
               {formatElapsed(elapsedSec)}
             </span>
           )}
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-          </span>
+          <LiveIndicator />
         </div>
       )}
     </>

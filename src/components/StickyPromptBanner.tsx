@@ -1,172 +1,165 @@
-import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react"
-import { ChevronUp } from "lucide-react"
-import type { ParsedSession } from "@/lib/types"
+import { memo, useEffect, useMemo, useState } from "react"
+import { ChevronUp, MessageSquareText } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import type { ParsedSession, Turn } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
 import { parseTeammateMessage } from "@/lib/teammateMessage"
 import { extractCommandArgs, extractCommandName, stripSystemTags } from "@/lib/userMessageContent"
-import { cn } from "@/lib/utils"
 
 interface StickyPromptBannerProps {
   session: ParsedSession
   scrollContainerRef: React.RefObject<HTMLElement | null>
 }
 
+interface StickyTurn {
+  sessionId: string
+  index: number
+}
+
+const TURN_SELECTOR = "[data-turn-index]"
+const PROMPT_SELECTOR = "[data-turn-prompt]"
+const POSITION_EPSILON = 1
+const PROMPT_HEIGHT_FALLBACK = 120
+const PREVIEW_LENGTH = 180
+
+function promptPreview(turn: Turn): string | null {
+  if (!turn.userMessage) return null
+
+  const raw = getUserMessageText(turn.userMessage)
+  const { text: unwrapped } = parseTeammateMessage(raw)
+  const clean = stripSystemTags(unwrapped)
+
+  if (!clean) {
+    const command = extractCommandName(raw)
+    if (!command) return null
+    const args = extractCommandArgs(raw)
+    return args ? `/${command} ${args}` : `/${command}`
+  }
+
+  const firstLine = clean.split("\n")[0]
+  return firstLine.length > PREVIEW_LENGTH
+    ? `${firstLine.slice(0, PREVIEW_LENGTH)}...`
+    : firstLine
+}
+
+function findPrompt(turns: Turn[], startIndex: number): { index: number; text: string } | null {
+  for (let index = startIndex; index >= 0; index--) {
+    const turn = turns[index]
+    if (!turn) continue
+    const text = promptPreview(turn)
+    if (text) return { index, text }
+  }
+  return null
+}
+
+function hiddenPromptTurnIndex(container: HTMLElement): number | null {
+  const rootTop = container.getBoundingClientRect().top
+  let activeTurn: HTMLElement | null = null
+  let activeTurnTop = 0
+
+  for (const turn of container.querySelectorAll<HTMLElement>(TURN_SELECTOR)) {
+    const top = turn.getBoundingClientRect().top
+    if (top > rootTop + POSITION_EPSILON) break
+    activeTurn = turn
+    activeTurnTop = top
+  }
+
+  if (!activeTurn) return null
+
+  const index = Number(activeTurn.dataset.turnIndex)
+  if (!Number.isInteger(index)) return null
+
+  const prompt = activeTurn.querySelector<HTMLElement>(PROMPT_SELECTOR)
+  const promptIsVisible = prompt
+    ? prompt.getBoundingClientRect().bottom > rootTop + POSITION_EPSILON
+    : activeTurnTop + PROMPT_HEIGHT_FALLBACK > rootTop
+
+  return promptIsVisible ? null : index
+}
+
 export const StickyPromptBanner = memo(function StickyPromptBanner({
   session,
   scrollContainerRef,
 }: StickyPromptBannerProps) {
-  const [stickyTurn, setStickyTurn] = useState<{
-    index: number
-    userMsgVisible: boolean
-  } | null>(null)
-
-  // Track visible turn elements via IntersectionObserver (no synchronous layout reads)
-  const visibleTurnsRef = useRef(new Map<number, IntersectionObserverEntry>())
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const mutationObserverRef = useRef<MutationObserver | null>(null)
-
-  const computeStickyTurn = useCallback(() => {
-    const visible = visibleTurnsRef.current
-    if (visible.size === 0) {
-      setStickyTurn(null)
-      return
-    }
-
-    // Find the topmost visible turn (smallest intersectionRect.top or largest negative boundingClientRect.top)
-    let bestIndex: number | null = null
-    let bestTop = Infinity
-
-    for (const [index, entry] of visible) {
-      // The turn that is closest to the top of the viewport and still intersecting
-      if (entry.boundingClientRect.top < bestTop) {
-        bestTop = entry.boundingClientRect.top
-        bestIndex = index
-      }
-    }
-
-    if (bestIndex === null) {
-      setStickyTurn(null)
-      return
-    }
-
-    // User message is considered visible if the top of the turn is within 120px of the container top
-    const entry = visible.get(bestIndex)!
-    const rootTop = entry.rootBounds?.top ?? 0
-    const userMsgVisible = entry.boundingClientRect.top + 120 > rootTop
-
-    setStickyTurn({ index: bestIndex, userMsgVisible })
-  }, [])
+  const [stickyTurn, setStickyTurn] = useState<StickyTurn | null>(null)
 
   useEffect(() => {
     const container = scrollContainerRef.current
     if (!container) return
 
-    // Create IntersectionObserver rooted in the scroll container
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const el = entry.target as HTMLElement
-          const index = parseInt(el.dataset.turnIndex!, 10)
-          if (entry.isIntersecting) {
-            visibleTurnsRef.current.set(index, entry)
-          } else {
-            visibleTurnsRef.current.delete(index)
-          }
-        }
-        computeStickyTurn()
-      },
-      {
-        root: container,
-        // Use a top margin to detect turns near the top edge
-        rootMargin: "0px 0px 0px 0px",
-        threshold: [0, 0.1],
-      }
-    )
-    observerRef.current = observer
+    let frame: number | null = null
+    const update = () => {
+      frame = null
+      const index = hiddenPromptTurnIndex(container)
+      setStickyTurn((current) => {
+        if (index === null) return null
+        if (current?.sessionId === session.sessionId && current.index === index) return current
+        return { sessionId: session.sessionId, index }
+      })
+    }
+    const scheduleUpdate = () => {
+      if (frame === null) frame = requestAnimationFrame(update)
+    }
 
-    // Observe all existing turn elements
-    const turnEls = container.querySelectorAll<HTMLElement>("[data-turn-index]")
-    for (const el of turnEls) observer.observe(el)
+    setStickyTurn(null)
+    container.addEventListener("scroll", scheduleUpdate, { passive: true })
 
-    // Watch for new turn elements being added (live sessions, virtualized lists)
-    const mutationObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node instanceof HTMLElement) {
-            if (node.dataset.turnIndex !== undefined) {
-              observer.observe(node)
-            }
-            // Also check children
-            const children = node.querySelectorAll<HTMLElement>("[data-turn-index]")
-            for (const child of children) observer.observe(child)
-          }
-        }
-      }
-    })
+    const mutationObserver = new MutationObserver(scheduleUpdate)
     mutationObserver.observe(container, { childList: true, subtree: true })
-    mutationObserverRef.current = mutationObserver
 
-    const visibleTurns = visibleTurnsRef.current
+    const resizeObserver = new ResizeObserver(scheduleUpdate)
+    resizeObserver.observe(container)
+    if (container.firstElementChild) resizeObserver.observe(container.firstElementChild)
+
+    scheduleUpdate()
     return () => {
-      observer.disconnect()
+      container.removeEventListener("scroll", scheduleUpdate)
       mutationObserver.disconnect()
-      visibleTurns.clear()
-      observerRef.current = null
-      mutationObserverRef.current = null
+      resizeObserver.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
     }
-  }, [scrollContainerRef, computeStickyTurn])
+  }, [scrollContainerRef, session.sessionId])
 
-  const promptText = useMemo(() => {
-    if (!stickyTurn) return null
-    const turn = session.turns[stickyTurn.index]
-    if (!turn?.userMessage) return null
-    const raw = getUserMessageText(turn.userMessage)
-    const { text: unwrapped } = parseTeammateMessage(raw)
-    const clean = stripSystemTags(unwrapped)
-    // A turn that is only a slash command strips to nothing, which would hide
-    // the banner entirely — show the command itself instead.
-    if (!clean) {
-      const command = extractCommandName(raw)
-      if (!command) return null
-      const args = extractCommandArgs(raw)
-      return args ? `/${command} ${args}` : `/${command}`
-    }
-    const firstLine = clean.split("\n")[0]
-    return firstLine.length > 150 ? firstLine.slice(0, 150) + "..." : firstLine
-  }, [stickyTurn, session.turns])
+  const prompt = useMemo(() => {
+    if (!stickyTurn || stickyTurn.sessionId !== session.sessionId) return null
+    return findPrompt(session.turns, stickyTurn.index)
+  }, [session.sessionId, session.turns, stickyTurn])
+
+  if (!prompt) return null
 
   const scrollToPrompt = () => {
     const container = scrollContainerRef.current
-    if (!container || !stickyTurn) return
-    const turnEl = container.querySelector<HTMLElement>(
-      `[data-turn-index="${stickyTurn.index}"]`
+    if (!container) return
+    const turn = container.querySelector<HTMLElement>(
+      `[data-turn-index="${prompt.index}"]`,
     )
-    if (turnEl) {
-      turnEl.scrollIntoView({ behavior: "smooth", block: "start" })
-    }
+    const target = turn?.querySelector<HTMLElement>(PROMPT_SELECTOR) ?? turn
+    if (!target) return
+
+    const top = container.scrollTop
+      + target.getBoundingClientRect().top
+      - container.getBoundingClientRect().top
+    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" })
   }
 
-  if (!promptText || !stickyTurn || stickyTurn.userMsgVisible) return null
-
   return (
-    <button
+    <Button
       type="button"
-      aria-label={`Scroll to turn ${stickyTurn.index + 1} prompt`}
-      className={cn(
-        "absolute inset-x-0 top-0 z-20",
-        "flex cursor-pointer items-center gap-1.5 border-b border-border/40 bg-elevation-2/95 px-2 py-1 backdrop-blur",
-        "transition-colors duration-200 hover:bg-elevation-3",
-        "md:gap-2 md:border-blue-500/20 md:bg-blue-950 md:px-3 md:py-1.5 md:hover:bg-blue-900",
-      )}
+      variant="outline"
+      size="sm"
+      aria-label={`Scroll to turn ${prompt.index + 1} prompt`}
+      title={prompt.text}
+      className="absolute inset-x-0 top-0 z-30 h-9 justify-start rounded-none border-x-0 px-3 text-left"
       onClick={scrollToPrompt}
     >
-      <span className="shrink-0 text-[10px] font-medium text-muted-foreground md:text-[11px] md:text-blue-400/80">
-        Turn {stickyTurn.index + 1}
+      <MessageSquareText data-icon="inline-start" />
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+        Turn {prompt.index + 1}
       </span>
-      <span className="min-w-0 truncate text-[11px] text-foreground/70 md:text-xs md:text-blue-100/70">
-        {promptText}
+      <span className="min-w-0 flex-1 truncate text-xs font-normal text-foreground/80">
+        {prompt.text}
       </span>
-      <ChevronUp className="ml-auto size-3 shrink-0 text-muted-foreground md:text-blue-400/60" />
-    </button>
+      <ChevronUp data-icon="inline-end" className="ml-auto" />
+    </Button>
   )
 })

@@ -7,17 +7,21 @@
  *
  *   GET  /api/workflows/:dirName/:sessionId            list workflows
  *   GET  /api/workflow-detail/:dirName/:sessionId/:runId   full run detail
+ *   GET  /api/workflow-result/:dirName/:sessionId/:runId   synthesized result
+ *   GET  /api/workflow-agent-result/:dirName/:sessionId/:runId/:agentId
  *   GET  /api/workflow-watch/:dirName/:sessionId[/:runId]  SSE live updates
  *   POST /api/workflow-stop                            force-stop a run
  *
  * Mirrors the team-watch SSE pattern (debounced fs.watch → {type:"update"}).
  */
 import { watch, activeProcesses, persistentSessions } from "../helpers"
-import type { UseFn } from "../http"
+import { withJsonBody, type UseFn } from "../http"
 import { sdkSessions, stopSDKSession } from "../sdk-session"
 import {
   listSessionWorkflows,
+  readWorkflowAgentResult,
   readWorkflowDetail,
+  readWorkflowResult,
   workflowsDirFor,
   sessionDirFor,
 } from "../lib/workflows"
@@ -126,6 +130,71 @@ export function registerWorkflowRoutes(use: UseFn) {
     }
   })
 
+  // GET /api/workflow-result/:dirName/:sessionId/:runId
+  use("/api/workflow-result/", async (req, res, next) => {
+    if (req.method !== "GET") return next()
+
+    const url = new URL(req.url || "/", "http://localhost")
+    const parts = url.pathname.split("/").filter(Boolean)
+    if (parts.length !== 3) return next()
+
+    const dirName = decodeURIComponent(parts[0])
+    const sessionId = decodeURIComponent(parts[1])
+    const runId = decodeURIComponent(parts[2])
+
+    if (!workflowsDirFor(dirName, sessionId)) {
+      res.statusCode = 403
+      res.end(JSON.stringify({ error: "Access denied" }))
+      return
+    }
+
+    try {
+      const result = await readWorkflowResult(dirName, sessionId, runId)
+      if (!result) {
+        res.statusCode = 404
+        res.end(JSON.stringify({ error: "Workflow result not found" }))
+        return
+      }
+      sendJson(res, result)
+    } catch (err) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: String(err) }))
+    }
+  })
+
+  // GET /api/workflow-agent-result/:dirName/:sessionId/:runId/:agentId
+  use("/api/workflow-agent-result/", async (req, res, next) => {
+    if (req.method !== "GET") return next()
+
+    const url = new URL(req.url || "/", "http://localhost")
+    const parts = url.pathname.split("/").filter(Boolean)
+    if (parts.length !== 4) return next()
+
+    const dirName = decodeURIComponent(parts[0])
+    const sessionId = decodeURIComponent(parts[1])
+    const runId = decodeURIComponent(parts[2])
+    const agentId = decodeURIComponent(parts[3])
+
+    if (!workflowsDirFor(dirName, sessionId)) {
+      res.statusCode = 403
+      res.end(JSON.stringify({ error: "Access denied" }))
+      return
+    }
+
+    try {
+      const agentResult = await readWorkflowAgentResult(dirName, sessionId, runId, agentId)
+      if (!agentResult) {
+        res.statusCode = 404
+        res.end(JSON.stringify({ error: "Agent result not found" }))
+        return
+      }
+      sendJson(res, agentResult)
+    } catch (err) {
+      res.statusCode = 500
+      res.end(JSON.stringify({ error: String(err) }))
+    }
+  })
+
   // GET /api/workflow-watch/:dirName/:sessionId[/:runId] — SSE live updates
   use("/api/workflow-watch/", (req, res, next) => {
     if (req.method !== "GET") return next()
@@ -201,18 +270,7 @@ export function registerWorkflowRoutes(use: UseFn) {
   use("/api/workflow-stop", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => { body += chunk })
-    req.on("end", () => {
-      let parsed: { sessionId?: string; runId?: string }
-      try {
-        parsed = JSON.parse(body)
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
-        return
-      }
-
+    withJsonBody<{ sessionId?: string; runId?: string }>(req, res, (parsed) => {
       const sessionId = parsed.sessionId
       if (!sessionId || typeof sessionId !== "string") {
         res.statusCode = 400

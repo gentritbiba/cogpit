@@ -6,12 +6,19 @@ function matchScore(lowerPath: string, basename: string, normalized: string): nu
   return 4
 }
 
-export function rankProjectFiles(files: string[], query: string, limit: number): string[] {
+export interface RankedProjectFiles {
+  /** The highest-ranked matches, capped at `limit`. */
+  files: string[]
+  /** How many files matched before `limit` was applied. */
+  totalMatches: number
+}
+
+export function rankProjectFiles(files: string[], query: string, limit: number): RankedProjectFiles {
   const normalized = query.trim().toLowerCase()
-  if (!normalized) return files.slice(0, limit)
+  if (!normalized) return { files: files.slice(0, limit), totalMatches: files.length }
   const terms = normalized.split(/\s+/).filter(Boolean)
 
-  return files
+  const matches = files
     .map((path) => {
       const lowerPath = path.toLowerCase()
       const basename = lowerPath.split("/").at(-1) ?? lowerPath
@@ -20,6 +27,6 @@ export function rankProjectFiles(files: string[], query: string, limit: number):
     })
     .filter((entry): entry is { path: string; score: number; depth: number } => entry !== null)
     .sort((a, b) => a.score - b.score || a.depth - b.depth || a.path.length - b.path.length)
-    .slice(0, limit)
-    .map((entry) => entry.path)
+
+  return { files: matches.slice(0, limit).map((entry) => entry.path), totalMatches: matches.length }
 }

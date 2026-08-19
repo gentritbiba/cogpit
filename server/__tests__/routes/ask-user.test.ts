@@ -56,10 +56,13 @@ function makeReqRes(body: string) {
 
   const next = vi.fn()
 
-  // Simulate streaming the request body
-  const simulate = () => {
+  // Simulate streaming the request body. The route parses through
+  // withJsonBody, so the handler runs on the microtask queue rather than
+  // inside the "end" emit; drain it before asserting.
+  const simulate = async () => {
     req.emit("data", body)
     req.emit("end")
+    await drainBodyParse()
   }
 
   return { req, res, next, simulate }
@@ -67,13 +70,22 @@ function makeReqRes(body: string) {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Drain the microtask queue that withJsonBody parses on. Deliberately not
+ * setImmediate: several tests here run with fake timers, which never fire it.
+ * readJsonBody settles through promises only, so yielding is enough.
+ */
+async function drainBodyParse() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve()
+}
+
 describe("POST /api/ask-user-answer", () => {
   beforeEach(() => {
     mockSdkSessions.clear()
     mockResolveUserQuestion.mockReset()
   })
 
-  it("returns 200 and resolves a valid string[] payload", () => {
+  it("returns 200 and resolves a valid string[] payload", async () => {
     const handler = buildHandler()
 
     mockSdkSessions.set("session-abc", {})
@@ -83,14 +95,14 @@ describe("POST /api/ask-user-answer", () => {
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(200)
     expect(res._getData()).toEqual({ ok: true })
     expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"])
   })
 
-  it("returns 200 and resolves a Record<string, string> payload", () => {
+  it("returns 200 and resolves a Record<string, string> payload", async () => {
     const handler = buildHandler()
 
     mockSdkSessions.set("session-abc", {})
@@ -100,14 +112,14 @@ describe("POST /api/ask-user-answer", () => {
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(200)
     expect(res._getData()).toEqual({ ok: true })
     expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-2", { q1: "blue", q2: "fast" })
   })
 
-  it("returns 404 when sessionId is not a live SDK session", () => {
+  it("returns 404 when sessionId is not a live SDK session", async () => {
     const handler = buildHandler()
 
     // Do NOT add session to mockSdkSessions
@@ -115,64 +127,64 @@ describe("POST /api/ask-user-answer", () => {
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(404)
     expect((res._getData() as { error: string }).error).toMatch(/not found/i)
   })
 
-  it("returns 400 when sessionId is missing", () => {
+  it("returns 400 when sessionId is missing", async () => {
     const handler = buildHandler()
 
     const body = JSON.stringify({ toolUseId: "tu-1", answers: ["Yes"] })
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(400)
     expect((res._getData() as { error: string }).error).toContain("sessionId")
   })
 
-  it("returns 400 when toolUseId is missing", () => {
+  it("returns 400 when toolUseId is missing", async () => {
     const handler = buildHandler()
 
     const body = JSON.stringify({ sessionId: "s1", answers: ["Yes"] })
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(400)
     expect((res._getData() as { error: string }).error).toContain("toolUseId")
   })
 
-  it("returns 400 when answers is missing", () => {
+  it("returns 400 when answers is missing", async () => {
     const handler = buildHandler()
 
     const body = JSON.stringify({ sessionId: "s1", toolUseId: "tu-1" })
     const { req, res, next, simulate } = makeReqRes(body)
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(400)
     expect((res._getData() as { error: string }).error).toContain("answers")
   })
 
-  it("returns 400 for malformed JSON body", () => {
+  it("returns 400 for malformed JSON body", async () => {
     const handler = buildHandler()
 
     const { req, res, next, simulate } = makeReqRes("{invalid json")
 
     handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    simulate()
+    await simulate()
 
     expect(res._getStatus()).toBe(400)
     expect((res._getData() as { error: string }).error).toMatch(/invalid json/i)
   })
 
-  it("calls next() for non-POST methods", () => {
+  it("calls next() for non-POST methods", async () => {
     const handler = buildHandler()
 
     const { req, res, next } = makeReqRes("")
@@ -213,7 +225,7 @@ describe("GET /api/user-questions", () => {
     return { status, body: payload ? JSON.parse(payload) : null }
   }
 
-  it("groups blocked questions by session", () => {
+  it("groups blocked questions by session", async () => {
     // Mission Control renders cards for sessions that are not open, so it needs
     // one call covering all of them.
     mockListUserQuestionSessionIds.mockReturnValue(["s1"])
@@ -231,14 +243,14 @@ describe("GET /api/user-questions", () => {
     })
   })
 
-  it("omits sessions with nothing pending", () => {
+  it("omits sessions with nothing pending", async () => {
     mockListUserQuestionSessionIds.mockReturnValue(["quiet"])
     mockGetSDKUserQuestions.mockReturnValue([])
 
     expect(invokeGet().body).toEqual({ bySession: {} })
   })
 
-  it("returns an empty map when no session is blocked", () => {
+  it("returns an empty map when no session is blocked", async () => {
     expect(invokeGet().body).toEqual({ bySession: {} })
   })
 })

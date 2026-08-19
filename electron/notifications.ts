@@ -5,6 +5,7 @@ import {
   isViewingSession,
   sessionPath,
   type DesktopAttentionMessage,
+  type NotificationClickedMessage,
   type NotifyMessage,
 } from "../shared/notifications"
 
@@ -74,7 +75,11 @@ export const ATTENTION_WINDOW_EVENTS = [
  * session — a backgrounded, minimized, or differently-scrolled window is worth
  * interrupting for.
  */
-export function handleWorkerNotification(message: unknown, win: BrowserWindow | null): void {
+export function handleWorkerNotification(
+  message: unknown,
+  win: BrowserWindow | null,
+  postToWorker?: (message: NotificationClickedMessage) => void,
+): void {
   if (!isNotifyMessage(message)) return
 
   // Runs at the top of a main-process event handler, where a throw would be an
@@ -86,7 +91,11 @@ export function handleWorkerNotification(message: unknown, win: BrowserWindow | 
     if (live && isWindowActive(live) && isViewingSession(live.webContents.getURL(), message.nav)) return
 
     const notification = new Notification({ title: message.title, body: message.body })
-    notification.on("click", () => revealSession(message, live))
+    notification.on("click", () => {
+      // Reflect the click into notification history before anything can fail.
+      if (message.historyId) postToWorker?.({ type: "notification-clicked", historyId: message.historyId })
+      void revealSession(message, live)
+    })
     notification.show()
     app.dock?.bounce("informational")
   } catch (err) {
@@ -98,8 +107,12 @@ function isWindowActive(win: BrowserWindow): boolean {
   return win.isFocused() && win.isVisible() && !win.isMinimized()
 }
 
+/** How long a click keeps retrying to reach a renderer that is still booting. */
+const REVEAL_RETRY_ATTEMPTS = 20
+const REVEAL_RETRY_DELAY_MS = 250
+
 /** Bring Cogpit forward and route the SPA to the session that notified. */
-function revealSession(message: NotifyMessage, target: BrowserWindow | null): void {
+async function revealSession(message: NotifyMessage, target: BrowserWindow | null): Promise<void> {
   const win = target && !target.isDestroyed() ? target : BrowserWindow.getAllWindows()[0]
   if (!win || win.isDestroyed()) return
 
@@ -118,8 +131,27 @@ function revealSession(message: NotifyMessage, target: BrowserWindow | null): vo
   const path = sessionPath(message.nav)
   if (!path) return
 
-  void win.webContents.executeJavaScript(`
-    window.history.pushState({}, '', ${JSON.stringify(path)});
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  `)
+  // The renderer registers window.__cogpitRevealSession once its router is
+  // mounted. A fire-and-forget pushState used to land in a renderer that was
+  // still booting (cold start, mid-reload) and be silently dropped — so the
+  // navigation is acked and retried until the app is actually ready for it.
+  for (let attempt = 0; attempt < REVEAL_RETRY_ATTEMPTS; attempt++) {
+    if (win.isDestroyed()) return
+    try {
+      const handled: unknown = await win.webContents.executeJavaScript(
+        `typeof window.__cogpitRevealSession === "function"
+          ? (window.__cogpitRevealSession(${JSON.stringify(path)}), true)
+          : false`,
+      )
+      if (handled === true) return
+    } catch {
+      // Renderer mid-load; retry below.
+    }
+    await delay(REVEAL_RETRY_DELAY_MS)
+  }
+  console.error("[main] Notification click could not reach the renderer:", path)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

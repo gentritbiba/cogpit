@@ -154,6 +154,42 @@ describe("SessionRow — deferred state", () => {
   })
 })
 
+describe("SessionRow — status dot", () => {
+  function renderDot(session: ActiveSessionInfo) {
+    const { container } = render(
+      <SessionRow
+        session={session}
+        isActiveSession={false}
+        proc={undefined}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+      />
+    )
+    return container.querySelector("[data-status-dot]")
+  }
+
+  it("distinguishes a working session from a live but idle one without animation", () => {
+    const working = renderDot(makeSession({ isActive: true, agentStatus: "tool_use" }))
+    const idle = renderDot(makeSession({ isActive: true, agentStatus: "idle" }))
+
+    expect(working).toHaveAttribute("data-status-dot", "working")
+    expect(idle).toHaveAttribute("data-status-dot", "idle")
+    expect(working?.className).not.toBe(idle?.className)
+    // Global CSS disables these, so they must not be the only difference.
+    expect(working?.className).not.toMatch(/animate-(pulse|ping)/)
+    expect(idle?.className).not.toMatch(/animate-(pulse|ping)/)
+  })
+
+  it("marks a deferred session as needing attention", () => {
+    expect(renderDot(makeSession({ isActive: true, agentStatus: "deferred" })))
+      .toHaveAttribute("data-status-dot", "attention")
+  })
+
+  it("renders no dot for a session that is not live", () => {
+    expect(renderDot(makeSession())).toBeNull()
+  })
+})
+
 describe("SessionRow — pull requests and turn count", () => {
   const pr = (number: number, title: string | null = null) => ({
     url: `https://github.com/o/r/pull/${number}`,

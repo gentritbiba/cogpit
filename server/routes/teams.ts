@@ -7,7 +7,7 @@ import {
   join,
   watch,
 } from "../helpers"
-import type { UseFn } from "../http"
+import { withJsonBody, type UseFn } from "../http"
 
 export function registerTeamRoutes(use: UseFn) {
   // GET /api/teams - list all teams with task progress summary
@@ -213,13 +213,8 @@ export function registerTeamRoutes(use: UseFn) {
       return
     }
 
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", async () => {
+    withJsonBody<{ message?: string }>(req, res, async ({ message }) => {
       try {
-        const { message } = JSON.parse(body)
         if (!message || typeof message !== "string") {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "message is required" }))

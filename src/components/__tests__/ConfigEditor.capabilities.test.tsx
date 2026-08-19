@@ -5,7 +5,7 @@ import { ConfigEditor } from "@/components/config/ConfigEditor"
 const mocks = vi.hoisted(() => ({ authFetch: vi.fn() }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
-vi.mock("@/components/config/HighlightedEditor", () => ({
+vi.mock("@/components/shared/HighlightedEditor", () => ({
   HighlightedEditor: ({ value, onChange, readOnly }: {
     value: string
     onChange: (value: string) => void

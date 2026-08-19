@@ -121,41 +121,11 @@ describe("authMiddleware (team edition)", () => {
     expect(r.body).toContain("Authentication required")
   })
 
-  it("lets a trusted-local /api/notify POST through (agent hooks)", () => {
+  it("requires auth for /api/notifications even from trusted local", () => {
+    // The old /api/notify agent-hook carve-out is gone — notifications are
+    // raised server-side now, so no unauthenticated ingest survives.
     enterTeamEdition()
-    const r = run("/api/notify", { method: "POST" })
-    expect(r.next).toHaveBeenCalledOnce()
-  })
-
-  it("does not extend the /api/notify carve-out to forwarded loopback", () => {
-    enterTeamEdition()
-    const r = run("/api/notify", { method: "POST", forwardedFor: "203.0.113.8" })
-    expect(r.next).not.toHaveBeenCalled()
-    expect(r.statusCode).toBe(401)
-  })
-
-  it("rejects a cross-origin /api/notify POST from trusted local with 403", () => {
-    // A drive-by cross-site page POSTing through a local browser must not
-    // reach the notify handler — same screen the personal edition applies.
-    enterTeamEdition()
-    const r = run("/api/notify", { method: "POST", origin: "https://evil.example" })
-    expect(r.next).not.toHaveBeenCalled()
-    expect(r.statusCode).toBe(403)
-    expect(r.body).toContain("Untrusted request source")
-  })
-
-  it("does not extend the /api/notify carve-out to sibling paths", () => {
-    enterTeamEdition()
-    const r = run("/api/notifyx", { method: "POST" })
-    expect(r.next).not.toHaveBeenCalled()
-    expect(r.statusCode).toBe(401)
-  })
-
-  it("does not extend the /api/notify carve-out to case variants", () => {
-    // Express routes case-insensitively, so /API/NOTIFY would still reach the
-    // handler if the carve-out matched loosely — it must fall through to auth.
-    enterTeamEdition()
-    const r = run("/API/NOTIFY", { method: "POST" })
+    const r = run("/api/notifications", { method: "GET" })
     expect(r.next).not.toHaveBeenCalled()
     expect(r.statusCode).toBe(401)
   })

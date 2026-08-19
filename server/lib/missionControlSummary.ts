@@ -25,8 +25,8 @@ import type {
 const TRAIL_LENGTH = 3
 /** Changed files listed per card before collapsing into "+N more". */
 const MAX_FILES_LISTED = 4
-/** Assistant prose kept for the card preview. */
-const PREVIEW_LIMIT = 240
+/** Assistant prose kept for the card preview — the card's main body. */
+const PREVIEW_LIMIT = 600
 /** Memory backstop — the grid only ever asks about a couple dozen sessions. */
 const MAX_CACHE_ENTRIES = 200
 

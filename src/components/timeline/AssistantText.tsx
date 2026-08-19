@@ -3,55 +3,15 @@ import { Check, Copy } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Button } from "@/components/ui/button"
 import { markdownComponents, markdownPlugins, preprocessImagePaths } from "./markdown-components"
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip"
-import type { TokenUsage } from "@/lib/types"
-import { shortenModel, formatTokenCount } from "@/lib/format"
+import { shortenModel } from "@/lib/format"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { cn } from "@/lib/utils"
-
-// ── Token usage tooltip ──────────────────────────────────────────────────
-
-function TokenUsageBadge({ usage }: { usage: TokenUsage }): React.ReactElement {
-  const totalInput = usage.input_tokens
-    + (usage.cache_creation_input_tokens ?? 0)
-    + (usage.cache_read_input_tokens ?? 0)
-  const cacheRead = usage.cache_read_input_tokens ?? 0
-  const cacheWrite = usage.cache_creation_input_tokens ?? 0
-
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<span className="text-[10px] text-muted-foreground cursor-default" />}>
-          {formatTokenCount(totalInput + usage.output_tokens)} tokens
-      </TooltipTrigger>
-      <TooltipContent className="text-xs space-y-1">
-        <div>Context: {formatTokenCount(totalInput)}</div>
-        <div className="pl-2 text-muted-foreground">New: {formatTokenCount(usage.input_tokens)}</div>
-        {cacheRead > 0 && (
-          <div className="pl-2 text-muted-foreground">
-            Cache read: {formatTokenCount(cacheRead)}
-          </div>
-        )}
-        {cacheWrite > 0 && (
-          <div className="pl-2 text-muted-foreground">
-            Cache write: {formatTokenCount(cacheWrite)}
-          </div>
-        )}
-        <div>Output: {formatTokenCount(usage.output_tokens)}</div>
-      </TooltipContent>
-    </Tooltip>
-  )
-}
 
 // ── Main component ───────────────────────────────────────────────────────
 
 interface AssistantTextProps {
   text: string
   model: string | null
-  tokenUsage: TokenUsage | null
   timestamp?: string
   compact?: boolean
 }
@@ -59,7 +19,6 @@ interface AssistantTextProps {
 export const AssistantText = memo(function AssistantText({
   text,
   model,
-  tokenUsage,
   timestamp,
   compact = false,
 }: AssistantTextProps) {
@@ -71,7 +30,6 @@ export const AssistantText = memo(function AssistantText({
   return (
     <div className="group">
       {!compact && <div className="mb-1 flex min-h-6 items-center justify-end gap-1.5">
-        {tokenUsage && <TokenUsageBadge usage={tokenUsage} />}
         {model && (
           <span className="text-[10px] text-muted-foreground/40">
             {shortenModel(model)}

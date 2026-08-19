@@ -11,11 +11,16 @@ import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
+import { TimelineMinimap } from "@/components/timeline/TimelineMinimap"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { FindInSession, type FindInSessionHandle } from "@/components/FindInSession"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
+import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
+
+/** Opens find-in-conversation from outside the timeline (the command palette). */
+export const FIND_IN_CONVERSATION_EVENT = "cogpit:find-in-conversation"
 
 interface ChatAreaProps {
   searchInputRef: RefObject<HTMLInputElement | null>
@@ -45,23 +50,31 @@ export const ChatArea = memo(function ChatArea({
   const { chatScrollRef, scrollEndRef, handleScroll, canScrollDown, scrollToBottomInstant, initialScrollDone } = scroll
   const findRef = useRef<FindInSessionHandle>(null)
 
-  // Cmd/Ctrl+F → open find-in-session
+  // Cmd/Ctrl+F (or the command palette) → open find-in-session
   const handleFindOpen = useCallback(() => findRef.current?.open(), [])
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "f" && !e.shiftKey) {
-        e.preventDefault()
-        handleFindOpen()
-      }
+      if (!matchesKeybinding("findInConversation", e)) return
+      e.preventDefault()
+      handleFindOpen()
     }
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
+    window.addEventListener(FIND_IN_CONVERSATION_EVENT, handleFindOpen)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener(FIND_IN_CONVERSATION_EVENT, handleFindOpen)
+    }
   }, [handleFindOpen])
 
   useEffect(() => {
     if (!isMobile || !mobileSearchOpen) return
     requestAnimationFrame(() => searchInputRef.current?.focus())
   }, [isMobile, mobileSearchOpen, searchInputRef])
+
+  const handleJumpToTurn = useCallback(
+    (index: number) => dispatch({ type: "JUMP_TO_TURN", index }),
+    [dispatch],
+  )
 
   const closeMobileSearch = useCallback(() => {
     dispatch({ type: "SET_SEARCH_QUERY", value: "" })
@@ -103,6 +116,13 @@ export const ChatArea = memo(function ChatArea({
       {/* Scrollable chat area */}
       <div className={cn("relative", isMobile ? "flex-1 min-h-0" : "h-full")}>
         <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
+        {!isMobile && (
+          <TimelineMinimap
+            turns={currentSession.turns}
+            scrollContainerRef={chatScrollRef}
+            onJumpToTurn={handleJumpToTurn}
+          />
+        )}
         <StickyPromptBanner
           session={currentSession}
           scrollContainerRef={chatScrollRef}

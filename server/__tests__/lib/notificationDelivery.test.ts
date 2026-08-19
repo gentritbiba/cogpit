@@ -10,6 +10,9 @@ vi.mock("../../lib/desktopNotify", () => ({
 vi.mock("../../lib/pushNotify", () => ({
   sendPushNotification: (...args: unknown[]) => mockSendPush(...args),
 }))
+vi.mock("../../lib/notificationHistory", () => ({
+  recordNotification: vi.fn(() => ({ id: "history-1" })),
+}))
 
 import { deliverNotification } from "../../lib/notificationDelivery"
 import { setDesktopAttention } from "../../lib/desktopAttention"

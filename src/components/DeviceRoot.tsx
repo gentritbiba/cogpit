@@ -9,6 +9,7 @@ import {
   LOCAL_DEVICE_ID,
 } from "@/lib/device"
 import { matchDeviceSwitchIndex, matchDeviceCycle } from "@/lib/keybindings"
+import { revealSessionPath } from "@/lib/revealSession"
 import { useDevices } from "@/hooks/useDevices"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
@@ -37,7 +38,7 @@ import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
  * remount, no hold, boot behavior is byte-identical to pre-team builds.
  *
  * Also hosted here because they must survive the remount:
- * - device keyboard shortcuts (mod+shift+1..9 jump, mod+shift+0 cycle)
+ * - device keyboard shortcuts (platform chord 1..9 jump, platform chord 0 cycle)
  * - the offline banner for an unreachable active remote device
  *
  * The session inventory provider is keyed here rather than inside App so the
@@ -88,6 +89,16 @@ export function DeviceRoot() {
     const sync = () => setIdentityKey(getActiveIdentity())
     window.addEventListener("cogpit-identity-changed", sync)
     return () => window.removeEventListener("cogpit-identity-changed", sync)
+  }, [])
+
+  // Deep-link entry point for desktop notification clicks. Registered here —
+  // above the keyed App remount — so it exists for the whole app lifetime and
+  // doubles as the "renderer is ready" ack the main process retries against.
+  useEffect(() => {
+    window.__cogpitRevealSession = revealSessionPath
+    return () => {
+      delete window.__cogpitRevealSession
+    }
   }, [])
 
   // Device shortcuts: slot 1 is always this machine, 2..9 follow registry order.

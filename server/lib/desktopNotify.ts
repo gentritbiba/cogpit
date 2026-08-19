@@ -22,10 +22,15 @@ function parentMessagePort(): ParentMessagePort | null {
  * clickable deep link. Only the standalone server falls back to osascript,
  * whose notifications are attributed to Script Editor and cannot be clicked.
  */
-export function showNotification(title: string, body: string, nav: NotificationNav): void {
+export function showNotification(
+  title: string,
+  body: string,
+  nav: NotificationNav,
+  historyId?: string,
+): void {
   const port = parentMessagePort()
   if (port) {
-    const message: NotifyMessage = { type: "notify", title, body, nav }
+    const message: NotifyMessage = { type: "notify", title, body, nav, historyId }
     port.postMessage(message)
     return
   }

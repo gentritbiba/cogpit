@@ -1,4 +1,4 @@
-import { memo, useRef, useLayoutEffect } from "react"
+import { memo, useRef, useLayoutEffect, useMemo, useState } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
@@ -9,11 +9,13 @@ import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
+import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { LiveElapsed } from "./AgentStatusIndicator"
 import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
+import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
@@ -21,6 +23,7 @@ import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import type { Turn, TurnContentBlock } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDuration, getTurnDuration } from "@/lib/format"
+import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
@@ -28,6 +31,14 @@ const CARD_STYLES = {
   user:      "bg-blue-500/[0.12] border border-blue-500/20",
   userAgent: "bg-green-500/[0.12] border border-green-500/20",
 } as const
+
+/**
+ * One rail for nesting. Depth is the only thing a rail has to communicate, so
+ * every nested block shares a single hairline; a nested agent transcript is a
+ * genuine structural difference, so it keeps the one accent.
+ */
+const NEST_RAIL = "border-l border-border/40"
+const AGENT_RAIL = "border-l border-indigo-400/40"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,8 +48,6 @@ interface TurnSectionProps {
   branchCount?: number
 }
 
-/** Statuses that indicate the agent is still working (turn not yet done). */
-const ACTIVE_STATUSES = new Set(["thinking", "tool_use", "processing"])
 
 // ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
@@ -55,7 +64,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
     const { status } = deriveSessionStatus(
       session.rawMessages as Array<{ type: string; [key: string]: unknown }>
     )
-    isTurnDone = !ACTIVE_STATUSES.has(status)
+    isTurnDone = !WORKING_STATUSES.has(status)
   }
 
   const cwd = session?.cwd ?? ""
@@ -141,9 +150,32 @@ const TurnSectionInner = memo(function TurnSectionInner({
       msg.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write"),
     )
 
+  // A settled turn is mostly process. Fold it down to its answer and let the
+  // work sit one click away; the live turn and "expand all" stay open.
+  const foldPlan = useMemo(() => planTurnFold(turn.contentBlocks), [turn.contentBlocks])
+  const [workExpanded, setWorkExpanded] = useState(false)
+  const workVisible = workExpanded || expandAll || !isTurnDone
+
+  const { leadingBlocks, trailingBlocks } = useMemo(() => {
+    if (!foldPlan.foldable) {
+      return { leadingBlocks: [] as TurnContentBlock[], trailingBlocks: [] as TurnContentBlock[] }
+    }
+    const anchor = foldPlan.foldAnchorIndex
+    const folded = new Set(foldPlan.foldedIndices)
+    return {
+      leadingBlocks: turn.contentBlocks.slice(0, anchor),
+      // Everything from the anchor on keeps its original order, so expanding
+      // never reshuffles the turn.
+      trailingBlocks: turn.contentBlocks
+        .slice(anchor)
+        .filter((_, offset) => workVisible || !folded.has(anchor + offset)),
+    }
+  }, [foldPlan, turn.contentBlocks, workVisible])
+
   return (
     <div
       ref={ref}
+      data-turn-index={index}
       className={cn(
         "group relative",
         isMobile ? "px-1 py-3" : "px-4 py-5",
@@ -163,7 +195,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       {isNear ? (
         <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
           {turn.userMessage && (
-            <div className={cn(
+            <div data-turn-prompt className={cn(
               isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
               isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
             )}>
@@ -177,16 +209,51 @@ const TurnSectionInner = memo(function TurnSectionInner({
             </div>
           )}
 
-          <ContentBlocks
-            blocks={turn.contentBlocks}
-            model={turn.model}
-            expandAll={expandAll}
-            activeToolCallId={activeToolCallId}
-            isAgentActive={isAgentActive}
-            isSubAgentView={isSubAgentView}
-            isMobile={isMobile}
-            skillMetadata={skillMetadata}
-          />
+          {foldPlan.foldable ? (
+            <>
+              {leadingBlocks.length > 0 && (
+                <ContentBlocks
+                  blocks={leadingBlocks}
+                  model={turn.model}
+                  expandAll={expandAll}
+                  activeToolCallId={activeToolCallId}
+                  isAgentActive={isAgentActive}
+                  isSubAgentView={isSubAgentView}
+                  isMobile={isMobile}
+                  skillMetadata={skillMetadata}
+                />
+              )}
+              <TurnWorkFold
+                label={turnFoldLabel(getTurnDuration(turn), foldPlan.hiddenToolCalls)}
+                expanded={workVisible}
+                onToggle={() => setWorkExpanded((open) => !open)}
+                compact={isMobile}
+              />
+              {trailingBlocks.length > 0 && (
+                <ContentBlocks
+                  blocks={trailingBlocks}
+                  model={turn.model}
+                  expandAll={expandAll}
+                  activeToolCallId={activeToolCallId}
+                  isAgentActive={isAgentActive}
+                  isSubAgentView={isSubAgentView}
+                  isMobile={isMobile}
+                  skillMetadata={skillMetadata}
+                />
+              )}
+            </>
+          ) : (
+            <ContentBlocks
+              blocks={turn.contentBlocks}
+              model={turn.model}
+              expandAll={expandAll}
+              activeToolCallId={activeToolCallId}
+              isAgentActive={isAgentActive}
+              isSubAgentView={isSubAgentView}
+              isMobile={isMobile}
+              skillMetadata={skillMetadata}
+            />
+          )}
 
           {isTurnDone && hasFileChanges && (
             <TurnChangedFiles turn={turn} turnIndex={index} cwd={cwd} />
@@ -229,21 +296,12 @@ function TurnHeader({
 
   return (
     <div className={cn("flex items-center", isMobile ? "mb-2 gap-1.5" : "mb-4 gap-2")}>
-      {isMobile ? (
-        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
-          Turn {index + 1}
-        </span>
-      ) : (
-        <div className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/50 bg-elevation-2 font-mono text-[10px] text-muted-foreground">
-          {index + 1}
-        </div>
-      )}
+      {/* The turn boundary is carried by the accented user message below; this
+          number is a label for cross-referencing panels, not a second cue. */}
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/50">
+        {isMobile ? `Turn ${index + 1}` : index + 1}
+      </span>
       <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
-      {!isMobile && turn.timestamp && (
-        <span className="text-[10px] text-muted-foreground/40">
-          {new Date(turn.timestamp).toLocaleTimeString()}
-        </span>
-      )}
       {onRestoreToHere && (
         <button
           type="button"
@@ -292,7 +350,7 @@ function TurnTimer({
   if (showLiveTimer) {
     return (
       <span className="flex items-center gap-1 text-[10px] text-amber-400/70 font-mono tabular-nums">
-        <Clock className="w-2.5 h-2.5 animate-pulse" />
+        <Clock className="w-2.5 h-2.5" />
         <LiveElapsed startTimestamp={timestamp} className="tabular-nums" />
       </span>
     )
@@ -322,6 +380,8 @@ function ContentBlocks({
   skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
+  // Indent for every nested block, so the rails all line up.
+  const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
 
   let i = 0
   while (i < blocks.length) {
@@ -334,7 +394,7 @@ function ContentBlocks({
       // Single tool_calls group with no thinking → render as orphan tool calls
       if (items.length === 1 && items[0].kind === "tool_calls") {
         elements.push(
-          <div key={`tools-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`tools-${i}`} className={cn(NEST_RAIL, nestIndent)}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -347,7 +407,7 @@ function ContentBlocks({
       // Mixed or multiple items → grouped collapsible
       } else {
         elements.push(
-          <div key={`activity-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`activity-${i}`} className={cn(NEST_RAIL, nestIndent)}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -375,12 +435,11 @@ function ContentBlocks({
             <AssistantText
               text={text}
               model={model}
-              tokenUsage={null}
               timestamp={block.timestamp}
               compact={isMobile}
             />
             {hasFollowingActivity && (
-              <div className={cn("mt-1.5 border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+              <div className={cn("mt-1.5", NEST_RAIL, nestIndent)}>
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
@@ -421,7 +480,7 @@ function ContentBlocks({
 
     if (block.kind === "sub_agent") {
       elements.push(
-        <div key={`agent-${i}`} className={cn("border-l-2 border-indigo-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
           <SubAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -431,7 +490,7 @@ function ContentBlocks({
 
     if (block.kind === "background_agent") {
       elements.push(
-        <div key={`bg-agent-${i}`} className={cn("border-l-2 border-violet-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`bg-agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )

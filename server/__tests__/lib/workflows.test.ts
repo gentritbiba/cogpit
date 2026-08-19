@@ -16,7 +16,9 @@ import {
   normalizeDetail,
   isTerminalAgentState,
   listSessionWorkflows,
+  readWorkflowAgentResult,
   readWorkflowDetail,
+  readWorkflowResult,
   workflowsDirFor,
   type WorkflowJournal,
 } from "../../lib/workflows"
@@ -120,6 +122,55 @@ describe("workflow normalization", () => {
     it("omits resultPreview when result is null", () => {
       const d = normalizeDetail("wf_abc-123", journal({ result: null }))
       expect(d.resultPreview).toBeUndefined()
+    })
+  })
+
+  describe("readWorkflowAgentResult", () => {
+    it("returns the latest complete result for one agent", async () => {
+      mockedReadFile.mockResolvedValueOnce([
+        JSON.stringify({ type: "result", agentId: "agent-1", result: { headline: "Old" } }),
+        "{incomplete",
+        JSON.stringify({ type: "result", agentId: "agent-2", result: { headline: "Other" } }),
+        JSON.stringify({ type: "result", agentId: "agent-1", result: { headline: "Latest" } }),
+      ].join("\n"))
+
+      await expect(readWorkflowAgentResult("proj", "sess", "wf_abc-123", "agent-1"))
+        .resolves.toEqual({ result: { headline: "Latest" } })
+    })
+
+    it("rejects unsafe identifiers without reading a file", async () => {
+      await expect(readWorkflowAgentResult("proj", "sess", "../escape", "agent-1"))
+        .resolves.toBeNull()
+      await expect(readWorkflowAgentResult("proj", "sess", "wf_abc-123", "../escape"))
+        .resolves.toBeNull()
+      expect(mockedReadFile).not.toHaveBeenCalled()
+    })
+
+    it("returns null when the agent has no completed result", async () => {
+      mockedReadFile.mockResolvedValueOnce(
+        JSON.stringify({ type: "started", agentId: "agent-1" }),
+      )
+
+      await expect(readWorkflowAgentResult("proj", "sess", "wf_abc-123", "agent-1"))
+        .resolves.toBeNull()
+    })
+  })
+
+  describe("readWorkflowResult", () => {
+    it("returns the complete synthesized result", async () => {
+      mockedReadFile.mockResolvedValueOnce(JSON.stringify(journal({
+        result: { recommendation: "Ship it", steps: ["One", "Two"] },
+      })))
+
+      await expect(readWorkflowResult("proj", "sess", "wf_abc-123"))
+        .resolves.toEqual({ result: { recommendation: "Ship it", steps: ["One", "Two"] } })
+    })
+
+    it("returns null when the journal has no result", async () => {
+      mockedReadFile.mockResolvedValueOnce(JSON.stringify(journal({ result: null })))
+
+      await expect(readWorkflowResult("proj", "sess", "wf_abc-123"))
+        .resolves.toBeNull()
     })
   })
 

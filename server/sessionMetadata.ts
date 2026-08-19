@@ -372,11 +372,33 @@ export async function getSessionMeta(filePath: string) {
 }
 
 /**
+ * Lines that can still change the verdict once the turn-ending line is known:
+ * background agent/workflow launches, task notifications, and TaskStop calls
+ * (Claude), or collab-agent lifecycle records (Codex).
+ */
+const CLAUDE_TAIL_MARKERS = ["async_launched", "task-notification", '"TaskStop"']
+// function_call_output is included because output lines carry only a call_id —
+// the tracker links them back to the spawn/wait/interrupt call they answer.
+const CODEX_TAIL_MARKERS = ["spawn_agent", "spawnAgent", "wait_agent", "waitAgent", "interrupt_agent", "interruptAgent", "sub_agent_activity", "agent_message", "function_call_output"]
+
+/** Cheap string test that keeps the filtered phase from parsing irrelevant lines. */
+function isTailCandidate(line: string, provider: "claude" | "codex", needUserActivity: boolean): boolean {
+  const markers = provider === "claude" ? CLAUDE_TAIL_MARKERS : CODEX_TAIL_MARKERS
+  return markers.some((marker) => line.includes(marker))
+    || (needUserActivity && line.includes('"type":"user"'))
+}
+
+/**
  * Read backward through a session JSONL to derive agent status.
  * Scans in 4KB chunks from the tail, parsing one line at a time until it
  * finds a meaningful message (assistant or non-meta user). This reads only
  * as far as needed — typically one chunk — and uses the same
  * deriveSessionStatus() function as the client side.
+ *
+ * A turn-ending line (Claude end_turn / Codex task_complete) alone cannot
+ * distinguish "done" from "waiting on background agents", so it switches the
+ * scan into a filtered second phase that keeps reading (up to the cap) but
+ * only collects the lines that matter for that verdict.
  */
 export async function getSessionStatus(filePath: string): Promise<SessionStatusInfo> {
   const CHUNK = 4096
@@ -390,6 +412,8 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
       const meaningful: Array<{ type: string; [key: string]: unknown }> = []
       let cursor = fileStat.size
       let leftover = ""
+      let turnEnded: "claude" | "codex" | null = null
+      let needUserActivity = false
 
       for (let chunk = 0; chunk < MAX_CHUNKS && cursor > 0; chunk++) {
         const readSize = Math.min(CHUNK, cursor)
@@ -407,8 +431,23 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
         for (let i = lines.length - 1; i >= startIdx; i--) {
           const line = lines[i]
           if (!line) continue
+          // Filtered phase: skip lines that cannot change the verdict before
+          // paying for a JSON parse.
+          if (turnEnded && !isTailCandidate(line, turnEnded, needUserActivity)) continue
+
           let obj: { type: string; [key: string]: unknown }
           try { obj = JSON.parse(line) } catch { continue }
+
+          if (turnEnded) {
+            if (turnEnded === "claude") {
+              if (obj.type !== "user" && obj.type !== "assistant" && obj.type !== "queue-operation" && obj.type !== "attachment") continue
+              meaningful.unshift(obj)
+              if (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta) needUserActivity = false
+            } else if (obj.type === "event_msg" || obj.type === "response_item") {
+              meaningful.unshift(obj)
+            }
+            continue
+          }
 
           // terminal_reason system message — session ended abnormally
           if (obj.type === "system" && (obj as { subtype?: string }).subtype === "terminal_reason") {
@@ -420,7 +459,11 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
             const payload = obj.payload as { type?: string } | undefined
             switch (payload?.type) {
               case "task_complete":
-                return { status: "completed" }
+                // Spawned collab agents may still be running — keep scanning
+                // for their lifecycle records.
+                meaningful.unshift(obj)
+                turnEnded = "codex"
+                continue
               case "task_started":
                 return { status: "processing" }
               case "agent_message":
@@ -431,15 +474,14 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
           }
 
           if (obj.type === "response_item") {
-            const payload = obj.payload as { type?: string; name?: string } | undefined
-            if (payload?.type === "function_call") {
-              return { status: "tool_use", toolName: payload.name }
+            const payload = obj.payload as { type?: string; role?: string } | undefined
+            const decides = payload?.type === "function_call"
+              || (payload?.type === "message" && (payload.role === "assistant" || payload.role === "user"))
+            if (decides) {
+              meaningful.unshift(obj)
+              return deriveSessionStatus(meaningful)
             }
-            if (payload?.type === "message") {
-              const role = (payload as { role?: string }).role
-              if (role === "assistant") return { status: "thinking" }
-              if (role === "user") return { status: "processing" }
-            }
+            continue
           }
 
           // Deferred hook_progress — prepend and return immediately
@@ -456,15 +498,28 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
             continue
           }
 
+          // Task-notification attachments in the tail mean a wakeup is being
+          // delivered — deriveSessionStatus reads them during its walk.
+          if (obj.type === "attachment") {
+            meaningful.unshift(obj)
+            continue
+          }
+
           if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {
             // Prepend so array stays in file order (oldest first)
             meaningful.unshift(obj)
 
             // Can we derive status from what we've collected?
-            // end_turn needs user context to distinguish completed vs idle, so keep scanning.
+            // end_turn needs user context and pending background-launch info,
+            // so it switches to the filtered scan instead of deciding here.
             const isEndTurn = obj.type === "assistant"
               && (obj.message as { stop_reason?: string } | undefined)?.stop_reason === "end_turn"
-            const canDerive = (obj.type === "assistant" && !isEndTurn)
+            if (isEndTurn) {
+              turnEnded = "claude"
+              needUserActivity = true
+              continue
+            }
+            const canDerive = obj.type === "assistant"
               || (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta)
             if (canDerive) return deriveSessionStatus(meaningful)
           }

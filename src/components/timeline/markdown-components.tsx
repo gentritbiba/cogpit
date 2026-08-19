@@ -140,6 +140,7 @@ function ExternalLink({
 function LocalImage({ src, alt }: { src?: string; alt?: string }) {
   const canAccessHostFiles = useCapability("hostFiles")
   const [expanded, setExpanded] = useState(false)
+  const [failedSrc, setFailedSrc] = useState<string | undefined>()
   const imageGallery = useOptionalImageGallery()
   const localImageBlocked = isLocalImagePath(src) && !canAccessHostFiles
   const resolved = localImageBlocked ? undefined : resolveImageSrc(src)
@@ -160,6 +161,14 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
     return alt ? <span className="text-muted-foreground">{alt}</span> : null
   }
 
+  if (resolved && failedSrc === resolved) {
+    return (
+      <span role="status" className="my-3 block text-xs text-muted-foreground">
+        Image unavailable{alt ? `: ${alt}` : ""}
+      </span>
+    )
+  }
+
   return (
     <>
       <button
@@ -173,6 +182,7 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
           alt={alt ?? ""}
           loading="lazy"
           decoding="async"
+          onError={() => setFailedSrc(resolved)}
           className="max-h-96 max-w-full rounded-lg object-contain"
         />
         <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
