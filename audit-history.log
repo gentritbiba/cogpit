@@ -4,8 +4,8 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
-### 2026-08-19 16:05 UTC — UI and Navigation Simplification (PLACEHOLDER)
-- **File:** `audit-history/audit-20260819T160546Z-PLACEHOLDER.md`
+### 2026-08-19 16:05 UTC — UI and Navigation Simplification (0985b69)
+- **File:** `audit-history/audit-20260819T160546Z-0985b69.md`
 - **Status:** PASS AFTER UPDATES
 - **Scope:** One searchable session list replaces the Live/Browse/Teams split;
   the dedicated team dashboard and agent context bar are removed; scripts move
@@ -18,7 +18,7 @@ Chronological record of all documentation audits for the agent-window project.
   left unchanged.
 - **Risk:** MEDIUM (visible navigation removal and `/team/:teamName` deep-link
   normalization; no server API or persisted-data change)
-- **Commit:** pending
+- **Commit:** `0985b69`
 
 ### 2026-08-19 — Background Agent Completion Status (awaiting_agents) (a233642)
 - **File:** `audit-history/audit-a233642-awaiting-agents-status.md`
