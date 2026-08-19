@@ -31,6 +31,7 @@ import { registerScriptRoutes } from "./routes/scripts"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
+import { registerSessionStatusRoutes } from "./routes/session-status"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
@@ -91,6 +92,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-file-changes", registerSessionFileChangesRoutes),
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
+  apiRoute("session-status", registerSessionStatusRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
   apiRoute("usage", registerUsageRoutes),

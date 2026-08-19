@@ -108,6 +108,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "session-file-changes": admin("/api/session-file-changes"),
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
+  "session-status": authed("/api/session-status"),
   editor: admin("/api/reveal-in-folder", "/api/open-terminal", "/api/open-in-editor"),
   worktrees: [
     { prefix: "/api/worktrees", methods: ["GET"], requires: "authed" },

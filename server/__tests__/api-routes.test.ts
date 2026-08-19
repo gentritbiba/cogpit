@@ -34,6 +34,7 @@ const CANONICAL_ROUTE_IDS = [
   "session-file-changes",
   "session-config",
   "session-context",
+  "session-status",
   "editor",
   "worktrees",
   "usage",
