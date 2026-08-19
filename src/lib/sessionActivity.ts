@@ -9,6 +9,7 @@ export const WORKING_STATUSES: ReadonlySet<string> = new Set([
   "tool_use",
   "processing",
   "compacting",
+  "awaiting_agents",
 ])
 
 /** How recently the session file must have changed to corroborate a status. */

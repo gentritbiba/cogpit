@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useEffect } from "react"
-import { Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
+import { Bot, Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { deriveSessionStatus, getStatusLabel } from "@/lib/sessionStatus"
+import { deriveSessionStatus, getStatusLabel, getTerminalReasonLabel } from "@/lib/sessionStatus"
 import { formatDuration, getTurnDuration } from "@/lib/format"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { SessionStatus, SessionStatusInfo } from "@/lib/sessionStatus"
@@ -16,6 +16,8 @@ function StatusIcon({ status }: { status: SessionStatus }) {
       return <CircleEllipsis className="size-5 text-amber-500" />
     case "compacting":
       return <ChevronsDownUp className="size-5 text-amber-500" />
+    case "awaiting_agents":
+      return <Bot className="size-5 text-blue-400" />
     case "completed":
       return <CheckCircle2 className="size-5 text-emerald-400" />
     default:
@@ -40,11 +42,12 @@ function AgentStatusLine({
   startTimestamp?: string
 }) {
   const isCompleted = status.status === "completed"
+  const pendingDescriptions = status.pendingAgentDescriptions ?? []
 
   return (
     <div
       className={cn(
-        "flex items-center gap-2.5 transition-opacity",
+        "flex items-center gap-2.5 min-w-0 transition-opacity",
         fading ? "opacity-0" : "opacity-100",
       )}
       style={{ transitionDuration: `${FADE_DURATION}ms` }}
@@ -52,7 +55,7 @@ function AgentStatusLine({
       <StatusIcon status={status.status} />
       <span
         className={cn(
-          "text-xs font-medium",
+          "text-xs font-medium shrink-0",
           !isCompleted && "text-muted-foreground",
           isCompleted && status.terminalReason && "text-amber-400",
           isCompleted && !status.terminalReason && "text-green-400",
@@ -63,8 +66,16 @@ function AgentStatusLine({
       {!isCompleted && startTimestamp && (
         <LiveElapsed startTimestamp={startTimestamp} />
       )}
+      {pendingDescriptions.length > 0 && (
+        <span
+          className="text-[10px] text-muted-foreground/60 truncate"
+          title={pendingDescriptions.join("\n")}
+        >
+          {pendingDescriptions.join(" · ")}
+        </span>
+      )}
       {(status.pendingQueue ?? 0) > 0 && (
-        <span className="text-[10px] text-muted-foreground/60 ml-1">
+        <span className="text-[10px] text-muted-foreground/60 ml-1 shrink-0">
           +{status.pendingQueue} queued
         </span>
       )}
@@ -72,6 +83,11 @@ function AgentStatusLine({
   )
 }
 
+/**
+ * "Done" flashes with the turn duration, then settles into a persistent
+ * "Waiting for your input" line — the signal that the agent is truly idle
+ * (no running turn, no background agents) and the next move is the user's.
+ */
 function CompletedAgentStatus({
   status,
   durationLabel,
@@ -79,36 +95,50 @@ function CompletedAgentStatus({
   status: SessionStatusInfo
   durationLabel: string | null
 }) {
-  const [fadePhase, setFadePhase] = useState<"visible" | "fading" | "hidden">("visible")
+  const [fadePhase, setFadePhase] = useState<"visible" | "fading" | "ready">("visible")
 
   useEffect(() => {
     const fadeTimer = setTimeout(() => setFadePhase("fading"), FADE_DELAY)
-    const hideTimer = setTimeout(
-      () => setFadePhase("hidden"),
+    const readyTimer = setTimeout(
+      () => setFadePhase("ready"),
       FADE_DELAY + FADE_DURATION,
     )
     return () => {
       clearTimeout(fadeTimer)
-      clearTimeout(hideTimer)
+      clearTimeout(readyTimer)
     }
   }, [])
 
-  const label = getStatusLabel(status.status, status.toolName, status.terminalReason) ?? "Done"
-  const showStatus = fadePhase !== "hidden"
-  if (!showStatus && !durationLabel) return null
+  if (fadePhase === "ready") {
+    return (
+      <div className="flex items-center gap-2.5 py-3 px-4" data-agent-ready>
+        <CheckCircle2 className="size-4 shrink-0 text-emerald-400/80" />
+        <span className={cn(
+          "text-xs font-medium",
+          status.terminalReason ? "text-amber-400" : "text-muted-foreground",
+        )}>
+          {status.terminalReason ? getTerminalReasonLabel(status.terminalReason) : "Waiting for your input"}
+        </span>
+        {durationLabel && (
+          <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+            {durationLabel}
+          </span>
+        )}
+      </div>
+    )
+  }
 
+  const label = getStatusLabel(status.status, status.toolName, status.terminalReason) ?? "Done"
   return (
     <div className="flex items-center gap-2.5 py-3 px-4">
-      {showStatus && (
-        <AgentStatusLine
-          status={status}
-          label={label}
-          fading={fadePhase === "fading"}
-        />
-      )}
+      <AgentStatusLine
+        status={status}
+        label={label}
+        fading={fadePhase === "fading"}
+      />
       {durationLabel && (
         <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
-          {showStatus ? "in " : ""}{durationLabel}
+          in {durationLabel}
         </span>
       )}
     </div>
@@ -121,6 +151,23 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
   // Suppress stale "completed" when isLive transitions false→true (new turn starting).
   // Without this, the old "Done" briefly flashes before the new user message arrives.
   const [suppressCompleted, setSuppressCompleted] = useState(false)
+  // Once a completion was witnessed live, keep showing "Waiting for your input"
+  // even after the SSE stale timer flips isLive off — the whole point of the
+  // ready indicator is surviving the quiet stretch until the user comes back.
+  const [readyLatched, setReadyLatched] = useState(false)
+
+  // The component stays mounted across session switches, so both latches are
+  // per-session state that must reset with the session identity — otherwise a
+  // ready latch earned in one session leaks a "Waiting for your input" line
+  // into every archived session opened after it. Reset during render (not in
+  // an effect) so the stale latch never paints a frame.
+  const sessionId = session?.sessionId
+  const [latchedSessionId, setLatchedSessionId] = useState(sessionId)
+  if (sessionId !== latchedSessionId) {
+    setLatchedSessionId(sessionId)
+    setSuppressCompleted(false)
+    setReadyLatched(false)
+  }
 
   const derivedStatus = useMemo(() => {
     if (!session || sseState !== "connected") return null
@@ -139,25 +186,35 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     if (!derivedStatus || derivedStatus.status === "compacting" || derivedStatus.status === "idle") return
 
     if (!isLive) {
-      if (derivedStatus.status === "completed") setSuppressCompleted(true)
+      if (derivedStatus.status === "completed" && !readyLatched) setSuppressCompleted(true)
       return
     }
 
+    if (derivedStatus.status === "completed") {
+      setReadyLatched(true)
+      return
+    }
     // A non-completed status means a new turn has genuinely started.
-    if (derivedStatus.status !== "completed") setSuppressCompleted(false)
-  }, [derivedStatus, isLive])
+    setSuppressCompleted(false)
+    setReadyLatched(false)
+  }, [derivedStatus, isLive, readyLatched])
 
   const agentStatus = useMemo(() => {
     if (!derivedStatus) return null
 
     // Compaction remains visible even while ordinary live output is paused.
     if (derivedStatus.status === "compacting") return derivedStatus
-    if (!isLive || derivedStatus.status === "idle") return null
 
-    // Suppress a completed status carried over from the previous turn.
-    if (derivedStatus.status === "completed" && suppressCompleted) return null
+    // A completed status witnessed live persists as the ready indicator.
+    if (derivedStatus.status === "completed") {
+      if (suppressCompleted) return null
+      if (!isLive && !readyLatched) return null
+      return derivedStatus
+    }
+
+    if (!isLive || derivedStatus.status === "idle") return null
     return derivedStatus
-  }, [derivedStatus, isLive, suppressCompleted])
+  }, [derivedStatus, isLive, suppressCompleted, readyLatched])
 
   const isCompleted = agentStatus?.status === "completed"
   const lastTurn = session?.turns[session.turns.length - 1] ?? null
@@ -194,7 +251,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
     return <CompletedAgentStatus status={agentStatus} durationLabel={durationLabel} />
   }
 
-  const label = getStatusLabel(agentStatus.status, agentStatus.toolName, agentStatus.terminalReason)
+  const label = getStatusLabel(agentStatus.status, agentStatus.toolName, agentStatus.terminalReason, agentStatus.pendingAgents)
   if (!label) return null
 
   return (

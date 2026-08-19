@@ -21,6 +21,8 @@ export interface ActiveSessionInfo {
   agentStatus?: SessionStatus
   agentToolName?: string
   agentTerminalReason?: string
+  /** Background agents still running while the turn has ended (awaiting_agents). */
+  agentPendingAgents?: number
   /** Agent-team name when this session is a teammate's own session. */
   teamName?: string
   /** Member name within the team (for example, "cc-research"). */

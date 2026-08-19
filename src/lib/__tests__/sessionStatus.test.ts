@@ -225,6 +225,229 @@ describe("deriveSessionStatus — deferred", () => {
   })
 })
 
+// ── Background agents / tasks (Claude) ─────────────────────────────────────
+
+/** A user line recording a background Agent/Workflow launch. */
+function asyncLaunch(toolUseId: string, taskId: string, description?: string) {
+  return {
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: toolUseId, content: "Async agent launched successfully." }],
+    },
+    toolUseResult: { isAsync: true, status: "async_launched", agentId: taskId, description },
+  }
+}
+
+function notificationText(toolUseId: string, taskId: string) {
+  return `<task-notification>\n<task-id>${taskId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>completed</status>\n</task-notification>`
+}
+
+const userPrompt = { type: "user", message: { role: "user", content: "go do things" } }
+const endTurn = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } }
+
+describe("deriveSessionStatus — background agents (Claude)", () => {
+  it("returns awaiting_agents when end_turn but a launched agent has not notified", () => {
+    const result = deriveSessionStatus([
+      userPrompt,
+      asyncLaunch("tu1", "ag1", "Explore the parser"),
+      endTurn,
+    ])
+    expect(result.status).toBe("awaiting_agents")
+    expect(result.pendingAgents).toBe(1)
+    expect(result.pendingAgentDescriptions).toEqual(["Explore the parser"])
+  })
+
+  it("returns completed once the task-notification was consumed as a user message", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "user", message: { role: "user", content: notificationText("tu1", "ag1") } },
+      { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("matches notifications by task-id alone (agentId)", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "user", message: { role: "user", content: [{ type: "text", text: notificationText("other", "ag1") }] } },
+      endTurn,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("counts only the still-pending launches", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1", "first"),
+      asyncLaunch("tu2", "ag2", "second"),
+      endTurn,
+      { type: "user", message: { role: "user", content: notificationText("tu1", "ag1") } },
+      endTurn,
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("awaiting_agents")
+    expect(result.pendingAgents).toBe(1)
+    expect(result.pendingAgentDescriptions).toEqual(["second"])
+  })
+
+  it("treats a TaskStop call as resolving the stopped task", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "ts1", name: "TaskStop", input: { task_id: "ag1" } }] } },
+      { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "ts1", content: "stopped" }] } },
+      endTurn,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("returns processing while a completion notification is queued but not delivered", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "queue-operation", operation: "enqueue", content: notificationText("tu1", "ag1") },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("processing")
+    // Internal wakeups are not user-queued prompts
+    expect(result.pendingQueue).toBe(0)
+  })
+
+  it("returns processing while a notification attachment is being delivered", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "queue-operation", operation: "enqueue", content: notificationText("tu1", "ag1") },
+      { type: "queue-operation", operation: "remove", content: notificationText("tu1", "ag1") },
+      { type: "attachment", attachment: { type: "queued_command", prompt: notificationText("tu1", "ag1"), commandMode: "task-notification" } },
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("processing")
+  })
+
+  it("returns completed after the delivered notification was processed in a later turn", () => {
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "queue-operation", operation: "enqueue", content: notificationText("tu1", "ag1") },
+      { type: "queue-operation", operation: "remove", content: notificationText("tu1", "ag1") },
+      { type: "attachment", attachment: { type: "queued_command", prompt: notificationText("tu1", "ag1"), commandMode: "task-notification" } },
+      { type: "user", message: { role: "user", content: notificationText("tu1", "ag1") } },
+      endTurn,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("does not treat a background Bash task as a pending agent", () => {
+    const msgs = [
+      userPrompt,
+      {
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu9", content: "Command running in background with ID: bay1" }] },
+        toolUseResult: { stdout: "", stderr: "", backgroundTaskId: "bay1" },
+      },
+      endTurn,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("treats a consumed notification as delivered even when its enqueue has no remove", () => {
+    // Real transcripts write far more notification enqueues than removes; the
+    // wakeup must not read as "processing" forever once the notification was
+    // consumed as a user message and the agent finished the follow-up turn.
+    const msgs = [
+      userPrompt,
+      asyncLaunch("tu1", "ag1"),
+      endTurn,
+      { type: "queue-operation", operation: "enqueue", content: notificationText("tu1", "ag1") },
+      { type: "user", message: { role: "user", content: notificationText("tu1", "ag1") } },
+      endTurn,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("keeps user-queued prompts in pendingQueue while excluding notifications", () => {
+    const msgs = [
+      userPrompt,
+      endTurn,
+      { type: "queue-operation", operation: "enqueue", content: "real user prompt" },
+      { type: "queue-operation", operation: "enqueue", content: notificationText("tu1", "ag1") },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.pendingQueue).toBe(1)
+  })
+})
+
+// ── Background agents (Codex collab) ────────────────────────────────────────
+
+describe("deriveSessionStatus — Codex collab agents", () => {
+  const sessionMeta = { type: "session_meta", payload: { id: "x" } }
+  const taskComplete = { type: "event_msg", payload: { type: "task_complete" } }
+
+  function spawn(callId: string, agentId: string) {
+    return [
+      { type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: callId, arguments: `{"message":"do work","task_name":"researcher"}` } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: callId, output: `{"agent_id":"${agentId}","task_name":"/root/researcher"}` } },
+    ]
+  }
+
+  it("returns awaiting_agents when task_complete but a spawned agent is still running", () => {
+    const result = deriveSessionStatus([sessionMeta, ...spawn("c1", "agA"), taskComplete])
+    expect(result.status).toBe("awaiting_agents")
+    expect(result.pendingAgents).toBe(1)
+  })
+
+  it("returns completed once wait_agent reports the agent finished", () => {
+    const msgs = [
+      sessionMeta,
+      ...spawn("c1", "agA"),
+      { type: "response_item", payload: { type: "function_call", name: "wait_agent", call_id: "c2", arguments: "{}" } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "c2", output: `{"status":{"agA":{"completed":"done"}}}` } },
+      taskComplete,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("returns completed when the agent sent FINAL_ANSWER", () => {
+    const msgs = [
+      sessionMeta,
+      ...spawn("c1", "agA"),
+      { type: "event_msg", payload: { type: "sub_agent_activity", agent_thread_id: "agA", agent_path: "/root/researcher", kind: "started", event_id: "c1" } },
+      { type: "response_item", payload: { type: "agent_message", author: "/root/researcher", recipient: "/root", content: [{ type: "input_text", text: "Message Type: FINAL_ANSWER\nPayload:\nall done" }] } },
+      taskComplete,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("handles agent-id renumbering between spawn output and activity events", () => {
+    const msgs = [
+      sessionMeta,
+      ...spawn("c1", "prov1"),
+      { type: "event_msg", payload: { type: "sub_agent_activity", agent_thread_id: "threadZ", agent_path: "/root/researcher", kind: "started", event_id: "c1" } },
+      { type: "event_msg", payload: { type: "sub_agent_activity", agent_thread_id: "threadZ", agent_path: "/root/researcher", kind: "interrupted" } },
+      taskComplete,
+    ]
+    expect(deriveSessionStatus(msgs).status).toBe("completed")
+  })
+
+  it("normalizes collab tool names for the tool_use status", () => {
+    const msgs = [
+      sessionMeta,
+      { type: "response_item", payload: { type: "function_call", name: "collab__waitAgent", call_id: "c2" } },
+    ]
+    const result = deriveSessionStatus(msgs)
+    expect(result.status).toBe("tool_use")
+    expect(result.toolName).toBe("wait_agent")
+  })
+})
+
 describe("getStatusLabel", () => {
   it("returns null for idle", () => {
     expect(getStatusLabel("idle")).toBeNull()
@@ -265,6 +488,17 @@ describe("getStatusLabel", () => {
 
   it("returns Done for completed", () => {
     expect(getStatusLabel("completed")).toBe("Done")
+  })
+
+  it("labels awaiting_agents with the pending count", () => {
+    expect(getStatusLabel("awaiting_agents", undefined, undefined, 2)).toBe("Waiting on 2 agents...")
+    expect(getStatusLabel("awaiting_agents", undefined, undefined, 1)).toBe("Waiting on 1 agent...")
+    expect(getStatusLabel("awaiting_agents")).toBe("Waiting on agents...")
+  })
+
+  it("returns Running agents... for Codex collab tools", () => {
+    expect(getStatusLabel("tool_use", "wait_agent")).toBe("Running agents...")
+    expect(getStatusLabel("tool_use", "spawn_agent")).toBe("Running agents...")
   })
 })
 

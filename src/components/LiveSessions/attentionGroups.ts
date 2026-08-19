@@ -1,5 +1,5 @@
 import { sortSessionsByRecency } from "@/lib/sessionOrdering"
-import { isSessionActive } from "@/lib/sessionActivity"
+import { isSessionActive, WORKING_STATUSES } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /**
@@ -27,8 +27,6 @@ export interface AttentionGroups {
 function isTeammate(s: ActiveSessionInfo): boolean {
   return !!(s.teamName && s.agentName)
 }
-
-const WORKING_STATUSES = new Set(["thinking", "tool_use", "processing", "compacting"])
 
 /**
  * Triage sessions into "needs you" and "working" buckets, newest-first.
@@ -98,6 +96,7 @@ export function workingChip(s: ActiveSessionInfo): string {
     case "thinking": return "Thinking"
     case "processing": return "Processing"
     case "compacting": return "Compacting"
+    case "awaiting_agents": return "Agents running"
     default: return "Running"
   }
 }

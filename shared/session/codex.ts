@@ -6,6 +6,7 @@ import {
 } from "./codex-patches"
 import {
   inferToolError,
+  normalizeFunctionName,
   normalizePlanToTodos,
   parseCustomToolOutput,
 } from "./codex-tool-normalization"
@@ -187,35 +188,6 @@ function buildCodexUserContent(
     ...audio,
     ...(text ? [{ type: "text" as const, text }] : []),
   ]
-}
-
-function normalizeFunctionName(rawName: string): string {
-  // Current collaboration tools carry a namespace separately, but older and
-  // transitional rollouts also encoded it in the function name itself.
-  const leaf = rawName
-    .split(/(?:__|[.:/])+/)
-    .filter(Boolean)
-    .at(-1) ?? rawName
-
-  const aliases: Record<string, string> = {
-    spawnAgent: "spawn_agent",
-    waitAgent: "wait_agent",
-    sendMessage: "send_message",
-    followupTask: "followup_task",
-    listAgents: "list_agents",
-    interruptAgent: "interrupt_agent",
-  }
-  const canonicalCollaborationNames = new Set([
-    "spawn_agent",
-    "wait_agent",
-    "send_message",
-    "followup_task",
-    "list_agents",
-    "interrupt_agent",
-  ])
-  if (aliases[leaf]) return aliases[leaf]
-  if (canonicalCollaborationNames.has(leaf)) return leaf
-  return rawName
 }
 
 interface InterAgentMessage {

@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { writeFile, rm, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getCodexSessionIdentity, getSessionMeta } from "../sessionMetadata"
+import { getCodexSessionIdentity, getSessionMeta, getSessionStatus } from "../sessionMetadata"
 
 const cleanups: string[] = []
 
@@ -134,5 +134,80 @@ describe("getSessionMeta agent-team tags", () => {
     const meta = await getSessionMeta(filePath)
     expect(meta.teamName).toBe("")
     expect(meta.agentName).toBe("")
+  })
+})
+
+describe("getSessionStatus background agents", () => {
+  const endTurn = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } }
+
+  function asyncLaunch(toolUseId: string, agentId: string, description: string) {
+    return {
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: toolUseId, content: "Async agent launched successfully." }],
+      },
+      toolUseResult: { isAsync: true, status: "async_launched", agentId, description },
+    }
+  }
+
+  it("keeps scanning past the decision point to find pending background launches", async () => {
+    const filePath = await writeSession([
+      userLine("kick off the agents"),
+      asyncLaunch("tu1", "ag1", "Explore the parser"),
+      // Ordinary tool activity between the launch and the end of the turn —
+      // a single-phase scan would stop at the tool_result user line below.
+      { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", id: "t2", name: "Read", input: {} }] } },
+      { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", content: "file contents" }] } },
+      endTurn,
+    ])
+
+    const status = await getSessionStatus(filePath)
+    expect(status.status).toBe("awaiting_agents")
+    expect(status.pendingAgents).toBe(1)
+    expect(status.pendingAgentDescriptions).toEqual(["Explore the parser"])
+  })
+
+  it("returns completed once the launch has a task-notification", async () => {
+    const filePath = await writeSession([
+      userLine("kick off the agents"),
+      asyncLaunch("tu1", "ag1", "Explore the parser"),
+      endTurn,
+      {
+        type: "user",
+        message: { role: "user", content: "<task-notification>\n<task-id>ag1</task-id>\n<tool-use-id>tu1</tool-use-id>\n<status>completed</status>\n</task-notification>" },
+      },
+      endTurn,
+    ])
+
+    const status = await getSessionStatus(filePath)
+    expect(status.status).toBe("completed")
+  })
+
+  it("reports awaiting_agents for a Codex session with running collab agents", async () => {
+    const filePath = await writeSession([
+      { type: "session_meta", payload: { id: "codex-1", cwd: "/tmp/proj" } },
+      { type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "c1", arguments: "{\"message\":\"go\",\"task_name\":\"researcher\"}" } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "{\"agent_id\":\"agA\",\"task_name\":\"/root/researcher\"}" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ])
+
+    const status = await getSessionStatus(filePath)
+    expect(status.status).toBe("awaiting_agents")
+    expect(status.pendingAgents).toBe(1)
+  })
+
+  it("reports completed for a Codex session whose collab agents finished", async () => {
+    const filePath = await writeSession([
+      { type: "session_meta", payload: { id: "codex-1", cwd: "/tmp/proj" } },
+      { type: "response_item", payload: { type: "function_call", name: "spawn_agent", call_id: "c1", arguments: "{\"message\":\"go\"}" } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "{\"agent_id\":\"agA\"}" } },
+      { type: "response_item", payload: { type: "function_call", name: "wait_agent", call_id: "c2", arguments: "{}" } },
+      { type: "response_item", payload: { type: "function_call_output", call_id: "c2", output: "{\"status\":{\"agA\":{\"completed\":\"done\"}}}" } },
+      { type: "event_msg", payload: { type: "task_complete" } },
+    ])
+
+    const status = await getSessionStatus(filePath)
+    expect(status.status).toBe("completed")
   })
 })

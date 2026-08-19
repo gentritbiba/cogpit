@@ -59,10 +59,12 @@ curl -s "$BASE/api/session-status/$SESSION_ID"
 ```
 
 - `running`: a turn is in flight right now. This is the primary completion signal for sessions Cogpit manages: it flips true as soon as the server accepts a message (before `send-message` even responds) and false exactly at the turn boundary, so it does not suffer the JSONL flush lag that `status` does. Poll until it is `false`.
-- `status`: `idle` | `thinking` | `tool_use` | `processing` | `completed` | `compacting` | `deferred`, derived from the session JSONL tail. Use it as the fallback for sessions the server does not manage (started in a terminal, or before a server restart): treat `completed`, `idle`, `deferred`, or any `terminalReason` as terminal. It can briefly report the previous turn's `completed` right after a send, so prefer `running` when it is available.
+- `status`: one of `idle` | `thinking` | `tool_use` | `processing` | `completed` | `compacting` | `deferred` | `awaiting_agents`, derived from the session JSONL tail. Terminal statuses: `completed`, `idle`, `deferred`, or any `terminalReason`. **Non-terminal:** `awaiting_agents` means the turn ended but background agents/workflows are still running; the session will resume by itself when they notify. For sessions the server does not manage (started in a terminal, or before a server restart), treat terminal statuses as the end of turn. It can briefly report the previous turn's `completed` right after a send, so prefer `running` when it is available.
 - `live`: the server holds an open SDK query or process that can take follow-ups without a resume. Stays `true` between turns for SDK and legacy sessions; native Codex sessions only report `live` during a turn.
 - `pendingQueue`: user messages queued but not yet processed. Wait for it to hit 0 as well if you sent several messages back to back.
 - `terminalReason`: set when the session ended abnormally.
+- `pendingAgents`: (only when `status === "awaiting_agents"`) number of background agents/workflows still running.
+- `pendingAgentDescriptions`: (only when `status === "awaiting_agents"`) short descriptions of pending agents, oldest first.
 
 Poll loop:
 
@@ -187,7 +189,7 @@ Parsed session overview: turn summaries, tool call counts, token totals. Much ea
 
 ### GET /api/session-status/:sessionId
 
-`{ sessionId, live, running, status, toolName?, pendingQueue?, terminalReason? }`. See "Detecting turn completion". 404 if the session doesn't exist.
+`{ sessionId, live, running, status, toolName?, pendingQueue?, terminalReason?, pendingAgents?, pendingAgentDescriptions? }`. See "Detecting turn completion". 404 if the session doesn't exist. `pendingAgents` and `pendingAgentDescriptions` are only present when `status === "awaiting_agents"`.
 
 ### GET /api/find-session/:sessionId
 
@@ -195,7 +197,7 @@ Resolve a bare sessionId to `{ dirName, fileName }`.
 
 ### GET /api/active-sessions
 
-Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
+Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
 
 ### GET /api/running-processes
 

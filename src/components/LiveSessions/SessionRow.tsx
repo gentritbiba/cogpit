@@ -73,7 +73,7 @@ export function SessionRow({
   const statusLabel = isLive
     ? (isNativeIdle
         ? "Running"
-        : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Running")
+        : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? "Running")
     : null
   // Left-edge status dot. Recent (dead) sessions get no dot.
   const dotState = isDeferred

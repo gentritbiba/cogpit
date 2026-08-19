@@ -71,7 +71,7 @@ function StripRow({
   onResume,
   onPrefetch,
 }: StripRowProps) {
-  const statusLabel = getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? chip.label
+  const statusLabel = getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? chip.label
   const { onHoverStart, onHoverEnd } = useHoverPrefetch(onPrefetch)
   return (
     <Tooltip>

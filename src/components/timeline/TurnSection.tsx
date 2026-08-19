@@ -14,6 +14,7 @@ import { BranchIndicator } from "@/components/BranchIndicator"
 import { LiveElapsed } from "./AgentStatusIndicator"
 import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
+import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
@@ -45,8 +46,6 @@ interface TurnSectionProps {
   branchCount?: number
 }
 
-/** Statuses that indicate the agent is still working (turn not yet done). */
-const ACTIVE_STATUSES = new Set(["thinking", "tool_use", "processing"])
 
 // ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
@@ -63,7 +62,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
     const { status } = deriveSessionStatus(
       session.rawMessages as Array<{ type: string; [key: string]: unknown }>
     )
-    isTurnDone = !ACTIVE_STATUSES.has(status)
+    isTurnDone = !WORKING_STATUSES.has(status)
   }
 
   const cwd = session?.cwd ?? ""
@@ -171,7 +170,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       {isNear ? (
         <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
           {turn.userMessage && (
-            <div className={cn(
+            <div data-turn-prompt className={cn(
               isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
               isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
             )}>
@@ -321,6 +320,8 @@ function ContentBlocks({
   skillMetadata?: Map<string, SkillMeta>
 }) {
   const elements: React.ReactNode[] = []
+  // Indent for every nested block, so the rails all line up.
+  const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
 
   let i = 0
   while (i < blocks.length) {
@@ -333,7 +334,7 @@ function ContentBlocks({
       // Single tool_calls group with no thinking → render as orphan tool calls
       if (items.length === 1 && items[0].kind === "tool_calls") {
         elements.push(
-          <div key={`tools-${i}`} className={cn(NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`tools-${i}`} className={cn(NEST_RAIL, nestIndent)}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -346,7 +347,7 @@ function ContentBlocks({
       // Mixed or multiple items → grouped collapsible
       } else {
         elements.push(
-          <div key={`activity-${i}`} className={cn(NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`activity-${i}`} className={cn(NEST_RAIL, nestIndent)}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -378,7 +379,7 @@ function ContentBlocks({
               compact={isMobile}
             />
             {hasFollowingActivity && (
-              <div className={cn("mt-1.5", NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+              <div className={cn("mt-1.5", NEST_RAIL, nestIndent)}>
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
@@ -419,7 +420,7 @@ function ContentBlocks({
 
     if (block.kind === "sub_agent") {
       elements.push(
-        <div key={`agent-${i}`} className={cn(AGENT_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
           <SubAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -429,7 +430,7 @@ function ContentBlocks({
 
     if (block.kind === "background_agent") {
       elements.push(
-        <div key={`bg-agent-${i}`} className={cn(AGENT_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`bg-agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )

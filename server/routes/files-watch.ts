@@ -451,21 +451,24 @@ export function registerFileWatchRoutes(use: UseFn) {
       if (!closed) flushNewLines()
     }, POLL_MS)
 
-    // ── In-progress compaction detection ──────────────────────────────
-    // When Claude Code compacts, it spawns a subagent with an ID like
-    // "acompact-<hash>" and writes to <sessionId>/subagents/agent-acompact-*.jsonl.
-    // Nothing is written to the parent JSONL until compaction finishes,
-    // so we poll the subagents dir and send a synthetic SSE event.
+    // ── Subagent-side activity detection ──────────────────────────────
+    // Two kinds of work write only to <sessionId>/subagents/, never to the
+    // parent JSONL while they run:
+    //   • compaction (agent-acompact-*.jsonl) — until it finishes
+    //   • background agents/workflows — until their task-notification lands
+    // The client's stale timer would fire mid-work and render the session as
+    // finished, so we poll the subagents dir and send synthetic SSE events.
     const sessionDir = sessionFilePath.replace(/\.jsonl$/, "")
     const subagentsDir = sessionDir + "/subagents"
-    // Re-announce periodically rather than latching a single event. A
-    // compaction writes nothing to the parent JSONL, so the client's stale
-    // timer would fire mid-compaction and clear the flag with no way for the
-    // server to say "still going" — the session would render as finished.
+    // Re-announce periodically rather than latching a single event, so the
+    // server keeps saying "still going" for as long as the work runs.
     let compactingSentAt = 0
-    const COMPACTING_RESEND_MS = 10_000
+    let subagentActivitySentAt = 0
+    const ACTIVITY_RESEND_MS = 10_000
+    const SUBAGENT_STAT_CAP = 100
+    let subagentTick = 0
 
-    const compactionPoller = isCodexDirName(dirName)
+    const subagentPoller = isCodexDirName(dirName)
       ? null
       : setInterval(async () => {
         if (closed) return
@@ -479,7 +482,7 @@ export function registerFileWatchRoutes(use: UseFn) {
             const s = await stat(subagentsDir + "/" + compactFile)
             const recentlyActive = Date.now() - s.mtimeMs < 30_000
             if (recentlyActive) {
-              if (Date.now() - compactingSentAt >= COMPACTING_RESEND_MS) {
+              if (Date.now() - compactingSentAt >= ACTIVITY_RESEND_MS) {
                 compactingSentAt = Date.now()
                 res.write(`data: ${JSON.stringify({ type: "compacting_in_progress" })}\n\n`)
               }
@@ -488,6 +491,27 @@ export function registerFileWatchRoutes(use: UseFn) {
             }
           } else {
             compactingSentAt = 0
+          }
+
+          // Background-agent liveness is slower-moving than compaction; check
+          // it on every fifth tick to keep the steady-state stat load small.
+          subagentTick++
+          if (subagentTick % 5 !== 0) return
+          recordActivity("Subagent activity checks")
+          const agentFiles = files
+            .filter((f) => f.startsWith("agent-") && !f.startsWith("agent-acompact") && f.endsWith(".jsonl"))
+            .slice(0, SUBAGENT_STAT_CAP)
+          let hasFreshAgent = false
+          for (const agentFile of agentFiles) {
+            const s = await stat(subagentsDir + "/" + agentFile).catch(() => null)
+            if (s && Date.now() - s.mtimeMs < 30_000) {
+              hasFreshAgent = true
+              break
+            }
+          }
+          if (hasFreshAgent && Date.now() - subagentActivitySentAt >= ACTIVITY_RESEND_MS) {
+            subagentActivitySentAt = Date.now()
+            res.write(`data: ${JSON.stringify({ type: "subagent_activity" })}\n\n`)
           }
         } catch {
           // subagents dir may not exist — that's fine
@@ -502,7 +526,7 @@ export function registerFileWatchRoutes(use: UseFn) {
     // Cleanup on disconnect
     req.on("close", () => {
       cleanup()
-      if (compactionPoller) clearInterval(compactionPoller)
+      if (subagentPoller) clearInterval(subagentPoller)
     })
   })
 }
