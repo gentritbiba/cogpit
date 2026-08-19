@@ -20,6 +20,7 @@ import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import {
   JsonResultHighlighted,
   ReadResultHighlighted,
+  type ToolResultVariant,
   tryPrettyJson,
 } from "./ToolCallResult"
 import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
@@ -47,6 +48,15 @@ const TOOL_TIER_STYLES: Record<ToolTier, string> = {
  * legible of the three.
  */
 const FAILED_TOOL_TEXT_STYLE = "text-red-400"
+const DESKTOP_RESULT_LINE_LIMIT = 8
+const DESKTOP_RESULT_CLASS =
+  "pl-3 border-l font-mono text-muted-foreground text-[11px] whitespace-pre-wrap break-all leading-[1.6]"
+const MOBILE_RESULT_CLASS =
+  "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border"
+
+function splitLogicalLines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/)
+}
 
 const TOOL_TIERS: Record<string, ToolTier> = {
   // Mutating — writes files, runs commands, spawns work, sends things out.
@@ -140,20 +150,31 @@ function ToolResultPanel({
   toolCall,
   resultExpanded,
   onToggleExpanded,
+  isMobile,
 }: {
   toolCall: ToolCall
   resultExpanded: boolean
   onToggleExpanded: () => void
+  isMobile: boolean
 }): React.ReactElement {
   const resultText = toolCall.result ?? ""
   const isLongResult = resultText.length > 1000
-  const visibleResult = isLongResult && !resultExpanded
+  const mobileVisibleResult = isLongResult && !resultExpanded
     ? resultText.slice(0, 500) + "..."
     : resultText
   const prettyJson = useMemo(
     () => (!toolCall.isError && toolCall.name !== "Read") ? tryPrettyJson(resultText) : null,
     [toolCall.isError, toolCall.name, resultText],
   )
+  const desktopResult = prettyJson ?? resultText
+  const desktopLines = useMemo(() => splitLogicalLines(desktopResult), [desktopResult])
+  const hiddenLineCount = Math.max(0, desktopLines.length - DESKTOP_RESULT_LINE_LIMIT)
+  const desktopVisibleResult = resultExpanded
+    ? desktopResult
+    : desktopLines.slice(0, DESKTOP_RESULT_LINE_LIMIT).join("\n")
+  const showExpander = isMobile ? isLongResult : hiddenLineCount > 0
+  const highlightedExpanded = !isMobile || !isLongResult || resultExpanded
+  const highlightedVariant: ToolResultVariant = isMobile ? "boxed" : "unboxed"
 
   return (
     <div className="mt-1.5">
@@ -161,35 +182,44 @@ function ToolResultPanel({
       !toolCall.isError &&
       typeof toolCall.input.file_path === "string" ? (
         <ReadResultHighlighted
-          result={resultText}
+          result={isMobile ? resultText : desktopVisibleResult}
           filePath={toolCall.input.file_path}
-          expanded={!isLongResult || resultExpanded}
+          expanded={highlightedExpanded}
+          variant={highlightedVariant}
         />
       ) : prettyJson !== null ? (
         <JsonResultHighlighted
-          result={prettyJson}
-          expanded={!isLongResult || resultExpanded}
+          result={isMobile ? prettyJson : desktopVisibleResult}
+          expanded={highlightedExpanded}
           alreadyPretty
+          variant={highlightedVariant}
         />
       ) : (
         <pre
           className={cn(
-            "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
+            isMobile ? MOBILE_RESULT_CLASS : DESKTOP_RESULT_CLASS,
             toolCall.isError
-              ? "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border-red-500/20"
-              : "text-muted-foreground bg-elevation-0 border-border/30",
+              ? cn(
+                  "text-red-700 dark:text-red-300 border-red-500/20",
+                  isMobile && "bg-red-50 dark:bg-red-950/30",
+                )
+              : isMobile && "text-muted-foreground bg-elevation-0 border-border/30",
           )}
         >
-          {visibleResult}
+          {isMobile ? mobileVisibleResult : desktopVisibleResult}
         </pre>
       )}
-      {isLongResult && (
+      {showExpander && (
         <button
           type="button"
           onClick={onToggleExpanded}
           className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
         >
-          {resultExpanded ? "Show less" : "Show more"}
+          {resultExpanded
+            ? "Show less"
+            : isMobile
+              ? "Show more"
+              : `+${hiddenLineCount} lines`}
         </button>
       )}
     </div>
@@ -349,6 +379,7 @@ export const ToolCallCard = memo(function ToolCallCard({
       toolCall={toolCall}
       resultExpanded={resultExpanded}
       onToggleExpanded={() => setResultExpanded(!resultExpanded)}
+      isMobile={isMobile}
     />
   ) : null
 

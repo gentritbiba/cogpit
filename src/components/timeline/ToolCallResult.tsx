@@ -4,8 +4,12 @@ import { getLangFromPath, highlightCode } from "@/lib/shiki"
 
 type TokenLine = Array<{ content: string; color?: string }>
 
-const CODE_BLOCK_CLASS =
+export type ToolResultVariant = "boxed" | "unboxed"
+
+const BOXED_CODE_BLOCK_CLASS =
   "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]"
+const DESKTOP_RESULT_CLASS =
+  "pl-3 border-l font-mono text-muted-foreground text-[11px] whitespace-pre-wrap break-all leading-[1.6]"
 
 function useHighlightedTokens(
   code: string,
@@ -33,13 +37,15 @@ function HighlightedCodeBlock({
   lines,
   tokens,
   lineNums,
+  variant,
 }: {
   lines: string[]
   tokens: TokenLine[] | null
   lineNums?: string[]
+  variant: ToolResultVariant
 }): React.ReactElement {
   return (
-    <pre className={CODE_BLOCK_CLASS}>
+    <pre className={variant === "boxed" ? BOXED_CODE_BLOCK_CLASS : DESKTOP_RESULT_CLASS}>
       <code className="block">
         {lines.map((line, lineIndex) => {
           const tokenLine = tokens?.[lineIndex]
@@ -68,10 +74,14 @@ function HighlightedCodeBlock({
 
 const LINE_PREFIX_RE = /^(\s*\d+)→(.*)$/
 
+function splitLogicalLines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/)
+}
+
 function parseReadResult(text: string): { lineNums: string[]; codeLines: string[] } {
   const lineNums: string[] = []
   const codeLines: string[] = []
-  for (const line of text.split("\n")) {
+  for (const line of splitLogicalLines(text)) {
     const match = line.match(LINE_PREFIX_RE)
     if (match) {
       lineNums.push(match[1])
@@ -88,10 +98,12 @@ export function ReadResultHighlighted({
   result,
   filePath,
   expanded,
+  variant = "boxed",
 }: {
   result: string
   filePath: string
   expanded: boolean
+  variant?: ToolResultVariant
 }): React.ReactElement {
   const isDark = useIsDarkMode()
   const lang = getLangFromPath(filePath)
@@ -103,7 +115,14 @@ export function ReadResultHighlighted({
   const code = useMemo(() => codeLines.join("\n"), [codeLines])
   const tokens = useHighlightedTokens(code, lang, isDark)
 
-  return <HighlightedCodeBlock lines={codeLines} tokens={tokens} lineNums={lineNums} />
+  return (
+    <HighlightedCodeBlock
+      lines={codeLines}
+      tokens={tokens}
+      lineNums={lineNums}
+      variant={variant}
+    />
+  )
 }
 
 export function tryPrettyJson(text: string): string | null {
@@ -120,10 +139,12 @@ export function JsonResultHighlighted({
   result,
   expanded,
   alreadyPretty,
+  variant = "boxed",
 }: {
   result: string
   expanded: boolean
   alreadyPretty?: boolean
+  variant?: ToolResultVariant
 }): React.ReactElement {
   const isDark = useIsDarkMode()
   const pretty = useMemo(
@@ -131,8 +152,8 @@ export function JsonResultHighlighted({
     [result, alreadyPretty],
   )
   const sliced = expanded ? pretty : pretty.slice(0, 2000)
-  const lines = useMemo(() => sliced.split("\n"), [sliced])
+  const lines = useMemo(() => splitLogicalLines(sliced), [sliced])
   const tokens = useHighlightedTokens(sliced, "json", isDark)
 
-  return <HighlightedCodeBlock lines={lines} tokens={tokens} />
+  return <HighlightedCodeBlock lines={lines} tokens={tokens} variant={variant} />
 }

@@ -447,6 +447,94 @@ describe("ToolCallCard desktop disclosure", () => {
     expect(screen.queryByText('"content"')).toBeNull()
   })
 
+  it("clamps CRLF Read results to eight lines and preserves line numbers", () => {
+    const result = Array.from(
+      { length: 10 },
+      (_, index) => `${index + 1}→line ${index + 1}`,
+    ).join("\r\n")
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "src/example.ts" }),
+      result,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Read details: src\/example\.ts/ }))
+
+    expect(screen.getByText("8")).toBeInTheDocument()
+    expect(screen.getByText("line 8")).toBeInTheDocument()
+    expect(screen.queryByText("line 9")).toBeNull()
+    const resultBlock = screen.getByText("line 1").closest("pre")
+    expect(resultBlock).toHaveClass("pl-3", "border-l", "font-mono", "text-muted-foreground")
+    expect(resultBlock).not.toHaveClass("rounded", "p-2", "max-h-96", "overflow-y-auto", "border", "bg-elevation-0")
+
+    fireEvent.click(screen.getByRole("button", { name: "+2 lines" }))
+    expect(screen.getByText("line 10")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }))
+    expect(screen.queryByText("line 9")).toBeNull()
+    expect(screen.getByRole("button", { name: "+2 lines" })).toBeInTheDocument()
+  })
+
+  it("counts formatted JSON lines before clamping", () => {
+    const result = JSON.stringify(Object.fromEntries(
+      Array.from({ length: 8 }, (_, index) => [`key${index + 1}`, index + 1]),
+    ))
+    const toolCall: ToolCall = {
+      ...makeToolCall("WebFetch", { url: "https://example.com" }),
+      result,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /WebFetch details/ }))
+
+    expect(screen.getByRole("button", { name: "+2 lines" })).toBeInTheDocument()
+    expect(screen.getByText(/"key7"/)).toBeInTheDocument()
+    expect(screen.queryByText(/"key8"/)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "+2 lines" }))
+    expect(screen.getByText(/"key8"/)).toBeInTheDocument()
+  })
+
+  it("clamps plain text results and leaves exactly eight lines unexpanded", () => {
+    const nineLineCall: ToolCall = {
+      ...makeToolCall("Grep", { pattern: "match" }),
+      result: Array.from({ length: 9 }, (_, index) => `match ${index + 1}`).join("\n"),
+    }
+
+    const { unmount } = render(<ToolCallCard toolCall={nineLineCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Grep details/ }))
+
+    expect(screen.getByRole("button", { name: "+1 lines" })).toBeInTheDocument()
+    expect(screen.queryByText("match 9")).toBeNull()
+    unmount()
+
+    const eightLineCall: ToolCall = {
+      ...makeToolCall("Grep", { pattern: "exact" }),
+      result: Array.from({ length: 8 }, (_, index) => `exact ${index + 1}`).join("\n"),
+    }
+    const { container } = render(<ToolCallCard toolCall={eightLineCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Grep details/ }))
+
+    expect(container.querySelector("pre")).toHaveTextContent("exact 8")
+    expect(screen.queryByRole("button", { name: /^\+\d+ lines$/ })).toBeNull()
+  })
+
+  it("clamps errors without boxing away their red state", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Bash", { command: "failing-command" }),
+      result: Array.from({ length: 10 }, (_, index) => `error ${index + 1}`).join("\n"),
+      isError: true,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+
+    const resultBlock = screen.getByText(/error 1/).closest("pre")
+    expect(resultBlock).toHaveClass("pl-3", "border-l", "text-red-700", "dark:text-red-300")
+    expect(resultBlock).not.toHaveClass("rounded", "p-2", "max-h-96", "overflow-y-auto", "border", "bg-red-50", "dark:bg-red-950/30")
+    expect(screen.getByRole("button", { name: "+2 lines" })).toBeInTheDocument()
+    expect(screen.queryByText(/error 9/)).toBeNull()
+  })
+
   it("keeps raw JSON input behind the nested input link", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Write", { file_path: "src/example.ts", content: "export {}" }),
@@ -461,7 +549,8 @@ describe("ToolCallCard desktop disclosure", () => {
     fireEvent.click(screen.getByRole("button", { name: "input" }))
 
     expect(disclosure).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByText(/"content"/)).toBeTruthy()
+    const inputBlock = screen.getByText(/"content"/).closest("pre")
+    expect(inputBlock).toHaveClass("rounded", "p-2", "max-h-96", "overflow-y-auto", "border")
   })
 
   it("opens only the primary panel during bulk payload expansion", () => {
@@ -1015,6 +1104,28 @@ describe("ToolCallCard mobile payload controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Result" }))
     expect(screen.getByText("Edit applied")).toBeTruthy()
+  })
+
+  it("preserves boxed, character-based result expansion", () => {
+    const result = "x".repeat(1001)
+    const toolCall: ToolCall = {
+      ...makeToolCall("Write", { file_path: "src/mobile.ts" }),
+      result,
+    }
+
+    const { container } = render(
+      <ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Expand Write tool call" }))
+    fireEvent.click(screen.getByRole("button", { name: "Result" }))
+
+    const resultBlock = container.querySelector("pre")
+    expect(resultBlock).toHaveClass("rounded", "p-2", "max-h-96", "overflow-y-auto", "border", "bg-elevation-0")
+    expect(resultBlock).toHaveTextContent(`${"x".repeat(500)}...`)
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }))
+    expect(resultBlock).toHaveTextContent(result)
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }))
+    expect(resultBlock).toHaveTextContent(`${"x".repeat(500)}...`)
   })
 })
 
