@@ -130,8 +130,10 @@ function startServerWorker(staticDir: string, userDataDir: string, isDev: boolea
     const workerPath = join(__dirname, "server-worker.js")
     serverProcess = utilityProcess.fork(workerPath)
 
-    // The worker cannot construct Notifications itself; it asks us to.
-    serverProcess.on("message", (msg: unknown) => handleWorkerNotification(msg, mainWindow))
+    // The worker cannot construct Notifications itself; it asks us to. Clicks
+    // are reported back so notification history reflects them.
+    serverProcess.on("message", (msg: unknown) =>
+      handleWorkerNotification(msg, mainWindow, (reply) => serverProcess?.postMessage(reply)))
 
     // ...and it cannot see window focus, so we tell it when to use the phone.
     reportAttention = startAttentionReporting(

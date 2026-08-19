@@ -90,7 +90,7 @@ export async function createServerComposition(
   // Block data APIs until configuration exists, while leaving bootstrap and
   // discovery endpoints available.
   app.use("/api", (req, res, next) => {
-    const exempt = ["/config", "/notify", "/hello", "/me", "/team/bootstrap", "/auth"]
+    const exempt = ["/config", "/hello", "/me", "/team/bootstrap", "/auth"]
     if (exempt.some((prefix) => prefixMatches(req.path, prefix))) return next()
     if (!getConfig()) {
       res.status(503).json({ error: "Not configured", code: "NOT_CONFIGURED" })

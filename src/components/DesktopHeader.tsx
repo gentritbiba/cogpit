@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { LeakIndicator } from "@/components/LeakIndicator"
+import { NotificationsBell } from "@/components/NotificationsBell"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { LiveIndicator, HeaderIconButton } from "@/components/header-shared"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
@@ -146,6 +147,8 @@ export const DesktopHeader = memo(function DesktopHeader({
       <TokenUsageIndicator agentKind={activeAgentKind} />
 
       <LeakIndicator />
+
+      <NotificationsBell />
 
       <DeviceSwitcher />
 

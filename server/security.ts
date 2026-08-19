@@ -691,11 +691,10 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
 /**
  * Team edition flips the trust model: a loopback socket is no longer a trust
  * boundary, so every request must present a valid principal-carrying session
- * token regardless of where it came from. Local trust survives only for the
- * /api/notify agent hooks, and the first-admin bootstrap stays reachable only
- * while the users store is initialized and empty (the route then verifies its
- * process-local one-time token). Both carve-outs admit unauthenticated requests,
- * so they still demand a trusted mutation source:
+ * token regardless of where it came from. The first-admin bootstrap stays
+ * reachable only while the users store is initialized and empty (the route then
+ * verifies its process-local one-time token). That carve-out admits
+ * unauthenticated requests, so it still demands a trusted mutation source:
  * a cross-site page in a local browser gets 403 while headerless curl/agent
  * clients pass. The networkAccess/networkPassword config is ignored — user
  * credentials replace the network password entirely.
@@ -709,10 +708,9 @@ function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: Nex
   }
 
   const path = url.split("?")[0]
-  const notifyCarveOut = path === "/api/notify" && isTrustedDirectLocalRequest(req)
   const bootstrapCarveOut =
     path === "/api/team/bootstrap" && isUsersStoreInitialized() && userCount() === 0
-  if (notifyCarveOut || bootstrapCarveOut) {
+  if (bootstrapCarveOut) {
     if (!hasTrustedMutationSource(req)) {
       return sendJson(res, 403, { error: "Untrusted request source" })
     }

@@ -7,7 +7,9 @@ import { createAppServer } from "./server.ts"
 import { getConfig } from "../server/config"
 import { removePortFile, writePortFile } from "../server/lib/portFile"
 import { setDesktopAttention } from "../server/lib/desktopAttention"
-import { isDesktopAttentionMessage } from "../shared/notifications"
+import { startSessionActivityMonitor } from "../server/lib/sessionActivityMonitor"
+import { markNotificationsRead } from "../server/lib/notificationHistory"
+import { isDesktopAttentionMessage, isNotificationClickedMessage } from "../shared/notifications"
 
 interface WorkerConfig {
   staticDir: string
@@ -45,6 +47,7 @@ async function start({ staticDir, userDataDir, isDev }: WorkerConfig): Promise<v
     process.on("exit", removePortFile)
 
     console.log(`[server-worker] Cogpit server listening on http://${listenHost}:${port}`)
+    startSessionActivityMonitor()
     process.parentPort.postMessage({ type: "ready", port })
   } catch (err) {
     console.error("[server-worker] Failed to start server:", err)
@@ -57,6 +60,13 @@ process.parentPort.on("message", ({ data }: { data: unknown }) => {
   // message must be dispatched by shape — not assumed to be the boot config.
   if (isDesktopAttentionMessage(data)) {
     setDesktopAttention(data.attended)
+    return
+  }
+
+  if (isNotificationClickedMessage(data)) {
+    void markNotificationsRead([data.historyId]).catch((err: unknown) => {
+      console.error("[server-worker] Failed to mark notification read:", err)
+    })
     return
   }
 

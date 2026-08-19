@@ -14,13 +14,14 @@ import { registerEditorRoutes } from "./routes/editor"
 import { registerFileContentRoutes } from "./routes/file-content"
 import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerFileRoutes } from "./routes/files"
+import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerMcpRoutes } from "./routes/mcp"
 import { registerMissionControlRoutes } from "./routes/mission-control"
 import { registerModelRoutes } from "./routes/models"
-import { registerNotifyRoutes } from "./routes/notify"
+import { registerNotificationRoutes } from "./routes/notifications"
 import { registerPerformanceRoutes } from "./routes/performance"
 import { registerPermissionRoutes } from "./routes/permissions"
 import { registerPortRoutes } from "./routes/ports"
@@ -103,8 +104,9 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("project-files", registerProjectFileRoutes),
   apiRoute("project-file", registerProjectFileContentRoutes),
   apiRoute("git-status", registerGitStatusRoutes),
+  apiRoute("git-diff", registerGitDiffRoutes),
   apiRoute("mcp", registerMcpRoutes),
-  apiRoute("notify", registerNotifyRoutes),
+  apiRoute("notifications", registerNotificationRoutes),
   apiRoute("scripts", registerScriptRoutes),
   apiRoute("permissions", registerPermissionRoutes),
   apiRoute("mission-control", registerMissionControlRoutes),

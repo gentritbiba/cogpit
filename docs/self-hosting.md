@@ -197,11 +197,6 @@ password of the team account to connect as; everything done through the hub acts
 user. Prefer a dedicated team account per hub over a person's own — the hub machine stores
 that password, and a dedicated account can be rotated or disabled on its own.
 
-### Agent hooks
-
-`/api/notify` still accepts unauthenticated posts from local processes, so agent hooks on
-the box keep working without a login.
-
 ### Security notes
 
 - Local processes are **not** trusted in team edition. Everyone logs in, including clients
