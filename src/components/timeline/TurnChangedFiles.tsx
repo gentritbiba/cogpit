@@ -1,8 +1,9 @@
-import { useMemo, useState, useEffect, memo } from "react"
-import { ChevronDown, ChevronRight, Folder, ChevronsDownUp, ChevronsUpDown, FileCode2 } from "lucide-react"
+import { useMemo, useState, memo } from "react"
+import { ChevronDown, ChevronRight, Folder, FileCode2 } from "lucide-react"
 import { diffLineCount } from "@/lib/diffUtils"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { OpIndicator, SubAgentIndicator } from "@/components/FileChangesPanel/file-change-indicators"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
 import type { Turn, ToolCall } from "@/lib/types"
@@ -204,9 +205,6 @@ function buildFileTree(changes: FileChangeInfo[], cwd: string): TreeNode[] {
   return toTree(root, "")
 }
 
-// ── Change bar (GitHub-style colored blocks) ────────────────────────────────
-
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 interface TurnChangedFilesProps {
@@ -219,6 +217,7 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
   const canAccessHostFiles = useCapability("hostFiles")
   const fileChanges = useMemo(() => computeTurnFileChanges(turn), [turn])
   const tree = useMemo(() => buildFileTree(fileChanges, cwd), [fileChanges, cwd])
+  const [expanded, setExpanded] = useState(false)
 
   const totals = useMemo(() => {
     let add = 0
@@ -230,49 +229,45 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
     return { add, del }
   }, [fileChanges])
 
-  const [allExpanded, setAllExpanded] = useState(true)
-
   if (fileChanges.length === 0) return null
 
   return (
-    <div className="border-l border-border/40 pl-3 ml-1">
-      {/* Header */}
-      <div className="flex items-center gap-2 py-1">
-        <FileCode2 className="size-3.5 text-muted-foreground/50" />
-        <span className="text-[11px] font-medium text-muted-foreground/70">
-          {fileChanges.length} file{fileChanges.length !== 1 ? "s" : ""} changed
+    <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <CollapsibleTrigger
+        className="group/files flex min-h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left text-[11px] text-muted-foreground/55 outline-none transition-colors hover:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      >
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
+            expanded && "rotate-90",
+          )}
+        />
+        <FileCode2 className="size-3.5 shrink-0 opacity-60" />
+        <span className="font-medium tabular-nums">
+          {fileChanges.length} file{fileChanges.length !== 1 ? "s" : ""}
         </span>
-        <span className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums">
-          <span className="text-green-500/80">+{totals.add}</span>
-          <span className="text-red-400/80">-{totals.del}</span>
-        </span>
+        <LineCounts add={totals.add} del={totals.del} className="opacity-80" />
         <ChangeBar add={totals.add} del={totals.del} />
-        <div className="flex-1" />
-        <button
-          onClick={() => setAllExpanded(!allExpanded)}
-          className="p-0.5 text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
-          title={allExpanded ? "Collapse all" : "Expand all"}
-        >
-          {allExpanded
-            ? <ChevronsDownUp className="size-3" />
-            : <ChevronsUpDown className="size-3" />}
-        </button>
-      </div>
+        <span
+          aria-hidden
+          className="pointer-events-none ml-1 h-px flex-1 bg-border/40 transition-colors group-hover/files:bg-border/70"
+        />
+      </CollapsibleTrigger>
 
-      {/* Tree */}
-      <div className="py-0.5">
-        {tree.map((node) => (
-          <TreeRow
-            key={node.fullPath}
-            node={node}
-            depth={0}
-            allExpanded={allExpanded}
-            turnIndex={turnIndex}
-            canFocusFiles={canAccessHostFiles}
-          />
-        ))}
-      </div>
-    </div>
+      <CollapsibleContent className="ml-1 border-l border-border/40 pl-3">
+        <div className="py-0.5">
+          {tree.map((node) => (
+            <TreeRow
+              key={node.fullPath}
+              node={node}
+              depth={0}
+              turnIndex={turnIndex}
+              canFocusFiles={canAccessHostFiles}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })
 
@@ -281,22 +276,15 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
 const TreeRow = memo(function TreeRow({
   node,
   depth,
-  allExpanded,
   turnIndex,
   canFocusFiles,
 }: {
   node: TreeNode
   depth: number
-  allExpanded: boolean
   turnIndex: number
   canFocusFiles: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
-
-  // Sync with global expand/collapse toggle
-  useEffect(() => {
-    setExpanded(allExpanded)
-  }, [allExpanded])
 
   const paddingLeft = depth * 16 + 8
 
@@ -351,7 +339,6 @@ const TreeRow = memo(function TreeRow({
             key={child.fullPath}
             node={child}
             depth={depth + 1}
-            allExpanded={allExpanded}
             turnIndex={turnIndex}
             canFocusFiles={canFocusFiles}
           />
@@ -359,9 +346,6 @@ const TreeRow = memo(function TreeRow({
     </>
   )
 })
-
-// ── Small helpers ─────────────────────────────────────────────────────────────
-
 
 const EXT_COLORS: Record<string, string> = {
   tsx: "bg-blue-400/70",

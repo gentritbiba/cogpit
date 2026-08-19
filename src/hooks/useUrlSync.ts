@@ -20,7 +20,6 @@ interface UseUrlSyncOpts {
 //   /                          → home (projects list)
 //   /{dirName}                 → project sessions list
 //   /{dirName}/{sessionId}     → viewing a specific session
-//   /team/{teamName}           → team view
 //   /preview/{sessionId}       → local session-only preview
 //
 // A remote device carries a leading "/d/:deviceId" segment in front of any of
@@ -31,11 +30,11 @@ interface UseUrlSyncOpts {
 // "codex__").
 
 interface ParsedUrl {
-  type: "home" | "session" | "project" | "team" | "preview"
+  type: "home" | "session" | "project" | "preview"
   dirName?: string
   /** sessionId (UUID) — we append .jsonl to get the fileName for the API */
   sessionId?: string
-  teamName?: string
+  normalizeHome?: boolean
 }
 
 /** "" for the local device, "/d/<id>" for a remote device. */
@@ -71,9 +70,6 @@ function fileNameFromSessionId(sessionId: string): string {
 
 function stateToPath(state: SessionState): string {
   const prefix = devicePathPrefix()
-  if (state.mainView === "teams" && state.selectedTeam) {
-    return `${prefix}/team/${encodeURIComponent(state.selectedTeam)}`
-  }
   if (state.sessionSource) {
     const { dirName, fileName } = state.sessionSource
     const sessionId = sessionIdFromFileName(fileName)
@@ -97,13 +93,8 @@ function parsePath(rawPathname: string): ParsedUrl {
     return { type: "preview", sessionId: previewSessionId }
   }
 
-  // Team routes are prefixed to avoid ambiguity
-  const teamMatch = pathname.match(/^\/team\/([^/]+)$/)
-  if (teamMatch) {
-    return {
-      type: "team",
-      teamName: decodeURIComponent(teamMatch[1]),
-    }
+  if (pathname.startsWith("/team/")) {
+    return { type: "home", normalizeHome: true }
   }
 
   // Split remaining path segments (skip empty leading segment)
@@ -213,12 +204,15 @@ export function useUrlSync({
         } else if (parsed.type === "project" && parsed.dirName) {
           setPreviewLoadError(null)
           dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: parsed.dirName })
-        } else if (parsed.type === "team" && parsed.teamName) {
-          setPreviewLoadError(null)
-          dispatch({ type: "SELECT_TEAM", teamName: parsed.teamName, isMobile })
         } else {
           setPreviewLoadError(null)
           dispatch({ type: "GO_HOME", isMobile })
+          if (parsed.normalizeHome) {
+            const home = deviceHomePath()
+            window.history.replaceState(null, "", home)
+            lastPushedRef.current = home
+            saveLastPath(getActiveDeviceId(), home)
+          }
         }
       } finally {
         skipPushDepthRef.current--
@@ -227,7 +221,7 @@ export function useUrlSync({
     [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse]
   )
 
-  // On mount: if URL has a path, load the corresponding session/team
+  // On mount: if URL has a path, load the corresponding session or project.
   useEffect(() => {
     if (initialLoadDone.current) return
     initialLoadDone.current = true
@@ -237,7 +231,7 @@ export function useUrlSync({
     saveLastPath(getActiveDeviceId(), window.location.pathname)
 
     const parsed = parsePath(window.location.pathname)
-    if (parsed.type !== "home") {
+    if (parsed.type !== "home" || parsed.normalizeHome) {
       loadFromUrl(parsed)
     }
   }, [loadFromUrl])
@@ -256,7 +250,7 @@ export function useUrlSync({
       saveLastPath(getActiveDeviceId(), newPath)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync URL-relevant state fields
-  }, [state.sessionSource, state.pendingDirName, state.mainView, state.selectedTeam, state.dashboardProject])
+  }, [state.sessionSource, state.pendingDirName, state.mainView, state.dashboardProject])
 
   // Handle browser back/forward
   useEffect(() => {

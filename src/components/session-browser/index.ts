@@ -1,2 +1,2 @@
 export { SessionBrowser } from "./SessionBrowser"
-export type { SessionBrowserProps, ProjectInfo, SessionInfo } from "./types"
+export type { SessionBrowserProps } from "./types"

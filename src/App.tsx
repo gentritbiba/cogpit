@@ -1,7 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
 import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AgentContextBar } from "@/components/AgentContextBar"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
@@ -131,10 +130,6 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
   // Stable callbacks
-  const handleSidebarTabChange = useCallback(
-    (tab: "live" | "browse" | "teams") => dispatch({ type: "SET_SIDEBAR_TAB", tab }),
-    [dispatch]
-  )
   const handleToggleExpandAll = useCallback(() => dispatch({ type: "TOGGLE_EXPAND_ALL" }), [dispatch])
   const handleOpenCommandPalette = useCallback(() => setShowCommandPalette(true), [])
   const handleFocusComposer = useCallback(() => chatInputRef.current?.focus(), [])
@@ -460,15 +455,14 @@ export default function App() {
     }
   }, [teamContext?.currentMemberName, teamContext, dispatch])
 
-  // Guard: reset mobile tab when session/team context disappears
+  // Guard: reset mobile-only views when their session context disappears.
   useEffect(() => {
     if (!isMobile) return
     dispatch({
       type: "GUARD_MOBILE_TAB",
       hasSession: !!state.session || !!state.pendingDirName,
-      hasTeam: !!teamContext,
     })
-  }, [state.session, state.pendingDirName, teamContext, state.mobileTab, isMobile, dispatch])
+  }, [state.session, state.pendingDirName, state.mobileTab, isMobile, dispatch])
 
   // Scroll management
   const scroll = useChatScroll({
@@ -724,10 +718,10 @@ export default function App() {
   }), [
     state.activeTurnIndex, state.activeToolCallId,
     state.searchQuery, state.expandAll,
-    state.mainView, state.mobileTab, state.sidebarTab,
+    state.mainView, state.mobileTab,
     state.dashboardProject, state.pendingDirName, state.pendingCwd,
     state.currentMemberName, state.loadingMember,
-    state.selectedTeam, state.configFilePath, state.sessionChangeKey,
+    state.configFilePath, state.sessionChangeKey,
     dispatch, config, themeCtx, networkAuth, me, isMobile,
   ])
 
@@ -939,7 +933,7 @@ export default function App() {
     </Suspense>
   )
 
-  const processPanelNode = processPanel.processes.size > 0 && (
+  const processPanelNode = terminalEnabled && (
     <ProcessPanel
       processes={processPanel.processes}
       activeProcessId={processPanel.activeProcessId}
@@ -958,6 +952,8 @@ export default function App() {
         chatInputRef.current?.focus()
       }}
       onUpdateStatus={processPanel.updateProcessStatus}
+      projectDir={currentCwd}
+      onProcessStarted={processPanel.addProcess}
       mobile={isMobile}
     />
   )
@@ -969,20 +965,6 @@ export default function App() {
       currentMemberName={state.currentMemberName}
       loadingMember={state.loadingMember}
       onMemberClick={actions.handleTeamMemberSwitch}
-      onTeamClick={actions.handleOpenTeamFromBar}
-    />
-  )
-
-  // Keep delegated Claude agents visible in the session context, even when
-  // the optional Stats panel is closed. The detailed timeline and Stats panel
-  // remain the places for full transcripts and metrics.
-  const agentContextBar = state.session && !isSubAgentView && (
-    <AgentContextBar
-      session={state.session}
-      sessionSource={state.sessionSource}
-      backgroundAgents={backgroundAgents}
-      onLoadSession={handlers.handleLoadSessionScrollAware}
-      mobile={isMobile}
     />
   )
 
@@ -1131,19 +1113,14 @@ export default function App() {
             handlers,
             creatingSession,
             pendingSession: pendingSessionInfo,
-            onSidebarTabChange: handleSidebarTabChange,
             onStartNewSession: handleStartNewSession,
             onSelectProject: handleSelectProject,
-            onBeforeSessionSwitch: handlePreSessionSwitch,
             liveSessionsRefreshRef,
             onPrefetchSession: prefetchSession,
-            workerParse,
           }}
           sessionView={{
             searchInputRef,
             teamMembersBar,
-            agentContextBar,
-            hasTeam: Boolean(teamContext),
             activeComposer: subAgentReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,
@@ -1196,21 +1173,17 @@ export default function App() {
             handlers,
             creatingSession,
             pendingSession: pendingSessionInfo,
-            onSidebarTabChange: handleSidebarTabChange,
             onStartNewSession: handleStartNewSession,
             onStartNewFolder: handleStartNewFolder,
             onSelectProject: handleSelectProject,
             onOpenPaletteProject: handleOpenPaletteProject,
-            onBeforeSessionSwitch: handlePreSessionSwitch,
             liveSessionsRefreshRef,
             onPrefetchSession: prefetchSession,
-            workerParse,
           }}
           sessionView={{
             searchInputRef,
             chatInputRef,
             teamMembersBar,
-            agentContextBar,
             activeComposer: subAgentReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,

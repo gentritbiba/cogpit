@@ -1,44 +1,39 @@
 import { memo } from "react"
 import type { LucideIcon } from "lucide-react"
-import { MessageSquare, FolderOpen, BarChart3, Users } from "lucide-react"
+import { MessageSquare, FolderOpen, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LiveIndicator } from "@/components/header-shared"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { hapticLight } from "@/lib/haptics"
 
-export type MobileTab = "chat" | "sessions" | "stats" | "teams"
+export type MobileTab = "chat" | "sessions" | "stats"
 
 interface TabDefinition {
   id: MobileTab
   label: string
   icon: LucideIcon
   requiresSession?: boolean
-  requiresTeam?: boolean
 }
 
 interface MobileNavProps {
   activeTab: MobileTab
   onTabChange: (tab: MobileTab) => void
-  hasTeam: boolean
 }
 
 const TAB_DEFINITIONS: TabDefinition[] = [
   { id: "sessions", label: "Sessions", icon: FolderOpen },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "stats", label: "Stats", icon: BarChart3, requiresSession: true },
-  { id: "teams", label: "Teams", icon: Users, requiresTeam: true },
 ]
 
 export const MobileNav = memo(function MobileNav({
   activeTab,
   onTabChange,
-  hasTeam,
 }: MobileNavProps) {
   const { session, isLive } = useSessionContext()
   const hasSession = session !== null
   const visibleTabs = TAB_DEFINITIONS.filter((t) => {
     if (t.requiresSession && !hasSession) return false
-    if (t.requiresTeam && !hasTeam) return false
     return true
   })
 

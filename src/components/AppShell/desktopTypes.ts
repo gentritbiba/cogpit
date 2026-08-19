@@ -6,7 +6,6 @@ import type {
   SetStateAction,
 } from "react"
 import type { PanelSize } from "react-resizable-panels"
-import type { ParsedSession } from "@/lib/types"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
@@ -39,11 +38,7 @@ export type DesktopPanels = Pick<
 
 export type DesktopSessionActions = Pick<
   ReturnType<typeof useSessionActions>,
-  | "handleLoadSession"
   | "handleDashboardSelect"
-  | "handleSelectTeam"
-  | "handleBackFromTeam"
-  | "handleOpenSessionFromTeam"
   | "handleGoHome"
   | "handleJumpToTurn"
 >
@@ -76,23 +71,18 @@ export interface DesktopNavigation {
     cwd?: string | null
     firstMessage?: string
   } | null
-  onSidebarTabChange: (tab: "live" | "browse" | "teams") => void
   onStartNewSession: (dirName: string, cwd?: string) => void
   onStartNewFolder: (cwd: string) => void
   onSelectProject: (dirName: string | null) => void
   onOpenPaletteProject: (dirName: string) => void
-  onBeforeSessionSwitch: () => void
   liveSessionsRefreshRef: MutableRefObject<(() => void) | null>
   onPrefetchSession: (dirName: string, fileName: string) => void
-  /** Off-main-thread session parser from App's `useParserWorker`. */
-  workerParse: (text: string) => Promise<ParsedSession>
 }
 
 export interface DesktopSessionView {
   searchInputRef: RefObject<HTMLInputElement | null>
   chatInputRef: RefObject<ChatInputHandle | null>
   teamMembersBar: ReactNode
-  agentContextBar: ReactNode
   activeComposer: ReactNode
   pendingComposer: ReactNode
   pendingTurns: ReactNode[]

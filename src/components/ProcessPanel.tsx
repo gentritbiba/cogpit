@@ -1,7 +1,17 @@
 import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "react"
 import { stripAnsi } from "@/lib/ansi"
 import { authUrl } from "@/lib/auth"
-import { ChevronDown, ChevronRight, X } from "lucide-react"
+import { ChevronDown, ChevronRight, Plus, TerminalSquare, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { ProcessPanelScripts } from "@/components/ProcessPanelScripts"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
@@ -102,47 +112,46 @@ function ProcessTab({
 }) {
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          onClick()
-        }
-      }}
       title={process.source ?? process.name}
       className={cn(
         "inline-flex shrink-0 items-center rounded-full text-[10px] font-medium transition-colors",
-        mobile ? "gap-1 px-1.5 py-0.5" : "gap-1.5 px-2.5 py-0.5",
         isActive
           ? "bg-elevation-2 text-foreground border border-border"
           : "text-muted-foreground hover:text-foreground hover:bg-elevation-2 border border-transparent"
       )}
     >
-      {process.status === "running" && (
-        <span className="inline-block size-1.5 rounded-full bg-green-400 shrink-0" />
-      )}
-      {process.status === "errored" && (
-        <span className="inline-block size-1.5 rounded-full bg-red-400 shrink-0" />
-      )}
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`Select ${process.name}`}
+        className={cn(
+          "inline-flex min-w-0 items-center",
+          mobile ? "gap-1 py-0.5 pl-1.5" : "gap-1.5 py-0.5 pl-2.5",
+        )}
+      >
+        {process.status === "running" && (
+          <span className="inline-block size-1.5 rounded-full bg-green-400 shrink-0" />
+        )}
+        {process.status === "errored" && (
+          <span className="inline-block size-1.5 rounded-full bg-red-400 shrink-0" />
+        )}
 
-      <span className="truncate max-w-[100px]">{process.name}</span>
+        <span className="truncate max-w-[100px]">{process.name}</span>
 
-      <span className={cn(
-        "inline-flex items-center rounded px-1 py-px text-[9px] border",
-        mobile && "hidden",
-        TYPE_STYLES[process.type]
-      )}>
-        {process.type}
-      </span>
+        <span className={cn(
+          "inline-flex items-center rounded px-1 py-px text-[9px] border",
+          mobile && "hidden",
+          TYPE_STYLES[process.type]
+        )}>
+          {process.type}
+        </span>
+      </button>
 
       <button
         type="button"
         aria-label={`Close ${process.name}`}
-        onClick={(e) => { e.stopPropagation(); onClose() }}
-        onKeyDown={(e) => e.stopPropagation()}
-        className="ml-0.5 rounded p-0.5 hover:bg-elevation-3 text-muted-foreground hover:text-foreground"
+        onClick={onClose}
+        className="mx-1 rounded p-0.5 hover:bg-elevation-3 text-muted-foreground hover:text-foreground"
       >
         <X className="size-2.5" />
       </button>
@@ -177,6 +186,8 @@ interface ProcessPanelProps {
   onRequestTerminal?: () => void
   onAddTerminalContext?: (text: string) => void
   onUpdateStatus?: (id: string, status: ProcessEntry["status"]) => void
+  projectDir?: string | null
+  onProcessStarted?: (entry: ProcessEntry) => void
   mobile?: boolean
 }
 
@@ -190,6 +201,8 @@ export const ProcessPanel = memo(function ProcessPanel({
   onRequestTerminal,
   onAddTerminalContext,
   onUpdateStatus,
+  projectDir,
+  onProcessStarted,
   mobile = false,
 }: ProcessPanelProps) {
   const pty = usePty()
@@ -232,8 +245,6 @@ export const ProcessPanel = memo(function ProcessPanel({
     try { localStorage.setItem(HEIGHT_KEY, String(height)) } catch { /* ignore */ }
   }, [height])
 
-  if (processes.size === 0) return null
-
   const activeProcess = activeProcessId ? processes.get(activeProcessId) : null
   const processList = [...processes.values()]
 
@@ -253,20 +264,22 @@ export const ProcessPanel = memo(function ProcessPanel({
         "flex shrink-0 items-center border-b border-border bg-elevation-1",
         mobile ? "h-7 gap-1 px-2" : "h-8 gap-2 px-3",
       )}>
-        <button
+        <Button
           type="button"
-          className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
           onClick={onToggleCollapse}
-          aria-label={collapsed ? "Expand process panel" : "Collapse process panel"}
+          aria-label={collapsed ? "Expand terminal panel" : "Collapse terminal panel"}
           aria-expanded={!collapsed}
         >
           {collapsed ? (
-            <ChevronRight className="size-3 text-muted-foreground" />
+            <ChevronRight data-icon="inline-start" />
           ) : (
-            <ChevronDown className="size-3 text-muted-foreground" />
+            <ChevronDown data-icon="inline-start" />
           )}
-          <span className={cn("text-[11px] font-medium text-muted-foreground", mobile && "sr-only")}>Processes</span>
-        </button>
+          <span className={cn(mobile && "sr-only")}>Terminal</span>
+        </Button>
 
         <div className={cn("flex flex-1 items-center gap-1 overflow-x-auto no-scrollbar", !mobile && "ml-2")}>
           {processList.map((proc) => (
@@ -280,33 +293,80 @@ export const ProcessPanel = memo(function ProcessPanel({
             />
           ))}
         </div>
+
+        {onRequestTerminal && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={!projectDir}
+            onClick={onRequestTerminal}
+            aria-label="New terminal"
+            title={projectDir ? "New terminal" : "Open a project to start a terminal"}
+          >
+            <Plus />
+          </Button>
+        )}
       </div>
 
-      {!collapsed && activeProcess && (
-        <div className="flex flex-col" style={{ height: mobile ? "min(36dvh, 260px)" : height }}>
-          {activeProcess.type === "task" ? (
-            <ProcessOutput
-              key={activeProcess.id}
-              process={activeProcess}
+      {!collapsed && (
+        <div className="flex min-h-0" style={{ height: mobile ? "min(36dvh, 260px)" : height }}>
+          {!mobile && (
+            <ProcessPanelScripts
+              projectDir={projectDir}
+              onProcessStarted={onProcessStarted}
             />
-          ) : (
-            <Suspense
-              fallback={(
-                <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
-                  Loading terminal…
-                </div>
-              )}
-            >
-              <TerminalOutput
-                key={activeProcess.id}
-                processId={activeProcess.id}
-                autoFocus
-                onRequestNew={onRequestTerminal}
-                onRequestClose={() => handleClose(activeProcess)}
-                onAddContext={onAddTerminalContext}
-              />
-            </Suspense>
           )}
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            {activeProcess?.type === "task" && (
+              <ProcessOutput
+                key={activeProcess.id}
+                process={activeProcess}
+              />
+            )}
+
+            {activeProcess && activeProcess.type !== "task" && (
+              <Suspense
+                fallback={(
+                  <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
+                    Loading terminal…
+                  </div>
+                )}
+              >
+                <TerminalOutput
+                  key={activeProcess.id}
+                  processId={activeProcess.id}
+                  autoFocus
+                  onRequestNew={onRequestTerminal}
+                  onRequestClose={() => handleClose(activeProcess)}
+                  onAddContext={onAddTerminalContext}
+                />
+              </Suspense>
+            )}
+
+            {!activeProcess && (
+              <Empty className="rounded-none">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <TerminalSquare />
+                  </EmptyMedia>
+                  <EmptyTitle>No terminal open</EmptyTitle>
+                  <EmptyDescription>
+                    Start a terminal here or run a project script from the left.
+                  </EmptyDescription>
+                </EmptyHeader>
+                {onRequestTerminal && projectDir && (
+                  <EmptyContent>
+                    <Button type="button" size="sm" onClick={onRequestTerminal}>
+                      <Plus data-icon="inline-start" />
+                      New terminal
+                    </Button>
+                  </EmptyContent>
+                )}
+              </Empty>
+            )}
+          </div>
         </div>
       )}
     </div>

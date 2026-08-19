@@ -42,7 +42,7 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 - **Talk to your agents** — send messages, approve plans, answer questions, interrupt or branch at any point
 - **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring
 - **Debug faster** — color-coded tool calls, expandable thinking blocks, line-by-line edit diffs, and complete session history
-- **Manage multi-agent workflows** — team dashboards with kanban boards, inter-agent messaging, and per-member session navigation
+- **Follow multi-agent work** — see each agent's task, status, available runtime details, and recorded thread without leaving the parent session
 - **Undo anything** — rewind sessions to any turn with full branching support and file operation reversal
 
 ## Features
@@ -52,6 +52,8 @@ Start sessions with Claude Code or Codex from the same interface. Model settings
 
 ### Live Session Monitoring
 Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
+
+The desktop sidebar and mobile Sessions tab use the same searchable live-and-recent session list, including status and attention cues.
 
 Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.
 
@@ -64,8 +66,10 @@ Create persistent goals above the composer and monitor status, tokens, elapsed t
 ### Conversation Timeline
 Structured view of every turn: user messages, thinking blocks, assistant text with syntax-highlighted Markdown, color-coded tool call badges, LCS-based edit diffs, and compaction markers. Virtualized for smooth scrolling across long sessions.
 
+Agent work stays open while a turn is live. Completed turns with a final answer fold that work behind a duration row, and each turn's file summary is a separate collapsed disclosure.
+
 ### Sub-Agent Viewer
-When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. A session-level context bar keeps delegated agents visible, while the session browser provides a global view of Codex subagents across projects. Color-coded panels show each result within the parent timeline, and full agent threads remain inspectable.
+When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. The session Stats panel shows each agent's status, task summary, duration, and tool count when available. The parent timeline keeps the work in context, and recorded agent threads remain inspectable.
 
 ### Token Analytics & Cost Tracking
 Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
@@ -104,9 +108,6 @@ Rewind to any previous turn. Create branches, switch between them via an SVG gra
 ### File Changes
 Track all modifications across a session. Net-diff view (aggregated) or per-edit view (chronological). Sub-agent attribution. Open files in your editor or view git diffs directly.
 
-### Team Dashboards
-Inspect multi-agent teams: member status cards, kanban task board, color-coded message timeline, team chat, and live SSE updates.
-
 ### Worktree Management
 List active git worktrees with dirty/clean status, commits-ahead count, and linked sessions. Create PRs directly. Bulk cleanup of stale worktrees.
 
@@ -119,8 +120,8 @@ Browse and edit your project's `.claude/` directory directly from the dashboard 
 ### Command Palette & Keyboard Shortcuts
 Press `Cmd+K` to open the command palette: navigate projects, sessions, toggle panels, access settings, and more. Customize keyboard shortcuts globally with conflict detection and preset categories (General, View, Tools).
 
-### Integrated Terminal Context
-Select text in terminal output and add it to the chat composer with one action. Flows terminal debugging context directly into your next message to Claude or Codex.
+### Integrated Terminals & Project Scripts
+On desktop, open terminals and discovered project scripts from one bottom process panel. Runs share the same tabs and output area. Select terminal output and add it to the chat composer with one action.
 
 ### Project File Editor & Previews
 Edit project files securely: read and write to any file in your project with optimistic concurrency control (mtime-based conflict detection prevents lost writes). Preview viewport with zoom controls for rendered content. File suggestions with `@-mention` autocomplete in the chat input.

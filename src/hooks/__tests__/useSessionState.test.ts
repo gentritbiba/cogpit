@@ -105,11 +105,6 @@ describe("useSessionState", () => {
       expect(getState(hook).mainView).toBe("sessions")
     })
 
-    it("starts with sidebarTab as live", () => {
-      const hook = renderState()
-      expect(getState(hook).sidebarTab).toBe("live")
-    })
-
     it("starts with mobileTab as sessions", () => {
       const hook = renderState()
       expect(getState(hook).mobileTab).toBe("sessions")
@@ -177,18 +172,17 @@ describe("useSessionState", () => {
       expect(getState(hook).mobileTab).toBe("sessions")
     })
 
-    it("clears selectedTeam and currentMemberName", () => {
+    it("clears currentMemberName", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "team1", isMobile: false })
+      dispatch(hook, { type: "SET_CURRENT_MEMBER_NAME", name: "member-1" })
       dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
-      expect(getState(hook).selectedTeam).toBeNull()
       expect(getState(hook).currentMemberName).toBeNull()
     })
 
     it("resets mainView to sessions", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "team1", isMobile: false })
-      expect(getState(hook).mainView).toBe("teams")
+      dispatch(hook, { type: "OPEN_CONFIG" })
+      expect(getState(hook).mainView).toBe("config")
       dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
       expect(getState(hook).mainView).toBe("sessions")
     })
@@ -240,50 +234,16 @@ describe("useSessionState", () => {
       expect(getState(hook).mobileTab).toBe("sessions")
     })
 
-    it("resets mainView, selectedTeam, and dashboardProject", () => {
+    it("resets mainView and dashboardProject", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "t1", isMobile: false })
+      dispatch(hook, { type: "OPEN_CONFIG" })
       dispatch(hook, { type: "SET_DASHBOARD_PROJECT", dirName: "p1" })
       dispatch(hook, { type: "GO_HOME", isMobile: false })
       expect(getState(hook).mainView).toBe("sessions")
-      expect(getState(hook).selectedTeam).toBeNull()
       expect(getState(hook).dashboardProject).toBeNull()
     })
   })
 
-  // ── LOAD_SESSION_FROM_TEAM ──────────────────────────────────────────
-
-  describe("LOAD_SESSION_FROM_TEAM", () => {
-    it("sets session and source from team context", () => {
-      const hook = renderState()
-      const session = makeSession()
-      const source = makeSource()
-      dispatch(hook, { type: "LOAD_SESSION_FROM_TEAM", session, source, memberName: "agent-1", isMobile: false })
-      expect(getState(hook).session).toBe(session)
-      expect(getState(hook).sessionSource).toBe(source)
-      expect(getState(hook).currentMemberName).toBe("agent-1")
-    })
-
-    it("increments sessionChangeKey", () => {
-      const hook = renderState()
-      const before = getState(hook).sessionChangeKey
-      dispatch(hook, { type: "LOAD_SESSION_FROM_TEAM", session: makeSession(), source: makeSource(), isMobile: false })
-      expect(getState(hook).sessionChangeKey).toBe(before + 1)
-    })
-
-    it("sets mobileTab to chat on mobile", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "LOAD_SESSION_FROM_TEAM", session: makeSession(), source: makeSource(), isMobile: true })
-      expect(getState(hook).mobileTab).toBe("chat")
-    })
-
-    it("preserves current member name when not provided", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SET_CURRENT_MEMBER_NAME", name: "existing-member" })
-      dispatch(hook, { type: "LOAD_SESSION_FROM_TEAM", session: makeSession(), source: makeSource(), isMobile: false })
-      expect(getState(hook).currentMemberName).toBe("existing-member")
-    })
-  })
 
   // ── SWITCH_TEAM_MEMBER ──────────────────────────────────────────────
 
@@ -316,39 +276,6 @@ describe("useSessionState", () => {
     })
   })
 
-  // ── SELECT_TEAM / BACK_FROM_TEAM ──────────────────────────────────
-
-  describe("SELECT_TEAM", () => {
-    it("sets selectedTeam and mainView to teams", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "alpha", isMobile: false })
-      expect(getState(hook).selectedTeam).toBe("alpha")
-      expect(getState(hook).mainView).toBe("teams")
-    })
-
-    it("sets mobileTab to teams on mobile", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "alpha", isMobile: true })
-      expect(getState(hook).mobileTab).toBe("teams")
-    })
-  })
-
-  describe("BACK_FROM_TEAM", () => {
-    it("clears selectedTeam and sets mainView to sessions", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "alpha", isMobile: false })
-      dispatch(hook, { type: "BACK_FROM_TEAM", isMobile: false })
-      expect(getState(hook).selectedTeam).toBeNull()
-      expect(getState(hook).mainView).toBe("sessions")
-    })
-
-    it("sets mobileTab to sessions on mobile", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "alpha", isMobile: true })
-      dispatch(hook, { type: "BACK_FROM_TEAM", isMobile: true })
-      expect(getState(hook).mobileTab).toBe("sessions")
-    })
-  })
 
   // ── JUMP_TO_TURN ──────────────────────────────────────────────────
 
@@ -433,22 +360,7 @@ describe("useSessionState", () => {
       expect(getState(hook).mobileTab).toBe("chat")
     })
 
-    it("sets sidebarTab to teams when tab is teams and no selectedTeam", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "teams" })
-      expect(getState(hook).sidebarTab).toBe("teams")
-    })
-
-    it("keeps sidebarTab when tab is teams but selectedTeam exists", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "t1", isMobile: false })
-      dispatch(hook, { type: "SET_SIDEBAR_TAB", tab: "browse" })
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "teams" })
-      // selectedTeam exists, so sidebarTab stays as "browse"
-      expect(getState(hook).sidebarTab).toBe("browse")
-    })
-
-    it("returns same state when tab and sidebarTab are unchanged", () => {
+    it("returns same state when the tab is unchanged", () => {
       const hook = renderState()
       dispatch(hook, { type: "SET_MOBILE_TAB", tab: "stats" })
       const stateAfter = getState(hook)
@@ -609,43 +521,28 @@ describe("useSessionState", () => {
     it("falls back from chat to sessions when no session", () => {
       const hook = renderState()
       dispatch(hook, { type: "SET_MOBILE_TAB", tab: "chat" })
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: false })
+      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false })
       expect(getState(hook).mobileTab).toBe("sessions")
     })
 
     it("falls back from stats to sessions when no session", () => {
       const hook = renderState()
       dispatch(hook, { type: "SET_MOBILE_TAB", tab: "stats" })
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: false })
-      expect(getState(hook).mobileTab).toBe("sessions")
-    })
-
-    it("falls back from teams to sessions when no team", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "teams" })
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: false })
+      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false })
       expect(getState(hook).mobileTab).toBe("sessions")
     })
 
     it("keeps chat tab when session exists", () => {
       const hook = renderState()
       dispatch(hook, { type: "SET_MOBILE_TAB", tab: "chat" })
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: true, hasTeam: false })
+      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: true })
       expect(getState(hook).mobileTab).toBe("chat")
-    })
-
-    it("keeps teams tab when team exists", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SET_MOBILE_TAB", tab: "teams" })
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: true })
-      expect(getState(hook).mobileTab).toBe("teams")
     })
 
     it("returns same state when no fallback needed", () => {
       const hook = renderState()
       const s = getState(hook)
-      // mobileTab is "sessions", hasSession: false, hasTeam: false — no change needed
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: false })
+      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false })
       expect(getState(hook)).toBe(s)
     })
   })
@@ -675,22 +572,6 @@ describe("useSessionState", () => {
     })
   })
 
-  // ── SET_SIDEBAR_TAB ───────────────────────────────────────────────
-
-  describe("SET_SIDEBAR_TAB", () => {
-    it("sets sidebar tab", () => {
-      const hook = renderState()
-      dispatch(hook, { type: "SET_SIDEBAR_TAB", tab: "teams" })
-      expect(getState(hook).sidebarTab).toBe("teams")
-    })
-
-    it("returns same state when unchanged", () => {
-      const hook = renderState()
-      const s = getState(hook)
-      dispatch(hook, { type: "SET_SIDEBAR_TAB", tab: "live" })
-      expect(getState(hook)).toBe(s)
-    })
-  })
 
   // ── SET_DASHBOARD_PROJECT ─────────────────────────────────────────
 
@@ -791,14 +672,13 @@ describe("useSessionState", () => {
       const hook = renderState()
       dispatch(hook, { type: "SET_SEARCH_QUERY", value: "abc" })
       dispatch(hook, { type: "SET_EXPAND_ALL", value: true })
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "t", isMobile: false })
+      dispatch(hook, { type: "OPEN_CONFIG" })
       dispatch(hook, { type: "SET_DASHBOARD_PROJECT", dirName: "proj" })
 
       dispatch(hook, { type: "FINALIZE_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
       const s = getState(hook)
       expect(s.searchQuery).toBe("")
       expect(s.expandAll).toBe(false)
-      expect(s.selectedTeam).toBeNull()
       expect(s.mainView).toBe("sessions")
       expect(s.dashboardProject).toBeNull()
     })
@@ -844,18 +724,10 @@ describe("useSessionState", () => {
       expect(getState(hook)).toBe(before)
     })
 
-    it("returns same reference for no-op SET_SIDEBAR_TAB", () => {
-      const hook = renderState()
-      const before = getState(hook)
-      // initial sidebarTab is "live"
-      dispatch(hook, { type: "SET_SIDEBAR_TAB", tab: "live" })
-      expect(getState(hook)).toBe(before)
-    })
-
     it("returns same reference for no-op GUARD_MOBILE_TAB when already sessions", () => {
       const hook = renderState()
       const before = getState(hook)
-      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false, hasTeam: false })
+      dispatch(hook, { type: "GUARD_MOBILE_TAB", hasSession: false })
       expect(getState(hook)).toBe(before)
     })
   })
@@ -903,21 +775,16 @@ describe("useSessionState", () => {
       expect(getState(hook).expandAll).toBe(false)
     })
 
-    it("SELECT_TEAM -> LOAD_SESSION_FROM_TEAM -> SWITCH_TEAM_MEMBER -> GO_HOME flow", () => {
+    it("LOAD_SESSION -> SWITCH_TEAM_MEMBER -> GO_HOME flow", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "team-a", isMobile: false })
-      expect(getState(hook).mainView).toBe("teams")
-      expect(getState(hook).selectedTeam).toBe("team-a")
-
       dispatch(hook, {
-        type: "LOAD_SESSION_FROM_TEAM",
+        type: "LOAD_SESSION",
         session: makeSession(),
         source: makeSource(),
-        memberName: "alice",
         isMobile: false,
       })
+      dispatch(hook, { type: "SET_CURRENT_MEMBER_NAME", name: "alice" })
       expect(getState(hook).currentMemberName).toBe("alice")
-      expect(getState(hook).mainView).toBe("sessions")
 
       dispatch(hook, {
         type: "SWITCH_TEAM_MEMBER",
@@ -953,12 +820,10 @@ describe("useSessionState", () => {
       expect(getState(hook).searchQuery).toBe("")
     })
 
-    it("supports team flow: select team -> load member -> switch -> back", () => {
+    it("supports switching between members in an active team session", () => {
       const hook = renderState()
-      dispatch(hook, { type: "SELECT_TEAM", teamName: "my-team", isMobile: false })
-      expect(getState(hook).mainView).toBe("teams")
-
-      dispatch(hook, { type: "LOAD_SESSION_FROM_TEAM", session: makeSession(), source: makeSource(), memberName: "m1", isMobile: false })
+      dispatch(hook, { type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
+      dispatch(hook, { type: "SET_CURRENT_MEMBER_NAME", name: "m1" })
       expect(getState(hook).currentMemberName).toBe("m1")
 
       dispatch(hook, { type: "SWITCH_TEAM_MEMBER", session: makeSession(), source: makeSource(), memberName: "m2" })

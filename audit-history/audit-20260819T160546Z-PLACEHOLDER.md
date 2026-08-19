@@ -1,0 +1,67 @@
+# Audit report: UI and navigation simplification
+
+**Date:** 2026-08-19 16:05 UTC
+**Commit:** pending
+**Status:** PASS AFTER UPDATES
+
+## Scope
+
+The renderer now uses one searchable live-and-recent session list instead of
+separate Live, Browse, and Teams navigation. The dedicated team dashboard and
+session-level agent context bar are gone. Project scripts moved from the
+sidebar into the bottom process panel. Turn work and turn-level file changes
+use compact disclosures, and the Stats panel now carries richer agent status.
+
+The change removes renderer UI and state only. It does not add or change an
+HTTP API route, persisted server format, environment variable, or deployment
+contract.
+
+## Documentation impact
+
+| Document | Result | Action |
+| --- | --- | --- |
+| `README.md` | Stale product claims | Updated |
+| `docs/architecture/README.md` | Accurate | No change |
+| `docs/self-hosting.md` | Accurate | No change |
+| `docs/team-edition-guide.html` | Accurate | No change |
+| `docs/ui-simplification.md` | Dated v1.4.0 design baseline | Left unchanged |
+| `AGENTS.md` and `CLAUDE.md` | No affected workflow contract | No change |
+| `docs/plans/*` | Historical plans | Left unchanged |
+
+## README corrections
+
+- Removed the deleted team dashboard, kanban board, and team chat from the
+  feature list.
+- Replaced references to the deleted agent context bar and cross-project
+  subagent browser with the current Stats panel and parent-timeline behavior.
+- Documented the shared desktop/mobile session list.
+- Documented live and settled turn disclosures plus the separate collapsed
+  file summary.
+- Updated the terminal feature to place desktop project scripts in the bottom
+  process panel.
+
+## Compatibility notes
+
+- Existing `/team/:teamName` renderer links now normalize to the device home
+  route because the team dashboard no longer exists.
+- Team-member session navigation inside an open team session remains.
+- Script execution still uses the existing process APIs. Only its desktop
+  placement changed.
+- Recorded subagent threads remain navigable from the Stats panel. Temporary
+  streamed agents without a recorded thread appear as status rows only.
+
+## Verification
+
+- Inspected the final renderer diff, including app-shell navigation, session
+  state and URL sync, the session browser, process panel, turn folding, and
+  agent stats.
+- Searched active Markdown and HTML documentation for the removed UI names and
+  stale feature claims.
+- Confirmed that remaining matches outside `README.md` are either dated design
+  context or historical plans.
+- Full lint, type, and test gates remain part of the parent commit workflow.
+
+## Verdict
+
+**PASS AFTER UPDATES.** The README now describes the shipped UI. No architecture,
+self-hosting, team-server, or agent-instruction document needs a correction.

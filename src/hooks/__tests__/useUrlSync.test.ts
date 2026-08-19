@@ -23,9 +23,8 @@ function makeState(overrides: Partial<SessionState> = {}): SessionState {
     sessionSource: null,
     selectedTurnIndex: null,
     sidebarOpen: true,
-    mainView: "dashboard",
+    mainView: "sessions",
     dashboardProject: null,
-    selectedTeam: null,
     ...overrides,
   } as SessionState
 }
@@ -146,16 +145,17 @@ describe("useUrlSync", () => {
     })
   })
 
-  it("dispatches SELECT_TEAM for team path", async () => {
+  it("returns removed team paths to the home view", async () => {
     window.history.replaceState(null, "", "/team/my-team")
 
     renderUrlSync()
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SELECT_TEAM", teamName: "my-team" })
+        expect.objectContaining({ type: "GO_HOME" })
       )
     })
+    expect(window.location.pathname).toBe("/")
   })
 
   it("dispatches GO_HOME when session load fails", async () => {
@@ -182,20 +182,6 @@ describe("useUrlSync", () => {
     renderUrlSync(state)
 
     expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/proj-a/sess-1")
-    pushStateSpy.mockRestore()
-  })
-
-  it("pushes team URL when team is selected", () => {
-    const pushStateSpy = vi.spyOn(window.history, "pushState")
-
-    const state = makeState({
-      mainView: "teams",
-      selectedTeam: "alpha-team",
-    })
-
-    renderUrlSync(state)
-
-    expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/team/alpha-team")
     pushStateSpy.mockRestore()
   })
 
@@ -230,13 +216,13 @@ describe("useUrlSync", () => {
 
     const { unmount } = renderUrlSync()
 
-    // Simulate navigating to a team URL then pressing "back"
+    // Removed team routes resolve to home when reached through history.
     window.history.pushState(null, "", "/team/test-team")
     window.dispatchEvent(new PopStateEvent("popstate"))
 
     await vi.waitFor(() => {
       expect(dispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SELECT_TEAM", teamName: "test-team" })
+        expect.objectContaining({ type: "GO_HOME" })
       )
     })
 
@@ -288,16 +274,17 @@ describe("useUrlSync", () => {
       })
     })
 
-    it("parses a device-scoped team path /d/<id>/team/<name>", async () => {
+    it("returns a removed device-scoped team path to home", async () => {
       window.history.replaceState(null, "", "/d/dev_x/team/alpha")
 
       renderUrlSync()
 
       await vi.waitFor(() => {
         expect(dispatch).toHaveBeenCalledWith(
-          expect.objectContaining({ type: "SELECT_TEAM", teamName: "alpha" })
+          expect.objectContaining({ type: "GO_HOME" })
         )
       })
+      expect(window.location.pathname).toBe("/d/dev_x/")
     })
 
     it("emits a /d/<id>-prefixed path and remembers it when a remote device is active", () => {

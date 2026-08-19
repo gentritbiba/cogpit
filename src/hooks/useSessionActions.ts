@@ -69,35 +69,6 @@ export function useSessionActions({
     [handleLoadSession, workerParse, onBeforeSwitch]
   )
 
-  const handleOpenSessionFromTeam = useCallback(
-    async (dirName: string, fileName: string, memberName?: string) => {
-      onBeforeSwitch?.()
-      setLoadError(null)
-      try {
-        const { parsed, source } = await loadSessionTailCached(
-          dirName,
-          fileName,
-          workerParse,
-          "team session",
-        )
-        startTransition(() => {
-          dispatch({
-            type: "LOAD_SESSION_FROM_TEAM",
-            session: parsed,
-            source,
-            memberName,
-            isMobile,
-          })
-        })
-        resetTurnCount(parsed.turns.length)
-        scrollToBottomInstant()
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load team session")
-      }
-    },
-    [dispatch, isMobile, resetTurnCount, scrollToBottomInstant, workerParse, onBeforeSwitch]
-  )
-
   const handleTeamMemberSwitch = useCallback(
     async (member: TeamMember) => {
       if (!teamContext) return
@@ -139,22 +110,6 @@ export function useSessionActions({
 
   const clearLoadError = useCallback(() => setLoadError(null), [])
 
-  const handleSelectTeam = useCallback(
-    (teamName: string) => {
-      dispatch({ type: "SELECT_TEAM", teamName, isMobile })
-    },
-    [dispatch, isMobile]
-  )
-
-  const handleBackFromTeam = useCallback(() => {
-    dispatch({ type: "BACK_FROM_TEAM", isMobile })
-  }, [dispatch, isMobile])
-
-  const handleOpenTeamFromBar = useCallback(() => {
-    if (!teamContext) return
-    dispatch({ type: "SELECT_TEAM", teamName: teamContext.teamName, isMobile })
-  }, [dispatch, teamContext, isMobile])
-
   const handleGoHome = useCallback(() => {
     dispatch({ type: "GO_HOME", isMobile })
   }, [dispatch, isMobile])
@@ -178,11 +133,7 @@ export function useSessionActions({
     clearLoadError,
     handleLoadSession,
     handleDashboardSelect,
-    handleOpenSessionFromTeam,
     handleTeamMemberSwitch,
-    handleSelectTeam,
-    handleBackFromTeam,
-    handleOpenTeamFromBar,
     handleGoHome,
     handleJumpToTurn,
     handleMobileTabChange,

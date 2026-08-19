@@ -29,7 +29,7 @@ export const SessionStatusBar = memo(function SessionStatusBar({ session, effort
   if (!hasAny) return null
 
   return (
-    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border/40 bg-elevation-0/50 text-[11px] font-mono">
+    <div className="flex min-w-0 items-center gap-2 text-[11px] font-mono">
       {session.model && <span className="text-foreground/80">{shortenModel(session.model)}</span>}
       {effort && (
         <span className="flex items-center gap-1 text-amber-400">
@@ -49,12 +49,10 @@ export const SessionStatusBar = memo(function SessionStatusBar({ session, effort
           {worktreePath}
         </span>
       )}
-      <div className="ml-auto flex items-center gap-2 min-w-0">
-        {session.gitBranch && (
-          <span className="text-muted-foreground truncate">{session.gitBranch}</span>
-        )}
-        <PullRequestChips pullRequests={pullRequests} />
-      </div>
+      {session.gitBranch && (
+        <span className="text-muted-foreground truncate">{session.gitBranch}</span>
+      )}
+      <PullRequestChips pullRequests={pullRequests} />
     </div>
   )
 })

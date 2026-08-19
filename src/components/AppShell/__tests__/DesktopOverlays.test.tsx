@@ -107,11 +107,7 @@ function makeProps(): Pick<DesktopAppShellProps, "navigation" | "project" | "chr
         setShowWorktrees: vi.fn(),
       },
       actions: {
-        handleLoadSession: vi.fn(),
         handleDashboardSelect: vi.fn(),
-        handleSelectTeam: vi.fn(),
-        handleBackFromTeam: vi.fn(),
-        handleOpenSessionFromTeam: vi.fn(),
         handleGoHome: vi.fn(),
         handleJumpToTurn: vi.fn(),
       },

@@ -6,7 +6,6 @@ import { ChatArea } from "@/components/ChatArea"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
-import { SessionStatusBar } from "@/components/SessionStatusBar"
 import { StatsPanel } from "@/components/StatsPanel"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import {
@@ -26,7 +25,6 @@ import {
   PrimarySessionBrowser,
   MissionControlView,
   ProjectDashboard,
-  SelectedTeamDashboard,
 } from "./SharedAppViews"
 import {
   formatProjectPromptContext,
@@ -59,7 +57,6 @@ function DesktopSessionContent({
         <ResizablePanel defaultSize={project.hasFileChanges && navigation.panels.showFileChanges ? 70 : 100} minSize="500px">
           <div className="relative h-full min-h-0 flex flex-col">
             {sessionView.teamMembersBar}
-            {sessionView.agentContextBar}
             <SessionInfoBar
               creatingSession={navigation.creatingSession}
               onNewSession={navigation.onStartNewSession}
@@ -68,10 +65,6 @@ function DesktopSessionContent({
               onBackToMain={isSubAgentView ? sessionView.onBackToMain : undefined}
               onShowWorkflows={sessionView.onShowWorkflows}
               workflowCount={sessionView.workflowCount}
-            />
-            <SessionStatusBar
-              session={session}
-              thinkingEnabled={session.turns.some((turn) => turn.thinking.length > 0)}
             />
             <ChatArea
               searchInputRef={sessionView.searchInputRef}
@@ -124,7 +117,6 @@ function DesktopMainView({
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const view = resolveDesktopMainView({
     mainView: state.mainView,
-    selectedTeam: state.selectedTeam,
     hasSession: Boolean(session),
     pendingDirName: state.pendingDirName,
   })
@@ -147,10 +139,6 @@ function DesktopMainView({
 
   if (view === "mission") {
     return <MissionControlView navigation={navigation} />
-  }
-
-  if (view === "teams" && state.selectedTeam) {
-    return <SelectedTeamDashboard navigation={navigation} />
   }
 
   if (view === "session") {
@@ -278,8 +266,6 @@ export function DesktopWorkspace({
       >
         <PrimarySessionBrowser
           navigation={navigation}
-          projectDir={session?.cwd ?? state.pendingCwd ?? null}
-          onScriptStarted={project.processPanel.addProcess}
         />
       </HoverRevealPanel>
 
@@ -293,8 +279,8 @@ export function DesktopWorkspace({
 
       <HoverRevealPanel
         side="right"
-        visible={!project.showPreview && !project.showProjectFiles && navigation.panels.showStats && Boolean(session) && state.mainView !== "teams" && state.mainView !== "config"}
-        enabled={!project.showPreview && !project.showProjectFiles && Boolean(session) && state.mainView !== "teams" && state.mainView !== "config"}
+        visible={!project.showPreview && !project.showProjectFiles && navigation.panels.showStats && Boolean(session) && state.mainView !== "config"}
+        enabled={!project.showPreview && !project.showProjectFiles && Boolean(session) && state.mainView !== "config"}
       >
         <StatsPanel
           onJumpToTurn={navigation.actions.handleJumpToTurn}

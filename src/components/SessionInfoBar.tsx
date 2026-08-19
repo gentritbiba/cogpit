@@ -34,6 +34,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { Spinner } from "@/components/ui/Spinner"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
+import { SessionStatusBar } from "@/components/SessionStatusBar"
 import type { RawMessage } from "@/lib/types"
 
 const MOBILE_MENU_ITEM_CLASS =
@@ -224,6 +225,11 @@ export const SessionInfoBar = memo(function SessionInfoBar({
         rawMessages={claudeRawMessages}
         showRemaining
         showTooltip={!isMobile}
+      />
+
+      <SessionStatusBar
+        session={session}
+        thinkingEnabled={session.turns.some((turn) => turn.thinking.length > 0)}
       />
 
       <div className="flex-1" />

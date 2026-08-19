@@ -9,7 +9,6 @@ describe("resolveDesktopMainView", () => {
   it("gives config precedence over session and pending content", () => {
     expect(resolveDesktopMainView({
       mainView: "config",
-      selectedTeam: "core",
       hasSession: true,
       pendingDirName: "pending",
     })).toBe("config")
@@ -20,7 +19,6 @@ describe("resolveDesktopMainView", () => {
     // another session, so an open session must not hide it.
     expect(resolveDesktopMainView({
       mainView: "mission",
-      selectedTeam: "core",
       hasSession: true,
       pendingDirName: "pending",
     })).toBe("mission")
@@ -29,34 +27,14 @@ describe("resolveDesktopMainView", () => {
   it("keeps config ahead of Mission Control", () => {
     expect(resolveDesktopMainView({
       mainView: "config",
-      selectedTeam: null,
       hasSession: false,
       pendingDirName: null,
     })).toBe("config")
   })
 
-  it("shows a selected team before session content", () => {
-    expect(resolveDesktopMainView({
-      mainView: "teams",
-      selectedTeam: "core",
-      hasSession: true,
-      pendingDirName: null,
-    })).toBe("teams")
-  })
-
-  it("falls through an unselected teams view to the active session", () => {
-    expect(resolveDesktopMainView({
-      mainView: "teams",
-      selectedTeam: null,
-      hasSession: true,
-      pendingDirName: null,
-    })).toBe("session")
-  })
-
   it("uses pending content before the dashboard", () => {
     expect(resolveDesktopMainView({
       mainView: "sessions",
-      selectedTeam: null,
       hasSession: false,
       pendingDirName: "pending",
     })).toBe("pending")
@@ -65,7 +43,6 @@ describe("resolveDesktopMainView", () => {
   it("uses the dashboard when no more specific view is available", () => {
     expect(resolveDesktopMainView({
       mainView: "sessions",
-      selectedTeam: null,
       hasSession: false,
       pendingDirName: null,
     })).toBe("dashboard")

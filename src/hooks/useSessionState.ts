@@ -27,10 +27,8 @@ export interface SessionState {
   sessionChangeKey: number
   currentMemberName: string | null
   loadingMember: string | null
-  mainView: "sessions" | "teams" | "config" | "mission"
+  mainView: "sessions" | "config" | "mission"
   configFilePath: string | null
-  selectedTeam: string | null
-  sidebarTab: "live" | "browse" | "teams"
   mobileTab: MobileTab
   dashboardProject: string | null
 }
@@ -38,10 +36,7 @@ export interface SessionState {
 export type SessionAction =
   | { type: "LOAD_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
   | { type: "GO_HOME"; isMobile: boolean }
-  | { type: "LOAD_SESSION_FROM_TEAM"; session: ParsedSession; source: SessionSource; memberName?: string; isMobile: boolean }
   | { type: "SWITCH_TEAM_MEMBER"; session: ParsedSession; source: SessionSource; memberName: string }
-  | { type: "SELECT_TEAM"; teamName: string; isMobile: boolean }
-  | { type: "BACK_FROM_TEAM"; isMobile: boolean }
   | { type: "JUMP_TO_TURN"; index: number; toolCallId?: string }
   | { type: "SET_SEARCH_QUERY"; value: string }
   | { type: "SET_EXPAND_ALL"; value: boolean }
@@ -51,9 +46,8 @@ export type SessionAction =
   | { type: "SET_OLDER_TURNS"; turns: Turn[] }
   | { type: "RELOAD_SESSION_CONTENT"; session: ParsedSession; source: SessionSource }
   | { type: "SET_CURRENT_MEMBER_NAME"; name: string | null }
-  | { type: "GUARD_MOBILE_TAB"; hasSession: boolean; hasTeam: boolean }
+  | { type: "GUARD_MOBILE_TAB"; hasSession: boolean }
   | { type: "SET_LOADING_MEMBER"; name: string | null }
-  | { type: "SET_SIDEBAR_TAB"; tab: "live" | "browse" | "teams" }
   | { type: "SET_DASHBOARD_PROJECT"; dirName: string | null }
   | { type: "INIT_PENDING_SESSION"; dirName: string; cwd?: string; isMobile: boolean }
   | { type: "FINALIZE_SESSION"; session: ParsedSession; source: SessionSource; isMobile: boolean }
@@ -78,8 +72,6 @@ const initialState: SessionState = {
   loadingMember: null,
   mainView: "sessions",
   configFilePath: null,
-  selectedTeam: null,
-  sidebarTab: "live",
   mobileTab: "sessions",
   dashboardProject: null,
 }
@@ -122,7 +114,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         expandAll: false,
 
         mainView: "sessions",
-        selectedTeam: null,
         currentMemberName: null,
         dashboardProject: null,
         sessionChangeKey: state.sessionChangeKey + 1,
@@ -142,25 +133,9 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         expandAll: false,
 
         mainView: "sessions",
-        selectedTeam: null,
         currentMemberName: null,
         dashboardProject: null,
         mobileTab: action.isMobile ? "sessions" : state.mobileTab,
-      }
-
-    case "LOAD_SESSION_FROM_TEAM":
-      return {
-        ...state,
-        ...openSession(action.session),
-        sessionSource: action.source,
-        activeTurnIndex: null,
-        searchQuery: "",
-        expandAll: false,
-        mainView: "sessions",
-        selectedTeam: null,
-        currentMemberName: action.memberName ?? state.currentMemberName,
-        sessionChangeKey: state.sessionChangeKey + 1,
-        mobileTab: action.isMobile ? "chat" : state.mobileTab,
       }
 
     case "SWITCH_TEAM_MEMBER":
@@ -173,22 +148,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         expandAll: false,
         currentMemberName: action.memberName,
         sessionChangeKey: state.sessionChangeKey + 1,
-      }
-
-    case "SELECT_TEAM":
-      return {
-        ...state,
-        selectedTeam: action.teamName,
-        mainView: "teams",
-        mobileTab: action.isMobile ? "teams" : state.mobileTab,
-      }
-
-    case "BACK_FROM_TEAM":
-      return {
-        ...state,
-        selectedTeam: null,
-        mainView: "sessions",
-        mobileTab: action.isMobile ? "sessions" : state.mobileTab,
       }
 
     case "JUMP_TO_TURN":
@@ -209,11 +168,9 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
     case "TOGGLE_EXPAND_ALL":
       return { ...state, expandAll: !state.expandAll }
 
-    case "SET_MOBILE_TAB": {
-      const newSidebarTab = action.tab === "teams" && !state.selectedTeam ? "teams" : state.sidebarTab
-      if (state.mobileTab === action.tab && state.sidebarTab === newSidebarTab) return state
-      return { ...state, mobileTab: action.tab, sidebarTab: newSidebarTab }
-    }
+    case "SET_MOBILE_TAB":
+      if (state.mobileTab === action.tab) return state
+      return { ...state, mobileTab: action.tab }
 
     case "UPDATE_SESSION":
       return {
@@ -258,19 +215,12 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       if (!action.hasSession && (tab === "stats" || tab === "chat")) {
         tab = "sessions"
       }
-      if (!action.hasTeam && tab === "teams") {
-        tab = "sessions"
-      }
       return tab !== state.mobileTab ? { ...state, mobileTab: tab } : state
     }
 
     case "SET_LOADING_MEMBER":
       if (state.loadingMember === action.name) return state
       return { ...state, loadingMember: action.name }
-
-    case "SET_SIDEBAR_TAB":
-      if (state.sidebarTab === action.tab) return state
-      return { ...state, sidebarTab: action.tab }
 
     case "SET_DASHBOARD_PROJECT":
       if (state.dashboardProject === action.dirName) return state
@@ -288,7 +238,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         searchQuery: "",
         expandAll: false,
         mainView: "sessions",
-        selectedTeam: null,
         currentMemberName: null,
         dashboardProject: null,
         sessionChangeKey: state.sessionChangeKey + 1,
@@ -307,7 +256,6 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         searchQuery: "",
         expandAll: false,
         mainView: "sessions",
-        selectedTeam: null,
         currentMemberName: null,
         dashboardProject: null,
         sessionChangeKey: state.sessionChangeKey + 1,

@@ -24,4 +24,28 @@ describe("TurnWorkFold", () => {
 
     expect(onToggle).toHaveBeenCalledTimes(1)
   })
+
+  it("uses the full rule as part of the click target", () => {
+    const onToggle = vi.fn()
+    const { container } = render(
+      <TurnWorkFold label="Working for 8s" expanded={false} onToggle={onToggle} />,
+    )
+
+    fireEvent.click(container.querySelector("[aria-hidden]")!)
+
+    expect(onToggle).toHaveBeenCalledTimes(1)
+  })
+
+  it("updates from working to worked without replacing the disclosure", () => {
+    const { rerender } = render(
+      <TurnWorkFold label="Working for 8s" expanded={false} onToggle={() => {}} />,
+    )
+    const control = screen.getByRole("button")
+
+    rerender(
+      <TurnWorkFold label="Worked for 9s" expanded={false} onToggle={() => {}} />,
+    )
+
+    expect(screen.getByRole("button", { name: /worked for 9s/i })).toBe(control)
+  })
 })

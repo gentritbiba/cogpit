@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button"
 import { ChatArea } from "@/components/ChatArea"
 import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { MobileNav, type MobileTab } from "@/components/MobileNav"
-import { SessionBrowser } from "@/components/SessionBrowser"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { StatsPanel } from "@/components/StatsPanel"
 import { UpdateBanner } from "@/components/UpdateBanner"
@@ -19,7 +18,6 @@ import { adjacentMobileTab, visibleMobileTabs } from "./mobileView"
 import {
   PrimarySessionBrowser,
   ProjectDashboard,
-  SelectedTeamDashboard,
 } from "./SharedAppViews"
 
 const MobileFileChanges = lazy(() => import("@/components/MobileFileChanges").then((module) => ({ default: module.MobileFileChanges })))
@@ -32,18 +30,14 @@ export function MobileAppShell({
   chrome,
 }: MobileAppShellProps) {
   const { state, theme } = useAppContext()
-  const { session, sessionSource, isSubAgentView } = useSessionContext()
+  const { session, isSubAgentView } = useSessionContext()
 
   const visibleTabs = useMemo(() => visibleMobileTabs({
     hasSession: Boolean(session),
     hasPendingSession: Boolean(state.pendingDirName),
-    hasTeam: sessionView.hasTeam,
   }),
-    [session, state.pendingDirName, sessionView.hasTeam],
+    [session, state.pendingDirName],
   )
-  const activeSessionKey = sessionSource
-    ? `${sessionSource.dirName}/${sessionSource.fileName}`
-    : null
 
   const swipeRef = useSwipeNavigation<HTMLElement>({
     enabled: true,
@@ -72,7 +66,7 @@ export function MobileAppShell({
     <div className={`${theme.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
-      {!(state.mobileTab === "chat" && session && state.mainView !== "teams") && (
+      {!(state.mobileTab === "chat" && session) && (
         <div className="flex h-10 shrink-0 items-center border-b border-border/40 bg-elevation-0 px-1.5">
           <DeviceSwitcher compact />
         </div>
@@ -84,12 +78,9 @@ export function MobileAppShell({
 
         {state.mobileTab === "chat" && (
           <div className="flex flex-1 min-h-0 flex-col min-w-0">
-            {state.mainView === "teams" && state.selectedTeam ? (
-              <SelectedTeamDashboard navigation={navigation} />
-            ) : session ? (
+            {session ? (
               <div className="flex flex-1 min-h-0 flex-col">
                 {sessionView.teamMembersBar}
-                {sessionView.agentContextBar}
                 <SessionInfoBar
                   creatingSession={navigation.creatingSession}
                   onNewSession={navigation.onStartNewSession}
@@ -155,31 +146,11 @@ export function MobileAppShell({
           />
         )}
 
-        {state.mobileTab === "teams" && (
-          <div className="flex flex-1 min-h-0 flex-col min-w-0">
-            {state.selectedTeam ? (
-              <SelectedTeamDashboard navigation={navigation} />
-            ) : (
-              <SessionBrowser
-                sessionId={session?.sessionId ?? null}
-                activeSessionKey={activeSessionKey}
-                onLoadSession={navigation.actions.handleLoadSession}
-                sidebarTab="teams"
-                onSidebarTabChange={navigation.onSidebarTabChange}
-                onSelectTeam={navigation.actions.handleSelectTeam}
-                isMobile
-                teamsOnly
-                onBeforeSessionSwitch={navigation.onBeforeSessionSwitch}
-                workerParse={navigation.workerParse}
-              />
-            )}
-          </div>
-        )}
       </main>
 
       {state.mobileTab === "chat" && chrome.processPanel}
       {chrome.workflowsPanel}
-      {state.mobileTab === "chat" && (session || state.pendingDirName) && state.mainView !== "teams" && (
+      {state.mobileTab === "chat" && (session || state.pendingDirName) && (
         <>
           {sessionView.todoProgress}
           {session ? sessionView.activeComposer : sessionView.pendingComposer}
@@ -189,7 +160,6 @@ export function MobileAppShell({
       <MobileNav
         activeTab={state.mobileTab}
         onTabChange={changeTab}
-        hasTeam={sessionView.hasTeam}
       />
 
       {chrome.undoDialog}

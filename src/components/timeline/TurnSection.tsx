@@ -113,6 +113,29 @@ interface TurnSectionInnerProps {
   onExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
 }
 
+function TurnWorkLabel({
+  turn,
+  isTurnDone,
+  hiddenToolCalls,
+}: {
+  turn: Turn
+  isTurnDone: boolean
+  hiddenToolCalls: number
+}) {
+  if (isTurnDone) return turnFoldLabel(getTurnDuration(turn), hiddenToolCalls)
+  if (!turn.timestamp) return "Working"
+
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      Working for
+      <LiveElapsed
+        startTimestamp={turn.timestamp}
+        className="text-[11px] text-inherit"
+      />
+    </span>
+  )
+}
+
 const TurnSectionInner = memo(function TurnSectionInner({
   turn,
   index,
@@ -150,11 +173,15 @@ const TurnSectionInner = memo(function TurnSectionInner({
       msg.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write"),
     )
 
-  // A settled turn is mostly process. Fold it down to its answer and let the
-  // work sit one click away; the live turn and "expand all" stay open.
-  const foldPlan = useMemo(() => planTurnFold(turn.contentBlocks), [turn.contentBlocks])
-  const [workExpanded, setWorkExpanded] = useState(false)
-  const workVisible = workExpanded || expandAll || !isTurnDone
+  const foldPhase = isTurnDone ? "settled" : "working"
+  const foldPlan = useMemo(
+    () => planTurnFold(turn.contentBlocks, foldPhase),
+    [foldPhase, turn.contentBlocks],
+  )
+  // Undefined follows the global setting. A click becomes a local override,
+  // so the disclosure never ignores the user while "expand all" is active.
+  const [workExpanded, setWorkExpanded] = useState<boolean | undefined>(undefined)
+  const workVisible = workExpanded ?? (expandAll || !isTurnDone)
 
   const { leadingBlocks, trailingBlocks } = useMemo(() => {
     if (!foldPlan.foldable) {
@@ -224,9 +251,15 @@ const TurnSectionInner = memo(function TurnSectionInner({
                 />
               )}
               <TurnWorkFold
-                label={turnFoldLabel(getTurnDuration(turn), foldPlan.hiddenToolCalls)}
+                label={
+                  <TurnWorkLabel
+                    turn={turn}
+                    isTurnDone={isTurnDone}
+                    hiddenToolCalls={foldPlan.hiddenToolCalls}
+                  />
+                }
                 expanded={workVisible}
-                onToggle={() => setWorkExpanded((open) => !open)}
+                onToggle={() => setWorkExpanded(!workVisible)}
                 compact={isMobile}
               />
               {trailingBlocks.length > 0 && (

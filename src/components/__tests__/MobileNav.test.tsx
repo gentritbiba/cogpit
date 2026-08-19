@@ -34,7 +34,6 @@ describe("MobileNav", () => {
       <MobileNav
         activeTab="chat"
         onTabChange={onTabChange}
-        hasTeam={false}
       />,
     )
 
@@ -48,7 +47,6 @@ describe("MobileNav", () => {
     expect(screen.queryByText("Sessions")).not.toBeInTheDocument()
     expect(screen.queryByText("Chat")).not.toBeInTheDocument()
     expect(screen.queryByText("Stats")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Teams" })).not.toBeInTheDocument()
 
     fireEvent.click(statsTab)
 
@@ -63,13 +61,11 @@ describe("MobileNav", () => {
       <MobileNav
         activeTab="sessions"
         onTabChange={vi.fn()}
-        hasTeam
       />,
     )
 
     expect(screen.getByRole("button", { name: "Sessions" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Teams" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Stats" })).not.toBeInTheDocument()
   })
 })

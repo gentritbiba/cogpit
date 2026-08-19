@@ -48,6 +48,24 @@ describe("planTurnFold", () => {
     expect(plan.foldable).toBe(false)
   })
 
+  it("folds an active turn before it has a final message", () => {
+    const plan = planTurnFold([text("Checking now"), tools("Bash"), thoughts("hmm")], "working")
+
+    expect(plan.foldable).toBe(true)
+    expect(plan.foldedIndices).toEqual([0, 1, 2])
+    expect(plan.foldAnchorIndex).toBe(0)
+  })
+
+  it("keeps pinned blocks visible while active work is folded", () => {
+    const plan = planTurnFold([
+      tools("Read"),
+      { kind: "queued_prompt", content: "also check this" },
+      text("Still working"),
+    ], "working")
+
+    expect(plan.foldedIndices).toEqual([0, 2])
+  })
+
   it("keeps user-facing blocks visible even when they precede the terminal message", () => {
     const blocks: TurnContentBlock[] = [
       tools("Read"),

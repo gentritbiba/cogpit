@@ -26,9 +26,9 @@ vi.mock("@/components/HoverRevealPanel", () => ({
   ),
 }))
 
-vi.mock("@/components/SessionBrowser", () => ({
-  SessionBrowser: ({ sessionId }: { sessionId: string | null }) => (
-    <div data-testid="session-browser">{sessionId ?? "no-session"}</div>
+vi.mock("@/components/session-browser", () => ({
+  SessionBrowser: ({ activeSessionKey }: { activeSessionKey: string | null }) => (
+    <div data-testid="session-browser">{activeSessionKey ?? "no-session"}</div>
   ),
 }))
 
@@ -42,12 +42,6 @@ vi.mock("@/components/ChatArea", () => ({
 
 vi.mock("@/components/SessionInfoBar", () => ({
   SessionInfoBar: () => <div data-testid="session-info" />,
-}))
-
-vi.mock("@/components/SessionStatusBar", () => ({
-  SessionStatusBar: ({ session }: { session: ParsedSession }) => (
-    <div data-testid="session-status">{session.sessionId}</div>
-  ),
 }))
 
 vi.mock("@/components/StatsPanel", () => ({
@@ -71,12 +65,6 @@ vi.mock("@/components/ui/resizable", () => ({
 vi.mock("@/components/ConfigBrowser", () => ({
   ConfigBrowser: ({ projectPath }: { projectPath: string | null }) => (
     <div data-testid="config-browser">{projectPath ?? "no-project"}</div>
-  ),
-}))
-
-vi.mock("@/components/TeamsDashboard", () => ({
-  TeamsDashboard: ({ teamName }: { teamName: string }) => (
-    <div data-testid="teams-dashboard">{teamName}</div>
   ),
 }))
 
@@ -116,13 +104,11 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
 
 function setContexts({
   mainView = "sessions",
-  selectedTeam = null,
   pendingDirName = null,
   pendingCwd = null,
   session = null,
 }: {
-  mainView?: "sessions" | "teams" | "config"
-  selectedTeam?: string | null
+  mainView?: "sessions" | "config" | "mission"
   pendingDirName?: string | null
   pendingCwd?: string | null
   session?: ParsedSession | null
@@ -142,12 +128,10 @@ function setContexts({
       loadingMember: null,
       mainView,
       configFilePath: null,
-      selectedTeam,
-      sidebarTab: "live",
       mobileTab: "sessions",
       dashboardProject: null,
     },
-  } as ReturnType<typeof useAppContext>)
+  } as unknown as ReturnType<typeof useAppContext>)
 
   contextMocks.useSessionContext.mockReturnValue({
     session,
@@ -185,11 +169,7 @@ function makeProps(
         setShowWorktrees: vi.fn(),
       },
       actions: {
-        handleLoadSession: vi.fn(),
         handleDashboardSelect: vi.fn(),
-        handleSelectTeam: vi.fn(),
-        handleBackFromTeam: vi.fn(),
-        handleOpenSessionFromTeam: vi.fn(),
         handleGoHome: vi.fn(),
         handleJumpToTurn: vi.fn(),
       },
@@ -201,21 +181,17 @@ function makeProps(
       },
       creatingSession: false,
       pendingSession: null,
-      onSidebarTabChange: vi.fn(),
       onStartNewSession: vi.fn(),
       onStartNewFolder: vi.fn(),
       onSelectProject: vi.fn(),
       onOpenPaletteProject: vi.fn(),
-      onBeforeSessionSwitch: vi.fn(),
       liveSessionsRefreshRef: { current: null },
       onPrefetchSession: vi.fn(),
-      workerParse: vi.fn(),
     },
     sessionView: {
       searchInputRef: { current: null },
       chatInputRef: { current: null },
       teamMembersBar: null,
-      agentContextBar: null,
       activeComposer: <div data-testid="active-composer" />,
       pendingComposer: <div data-testid="pending-composer" />,
       pendingTurns: [],
@@ -266,7 +242,7 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...makeProps()} />)
 
     expect(screen.getByTestId("session-browser")).toHaveTextContent("session-1")
-    expect(screen.getByTestId("session-status")).toHaveTextContent("session-1")
+    expect(screen.getByTestId("session-info")).toBeInTheDocument()
     expect(screen.getByTestId("active-composer")).toBeInTheDocument()
   })
 
@@ -276,7 +252,7 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...makeProps()} />)
 
     expect(await screen.findByTestId("config-browser")).toHaveTextContent("/fresh/session")
-    expect(screen.queryByTestId("session-status")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("session-info")).not.toBeInTheDocument()
   })
 
   it("renders pending turns and the pending composer before the dashboard", () => {
@@ -299,11 +275,4 @@ describe("DesktopWorkspace", () => {
     expect(screen.getByTestId("dashboard")).toBeInTheDocument()
   })
 
-  it("renders the shared selected-team dashboard", async () => {
-    setContexts({ mainView: "teams", selectedTeam: "platform" })
-
-    render(<DesktopWorkspace {...makeProps()} />)
-
-    expect(await screen.findByTestId("teams-dashboard")).toHaveTextContent("platform")
-  })
 })

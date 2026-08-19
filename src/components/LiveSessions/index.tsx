@@ -257,8 +257,8 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
             type="search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search live & recent…"
-            aria-label="Search live and recent sessions by project, branch, title, first prompt, or latest prompt"
+            placeholder="Search sessions…"
+            aria-label="Search sessions by project, branch, title, first prompt, or latest prompt"
             className="w-full rounded-md border border-border/60 py-1.5 pl-7 pr-7 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
           />
           {searchQuery && (
@@ -293,7 +293,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-4 px-1.5 pt-0.5 pb-3">
+        <div className="flex flex-col gap-3 px-1.5 pt-0.5 pb-3">
           {fetchError && (
             <div className="mx-1 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1.5">
               <AlertTriangle className="size-3 text-red-400 shrink-0" />

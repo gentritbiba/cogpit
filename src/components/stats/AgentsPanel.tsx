@@ -1,11 +1,13 @@
 import { useMemo, useEffect, useRef } from "react"
 import { ChevronRight } from "lucide-react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
-import { AgentCard } from "@/components/stats/AgentCard"
-import type { ParsedSession } from "@/lib/types"
+import { AgentCard, type AgentStatus } from "@/components/stats/AgentCard"
+import type { ParsedSession, ToolCall } from "@/lib/types"
 import { parseSubAgentPath } from "@/lib/format"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import { authFetch } from "@/lib/auth"
+import { useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
+import type { StreamingOverlay } from "@/lib/streamingOverlay"
 
 // ── Inline Agent Extraction ─────────────────────────────────────────────────
 
@@ -15,24 +17,82 @@ interface InlineAgent {
   subagentType: string | null
   preview: string
   isBackground: boolean
+  status: AgentStatus
+  durationMs?: number
+  toolUseCount?: number
+  parentToolUseId?: string
 }
 
-function extractInlineAgents(session: ParsedSession): InlineAgent[] {
-  const seen = new Map<string, Omit<InlineAgent, "agentId">>()
+function normalizeStatus(status: string | undefined, isActive = false): AgentStatus {
+  const normalized = status?.toLowerCase()
+  if (normalized === "completed" || normalized === "success" || normalized === "done") return "done"
+  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") return "failed"
+  if (isActive || normalized === "running" || normalized === "async_launched") return "running"
+  return "seen"
+}
+
+function firstLine(value: string): string {
+  return value.split("\n").map((line) => line.trim()).find(Boolean) ?? ""
+}
+
+function isAgentToolCall(toolCall: ToolCall): boolean {
+  return toolCall.name === "Task" || toolCall.name === "Agent"
+}
+
+function extractInlineAgents(session: ParsedSession, streamingOverlay: StreamingOverlay): InlineAgent[] {
+  const seen = new Map<string, InlineAgent>()
   for (const turn of session.turns) {
     for (const block of turn.contentBlocks) {
       if (block.kind !== "sub_agent" && block.kind !== "background_agent") continue
       for (const msg of block.messages) {
-        if (seen.has(msg.agentId)) continue
-        const preview = msg.text[0]?.split("\n").find((l) => l.trim())?.trim() ?? ""
-        seen.set(msg.agentId, { agentName: msg.agentName, subagentType: msg.subagentType, preview, isBackground: msg.isBackground })
+        const existing = seen.get(msg.agentId)
+        const nextStatus = normalizeStatus(msg.status)
+        seen.set(msg.agentId, {
+          agentId: msg.agentId,
+          agentName: msg.agentName ?? existing?.agentName ?? null,
+          subagentType: msg.subagentType ?? existing?.subagentType ?? null,
+          preview: firstLine(msg.prompt?.trim() || msg.text.find((text) => text.trim()) || "") || existing?.preview || "No task summary recorded",
+          isBackground: msg.isBackground || existing?.isBackground || false,
+          status: nextStatus === "seen" && existing?.status ? existing.status : nextStatus,
+          durationMs: msg.durationMs ?? existing?.durationMs,
+          toolUseCount: msg.toolUseCount ?? existing?.toolUseCount,
+          parentToolUseId: msg.parentToolUseId ?? existing?.parentToolUseId,
+        })
       }
     }
   }
-  return Array.from(seen.entries()).map(([agentId, info]) => ({
-    agentId,
-    ...info,
-  }))
+
+  const knownParentToolIds = new Set<string>()
+  for (const agent of seen.values()) {
+    if (agent.parentToolUseId) knownParentToolIds.add(agent.parentToolUseId)
+  }
+  const activeToolIds = new Set<string>()
+  for (const message of streamingOverlay) {
+    if (message.parentToolUseId) activeToolIds.add(message.parentToolUseId)
+  }
+  for (const turn of session.turns) {
+    for (const toolCall of turn.toolCalls) {
+      if (!isAgentToolCall(toolCall) || !activeToolIds.has(toolCall.id) || knownParentToolIds.has(toolCall.id)) continue
+      const input = toolCall.input
+      seen.set(`tool:${toolCall.id}`, {
+        agentId: `tool:${toolCall.id}`,
+        agentName: typeof input.name === "string" ? input.name : null,
+        subagentType: typeof input.subagent_type === "string" ? input.subagent_type : null,
+        preview: firstLine(
+          typeof input.prompt === "string"
+            ? input.prompt
+            : typeof input.description === "string"
+              ? input.description
+              : "Agent task in progress",
+        ),
+        isBackground: false,
+        status: "running",
+        parentToolUseId: toolCall.id,
+      })
+    }
+  }
+
+  return [...seen.values()]
 }
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -52,6 +112,7 @@ export function AgentsPanel({
   bgAgents,
   onLoadSession,
 }: AgentsPanelProps): React.JSX.Element | null {
+  const streamingOverlay = useStreamingOverlay()
   // Detect if we're currently viewing a sub-agent
   const subAgentView = useMemo(() => {
     if (!sessionSource) return null
@@ -61,7 +122,10 @@ export function AgentsPanel({
   }, [sessionSource])
 
   // Extract inline sub-agents from session content blocks
-  const currentInlineAgents = useMemo(() => extractInlineAgents(session), [session])
+  const currentInlineAgents = useMemo(
+    () => extractInlineAgents(session, streamingOverlay),
+    [session, streamingOverlay],
+  )
 
   // Cache parent session's inline agents so they persist when navigating to sub-agents.
   const cachedInlineAgentsRef = useRef(currentInlineAgents)
@@ -92,13 +156,7 @@ export function AgentsPanel({
 
   // Lookup map to enrich background agents with metadata from inline agents
   const inlineMetaMap = useMemo(() => {
-    const map = new Map<string, { agentName: string | null; subagentType: string | null }>()
-    for (const a of inlineAgents) {
-      if (!map.has(a.agentId)) {
-        map.set(a.agentId, { agentName: a.agentName, subagentType: a.subagentType })
-      }
-    }
-    return map
+    return new Map(inlineAgents.map((agent) => [agent.agentId, agent]))
   }, [inlineAgents])
 
   // Build combined list: background agents + inline-only sub-agents (deduplicated)
@@ -136,7 +194,7 @@ export function AgentsPanel({
 
   return (
     <section>
-      <SectionHeading>Sub-Agents ({totalCount})</SectionHeading>
+      <SectionHeading>Agents ({totalCount})</SectionHeading>
 
       {/* Back to Main button when viewing a sub-agent */}
       {subAgentView && onLoadSession && (
@@ -153,9 +211,7 @@ export function AgentsPanel({
       <div className="max-h-[280px] overflow-y-auto space-y-1.5 pr-0.5">
         {/* Background agents (sorted by latest modified) */}
         {sortedBgAgents.map((agent, idx) => {
-          const preview = agent.preview
-            ? agent.preview.split("\n").find((l) => l.trim())?.trim() ?? ""
-            : ""
+          const preview = firstLine(agent.preview ?? "")
           const meta = inlineMetaMap.get(agent.agentId)
           return (
             <AgentCard
@@ -163,11 +219,13 @@ export function AgentsPanel({
               agentId={agent.agentId}
               subagentType={meta?.subagentType ?? null}
               agentName={meta?.agentName ?? null}
-              preview={preview !== agent.agentId ? preview : ""}
+              preview={meta?.preview || (preview !== agent.agentId ? preview : "")}
               colorIndex={idx}
               isViewing={currentAgentId === agent.agentId}
               isBackground
-              isActive={agent.isActive}
+              status={agent.isActive ? "running" : meta?.status === "failed" ? "failed" : "done"}
+              durationMs={meta?.durationMs}
+              toolUseCount={meta?.toolUseCount}
               disabled={!onLoadSession}
               onStop={agent.isActive ? () => stopBackgroundAgent(agent.agentId) : undefined}
               onClick={() => onLoadSession?.(agent.dirName, agent.fileName)}
@@ -177,7 +235,7 @@ export function AgentsPanel({
 
         {/* Inline agents (sorted by latest spawned) */}
         {sortedInlineAgents.map((agent, idx) => {
-          const canNavigate = !!onLoadSession && !!parentSessionId && !!sessionSource
+          const canNavigate = !!onLoadSession && !!parentSessionId && !!sessionSource && !agent.agentId.startsWith("tool:")
           return (
             <AgentCard
               key={agent.agentId}
@@ -188,6 +246,9 @@ export function AgentsPanel({
               colorIndex={sortedBgAgents.length + idx}
               isViewing={currentAgentId === agent.agentId}
               isBackground={agent.isBackground}
+              status={agent.status}
+              durationMs={agent.durationMs}
+              toolUseCount={agent.toolUseCount}
               disabled={!canNavigate}
               onClick={() => {
                 if (!canNavigate) return

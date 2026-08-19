@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { Users, Crown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Separator } from "@/components/ui/separator"
 import type { TeamMember } from "@/lib/team-types"
 import { getMemberColorClass, getMemberEffectiveColor, isTeamLead } from "@/lib/team-types"
 
@@ -10,7 +11,6 @@ interface TeamMembersBarProps {
   currentMemberName?: string | null
   loadingMember?: string | null
   onMemberClick: (member: TeamMember) => void
-  onTeamClick?: () => void
 }
 
 export const TeamMembersBar = memo(function TeamMembersBar({
@@ -19,18 +19,14 @@ export const TeamMembersBar = memo(function TeamMembersBar({
   currentMemberName,
   loadingMember,
   onMemberClick,
-  onTeamClick,
 }: TeamMembersBarProps) {
   return (
     <div className="flex items-center gap-2 border-b border-border/40 bg-elevation-1 px-3 py-1.5 shrink-0 overflow-x-auto">
-      <button
-        onClick={onTeamClick}
-        className="flex items-center gap-1.5 shrink-0 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-      >
+      <div className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
         <Users className="size-3" />
         <span className="max-w-[120px] truncate">{teamName}</span>
-      </button>
-      <div className="h-3.5 w-px bg-border/50 shrink-0" />
+      </div>
+      <Separator orientation="vertical" className="h-3.5" />
       <div className="flex items-center gap-1">
         {members.map((member) => {
           const isCurrent = member.name === currentMemberName

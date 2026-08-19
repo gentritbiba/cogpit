@@ -23,7 +23,7 @@ function TimeSince({ iso }: { iso: string }) {
     return () => clearInterval(interval)
   }, [])
   return (
-    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+    <span data-relative-time className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
       {formatRelativeTime(iso)}
     </span>
   )
@@ -59,6 +59,7 @@ interface StripRowProps {
   killingPids: Set<number>
   customName?: string
   projectLabel: string
+  compact?: boolean
   onSelect: () => void
   onKill?: (pid: number, e: React.MouseEvent) => void
   onResume?: () => void
@@ -75,6 +76,7 @@ function StripRow({
   killingPids,
   customName,
   projectLabel,
+  compact = false,
   onSelect,
   onKill,
   onResume,
@@ -101,20 +103,28 @@ function StripRow({
           onFocus={onHoverStart}
           onBlur={onHoverEnd}
           className={cn(
-            "group relative w-full cursor-pointer rounded-md border px-2 py-1.5 text-left transition-colors duration-100",
+            "group relative w-full cursor-pointer rounded-md text-left transition-colors duration-100",
+            compact ? "border-0 px-2.5 py-2" : "border px-2 py-1.5",
             cardClassName,
-            isActiveSession && "border-l-2 border-l-blue-500",
+            isActiveSession && !compact && "border-l-2 border-l-blue-500",
           )}
         />}>
+        {compact && isActiveSession && (
+          <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true" />
+        )}
         <div className="flex items-center gap-1.5">
-          <span className={cn("size-1.5 shrink-0 rounded-full", dotClassName)} aria-hidden="true" />
+          <span className={cn("size-1.5 shrink-0 rounded-full", dotClassName, compact && "ring-0")} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-xs leading-tight text-foreground">
             {sessionTitle(s, customName)}
           </span>
-          <span className={cn("shrink-0 rounded px-1 py-px text-[9px] font-medium", chip.className)}>
+          <span className={cn(
+            "shrink-0 font-medium",
+            compact ? "text-[10px] text-muted-foreground" : "rounded px-1 py-px text-[9px]",
+            chip.className,
+          )}>
             {chip.label}
           </span>
-          <TimeSince iso={s.lastActivityAt || s.lastModified} />
+          {!compact && <TimeSince iso={s.lastActivityAt || s.lastModified} />}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 pl-3">
           <span className="truncate text-[10px] text-muted-foreground/60">{projectLabel}</span>
@@ -249,22 +259,26 @@ export function AttentionStrip({
 
       {groups.working.length > 0 && (
         <div className="flex flex-col gap-1">
-          <SectionHeader
-            dotClassName={STATUS_DOT.working}
-            labelClassName="text-green-400/90"
-            label="WORKING"
-            count={groups.working.length}
-          />
-          {visibleWorking.map((s) => (
-            <StripRow
-              key={`${s.dirName}/${s.fileName}`}
-              {...rowShared(s)}
-              chip={{ label: workingChip(s), className: "bg-blue-500/10 text-blue-400" }}
-              dotClassName={STATUS_DOT.working}
-              cardClassName="border-border/40 bg-white/[0.02] hover:bg-white/[0.04]"
-              onKill={onKill}
-            />
-          ))}
+          <div className="flex items-center justify-between px-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Working</span>
+            <span className="text-[10px] tabular-nums text-muted-foreground/60">{groups.working.length}</span>
+          </div>
+          <div
+            data-working-list
+            className="flex flex-col gap-0.5 overflow-hidden rounded-lg border border-border/50 bg-muted/20 p-0.5"
+          >
+            {visibleWorking.map((s) => (
+              <StripRow
+                key={`${s.dirName}/${s.fileName}`}
+                {...rowShared(s)}
+                chip={{ label: workingChip(s), className: "" }}
+                dotClassName={STATUS_DOT.working}
+                cardClassName="hover:bg-accent/50"
+                compact
+                onKill={onKill}
+              />
+            ))}
+          </div>
           {hiddenWorking > 0 && (
             <button
               type="button"
