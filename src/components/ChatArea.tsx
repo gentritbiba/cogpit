@@ -11,6 +11,7 @@ import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { PendingTurnPreview } from "@/components/PendingTurnPreview"
 import { AgentStatusIndicator } from "@/components/timeline/AgentStatusIndicator"
 import { StreamingTurnOverlay } from "@/components/timeline/StreamingTurnOverlay"
+import { TimelineMinimap } from "@/components/timeline/TimelineMinimap"
 import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { FindInSession, type FindInSessionHandle } from "@/components/FindInSession"
 import { useAppContext } from "@/contexts/AppContext"
@@ -70,6 +71,11 @@ export const ChatArea = memo(function ChatArea({
     requestAnimationFrame(() => searchInputRef.current?.focus())
   }, [isMobile, mobileSearchOpen, searchInputRef])
 
+  const handleJumpToTurn = useCallback(
+    (index: number) => dispatch({ type: "JUMP_TO_TURN", index }),
+    [dispatch],
+  )
+
   const closeMobileSearch = useCallback(() => {
     dispatch({ type: "SET_SEARCH_QUERY", value: "" })
     onMobileSearchClose?.()
@@ -110,6 +116,13 @@ export const ChatArea = memo(function ChatArea({
       {/* Scrollable chat area */}
       <div className={cn("relative", isMobile ? "flex-1 min-h-0" : "h-full")}>
         <FindInSession ref={findRef} scrollContainerRef={chatScrollRef} />
+        {!isMobile && (
+          <TimelineMinimap
+            turns={currentSession.turns}
+            scrollContainerRef={chatScrollRef}
+            onJumpToTurn={handleJumpToTurn}
+          />
+        )}
         <StickyPromptBanner
           session={currentSession}
           scrollContainerRef={chatScrollRef}

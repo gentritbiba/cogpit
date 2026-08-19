@@ -175,6 +175,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   return (
     <div
       ref={ref}
+      data-turn-index={index}
       className={cn(
         "group relative",
         isMobile ? "px-1 py-3" : "px-4 py-5",
