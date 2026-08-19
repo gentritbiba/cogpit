@@ -37,7 +37,7 @@ import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
  * remount, no hold, boot behavior is byte-identical to pre-team builds.
  *
  * Also hosted here because they must survive the remount:
- * - device keyboard shortcuts (mod+shift+1..9 jump, mod+shift+0 cycle)
+ * - device keyboard shortcuts (platform chord 1..9 jump, platform chord 0 cycle)
  * - the offline banner for an unreachable active remote device
  *
  * The session inventory provider is keyed here rather than inside App so the

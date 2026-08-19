@@ -14,7 +14,7 @@ describe("AssistantText", () => {
 
   it("copies the raw assistant response and shows feedback", async () => {
     const user = userEvent.setup()
-    render(<AssistantText text="**Useful** response" model={null} tokenUsage={null} />)
+    render(<AssistantText text="**Useful** response" model={null} />)
 
     await user.click(screen.getByRole("button", { name: "Copy response" }))
 

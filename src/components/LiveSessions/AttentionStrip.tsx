@@ -9,6 +9,7 @@ import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
 import { sessionTitle, projectGroupKey } from "./sessionListView"
 import { SessionPreview } from "./SessionPreview"
+import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 
 /** Working rows shown before the "+N more" expander. */
@@ -244,7 +245,7 @@ export function AttentionStrip({
       {groups.working.length > 0 && (
         <div className="flex flex-col gap-1">
           <SectionHeader
-            dotClassName="bg-green-400 animate-pulse"
+            dotClassName={STATUS_DOT.working}
             labelClassName="text-green-400/90"
             label="WORKING"
             count={groups.working.length}
@@ -254,7 +255,7 @@ export function AttentionStrip({
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
               chip={{ label: workingChip(s), className: "bg-blue-500/10 text-blue-400" }}
-              dotClassName="bg-green-400 animate-pulse"
+              dotClassName={STATUS_DOT.working}
               cardClassName="border-border/40 bg-white/[0.02] hover:bg-white/[0.04]"
               onKill={onKill}
             />

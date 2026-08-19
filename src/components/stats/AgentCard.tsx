@@ -68,7 +68,7 @@ export function AgentCard({
             <span
               className={cn(
                 "ml-auto inline-block size-1.5 shrink-0 rounded-full",
-                isActive ? "animate-pulse bg-green-400" : "bg-muted"
+                isActive ? "bg-green-400" : "bg-muted"
               )}
               title={isActive ? "Active" : "Done"}
             />

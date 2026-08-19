@@ -178,7 +178,7 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
   if (pendingInteraction && sseState === "connected") {
     return (
       <div className="flex items-center gap-2.5 py-3 px-4">
-        <CircleHelp className="size-5 shrink-0 animate-pulse text-pink-400" />
+        <CircleHelp className="size-5 shrink-0 text-pink-400" />
         <span className="text-xs font-medium text-pink-300">
           {pendingInteraction.type === "plan"
             ? "Waiting for plan approval"

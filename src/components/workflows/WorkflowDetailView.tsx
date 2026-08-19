@@ -51,7 +51,7 @@ export function WorkflowDetailView({ detail, stopping, confirming, onForceStop }
               {detail.workflowName}
             </h3>
             <Badge variant="outline" className={cn("h-5 gap-1 px-1.5 text-[10px] font-semibold", status.badge)}>
-              {active && <span className={cn("size-1.5 animate-pulse rounded-full", status.dot)} />}
+              {active && <span className={cn("size-1.5 rounded-full", status.dot)} />}
               {status.label}
             </Badge>
           </div>

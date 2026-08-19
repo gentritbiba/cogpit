@@ -251,7 +251,7 @@ export function AskUserQuestionCard({
                 ? "text-emerald-400"
                 : "text-pink-300/80",
           )}>
-            <Status className={cn("size-3", isWaiting && "animate-pulse")} />
+            <Status className="size-3" />
             {statusLabel}
           </div>
         </div>

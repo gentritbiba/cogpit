@@ -6,17 +6,14 @@ import {
   PanelLeftClose,
   PanelRightClose,
   Check,
-  Copy,
   Skull,
   Settings,
   Globe,
-  WifiOff,
   GitBranch,
   SlidersHorizontal,
   FileCode2,
   Search,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import {
   Tooltip,
   TooltipTrigger,
@@ -78,7 +75,7 @@ export const DesktopHeader = memo(function DesktopHeader({
   showMission,
   onToggleMission,
 }: DesktopHeaderProps) {
-  const { config: { networkUrl, networkAccessDisabled, defaultAgentKind } } = useAppContext()
+  const { config: { networkUrl, defaultAgentKind } } = useAppContext()
   const { session, sessionSource, isLive } = useSessionContext()
   const activeAgentKind = sessionSource
     ? sessionSource.agentKind ?? agentKindFromDirName(sessionSource.dirName)
@@ -138,24 +135,6 @@ export const DesktopHeader = memo(function DesktopHeader({
               </TooltipContent>
             </Tooltip>
             {isLive && <LiveIndicator aria-label="Session is live" />}
-            <Tooltip>
-              <TooltipTrigger render={<Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={handleCopyResumeCmd}
-                  aria-label={cmdCopied ? "Copied!" : "Copy resume command"}
-                />}>
-                  {cmdCopied ? (
-                    <Check className="size-3 text-green-400" />
-                  ) : (
-                    <Copy className="size-3" />
-                  )}
-              </TooltipTrigger>
-              <TooltipContent>
-                {cmdCopied ? "Copied!" : "Copy resume command"}
-              </TooltipContent>
-            </Tooltip>
           </>
         ) : (
           <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
@@ -172,7 +151,6 @@ export const DesktopHeader = memo(function DesktopHeader({
 
       <NetworkStatus
         networkUrl={networkUrl}
-        networkAccessDisabled={networkAccessDisabled}
         urlCopied={urlCopied}
         onCopyUrl={handleCopyNetworkUrl}
       />
@@ -183,7 +161,6 @@ export const DesktopHeader = memo(function DesktopHeader({
           icon={Search}
           label={`Command palette (${commandPaletteShortcut})`}
           onClick={onOpenCommandPalette}
-          className="text-muted-foreground hover:text-foreground"
         />
         {onToggleMission && (
           <MissionControlButton active={showMission ?? false} onToggle={onToggleMission} />
@@ -193,7 +170,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             icon={SlidersHorizontal}
             label={showConfig ? "Close Config Browser" : "Config Browser"}
             onClick={onToggleConfig}
-            className={showConfig ? "bg-blue-500/20" : "text-muted-foreground hover:text-foreground"}
+            className={showConfig ? "bg-blue-500/20" : undefined}
             iconClassName={showConfig ? "text-blue-400" : undefined}
           />
         )}
@@ -201,7 +178,6 @@ export const DesktopHeader = memo(function DesktopHeader({
           icon={Settings}
           label="Settings"
           onClick={onOpenSettings}
-          className="text-muted-foreground hover:text-foreground"
         />
         {can("killAny") && (
           <HeaderIconButton
@@ -209,8 +185,8 @@ export const DesktopHeader = memo(function DesktopHeader({
             label="Kill all tracked agent processes"
             onClick={onKillAll}
             disabled={killing}
-            className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-            iconClassName={killing ? "text-red-400 animate-pulse" : undefined}
+            className="hover:text-red-400 hover:bg-red-500/10"
+            iconClassName={killing ? "text-red-400" : undefined}
           />
         )}
         {onToggleWorktrees && (
@@ -218,7 +194,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             icon={GitBranch}
             label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
             onClick={onToggleWorktrees}
-            className={showWorktrees ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
+            className={showWorktrees ? "text-foreground" : undefined}
           />
         )}
         {hasFileChanges && onToggleFileChanges && (
@@ -226,7 +202,7 @@ export const DesktopHeader = memo(function DesktopHeader({
             icon={FileCode2}
             label={showFileChanges ? "Hide File Changes" : "Show File Changes"}
             onClick={onToggleFileChanges}
-            className={showFileChanges ? "text-amber-400" : "text-muted-foreground hover:text-foreground"}
+            className={showFileChanges ? "text-amber-400" : undefined}
             iconClassName={showFileChanges ? "text-amber-400" : undefined}
           />
         )}
@@ -251,44 +227,32 @@ export const DesktopHeader = memo(function DesktopHeader({
 
 interface NetworkStatusProps {
   networkUrl: string | null
-  networkAccessDisabled: boolean
   urlCopied: boolean
   onCopyUrl: () => void
 }
 
-/** Renders the network URL button or "Network off" indicator. */
-function NetworkStatus({ networkUrl, networkAccessDisabled, urlCopied, onCopyUrl }: NetworkStatusProps): React.ReactNode {
-  if (networkUrl) {
-    return (
-      <Tooltip>
-        <TooltipTrigger render={<button
-            type="button"
-            onClick={onCopyUrl}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
-          />}>
-            <Globe className="size-3 text-green-500" />
-            {urlCopied ? (
-              <span className="text-green-400">Copied!</span>
-            ) : (
-              networkUrl
-            )}
-        </TooltipTrigger>
-        <TooltipContent>Click to copy connection URL</TooltipContent>
-      </Tooltip>
-    )
-  }
+/**
+ * Network URL button. Network access being off is the safe default and renders
+ * nothing; being reachable on the LAN is the state worth seeing.
+ */
+function NetworkStatus({ networkUrl, urlCopied, onCopyUrl }: NetworkStatusProps): React.ReactNode {
+  if (!networkUrl) return null
 
-  if (networkAccessDisabled) {
-    return (
-      <Tooltip>
-        <TooltipTrigger render={<div className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground mr-1" />}>
-            <WifiOff className="size-3" />
-            <span>Network off</span>
-        </TooltipTrigger>
-        <TooltipContent>Network access is disabled</TooltipContent>
-      </Tooltip>
-    )
-  }
-
-  return null
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<button
+          type="button"
+          onClick={onCopyUrl}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
+        />}>
+          <Globe className="size-3 text-green-500" />
+          {urlCopied ? (
+            <span className="text-green-400">Copied!</span>
+          ) : (
+            networkUrl
+          )}
+      </TooltipTrigger>
+      <TooltipContent>Reachable on your network — click to copy the connection URL</TooltipContent>
+    </Tooltip>
+  )
 }

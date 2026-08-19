@@ -235,7 +235,7 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
   if (fileChanges.length === 0) return null
 
   return (
-    <div className="border-l-2 border-green-500/30 pl-3 ml-1">
+    <div className="border-l border-border/40 pl-3 ml-1">
       {/* Header */}
       <div className="flex items-center gap-2 py-1">
         <FileCode2 className="size-3.5 text-muted-foreground/50" />

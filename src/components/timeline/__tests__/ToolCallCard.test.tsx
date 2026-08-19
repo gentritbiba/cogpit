@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { getToolSummary, ToolCallCard } from "../ToolCallCard"
+import { getToolSummary, getToolTextStyle, ToolCallCard } from "../ToolCallCard"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "@/lib/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
@@ -116,6 +116,92 @@ describe("getToolSummary", () => {
 
   it("ToolSearch: returns query", () => {
     expect(getToolSummary(makeToolCall("ToolSearch", { query: "select:Read", max_results: 5 }))).toBe("select:Read")
+  })
+})
+
+describe("getToolTextStyle", () => {
+  it("gives calls that change the world full strength", () => {
+    for (const name of ["Write", "Edit", "Bash", "exec", "Task"]) {
+      expect(getToolTextStyle(name)).toBe("text-foreground")
+    }
+  })
+
+  it("mutes read-only calls", () => {
+    for (const name of ["Read", "Grep", "Glob", "WebFetch", "WebSearch"]) {
+      expect(getToolTextStyle(name)).toBe("text-muted-foreground")
+    }
+  })
+
+  it("mutes unknown tools rather than inventing a hue for them", () => {
+    expect(getToolTextStyle("SomeUnknownMcpTool")).toBe("text-muted-foreground")
+  })
+
+  it("reserves red for failures, whatever the tool was", () => {
+    expect(getToolTextStyle("Read", true)).toBe("text-red-400")
+    expect(getToolTextStyle("Bash", true)).toBe("text-red-400")
+  })
+})
+
+describe("ToolCallCard status icon", () => {
+  it("draws nothing for a completed call", () => {
+    // Success is the ~98% case; marking it trains the eye to skip the column
+    // where failures show up.
+    const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), result: "contents" }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByRole("img", { name: "Tool call failed" })).toBeNull()
+    expect(screen.queryByRole("img", { name: "Tool call running" })).toBeNull()
+  })
+
+  it("marks a failed call", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "x.ts" }),
+      result: "ENOENT",
+      isError: true,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByRole("img", { name: "Tool call failed" })).toBeTruthy()
+  })
+
+  it("marks a call that is still running", () => {
+    const toolCall = makeToolCall("Bash", { command: "bun test" })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive />)
+
+    expect(screen.getByRole("img", { name: "Tool call running" })).toBeTruthy()
+  })
+})
+
+describe("ToolCallCard timestamp", () => {
+  it("carries the wall clock on hover instead of printing it on every row", () => {
+    const timestamp = "2026-08-19T17:14:37.000Z"
+    const expected = new Date(timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+    const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), timestamp, result: "ok" }
+
+    const { container } = render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    // Costs no visible ink: the only node carrying it is screen-reader-only.
+    const printed = screen.queryByText(expected)
+    expect(printed?.tagName).toBe("TIME")
+    expect(printed?.className).toContain("sr-only")
+    // Mouse users get it from the row's tooltip.
+    expect(container.querySelector(`[title="${expected}"]`)).toBeTruthy()
+  })
+
+  it("gives assistive tech a machine-readable time", () => {
+    const timestamp = "2026-08-19T17:14:37.000Z"
+    const toolCall: ToolCall = { ...makeToolCall("Read", { file_path: "x.ts" }), timestamp, result: "ok" }
+
+    const { container } = render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(container.querySelector("time")?.getAttribute("datetime")).toBe(timestamp)
   })
 })
 
@@ -646,6 +732,37 @@ describe("CollapsibleToolCalls", () => {
     expect(button.textContent).toContain("ran 2 shell commands")
     // Tool badges remain alongside the summary.
     expect(button.textContent).toContain("Bash ×2")
+  })
+
+  it("shows failure in the collapsed summary", () => {
+    // Collapsed is the default for every historical turn, and success no longer
+    // draws an icon. If red does not reach the summary, a turn where Bash failed
+    // is indistinguishable from one where it succeeded without expanding it.
+    const failed: ToolCall[] = [
+      { id: "a", name: "Read", input: { file_path: "/tmp/a.ts" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+      { id: "b", name: "Bash", input: { command: "bun test" }, result: "exit 1", isError: true, timestamp: new Date().toISOString() },
+    ]
+
+    render(
+      <CollapsibleToolCalls toolCalls={failed} expandAll={false} activeToolCallId={null} />,
+    )
+
+    const bash = screen.getByText("Bash")
+    const read = screen.getByText("Read")
+    expect(bash.className).toContain(getToolTextStyle("Bash", true))
+    expect(bash.className).not.toBe(read.className)
+  })
+
+  it("keeps a wholly successful group free of failure ink", () => {
+    const ok: ToolCall[] = [
+      { id: "a", name: "Bash", input: { command: "bun test" }, result: "ok", isError: false, timestamp: new Date().toISOString() },
+    ]
+
+    render(
+      <CollapsibleToolCalls toolCalls={ok} expandAll={false} activeToolCallId={null} />,
+    )
+
+    expect(screen.getByText("Bash").className).not.toContain(getToolTextStyle("Bash", true))
   })
 })
 

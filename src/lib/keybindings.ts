@@ -1,5 +1,6 @@
 export type KeybindingCommand =
   | "commandPalette"
+  | "keyboardShortcuts"
   | "integratedTerminal"
   | "newIntegratedTerminal"
   | "closeIntegratedTerminal"
@@ -9,6 +10,12 @@ export type KeybindingCommand =
   | "toggleStats"
   | "missionControl"
   | "newSession"
+  | "focusComposer"
+  | "findInConversation"
+  | "nextLiveSession"
+  | "prevLiveSession"
+  | "recentSessionBack"
+  | "recentSessionForward"
   | "themeSelector"
   | "systemTerminal"
   | "preview"
@@ -40,11 +47,19 @@ export interface KeybindingShortcut {
   altKey?: boolean
 }
 
+/**
+ * The only list of shortcut groups. Both the shortcuts dialog and the dashboard
+ * cheat sheet render from this, so a new group cannot silently drop its rows.
+ */
+export const KEYBINDING_GROUPS = ["General", "View", "Tools"] as const
+
+export type KeybindingGroup = (typeof KEYBINDING_GROUPS)[number]
+
 export interface KeybindingDefinition {
   command: KeybindingCommand
   label: string
   description: string
-  group: "General" | "View" | "Tools"
+  group: KeybindingGroup
   defaultShortcut: KeybindingShortcut
 }
 
@@ -57,11 +72,53 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     defaultShortcut: { key: "k", modKey: true },
   },
   {
+    command: "keyboardShortcuts",
+    label: "Show keyboard shortcuts",
+    description: "Open this reference — only while no text field is focused",
+    group: "General",
+    defaultShortcut: { key: "?", shiftKey: true },
+  },
+  {
     command: "newSession",
     label: "Start a new session",
     description: "Open the project picker for a new agent session",
     group: "General",
     defaultShortcut: { key: "n", platformChord: true },
+  },
+  {
+    command: "focusComposer",
+    label: "Focus message composer",
+    description: "Jump to the chat composer — only while no text field is focused",
+    group: "General",
+    defaultShortcut: { key: " " },
+  },
+  {
+    command: "prevLiveSession",
+    label: "Focus previous live session",
+    description: "Move focus up the live session list; press Enter to open",
+    group: "General",
+    defaultShortcut: { key: "arrowup", modKey: true, shiftKey: true },
+  },
+  {
+    command: "nextLiveSession",
+    label: "Focus next live session",
+    description: "Move focus down the live session list; press Enter to open",
+    group: "General",
+    defaultShortcut: { key: "arrowdown", modKey: true, shiftKey: true },
+  },
+  {
+    command: "recentSessionBack",
+    label: "Previous recent session",
+    description: "Step back through recently opened sessions",
+    group: "General",
+    defaultShortcut: { key: "tab", ctrlKey: true },
+  },
+  {
+    command: "recentSessionForward",
+    label: "Next recent session",
+    description: "Step forward through recently opened sessions",
+    group: "General",
+    defaultShortcut: { key: "tab", ctrlKey: true, shiftKey: true },
   },
   {
     command: "toggleSidebar",
@@ -97,6 +154,13 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     description: "Collapse every conversation turn",
     group: "View",
     defaultShortcut: { key: "e", modKey: true, shiftKey: true },
+  },
+  {
+    command: "findInConversation",
+    label: "Find in conversation",
+    description: "Search the open conversation and step through matches",
+    group: "View",
+    defaultShortcut: { key: "f", modKey: true },
   },
   {
     command: "integratedTerminal",
@@ -190,76 +254,77 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     defaultShortcut: { key: "s", platformChord: true },
   },
   // Multi-device switching. 1 = this machine, then remote devices in registry
-  // order. (mod+1..9 is browser-reserved, so these use mod+shift.)
+  // order. mod+1..9 is browser-reserved and mod+shift+1..9 already jumps to the
+  // Nth live session, so these use the platform chord (⌃⌘N / Ctrl+Alt+N).
   {
     command: "device.switch.1",
     label: "Switch to device 1",
     description: "Jump to this machine (the local device)",
     group: "General",
-    defaultShortcut: { key: "1", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "1", platformChord: true },
   },
   {
     command: "device.switch.2",
     label: "Switch to device 2",
     description: "Jump to the 2nd device in the switcher",
     group: "General",
-    defaultShortcut: { key: "2", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "2", platformChord: true },
   },
   {
     command: "device.switch.3",
     label: "Switch to device 3",
     description: "Jump to the 3rd device in the switcher",
     group: "General",
-    defaultShortcut: { key: "3", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "3", platformChord: true },
   },
   {
     command: "device.switch.4",
     label: "Switch to device 4",
     description: "Jump to the 4th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "4", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "4", platformChord: true },
   },
   {
     command: "device.switch.5",
     label: "Switch to device 5",
     description: "Jump to the 5th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "5", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "5", platformChord: true },
   },
   {
     command: "device.switch.6",
     label: "Switch to device 6",
     description: "Jump to the 6th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "6", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "6", platformChord: true },
   },
   {
     command: "device.switch.7",
     label: "Switch to device 7",
     description: "Jump to the 7th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "7", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "7", platformChord: true },
   },
   {
     command: "device.switch.8",
     label: "Switch to device 8",
     description: "Jump to the 8th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "8", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "8", platformChord: true },
   },
   {
     command: "device.switch.9",
     label: "Switch to device 9",
     description: "Jump to the 9th device in the switcher",
     group: "General",
-    defaultShortcut: { key: "9", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "9", platformChord: true },
   },
   {
     command: "device.cycle",
     label: "Cycle devices",
     description: "Switch to the next device in the switcher",
     group: "General",
-    defaultShortcut: { key: "0", modKey: true, shiftKey: true },
+    defaultShortcut: { key: "0", platformChord: true },
   },
 ] as const
 
@@ -348,6 +413,17 @@ export function shortcutFromKeyboardEvent(event: KeyboardEvent): KeybindingShort
   }
 }
 
+/**
+ * Whether `node` is somewhere the user is typing. Shortcuts bound to bare keys
+ * (Space, `?`) must stay inert inside inputs, textareas, and rich-text editors.
+ */
+export function isEditableTarget(node: EventTarget | null): boolean {
+  const element = node as HTMLElement | null
+  if (!element) return false
+  const tag = element.tagName
+  return tag === "INPUT" || tag === "TEXTAREA" || element.isContentEditable === true
+}
+
 export function matchesKeybinding(command: KeybindingCommand, event: KeyboardEvent): boolean {
   const shortcut = getKeybinding(command)
   if (normalizeKey(event.key) !== normalizeKey(shortcut.key)) return false
@@ -379,6 +455,7 @@ export function matchesKeybinding(command: KeybindingCommand, event: KeyboardEve
 function formatKey(key: string): string {
   if (key === " ") return "Space"
   if (key === "escape") return "Esc"
+  if (key === "tab") return "Tab"
   if (key === "arrowup") return "↑"
   if (key === "arrowdown") return "↓"
   if (key === "arrowleft") return "←"
@@ -474,10 +551,8 @@ export const DEVICE_CYCLE_COMMAND: KeybindingCommand = "device.cycle"
  * these registry entries have no dispatcher of their own yet.
  */
 export function matchDeviceSwitchIndex(event: KeyboardEvent): number | null {
-  for (let index = 0; index < DEVICE_SWITCH_COMMANDS.length; index++) {
-    if (matchesKeybinding(DEVICE_SWITCH_COMMANDS[index], event)) return index + 1
-  }
-  return null
+  const index = DEVICE_SWITCH_COMMANDS.findIndex((command) => matchesKeybinding(command, event))
+  return index === -1 ? null : index + 1
 }
 
 /** Whether `event` matches the "cycle to next device" shortcut. */

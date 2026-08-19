@@ -16,16 +16,19 @@ import type { RawMessage } from "@/lib/types"
 
 type LiveIndicatorProps = HTMLAttributes<HTMLSpanElement>
 
-/** Pulsing green dot that indicates a live session. */
+/**
+ * The app's one green "live" dot — top bar, dashboard cards, LIVE badges, the
+ * composer. Defaults to 8px; pass a size class (`size-1.5`) to shrink it.
+ */
 export const LiveIndicator = memo(function LiveIndicator({
   className,
   ...rest
 }: LiveIndicatorProps) {
   return (
-    <span className={cn("relative flex h-2 w-2 shrink-0", className)} {...rest}>
-      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-      <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
-    </span>
+    <span
+      className={cn("inline-block size-2 shrink-0 rounded-full bg-green-500", className)}
+      {...rest}
+    />
   )
 })
 
@@ -45,6 +48,10 @@ interface HeaderIconButtonProps {
  * Icon button wrapped in a tooltip. Used for toolbar actions in headers and
  * info bars. Reduces the repetitive Tooltip > TooltipTrigger > Button >
  * TooltipContent pattern to a single component call.
+ *
+ * Hover is one neutral treatment for every button — colour is reserved for
+ * state (active panel, destructive action), never for a button's identity.
+ * `className` still wins over the default, so those cases can opt out.
  */
 export const HeaderIconButton = memo(function HeaderIconButton({
   icon: Icon,
@@ -58,7 +65,7 @@ export const HeaderIconButton = memo(function HeaderIconButton({
   const sizeClass = size === "sm" ? "h-6 w-6 p-0" : "h-7 w-7 p-0"
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="sm" className={cn(sizeClass, className)} onClick={onClick} disabled={disabled} aria-label={label} />}>
+      <TooltipTrigger render={<Button variant="ghost" size="sm" className={cn(sizeClass, "text-muted-foreground hover:text-foreground", className)} onClick={onClick} disabled={disabled} aria-label={label} />}>
           <Icon className={cn("size-3.5", iconClassName)} />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -75,18 +82,19 @@ interface ContextBadgeProps {
   warnOnly?: boolean
 }
 
-function getContextColors(pctLeft: number): {
-  border: string
-  text: string
-  bg: string
-} {
-  if (pctLeft < 10) {
-    return { border: "border-red-700/60", text: "text-red-400", bg: "bg-red-500/5" }
-  }
-  if (pctLeft < 30) {
-    return { border: "border-amber-700/60", text: "text-amber-400", bg: "bg-amber-500/5" }
-  }
-  return { border: "border-green-700/60", text: "text-green-400", bg: "bg-green-500/5" }
+type ContextPressure = "critical" | "warning" | "healthy"
+
+/** One ladder for how much context is left, so every reading of it agrees. */
+function contextPressure(pctLeft: number): ContextPressure {
+  if (pctLeft < 10) return "critical"
+  if (pctLeft < 30) return "warning"
+  return "healthy"
+}
+
+const CONTEXT_COLORS: Record<ContextPressure, { border: string; text: string; bg: string }> = {
+  critical: { border: "border-red-700/60", text: "text-red-400", bg: "bg-red-500/5" },
+  warning: { border: "border-amber-700/60", text: "text-amber-400", bg: "bg-amber-500/5" },
+  healthy: { border: "border-green-700/60", text: "text-green-400", bg: "bg-green-500/5" },
 }
 
 /**
@@ -103,9 +111,10 @@ export const ContextBadge = memo(function ContextBadge({
   if (!ctx) return null
 
   const pctLeft = Math.max(0, 100 - ctx.percent)
-  if (warnOnly && pctLeft >= 30) return null
+  const pressure = contextPressure(pctLeft)
+  if (warnOnly && pressure === "healthy") return null
   const remaining = Math.max(0, ctx.compactAt - ctx.used)
-  const colors = getContextColors(pctLeft)
+  const colors = CONTEXT_COLORS[pressure]
 
   const label = showRemaining
     ? `${pctLeft.toFixed(0)}% \u00b7 ${formatTokenCount(remaining)}`

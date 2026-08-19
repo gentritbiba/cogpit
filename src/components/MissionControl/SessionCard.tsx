@@ -62,9 +62,12 @@ const STATE_STYLES: Record<MissionCardState, StateStyle> = {
 }
 
 function StateIcon({ icon: Icon }: { icon: LucideIcon | null }) {
-  // animate-pulse/ping are globally disabled for GPU reasons; live-pulse is the
-  // sanctioned pulsing indicator.
-  if (!Icon) return <span className="live-pulse size-[7px] shrink-0 rounded-full bg-blue-400" />
+  // "Running" has no glyph, so a dot with a static halo carries it. Motion is
+  // globally disabled to keep Chromium's compositor idle, and the halo has to
+  // match the dot: the old shared class painted a green ring on this blue dot.
+  if (!Icon) {
+    return <span className="size-[7px] shrink-0 rounded-full bg-blue-400 ring-2 ring-blue-400/40" />
+  }
   return <Icon className="size-3.5 shrink-0" />
 }
 

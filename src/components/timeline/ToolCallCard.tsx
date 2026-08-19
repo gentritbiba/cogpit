@@ -1,6 +1,5 @@
 import { useState, useMemo, memo, useCallback } from "react"
 import {
-  CheckCircle,
   XCircle,
   ChevronRight,
   ChevronDown,
@@ -28,50 +27,66 @@ import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../s
 export { getToolSummary }
 
 /**
- * Timeline tool badge styles — used in the live session timeline (ToolCallCard).
+ * Timeline tool name styles — used in the live session timeline (ToolCallCard).
  *
- * Bare tinted text — no pill, background, or border — so a dense streaming list
- * stays quiet. Primary action tools (Write/Edit/Bash) render at full strength to
- * draw attention; secondary/read-only tools are dimmed.
+ * Colour encodes what a call does, never which tool it is: the name is spelled
+ * out in words right beside it, so hue never carried identity in the first
+ * place. Calls that change the world read at full strength, read-only calls
+ * stay muted, and red is reserved for failures so it keeps meaning one thing.
  */
-const TOOL_TEXT_STYLES: Record<string, string> = {
-  // Full strength — primary action tools
-  Write: "text-green-400",
-  Edit: "text-amber-400",
-  Bash: "text-red-400",
-  // Dimmed — secondary tools
-  Read: "text-blue-400/70",
-  Grep: "text-purple-400/70",
-  Glob: "text-cyan-400/70",
-  Task: "text-indigo-400/70",
-  WebFetch: "text-orange-400/70",
-  WebSearch: "text-orange-400/70",
-  EnterPlanMode: "text-purple-400/70",
-  ExitPlanMode: "text-purple-400/70",
-  AskUserQuestion: "text-pink-400/70",
-  // Scheduling / automation tools
-  Monitor: "text-cyan-400/70",
-  CronCreate: "text-violet-400/70",
-  CronDelete: "text-violet-400/70",
-  CronList: "text-violet-400/70",
-  ScheduleWakeup: "text-violet-400/70",
-  RemoteTrigger: "text-blue-400/70",
-  PushNotification: "text-pink-400/80",
-  EnterWorktree: "text-emerald-400/70",
-  ExitWorktree: "text-emerald-400/70",
-  Skill: "text-indigo-400/80",
-  ToolSearch: "text-slate-400/70",
-  TodoWrite: "text-violet-400/70",
-  Mcp: "text-teal-400/70",
-  Image: "text-pink-400/70",
-  exec: "text-slate-400/70",
+type ToolTier = "mutating" | "readOnly"
+
+const TOOL_TIER_STYLES: Record<ToolTier, string> = {
+  mutating: "text-foreground",
+  readOnly: "text-muted-foreground",
 }
 
-const DEFAULT_TOOL_TEXT_STYLE = "text-muted-foreground/60"
+/**
+ * The timeline's error ink. `text-destructive` resolves to a near-black red in
+ * this app's dark theme, which would make the one state that matters the least
+ * legible of the three.
+ */
+const FAILED_TOOL_TEXT_STYLE = "text-red-400"
 
-/** Tool name color. Bare tinted text — no pill, no background, no border. */
-export function getToolTextStyle(name: string): string {
-  return TOOL_TEXT_STYLES[name] ?? DEFAULT_TOOL_TEXT_STYLE
+const TOOL_TIERS: Record<string, ToolTier> = {
+  // Mutating — writes files, runs commands, spawns work, sends things out.
+  Write: "mutating",
+  Edit: "mutating",
+  Bash: "mutating",
+  exec: "mutating",
+  Task: "mutating",
+  Skill: "mutating",
+  TodoWrite: "mutating",
+  Image: "mutating",
+  AskUserQuestion: "mutating",
+  CronCreate: "mutating",
+  CronDelete: "mutating",
+  ScheduleWakeup: "mutating",
+  RemoteTrigger: "mutating",
+  PushNotification: "mutating",
+  EnterWorktree: "mutating",
+  ExitWorktree: "mutating",
+  // Read-only — inspects the world without changing it.
+  Read: "readOnly",
+  Grep: "readOnly",
+  Glob: "readOnly",
+  WebFetch: "readOnly",
+  WebSearch: "readOnly",
+  ToolSearch: "readOnly",
+  Monitor: "readOnly",
+  CronList: "readOnly",
+  Mcp: "readOnly",
+  EnterPlanMode: "readOnly",
+  ExitPlanMode: "readOnly",
+}
+
+/** Unknown tools stay quiet rather than claim attention they may not deserve. */
+const DEFAULT_TOOL_TIER: ToolTier = "readOnly"
+
+/** Tool name color. Bare text — no pill, no background, no border. */
+export function getToolTextStyle(name: string, isError = false): string {
+  if (isError) return FAILED_TOOL_TEXT_STYLE
+  return TOOL_TIER_STYLES[TOOL_TIERS[name] ?? DEFAULT_TOOL_TIER]
 }
 
 // ── Reusable toggle button for expand/collapse sections ──────────────────
@@ -80,22 +95,17 @@ function ToggleButton({
   isOpen,
   onClick,
   label,
-  activeClass,
 }: {
   isOpen: boolean
   onClick: () => void
   label: string
-  activeClass?: string
 }): React.ReactElement {
   const Chevron = isOpen ? ChevronDown : ChevronRight
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "text-[10px] flex items-center gap-0.5 transition-colors",
-        isOpen && activeClass ? activeClass : "text-muted-foreground hover:text-foreground",
-      )}
+      className="text-[10px] flex items-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
     >
       <Chevron className="w-3 h-3" />
       {label}
@@ -105,6 +115,11 @@ function ToggleButton({
 
 // ── Status icon for tool call completion state ───────────────────────────
 
+/**
+ * Success draws nothing. It is the ~98% case, and a marker that is almost never
+ * actionable teaches the eye to skip exactly the column where failures appear.
+ * Only the exceptions — failed, and still running — get ink.
+ */
 function StatusIcon({
   toolCall,
   isAgentActive,
@@ -113,13 +128,10 @@ function StatusIcon({
   isAgentActive?: boolean
 }): React.ReactElement | null {
   if (toolCall.isError) {
-    return <XCircle className="w-4 h-4 text-red-400" />
+    return <XCircle role="img" aria-label="Tool call failed" className="w-4 h-4 text-red-400" />
   }
-  if (toolCall.result !== null) {
-    return <CheckCircle className="w-4 h-4 text-green-500/60" />
-  }
-  if (isAgentActive) {
-    return <Loader2 className="w-4 h-4 text-blue-400" />
+  if (toolCall.result === null && isAgentActive) {
+    return <Loader2 role="img" aria-label="Tool call running" className="w-4 h-4 animate-spin text-blue-400" />
   }
   return null
 }
@@ -167,6 +179,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
   const nameTitle = presentation.label === toolCall.name
     ? toolCall.name
     : `${presentation.label} (${toolCall.name})`
+  const nameClass = getToolTextStyle(presentation.styleName, toolCall.isError)
+  // Wall-clock time is almost never scanned, but is occasionally needed. Hover
+  // carries it so it costs no ink on every row. `title` is mouse-only, so the
+  // desktop row also renders it as screen-reader-only text.
+  const timeLabel = toolCall.timestamp
+    ? new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : undefined
+  const timeIso = toolCall.timestamp ? new Date(toolCall.timestamp).toISOString() : undefined
 
   const showInput = expandAll || inputOpen
   const showResult = expandAll || resultOpen
@@ -226,10 +246,11 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           className="flex w-full items-center gap-1.5 rounded-sm text-left active:bg-white/[0.03]"
           onClick={handleCompactTap}
           aria-label={`Expand ${displayName} tool call`}
+          title={timeLabel}
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
-              className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(presentation.styleName))}
+              className={cn("shrink-0 font-mono text-[10px]", nameClass)}
               title={nameTitle}
             >
               {displayName}
@@ -244,13 +265,14 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </button>
       ) : (
-        <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")}>
+        <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")} title={timeLabel}>
+        {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
         <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
           <span
             className={cn(
               "shrink-0 font-mono",
               isMobile ? "text-[10px]" : "text-[11px]",
-              getToolTextStyle(presentation.styleName)
+              nameClass,
             )}
             title={nameTitle}
           >
@@ -263,11 +285,6 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {toolCall.timestamp && !isMobile && (
-            <span className="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
-              {new Date(toolCall.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-            </span>
-          )}
           {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
             <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
           )}
@@ -310,7 +327,6 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
               isOpen={showDiff}
               onClick={() => setDiffOpen(!diffOpen)}
               label="Diff"
-              activeClass="text-amber-400"
             />
           )}
           <ToggleButton

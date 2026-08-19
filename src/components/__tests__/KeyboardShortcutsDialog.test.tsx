@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog"
-import { getKeybinding, resetAllKeybindings } from "@/lib/keybindings"
+import {
+  KEYBINDING_DEFINITIONS,
+  getKeybinding,
+  resetAllKeybindings,
+} from "@/lib/keybindings"
 
 describe("KeyboardShortcutsDialog", () => {
   beforeEach(() => {
@@ -54,5 +58,42 @@ describe("KeyboardShortcutsDialog", () => {
 
     expect(screen.getByRole("textbox", { name: "Search keyboard shortcuts" })).toHaveValue("")
     expect(screen.queryByText("Press keys…")).not.toBeInTheDocument()
+  })
+
+  it("renders a row for every registered command", () => {
+    // The dialog only renders the General/View/Tools sections, so a definition
+    // added under any other group would silently vanish from the reference.
+    render(<KeyboardShortcutsDialog open onOpenChange={vi.fn()} />)
+
+    for (const definition of KEYBINDING_DEFINITIONS) {
+      expect(
+        screen.getByRole("button", { name: `Change shortcut for ${definition.label}` }),
+      ).toBeInTheDocument()
+    }
+  })
+
+  it("shows readable chords for the shortcuts that were previously raw listeners", () => {
+    render(<KeyboardShortcutsDialog open onOpenChange={vi.fn()} />)
+
+    const chordFor = (label: string) =>
+      screen.getByRole("button", { name: `Change shortcut for ${label}` }).textContent
+
+    expect(chordFor("Focus message composer")).toBe("Space")
+    expect(chordFor("Find in conversation")).toMatch(/F$/)
+    expect(chordFor("Focus next live session")).toContain("↓")
+    expect(chordFor("Focus previous live session")).toContain("↑")
+    expect(chordFor("Next recent session")).toContain("Tab")
+    expect(chordFor("Show keyboard shortcuts")).toContain("?")
+    expect(chordFor("Switch to device 1")).toMatch(/1$/)
+  })
+
+  it("rebinds a newly registered command", async () => {
+    const user = userEvent.setup()
+    render(<KeyboardShortcutsDialog open onOpenChange={vi.fn()} />)
+
+    await user.click(screen.getByRole("button", { name: "Change shortcut for Find in conversation" }))
+    fireEvent.keyDown(window, { key: "g", ctrlKey: true, altKey: true })
+
+    expect(getKeybinding("findInConversation")).toMatchObject({ key: "g", ctrlKey: true, altKey: true })
   })
 })

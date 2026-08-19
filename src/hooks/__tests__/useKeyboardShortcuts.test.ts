@@ -428,4 +428,79 @@ describe("useKeyboardShortcuts", () => {
       // No assertions needed - just verifying no crash
     })
   })
+
+  describe("Cmd+Shift+Arrow - focus live sessions", () => {
+    function addLiveSessionButton(): HTMLButtonElement {
+      const btn = document.createElement("button")
+      btn.setAttribute("data-live-session", "true")
+      btn.focus = vi.fn()
+      document.body.appendChild(btn)
+      return btn
+    }
+
+    it("focuses the first live session on Cmd+Shift+ArrowDown", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+      const first = addLiveSessionButton()
+      const last = addLiveSessionButton()
+
+      fireKey("ArrowDown", { metaKey: true, shiftKey: true })
+
+      expect(first.focus).toHaveBeenCalled()
+      expect(last.focus).not.toHaveBeenCalled()
+
+      document.body.removeChild(first)
+      document.body.removeChild(last)
+    })
+
+    it("focuses the last live session on Cmd+Shift+ArrowUp", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+      const first = addLiveSessionButton()
+      const last = addLiveSessionButton()
+
+      fireKey("ArrowUp", { ctrlKey: true, shiftKey: true })
+
+      expect(last.focus).toHaveBeenCalled()
+      expect(first.focus).not.toHaveBeenCalled()
+
+      document.body.removeChild(first)
+      document.body.removeChild(last)
+    })
+  })
+
+  describe("Ctrl+Tab - recent session switching", () => {
+    const entry = { dirName: "-workspace-cogpit", fileName: "session-1.jsonl" }
+
+    it("steps back through history on Ctrl+Tab", () => {
+      const opts = createOpts({ onHistoryBack: vi.fn(() => entry) })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Tab", { ctrlKey: true })
+
+      expect(opts.onHistoryBack).toHaveBeenCalled()
+      expect(opts.onHistoryForward).not.toHaveBeenCalled()
+      expect(opts.onNavigateToSession).toHaveBeenCalledWith(entry.dirName, entry.fileName)
+    })
+
+    it("steps forward through history on Ctrl+Shift+Tab", () => {
+      const opts = createOpts({ onHistoryForward: vi.fn(() => entry) })
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Tab", { ctrlKey: true, shiftKey: true })
+
+      expect(opts.onHistoryForward).toHaveBeenCalled()
+      expect(opts.onHistoryBack).not.toHaveBeenCalled()
+    })
+
+    it("ignores Cmd+Tab so the macOS app switcher still works", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Tab", { metaKey: true })
+
+      expect(opts.onHistoryBack).not.toHaveBeenCalled()
+      expect(opts.onHistoryForward).not.toHaveBeenCalled()
+    })
+  })
 })

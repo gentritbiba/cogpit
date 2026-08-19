@@ -8,12 +8,12 @@ import {
 } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
+import { LiveIndicator } from "@/components/header-shared"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import { formatRelativeTime } from "@/lib/format"
 import { useWorkflowLive } from "@/hooks/useWorkflowLive"
 import {
-  isWorkflowActive,
   workflowStatusStyle,
   type WorkflowDetail,
   type WorkflowSummary,
@@ -141,10 +141,7 @@ export function WorkflowsPanel({
               Workflows
               {isLive && (
                 <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[10px] font-semibold border-green-700 text-green-400">
-                  <span className="relative flex size-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex size-1.5 rounded-full bg-green-500" />
-                  </span>
+                  <LiveIndicator className="size-1.5" />
                   LIVE
                 </Badge>
               )}
@@ -236,7 +233,6 @@ function WorkflowListRow({
   onClick: () => void
 }) {
   const status = workflowStatusStyle(workflow.status)
-  const live = isWorkflowActive(workflow.status)
   const done = workflow.agentCounts.done + workflow.agentCounts.error
   return (
     <button
@@ -246,7 +242,7 @@ function WorkflowListRow({
         active ? "border-violet-700/50 bg-violet-500/10" : "border-border/50 bg-elevation-1 hover:bg-elevation-2",
       )}
     >
-      <span className={cn("size-2 shrink-0 rounded-full", status.dot, live && "animate-pulse")} />
+      <span className={cn("size-2 shrink-0 rounded-full", status.dot)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-xs font-medium text-foreground">{workflow.workflowName}</span>

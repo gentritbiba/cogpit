@@ -346,25 +346,6 @@
     0 0 0 1px rgba(59, 130, 246, 0.10);
 }
 
-/* Live session pulse — uses pseudo-element to avoid paint-expensive
-   box-shadow animation on the main element */
-.live-pulse {
-  position: relative;
-}
-.live-pulse::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
-  animation: live-pulse 2s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes live-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
 /* ── Glass / Glassmorphism (Rule 5: backdrop-filter + blur) ── */
 .glass {
   backdrop-filter: blur(16px) saturate(180%);
@@ -463,8 +444,7 @@ html.electron-win .electron-drag {
   .panel-enter,
   .panel-enter-right,
   .toast-enter,
-  .fade-in,
-  .live-pulse {
+  .fade-in {
     animation: none;
   }
   .transition-smooth {
@@ -473,10 +453,14 @@ html.electron-win .electron-drag {
 }
 
 /*
- * Ping/pulse indicators are purely decorative but keep Chromium's compositor
- * producing frames indefinitely. Solid status colors communicate the same
- * state without a permanent GPU tax. Short entrance and loading animations
- * remain available.
+ * Ping/pulse indicators keep Chromium's compositor producing frames forever,
+ * which cost real battery. Short entrance and loading animations still run.
+ *
+ * Read this before reaching for either class: these are neutered, not banned,
+ * so `animate-pulse` renders a static element and nothing warns you. Two live
+ * states were pixel-identical for releases because they differed only by this
+ * class. Distinguish states with paint instead, the way
+ * src/components/LiveSessions/statusDot.ts does: brightness, opacity, a ring.
  */
 .animate-ping,
 .animate-pulse {

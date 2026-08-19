@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { LiveIndicator } from "@/components/header-shared"
 import { useTeamLive } from "@/hooks/useTeamLive"
 import { authFetch } from "@/lib/auth"
 import { MembersGrid } from "@/components/teams/MembersGrid"
@@ -151,10 +152,7 @@ export function TeamsDashboard({ teamName, onBack, onOpenSession }: TeamsDashboa
                     variant="outline"
                     className="h-5 px-1.5 text-[10px] font-semibold border-green-700 text-green-400 gap-1"
                   >
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-green-500" />
-                    </span>
+                    <LiveIndicator className="size-1.5" />
                     LIVE
                   </Badge>
                 )}

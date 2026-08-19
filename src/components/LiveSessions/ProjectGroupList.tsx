@@ -268,7 +268,7 @@ function ProjectGroup({
                 className="flex items-center gap-1 shrink-0 text-[10px] font-medium text-green-400"
                 aria-label={`${liveCount} live sessions`}
               >
-                <span className="size-1.5 rounded-full bg-green-400 animate-pulse" aria-hidden="true" />
+                <span className="size-1.5 rounded-full bg-green-400" aria-hidden="true" />
                 {liveCount}
               </span>
             )}

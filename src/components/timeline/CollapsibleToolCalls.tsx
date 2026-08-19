@@ -91,13 +91,20 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     }
   }, [])
 
+  // hasError rides along because collapsed is the default for historical turns.
+  // Success draws no icon now, so red on the name is the only thing separating a
+  // turn where Bash failed from one where it succeeded without expanding it.
   const toolCounts = useMemo(() => {
-    const counts = new Map<string, { count: number; styleName: string }>()
+    const counts = new Map<string, { count: number; styleName: string; hasError: boolean }>()
     for (const tc of toolCalls) {
       const { label, styleName } = getToolPresentation(tc)
       const current = counts.get(label)
-      if (current) current.count++
-      else counts.set(label, { count: 1, styleName })
+      if (current) {
+        current.count++
+        current.hasError = current.hasError || Boolean(tc.isError)
+      } else {
+        counts.set(label, { count: 1, styleName, hasError: Boolean(tc.isError) })
+      }
     }
     return [...counts].sort((a, b) => b[1].count - a[1].count)
   }, [toolCalls])
@@ -182,8 +189,8 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
               Thinking{thinkingCount > 1 ? ` ×${thinkingCount}` : ""}
             </span>
           )}
-          {toolCounts.map(([name, { count, styleName }]) => (
-            <span key={name} className={cn("font-mono text-[10px]", getToolTextStyle(styleName))}>
+          {toolCounts.map(([name, { count, styleName, hasError }]) => (
+            <span key={name} className={cn("font-mono text-[10px]", getToolTextStyle(styleName, hasError))}>
               {name}
               {count > 1 ? ` ×${count}` : ""}
             </span>

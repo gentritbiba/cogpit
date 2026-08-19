@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { Flame } from "lucide-react"
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -5,16 +6,33 @@ import { useLeakMonitor } from "@/hooks/useLeakMonitor"
 import { formatAge } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
+/** How long a cleared indicator stays on screen before it hides itself. */
+const CLEARED_VISIBLE_MS = 60_000
+
 /**
  * Top-bar leak monitor for agent processes (orphaned claude sessions, hot
- * headless browsers). Muted with a zero count while the system is clean;
- * red when leaks are flagged, and clicking it then kills all of them.
+ * headless browsers). Red when leaks are flagged, and clicking it then kills
+ * all of them. A clean system shows nothing — the monitor keeps polling and
+ * the power monitor still lists every process — but the indicator stays pinned
+ * at zero for a minute after the last leak clears so a kill confirms itself.
  */
 export function LeakIndicator() {
   const { leaks, killing, killLeaks, refresh } = useLeakMonitor()
+  const [pinned, setPinned] = useState(false)
 
   const hasLeaks = leaks.length > 0
   const totalCpu = leaks.reduce((sum, leak) => sum + leak.cpuPercent, 0)
+
+  useEffect(() => {
+    if (hasLeaks) {
+      setPinned(true)
+      return
+    }
+    const timer = window.setTimeout(() => setPinned(false), CLEARED_VISIBLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [hasLeaks])
+
+  if (!hasLeaks && !pinned) return null
 
   return (
     <Tooltip>
@@ -34,7 +52,7 @@ export function LeakIndicator() {
           )}
         />
       }>
-        <Flame className={cn("size-3.5", killing && "animate-pulse")} />
+        <Flame className="size-3.5" />
         <span className="tabular-nums">{killing ? "…" : leaks.length}</span>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="p-3">
@@ -60,7 +78,7 @@ export function LeakIndicator() {
           <div className="min-w-[180px] space-y-1">
             <div className="text-[10px] font-medium uppercase tracking-wider">Leak monitor</div>
             <div className="text-[10px] text-muted-foreground">
-              No leaked agent processes. Checks every minute — click to re-scan now.
+              No leaked agent processes. Click to re-scan; this hides itself once the system stays clean.
             </div>
           </div>
         )}

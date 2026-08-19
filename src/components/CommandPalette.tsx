@@ -6,6 +6,7 @@ import {
   ChevronsUpDown,
   Code2,
   Copy,
+  CopyPlus,
   FileCode2,
   FolderOpen,
   FolderSearch,
@@ -14,12 +15,17 @@ import {
   Globe2,
   Home,
   Keyboard,
+  Laptop,
+  LayoutGrid,
   MessageSquare,
   PanelLeft,
   Palette,
   Plus,
   Search,
+  Server,
   Settings,
+  Settings2,
+  Skull,
   SlidersHorizontal,
   Terminal,
   TerminalSquare,
@@ -32,7 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
-import { shortcutLabel } from "@/lib/keybindings"
+import { DEVICE_SWITCH_COMMANDS, shortcutLabel } from "@/lib/keybindings"
 
 export interface CommandPaletteProject {
   dirName: string
@@ -57,6 +63,13 @@ export interface CommandPaletteSession {
   lastModified?: string
 }
 
+export interface CommandPaletteDevice {
+  id: string
+  name: string
+  isLocal: boolean
+  isActive: boolean
+}
+
 export interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -68,6 +81,11 @@ export interface CommandPaletteProps {
   onToggleStats: () => void
   onToggleFileChanges: () => void
   onToggleWorktrees: () => void
+  onToggleMissionControl: () => void
+  onDuplicateSession?: () => void
+  onCopyResumeCommand?: () => void
+  onFindInConversation?: () => void
+  onKillAll?: () => void
   onOpenConfig?: () => void
   onOpenSettings: () => void
   onOpenKeyboardShortcuts?: () => void
@@ -79,6 +97,8 @@ export interface CommandPaletteProps {
   onOpenProjectInEditor?: () => void
   onRevealProject?: () => void
   onCopyProjectPath?: () => void
+  onOpenDevices?: (mode: "add" | "manage") => void
+  onSwitchDevice?: (deviceId: string) => void
   onFocusComposer: () => void
   onExpandAll: () => void
   onCollapseAll: () => void
@@ -92,9 +112,11 @@ export interface CommandPaletteProps {
   showFileChanges: boolean
   showWorktrees: boolean
   showConfig: boolean
+  showMission: boolean
   showProjectFiles?: boolean
   projects?: CommandPaletteProject[]
   recentSessions?: CommandPaletteSession[]
+  devices?: CommandPaletteDevice[]
   loadingNavigation?: boolean
 }
 
@@ -133,9 +155,25 @@ function action(
   }
 }
 
+/**
+ * Keeps the entries the current session can actually run, in listed order, so
+ * the source order and the on-screen order stay the same thing.
+ */
+function availableActions(...items: (PaletteAction | false | undefined)[]): PaletteAction[] {
+  return items.filter((item): item is PaletteAction => item !== false && item !== undefined)
+}
+
 export function CommandPalette(props: CommandPaletteProps) {
-  const navigation = [
+  const navigation = availableActions(
     action("home", "Go to dashboard", "home overview", Home, props.onGoHome),
+    action(
+      "mission-control",
+      props.showMission ? "Exit Mission Control" : "Open Mission Control",
+      "live sessions blocked waiting answer everything at once",
+      LayoutGrid,
+      props.onToggleMissionControl,
+      shortcutLabel("missionControl"),
+    ),
     action(
       "new-session",
       "Start a new session",
@@ -144,20 +182,30 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onNewSession,
       shortcutLabel("newSession"),
     ),
-  ]
-
-  if (props.canFocusComposer) {
-    navigation.push(
-      action(
-        "focus-composer",
-        "Focus message composer",
-        "chat prompt input",
-        MessageSquare,
-        props.onFocusComposer,
-        "Space",
-      ),
-    )
-  }
+    props.onDuplicateSession && action(
+      "duplicate-session",
+      "Duplicate this session",
+      "copy fork clone branch thread",
+      CopyPlus,
+      props.onDuplicateSession,
+    ),
+    props.canFocusComposer && action(
+      "focus-composer",
+      "Focus message composer",
+      "chat prompt input",
+      MessageSquare,
+      props.onFocusComposer,
+      shortcutLabel("focusComposer"),
+    ),
+    props.onFindInConversation && action(
+      "find-in-conversation",
+      "Find in conversation",
+      "search text transcript turns matches",
+      Search,
+      props.onFindInConversation,
+      shortcutLabel("findInConversation"),
+    ),
+  )
 
   const projects = (props.projects ?? []).slice(0, 8).map((project) =>
     action(
@@ -191,7 +239,23 @@ export function CommandPalette(props: CommandPaletteProps) {
     )
   })
 
-  const view = [
+  // Only worth its own group once a remote device exists — a single-machine
+  // install has nothing to switch between.
+  const deviceList = props.devices ?? []
+  const devices = deviceList.length > 1 && props.onSwitchDevice
+    ? deviceList.slice(0, DEVICE_SWITCH_COMMANDS.length).map((device, index) =>
+        action(
+          `device-${device.id}`,
+          device.isActive ? `${device.name} (current)` : `Switch to ${device.name}`,
+          `device machine host remote ${device.id}`,
+          device.isLocal ? Laptop : Server,
+          () => props.onSwitchDevice?.(device.id),
+          shortcutLabel(DEVICE_SWITCH_COMMANDS[index]),
+        ),
+      )
+    : []
+
+  const view = availableActions(
     action(
       "toggle-sidebar",
       props.showSidebar ? "Hide session sidebar" : "Show session sidebar",
@@ -200,59 +264,105 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onToggleSidebar,
       shortcutLabel("toggleSidebar"),
     ),
-  ]
+    props.hasSession && action(
+      "toggle-stats",
+      props.showStats ? "Hide session analytics" : "Show session analytics",
+      "stats tokens usage panel",
+      BarChart3,
+      props.onToggleStats,
+      shortcutLabel("toggleStats"),
+    ),
+    props.onToggleProjectFiles && action(
+      "project-files",
+      props.showProjectFiles ? "Close project files" : "Open project files",
+      "browse edit save workspace source code",
+      FolderTree,
+      props.onToggleProjectFiles,
+      shortcutLabel("projectFiles"),
+    ),
+    props.hasFileChanges && action(
+      "toggle-file-changes",
+      props.showFileChanges ? "Hide file changes" : "Show file changes",
+      "diff edits review panel",
+      FileCode2,
+      props.onToggleFileChanges,
+    ),
+    props.supportsWorktrees && props.canOpenTerminal && action(
+      "toggle-worktrees",
+      props.showWorktrees ? "Hide worktrees" : "Show worktrees",
+      "git branches panel",
+      GitBranch,
+      props.onToggleWorktrees,
+    ),
+  )
 
-  if (props.hasSession) {
-    view.push(
-      action(
-        "toggle-stats",
-        props.showStats ? "Hide session analytics" : "Show session analytics",
-        "stats tokens usage panel",
-        BarChart3,
-        props.onToggleStats,
-        shortcutLabel("toggleStats"),
-      ),
-    )
-  }
-
-  if (props.onToggleProjectFiles) {
-    view.push(
-      action(
-        "project-files",
-        props.showProjectFiles ? "Close project files" : "Open project files",
-        "browse edit save workspace source code",
-        FolderTree,
-        props.onToggleProjectFiles,
-        shortcutLabel("projectFiles"),
-      ),
-    )
-  }
-
-  if (props.hasFileChanges) {
-    view.push(
-      action(
-        "toggle-file-changes",
-        props.showFileChanges ? "Hide file changes" : "Show file changes",
-        "diff edits review panel",
-        FileCode2,
-        props.onToggleFileChanges,
-      ),
-    )
-  }
-
-  if (props.supportsWorktrees && props.canOpenTerminal) {
-    view.push(
-      action(
-        "toggle-worktrees",
-        props.showWorktrees ? "Hide worktrees" : "Show worktrees",
-        "git branches panel",
-        GitBranch,
-        props.onToggleWorktrees,
-      ),
-    )
-  }
-
-  const tools = [
+  const tools = availableActions(
+    props.onOpenProjectInEditor && action(
+      "open-project-editor",
+      "Open project in editor",
+      "code cursor vscode zed workspace",
+      Code2,
+      props.onOpenProjectInEditor,
+    ),
+    props.onRevealProject && action(
+      "reveal-project",
+      "Reveal project in file manager",
+      "finder explorer folder directory",
+      FolderSearch,
+      props.onRevealProject,
+    ),
+    props.onCopyResumeCommand && action(
+      "copy-resume-command",
+      "Copy resume command",
+      "cli claude codex terminal clipboard continue session",
+      Copy,
+      props.onCopyResumeCommand,
+    ),
+    props.onCopyProjectPath && action(
+      "copy-project-path",
+      "Copy project path",
+      "workspace directory clipboard",
+      Copy,
+      props.onCopyProjectPath,
+    ),
+    props.onOpenIntegratedTerminal && action(
+      "integrated-terminal",
+      "New integrated terminal",
+      "embedded shell command line process panel",
+      Terminal,
+      props.onOpenIntegratedTerminal,
+      shortcutLabel("newIntegratedTerminal"),
+    ),
+    props.canOpenTerminal && action(
+      "terminal",
+      "Open in system terminal",
+      "external shell command line app",
+      TerminalSquare,
+      props.onOpenTerminal,
+      shortcutLabel("systemTerminal"),
+    ),
+    props.onTogglePreview && action(
+      "preview",
+      "Toggle development preview",
+      "browser localhost dev server website",
+      Globe2,
+      props.onTogglePreview,
+      shortcutLabel("preview"),
+    ),
+    props.onOpenKeyboardShortcuts && action(
+      "keyboard-shortcuts",
+      "Customize keyboard shortcuts",
+      "keybindings hotkeys settings",
+      Keyboard,
+      props.onOpenKeyboardShortcuts,
+    ),
+    props.onOpenConfig && action(
+      "config",
+      props.showConfig ? "Close agent configuration" : "Open agent configuration",
+      "skills commands claude settings files",
+      SlidersHorizontal,
+      props.onOpenConfig,
+    ),
     action("settings", "Open Cogpit settings", "preferences network", Settings, props.onOpenSettings),
     action(
       "theme",
@@ -264,109 +374,34 @@ export function CommandPalette(props: CommandPaletteProps) {
     ),
     action("expand", "Expand all turns", "conversation details", ChevronsDownUp, props.onExpandAll, shortcutLabel("expandAll")),
     action("collapse", "Collapse all turns", "conversation details", ChevronsUpDown, props.onCollapseAll, shortcutLabel("collapseAll")),
-  ]
-
-  if (props.onOpenConfig) {
-    tools.unshift(action(
-      "config",
-      props.showConfig ? "Close agent configuration" : "Open agent configuration",
-      "skills commands claude settings files",
-      SlidersHorizontal,
-      props.onOpenConfig,
-    ))
-  }
-
-  if (props.onOpenKeyboardShortcuts) {
-    tools.unshift(
-      action(
-        "keyboard-shortcuts",
-        "Customize keyboard shortcuts",
-        "keybindings hotkeys settings",
-        Keyboard,
-        props.onOpenKeyboardShortcuts,
-      ),
-    )
-  }
-
-  if (props.onTogglePreview) {
-    tools.unshift(
-      action(
-        "preview",
-        "Toggle development preview",
-        "browser localhost dev server website",
-        Globe2,
-        props.onTogglePreview,
-        shortcutLabel("preview"),
-      ),
-    )
-  }
-
-  if (props.canOpenTerminal) {
-    tools.unshift(
-      action(
-        "terminal",
-        "Open in system terminal",
-        "external shell command line app",
-        TerminalSquare,
-        props.onOpenTerminal,
-        shortcutLabel("systemTerminal"),
-      ),
-    )
-  }
-
-  if (props.onOpenIntegratedTerminal) {
-    tools.unshift(
-      action(
-        "integrated-terminal",
-        "New integrated terminal",
-        "embedded shell command line process panel",
-        Terminal,
-        props.onOpenIntegratedTerminal,
-        shortcutLabel("newIntegratedTerminal"),
-      ),
-    )
-  }
-
-  if (props.onCopyProjectPath) {
-    tools.unshift(
-      action(
-        "copy-project-path",
-        "Copy project path",
-        "workspace directory clipboard",
-        Copy,
-        props.onCopyProjectPath,
-      ),
-    )
-  }
-
-  if (props.onRevealProject) {
-    tools.unshift(
-      action(
-        "reveal-project",
-        "Reveal project in file manager",
-        "finder explorer folder directory",
-        FolderSearch,
-        props.onRevealProject,
-      ),
-    )
-  }
-
-  if (props.onOpenProjectInEditor) {
-    tools.unshift(
-      action(
-        "open-project-editor",
-        "Open project in editor",
-        "code cursor vscode zed workspace",
-        Code2,
-        props.onOpenProjectInEditor,
-      ),
-    )
-  }
+    props.onKillAll && action(
+      "kill-all",
+      "Kill all agent processes",
+      "stop terminate halt everything runaway",
+      Skull,
+      props.onKillAll,
+    ),
+    props.onOpenDevices && action(
+      "manage-devices",
+      "Manage devices…",
+      "remote machines hub hosts edit rename remove switch",
+      Settings2,
+      () => props.onOpenDevices?.("manage"),
+    ),
+    props.onOpenDevices && action(
+      "add-device",
+      "Add device…",
+      "remote machine hub host connect pair new",
+      Server,
+      () => props.onOpenDevices?.("add"),
+    ),
+  )
 
   const groups: PaletteGroup[] = [
     { value: "Navigation", items: navigation },
     ...(recentSessions.length > 0 ? [{ value: "Recent sessions", items: recentSessions }] : []),
     ...(projects.length > 0 ? [{ value: "Projects", items: projects }] : []),
+    ...(devices.length > 0 ? [{ value: "Devices", items: devices }] : []),
     { value: "View", items: view },
     { value: "Tools", items: tools },
   ]

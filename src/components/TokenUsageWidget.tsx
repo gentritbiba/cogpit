@@ -8,18 +8,28 @@ import {
 import type { AgentKind } from "@/lib/sessionSource"
 import { formatTokenCount } from "@/lib/format"
 
-function getUtilColor(pct: number) {
-  if (pct >= 90) return "text-red-400"
-  if (pct >= 80) return "text-orange-400"
-  if (pct >= 60) return "text-yellow-400"
-  return "text-green-400"
+type UsageLevel = "nominal" | "caution" | "warning" | "danger"
+
+/** Quota bands. Nominal reads neutral — only pressure earns a colour. */
+function usageLevel(pct: number): UsageLevel {
+  if (pct >= 90) return "danger"
+  if (pct >= 80) return "warning"
+  if (pct >= 60) return "caution"
+  return "nominal"
 }
 
-function getDotColor(pct: number) {
-  if (pct >= 90) return "bg-red-400"
-  if (pct >= 80) return "bg-orange-400"
-  if (pct >= 60) return "bg-yellow-400"
-  return "bg-green-400"
+const USAGE_TEXT_COLOR: Record<UsageLevel, string> = {
+  nominal: "text-muted-foreground",
+  caution: "text-yellow-400",
+  warning: "text-orange-400",
+  danger: "text-red-400",
+}
+
+const USAGE_BAR_COLOR: Record<UsageLevel, string> = {
+  nominal: "bg-muted-foreground",
+  caution: "bg-yellow-400",
+  warning: "bg-orange-400",
+  danger: "bg-red-400",
 }
 
 function TooltipBody({ usage }: { usage: UsageData }) {
@@ -45,17 +55,18 @@ function TooltipBody({ usage }: { usage: UsageData }) {
           ? new Date(r.resetsAt).getTime() - usage.fetchedAt
           : null
         const resetH = resetMs != null ? Math.max(0, Math.round(resetMs / 3_600_000)) : null
+        const level = usageLevel(r.pct)
         return (
           <div key={r.label} className="space-y-0.5">
             <div className="flex items-center justify-between text-[10px]">
               <span className="text-muted-foreground">{r.label}</span>
-              <span className={cn("font-semibold", getUtilColor(r.pct))}>
+              <span className={cn("font-semibold", USAGE_TEXT_COLOR[level])}>
                 {r.pct.toFixed(1)}%
               </span>
             </div>
             <div className="h-1 w-full rounded-full bg-elevation-3 overflow-hidden">
               <div
-                className={cn("h-full rounded-full", getDotColor(r.pct))}
+                className={cn("h-full rounded-full", USAGE_BAR_COLOR[level])}
                 style={{ width: `${Math.min(r.pct, 100)}%`, opacity: 0.6 }}
               />
             </div>
@@ -82,7 +93,11 @@ function TooltipBody({ usage }: { usage: UsageData }) {
   )
 }
 
-/** Compact usage indicator for the top bar. Renders nothing if unavailable. */
+/**
+ * Quota readout for the top bar — a single quiet number, because its slope is
+ * what gets sampled. It only takes on colour under real quota pressure.
+ * Renders nothing if usage is unavailable.
+ */
 export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: AgentKind }) {
   const { usage, loading, available, refresh } = useTokenUsage(agentKind)
 
@@ -94,9 +109,12 @@ export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: Agen
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<button type="button" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1" />}>
-          <span className={cn("inline-block size-1.5 rounded-full shrink-0", getDotColor(primary))} />
-          <span className={cn("tabular-nums", getUtilColor(primary), loading && "animate-pulse")}>
+      <TooltipTrigger render={<button type="button" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="rounded-md px-1.5 py-1 text-xs font-mono hover:bg-elevation-2 transition-colors mr-1" />}>
+          <span className={cn(
+            "tabular-nums",
+            USAGE_TEXT_COLOR[usageLevel(primary)],
+            loading && "opacity-50",
+          )}>
             {primary.toFixed(0)}%
           </span>
       </TooltipTrigger>

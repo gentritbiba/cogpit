@@ -29,6 +29,14 @@ const CARD_STYLES = {
   userAgent: "bg-green-500/[0.12] border border-green-500/20",
 } as const
 
+/**
+ * One rail for nesting. Depth is the only thing a rail has to communicate, so
+ * every nested block shares a single hairline; a nested agent transcript is a
+ * genuine structural difference, so it keeps the one accent.
+ */
+const NEST_RAIL = "border-l border-border/40"
+const AGENT_RAIL = "border-l border-indigo-400/40"
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface TurnSectionProps {
@@ -229,21 +237,12 @@ function TurnHeader({
 
   return (
     <div className={cn("flex items-center", isMobile ? "mb-2 gap-1.5" : "mb-4 gap-2")}>
-      {isMobile ? (
-        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
-          Turn {index + 1}
-        </span>
-      ) : (
-        <div className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border/50 bg-elevation-2 font-mono text-[10px] text-muted-foreground">
-          {index + 1}
-        </div>
-      )}
+      {/* The turn boundary is carried by the accented user message below; this
+          number is a label for cross-referencing panels, not a second cue. */}
+      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/50">
+        {isMobile ? `Turn ${index + 1}` : index + 1}
+      </span>
       <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
-      {!isMobile && turn.timestamp && (
-        <span className="text-[10px] text-muted-foreground/40">
-          {new Date(turn.timestamp).toLocaleTimeString()}
-        </span>
-      )}
       {onRestoreToHere && (
         <button
           type="button"
@@ -292,7 +291,7 @@ function TurnTimer({
   if (showLiveTimer) {
     return (
       <span className="flex items-center gap-1 text-[10px] text-amber-400/70 font-mono tabular-nums">
-        <Clock className="w-2.5 h-2.5 animate-pulse" />
+        <Clock className="w-2.5 h-2.5" />
         <LiveElapsed startTimestamp={timestamp} className="tabular-nums" />
       </span>
     )
@@ -334,7 +333,7 @@ function ContentBlocks({
       // Single tool_calls group with no thinking → render as orphan tool calls
       if (items.length === 1 && items[0].kind === "tool_calls") {
         elements.push(
-          <div key={`tools-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`tools-${i}`} className={cn(NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -347,7 +346,7 @@ function ContentBlocks({
       // Mixed or multiple items → grouped collapsible
       } else {
         elements.push(
-          <div key={`activity-${i}`} className={cn("border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+          <div key={`activity-${i}`} className={cn(NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
@@ -375,12 +374,11 @@ function ContentBlocks({
             <AssistantText
               text={text}
               model={model}
-              tokenUsage={null}
               timestamp={block.timestamp}
               compact={isMobile}
             />
             {hasFollowingActivity && (
-              <div className={cn("mt-1.5 border-l-2 border-border/40", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+              <div className={cn("mt-1.5", NEST_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
@@ -421,7 +419,7 @@ function ContentBlocks({
 
     if (block.kind === "sub_agent") {
       elements.push(
-        <div key={`agent-${i}`} className={cn("border-l-2 border-indigo-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`agent-${i}`} className={cn(AGENT_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
           <SubAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -431,7 +429,7 @@ function ContentBlocks({
 
     if (block.kind === "background_agent") {
       elements.push(
-        <div key={`bg-agent-${i}`} className={cn("border-l-2 border-violet-500/30", isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
+        <div key={`bg-agent-${i}`} className={cn(AGENT_RAIL, isMobile ? "ml-0 pl-2" : "ml-1 pl-3")}>
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )

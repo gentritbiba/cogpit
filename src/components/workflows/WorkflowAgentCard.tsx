@@ -21,12 +21,7 @@ export function WorkflowAgentCard({ agent }: { agent: WorkflowAgent }) {
     <div className="rounded-md border border-border bg-elevation-1 px-2.5 py-2">
       {/* Header line: state dot, label, badge */}
       <div className="flex items-center gap-2">
-        <span className="relative flex size-2 shrink-0">
-          {running && (
-            <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", style.dot)} />
-          )}
-          <span className={cn("relative inline-flex size-2 rounded-full", style.dot)} />
-        </span>
+        <span className={cn("size-2 shrink-0 rounded-full", style.dot)} />
         <span className="flex-1 min-w-0 truncate text-xs font-medium text-foreground" title={agent.label}>
           {agent.label}
         </span>

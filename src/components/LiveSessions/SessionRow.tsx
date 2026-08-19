@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
 import { SessionPreview, isIdleStatus, getStatusColor } from "./SessionPreview"
 import { sessionTitle } from "./sessionListView"
+import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
@@ -74,14 +75,11 @@ export function SessionRow({
         ? "Running"
         : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason) ?? "Running")
     : null
-  // Left-edge status dot: amber = needs attention, pulsing green = working,
-  // solid green = live but idle/done. Recent (dead) sessions get no dot.
-  const statusDot = isDeferred
-    ? "bg-amber-400"
+  // Left-edge status dot. Recent (dead) sessions get no dot.
+  const dotState = isDeferred
+    ? "attention"
     : isLive
-      ? isIdleStatus(s.agentStatus)
-        ? "bg-green-400"
-        : "bg-green-400 animate-pulse"
+      ? isIdleStatus(s.agentStatus) ? "idle" : "working"
       : null
   const isTeammate = !!(s.teamName && s.agentName)
   const title = sessionTitle(s, customName)
@@ -128,7 +126,9 @@ export function SessionRow({
         />}>
           {/* Status dot — fixed-width slot so titles stay aligned when there's no dot */}
           <span className="flex w-1.5 shrink-0 items-center justify-center" aria-hidden="true">
-            {statusDot && <span className={cn("size-1.5 rounded-full", statusDot)} />}
+            {dotState && (
+              <span data-status-dot={dotState} className={cn("size-1.5 rounded-full", STATUS_DOT[dotState])} />
+            )}
           </span>
 
           {/* Title */}

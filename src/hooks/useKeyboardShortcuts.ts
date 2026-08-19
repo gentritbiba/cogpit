@@ -2,7 +2,7 @@ import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { can } from "@/lib/capabilities"
-import { matchesKeybinding } from "@/lib/keybindings"
+import { isEditableTarget, matchesKeybinding } from "@/lib/keybindings"
 
 interface HistoryEntry {
   dirName: string
@@ -84,8 +84,6 @@ export function useKeyboardShortcuts({
   useEffect(() => {
     if (isMobile) return
     function handleKeyDown(e: KeyboardEvent) {
-      const mod = e.metaKey || e.ctrlKey
-
       if (matchesKeybinding("commandPalette", e)) {
         e.preventDefault()
         onOpenCommandPalette?.()
@@ -138,19 +136,16 @@ export function useKeyboardShortcuts({
         return
       }
 
-      // Ctrl+Cmd+N (Mac) or Ctrl+Alt+N (Windows/Linux) — open project switcher
       if (matchesKeybinding("newSession", e)) {
         e.preventDefault()
         onOpenProjectSwitcher()
       }
 
-      // Ctrl+Cmd+S (Mac) or Ctrl+Alt+S (Windows/Linux) — open theme selector
       if (matchesKeybinding("themeSelector", e)) {
         e.preventDefault()
         onOpenThemeSelector()
       }
 
-      // Ctrl+Cmd+T (Mac) or Ctrl+Alt+T (Windows/Linux) — open terminal at project
       if (matchesKeybinding("systemTerminal", e)) {
         if (!can("terminal")) return
         e.preventDefault()
@@ -162,8 +157,10 @@ export function useKeyboardShortcuts({
         searchInputRef.current?.blur()
       }
 
-      // Ctrl+Shift+1–9 — jump to the Nth live session
-      if (mod && e.shiftKey && e.code.startsWith("Digit")) {
+      // Mod+Shift+1–9 — jump to the Nth live session. Matched on `e.code` (not
+      // `e.key`) because Shift+Digit yields "!" … ")" on most layouts, so this
+      // stays outside KEYBINDING_DEFINITIONS and is not rebindable.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code.startsWith("Digit")) {
         const num = parseInt(e.code.charAt(5), 10)
         if (num >= 1 && num <= 9) {
           e.preventDefault()
@@ -176,37 +173,27 @@ export function useKeyboardShortcuts({
         }
       }
 
-      // Ctrl+Tab / Ctrl+Shift+Tab — MRU session switching (like Firefox tabs)
-      // Only Ctrl (not Cmd) since Cmd+Tab is macOS app switcher.
-      // In browsers, Ctrl+Tab switches browser tabs so this naturally only works in Electron.
-      if (e.ctrlKey && !e.metaKey && e.key === "Tab") {
+      // Ctrl+Tab / Ctrl+Shift+Tab — MRU session switching (like Firefox tabs).
+      // Only Ctrl (not Cmd) since Cmd+Tab is the macOS app switcher, and in
+      // browsers Ctrl+Tab switches browser tabs, so this only works in Electron.
+      const recentForward = matchesKeybinding("recentSessionForward", e)
+      if (recentForward || matchesKeybinding("recentSessionBack", e)) {
         e.preventDefault()
-        const entry = e.shiftKey ? onHistoryForward() : onHistoryBack()
+        const entry = recentForward ? onHistoryForward() : onHistoryBack()
         if (entry) {
           onNavigateToSession(entry.dirName, entry.fileName)
         }
       }
 
-      // Space (no modifier, no focused input) — focus chat input
-      if (
-        e.key === " " &&
-        !mod &&
-        !e.shiftKey &&
-        !e.altKey
-      ) {
-        const tag = (document.activeElement as HTMLElement)?.tagName
-        const isEditable =
-          tag === "INPUT" ||
-          tag === "TEXTAREA" ||
-          (document.activeElement as HTMLElement)?.isContentEditable
-        if (!isEditable) {
-          e.preventDefault()
-          chatInputRef.current?.focus()
-        }
+      // Space — focus chat input, unless the user is already typing somewhere
+      if (matchesKeybinding("focusComposer", e) && !isEditableTarget(document.activeElement)) {
+        e.preventDefault()
+        chatInputRef.current?.focus()
       }
 
-      // Ctrl+Shift+ArrowDown/Up — navigate between live sessions (Enter to open)
-      if (mod && e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      // Mod+Shift+Arrow — navigate between live sessions (Enter to open)
+      const nextLive = matchesKeybinding("nextLiveSession", e)
+      if (nextLive || matchesKeybinding("prevLiveSession", e)) {
         e.preventDefault()
         const buttons = getLiveSessionButtons()
         if (buttons.length === 0) return
@@ -214,10 +201,9 @@ export function useKeyboardShortcuts({
         const currentIdx = buttons.findIndex((btn) => btn === document.activeElement)
         let nextIdx: number
         if (currentIdx === -1) {
-          nextIdx = e.key === "ArrowDown" ? 0 : buttons.length - 1
+          nextIdx = nextLive ? 0 : buttons.length - 1
         } else {
-          const delta = e.key === "ArrowDown" ? 1 : -1
-          nextIdx = Math.max(0, Math.min(buttons.length - 1, currentIdx + delta))
+          nextIdx = Math.max(0, Math.min(buttons.length - 1, currentIdx + (nextLive ? 1 : -1)))
         }
         focusSession(buttons[nextIdx])
       }

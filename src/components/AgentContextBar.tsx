@@ -152,6 +152,12 @@ function statusIcon(status: AgentStatus) {
   return <Circle className="size-2.5 text-muted-foreground" />
 }
 
+function statusDot(status: AgentStatus): string {
+  if (status === "running") return "bg-emerald-400"
+  if (status === "failed") return "bg-red-400"
+  return "bg-muted-foreground/50"
+}
+
 function formatDuration(durationMs: number | undefined): string | null {
   if (durationMs == null) return null
   if (durationMs < 1000) return `${durationMs}ms`
@@ -216,14 +222,14 @@ export function AgentContextBar({
         {activeCount > 0 && <span className="text-emerald-400">{activeCount} active</span>}
         {mobile && featuredAgent ? (
           <span className="ml-auto flex min-w-0 items-center gap-1 truncate text-[10px]">
-            <span className={cn("size-1.5 shrink-0 rounded-full", featuredAgent.status === "running" ? "animate-pulse bg-emerald-400" : featuredAgent.status === "failed" ? "bg-red-400" : "bg-muted-foreground/50")} />
+            <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(featuredAgent.status))} />
             <span className="truncate">{agentLabel(featuredAgent)}</span>
           </span>
         ) : (
           <div className="flex min-w-0 items-center gap-1 overflow-hidden">
             {agents.map((agent) => (
               <span key={agent.agentId} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-elevation-2 px-1.5 py-0.5 text-[10px]">
-                <span className={cn("size-1.5 shrink-0 rounded-full", agent.status === "running" ? "animate-pulse bg-emerald-400" : agent.status === "failed" ? "bg-red-400" : "bg-muted-foreground/50")} />
+                <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(agent.status))} />
                 <span className="max-w-32 truncate">{agentLabel(agent)}</span>
               </span>
             ))}

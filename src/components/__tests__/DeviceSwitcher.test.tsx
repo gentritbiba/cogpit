@@ -97,6 +97,26 @@ describe("DeviceSwitcher", () => {
     expect(screen.getByText("Manage devices…")).toBeInTheDocument()
   })
 
+  it("renders nothing when no remote devices are configured", () => {
+    mocks.useDevices.mockReturnValue(hookValue({ devices: [] }))
+    const { container } = render(<DeviceSwitcher />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it("keeps the compact variant with no devices — mobile has no command palette", () => {
+    mocks.useDevices.mockReturnValue(hookValue({ devices: [] }))
+    render(<DeviceSwitcher compact />)
+    expect(screen.getByRole("button", { name: "Switch device" })).toBeInTheDocument()
+  })
+
+  it("stays visible on an empty list while a remote device is active", () => {
+    mocks.useDevices.mockReturnValue(
+      hookValue({ devices: [], activeDeviceId: "dev_1", activeDevice: DEVICE }),
+    )
+    render(<DeviceSwitcher />)
+    expect(screen.getByRole("button", { name: "Switch device" })).toHaveTextContent("Studio")
+  })
+
   it("hides the add/manage entries for a member without manageDevices", async () => {
     setMe({
       authenticated: true,
