@@ -76,6 +76,12 @@ interface LiveWorkflowEvent {
   result?: unknown
 }
 
+export interface WorkflowAgentResult {
+  result: unknown
+}
+
+export type WorkflowResult = WorkflowAgentResult
+
 export interface WorkflowAgentCounts {
   total: number
   queued: number
@@ -242,6 +248,69 @@ function liveWorkflowsDirFor(dirName: string, sessionId: string): string | null 
   if (!sessionDir) return null
   const dir = join(sessionDir, "subagents", "workflows")
   return isWithinDir(dirs.PROJECTS_DIR, dir) ? dir : null
+}
+
+function isSafeAgentId(agentId: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(agentId)
+}
+
+/** Read one agent's complete result from the append-only workflow journal. */
+export async function readWorkflowAgentResult(
+  dirName: string,
+  sessionId: string,
+  runId: string,
+  agentId: string,
+): Promise<WorkflowAgentResult | null> {
+  if (!isSafeRunId(runId) || !isSafeAgentId(agentId)) return null
+
+  const liveDir = liveWorkflowsDirFor(dirName, sessionId)
+  if (!liveDir) return null
+
+  const runDir = join(liveDir, runId)
+  if (!isWithinDir(liveDir, runDir)) return null
+
+  let raw: string
+  try {
+    raw = await readFile(join(runDir, "journal.jsonl"), "utf-8")
+  } catch {
+    return null
+  }
+
+  const lines = raw.split("\n")
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index].trim()
+    if (!line) continue
+
+    let event: LiveWorkflowEvent
+    try {
+      event = JSON.parse(line) as LiveWorkflowEvent
+    } catch {
+      continue
+    }
+
+    if (event.type === "result" && event.agentId === agentId) {
+      return { result: event.result }
+    }
+  }
+
+  return null
+}
+
+/** Read the complete synthesized result from a finished workflow journal. */
+export async function readWorkflowResult(
+  dirName: string,
+  sessionId: string,
+  runId: string,
+): Promise<WorkflowResult | null> {
+  if (!isSafeRunId(runId)) return null
+
+  const completedDir = workflowsDirFor(dirName, sessionId)
+  if (!completedDir) return null
+  if (!isWithinDir(completedDir, join(completedDir, `${runId}.json`))) return null
+
+  const journal = await readJournal(completedDir, runId)
+  if (!journal || journal.result == null) return null
+  return { result: journal.result }
 }
 
 /** Build a best-effort running detail from the append-only live event journal. */

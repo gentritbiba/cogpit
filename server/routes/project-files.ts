@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process"
-import { readdir, stat } from "node:fs/promises"
+import { readdir, realpath, stat } from "node:fs/promises"
 import { isAbsolute, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { sendJson, type UseFn } from "../http"
@@ -47,9 +47,12 @@ async function listGitProjectFiles(root: string): Promise<string[] | null> {
   }
 }
 
-export async function listProjectFiles(root: string): Promise<string[]> {
+export async function listProjectFiles(
+  root: string,
+  { skipCache = false }: { skipCache?: boolean } = {},
+): Promise<string[]> {
   const cached = fileCache.get(root)
-  if (cached && cached.expiresAt > Date.now()) return cached.files
+  if (!skipCache && cached && cached.expiresAt > Date.now()) return cached.files
 
   const gitFiles = await listGitProjectFiles(root)
   if (gitFiles) {
@@ -91,16 +94,22 @@ export function registerProjectFileRoutes(use: UseFn) {
     const cwd = url.searchParams.get("cwd") ?? ""
     const query = url.searchParams.get("q") ?? ""
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 30, 1), 100)
+    const skipCache = url.searchParams.get("refresh") === "1"
 
     if (!isAbsolute(cwd)) return sendJson(res, 400, { error: "cwd must be an absolute path" })
-    const root = resolve(cwd)
+    let root = resolve(cwd)
     try {
       const info = await stat(root)
       if (!info.isDirectory()) return sendJson(res, 400, { error: "cwd must be a directory" })
-      const files = await listProjectFiles(root)
+      // Canonicalize so a symlinked project root keys the cache — and relativizes
+      // paths — the same way /api/git-status and /api/project-file do.
+      root = await realpath(root)
+      const files = await listProjectFiles(root, { skipCache })
+      const ranked = rankProjectFiles(files, query, limit)
       return sendJson(res, 200, {
-        files: rankProjectFiles(files, query, limit),
-        truncated: files.length >= MAX_FILES,
+        files: ranked.files,
+        totalMatches: ranked.totalMatches,
+        scanLimited: files.length >= MAX_FILES,
       })
     } catch {
       return sendJson(res, 404, { error: "Project directory not found" })

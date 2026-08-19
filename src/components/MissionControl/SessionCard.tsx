@@ -1,30 +1,29 @@
 /**
  * One session, rendered as a Mission Control card.
  *
- * Density is the point: state, current work, diffstat, metrics and context
- * pressure at a glance, so a wall of these is scannable without opening any.
+ * Deliberately sparse: what the session is, what state it's in, and what it
+ * last said — with the space spent on actual text. A single thin footer
+ * carries the diffstat and context pressure; every other metric lives in the
+ * session itself.
  */
 
 import { memo } from "react"
 import { CheckCircle2, ChevronRight, MessageCircleQuestion, XCircle } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { formatDuration, formatRelativeTime, formatTokenCount, shortenModel } from "@/lib/format"
+import { formatRelativeTime, shortenModel } from "@/lib/format"
 import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
 import type { PermissionDecision } from "@/lib/permissionApi"
 import type { UserQuestionAnswerMap } from "@/lib/askUserApi"
 import type {
-  MissionControlContext,
   MissionControlCurrentTool,
   MissionControlSummary,
 } from "../../../shared/contracts/missionControl"
 import { PermissionPrompt } from "./PermissionPrompt"
 import { QuestionPrompt } from "./QuestionPrompt"
-import { contextBarColor, type MissionCard, type MissionCardState } from "./missionControlView"
-
-const CAPTION = "text-[9px] uppercase tracking-wider text-muted-foreground/70"
+import { contextPercentColor, type MissionCard, type MissionCardState } from "./missionControlView"
 
 interface StateStyle {
   label: string
@@ -100,7 +99,6 @@ export const SessionCard = memo(function SessionCard({
   const request = permissions[0]
   const question = questions[0]
   const blocked = Boolean(request || question)
-  const context = summary?.context ?? null
   const title = sessionTitle(session, customName)
 
   return (
@@ -128,7 +126,12 @@ export const SessionCard = memo(function SessionCard({
           )}
           <ChevronRight className="size-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60" />
         </span>
-        <span className="truncate text-[13.5px] font-semibold leading-tight tracking-tight text-foreground/95">
+        <span
+          className={cn(
+            "text-[13.5px] font-semibold leading-tight tracking-tight text-foreground/95",
+            compact ? "truncate" : "line-clamp-2",
+          )}
+        >
           {title}
         </span>
       </button>
@@ -164,32 +167,12 @@ export const SessionCard = memo(function SessionCard({
       {!blocked && summary?.currentTool && <CurrentTool tool={summary.currentTool} />}
 
       {!compact && !blocked && summary?.lastAssistantText && (
-        <p className="line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="line-clamp-5 text-[11.5px] leading-relaxed text-muted-foreground">
           {summary.lastAssistantText}
         </p>
       )}
 
-      {!compact && summary && summary.files.length > 0 && <ChangedFiles summary={summary} />}
-
-      {!compact && summary && summary.toolTrail.length > 0 && (
-        <ToolTrail trail={summary.toolTrail} totalCalls={summary.totalToolCalls} />
-      )}
-
-      <div
-        className={cn(
-          "mt-auto flex items-stretch border-t border-border/40 pt-2",
-          // Full-width list rows would otherwise fling the three metrics to
-          // opposite ends of the screen.
-          compact && "max-w-xs gap-6",
-        )}
-      >
-        {/* A session with one event has no span yet; "0ms" reads as noise. */}
-        <Metric label="Elapsed" value={summary?.elapsedMs ? formatDuration(summary.elapsedMs) : "—"} />
-        <Metric label="Turns" value={String(session.turnCount ?? summary?.turnCount ?? 0)} />
-        <Metric label="Tokens" value={summary ? formatTokenCount(summary.tokens.total) : "—"} />
-      </div>
-
-      {context && context.used > 0 && <ContextBar context={context} />}
+      {summary && <Footer summary={summary} />}
     </div>
   )
 })
@@ -207,75 +190,29 @@ function CurrentTool({ tool }: { tool: MissionControlCurrentTool }) {
   )
 }
 
-function ChangedFiles({ summary }: { summary: MissionControlSummary }) {
-  const total = summary.filesTotal
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className={cn("flex items-center justify-between", CAPTION)}>
-        <span>
-          {total.count} file{total.count === 1 ? "" : "s"} changed
-        </span>
-        <LineCounts add={total.additions} del={total.deletions} />
-      </div>
-      {summary.files.map((file) => (
-        <div key={file.path} className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground/85">
-            {file.path.split("/").slice(-2).join("/")}
-          </span>
-          <LineCounts add={file.additions} del={file.deletions} />
-        </div>
-      ))}
-    </div>
-  )
-}
+/** One thin line — diffstat left, context pressure right — or nothing at all. */
+function Footer({ summary }: { summary: MissionControlSummary }) {
+  const files = summary.filesTotal
+  const context = summary.context
+  const hasFiles = files.count > 0
+  const hasContext = context !== null && context.used > 0
+  if (!hasFiles && !hasContext) return null
 
-function ToolTrail({ trail, totalCalls }: { trail: string[]; totalCalls: number }) {
-  const hidden = totalCalls - trail.length
   return (
-    <div className="flex items-center gap-1">
-      {trail.map((tool, i) => (
-        <span key={`${tool}-${i}`} className="flex items-center gap-1">
-          {i > 0 && <span className="text-[10px] text-muted-foreground/30">›</span>}
-          <span className={cn("font-mono text-[9.5px]", getToolTextStyle(tool))}>
-            {tool}
+    <div className="mt-auto flex items-center gap-2 border-t border-border/40 pt-1.5 font-mono text-[10px] text-muted-foreground/70">
+      {hasFiles && (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">
+            {files.count} file{files.count === 1 ? "" : "s"}
           </span>
-        </span>
-      ))}
-      {hidden > 0 && (
-        <span className="ml-auto font-mono text-[10px] text-muted-foreground/50">
-          +{hidden} calls
+          <LineCounts add={files.additions} del={files.deletions} />
         </span>
       )}
-    </div>
-  )
-}
-
-function ContextBar({ context }: { context: MissionControlContext }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex justify-between font-mono text-[9.5px] text-muted-foreground/70">
-        <span>
-          context {formatTokenCount(context.used)} / {formatTokenCount(context.limit)}
+      {hasContext && (
+        <span className={cn("ml-auto shrink-0", contextPercentColor(context.percent))}>
+          ctx {context.percent}%
         </span>
-        <span>{context.percent}%</span>
-      </div>
-      <div className="h-1 overflow-hidden rounded-full bg-elevation-0">
-        <div
-          className={cn("h-full rounded-full transition-all", contextBarColor(context.percent))}
-          style={{ width: `${Math.max(1, Math.min(100, context.percent))}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 flex-1">
-      <span className={cn("block", CAPTION)}>{label}</span>
-      <span className="mt-0.5 block truncate font-mono text-[12.5px] font-semibold tracking-tight text-foreground/90">
-        {value}
-      </span>
+      )}
     </div>
   )
 }

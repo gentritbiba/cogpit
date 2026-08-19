@@ -192,6 +192,56 @@ describe("workflow routes", () => {
     })
   })
 
+  describe("GET /api/workflow-agent-result/:dirName/:sessionId/:runId/:agentId", () => {
+    it("returns the complete structured result", async () => {
+      mockedReadFile.mockResolvedValueOnce([
+        JSON.stringify({ type: "started", agentId: "agent-1" }),
+        JSON.stringify({
+          type: "result",
+          agentId: "agent-1",
+          result: { headline: "The useful answer", findings: [{ title: "First" }] },
+        }),
+      ].join("\n"))
+      const { req, res, next } = createMockReqRes(
+        "GET",
+        "/proj/sess/wf_abc-123/agent-1",
+      )
+
+      await getRouteHandler(handlers, "/api/workflow-agent-result/")(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual({
+        result: { headline: "The useful answer", findings: [{ title: "First" }] },
+      })
+    })
+
+    it("returns 404 when the result is unavailable", async () => {
+      mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
+      const { req, res, next } = createMockReqRes(
+        "GET",
+        "/proj/sess/wf_abc-123/agent-1",
+      )
+
+      await getRouteHandler(handlers, "/api/workflow-agent-result/")(req, res, next)
+
+      expect(res._getStatus()).toBe(404)
+    })
+  })
+
+  describe("GET /api/workflow-result/:dirName/:sessionId/:runId", () => {
+    it("returns the complete synthesized result", async () => {
+      mockedReadFile.mockResolvedValueOnce(journalJson({
+        result: { recommendation: "Keep the useful parts" },
+      }))
+      const { req, res, next } = createMockReqRes("GET", "/proj/sess/wf_abc-123")
+
+      await getRouteHandler(handlers, "/api/workflow-result/")(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual({
+        result: { recommendation: "Keep the useful parts" },
+      })
+    })
+  })
+
   describe("POST /api/workflow-stop", () => {
     it("returns 400 when sessionId is missing", async () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ runId: "wf_abc-123" }))

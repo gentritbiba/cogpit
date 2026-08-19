@@ -26,10 +26,23 @@ describe("ProjectFilesPanel", () => {
         }))
       }
       if (url.startsWith("/api/project-files")) {
-        return Promise.resolve(jsonResponse({ files: ["src/App.tsx", "README.md"], truncated: false }))
+        return Promise.resolve(jsonResponse({
+          files: ["src/App.tsx", "README.md"],
+          totalMatches: 2,
+          scanLimited: false,
+        }))
       }
       if (url.startsWith("/api/project-file?") && !init?.method) {
         return Promise.resolve(jsonResponse({ content: "const value = 1\n", mtimeMs: 10, size: 16 }))
+      }
+      if (url.startsWith("/api/git-diff")) {
+        return Promise.resolve(jsonResponse({
+          path: "src/App.tsx",
+          original: "const value = 1\n",
+          current: "const value = 2\n",
+          binary: false,
+          tooLarge: false,
+        }))
       }
       if (url === "/api/project-file" && init?.method === "PUT") {
         return Promise.resolve(jsonResponse({ ok: true, mtimeMs: 20, size: 16 }))
@@ -91,7 +104,80 @@ describe("ProjectFilesPanel", () => {
 
     expect(screen.getByRole("button", { name: /App\.tsx/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /README\.md/ })).not.toBeInTheDocument()
-    expect(screen.getByText("M")).toBeInTheDocument()
+    expect(screen.getByText("M")).toHaveAttribute("title", "Modified")
+  })
+
+  it("diffs a changed file against the last commit", async () => {
+    const user = userEvent.setup()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    await user.click(await screen.findByRole("button", { name: "Changes" }))
+    await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
+
+    expect(await screen.findByText("const value = 1")).toBeInTheDocument()
+    expect(screen.getByText("const value = 2")).toBeInTheDocument()
+    expect(screen.getByText("+1")).toBeInTheDocument()
+    expect(screen.getByText("-1")).toBeInTheDocument()
+    expect(screen.queryByRole("textbox", { name: "Editing src/App.tsx" })).not.toBeInTheDocument()
+  })
+
+  it("opens the editor for a changed file on request", async () => {
+    const user = userEvent.setup()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    await user.click(await screen.findByRole("button", { name: "Changes" }))
+    await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
+    await screen.findByText("const value = 2")
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+
+    expect(await screen.findByRole("textbox", { name: "Editing src/App.tsx" })).toHaveValue("const value = 1\n")
+  })
+
+  it("opens unchanged files straight in the editor", async () => {
+    const user = userEvent.setup()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    await user.click(await screen.findByRole("button", { name: /README\.md/ }))
+
+    expect(await screen.findByRole("textbox", { name: "Editing README.md" })).toBeInTheDocument()
+    expect(mocks.authFetch.mock.calls.some((call) => String(call[0]).startsWith("/api/git-diff"))).toBe(false)
+  })
+
+  it("reports how many matches the result limit hid", async () => {
+    mocks.authFetch.mockImplementation((url: string) => {
+      if (url.startsWith("/api/git-status")) return Promise.resolve(jsonResponse({ isRepository: false, files: [] }))
+      return Promise.resolve(jsonResponse({
+        files: ["src/App.tsx", "README.md"],
+        totalMatches: 42,
+        scanLimited: false,
+      }))
+    })
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    expect(await screen.findByText(/Showing 2 of 42 matches/)).toBeInTheDocument()
+  })
+
+  it("keeps quiet when every match is on screen", async () => {
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    await screen.findByRole("button", { name: /App\.tsx/ })
+    expect(screen.queryByText(/matches/)).not.toBeInTheDocument()
+  })
+
+  it("bypasses the server listing cache when refreshed", async () => {
+    const user = userEvent.setup()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+
+    await screen.findByRole("button", { name: /App\.tsx/ })
+    const listCallsBefore = mocks.authFetch.mock.calls.filter((call) => String(call[0]).includes("refresh=1"))
+    expect(listCallsBefore).toHaveLength(0)
+
+    await user.click(screen.getByRole("button", { name: "Refresh files and git status" }))
+
+    await waitFor(() => {
+      expect(mocks.authFetch.mock.calls.some((call) => String(call[0]).includes("refresh=1"))).toBe(true)
+    })
+    expect(mocks.authFetch.mock.calls.filter((call) => String(call[0]).startsWith("/api/git-status"))).toHaveLength(2)
   })
 
   it("sends selected file lines back to the composer context", async () => {

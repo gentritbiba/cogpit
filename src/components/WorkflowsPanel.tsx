@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { Workflow as WorkflowIcon, RefreshCw, Loader2, ChevronLeft } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Workflow as WorkflowIcon, RefreshCw, ChevronLeft } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -8,6 +8,15 @@ import {
 } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Spinner } from "@/components/ui/Spinner"
 import { LiveIndicator } from "@/components/header-shared"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
@@ -39,25 +48,23 @@ export function WorkflowsPanel({
   isLive,
   onRefetchList,
 }: WorkflowsPanelProps) {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [preferredRunId, setPreferredRunId] = useState<string | null>(null)
+  const [showRunList, setShowRunList] = useState(false)
   const [detail, setDetail] = useState<WorkflowDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [confirmingStop, setConfirmingStop] = useState(false)
   const [stopNote, setStopNote] = useState<string | null>(null)
+  const detailRequestIdRef = useRef(0)
 
-  // Default selection: newest run, kept sticky unless it disappears.
-  useEffect(() => {
-    if (workflows.length === 0) {
-      setSelectedRunId(null)
-      return
-    }
-    setSelectedRunId((cur) =>
-      cur && workflows.some((w) => w.runId === cur) ? cur : workflows[0].runId,
-    )
-  }, [workflows])
+  const selectedRunId = showRunList
+    ? null
+    : preferredRunId && workflows.some((workflow) => workflow.runId === preferredRunId)
+      ? preferredRunId
+      : workflows[0]?.runId ?? null
 
   const fetchDetail = useCallback(async () => {
+    const requestId = ++detailRequestIdRef.current
     if (!dirName || !sessionId || !selectedRunId) {
       setDetail(null)
       return
@@ -67,30 +74,30 @@ export function WorkflowsPanel({
         `/api/workflow-detail/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}/${encodeURIComponent(selectedRunId)}`,
       )
       if (!res.ok) {
-        setDetail(null)
+        if (requestId === detailRequestIdRef.current) setDetail(null)
         return
       }
-      setDetail(await res.json())
+      const nextDetail = await res.json() as WorkflowDetail
+      if (requestId === detailRequestIdRef.current) setDetail(nextDetail)
     } catch {
-      setDetail(null)
+      if (requestId === detailRequestIdRef.current) setDetail(null)
     } finally {
-      setLoadingDetail(false)
+      if (requestId === detailRequestIdRef.current) setLoadingDetail(false)
     }
   }, [dirName, sessionId, selectedRunId])
 
-  // Fetch detail when the selected run changes.
   useEffect(() => {
     if (!selectedRunId) {
       setDetail(null)
       return
     }
+    setDetail(null)
     setLoadingDetail(true)
     setConfirmingStop(false)
     setStopNote(null)
     fetchDetail()
   }, [selectedRunId, fetchDetail])
 
-  // Live updates for the selected run: refetch its detail and the list.
   useWorkflowLive(open ? dirName : null, open ? sessionId : null, open ? selectedRunId : null, () => {
     fetchDetail()
     onRefetchList()
@@ -128,57 +135,67 @@ export function WorkflowsPanel({
     }
   }, [confirmingStop, sessionId, selectedRunId, fetchDetail, onRefetchList])
 
-  const showList = workflows.length > 1
+  const hasMultipleRuns = workflows.length > 1
   const selected = workflows.find((w) => w.runId === selectedRunId)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="!max-w-[820px] w-full">
-        <SheetHeader>
-          <div className="flex items-center justify-between pr-8">
-            <SheetTitle className="flex items-center gap-2">
-              <WorkflowIcon className="size-4 text-violet-400" />
+      <SheetContent side="right" className="w-full !max-w-[1120px]">
+        <SheetHeader className="min-h-16 justify-center py-3">
+          <div className="flex items-center justify-between gap-3 pr-9">
+            <SheetTitle className="flex items-center gap-2.5 text-base">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <WorkflowIcon className="size-4" />
+              </span>
               Workflows
+              {workflows.length > 0 && (
+                <Badge variant="secondary">{workflows.length}</Badge>
+              )}
               {isLive && (
-                <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[10px] font-semibold border-green-700 text-green-400">
+                <Badge variant="outline" className="border-emerald-700/50 text-emerald-500">
                   <LiveIndicator className="size-1.5" />
-                  LIVE
+                  Live
                 </Badge>
               )}
             </SheetTitle>
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={onRefetchList}
               aria-label="Refresh workflows"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-elevation-1 hover:text-foreground transition-colors"
+              title="Refresh workflows"
             >
-              <RefreshCw className="size-3.5" />
-            </button>
+              <RefreshCw />
+            </Button>
           </div>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100dvh-4.5rem)]">
-          <div className="px-4 pb-10 pt-2">
+        <ScrollArea className="h-[calc(100dvh-4rem)]">
+          <div className="px-5 py-5 sm:px-6">
             {workflows.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-20 text-center text-muted-foreground">
-                <WorkflowIcon className="size-8 opacity-40" />
-                <p className="text-sm">No workflows in this session</p>
-                <p className="max-w-xs text-xs text-muted-foreground/70">
-                  When this session launches a workflow, its phases and agents will appear here live.
-                </p>
-              </div>
+              <Empty className="min-h-[60dvh]">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><WorkflowIcon /></EmptyMedia>
+                  <EmptyTitle>No workflows in this session</EmptyTitle>
+                  <EmptyDescription>
+                    Phases, agents, and their responses will appear here when this session starts a workflow.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <>
-                {/* Run selector (only when more than one) */}
-                {showList && (
-                  <div className="mb-3 flex flex-col gap-1">
+                {hasMultipleRuns && (
+                  <div className="mb-5 flex flex-col gap-2">
                     {selectedRunId && detail && (
-                      <button
-                        onClick={() => setSelectedRunId(null)}
-                        className="mb-1 inline-flex w-fit items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowRunList(true)}
+                        className="w-fit px-2 text-muted-foreground"
                       >
-                        <ChevronLeft className="size-3" />
-                        All workflows ({workflows.length})
-                      </button>
+                        <ChevronLeft data-icon="inline-start" />
+                        All runs
+                      </Button>
                     )}
                     {(!selectedRunId || !detail) &&
                       workflows.map((w) => (
@@ -186,33 +203,43 @@ export function WorkflowsPanel({
                           key={w.runId}
                           workflow={w}
                           active={w.runId === selectedRunId}
-                          onClick={() => setSelectedRunId(w.runId)}
+                          onClick={() => {
+                            setPreferredRunId(w.runId)
+                            setShowRunList(false)
+                          }}
                         />
                       ))}
                   </div>
                 )}
 
-                {/* Detail */}
                 {loadingDetail && !detail ? (
-                  <div className="flex items-center justify-center py-20">
-                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  <div className="flex min-h-[50dvh] items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Spinner />
+                    Loading workflow…
                   </div>
                 ) : detail ? (
                   <>
                     {stopNote && (
-                      <div className="mb-2 rounded-md border border-border/50 bg-elevation-1 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+                      <div className="mb-4 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                         {stopNote}
                       </div>
                     )}
                     <WorkflowDetailView
                       detail={detail}
+                      dirName={dirName ?? ""}
+                      sessionId={sessionId ?? ""}
                       stopping={stopping}
                       confirming={confirmingStop}
                       onForceStop={handleForceStop}
                     />
                   </>
                 ) : selected ? (
-                  <p className="py-20 text-center text-sm text-muted-foreground">Couldn't load this workflow.</p>
+                  <Empty className="min-h-[50dvh]">
+                    <EmptyHeader>
+                      <EmptyTitle>Could not load this workflow</EmptyTitle>
+                      <EmptyDescription>The journal may have moved or the run may no longer be available.</EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
                 ) : null}
               </>
             )}
@@ -238,19 +265,20 @@ function WorkflowListRow({
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
-        active ? "border-violet-700/50 bg-violet-500/10" : "border-border/50 bg-elevation-1 hover:bg-elevation-2",
+        "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors",
+        active ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40",
       )}
     >
       <span className={cn("size-2 shrink-0 rounded-full", status.dot)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-xs font-medium text-foreground">{workflow.workflowName}</span>
-          <Badge variant="outline" className={cn("h-4 px-1.5 text-[9px] font-semibold uppercase", status.badge)}>
+          <span className="truncate text-sm font-medium text-foreground">{workflow.workflowName}</span>
+          <Badge variant="outline" className={status.badge}>
             {status.label}
           </Badge>
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+        {workflow.summary && <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{workflow.summary}</p>}
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
           <span>{done}/{workflow.agentCount} agents</span>
           {workflow.startTime > 0 && <span>{formatRelativeTime(new Date(workflow.startTime).toISOString())}</span>}
         </div>

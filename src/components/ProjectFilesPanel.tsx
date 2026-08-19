@@ -20,13 +20,18 @@ import {
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { LineCounts } from "@/components/shared/ChangeCounts"
+import { HighlightedEditor } from "@/components/shared/HighlightedEditor"
+import { EditDiffView } from "@/components/timeline/EditDiffView"
 import { Spinner } from "@/components/ui/Spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
+import { fileTypeColor, fileTypeIcon } from "@/lib/fileTypeColors"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import { parseProjectFilesResponse } from "@/hooks/useProjectFileSuggestions"
+import { diffLineCount } from "../../shared/diff-utils"
 
 interface ProjectFilesPanelProps {
   cwd: string
@@ -55,6 +60,15 @@ interface GitStatusFile {
   workTreeStatus: string
 }
 
+/** HEAD-vs-working-tree contents for one file; null sides mean "absent there". */
+interface GitFileDiff {
+  path: string
+  original: string | null
+  current: string | null
+  binary: boolean
+  tooLarge: boolean
+}
+
 interface GitStatusData {
   isRepository: boolean
   branch?: string | null
@@ -68,6 +82,22 @@ interface GitStatusData {
 const MIN_WIDTH = 520
 const DEFAULT_WIDTH = 760
 const WIDTH_KEY = "cogpit-project-files-width"
+
+/** Porcelain status letters, keyed by the most significant of the two columns. */
+const GIT_STATUS_STYLES: Record<string, { label: string; className: string }> = {
+  "?": { label: "Untracked", className: "text-sky-700 dark:text-blue-300" },
+  A: { label: "Added", className: "text-green-700 dark:text-green-400" },
+  M: { label: "Modified", className: "text-amber-700 dark:text-amber-400" },
+  D: { label: "Deleted", className: "text-red-600 dark:text-red-400" },
+  R: { label: "Renamed", className: "text-purple-600 dark:text-purple-400" },
+  C: { label: "Copied", className: "text-purple-600 dark:text-purple-400" },
+  U: { label: "Conflicted", className: "text-destructive" },
+}
+
+function gitStatusStyle(file: GitStatusFile) {
+  const significant = file.workTreeStatus.trim() || file.indexStatus.trim()
+  return GIT_STATUS_STYLES[significant] ?? { label: "Changed", className: "text-muted-foreground" }
+}
 
 function loadWidth(): number {
   try {
@@ -106,7 +136,10 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   const [files, setFiles] = useState<string[]>([])
   const [filesLoading, setFilesLoading] = useState(true)
   const [filesError, setFilesError] = useState<string | null>(null)
-  const [truncated, setTruncated] = useState(false)
+  const [totalMatches, setTotalMatches] = useState(0)
+  const [scanLimited, setScanLimited] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+  const skipListCacheRef = useRef(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [content, setContent] = useState("")
   const [savedContent, setSavedContent] = useState("")
@@ -120,10 +153,20 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null)
   const [gitLoading, setGitLoading] = useState(false)
   const [gitError, setGitError] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<"edit" | "diff">("edit")
+  const [diff, setDiff] = useState<GitFileDiff | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
   const [selectedExcerpt, setSelectedExcerpt] = useState<Omit<ProjectPromptContext, "path"> | null>(null)
   const [reviewDraft, setReviewDraft] = useState<Omit<ProjectPromptContext, "path"> | null>(null)
   const [reviewComment, setReviewComment] = useState("")
   const dirty = selectedPath !== null && content !== savedContent
+  const changedFiles = useMemo(() => new Map(
+    (gitStatus?.files ?? []).flatMap((file) => [
+      [file.path, file] as const,
+      ...(file.originalPath ? [[file.originalPath, file] as const] : []),
+    ]),
+  ), [gitStatus?.files])
 
   const loadGitStatus = useCallback(async () => {
     setGitLoading(true)
@@ -152,16 +195,23 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     const timer = window.setTimeout(async () => {
       setFilesLoading(true)
       setFilesError(null)
+      // The server caches listings for 30s; an explicit refresh must see files
+      // created or deleted since then.
+      const skipCache = skipListCacheRef.current
+      skipListCacheRef.current = false
       try {
         const response = await authFetch(
-          `/api/project-files?cwd=${encodeURIComponent(cwd)}&q=${encodeURIComponent(query)}&limit=100`,
+          `/api/project-files?cwd=${encodeURIComponent(cwd)}&q=${encodeURIComponent(query)}&limit=100${skipCache ? "&refresh=1" : ""}`,
           { signal: controller.signal },
         )
         if (!response.ok) throw new Error(await responseError(response, "Unable to list project files"))
         const data: unknown = await response.json()
         if (controller.signal.aborted) return
-        setFiles(parseProjectFilesResponse(data))
-        setTruncated((data as { truncated?: unknown }).truncated === true)
+        const listed = parseProjectFilesResponse(data)
+        const total = (data as { totalMatches?: unknown }).totalMatches
+        setFiles(listed)
+        setTotalMatches(typeof total === "number" ? total : listed.length)
+        setScanLimited((data as { scanLimited?: unknown }).scanLimited === true)
       } catch (error) {
         if (!controller.signal.aborted) {
           setFiles([])
@@ -176,7 +226,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [cwd, query])
+  }, [cwd, query, reloadToken])
 
   useEffect(() => {
     setSelectedPath(null)
@@ -185,6 +235,9 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     setMtimeMs(null)
     setFileError(null)
     setSelectedExcerpt(null)
+    setViewMode("edit")
+    setDiff(null)
+    setDiffError(null)
   }, [cwd])
 
   useEffect(() => {
@@ -195,7 +248,6 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   }, [dirty])
 
   const loadFile = useCallback(async (path: string) => {
-    setSelectedPath(path)
     setFileLoading(true)
     setFileError(null)
     setSavedNotice(false)
@@ -221,11 +273,77 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     }
   }, [cwd])
 
+  const loadDiff = useCallback(async (path: string, originalPath?: string) => {
+    setDiffLoading(true)
+    setDiffError(null)
+    setDiff(null)
+    try {
+      const renamedFrom = originalPath ? `&originalPath=${encodeURIComponent(originalPath)}` : ""
+      const response = await authFetch(
+        `/api/git-diff?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(path)}${renamedFrom}`,
+      )
+      if (!response.ok) throw new Error(await responseError(response, "Unable to diff file"))
+      setDiff(await response.json() as GitFileDiff)
+    } catch (error) {
+      setDiffError(error instanceof Error ? error.message : "Unable to diff file")
+    } finally {
+      setDiffLoading(false)
+    }
+  }, [cwd])
+
+  const openFile = useCallback((path: string, mode: "edit" | "diff") => {
+    setSelectedPath(path)
+    setViewMode(mode)
+    if (mode === "edit") {
+      void loadFile(path)
+      return
+    }
+    // The editor is loaded lazily on the first switch to edit, so clear whatever
+    // the previously opened file left behind.
+    setContent("")
+    setSavedContent("")
+    setMtimeMs(null)
+    setFileError(null)
+    setSavedNotice(false)
+    setSelectedExcerpt(null)
+    void loadDiff(path, changedFiles.get(path)?.originalPath)
+  }, [changedFiles, loadDiff, loadFile])
+
   const selectFile = useCallback((path: string) => {
     if (path === selectedPath) return
     if (dirty && !window.confirm("Discard unsaved changes and open another file?")) return
-    void loadFile(path)
-  }, [dirty, loadFile, selectedPath])
+    openFile(path, fileScope === "changes" && changedFiles.has(path) ? "diff" : "edit")
+  }, [changedFiles, dirty, fileScope, openFile, selectedPath])
+
+  const showDiff = useCallback(() => {
+    if (!selectedPath || viewMode === "diff") return
+    setViewMode("diff")
+    if (diff?.path !== selectedPath && !diffLoading) {
+      void loadDiff(selectedPath, changedFiles.get(selectedPath)?.originalPath)
+    }
+  }, [changedFiles, diff?.path, diffLoading, loadDiff, selectedPath, viewMode])
+
+  const showEditor = useCallback(() => {
+    if (!selectedPath || viewMode === "edit") return
+    setViewMode("edit")
+    if (mtimeMs === null && !fileLoading) void loadFile(selectedPath)
+  }, [fileLoading, loadFile, mtimeMs, selectedPath, viewMode])
+
+  const reloadSelected = useCallback(() => {
+    if (!selectedPath) return
+    if (viewMode === "diff") {
+      void loadDiff(selectedPath, changedFiles.get(selectedPath)?.originalPath)
+      return
+    }
+    void loadFile(selectedPath)
+  }, [changedFiles, loadDiff, loadFile, selectedPath, viewMode])
+
+  const refreshAll = useCallback(() => {
+    skipListCacheRef.current = true
+    setReloadToken((token) => token + 1)
+    void loadGitStatus()
+    if (viewMode === "diff") reloadSelected()
+  }, [loadGitStatus, reloadSelected, viewMode])
 
   const saveFile = useCallback(async () => {
     if (!selectedPath || mtimeMs === null || !dirty || saving) return
@@ -244,6 +362,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       setMtimeMs(data.mtimeMs)
       setSize(data.size)
       setSavedNotice(true)
+      setDiff(null)
       void loadGitStatus()
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "Unable to save file")
@@ -324,12 +443,11 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   }, [])
 
   const selectedName = useMemo(() => selectedPath?.split("/").at(-1) ?? null, [selectedPath])
-  const changedFiles = useMemo(() => new Map(
-    (gitStatus?.files ?? []).flatMap((file) => [
-      [file.path, file] as const,
-      ...(file.originalPath ? [[file.originalPath, file] as const] : []),
-    ]),
-  ), [gitStatus?.files])
+  const selectedGitFile = selectedPath ? changedFiles.get(selectedPath) : undefined
+  const diffCounts = useMemo(
+    () => (diff && !diff.binary && !diff.tooLarge ? diffLineCount(diff.original ?? "", diff.current ?? "") : null),
+    [diff],
+  )
   const displayedFiles = useMemo(() => {
     if (fileScope === "all") return files
     const normalizedQuery = query.trim().toLowerCase()
@@ -341,6 +459,9 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   }, [fileScope, files, gitStatus?.files, query])
   const listLoading = fileScope === "changes" ? gitLoading : filesLoading
   const listError = fileScope === "changes" ? gitError : filesError
+  // Git status is only fetched on mount, refresh, and save — never while typing —
+  // so it tracks an in-flight refresh without flickering on every keystroke.
+  const refreshing = gitLoading
 
   return (
     <aside
@@ -383,16 +504,6 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
             {(gitStatus.behind ?? 0) > 0 && <Badge variant="outline">↓ {gitStatus.behind}</Badge>}
             <span className="flex-1" />
             <span>{gitStatus.files.length} changed</span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={gitLoading}
-              onClick={() => void loadGitStatus()}
-              aria-label="Refresh git status"
-              title="Refresh git status"
-            >
-              <RefreshCw data-icon="inline-start" className={gitLoading ? "animate-spin" : undefined} />
-            </Button>
           </div>
           <Separator />
         </>
@@ -401,14 +512,27 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       <div className="flex min-h-0 flex-1">
         <section aria-label="File browser" className="flex w-56 shrink-0 flex-col">
           <div className="flex flex-col gap-2 p-2">
-            <Input
-              ref={searchRef}
-              aria-label="Search project files"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Filter files…"
-              spellCheck={false}
-            />
+            <div className="flex items-center gap-1">
+              <Input
+                ref={searchRef}
+                aria-label="Search project files"
+                className="min-w-0 flex-1"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Filter files…"
+                spellCheck={false}
+              />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={refreshing}
+                onClick={refreshAll}
+                aria-label="Refresh files and git status"
+                title="Refresh files and git status"
+              >
+                <RefreshCw data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />
+              </Button>
+            </div>
             {gitStatus?.isRepository && (
               <ToggleGroup
                 aria-label="File scope"
@@ -459,6 +583,8 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                   const directory = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
                   const gitFile = changedFiles.get(path)
                   const status = gitFile ? `${gitFile.indexStatus}${gitFile.workTreeStatus}`.trim() || "?" : null
+                  const statusStyle = gitFile ? gitStatusStyle(gitFile) : null
+                  const FileIcon = fileTypeIcon(path)
                   return (
                     <Button
                       key={path}
@@ -468,18 +594,24 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                       onClick={() => selectFile(path)}
                       title={path}
                     >
-                      <FileCode2 data-icon="inline-start" />
+                      <FileIcon data-icon="inline-start" className={fileTypeColor(path)} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs">{name}</span>
                         {directory && <span className="block truncate font-mono text-[9px] text-muted-foreground">{directory}</span>}
                       </span>
-                      {status && <Badge variant="outline" className="font-mono">{status}</Badge>}
+                      {status && statusStyle && (
+                        <Badge variant="outline" className={cn("font-mono", statusStyle.className)} title={statusStyle.label}>
+                          {status}
+                        </Badge>
+                      )}
                     </Button>
                   )
                 })}
-                {fileScope === "all" && truncated && (
+                {fileScope === "all" && (totalMatches > displayedFiles.length || scanLimited) && (
                   <p className="px-3 py-2 text-[10px] text-muted-foreground">
-                    Showing the first 100 results. Type to narrow the list.
+                    {totalMatches > displayedFiles.length
+                      && `Showing ${displayedFiles.length} of ${totalMatches} matches. Type to narrow the list. `}
+                    {scanLimited && "This project is too large to scan completely."}
                   </p>
                 )}
               </div>
@@ -497,14 +629,38 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                   <p className="truncate text-xs font-medium" title={selectedPath}>{selectedName}</p>
                   <p className="truncate font-mono text-[9px] text-muted-foreground">{selectedPath}</p>
                 </div>
-                {dirty && <Badge variant="outline">Unsaved</Badge>}
-                {!dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
-                {mtimeMs !== null && <span className="text-[10px] text-muted-foreground">{displayBytes(size)}</span>}
+                {selectedGitFile && (
+                  <ToggleGroup
+                    aria-label="File view"
+                    value={[viewMode]}
+                    onValueChange={(values) => {
+                      if (values[0] === "diff") showDiff()
+                      else if (values[0] === "edit") showEditor()
+                    }}
+                    variant="outline"
+                    size="sm"
+                    spacing={0}
+                  >
+                    <ToggleGroupItem value="diff">Diff</ToggleGroupItem>
+                    <ToggleGroupItem value="edit">Edit</ToggleGroupItem>
+                  </ToggleGroup>
+                )}
+                {viewMode === "diff" && selectedGitFile && (
+                  <Badge variant="outline" className={gitStatusStyle(selectedGitFile).className}>
+                    {gitStatusStyle(selectedGitFile).label}
+                  </Badge>
+                )}
+                {viewMode === "diff" && diffCounts && <LineCounts add={diffCounts.add} del={diffCounts.del} />}
+                {viewMode === "edit" && dirty && <Badge variant="outline">Unsaved</Badge>}
+                {viewMode === "edit" && !dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
+                {viewMode === "edit" && mtimeMs !== null && (
+                  <span className="text-[10px] text-muted-foreground">{displayBytes(size)}</span>
+                )}
                 {onAddToPrompt && (
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={fileLoading || mtimeMs === null}
+                    disabled={viewMode === "diff" ? diffLoading || diff === null : fileLoading || mtimeMs === null}
                     onClick={() => {
                       if (selectedExcerpt) {
                         setReviewComment("")
@@ -523,51 +679,99 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  disabled={fileLoading || saving}
-                  onClick={() => void loadFile(selectedPath)}
-                  aria-label="Reload file"
-                  title="Reload file"
+                  disabled={viewMode === "diff" ? diffLoading : fileLoading || saving}
+                  onClick={reloadSelected}
+                  aria-label={viewMode === "diff" ? "Reload diff" : "Reload file"}
+                  title={viewMode === "diff" ? "Reload diff" : "Reload file"}
                 >
                   <RefreshCw data-icon="inline-start" />
                 </Button>
-                <Button size="sm" disabled={!dirty || fileLoading || saving || mtimeMs === null} onClick={() => void saveFile()}>
-                  {saving ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" />}
-                  {saving ? "Saving…" : "Save"}
-                </Button>
+                {viewMode === "edit" && (
+                  <Button size="sm" disabled={!dirty || fileLoading || saving || mtimeMs === null} onClick={() => void saveFile()}>
+                    {saving ? <Spinner data-icon="inline-start" /> : <Save data-icon="inline-start" />}
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
+                )}
               </div>
               <Separator />
-              {fileError && (
+              {viewMode === "edit" && fileError && (
                 <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
                   <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
                   <span>{fileError}</span>
                 </div>
               )}
-              <div className="min-h-0 flex-1">
+              {viewMode === "diff" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  {diffLoading ? (
+                    <div className="flex size-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
+                      <Spinner />
+                      Loading diff…
+                    </div>
+                  ) : diffError ? (
+                    <Empty className="rounded-none">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon"><AlertTriangle /></EmptyMedia>
+                        <EmptyTitle>Could not diff this file</EmptyTitle>
+                        <EmptyDescription>{diffError}</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : diff === null ? null : diff.binary || diff.tooLarge ? (
+                    <Empty className="rounded-none">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon"><FileCode2 /></EmptyMedia>
+                        <EmptyTitle>{diff.binary ? "Binary file" : "File is too large to diff"}</EmptyTitle>
+                        <EmptyDescription>
+                          {diff.binary
+                            ? "Git tracks this change, but there is no text diff to show."
+                            : "Review this change in your editor instead."}
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : diff.original === diff.current ? (
+                    <Empty className="rounded-none">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon"><FileCode2 /></EmptyMedia>
+                        <EmptyTitle>No content changes</EmptyTitle>
+                        <EmptyDescription>This file matches the last commit — only its mode or index entry differs.</EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : (
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      <EditDiffView
+                        oldString={diff.original ?? ""}
+                        newString={diff.current ?? ""}
+                        filePath={selectedPath}
+                        compact={false}
+                        hideHeader
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
                 {fileLoading ? (
                   <div className="flex size-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status">
                     <Spinner />
                     Opening file…
                   </div>
                 ) : mtimeMs !== null ? (
-                  <Textarea
-                    ref={editorRef}
-                    aria-label={`Editing ${selectedPath}`}
+                  <HighlightedEditor
+                    textareaRef={editorRef}
+                    ariaLabel={`Editing ${selectedPath}`}
+                    filePath={selectedPath}
                     value={content}
-                    onChange={(event) => {
-                      setContent(event.target.value)
+                    readOnly={false}
+                    onChange={(next) => {
+                      setContent(next)
                       setSavedNotice(false)
                       setSelectedExcerpt(null)
                     }}
                     onKeyDown={handleEditorKeyDown}
                     onSelect={captureEditorSelection}
-                    spellCheck={false}
-                    className={cn(
-                      "size-full min-h-0 resize-none rounded-none border-0 font-mono text-xs leading-relaxed",
-                      "focus-visible:border-transparent focus-visible:ring-0",
-                    )}
                   />
                 ) : null}
               </div>
+              )}
             </>
           ) : (
             <Empty className="rounded-none">

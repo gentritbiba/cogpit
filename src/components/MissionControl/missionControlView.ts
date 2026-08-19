@@ -189,11 +189,12 @@ export function countMissionCards(cards: MissionCard[]): MissionCounts {
 }
 
 /**
- * Context bar colour, matching the badge thresholds used elsewhere: green until
- * 70% consumed, amber past that, red once nearly full.
+ * Colour for the footer's context percent, matching the badge thresholds used
+ * elsewhere: unremarkable until 70% consumed, amber past that, red once
+ * nearly full.
  */
-export function contextBarColor(percent: number): string {
-  if (percent >= 90) return "bg-red-500"
-  if (percent >= 70) return "bg-amber-500"
-  return "bg-green-500"
+export function contextPercentColor(percent: number): string {
+  if (percent >= 90) return "text-red-400"
+  if (percent >= 70) return "text-amber-400"
+  return "text-muted-foreground/70"
 }

@@ -9,7 +9,7 @@ import {
   buildMissionCards,
   countMissionCards,
   filterMissionCards,
-  contextBarColor,
+  contextPercentColor,
   isFinished,
   needsYou,
 } from "../missionControlView"
@@ -310,10 +310,10 @@ describe("state predicates", () => {
   })
 })
 
-describe("contextBarColor", () => {
-  it("escalates context bar colour with pressure", () => {
-    expect(contextBarColor(31)).toBe("bg-green-500")
-    expect(contextBarColor(71)).toBe("bg-amber-500")
-    expect(contextBarColor(95)).toBe("bg-red-500")
+describe("contextPercentColor", () => {
+  it("stays muted until context pressure warrants attention", () => {
+    expect(contextPercentColor(31)).toBe("text-muted-foreground/70")
+    expect(contextPercentColor(71)).toBe("text-amber-400")
+    expect(contextPercentColor(95)).toBe("text-red-400")
   })
 })

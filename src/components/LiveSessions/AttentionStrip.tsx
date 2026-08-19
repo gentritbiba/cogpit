@@ -40,6 +40,15 @@ const REASON_CHIP: Record<AttentionItem["reason"], { label: string; className: s
   done: { label: "Done", className: "bg-green-500/10 text-green-400" },
 }
 
+/** Row dot per reason. Anything blocked on a human shares the attention dot. */
+const REASON_DOT: Record<AttentionItem["reason"], string> = {
+  permission: STATUS_DOT.attention,
+  deferred: STATUS_DOT.attention,
+  waiting: STATUS_DOT.attention,
+  question: "bg-pink-400",
+  done: "bg-green-400",
+}
+
 interface StripRowProps {
   session: ActiveSessionInfo
   chip: { label: string; className: string }
@@ -215,7 +224,7 @@ export function AttentionStrip({
       {groups.needsYou.length > 0 && (
         <div className="flex flex-col gap-1">
           <SectionHeader
-            dotClassName="bg-amber-400"
+            dotClassName={STATUS_DOT.attention}
             labelClassName="text-amber-400/90"
             label="NEEDS YOU"
             count={groups.needsYou.length}
@@ -225,11 +234,7 @@ export function AttentionStrip({
               key={`${s.dirName}/${s.fileName}`}
               {...rowShared(s)}
               chip={REASON_CHIP[reason]}
-              dotClassName={
-                reason === "done"
-                  ? "bg-green-400"
-                  : reason === "question" ? "bg-pink-400" : "bg-amber-400"
-              }
+              dotClassName={REASON_DOT[reason]}
               cardClassName="border-amber-500/20 bg-amber-500/[0.04] hover:bg-amber-500/[0.08]"
               onKill={onKill}
               onResume={

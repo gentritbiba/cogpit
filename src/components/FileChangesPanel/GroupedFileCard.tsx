@@ -5,29 +5,13 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { EditDiffView } from "../timeline/EditDiffView"
 import { cn } from "@/lib/utils"
+import { fileExtension, fileTypeColor } from "@/lib/fileTypeColors"
 import { ChangeBar } from "@/components/shared/ChangeCounts"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
 
 export type DiffMode = "net" | "per-edit"
-
-const EXT_COLORS: Record<string, string> = {
-  tsx: "text-blue-400",
-  jsx: "text-blue-400",
-  ts: "text-yellow-400",
-  js: "text-yellow-400",
-  css: "text-purple-400",
-  scss: "text-purple-400",
-  json: "text-amber-400",
-  yaml: "text-amber-400",
-  md: "text-blue-300",
-  py: "text-green-400",
-  rs: "text-orange-500",
-  go: "text-cyan-400",
-  html: "text-orange-400",
-}
-
 
 interface GroupedFileCardProps {
   file: GroupedFile
@@ -67,8 +51,8 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
 
   const effectiveDiffMode = diffMode
 
-  const ext = file.filePath.split(".").pop()?.toLowerCase() ?? ""
-  const extColor = EXT_COLORS[ext] ?? "text-muted-foreground"
+  const ext = fileExtension(file.filePath)
+  const extColor = fileTypeColor(file.filePath)
 
   const oldString = file.netOriginal
   const newString = file.netCurrent

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { useWorkflowLive } from "./useWorkflowLive"
 import type { WorkflowSummary } from "@/lib/workflow-types"
@@ -14,20 +14,23 @@ export interface SessionWorkflows {
  * Loads the list of workflows for a session and keeps it live via SSE.
  * Returns an empty list (no error) when the session has never run a workflow.
  *
- * `enabled` gates all I/O: pass false for sessions that never used the
- * Workflow tool so we don't open an fs.watch on every opened session.
+ * The list is discovered once whenever a top-level session opens. `liveHint`
+ * starts the watcher immediately when the transcript contains a Workflow call;
+ * older runs also start watching after discovery.
  */
 export function useSessionWorkflows(
   dirName: string | null,
   sessionId: string | null,
-  enabled: boolean = true,
+  liveHint: boolean = true,
 ): SessionWorkflows {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(false)
+  const requestIdRef = useRef(0)
 
-  const active = enabled && !!dirName && !!sessionId
+  const active = !!dirName && !!sessionId
 
   const fetchList = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     if (!active) {
       setWorkflows([])
       return
@@ -37,15 +40,17 @@ export function useSessionWorkflows(
         `/api/workflows/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`,
       )
       if (!res.ok) {
-        setWorkflows([])
+        if (requestId === requestIdRef.current) setWorkflows([])
         return
       }
       const data: WorkflowSummary[] = await res.json()
-      setWorkflows(Array.isArray(data) ? data : [])
+      if (requestId === requestIdRef.current) {
+        setWorkflows(Array.isArray(data) ? data : [])
+      }
     } catch {
-      setWorkflows([])
+      if (requestId === requestIdRef.current) setWorkflows([])
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [active, dirName, sessionId])
 
@@ -59,9 +64,10 @@ export function useSessionWorkflows(
     fetchList()
   }, [active, fetchList])
 
+  const watch = active && (liveHint || workflows.length > 0)
   const { isLive } = useWorkflowLive(
-    active ? dirName : null,
-    active ? sessionId : null,
+    watch ? dirName : null,
+    watch ? sessionId : null,
     null,
     fetchList,
   )

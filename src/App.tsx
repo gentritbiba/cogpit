@@ -249,6 +249,7 @@ export default function App() {
     workflowSource.sessionId,
     hasWorkflowToolCalls,
   )
+  const hasWorkflows = hasWorkflowToolCalls || sessionWorkflows.workflows.length > 0
   const workflowBadgeCount = sessionWorkflows.workflows.length || workflowToolCallCount
   const setShowWorkflows = panels.setShowWorkflows
   const handleShowWorkflows = useCallback(() => setShowWorkflows(true), [setShowWorkflows])
@@ -393,10 +394,10 @@ export default function App() {
 
   // Close the workflows panel when navigating to a session without workflows.
   useEffect(() => {
-    if (showWorkflows && !hasWorkflowToolCalls) {
+    if (showWorkflows && !hasWorkflows) {
       setShowWorkflows(false)
     }
-  }, [showWorkflows, hasWorkflowToolCalls, setShowWorkflows])
+  }, [showWorkflows, hasWorkflows, setShowWorkflows])
 
   // New-session launch is lazy: the backend is not called until first submit.
   const {
@@ -987,9 +988,10 @@ export default function App() {
 
   // Workflow visualization panel — mounted only for sessions that ran a
   // workflow, so its chunk loads lazily and the Sheet can animate open/close.
-  const workflowsPanelNode = hasWorkflowToolCalls && (
+  const workflowsPanelNode = hasWorkflows && (
     <Suspense fallback={null}>
       <WorkflowsPanel
+        key={`${workflowSource.dirName ?? ""}:${workflowSource.sessionId ?? ""}`}
         open={panels.showWorkflows}
         onOpenChange={panels.setShowWorkflows}
         dirName={workflowSource.dirName}

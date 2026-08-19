@@ -9,7 +9,7 @@ import { BADGE_COLORS } from "./config-types"
 import { ScopeBadge } from "./ScopeBadge"
 import { CliBadge } from "./CliBadge"
 import { LinkIndicator } from "./LinkIndicator"
-import { HighlightedEditor } from "./HighlightedEditor"
+import { HighlightedEditor } from "@/components/shared/HighlightedEditor"
 
 interface ConfigEditorProps {
   file: ConfigItem
