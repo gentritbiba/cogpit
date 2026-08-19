@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, memo } from "react"
+import { planWorkLogTail, workLogTailLabel } from "@/lib/workLogTail"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import { ToolCallCard, getToolTextStyle } from "./ToolCallCard"
 import { ThinkingBlock } from "./ThinkingBlock"
@@ -62,6 +63,9 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   const hasInProgressCall = isAgentActive && toolCalls.some((tc) => tc.result === null)
   const hasUserQuestion = toolCalls.some((tc) => tc.name === "AskUserQuestion")
   const isOpen = expandAll || hasUserQuestion || (openOverride ?? hasInProgressCall)
+  // A group that opened itself so the user can watch shows only the newest
+  // entry; asking for it explicitly always shows the whole group.
+  const tailOnly = openOverride === null && hasInProgressCall && !expandAll && !hasUserQuestion
 
   const lastScrolledToolCallRef = useRef<string | null>(null)
   const scrollRafRef = useRef<number | null>(null)
@@ -154,21 +158,41 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
           </button>
         )}
         {activityItems ? (
-          activityItems.map((item, idx) => {
-            if (item.kind === "thinking") {
-              return (
-                <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll={false} />
-              )
-            }
-            const isLastGroup = idx === activityItems.length - 1
-            return item.toolCalls.map((tc, ti) =>
-              renderToolCallCard(tc, isLastGroup && ti === item.toolCalls.length - 1)
+          (() => {
+            const tail = planWorkLogTail(activityItems, tailOnly)
+            return (
+              <>
+                {tail.hidden > 0 && (
+                  <EarlierSteps count={tail.hidden} onReveal={() => setOpenOverride(true)} />
+                )}
+                {tail.visible.map((item, idx) => {
+                  if (item.kind === "thinking") {
+                    return (
+                      <ThinkingBlock key={`thinking-${idx}`} blocks={item.blocks} expandAll={false} />
+                    )
+                  }
+                  const isLastGroup = idx === tail.visible.length - 1
+                  return item.toolCalls.map((tc, ti) =>
+                    renderToolCallCard(tc, isLastGroup && ti === item.toolCalls.length - 1)
+                  )
+                })}
+              </>
             )
-          })
+          })()
         ) : (
-          toolCalls.map((tc, i) =>
-            renderToolCallCard(tc, i === toolCalls.length - 1)
-          )
+          (() => {
+            const tail = planWorkLogTail(toolCalls, tailOnly)
+            return (
+              <>
+                {tail.hidden > 0 && (
+                  <EarlierSteps count={tail.hidden} onReveal={() => setOpenOverride(true)} />
+                )}
+                {tail.visible.map((tc, i) =>
+                  renderToolCallCard(tc, i === tail.visible.length - 1)
+                )}
+              </>
+            )
+          })()
         )}
       </div>
     )
@@ -200,3 +224,17 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
     </button>
   )
 })
+
+/** Reveals the older head of a working group that is currently tailing. */
+function EarlierSteps({ count, onReveal }: { count: number; onReveal: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onReveal}
+      className="flex items-center gap-1.5 py-0.5 text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+    >
+      <ChevronDown className="size-3" />
+      {workLogTailLabel(count)}
+    </button>
+  )
+}

@@ -16,6 +16,7 @@ import { registerFileWatchRoutes } from "./routes/files-watch"
 import { registerFileRoutes } from "./routes/files"
 import { registerGitDiffRoutes } from "./routes/git-diff"
 import { registerGitStatusRoutes } from "./routes/git-status"
+import { registerProjectIconRoutes } from "./routes/project-icon"
 import { registerHelloRoutes, type HubMode } from "./routes/hello"
 import { registerLocalFileRoutes } from "./routes/local-file"
 import { registerMcpRoutes } from "./routes/mcp"
@@ -104,6 +105,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("project-files", registerProjectFileRoutes),
   apiRoute("project-file", registerProjectFileContentRoutes),
   apiRoute("git-status", registerGitStatusRoutes),
+  apiRoute("project-icon", registerProjectIconRoutes),
   apiRoute("git-diff", registerGitDiffRoutes),
   apiRoute("mcp", registerMcpRoutes),
   apiRoute("notifications", registerNotificationRoutes),

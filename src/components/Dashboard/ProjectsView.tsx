@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ProjectFavicon } from "@/components/ProjectFavicon"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, shortPath, projectName } from "@/lib/format"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -245,7 +246,13 @@ export function ProjectsView({
                       )}
                     >
                       <div className="flex items-center gap-2.5 mb-2">
-                        <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
+                        <ProjectFavicon
+                          projectPath={project.path}
+                          className="size-4"
+                          fallback={
+                            <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
+                          }
+                        />
                         <span className="text-sm font-medium text-foreground truncate flex-1">
                           {custom || projectName(project.path)}
                         </span>
