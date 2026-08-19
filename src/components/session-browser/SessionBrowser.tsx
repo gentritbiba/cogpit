@@ -182,8 +182,7 @@ export const SessionBrowser = memo(function SessionBrowser({
         )}
       </div>
 
-      {/* Scripts dock — always visible at bottom */}
-      {!isMobile && (
+      {!isMobile && projectDir != null && (
         <ScriptsDock
           projectDir={projectDir}
           onScriptStarted={onScriptStarted}
