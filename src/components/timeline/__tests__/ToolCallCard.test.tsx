@@ -338,6 +338,14 @@ describe("ToolCallCard hook badge rendering", () => {
 })
 
 describe("ToolCallCard Bash input rendering", () => {
+  it("keeps payloads closed when only containing groups are expanded", () => {
+    const toolCall = makeToolCall("Bash", { command: "bun test" })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+
+    expect(screen.queryByLabelText("Bash command")).toBeNull()
+  })
+
   it("renders Bash input as a readable command card", () => {
     const toolCall = makeToolCall("Bash", {
       command: "cd /workspace && npm test",
@@ -345,7 +353,7 @@ describe("ToolCallCard Bash input rendering", () => {
       timeout: 600_000,
     })
 
-    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
     expect(screen.getByLabelText("Bash command").textContent).toContain("cd /workspace && npm test")
     expect(screen.getByText("Run the focused test suite")).toBeTruthy()
@@ -361,7 +369,7 @@ describe("ToolCallCard Bash input rendering", () => {
       sandbox: "strict",
     })
 
-    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
     expect(screen.getByLabelText("Bash command").textContent).toContain("npm run build")
     expect(screen.getByText("Background")).toBeTruthy()
@@ -393,7 +401,7 @@ describe("ToolCallCard Codex exec input rendering", () => {
 text(r.output);`
     const toolCall = makeToolCall("exec", { raw: script })
 
-    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
     const renderedScript = screen.getByLabelText("Codex exec script")
     expect(renderedScript.textContent).toContain("tools.exec_command")
@@ -411,7 +419,7 @@ text(r.output);`
       raw: 'const r = await tools.view_image({ path: "/tmp/screenshot.png" });\nimage(r.image_url);',
     })
 
-    render(<ToolCallCard toolCall={toolCall} expandAll={true} />)
+    render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
     expect(screen.getByLabelText("Codex exec script").textContent).toContain("tools.view_image")
     expect(screen.getAllByText("View image")).toHaveLength(2)
@@ -587,6 +595,34 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
 })
 
 describe("ToolCallCard AskUserQuestion history", () => {
+  it("opens raw question details only at the payload expansion level", () => {
+    const toolCall: ToolCall = {
+      id: "expanded-question-id",
+      name: "AskUserQuestion",
+      input: { questions: [{ question: "Ship it?", options: [{ label: "Yes" }] }] },
+      result: 'Your questions have been answered: "Ship it?"="Yes".',
+      isError: false,
+      timestamp: new Date().toISOString(),
+    }
+
+    const { rerender } = render(
+      <ToolCallCard toolCall={toolCall} expandAll={true} isAgentActive={false} />,
+    )
+    expect(screen.queryByText("Input")).toBeNull()
+    expect(screen.queryByText("Result")).toBeNull()
+
+    rerender(
+      <ToolCallCard
+        toolCall={toolCall}
+        expandAll={true}
+        expandToolPayloads
+        isAgentActive={false}
+      />,
+    )
+    expect(screen.getByText("Input")).toBeInTheDocument()
+    expect(screen.getByText("Result")).toBeInTheDocument()
+  })
+
   it("renders the question, option descriptions, and selected answer as readable history", () => {
     const question = "Which fixes should I implement?"
     const result = `Your questions have been answered: "${question}"="Both (Recommended)". You can now continue with these answers in mind.`
@@ -666,6 +702,7 @@ describe("ToolCallCard AskUserQuestion history", () => {
       <CollapsibleToolCalls
         toolCalls={[readCall, questionCall]}
         expandAll={false}
+        expandToolPayloads={false}
         activeToolCallId={null}
       />,
     )
@@ -698,6 +735,7 @@ describe("CollapsibleToolCalls", () => {
       <CollapsibleToolCalls
         toolCalls={[completedCall, inProgressCall]}
         expandAll={false}
+        expandToolPayloads={false}
         activeToolCallId={null}
         isAgentActive
       />,
@@ -722,7 +760,7 @@ describe("CollapsibleToolCalls", () => {
     ]
 
     render(
-      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} activeToolCallId={null} />,
+      <CollapsibleToolCalls toolCalls={toolCalls} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
     const button = screen.getByRole("button")
@@ -744,7 +782,7 @@ describe("CollapsibleToolCalls", () => {
     ]
 
     render(
-      <CollapsibleToolCalls toolCalls={failed} expandAll={false} activeToolCallId={null} />,
+      <CollapsibleToolCalls toolCalls={failed} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
     const bash = screen.getByText("Bash")
@@ -759,7 +797,7 @@ describe("CollapsibleToolCalls", () => {
     ]
 
     render(
-      <CollapsibleToolCalls toolCalls={ok} expandAll={false} activeToolCallId={null} />,
+      <CollapsibleToolCalls toolCalls={ok} expandAll={false} expandToolPayloads={false} activeToolCallId={null} />,
     )
 
     expect(screen.getByText("Bash").className).not.toContain(getToolTextStyle("Bash", true))
@@ -827,5 +865,14 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
     expect(screen.getByText("Continue")).toBeTruthy()
     expect(screen.getByText("Pause")).toBeTruthy()
     expect(screen.getByText("Send answer")).toBeTruthy()
+  })
+
+  it("preserves mobile bulk expansion of raw details", () => {
+    const toolCall = makeAskUserQuestionCall("User chose Continue")
+
+    render(<ToolCallCard toolCall={toolCall} expandAll isAgentActive={false} />)
+
+    expect(screen.getByText("Input")).toBeTruthy()
+    expect(screen.getByText("Result")).toBeTruthy()
   })
 })

@@ -32,6 +32,9 @@ describe("keybindings", () => {
     expect(matchesKeybinding("projectFiles", event("f", { metaKey: true, shiftKey: true }))).toBe(true)
     expect(matchesKeybinding("projectFileSave", event("s", { ctrlKey: true }))).toBe(true)
     expect(matchesKeybinding("previewZoomIn", event("=", { metaKey: true }))).toBe(true)
+    expect(matchesKeybinding("expandAll", event("e", { metaKey: true }))).toBe(true)
+    expect(matchesKeybinding("expandAll", event("e", { metaKey: true, shiftKey: true }))).toBe(false)
+    expect(matchesKeybinding("expandToolPayloads", event("e", { metaKey: true, shiftKey: true }))).toBe(true)
   })
 
   it("persists and matches a custom shortcut", () => {

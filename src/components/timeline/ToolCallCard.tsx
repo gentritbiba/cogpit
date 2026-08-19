@@ -141,6 +141,7 @@ function StatusIcon({
 interface ToolCallCardProps {
   toolCall: ToolCall
   expandAll: boolean
+  expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
 }
@@ -157,7 +158,13 @@ const MOBILE_TOOL_LABELS: Record<string, string> = {
   ToolSearch: "Tool search",
 }
 
-export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
+export const ToolCallCard = memo(function ToolCallCard({
+  toolCall,
+  expandAll,
+  expandToolPayloads = false,
+  isAgentActive,
+  skillMetadata,
+}: ToolCallCardProps) {
   const { session, pendingInteraction } = useSessionContext()
   const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
@@ -188,9 +195,10 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     : undefined
   const timeIso = toolCall.timestamp ? new Date(toolCall.timestamp).toISOString() : undefined
 
-  const showInput = expandAll || inputOpen
-  const showResult = expandAll || resultOpen
-  const showDiff = expandAll || diffOpen
+  const payloadsExpanded = expandToolPayloads || (isMobile && expandAll)
+  const showInput = payloadsExpanded || inputOpen
+  const showResult = payloadsExpanded || resultOpen
+  const showDiff = payloadsExpanded || diffOpen
 
   const summary = presentation.summary
   const skillMeta = toolCall.name === "Skill" && skillMetadata
@@ -223,7 +231,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     return (
       <AskUserQuestionCard
         toolCall={toolCall}
-        expandAll={expandAll}
+        expandToolPayloads={payloadsExpanded}
         isAwaitingAnswer={
           pendingInteraction?.type === "question" &&
           pendingInteraction.toolUseId === toolCall.id

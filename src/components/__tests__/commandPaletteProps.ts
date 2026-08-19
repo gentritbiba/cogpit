@@ -24,6 +24,7 @@ export function createCommandPaletteProps() {
     onOpenTerminal: vi.fn(),
     onFocusComposer: vi.fn(),
     onExpandAll: vi.fn(),
+    onExpandToolPayloads: vi.fn(),
     onCollapseAll: vi.fn(),
     canFocusComposer: true,
     canOpenTerminal: true,

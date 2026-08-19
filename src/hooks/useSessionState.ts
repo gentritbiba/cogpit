@@ -24,6 +24,7 @@ export interface SessionState {
   activeToolCallId: string | null
   searchQuery: string
   expandAll: boolean
+  expandToolPayloads: boolean
   sessionChangeKey: number
   currentMemberName: string | null
   loadingMember: string | null
@@ -45,6 +46,7 @@ export type SessionAction =
   | { type: "JUMP_TO_TURN"; index: number; toolCallId?: string }
   | { type: "SET_SEARCH_QUERY"; value: string }
   | { type: "SET_EXPAND_ALL"; value: boolean }
+  | { type: "SET_EXPAND_TOOL_PAYLOADS"; value: boolean }
   | { type: "TOGGLE_EXPAND_ALL" }
   | { type: "SET_MOBILE_TAB"; tab: MobileTab }
   | { type: "UPDATE_SESSION"; session: ParsedSession }
@@ -62,6 +64,11 @@ export type SessionAction =
   | { type: "OPEN_MISSION" }
   | { type: "CLOSE_MISSION" }
 
+const COLLAPSED_EXPANSION = {
+  expandAll: false,
+  expandToolPayloads: false,
+} as const
+
 const initialState: SessionState = {
   session: null,
   windowTurns: [],
@@ -72,7 +79,7 @@ const initialState: SessionState = {
   activeTurnIndex: null,
   activeToolCallId: null,
   searchQuery: "",
-  expandAll: false,
+  ...COLLAPSED_EXPANSION,
   sessionChangeKey: 0,
   currentMemberName: null,
   loadingMember: null,
@@ -119,7 +126,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
 
         mainView: "sessions",
         selectedTeam: null,
@@ -139,7 +146,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
 
         mainView: "sessions",
         selectedTeam: null,
@@ -155,7 +162,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         sessionSource: action.source,
         activeTurnIndex: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
         mainView: "sessions",
         selectedTeam: null,
         currentMemberName: action.memberName ?? state.currentMemberName,
@@ -170,7 +177,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         sessionSource: action.source,
         activeTurnIndex: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
         currentMemberName: action.memberName,
         sessionChangeKey: state.sessionChangeKey + 1,
       }
@@ -203,11 +210,25 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
       return { ...state, searchQuery: action.value }
 
     case "SET_EXPAND_ALL":
-      if (state.expandAll === action.value) return state
-      return { ...state, expandAll: action.value }
+      if (action.value) {
+        if (state.expandAll && !state.expandToolPayloads) return state
+        return { ...state, expandAll: true, expandToolPayloads: false }
+      }
+      if (!state.expandAll && !state.expandToolPayloads) return state
+      return { ...state, ...COLLAPSED_EXPANSION }
+
+    case "SET_EXPAND_TOOL_PAYLOADS":
+      if (action.value) {
+        if (state.expandAll && state.expandToolPayloads) return state
+        return { ...state, expandAll: true, expandToolPayloads: true }
+      }
+      if (!state.expandToolPayloads) return state
+      return { ...state, expandToolPayloads: false }
 
     case "TOGGLE_EXPAND_ALL":
-      return { ...state, expandAll: !state.expandAll }
+      return state.expandAll
+        ? { ...state, ...COLLAPSED_EXPANSION }
+        : { ...state, expandAll: true }
 
     case "SET_MOBILE_TAB": {
       const newSidebarTab = action.tab === "teams" && !state.selectedTeam ? "teams" : state.sidebarTab
@@ -286,7 +307,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
         mainView: "sessions",
         selectedTeam: null,
         currentMemberName: null,
@@ -305,7 +326,7 @@ function sessionReducer(state: SessionState, action: SessionAction): SessionStat
         activeTurnIndex: null,
         activeToolCallId: null,
         searchQuery: "",
-        expandAll: false,
+        ...COLLAPSED_EXPANSION,
         mainView: "sessions",
         selectedTeam: null,
         currentMemberName: null,

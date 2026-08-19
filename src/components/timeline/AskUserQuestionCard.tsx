@@ -190,12 +190,12 @@ function QuestionHistoryItem({
 
 export function AskUserQuestionCard({
   toolCall,
-  expandAll,
+  expandToolPayloads,
   isAwaitingAnswer,
   sessionId,
 }: {
   toolCall: ToolCall
-  expandAll: boolean
+  expandToolPayloads: boolean
   /** True when this question is the session's pending interaction. */
   isAwaitingAnswer?: boolean
   sessionId?: string
@@ -203,7 +203,7 @@ export function AskUserQuestionCard({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const questions = useMemo(() => getQuestions(toolCall), [toolCall])
   const answers = useMemo(() => getAnswers(toolCall, questions), [toolCall, questions])
-  const showRawDetails = expandAll || detailsOpen
+  const showRawDetails = expandToolPayloads || detailsOpen
   const isAnswered = toolCall.result !== null && !toolCall.isError
   // questions.length guards the form branch from rendering an empty body:
   // AskUserAnswerForm returns null when it has nothing to ask.
@@ -306,7 +306,7 @@ export function AskUserQuestionCard({
         <button
           type="button"
           onClick={() => {
-            if (!expandAll) setDetailsOpen((open) => !open)
+            if (!expandToolPayloads) setDetailsOpen((open) => !open)
           }}
           className="flex items-center gap-1 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
           aria-expanded={showRawDetails}

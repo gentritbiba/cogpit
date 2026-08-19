@@ -14,11 +14,21 @@ interface Props {
   status: "pending" | "approved" | "rejected"
   toolCalls: ToolCall[]
   expandAll?: boolean
+  expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
 }
 
-export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls, expandAll = false, isAgentActive, skillMetadata }: Props) {
+export const PlanModeBlock = memo(function PlanModeBlock({
+  plan,
+  planFilePath,
+  status,
+  toolCalls,
+  expandAll = false,
+  expandToolPayloads = false,
+  isAgentActive,
+  skillMetadata,
+}: Props) {
   const [open, setOpen] = useState(true)
   // An unanswered question inside a collapsed plan block is unreachable, so it
   // forces the list open. Latched: once opened it stays open, so the list does
@@ -30,10 +40,11 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
   )
   const autoOpened = useRef(false)
   if (hasPendingQuestion) autoOpened.current = true
-  const callsOpen = callsOverride ?? autoOpened.current
+  const planOpen = expandAll || open
+  const callsOpen = expandAll || (callsOverride ?? autoOpened.current)
 
   const Icon = status === "approved" ? CheckCircle : status === "rejected" ? XCircle : Clock
-  const Chev = open ? ChevronDown : ChevronRight
+  const Chev = planOpen ? ChevronDown : ChevronRight
   const CallsChev = callsOpen ? ChevronDown : ChevronRight
 
   return (
@@ -72,7 +83,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
         )}
       </button>
 
-      {open && (
+      {planOpen && (
         <div className="px-3 pb-2">
           <div className="prose prose-sm dark:prose-invert max-w-none border-t border-purple-500/10 pt-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
@@ -96,6 +107,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
                       key={tc.id}
                       toolCall={tc}
                       expandAll={expandAll}
+                      expandToolPayloads={expandToolPayloads}
                       isAgentActive={isAgentActive}
                       skillMetadata={skillMetadata}
                     />

@@ -139,6 +139,7 @@ export default function App() {
   const handleOpenCommandPalette = useCallback(() => setShowCommandPalette(true), [])
   const handleFocusComposer = useCallback(() => chatInputRef.current?.focus(), [])
   const handleExpandAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: true }), [dispatch])
+  const handleExpandToolPayloads = useCallback(() => dispatch({ type: "SET_EXPAND_TOOL_PAYLOADS", value: true }), [dispatch])
   const handleCollapseAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: false }), [dispatch])
   const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
 
@@ -723,7 +724,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     state.activeTurnIndex, state.activeToolCallId,
-    state.searchQuery, state.expandAll,
+    state.searchQuery, state.expandAll, state.expandToolPayloads,
     state.mainView, state.mobileTab, state.sidebarTab,
     state.dashboardProject, state.pendingDirName, state.pendingCwd,
     state.currentMemberName, state.loadingMember,
@@ -1256,6 +1257,7 @@ export default function App() {
             onOpenCommandPalette: handleOpenCommandPalette,
             onFocusComposer: handleFocusComposer,
             onExpandAll: handleExpandAll,
+            onExpandToolPayloads: handleExpandToolPayloads,
             onCollapseAll: handleCollapseAll,
             keyboardShortcutsOpen: showKeyboardShortcuts,
             onKeyboardShortcutsOpenChange: setShowKeyboardShortcuts,

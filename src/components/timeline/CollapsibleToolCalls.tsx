@@ -35,6 +35,7 @@ function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
 export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   toolCalls,
   expandAll,
+  expandToolPayloads,
   activeToolCallId,
   isAgentActive = false,
   activityItems,
@@ -44,6 +45,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 }: {
   toolCalls: ToolCall[]
   expandAll: boolean
+  expandToolPayloads: boolean
   activeToolCallId: string | null
   isAgentActive?: boolean
   /** When provided, renders items in order (thinking + tool calls interleaved). */
@@ -128,7 +130,13 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
           tc.id === activeToolCallId && "ring-1 ring-blue-500/50 rounded-md"
         )}
       >
-        <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} skillMetadata={skillMetadata} />
+        <ToolCallCard
+          toolCall={tc}
+          expandAll={expandAll}
+          expandToolPayloads={expandToolPayloads}
+          isAgentActive={isLastWithoutResult}
+          skillMetadata={skillMetadata}
+        />
       </div>
     )
   }

@@ -128,7 +128,7 @@ describe("useKeyboardShortcuts", () => {
     })
   })
 
-  describe("Cmd+E / Ctrl+E - expand all", () => {
+  describe("Cmd+E / Ctrl+E - expand all groups", () => {
     it("dispatches SET_EXPAND_ALL true on Cmd+E", () => {
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))
@@ -152,15 +152,15 @@ describe("useKeyboardShortcuts", () => {
     })
   })
 
-  describe("Cmd+Shift+E - collapse all", () => {
-    it("dispatches SET_EXPAND_ALL false on Cmd+Shift+E", () => {
+  describe("Cmd+Shift+E - expand all tool payloads", () => {
+    it("dispatches SET_EXPAND_TOOL_PAYLOADS true on Cmd+Shift+E", () => {
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))
 
       fireKey("e", { metaKey: true, shiftKey: true })
       expect(opts.dispatch).toHaveBeenCalledWith({
-        type: "SET_EXPAND_ALL",
-        value: false,
+        type: "SET_EXPAND_TOOL_PAYLOADS",
+        value: true,
       })
     })
   })
@@ -312,14 +312,14 @@ describe("useKeyboardShortcuts", () => {
   })
 
   describe("Ctrl+E (non-mac modifier)", () => {
-    it("works with ctrlKey for expand/collapse", () => {
+    it("works with ctrlKey for payload expansion", () => {
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))
 
       fireKey("e", { ctrlKey: true, shiftKey: true })
       expect(opts.dispatch).toHaveBeenCalledWith({
-        type: "SET_EXPAND_ALL",
-        value: false,
+        type: "SET_EXPAND_TOOL_PAYLOADS",
+        value: true,
       })
     })
   })

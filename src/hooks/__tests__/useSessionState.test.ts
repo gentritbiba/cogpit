@@ -93,6 +93,7 @@ describe("useSessionState", () => {
     it("starts with expandAll false", () => {
       const hook = renderState()
       expect(getState(hook).expandAll).toBe(false)
+      expect(getState(hook).expandToolPayloads).toBe(false)
     })
 
     it("starts with sessionChangeKey 0", () => {
@@ -406,6 +407,63 @@ describe("useSessionState", () => {
       const initialState = getState(hook)
       dispatch(hook, { type: "SET_EXPAND_ALL", value: false })
       expect(getState(hook)).toBe(initialState)
+    })
+
+    it("clears payload expansion when collapsing all groups", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
+
+      dispatch(hook, { type: "SET_EXPAND_ALL", value: false })
+
+      expect(getState(hook).expandAll).toBe(false)
+      expect(getState(hook).expandToolPayloads).toBe(false)
+    })
+
+    it("demotes payload expansion to group-only expansion", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
+
+      dispatch(hook, { type: "SET_EXPAND_ALL", value: true })
+
+      expect(getState(hook).expandAll).toBe(true)
+      expect(getState(hook).expandToolPayloads).toBe(false)
+    })
+  })
+
+  describe("SET_EXPAND_TOOL_PAYLOADS", () => {
+    it("opens payloads and their containing groups", () => {
+      const hook = renderState()
+
+      dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
+
+      expect(getState(hook).expandAll).toBe(true)
+      expect(getState(hook).expandToolPayloads).toBe(true)
+    })
+
+    it("can close payloads without collapsing groups", () => {
+      const hook = renderState()
+      dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
+
+      dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: false })
+
+      expect(getState(hook).expandAll).toBe(true)
+      expect(getState(hook).expandToolPayloads).toBe(false)
+    })
+
+    it("resets payload expansion when the active session context changes", () => {
+      const hook = renderState()
+      const assertResetAfter = (action: Parameters<typeof dispatch>[1]) => {
+        dispatch(hook, { type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
+        dispatch(hook, action)
+        expect(getState(hook).expandToolPayloads).toBe(false)
+      }
+
+      assertResetAfter({ type: "LOAD_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
+      assertResetAfter({ type: "GO_HOME", isMobile: false })
+      assertResetAfter({ type: "LOAD_SESSION_FROM_TEAM", session: makeSession(), source: makeSource(), isMobile: false })
+      assertResetAfter({ type: "SWITCH_TEAM_MEMBER", session: makeSession(), source: makeSource(), memberName: "member" })
+      assertResetAfter({ type: "INIT_PENDING_SESSION", dirName: "pending", isMobile: false })
+      assertResetAfter({ type: "FINALIZE_SESSION", session: makeSession(), source: makeSource(), isMobile: false })
     })
   })
 
