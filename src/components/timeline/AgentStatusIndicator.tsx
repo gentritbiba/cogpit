@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect } from "react"
+import { memo, useMemo, useRef, useState, useEffect } from "react"
 import { Bot, Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveSessionStatus, getStatusLabel, getTerminalReasonLabel } from "@/lib/sessionStatus"
@@ -279,16 +279,27 @@ export function LiveElapsed({ startTimestamp, className }: { startTimestamp: str
 
 function LiveElapsedTimer({ startTimestamp, className }: { startTimestamp: string; className?: string }) {
   const startMs = new Date(startTimestamp).getTime()
-  const [elapsed, setElapsed] = useState(() => Date.now() - startMs)
+  const labelRef = useRef<HTMLSpanElement>(null)
 
+  // The clock writes its own text node once a second. Holding the elapsed time
+  // in React state would commit a render every second for the whole turn it is
+  // attached to, which is exactly when the transcript is streaming and least
+  // able to spare it.
   useEffect(() => {
-    const id = setInterval(() => setElapsed(Date.now() - startMs), 1000)
+    const paint = () => {
+      const el = labelRef.current
+      if (el) el.textContent = formatDuration(Math.max(0, Date.now() - startMs))
+    }
+    const id = setInterval(paint, 1000)
     return () => clearInterval(id)
   }, [startMs])
 
   return (
-    <span className={cn("text-[10px] text-muted-foreground/40 tabular-nums font-mono", className)}>
-      {formatDuration(Math.max(0, elapsed))}
+    <span
+      ref={labelRef}
+      className={cn("text-[10px] text-muted-foreground/40 tabular-nums font-mono", className)}
+    >
+      {formatDuration(Math.max(0, Date.now() - startMs))}
     </span>
   )
 }

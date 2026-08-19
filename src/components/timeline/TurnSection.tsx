@@ -1,4 +1,4 @@
-import { memo, useRef, useLayoutEffect } from "react"
+import { memo, useRef, useLayoutEffect, useMemo, useState } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
@@ -9,6 +9,7 @@ import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
+import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
 import { LiveElapsed } from "./AgentStatusIndicator"
@@ -22,6 +23,7 @@ import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import type { Turn, TurnContentBlock } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDuration, getTurnDuration } from "@/lib/format"
+import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
@@ -148,6 +150,28 @@ const TurnSectionInner = memo(function TurnSectionInner({
       msg.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write"),
     )
 
+  // A settled turn is mostly process. Fold it down to its answer and let the
+  // work sit one click away; the live turn and "expand all" stay open.
+  const foldPlan = useMemo(() => planTurnFold(turn.contentBlocks), [turn.contentBlocks])
+  const [workExpanded, setWorkExpanded] = useState(false)
+  const workVisible = workExpanded || expandAll || !isTurnDone
+
+  const { leadingBlocks, trailingBlocks } = useMemo(() => {
+    if (!foldPlan.foldable) {
+      return { leadingBlocks: [] as TurnContentBlock[], trailingBlocks: [] as TurnContentBlock[] }
+    }
+    const anchor = foldPlan.foldAnchorIndex
+    const folded = new Set(foldPlan.foldedIndices)
+    return {
+      leadingBlocks: turn.contentBlocks.slice(0, anchor),
+      // Everything from the anchor on keeps its original order, so expanding
+      // never reshuffles the turn.
+      trailingBlocks: turn.contentBlocks
+        .slice(anchor)
+        .filter((_, offset) => workVisible || !folded.has(anchor + offset)),
+    }
+  }, [foldPlan, turn.contentBlocks, workVisible])
+
   return (
     <div
       ref={ref}
@@ -184,16 +208,51 @@ const TurnSectionInner = memo(function TurnSectionInner({
             </div>
           )}
 
-          <ContentBlocks
-            blocks={turn.contentBlocks}
-            model={turn.model}
-            expandAll={expandAll}
-            activeToolCallId={activeToolCallId}
-            isAgentActive={isAgentActive}
-            isSubAgentView={isSubAgentView}
-            isMobile={isMobile}
-            skillMetadata={skillMetadata}
-          />
+          {foldPlan.foldable ? (
+            <>
+              {leadingBlocks.length > 0 && (
+                <ContentBlocks
+                  blocks={leadingBlocks}
+                  model={turn.model}
+                  expandAll={expandAll}
+                  activeToolCallId={activeToolCallId}
+                  isAgentActive={isAgentActive}
+                  isSubAgentView={isSubAgentView}
+                  isMobile={isMobile}
+                  skillMetadata={skillMetadata}
+                />
+              )}
+              <TurnWorkFold
+                label={turnFoldLabel(getTurnDuration(turn), foldPlan.hiddenToolCalls)}
+                expanded={workVisible}
+                onToggle={() => setWorkExpanded((open) => !open)}
+                compact={isMobile}
+              />
+              {trailingBlocks.length > 0 && (
+                <ContentBlocks
+                  blocks={trailingBlocks}
+                  model={turn.model}
+                  expandAll={expandAll}
+                  activeToolCallId={activeToolCallId}
+                  isAgentActive={isAgentActive}
+                  isSubAgentView={isSubAgentView}
+                  isMobile={isMobile}
+                  skillMetadata={skillMetadata}
+                />
+              )}
+            </>
+          ) : (
+            <ContentBlocks
+              blocks={turn.contentBlocks}
+              model={turn.model}
+              expandAll={expandAll}
+              activeToolCallId={activeToolCallId}
+              isAgentActive={isAgentActive}
+              isSubAgentView={isSubAgentView}
+              isMobile={isMobile}
+              skillMetadata={skillMetadata}
+            />
+          )}
 
           {isTurnDone && hasFileChanges && (
             <TurnChangedFiles turn={turn} turnIndex={index} cwd={cwd} />

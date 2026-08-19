@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react"
 import { Code2, FolderSearch, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
@@ -17,8 +18,10 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
-import { dirNameToPath, shortPath } from "@/lib/format"
+import { dirNameToPath } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { SessionInputFooter } from "./SessionInputFooter"
+import { NewSessionHeadline } from "./NewSessionHero"
 import {
   PrimarySessionBrowser,
   MissionControlView,
@@ -161,58 +164,77 @@ function DesktopMainView({
   }
 
   if (view === "pending") {
+    const hasPendingTurns = sessionView.pendingTurns.length > 0
+    // These reach into the host filesystem, so they stay visible but explain
+    // themselves when the active device is somewhere else.
+    const hostActionReason = isRemoteDeviceActive()
+      ? "Only on the machine running this session"
+      : undefined
     return (
-      <div className="flex flex-1 min-h-0 flex-col min-w-0">
-        {sessionView.pendingTurns.length > 0 ? (
+      <div
+        className={cn(
+          "flex flex-1 min-h-0 flex-col min-w-0",
+          // Before the first message there is no transcript to sit above, so the
+          // composer becomes the page instead of hugging the bottom edge.
+          !hasPendingTurns && "justify-center gap-4",
+        )}
+      >
+        {hasPendingTurns ? (
           <div className="flex-1 overflow-y-auto px-4 py-6">
             <div className="mx-auto max-w-3xl">
               {sessionView.pendingTurns}
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center gap-1">
-            <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-            <p className="text-xs text-muted-foreground font-mono">{shortPath(pendingPath ?? "")}</p>
-            {!isRemoteDeviceActive() && (
-              <div className="flex items-center gap-1 mt-2">
-                {can("terminal") && (
+          <NewSessionHeadline projectPath={pendingPath} />
+        )}
+        <SessionInputFooter>{sessionView.pendingComposer}</SessionInputFooter>
+        {!hasPendingTurns && (
+          <div className="flex items-center justify-center gap-1">
+            {can("terminal") && (
+              <DisabledHint reason={hostActionReason}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={Boolean(hostActionReason)}
+                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
+                  onClick={project.onOpenTerminal}
+                >
+                  <TerminalSquare className="size-3" />
+                  Terminal
+                </Button>
+              </DisabledHint>
+            )}
+            {can("hostFiles") && (
+              <>
+                <DisabledHint reason={hostActionReason}>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                    onClick={project.onOpenTerminal}
+                    disabled={Boolean(hostActionReason)}
+                    className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
+                    onClick={() => project.onPostProjectAction("/api/open-in-editor")}
                   >
-                    <TerminalSquare className="size-3" />
-                    Terminal
+                    <Code2 className="size-3" />
+                    Open
                   </Button>
-                )}
-                {can("hostFiles") && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
-                      onClick={() => project.onPostProjectAction("/api/open-in-editor")}
-                    >
-                      <Code2 className="size-3" />
-                      Open
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
-                      onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
-                    >
-                      <FolderSearch className="size-3" />
-                      Reveal
-                    </Button>
-                  </>
-                )}
-              </div>
+                </DisabledHint>
+                <DisabledHint reason={hostActionReason}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={Boolean(hostActionReason)}
+                    className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
+                    onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
+                  >
+                    <FolderSearch className="size-3" />
+                    Reveal
+                  </Button>
+                </DisabledHint>
+              </>
             )}
           </div>
         )}
-        <SessionInputFooter>{sessionView.pendingComposer}</SessionInputFooter>
       </div>
     )
   }
