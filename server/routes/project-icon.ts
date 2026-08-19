@@ -25,7 +25,10 @@ export function registerProjectIconRoutes(use: UseFn) {
     const icon = await resolveProjectIcon(cwd)
     const contentType = icon ? iconContentType(icon) : null
     if (!icon || !contentType) {
-      return sendJson(res, 404, { error: "Project has no icon" })
+      res.statusCode = 204
+      res.setHeader("Cache-Control", "private, max-age=300")
+      res.end()
+      return
     }
 
     res.statusCode = 200
@@ -36,7 +39,10 @@ export function registerProjectIconRoutes(use: UseFn) {
 
     const stream = createReadStream(icon)
     stream.once("error", (error) => {
-      if (!res.headersSent) sendJson(res, 404, { error: "Project has no icon" })
+      if (!res.headersSent) {
+        res.statusCode = 204
+        res.end()
+      }
       else res.destroy(error)
     })
     stream.pipe(res)
