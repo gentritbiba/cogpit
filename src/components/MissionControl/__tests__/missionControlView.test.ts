@@ -312,8 +312,8 @@ describe("state predicates", () => {
 
 describe("contextPercentColor", () => {
   it("stays muted until context pressure warrants attention", () => {
-    expect(contextPercentColor(31)).toBe("text-muted-foreground/70")
-    expect(contextPercentColor(71)).toBe("text-amber-400")
-    expect(contextPercentColor(95)).toBe("text-red-400")
+    expect(contextPercentColor(31)).toBe("text-muted-foreground")
+    expect(contextPercentColor(71)).toBe("text-warning")
+    expect(contextPercentColor(95)).toBe("text-destructive")
   })
 })

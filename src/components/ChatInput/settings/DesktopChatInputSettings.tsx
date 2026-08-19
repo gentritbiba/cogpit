@@ -6,6 +6,7 @@ import { McpDropdown } from "./McpDropdown"
 import { MiniDropdown } from "./MiniDropdown"
 import { PermissionDropdown } from "./PermissionDropdown"
 import type { CommonSettingsControlProps } from "./types"
+import { Button } from "@/components/ui/button"
 
 export function DesktopChatInputSettings({
   agentKind,
@@ -53,7 +54,7 @@ export function DesktopChatInputSettings({
       aria-describedby={applyHint ? applyHintId : undefined}
     >
       {applyHint && <span id={applyHintId} className="sr-only">{applyHint}</span>}
-      <div className="w-full flex items-center gap-2 flex-wrap">
+      <div className="flex w-full flex-wrap items-center gap-2">
         {onAgentKindChange
           ? (
             <AgentModelDropdown
@@ -88,21 +89,17 @@ export function DesktopChatInputSettings({
         )}
 
         {fastTier && onFastModeEnabledChange && (
-          <button
+          <Button
             type="button"
+            variant={fastModeEnabled ? "secondary" : "ghost"}
+            size="xs"
             aria-pressed={!!fastModeEnabled}
             onClick={() => changeAndApply(() => onFastModeEnabledChange(!fastModeEnabled))}
             title={fastTier.description}
-            className={cn(
-              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-              fastModeEnabled
-                ? "text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
           >
-            <Zap className={cn("size-3", fastModeEnabled && "fill-current")} />
+            <Zap data-icon="inline-start" className={cn(fastModeEnabled && "fill-current")} />
             {fastModeEnabled ? "Fast" : "Standard"}
-          </button>
+          </Button>
         )}
 
         {onPermissionModeChange && permissionMode && (
@@ -115,38 +112,30 @@ export function DesktopChatInputSettings({
         )}
 
         {showWorktree && isNewSession && onWorktreeEnabledChange && (
-          <button
+          <Button
             type="button"
+            variant={worktreeEnabled ? "secondary" : "ghost"}
+            size="xs"
             aria-pressed={!!worktreeEnabled}
             onClick={() => onWorktreeEnabledChange(!worktreeEnabled)}
-            className={cn(
-              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-              worktreeEnabled
-                ? "text-emerald-400"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5",
-            )}
           >
-            <GitBranch className="size-3" />
+            <GitBranch data-icon="inline-start" />
             Worktree
-          </button>
+          </Button>
         )}
 
         {showWorktree && onUltracodeEnabledChange && (
-          <button
+          <Button
             type="button"
+            variant={ultracodeEnabled ? "secondary" : "ghost"}
+            size="xs"
             aria-pressed={!!ultracodeEnabled}
             onClick={() => changeAndApply(() => onUltracodeEnabledChange(!ultracodeEnabled))}
             title="Ultracode: XHigh effort + standing multi-agent workflow orchestration"
-            className={cn(
-              "flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
-              ultracodeEnabled
-                ? "text-amber-400"
-                : "text-muted-foreground hover:text-foreground hover:bg-white/5",
-            )}
           >
-            <Zap className={cn("size-3", ultracodeEnabled && "fill-amber-400")} />
+            <Zap data-icon="inline-start" className={cn(ultracodeEnabled && "fill-current")} />
             Ultracode
-          </button>
+          </Button>
         )}
 
         {onToggleMcpServer && onRefreshMcpServers && onMcpAuth &&

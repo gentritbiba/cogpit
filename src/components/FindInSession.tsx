@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react"
 import { X, ChevronUp, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 
 export interface FindInSessionHandle {
   open: () => void
@@ -181,56 +187,69 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
     if (!isOpen) return null
 
     return (
-      <div className="absolute top-0 right-4 z-50 flex items-center gap-1 rounded-b-lg border border-t-0 border-border/60 bg-elevation-2 px-2 py-1.5 shadow-lg">
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Find in session..."
-          className="h-7 w-56 rounded-sm border border-border/40 bg-elevation-1 px-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring/40"
-          autoFocus
-        />
-        <span className="min-w-[3.5rem] text-center text-xs text-muted-foreground tabular-nums">
-          {query
-            ? matches.length > 0
-              ? `${activeIndex + 1}/${matches.length}`
-              : "0/0"
-            : ""}
-        </span>
-        <button
+      <div className="absolute right-4 top-0 flex items-center gap-1 rounded-b-lg border border-t-0 bg-popover p-2 text-popover-foreground shadow-sm">
+        <InputGroup className="w-64">
+          <InputGroupInput
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Find in conversation"
+            aria-label="Find in conversation"
+            autoFocus
+          />
+          <InputGroupAddon align="inline-end">
+            <span className="min-w-12 text-center text-xs tabular-nums">
+              {query
+                ? matches.length > 0
+                  ? `${activeIndex + 1}/${matches.length}`
+                  : "0/0"
+                : ""}
+            </span>
+          </InputGroupAddon>
+        </InputGroup>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToMatch(activeIndex - 1)}
           disabled={matches.length === 0}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors",
+            "text-muted-foreground",
             matches.length > 0
-              ? "hover:bg-accent hover:text-foreground"
-              : "opacity-40 cursor-default"
+              ? "hover:text-foreground"
+              : "cursor-default opacity-40"
           )}
           aria-label="Previous match"
         >
-          <ChevronUp className="size-3.5" />
-        </button>
-        <button
+          <ChevronUp data-icon="inline-start" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={() => goToMatch(activeIndex + 1)}
           disabled={matches.length === 0}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors",
+            "text-muted-foreground",
             matches.length > 0
-              ? "hover:bg-accent hover:text-foreground"
-              : "opacity-40 cursor-default"
+              ? "hover:text-foreground"
+              : "cursor-default opacity-40"
           )}
           aria-label="Next match"
         >
-          <ChevronDown className="size-3.5" />
-        </button>
-        <button
+          <ChevronDown data-icon="inline-start" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={handleClose}
-          className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground"
           aria-label="Close search"
         >
-          <X className="size-3.5" />
-        </button>
+          <X data-icon="inline-start" />
+        </Button>
       </div>
     )
   }

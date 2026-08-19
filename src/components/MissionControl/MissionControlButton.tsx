@@ -7,6 +7,7 @@
 
 import { useMemo } from "react"
 import { LayoutGrid } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -42,24 +43,24 @@ export function MissionControlButton({ active, onToggle }: MissionControlButtonP
         render={
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             onClick={onToggle}
             aria-label={label}
             className={cn(
-              "relative h-6 w-6 p-0",
-              active ? "bg-blue-500/20" : "text-muted-foreground hover:text-foreground",
+              "relative",
+              active ? "bg-accent text-accent-foreground" : "text-muted-foreground",
             )}
           />
         }
       >
-        <LayoutGrid className={cn("size-4", active && "text-blue-400")} />
+        <LayoutGrid data-icon="inline-start" />
         {needsYou > 0 && !active && (
-          <span
-            className="absolute -right-0.5 -top-0.5 flex h-3 min-w-3 items-center justify-center rounded-full bg-amber-500 px-[3px] font-mono text-[8px] font-bold text-black"
+          <Badge
+            className="absolute -right-1 -top-1 h-4 min-w-4 justify-center bg-warning px-1 py-0 font-mono text-xs text-warning-foreground"
             aria-hidden
           >
             {needsYou}
-          </span>
+          </Badge>
         )}
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

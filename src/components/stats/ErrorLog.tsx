@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn } from "@/lib/types"
+import { Button } from "@/components/ui/button"
 
 interface ErrorEntry {
   turnIndex: number
@@ -37,21 +38,23 @@ export function ErrorLog({ turns, onJumpToTurn }: ErrorLogProps): React.JSX.Elem
   return (
     <section>
       <SectionHeading>Errors ({errors.length})</SectionHeading>
-      <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1">
+      <div className="flex max-h-[300px] flex-col overflow-y-auto pr-1">
         {errors.map((err, i) => (
-          <button
+          <Button
             key={i}
+            type="button"
+            variant="ghost"
             onClick={() => onJumpToTurn?.(err.turnIndex)}
-            className="w-full rounded-lg border border-red-900/40 bg-red-950/20 depth-low px-3 py-2.5 text-left transition-colors hover:bg-red-950/40 hover:border-red-800/40"
+            className="h-auto w-full flex-col items-stretch rounded-none border-b border-border px-2 py-2.5 text-left whitespace-normal last:border-b-0 hover:bg-destructive/5"
           >
-            <div className="flex items-center gap-1.5 text-[11px]">
-              <span className="font-medium text-red-400">{err.toolName}</span>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="font-medium text-destructive">{err.toolName}</span>
               <span className="text-muted-foreground">Turn {err.turnIndex + 1}</span>
             </div>
-            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">
+            <div className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
               {err.message}
             </div>
-          </button>
+          </Button>
         ))}
       </div>
     </section>

@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import { ChangeBar, LineCounts } from "@/components/shared/ChangeCounts"
 import type { Turn, ToolCall } from "@/lib/types"
 import { useCapability } from "@/hooks/useCapability"
+import { fileTypeIcon } from "@/lib/fileTypeColors"
+import { Button } from "@/components/ui/button"
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -234,15 +236,16 @@ export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
       <CollapsibleTrigger
-        className="group/files flex min-h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left text-[11px] text-muted-foreground/55 outline-none transition-colors hover:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="group/files flex min-h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         <ChevronRight
+          data-icon="inline-start"
           className={cn(
             "size-3 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
             expanded && "rotate-90",
           )}
         />
-        <FileCode2 className="size-3.5 shrink-0 opacity-60" />
+        <FileCode2 className="size-3.5 shrink-0" data-icon="inline-start" />
         <span className="font-medium tabular-nums">
           {fileChanges.length} file{fileChanges.length !== 1 ? "s" : ""}
         </span>
@@ -289,27 +292,32 @@ const TreeRow = memo(function TreeRow({
   const paddingLeft = depth * 16 + 8
 
   if (node.isFile) {
+    const FileIcon = fileTypeIcon(node.name)
     const handleFileClick = () => {
-      if (node.absPath) {
+      if (canFocusFiles && node.absPath) {
         window.dispatchEvent(new CustomEvent(FOCUS_FILE_EVENT, { detail: { filePath: node.absPath, turnIndex } }))
       }
     }
 
     return (
-      <div
-        className={cn(
-          "flex items-center gap-1.5 py-[3px] text-[11px] font-mono rounded-sm transition-colors",
-          canFocusFiles && "hover:bg-white/[0.05] cursor-pointer",
-        )}
-        style={{ paddingLeft }}
-        onClick={canFocusFiles ? handleFileClick : undefined}
-        title={canFocusFiles ? "Click to focus in sidebar" : undefined}
-      >
-        <FileTypeIndicator name={node.name} />
-        <OpIndicator hasEdit={node.hasEdit} hasWrite={node.hasWrite} />
+      <div className="flex h-7 w-full items-center gap-1.5 font-mono text-xs" style={{ paddingLeft }}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          disabled={!canFocusFiles}
+          className={cn(
+            "h-7 min-w-0 flex-1 justify-start gap-1.5 rounded-sm px-0 font-mono text-xs font-normal disabled:opacity-100",
+            canFocusFiles && "cursor-pointer",
+          )}
+          onClick={handleFileClick}
+          title={canFocusFiles ? "Click to focus in sidebar" : undefined}
+        >
+          <FileIcon className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
+          <OpIndicator hasEdit={node.hasEdit} hasWrite={node.hasWrite} />
+          <span className="truncate text-foreground/75">{node.name}</span>
+        </Button>
         {node.subAgentId && <SubAgentIndicator agentId={node.subAgentId} />}
-        <span className="text-foreground/75 truncate">{node.name}</span>
-        <div className="flex-1 min-w-2" />
         <LineCounts add={node.additions} del={node.deletions} />
         <ChangeBar add={node.additions} del={node.deletions} />
       </div>
@@ -318,21 +326,25 @@ const TreeRow = memo(function TreeRow({
 
   return (
     <>
-      <div
-        className="flex items-center gap-1 py-[3px] text-[11px] font-mono cursor-pointer hover:bg-white/[0.03] rounded-sm select-none transition-colors"
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="h-7 w-full justify-start gap-1 rounded-sm font-mono text-xs font-normal"
         style={{ paddingLeft }}
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
       >
         {expanded ? (
-          <ChevronDown className="size-3 text-muted-foreground/40 shrink-0" />
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
         ) : (
-          <ChevronRight className="size-3 text-muted-foreground/40 shrink-0" />
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
         )}
-        <Folder className="size-3 text-blue-400/40 shrink-0" />
-        <span className="text-foreground/40 truncate">{node.name}</span>
+        <Folder className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
+        <span className="truncate text-foreground/70">{node.name}</span>
         <div className="flex-1 min-w-2" />
         {!expanded && <LineCounts add={node.additions} del={node.deletions} dimmed />}
-      </div>
+      </Button>
       {expanded &&
         node.children.map((child) => (
           <TreeRow
@@ -346,32 +358,3 @@ const TreeRow = memo(function TreeRow({
     </>
   )
 })
-
-const EXT_COLORS: Record<string, string> = {
-  tsx: "bg-blue-400/70",
-  jsx: "bg-blue-400/70",
-  ts: "bg-yellow-400/70",
-  js: "bg-yellow-400/70",
-  mjs: "bg-yellow-400/70",
-  cjs: "bg-yellow-400/70",
-  css: "bg-purple-400/70",
-  scss: "bg-purple-400/70",
-  less: "bg-purple-400/70",
-  json: "bg-amber-400/70",
-  yaml: "bg-amber-400/70",
-  yml: "bg-amber-400/70",
-  toml: "bg-amber-400/70",
-  md: "bg-blue-300/70",
-  mdx: "bg-blue-300/70",
-  html: "bg-orange-400/70",
-  htm: "bg-orange-400/70",
-  py: "bg-green-400/70",
-  rs: "bg-orange-500/70",
-  go: "bg-cyan-400/70",
-}
-
-function FileTypeIndicator({ name }: { name: string }) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  const color = EXT_COLORS[ext] ?? "bg-muted-foreground/40"
-  return <div className={cn("size-2 rounded-[2px] shrink-0", color)} />
-}

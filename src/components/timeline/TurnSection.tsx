@@ -12,6 +12,8 @@ import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
 import { BranchIndicator } from "@/components/BranchIndicator"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { LiveElapsed } from "./AgentStatusIndicator"
 import { collectActivity } from "@/lib/timelineHelpers"
 import { deriveSessionStatus } from "@/lib/sessionStatus"
@@ -28,8 +30,8 @@ import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 // ── Style constants ──────────────────────────────────────────────────────────
 
 const CARD_STYLES = {
-  user:      "bg-blue-500/[0.12] border border-blue-500/20",
-  userAgent: "bg-green-500/[0.12] border border-green-500/20",
+  user: "border border-border bg-muted/40",
+  userAgent: "border border-border bg-muted/25",
 } as const
 
 /**
@@ -38,7 +40,7 @@ const CARD_STYLES = {
  * genuine structural difference, so it keeps the one accent.
  */
 const NEST_RAIL = "border-l border-border/40"
-const AGENT_RAIL = "border-l border-indigo-400/40"
+const AGENT_RAIL = "border-l border-border"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -130,7 +132,7 @@ function TurnWorkLabel({
       Working for
       <LiveElapsed
         startTimestamp={turn.timestamp}
-        className="text-[11px] text-inherit"
+        className="text-xs text-inherit"
       />
     </span>
   )
@@ -206,7 +208,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
       className={cn(
         "group relative",
         isMobile ? "px-1 py-3" : "px-4 py-5",
-        isActive && "ring-1 ring-blue-500/30",
+        isActive && "rounded-lg ring-1 ring-ring/40",
       )}
     >
       <TurnHeader
@@ -223,7 +225,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
         <div ref={contentRef} className={cn("flex flex-col", isMobile ? "gap-2" : "gap-3")}>
           {turn.userMessage && (
             <div data-turn-prompt className={cn(
-              isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
+              isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
               isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
             )}>
               <UserMessage
@@ -331,23 +333,25 @@ function TurnHeader({
     <div className={cn("flex items-center", isMobile ? "mb-2 gap-1.5" : "mb-4 gap-2")}>
       {/* The turn boundary is carried by the accented user message below; this
           number is a label for cross-referencing panels, not a second cue. */}
-      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/50">
+      <span className="shrink-0 font-mono text-xs text-muted-foreground">
         {isMobile ? `Turn ${index + 1}` : index + 1}
       </span>
       <TurnTimer durationMs={durationMs} showLiveTimer={showLiveTimer} timestamp={turn.timestamp} />
       {onRestoreToHere && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => onRestoreToHere(index)}
           className={cn(
-            "ml-auto flex items-center gap-1 text-[10px] text-muted-foreground transition-opacity hover:text-amber-400",
-            isMobile ? "rounded-md p-1 opacity-60" : "opacity-0 group-hover:opacity-100",
+            "ml-auto text-muted-foreground transition-opacity hover:text-foreground",
+            isMobile ? "opacity-70" : "opacity-0 group-hover:opacity-100",
           )}
           title="Undo this turn and all after it"
         >
-          <RotateCcw className="size-3" />
+          <RotateCcw data-icon="inline-start" />
           <span className="hidden sm:inline">Restore</span>
-        </button>
+        </Button>
       )}
       {branchCount > 0 && onOpenBranches && (
         <div className={cn(!onRestoreToHere && "ml-auto")}>
@@ -374,16 +378,16 @@ function TurnTimer({
 }): React.ReactElement | null {
   if (durationMs !== null) {
     return (
-      <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60 font-mono tabular-nums">
-        <Clock className="w-2.5 h-2.5" />
+      <span className="flex items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground">
+        <Clock className="size-3" data-icon="inline-start" />
         {formatDuration(durationMs)}
       </span>
     )
   }
   if (showLiveTimer) {
     return (
-      <span className="flex items-center gap-1 text-[10px] text-amber-400/70 font-mono tabular-nums">
-        <Clock className="w-2.5 h-2.5" />
+      <span className="flex items-center gap-1 font-mono text-xs tabular-nums text-info">
+        <Clock className="size-3" data-icon="inline-start" />
         <LiveElapsed startTimestamp={timestamp} className="tabular-nums" />
       </span>
     )
@@ -497,13 +501,11 @@ function ContentBlocks({
         <div
           key={`queued-prompt-${block.timestamp ?? "untimed"}-${block.content}`}
           className={cn(
-            isMobile ? "rounded-xl p-2.5" : "rounded-2xl p-3",
+            isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
             isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
           )}
         >
-          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-blue-400/70">
-            Sent while Claude was working
-          </div>
+          <Badge variant="outline" className="mb-2">Queued while working</Badge>
           <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact={isMobile} />
         </div>
       )

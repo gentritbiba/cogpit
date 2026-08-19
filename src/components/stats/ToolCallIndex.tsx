@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { AlertTriangle, ChevronRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Collapsible,
   CollapsibleTrigger,
@@ -11,7 +12,6 @@ import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn, ToolCall } from "@/lib/types"
 import { truncate } from "@/lib/format"
 import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
-import { getToolColor } from "@/lib/parser"
 import { getToolPresentation, getToolSummary } from "../../../shared/session/toolSummary"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -100,21 +100,20 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): Reac
       <div className="max-h-[320px] overflow-y-auto">
         <div className="flex flex-col gap-0.5 pr-2">
           {toolCallGroups.map(([name, group]) => {
-            const colorClass = getToolColor(group.styleName)
             return (
               <Collapsible key={name}>
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-elevation-1">
+                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted">
                   <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-open]>&]:rotate-90" />
-                  <span className={cn("font-medium", colorClass)}>{name}</span>
+                  <span className="font-medium text-foreground">{name}</span>
                   <span className="ml-auto flex items-center gap-1.5">
                     {group.estimatedCost > 0 && (
-                      <span className="text-[9px] font-mono text-amber-400/70">
+                      <span className="font-mono text-xs text-warning">
                         ~{formatCost(group.estimatedCost)}
                       </span>
                     )}
                     <Badge
                       variant="secondary"
-                      className="h-4 px-1.5 text-[10px] font-normal"
+                      className="font-normal"
                     >
                       {group.count}
                     </Badge>
@@ -126,27 +125,30 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): Reac
                       const preview = getToolCallPreview(tc)
                       return (
                         <div key={`${tc.id}-${i}`}>
-                          <button
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
                             onClick={() => onJumpToTurn?.(turnIndex, tc.id)}
                             className={cn(
-                              "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-mono text-left transition-colors w-full",
+                              "h-auto w-full justify-start gap-1 px-1.5 py-0.5 text-left font-mono text-xs font-normal",
                               tc.isError
-                                ? "text-red-400 hover:bg-red-950/30"
-                                : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
+                                ? "text-destructive hover:bg-destructive/10"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
                             )}
                           >
                             {tc.isError && (
-                              <AlertTriangle className="size-2.5 shrink-0 text-red-500" />
+                              <AlertTriangle className="size-2.5 shrink-0 text-destructive" data-icon="inline-start" />
                             )}
                             <span className="truncate">
                               {preview || tc.id.slice(0, 8)}
                             </span>
-                          </button>
+                          </Button>
                         </div>
                       )
                     })}
                     {group.calls.length > 50 && (
-                      <div className="px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <div className="px-1.5 py-0.5 text-xs text-muted-foreground">
                         +{group.calls.length - 50} more
                       </div>
                     )}

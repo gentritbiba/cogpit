@@ -44,23 +44,22 @@ describe("HookEventChip", () => {
       makeEvent({ eventName: "PostToolUse", exitCode: 2 }),
     ]
     const { container } = render(<HookEventChip events={events} />)
-    // The wrapper div should have the red bg class
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/bg-red-950/)
+    expect(wrapper.className).toMatch(/bg-destructive/)
   })
 
   it("applies error styling for terminal event names", () => {
     const events = [makeEvent({ eventName: "StopFailure" })]
     const { container } = render(<HookEventChip events={events} />)
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/bg-red-950/)
+    expect(wrapper.className).toMatch(/bg-destructive/)
   })
 
   it("applies error styling for PermissionDenied event", () => {
     const events = [makeEvent({ eventName: "PermissionDenied" })]
     const { container } = render(<HookEventChip events={events} />)
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/bg-red-950/)
+    expect(wrapper.className).toMatch(/bg-destructive/)
   })
 
   it("shows singular 'hook event' for a single event", () => {

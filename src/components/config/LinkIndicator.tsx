@@ -16,14 +16,14 @@ export function LinkIndicator({ linkTarget, variant = "compact", className }: Li
   return (
     <span
       className={cn(
-        "flex items-center gap-1 text-sky-400/70 shrink-0 min-w-0",
+        "flex min-w-0 shrink-0 items-center gap-1 text-info",
         className,
       )}
       title={`Symlink → ${linkTarget}`}
     >
-      <Link2 className="size-2.5 shrink-0" />
+      <Link2 data-icon="inline-start" className="size-3 shrink-0" />
       {variant === "full" && (
-        <span className="text-[10px] font-mono truncate">→ {linkTarget}</span>
+        <span className="truncate font-mono text-xs">→ {linkTarget}</span>
       )}
     </span>
   )

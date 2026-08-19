@@ -2,19 +2,9 @@ import { Cpu, GitBranch, MessageSquare, Users } from "lucide-react"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatRelativeTime } from "@/lib/format"
-import type { SessionStatus } from "@/lib/sessionStatus"
 import { resolveTurnCount } from "@/lib/turnCountCache"
+import { getStatusColor } from "./sessionStatusPresentation"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
-
-export function isIdleStatus(status?: SessionStatus): boolean {
-  return status === "idle" || status === "completed"
-}
-
-export function getStatusColor(status?: SessionStatus): string {
-  if (isIdleStatus(status)) return "text-green-400"
-  if (status === "thinking" || status === "deferred") return "text-amber-400"
-  return "text-blue-400"
-}
 
 interface SessionPreviewProps {
   session: ActiveSessionInfo
@@ -42,7 +32,7 @@ export function SessionPreview({
   const turnCount = resolveTurnCount(s.sessionId, s.turnCount)
 
   return (
-    <div className="flex w-64 flex-col gap-1.5 text-[11px]">
+    <div className="flex w-64 flex-col gap-2 text-xs">
       {fullTitle && (
         <span className="font-medium leading-snug text-foreground">{fullTitle}</span>
       )}
@@ -52,14 +42,14 @@ export function SessionPreview({
         </span>
       )}
       {s.teamName && s.agentName && (
-        <span className="flex items-center gap-1 text-violet-400">
-          <Users className="size-2.5" />
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Users className="size-3" />
           {s.agentName} · {s.teamName}
         </span>
       )}
       {lastPrompt && (
-        <div className="border-l-2 border-border/60 pl-1.5 text-muted-foreground">
-          <span className="line-clamp-3 italic leading-snug">{lastPrompt}</span>
+        <div className="border-l-2 pl-2 text-muted-foreground">
+          <span className="line-clamp-3 leading-relaxed">{lastPrompt}</span>
         </div>
       )}
       <PullRequestChips pullRequests={s.pullRequests} layout="list" />
@@ -78,7 +68,7 @@ export function SessionPreview({
         )}
         <span>{formatFileSize(s.size)}</span>
         {proc && (
-          <span className="flex items-center gap-0.5 text-green-500">
+          <span className="flex items-center gap-0.5 text-success">
             <Cpu className="size-2.5" />
             {proc.memMB} MB
           </span>

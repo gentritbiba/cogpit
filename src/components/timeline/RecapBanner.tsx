@@ -3,7 +3,8 @@ import { ChevronDown, ChevronRight, History } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { markdownComponents } from "./markdown-components"
-import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface Props {
   content: string
@@ -25,22 +26,19 @@ export const RecapBanner = memo(function RecapBanner({ content }: Props) {
   const Chev = open ? ChevronDown : ChevronRight
 
   return (
-    <div className={cn("my-2 rounded-lg border border-blue-500/20 bg-blue-950/5")}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full text-left p-2 hover:bg-blue-500/5"
-      >
-        <Chev className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-        <History className="w-4 h-4 text-blue-400" />
+    <Collapsible open={open} onOpenChange={setOpen} className="my-2 rounded-lg border bg-card">
+      <CollapsibleTrigger render={<Button type="button" variant="ghost" className="h-auto w-full justify-start rounded-b-none p-2 text-left" />}>
+        <Chev className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+        <History className="size-4 text-muted-foreground" data-icon="inline-start" />
         <span className="text-sm font-medium">Session recap</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-2 prose prose-sm dark:prose-invert max-w-none border-t border-blue-500/10 pt-2">
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="prose prose-sm dark:prose-invert max-w-none border-t px-3 pb-2 pt-2">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {content}
           </ReactMarkdown>
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })

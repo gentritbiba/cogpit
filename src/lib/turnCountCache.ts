@@ -35,10 +35,9 @@ export function resolveTurnCount(sessionId: string, serverCount?: number): numbe
   return Math.max(cached ?? 0, serverCount ?? 0)
 }
 
-/** Turn count to Tailwind text color: muted by default, warm colors only for high counts. */
+/** Turn count color stays quiet until a session becomes unusually long. */
 export function turnCountColor(count: number): string {
   if (count <= 10) return "text-muted-foreground"
-  if (count <= 25) return "text-amber-400"
-  if (count <= 50) return "text-orange-400"
-  return "text-red-400"
+  if (count <= 50) return "text-warning"
+  return "text-destructive"
 }

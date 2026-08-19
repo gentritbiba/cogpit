@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, FileCode2, FolderTree, GitBranch, MessageSquarePlus, RefreshCw, Save, X } from "lucide-react"
+import { AlertTriangle, FileCode2, FolderTree, GitBranch, MessageSquarePlus, RefreshCw, Save, Search, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -17,7 +27,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { LineCounts } from "@/components/shared/ChangeCounts"
@@ -27,7 +41,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
-import { fileTypeColor, fileTypeIcon } from "@/lib/fileTypeColors"
+import { fileTypeIcon } from "@/lib/fileTypeColors"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import { parseProjectFilesResponse } from "@/hooks/useProjectFileSuggestions"
@@ -79,18 +93,22 @@ interface GitStatusData {
   files: GitStatusFile[]
 }
 
+type PendingDiscard =
+  | { type: "file"; path: string; mode: "edit" | "diff" }
+  | { type: "close" }
+
 const MIN_WIDTH = 520
 const DEFAULT_WIDTH = 760
 const WIDTH_KEY = "cogpit-project-files-width"
 
 /** Porcelain status letters, keyed by the most significant of the two columns. */
 const GIT_STATUS_STYLES: Record<string, { label: string; className: string }> = {
-  "?": { label: "Untracked", className: "text-sky-700 dark:text-blue-300" },
-  A: { label: "Added", className: "text-green-700 dark:text-green-400" },
-  M: { label: "Modified", className: "text-amber-700 dark:text-amber-400" },
-  D: { label: "Deleted", className: "text-red-600 dark:text-red-400" },
-  R: { label: "Renamed", className: "text-purple-600 dark:text-purple-400" },
-  C: { label: "Copied", className: "text-purple-600 dark:text-purple-400" },
+  "?": { label: "Untracked", className: "text-info" },
+  A: { label: "Added", className: "text-success" },
+  M: { label: "Modified", className: "text-warning" },
+  D: { label: "Deleted", className: "text-destructive" },
+  R: { label: "Renamed", className: "text-info" },
+  C: { label: "Copied", className: "text-info" },
   U: { label: "Conflicted", className: "text-destructive" },
 }
 
@@ -128,10 +146,10 @@ function displayBytes(value: number): string {
 
 export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const [width, setWidth] = useState(loadWidth)
+  const widthRef = useRef(width)
   const [query, setQuery] = useState("")
   const [files, setFiles] = useState<string[]>([])
   const [filesLoading, setFilesLoading] = useState(true)
@@ -160,6 +178,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   const [selectedExcerpt, setSelectedExcerpt] = useState<Omit<ProjectPromptContext, "path"> | null>(null)
   const [reviewDraft, setReviewDraft] = useState<Omit<ProjectPromptContext, "path"> | null>(null)
   const [reviewComment, setReviewComment] = useState("")
+  const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null)
   const dirty = selectedPath !== null && content !== savedContent
   const changedFiles = useMemo(() => new Map(
     (gitStatus?.files ?? []).flatMap((file) => [
@@ -238,6 +257,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     setViewMode("edit")
     setDiff(null)
     setDiffError(null)
+    setPendingDiscard(null)
   }, [cwd])
 
   useEffect(() => {
@@ -311,8 +331,12 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
 
   const selectFile = useCallback((path: string) => {
     if (path === selectedPath) return
-    if (dirty && !window.confirm("Discard unsaved changes and open another file?")) return
-    openFile(path, fileScope === "changes" && changedFiles.has(path) ? "diff" : "edit")
+    const mode = fileScope === "changes" && changedFiles.has(path) ? "diff" : "edit"
+    if (dirty) {
+      setPendingDiscard({ type: "file", path, mode })
+      return
+    }
+    openFile(path, mode)
   }, [changedFiles, dirty, fileScope, openFile, selectedPath])
 
   const showDiff = useCallback(() => {
@@ -384,9 +408,23 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
   }, [saveFile])
 
   const closePanel = useCallback(() => {
-    if (dirty && !window.confirm("Close the file workspace and discard unsaved changes?")) return
+    if (dirty) {
+      setPendingDiscard({ type: "close" })
+      return
+    }
     onClose()
   }, [dirty, onClose])
+
+  const confirmDiscard = useCallback(() => {
+    if (!pendingDiscard) return
+    const action = pendingDiscard
+    setPendingDiscard(null)
+    if (action.type === "file") {
+      openFile(action.path, action.mode)
+      return
+    }
+    onClose()
+  }, [onClose, openFile, pendingDiscard])
 
   const handleEditorKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Tab") return
@@ -426,20 +464,19 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     if (!dragRef.current) return
     const maxWidth = Math.max(MIN_WIDTH, window.innerWidth * 0.9)
     const next = dragRef.current.startWidth + (dragRef.current.startX - event.clientX)
-    setWidth(Math.min(maxWidth, Math.max(MIN_WIDTH, next)))
+    const nextWidth = Math.min(maxWidth, Math.max(MIN_WIDTH, next))
+    widthRef.current = nextWidth
+    setWidth(nextWidth)
   }, [])
 
   const handlePointerUp = useCallback(() => {
     if (!dragRef.current) return
     dragRef.current = null
-    setWidth((current) => {
-      try {
-        localStorage.setItem(WIDTH_KEY, String(current))
-      } catch {
-        // Ignore persistence failures.
-      }
-      return current
-    })
+    try {
+      localStorage.setItem(WIDTH_KEY, String(widthRef.current))
+    } catch {
+      // Ignore persistence failures.
+    }
   }, [])
 
   const selectedName = useMemo(() => selectedPath?.split("/").at(-1) ?? null, [selectedPath])
@@ -467,12 +504,12 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     <aside
       ref={panelRef}
       aria-label="Project files"
-      className="relative flex min-h-0 shrink-0 flex-col border-l border-border bg-elevation-0"
+      className="relative flex min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width }}
     >
       <div
         aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-1 cursor-col-resize hover:bg-primary/30"
+        className="absolute inset-y-0 left-0 w-1 cursor-col-resize hover:bg-accent"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -480,9 +517,9 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       />
 
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-        <FolderTree aria-hidden="true" className="size-4 text-muted-foreground" />
+        <FolderTree data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">Project files</h2>
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground" title={cwd}>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={cwd}>
           {cwd}
         </span>
         <Button variant="ghost" size="icon-sm" onClick={closePanel} aria-label="Close project files">
@@ -494,8 +531,8 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
 
       {gitStatus?.isRepository && (
         <>
-          <div className="flex h-8 shrink-0 items-center gap-2 px-3 text-[10px] text-muted-foreground">
-            <GitBranch aria-hidden="true" className="size-3.5" />
+          <div className="flex h-8 shrink-0 items-center gap-2 px-3 text-xs text-muted-foreground">
+            <GitBranch data-icon="inline-start" aria-hidden="true" className="size-3.5" />
             <span className="max-w-40 truncate font-mono text-foreground" title={gitStatus.branch ?? "Detached HEAD"}>
               {gitStatus.branch ?? "detached HEAD"}
             </span>
@@ -513,15 +550,18 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
         <section aria-label="File browser" className="flex w-56 shrink-0 flex-col">
           <div className="flex flex-col gap-2 p-2">
             <div className="flex items-center gap-1">
-              <Input
-                ref={searchRef}
-                aria-label="Search project files"
-                className="min-w-0 flex-1"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Filter files…"
-                spellCheck={false}
-              />
+              <InputGroup className="min-w-0 flex-1">
+                <InputGroupAddon>
+                  <Search data-icon="inline-start" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label="Search project files"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Filter files…"
+                  spellCheck={false}
+                />
+              </InputGroup>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -594,10 +634,10 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                       onClick={() => selectFile(path)}
                       title={path}
                     >
-                      <FileIcon data-icon="inline-start" className={fileTypeColor(path)} />
+                      <FileIcon data-icon="inline-start" className="text-muted-foreground" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs">{name}</span>
-                        {directory && <span className="block truncate font-mono text-[9px] text-muted-foreground">{directory}</span>}
+                        {directory && <span className="block truncate font-mono text-xs text-muted-foreground">{directory}</span>}
                       </span>
                       {status && statusStyle && (
                         <Badge variant="outline" className={cn("font-mono", statusStyle.className)} title={statusStyle.label}>
@@ -608,7 +648,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                   )
                 })}
                 {fileScope === "all" && (totalMatches > displayedFiles.length || scanLimited) && (
-                  <p className="px-3 py-2 text-[10px] text-muted-foreground">
+                  <p className="px-3 py-2 text-xs text-muted-foreground">
                     {totalMatches > displayedFiles.length
                       && `Showing ${displayedFiles.length} of ${totalMatches} matches. Type to narrow the list. `}
                     {scanLimited && "This project is too large to scan completely."}
@@ -627,7 +667,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
               <div className="flex h-10 shrink-0 items-center gap-2 px-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium" title={selectedPath}>{selectedName}</p>
-                  <p className="truncate font-mono text-[9px] text-muted-foreground">{selectedPath}</p>
+                  <p className="truncate font-mono text-xs text-muted-foreground">{selectedPath}</p>
                 </div>
                 {selectedGitFile && (
                   <ToggleGroup
@@ -654,7 +694,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                 {viewMode === "edit" && dirty && <Badge variant="outline">Unsaved</Badge>}
                 {viewMode === "edit" && !dirty && savedNotice && <Badge variant="secondary">Saved</Badge>}
                 {viewMode === "edit" && mtimeMs !== null && (
-                  <span className="text-[10px] text-muted-foreground">{displayBytes(size)}</span>
+                  <span className="text-xs text-muted-foreground">{displayBytes(size)}</span>
                 )}
                 {onAddToPrompt && (
                   <Button
@@ -696,7 +736,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
               <Separator />
               {viewMode === "edit" && fileError && (
                 <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
-                  <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
+                  <AlertTriangle data-icon="inline-start" aria-hidden="true" className="size-4 shrink-0" />
                   <span>{fileError}</span>
                 </div>
               )}
@@ -823,7 +863,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
               }}
             />
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setReviewDraft(null)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setReviewDraft(null)}>Cancel</Button>
               <Button type="submit" disabled={!reviewComment.trim()}>
                 <MessageSquarePlus data-icon="inline-start" />
                 Add to prompt
@@ -832,6 +872,30 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={pendingDiscard !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingDiscard(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDiscard?.type === "file"
+                ? `Your edits to ${selectedName ?? "this file"} will be lost when you open ${pendingDiscard.path}.`
+                : `Your edits to ${selectedName ?? "this file"} will be lost when you close the file workspace.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Keep editing</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmDiscard}>
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   )
 }

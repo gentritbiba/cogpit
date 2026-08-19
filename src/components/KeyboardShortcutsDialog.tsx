@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { Keyboard, RotateCcw, Search } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -8,7 +9,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
@@ -88,102 +93,105 @@ function KeyboardShortcutsDialogContent() {
 
   return (
     <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0" showCloseButton={false}>
-        <DialogHeader className="p-4 pb-3">
-          <DialogTitle className="flex items-center gap-2">
-            <Keyboard aria-hidden="true" className="size-4" />
-            Keyboard shortcuts
-          </DialogTitle>
-          <DialogDescription>
-            Click a shortcut, then press a new key combination. Changes are saved on this device.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogHeader className="p-4 pb-3">
+        <DialogTitle className="flex items-center gap-2">
+          <Keyboard data-icon="inline-start" aria-hidden="true" className="size-4" />
+          Keyboard shortcuts
+        </DialogTitle>
+        <DialogDescription>
+          Click a shortcut, then press a new key combination. Changes are saved on this device.
+        </DialogDescription>
+      </DialogHeader>
 
-        <Separator />
+      <Separator />
 
-        <div className="flex items-center gap-2 p-3">
-          <div className="relative flex-1">
-            <Search aria-hidden="true" className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label="Search keyboard shortcuts"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search shortcuts…"
-              className="pl-8"
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              resetAllKeybindings()
-              setBindings(getResolvedKeybindings())
-              setConflict(null)
-            }}
-          >
-            <RotateCcw data-icon="inline-start" />
-            Reset all
-          </Button>
-        </div>
+      <div className="flex items-center gap-2 p-3">
+        <InputGroup className="flex-1">
+          <InputGroupAddon>
+            <Search data-icon="inline-start" aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label="Search keyboard shortcuts"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search shortcuts…"
+          />
+        </InputGroup>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            resetAllKeybindings()
+            setBindings(getResolvedKeybindings())
+            setConflict(null)
+          }}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Reset all
+        </Button>
+      </div>
 
-        {conflict && (
-          <p role="alert" className="px-4 pb-2 text-xs text-destructive">
+      {conflict && (
+        <Alert variant="destructive" className="mx-3 mb-2 w-auto">
+          <AlertDescription>
             {conflict} Press another shortcut or Esc to cancel.
-          </p>
-        )}
+          </AlertDescription>
+        </Alert>
+      )}
 
-        <ScrollArea className="h-[min(28rem,60vh)]">
-          <div className="flex flex-col gap-4 px-3 pb-4">
-            {groups.map((group) => {
-              const definitions = filtered.filter((definition) => definition.group === group)
-              if (definitions.length === 0) return null
-              return (
-                <section key={group} className="flex flex-col gap-1">
-                  <h3 className="px-2 py-1 text-xs font-medium text-muted-foreground">{group}</h3>
-                  {definitions.map((definition) => {
-                    const isRecording = recording === definition.command
-                    return (
-                      <div
-                        key={definition.command}
-                        className="flex min-h-12 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm">{definition.label}</p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {definition.description}
-                          </p>
-                        </div>
-                        <Button
-                          variant={isRecording ? "secondary" : "outline"}
-                          size="sm"
-                          className="min-w-28 font-mono text-xs"
-                          onClick={() => {
-                            setConflict(null)
-                            setRecording(isRecording ? null : definition.command)
-                          }}
-                          aria-label={`Change shortcut for ${definition.label}`}
-                        >
-                          {isRecording ? "Press keys…" : formatShortcut(bindings[definition.command])}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => {
-                            resetKeybinding(definition.command)
-                            setBindings(getResolvedKeybindings())
-                            setConflict(null)
-                          }}
-                          aria-label={`Reset shortcut for ${definition.label}`}
-                        >
-                          <RotateCcw />
-                        </Button>
+      <ScrollArea className="h-[min(28rem,60vh)]">
+        <div className="flex flex-col gap-4 px-3 pb-4">
+          {groups.map((group) => {
+            const definitions = filtered.filter((definition) => definition.group === group)
+            if (definitions.length === 0) return null
+            return (
+              <section key={group} className="flex flex-col gap-1">
+                <h3 className="px-2 py-1 text-xs font-medium text-muted-foreground">{group}</h3>
+                {definitions.map((definition) => {
+                  const isRecording = recording === definition.command
+                  return (
+                    <div
+                      key={definition.command}
+                      className="flex min-h-12 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{definition.label}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {definition.description}
+                        </p>
                       </div>
-                    )
-                  })}
-                </section>
-              )
-            })}
-          </div>
-        </ScrollArea>
+                      <Button
+                        variant={isRecording ? "secondary" : "outline"}
+                        size="sm"
+                        className="min-w-28 font-mono text-xs"
+                        onClick={() => {
+                          setConflict(null)
+                          setRecording(isRecording ? null : definition.command)
+                        }}
+                        aria-label={`Change shortcut for ${definition.label}`}
+                      >
+                        {isRecording ? "Press keys…" : formatShortcut(bindings[definition.command])}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          resetKeybinding(definition.command)
+                          setBindings(getResolvedKeybindings())
+                          setConflict(null)
+                        }}
+                        aria-label={`Reset shortcut for ${definition.label}`}
+                      >
+                        <RotateCcw data-icon="inline-start" />
+                      </Button>
+                    </div>
+                  )
+                })}
+              </section>
+            )
+          })}
+        </div>
+      </ScrollArea>
     </DialogContent>
   )
 }

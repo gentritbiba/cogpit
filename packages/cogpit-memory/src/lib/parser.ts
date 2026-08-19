@@ -192,29 +192,20 @@ export function getUserMessageImages(content: UserContent | null): ImageBlock[] 
 
 // ── Tool Colors ─────────────────────────────────────────────────────────────
 
-const TOOL_COLORS: Record<string, string> = {
-  Read: "text-blue-400",
-  Write: "text-green-400",
-  Edit: "text-amber-400",
-  Bash: "text-red-400",
-  Grep: "text-purple-400",
-  Glob: "text-cyan-400",
-  Task: "text-indigo-400", // @deprecated pre-v2.1.63, now "Agent"
-  Agent: "text-indigo-400",
-  WebFetch: "text-orange-400",
-  WebSearch: "text-orange-400",
-  NotebookEdit: "text-green-400",
-  EnterPlanMode: "text-purple-400",
-  ExitPlanMode: "text-purple-400",
-  AskUserQuestion: "text-pink-400",
-  TodoWrite: "text-violet-400",
-  ToolSearch: "text-slate-400",
-  Skill: "text-indigo-400",
-  Mcp: "text-teal-400",
-  Image: "text-pink-400",
-  exec: "text-slate-400",
-}
+const FOREGROUND_TOOLS = new Set([
+  "Write",
+  "Edit",
+  "Bash",
+  "Task", // @deprecated pre-v2.1.63, now "Agent"
+  "Agent",
+  "NotebookEdit",
+  "AskUserQuestion",
+  "TodoWrite",
+  "Skill",
+  "Image",
+  "exec",
+])
 
 export function getToolColor(toolName: string): string {
-  return TOOL_COLORS[toolName] ?? "text-slate-400"
+  return FOREGROUND_TOOLS.has(toolName) ? "text-foreground" : "text-muted-foreground"
 }

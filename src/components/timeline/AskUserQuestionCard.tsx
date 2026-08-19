@@ -11,6 +11,8 @@ import {
 import type { ToolCall } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { AskUserAnswerForm } from "./AskUserAnswerForm"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 interface AskUserQuestion {
   question: string
@@ -111,59 +113,55 @@ function QuestionHistoryItem({
   const showWrittenAnswer = completed && answer !== undefined && selectedOptionCount === 0
 
   return (
-    <div className="rounded-lg border border-border/50 bg-elevation-1/70 p-3">
+    <div className="border-b border-border py-3 last:border-b-0">
       <div className="mb-1.5 flex items-center gap-2">
-        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pink-500/10 font-mono text-[10px] text-pink-300">
+        <Badge variant="outline" className="size-5 rounded-full p-0 font-mono text-muted-foreground">
           {index + 1}
-        </span>
+        </Badge>
         {question.header && (
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-pink-300/80">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {question.header}
           </span>
         )}
       </div>
 
-      <p className="text-[13px] leading-relaxed text-foreground/90">
+      <p className="text-sm leading-relaxed text-foreground">
         {question.question}
       </p>
 
       {options.length > 0 && (
-        <div className="mt-2.5 grid gap-1.5">
+        <div className="mt-2 flex flex-col divide-y divide-border">
           {options.map((option, optionIndex) => {
             const selected = isSelectedOption(question, answer, option.label)
             return (
               <div
                 key={`${option.label}-${optionIndex}`}
                 className={cn(
-                  "flex items-start gap-2.5 rounded-md border px-2.5 py-2",
+                  "flex items-start gap-2.5 py-2",
                   selected
-                    ? "border-pink-500/40 bg-pink-500/10 text-foreground"
-                    : "border-border/40 bg-elevation-0/40 text-muted-foreground",
+                    ? "text-foreground"
+                    : "text-muted-foreground",
                 )}
               >
                 <span
                   className={cn(
                     "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
                     question.multiSelect ? "rounded" : "rounded-full",
-                    selected
-                      ? "border-pink-400 bg-pink-500 text-white"
-                      : "border-muted-foreground/30",
+                    selected ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/30",
                   )}
                   aria-hidden="true"
                 >
-                  {selected && <Check className="size-3" strokeWidth={3} />}
+                  {selected && <Check className="size-3" strokeWidth={3} data-icon="icon" />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className={cn("block text-xs font-medium", selected && "text-pink-200")}>
+                  <span className="block text-xs font-medium">
                     {option.label}
                     {selected && (
-                      <span className="ml-2 text-[9px] font-semibold uppercase tracking-wide text-pink-300/70">
-                        Selected
-                      </span>
+                      <Badge variant="secondary" className="ml-2">Selected</Badge>
                     )}
                   </span>
                   {option.description && (
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                       {option.description}
                     </span>
                   )}
@@ -175,11 +173,9 @@ function QuestionHistoryItem({
       )}
 
       {showWrittenAnswer && (
-        <div className="mt-2.5 rounded-md border border-pink-500/25 bg-pink-500/[0.07] px-2.5 py-2">
-          <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-pink-300/70">
-            Answer
-          </div>
-          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground/90">
+        <div className="mt-2 border-l-2 border-border pl-3">
+          <div className="mb-0.5 text-xs font-medium text-muted-foreground">Answer</div>
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
             {answer.trim() || "No answer provided"}
           </p>
         </div>
@@ -227,36 +223,27 @@ export function AskUserQuestionCard({
   return (
     <section
       className={cn(
-        "my-1 overflow-hidden rounded-xl border bg-pink-500/[0.035]",
-        toolCall.isError ? "border-red-500/25" : "border-pink-500/25",
+        "my-1 overflow-hidden rounded-lg border bg-card",
+        toolCall.isError && "border-destructive/30",
       )}
       aria-label="Question history"
     >
-      <header className="flex items-start gap-2.5 border-b border-pink-500/15 px-3 py-2.5">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-pink-500/20 bg-pink-500/10">
-          <CircleHelp className="size-4 text-pink-300" />
-        </span>
+      <header className="flex items-start gap-2.5 border-b px-3 py-2.5">
+        <CircleHelp className="mt-0.5 size-4 shrink-0 text-muted-foreground" data-icon="inline-start" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="text-xs font-semibold text-foreground">Decision requested</h3>
-            <span className="text-[10px] text-muted-foreground">
+            <h3 className="text-sm font-medium text-foreground">Decision requested</h3>
+            <span className="text-xs text-muted-foreground">
               {questions.length} {questions.length === 1 ? "question" : "questions"}
             </span>
           </div>
-          <div className={cn(
-            "mt-0.5 inline-flex items-center gap-1 text-[10px]",
-            toolCall.isError
-              ? "text-red-300"
-              : isAnswered
-                ? "text-emerald-400"
-                : "text-pink-300/80",
-          )}>
-            <Status className="size-3" />
+          <Badge variant={toolCall.isError ? "destructive" : isAnswered ? "secondary" : "outline"}>
+            <Status data-icon="inline-start" />
             {statusLabel}
-          </div>
+          </Badge>
         </div>
         {toolCall.timestamp && (
-          <time className="hidden shrink-0 pt-0.5 font-mono text-[10px] tabular-nums text-muted-foreground/45 sm:block">
+          <time className="hidden shrink-0 pt-0.5 font-mono text-xs tabular-nums text-muted-foreground sm:block">
             {new Date(toolCall.timestamp).toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -266,7 +253,7 @@ export function AskUserQuestionCard({
         )}
       </header>
 
-      <div className="space-y-2 p-2.5 sm:p-3">
+      <div className="px-3">
         {isWaiting && sessionId ? (
           <AskUserAnswerForm toolCall={toolCall} sessionId={sessionId} embedded />
         ) : questions.length > 0 ? (
@@ -280,59 +267,61 @@ export function AskUserQuestionCard({
             />
           ))
         ) : (
-          <p className="rounded-md border border-border/40 bg-elevation-1 p-2.5 text-xs text-muted-foreground">
+          <p className="py-3 text-sm text-muted-foreground">
             Question details are unavailable.
           </p>
         )}
 
         {toolCall.result !== null && !hasStructuredAnswers && (
           <div className={cn(
-            "rounded-md border px-2.5 py-2",
+            "border-t border-border py-3",
             toolCall.isError
-              ? "border-red-500/25 bg-red-500/[0.07] text-red-200"
-              : "border-border/40 bg-elevation-1 text-muted-foreground",
+              ? "text-destructive"
+              : "text-muted-foreground",
           )}>
-            <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] opacity-70">
+            <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide opacity-70">
               Recorded response
             </div>
-            <p className="whitespace-pre-wrap break-words text-xs leading-relaxed">
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
               {toolCall.result}
             </p>
           </div>
         )}
       </div>
 
-      <div className="border-t border-pink-500/10 px-3 py-1.5">
-        <button
+      <div className="border-t px-3 py-1.5">
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => {
             if (!expandAll) setDetailsOpen((open) => !open)
           }}
-          className="flex items-center gap-1 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
+          className="-ml-2 text-muted-foreground"
           aria-expanded={showRawDetails}
         >
           {showRawDetails
-            ? <ChevronDown className="size-3" />
-            : <ChevronRight className="size-3" />}
+            ? <ChevronDown data-icon="inline-start" />
+            : <ChevronRight data-icon="inline-start" />}
           Raw details
-        </button>
+        </Button>
 
         {showRawDetails && (
           <div className="mt-1.5 grid gap-2 pb-1.5 lg:grid-cols-2">
             <div className="min-w-0">
-              <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Input
               </div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/30 bg-elevation-0 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed text-muted-foreground">
                 {JSON.stringify(toolCall.input, null, 2)}
               </pre>
             </div>
             {toolCall.result !== null && (
               <div className="min-w-0">
-                <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/60">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Result
                 </div>
-                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/30 bg-elevation-0 p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed text-muted-foreground">
                   {toolCall.result}
                 </pre>
               </div>

@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react"
 import { FileCode2, ChevronsDownUp, ChevronsUpDown, Layers, Clock, X, Sigma, List, ChevronLeft, ChevronRight, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import type { ParsedSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -54,33 +55,36 @@ function AgentGroupSection({
   const type = group.subagentType
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <div className="flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
-        <span
-          className="text-[10px] font-semibold text-indigo-400 truncate cursor-pointer hover:text-indigo-300 transition-colors"
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="h-auto min-w-0 truncate px-1 text-xs font-semibold"
           title={`Open subagent ${group.agentId}`}
           onClick={() => {
             window.dispatchEvent(new CustomEvent(OPEN_SUBAGENT_EVENT, { detail: { agentId: group.agentId } }))
           }}
         >
           {name}
-        </span>
+        </Button>
         {type && (
-          <span className="text-[9px] text-muted-foreground/60 truncate">
+          <span className="truncate text-xs text-muted-foreground">
             {type}
           </span>
         )}
         <Badge
           variant="outline"
-          className="h-3.5 px-1 text-[9px] border-indigo-400/30 text-indigo-400/70"
+          className="h-5 px-1.5 text-xs text-muted-foreground"
         >
           {group.files.length}
         </Badge>
         <div className="flex-1" />
-        <span className="text-[9px] font-mono tabular-nums text-green-500/60">
+        <span className="font-mono text-xs tabular-nums text-success">
           +{group.totalAdd}
         </span>
-        <span className="text-[9px] font-mono tabular-nums text-red-400/60">
+        <span className="font-mono text-xs tabular-nums text-destructive">
           -{group.totalDel}
         </span>
       </div>
@@ -290,39 +294,34 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const scopeLabel = getScopeLabel()
 
   return (
-    <div className="flex flex-col h-full overflow-hidden border-border min-w-0 elevation-1">
-      <div className="shrink-0 flex items-center gap-2 px-3 h-8 border-b border-border/50">
-        <FileCode2 className="size-3.5 text-amber-400" />
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-card">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
+        <FileCode2 data-icon="inline-start" className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-foreground">
           File Changes
         </span>
         <Badge
           variant="outline"
-          className="h-4 px-1.5 text-[10px] border-border/70 text-muted-foreground"
+          className="h-5 px-1.5 text-xs text-muted-foreground"
         >
           {totalFileCount} file{totalFileCount !== 1 ? "s" : ""}
         </Badge>
         <div className="flex-1" />
-        <span className="text-[10px] font-mono tabular-nums text-green-500/70">
+        <span className="font-mono text-xs tabular-nums text-success">
           +{groupedAdd}
         </span>
-        <span className="text-[10px] font-mono tabular-nums text-red-400/70">
+        <span className="font-mono text-xs tabular-nums text-destructive">
           -{groupedDel}
         </span>
 
-        {/* Group by agent toggle */}
         <Tooltip>
-          <TooltipTrigger render={<button
+          <TooltipTrigger render={<Button
+              variant={groupByAgent ? "secondary" : "ghost"}
+              size="icon-xs"
               onClick={() => setGroupByAgent(!groupByAgent)}
-              className={cn(
-                "p-1 transition-colors rounded",
-                groupByAgent
-                  ? "text-indigo-400 bg-indigo-400/10"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
               aria-label={groupByAgent ? "Show all changes" : "Group by subagent"}
             />}>
-              <Users className="size-3.5" />
+              <Users data-icon="inline-start" />
           </TooltipTrigger>
           <TooltipContent>
             {groupByAgent
@@ -331,19 +330,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           </TooltipContent>
         </Tooltip>
 
-        {/* Scope toggle */}
         <Tooltip>
-          <TooltipTrigger render={<button
+          <TooltipTrigger render={<Button
+              variant={scope === "all" ? "secondary" : "ghost"}
+              size="icon-xs"
               onClick={handleScopeToggle}
-              className={cn(
-                "p-1 transition-colors rounded",
-                scope === "all"
-                  ? "text-amber-400 bg-amber-400/10"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
               aria-label={scope === "last" ? "Show all turns" : "Show last turn only"}
             />}>
-              {scope === "all" ? <Layers className="size-3.5" /> : <Clock className="size-3.5" />}
+              {scope === "all" ? <Layers data-icon="inline-start" /> : <Clock data-icon="inline-start" />}
           </TooltipTrigger>
           <TooltipContent>
             {scope === "last"
@@ -352,19 +346,14 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           </TooltipContent>
         </Tooltip>
 
-        {/* Diff mode toggle */}
         <Tooltip>
-          <TooltipTrigger render={<button
+          <TooltipTrigger render={<Button
+              variant={diffMode === "per-edit" ? "secondary" : "ghost"}
+              size="icon-xs"
               onClick={() => setDiffMode(diffMode === "net" ? "per-edit" : "net")}
-              className={cn(
-                "p-1 transition-colors rounded",
-                diffMode === "per-edit"
-                  ? "text-violet-400 bg-violet-400/10"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
               aria-label={diffMode === "net" ? "Show per-edit diffs" : "Show net diff"}
             />}>
-              {diffMode === "net" ? <Sigma className="size-3.5" /> : <List className="size-3.5" />}
+              {diffMode === "net" ? <Sigma data-icon="inline-start" /> : <List data-icon="inline-start" />}
           </TooltipTrigger>
           <TooltipContent>
             {diffMode === "net"
@@ -374,73 +363,74 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
         </Tooltip>
 
         <Tooltip>
-          <TooltipTrigger render={<button
+          <TooltipTrigger render={<Button
+              variant="ghost"
+              size="icon-xs"
               onClick={() => setAllExpanded(!allExpanded)}
-              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={allExpanded ? "Collapse all" : "Expand all"}
             />}>
-              {allExpanded ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
+              {allExpanded ? <ChevronsDownUp data-icon="inline-start" /> : <ChevronsUpDown data-icon="inline-start" />}
           </TooltipTrigger>
           <TooltipContent>{allExpanded ? "Collapse all" : "Expand all"}</TooltipContent>
         </Tooltip>
       </div>
 
-      {/* Scope indicator bar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1 border-b border-border/50 bg-elevation-1/50">
-        <span className="text-[10px] text-muted-foreground/70">
+      <div className="flex shrink-0 items-center gap-1 border-b bg-muted/30 px-3 py-1">
+        <span className="text-xs text-muted-foreground">
           Showing:
         </span>
-        {/* Turn navigation arrows */}
         {scope !== "all" && lastTurnIndex > 0 && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => {
               const current = typeof scope === "number" ? scope : lastTurnIndex
               if (current > 0) setScope(current - 1)
             }}
             disabled={(typeof scope === "number" ? scope : lastTurnIndex) <= 0}
-            className="p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25 disabled:cursor-default transition-colors"
-            title="Previous turn"
+            aria-label="Previous turn"
           >
-            <ChevronLeft className="size-3" />
-          </button>
+            <ChevronLeft data-icon="inline-start" />
+          </Button>
         )}
         <span className={cn(
-          "text-[10px] font-medium",
-          typeof scope === "number" ? "text-blue-400" : "text-muted-foreground",
+          "text-xs font-medium",
+          typeof scope === "number" ? "text-foreground" : "text-muted-foreground",
         )}>
           {scopeLabel}
         </span>
         {scope !== "all" && lastTurnIndex > 0 && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => {
-              if (typeof scope === "number") {
-                if (scope + 1 >= lastTurnIndex) setScope("last")
-                else setScope(scope + 1)
-              }
+              setScope((currentScope) => {
+                if (typeof currentScope !== "number") return currentScope
+                return currentScope + 1 >= lastTurnIndex ? "last" : currentScope + 1
+              })
             }}
             disabled={scope === "last"}
-            className="p-0.5 text-muted-foreground/50 hover:text-foreground disabled:opacity-25 disabled:cursor-default transition-colors"
-            title="Next turn"
+            aria-label="Next turn"
           >
-            <ChevronRight className="size-3" />
-          </button>
+            <ChevronRight data-icon="inline-start" />
+          </Button>
         )}
         {typeof scope === "number" && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setScope("last")}
-            className="p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors"
-            title="Back to last turn"
+            aria-label="Back to last turn"
           >
-            <X className="size-3" />
-          </button>
+            <X data-icon="inline-start" />
+          </Button>
         )}
       </div>
 
       <div className="relative flex-1 min-h-0">
-        {/* Top fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-elevation-0 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b from-background to-transparent transition-opacity duration-200",
             canScrollUp ? "opacity-100" : "opacity-0"
           )}
         />
@@ -449,7 +439,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
           onScroll={handleScroll}
           className="h-full overflow-y-auto"
         >
-          <div className="p-1.5 space-y-1">
+          <div className="flex flex-col gap-1 p-1.5">
             {groupByAgent ? (
               agentGroups.length > 0 ? (
                 agentGroups.map((ag) => (
@@ -462,7 +452,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                   />
                 ))
               ) : (
-                <div className="text-[11px] text-muted-foreground/50 text-center py-4">
+                <div className="py-4 text-center text-xs text-muted-foreground">
                   No subagent changes in {scopeLabel.toLowerCase()}
                 </div>
               )
@@ -477,17 +467,16 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
                 />
               ))
             ) : (
-              <div className="text-[11px] text-muted-foreground/50 text-center py-4">
+              <div className="py-4 text-center text-xs text-muted-foreground">
                 No file changes in {scopeLabel.toLowerCase()}
               </div>
             )}
           </div>
           <div ref={bottomRef} />
         </div>
-        {/* Bottom fade */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-elevation-0 to-transparent transition-opacity duration-200",
+            "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-6 bg-gradient-to-t from-background to-transparent transition-opacity duration-200",
             canScrollDown ? "opacity-100" : "opacity-0"
           )}
         />

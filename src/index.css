@@ -1,9 +1,13 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -20,6 +24,12 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -40,130 +50,96 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-
-  /* ── Malewicz Elevation Surface Colors ── */
-  --color-elevation-0: var(--elevation-0);
-  --color-elevation-1: var(--elevation-1);
-  --color-elevation-2: var(--elevation-2);
-  --color-elevation-3: var(--elevation-3);
-  --color-elevation-4: var(--elevation-4);
 }
 
 :root {
-  --background: oklch(0.965 0 0);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
-  --card: oklch(0.995 0 0);
+  --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.955 0.002 260);
+  --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.955 0.002 260);
+  --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.955 0.002 260);
+  --accent: oklch(0.96 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.912 0.003 260);
-  --input: oklch(0.912 0.003 260);
-  --ring: oklch(0.708 0 0);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.51 0.15 151);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.68 0.16 72);
+  --warning-foreground: oklch(0.2 0.04 72);
+  --info: oklch(0.55 0.18 255);
+  --info-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.975 0.001 260);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.955 0.002 260);
+  --sidebar-accent: oklch(0.96 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.912 0.003 260);
-  --sidebar-ring: oklch(0.708 0 0);
-
-  /* Malewicz Elevation: "Lightness for Proximity" (light mode) */
-  --elevation-0: oklch(0.965 0 0);
-  --elevation-1: oklch(0.990 0 0);
-  --elevation-2: oklch(1.000 0 0);
-  --elevation-3: oklch(1.000 0 0);
-  --elevation-4: oklch(1.000 0 0);
-
-  --shadow-elevation-low:
-    0 1px 2px hsla(225, 40%, 20%, 0.06),
-    0 1px 3px hsla(225, 40%, 20%, 0.04);
-  --shadow-elevation-mid:
-    0 1px 2px hsla(225, 40%, 20%, 0.06),
-    0 4px 10px hsla(225, 40%, 20%, 0.06),
-    0 10px 20px hsla(225, 40%, 20%, 0.04);
-  --shadow-elevation-high:
-    0 2px 4px hsla(225, 40%, 20%, 0.06),
-    0 8px 20px hsla(225, 40%, 20%, 0.08),
-    0 24px 48px hsla(225, 40%, 20%, 0.06);
-  --edge-highlight-subtle: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.556 0 0);
 }
 
 .dark {
-  --background: oklch(0.18 0.008 265);
+  --background: oklch(0.105 0 0);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.18 0.008 265);
+  --card: oklch(0.13 0 0);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.24 0.010 265);
+  --popover: oklch(0.16 0 0);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.985 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.22 0.008 265);
+  --secondary: oklch(0.19 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.22 0.008 265);
+  --muted: oklch(0.18 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.22 0.008 265);
+  --accent: oklch(0.2 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.28 0.010 265);
-  --input: oklch(0.22 0.008 265);
-  --ring: oklch(0.439 0 0);
+  --destructive: oklch(0.64 0.22 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.72 0.17 151);
+  --success-foreground: oklch(0.12 0.03 151);
+  --warning: oklch(0.78 0.15 78);
+  --warning-foreground: oklch(0.16 0.03 72);
+  --info: oklch(0.72 0.14 255);
+  --info-foreground: oklch(0.12 0.03 255);
+  --border: oklch(0.24 0 0);
+  --input: oklch(0.22 0 0);
+  --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.18 0.008 265);
+  --sidebar: oklch(0.125 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.008 265);
+  --sidebar-primary: oklch(0.985 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.2 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.28 0.010 265);
-  --sidebar-ring: oklch(0.439 0 0);
-
-  /* Malewicz Elevation: "Lightness for Proximity" (dark mode)
-     Ground level lifted to surface — consistent elevation-1 base */
-  --elevation-0: oklch(0.18 0.008 265);     /* Ground — now matches surface level */
-  --elevation-1: oklch(0.18 0.008 265);     /* Surface — cards, panels (same as ground) */
-  --elevation-2: oklch(0.24 0.010 265);     /* Raised — interactive, inputs (+0.06) */
-  --elevation-3: oklch(0.30 0.012 265);     /* Floating — dropdowns, popovers (+0.06) */
-  --elevation-4: oklch(0.34 0.014 265);     /* Overlay — modals, dialogs (+0.04) */
-
-  /* Shadow Physics: subtle — rely on surface color difference, not heavy shadows */
-  --shadow-elevation-low:
-    0 1px 2px hsla(230, 60%, 4%, 0.3);
-  --shadow-elevation-mid:
-    0 1px 2px hsla(230, 60%, 4%, 0.3),
-    0 2px 6px hsla(230, 60%, 4%, 0.2);
-  --shadow-elevation-high:
-    0 1px 3px hsla(230, 60%, 4%, 0.4),
-    0 4px 12px hsla(230, 60%, 4%, 0.3);
-  --edge-highlight-subtle: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --sidebar-border: oklch(0.24 0 0);
+  --sidebar-ring: oklch(0.556 0 0);
 }
 
 /* ── Deep OLED Theme ──
    Pure black backgrounds, zero blue tint, maximum contrast.
    Great for OLED displays where true black saves power. */
 .dark.theme-oled {
-  --background: oklch(0.08 0 0);
+  --background: oklch(0 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.08 0 0);
   --card-foreground: oklch(0.985 0 0);
@@ -177,36 +153,19 @@
   --muted-foreground: oklch(0.65 0 0);
   --accent: oklch(0.10 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --destructive: oklch(0.64 0.22 25);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.18 0 0);
   --input: oklch(0.10 0 0);
-  --ring: oklch(0.439 0 0);
+  --ring: oklch(0.556 0 0);
   --sidebar: oklch(0.08 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.985 0 0);
+  --sidebar-primary-foreground: oklch(0 0 0);
   --sidebar-accent: oklch(0.10 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.18 0 0);
   --sidebar-ring: oklch(0.439 0 0);
-
-  /* OLED Elevation: ground lifted to surface level */
-  --elevation-0: oklch(0.08 0 0);
-  --elevation-1: oklch(0.08 0 0);
-  --elevation-2: oklch(0.14 0 0);
-  --elevation-3: oklch(0.18 0 0);
-  --elevation-4: oklch(0.22 0 0);
-
-  /* Shadows: darker, sharper for OLED contrast */
-  --shadow-elevation-low: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-elevation-mid:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 2px 6px rgba(0, 0, 0, 0.4);
-  --shadow-elevation-high:
-    0 1px 3px rgba(0, 0, 0, 0.6),
-    0 4px 12px rgba(0, 0, 0, 0.5);
-  --edge-highlight-subtle: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 @layer base {
@@ -215,19 +174,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-sans);
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
     font-optical-sizing: auto;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
     text-rendering: optimizeLegibility;
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
-    -webkit-font-smoothing: auto;
-    -moz-osx-font-smoothing: auto;
-  }
-  /* Chromium/Electron renders light-on-dark text thinner — bump weight to compensate */
-  .dark body {
-    font-weight: 430;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   button,
   [role="button"] {
@@ -265,92 +220,12 @@
   }
 }
 
-/* ── Bottom sheet drag handle ─────────────────────────── */
-.bottom-sheet-handle {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: oklch(0.5 0 0 / 0.4);
-  margin: 8px auto;
-}
-
-/* ── Custom Utilities ─────────────────────────────────────── */
-
-/* CSS containment: isolate layout recalculation boundaries during resize */
 [data-panel] {
   contain: layout style;
 }
 
-/* Kill all CSS transitions inside panels while the resize handle is being
-   dragged. Prevents the browser from computing transition frames for every
-   element during continuous resize. */
 [data-panel-group]:has([data-resize-handle-active]) [data-panel] * {
   transition: none !important;
-}
-
-/* Smooth transitions */
-.transition-smooth {
-  transition: color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* ── Malewicz Elevation Surfaces ───────────────────────────
-   "Lightness for Proximity" — higher elevation = lighter bg
-   Each level pairs its surface color with matching depth shadow */
-.elevation-0 {
-  background-color: var(--elevation-0);
-}
-.elevation-1 {
-  background-color: var(--elevation-1);
-}
-.elevation-2 {
-  background-color: var(--elevation-2);
-  box-shadow: var(--shadow-elevation-low);
-}
-.elevation-3 {
-  background-color: var(--elevation-3);
-  box-shadow: var(--shadow-elevation-mid);
-}
-.elevation-4 {
-  background-color: var(--elevation-4);
-  box-shadow: var(--shadow-elevation-high);
-}
-
-/* Standalone depth shadows (when you need shadow without bg change) */
-.depth-low { box-shadow: var(--shadow-elevation-low); }
-.depth-mid { box-shadow: var(--shadow-elevation-mid); }
-.depth-high { box-shadow: var(--shadow-elevation-high); }
-
-/* ── Card hover: elevation shift on hover ─── */
-.card-hover {
-  transition: box-shadow 0.2s ease,
-              background-color 0.2s ease,
-              border-color 0.2s ease;
-}
-.card-hover:hover {
-  box-shadow: var(--shadow-elevation-low);
-}
-
-/* Card hover with glow (blue accent) */
-.card-glow {
-  transition: box-shadow 0.2s ease,
-              border-color 0.2s ease,
-              background-color 0.2s ease;
-}
-.card-glow:hover {
-  box-shadow:
-    var(--shadow-elevation-low),
-    0 0 0 1px rgba(59, 130, 246, 0.10);
-}
-
-/* ── Glass / Glassmorphism (Rule 5: backdrop-filter + blur) ── */
-.glass {
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  box-shadow: var(--edge-highlight-subtle);
 }
 
 /* Electron window drag region */
@@ -393,27 +268,6 @@ html.electron-win .electron-drag {
   }
 }
 
-/* Skeleton loading animation */
-.skeleton {
-  background: linear-gradient(90deg, var(--muted) 25%, var(--border) 50%, var(--muted) 75%);
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.5s ease-in-out infinite;
-}
-@keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Fade in animation */
-.fade-in {
-  animation: fade-in 0.3s ease-out;
-}
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Panel slide-in animation */
 .panel-enter {
   animation: panel-enter 0.15s ease-out;
 }
@@ -430,79 +284,24 @@ html.electron-win .electron-drag {
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* Toast slide-up animation */
-.toast-enter {
-  animation: toast-enter 0.2s ease-out;
-}
-@keyframes toast-enter {
-  from { opacity: 0; transform: translate(-50%, 8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
-}
-
-/* Reduce motion for accessibility */
 @media (prefers-reduced-motion: reduce) {
   .panel-enter,
-  .panel-enter-right,
-  .toast-enter,
-  .fade-in {
+  .panel-enter-right {
     animation: none;
-  }
-  .transition-smooth {
-    transition: none;
   }
 }
 
-/*
- * Ping/pulse indicators keep Chromium's compositor producing frames forever,
- * which cost real battery. Short entrance and loading animations still run.
- *
- * Read this before reaching for either class: these are neutered, not banned,
- * so `animate-pulse` renders a static element and nothing warns you. Two live
- * states were pixel-identical for releases because they differed only by this
- * class. Distinguish states with paint instead, the way
- * src/components/LiveSessions/statusDot.ts does: brightness, opacity, a ring.
- */
 .animate-ping,
 .animate-pulse {
   animation: none !important;
 }
 
-/* ── Chat input 3D lighting (ChatGPT-style subtle depth) ── */
-.chat-input-3d {
-  box-shadow:
-    var(--edge-highlight-subtle),
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    0 4px 12px rgba(0, 0, 0, 0.08);
-}
-.dark .chat-input-3d {
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
-    inset 0 -1px 0 0 rgba(0, 0, 0, 0.1),
-    0 1px 3px rgba(0, 0, 0, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.2);
-}
-.dark .chat-input-3d:focus-within {
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
-    inset 0 -1px 0 0 rgba(0, 0, 0, 0.1),
-    0 1px 3px rgba(0, 0, 0, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-
-/* ── Find-in-session highlight ── */
 mark.find-in-session-highlight {
-  background-color: rgba(250, 204, 21, 0.35);
+  background-color: color-mix(in oklab, var(--warning) 35%, transparent);
   color: inherit;
   border-radius: 2px;
   padding: 0;
 }
 mark.find-in-session-active {
-  background-color: rgba(250, 204, 21, 0.7);
-}
-.dark mark.find-in-session-highlight {
-  background-color: rgba(250, 204, 21, 0.2);
-}
-.dark mark.find-in-session-active {
-  background-color: rgba(250, 204, 21, 0.5);
+  background-color: color-mix(in oklab, var(--warning) 65%, transparent);
 }

@@ -1,90 +1,84 @@
-import { Search, X, AlertTriangle, RefreshCw } from "lucide-react"
+import { AlertTriangle, RefreshCw, Search, X } from "lucide-react"
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { LiveIndicator } from "@/components/header-shared"
-
-/** One cheat-sheet row. `keys` is a formatted chord, e.g. "⇧⌘B" or "Ctrl+Shift+B". */
-export function Shortcut({ keys, label }: { keys: string; label: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-0.5">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="flex items-center gap-0.5 shrink-0">
-        {keys.split("+").map((k, i) => (
-          <kbd
-            key={i}
-            className="inline-flex items-center justify-center rounded border border-border/80 bg-muted/80 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground min-w-[20px]"
-          >
-            {k}
-          </kbd>
-        ))}
-      </span>
-    </div>
-  )
-}
-
-export function LiveDot({ size = "md" }: { size?: "sm" | "md" }) {
-  return <LiveIndicator className={size === "sm" ? "size-1.5" : undefined} />
-}
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function SearchInput({ value, onChange, placeholder }: {
   value: string
-  onChange: (v: string) => void
+  onChange: (value: string) => void
   placeholder: string
 }) {
   return (
-    <div className="mb-4 relative max-w-sm">
-      <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input
+    <InputGroup className="w-full sm:max-w-sm">
+      <InputGroupAddon>
+        <Search aria-hidden="true" />
+      </InputGroupAddon>
+      <InputGroupInput
+        aria-label={placeholder}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="bg-elevation-1 pl-9 h-8 text-sm border-border/50 placeholder:text-muted-foreground"
       />
       {value && (
-        <button
-          onClick={() => onChange("")}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          aria-label="Clear search"
-        >
-          <X className="size-3" />
-        </button>
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            aria-label="Clear search"
+            onClick={() => onChange("")}
+            size="icon-xs"
+          >
+            <X />
+          </InputGroupButton>
+        </InputGroupAddon>
       )}
-    </div>
+    </InputGroup>
   )
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5">
-      <AlertTriangle className="size-4 text-red-400 shrink-0" />
-      <span className="text-sm text-red-400 flex-1">{message}</span>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10"
-        onClick={onRetry}
-      >
-        <RefreshCw className="size-3 mr-1" />
-        Retry
-      </Button>
-    </div>
+    <Alert variant="destructive">
+      <AlertTriangle aria-hidden="true" />
+      <AlertTitle>Could not load this data</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+      <AlertAction>
+        <Button variant="ghost" size="xs" onClick={onRetry}>
+          <RefreshCw data-icon="inline-start" />
+          Retry
+        </Button>
+      </AlertAction>
+    </Alert>
   )
 }
 
-export function SkeletonCards({ count = 3, includeMessagePlaceholder = false }: {
+export function SkeletonRows({ count = 4, includeMessagePlaceholder = false }: {
   count?: number
   includeMessagePlaceholder?: boolean
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="rounded-lg elevation-1 p-4">
-          <div className="skeleton h-4 w-3/4 rounded mb-3" />
-          <div className="skeleton h-3 w-1/2 rounded mb-4" />
-          {includeMessagePlaceholder && <div className="skeleton h-8 w-full rounded mb-3" />}
-          <div className="flex gap-3">
-            <div className="skeleton h-3 w-16 rounded" />
-            <div className="skeleton h-3 w-16 rounded" />
+    <div className="overflow-hidden rounded-lg border" aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index}>
+          {index > 0 && <Separator />}
+          <div className="flex items-center gap-3 px-4 py-3.5">
+            <Skeleton className="size-8 shrink-0 rounded-md" />
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Skeleton className="h-4 w-40 max-w-full" />
+              {includeMessagePlaceholder && <Skeleton className="h-3 w-72 max-w-full" />}
+              <Skeleton className="h-3 w-52 max-w-full" />
+            </div>
+            <Skeleton className="hidden h-5 w-20 sm:block" />
           </div>
         </div>
       ))}

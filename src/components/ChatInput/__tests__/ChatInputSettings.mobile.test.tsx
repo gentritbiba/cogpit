@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ChatInputSettings } from "../ChatInputSettings"
 import { resetDynamicModelOptions } from "@/lib/utils"
@@ -50,11 +50,17 @@ describe("ChatInputSettings mobile", () => {
     const modelSelect = within(sheet).getByRole("combobox", { name: "Model" })
     const effortSelect = within(sheet).getByRole("combobox", { name: "Reasoning effort" })
     const accessSelect = within(sheet).getByRole("combobox", { name: "Access policy" })
+    const selectOption = async (trigger: HTMLElement, name: string) => {
+      await user.click(trigger)
+      const option = await screen.findByRole("option", { name })
+      await user.click(option)
+      await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"))
+    }
 
-    fireEvent.change(agentSelect, { target: { value: "claude" } })
-    fireEvent.change(modelSelect, { target: { value: "gpt-5.6-terra" } })
-    fireEvent.change(effortSelect, { target: { value: "high" } })
-    fireEvent.change(accessSelect, { target: { value: "plan" } })
+    await selectOption(agentSelect, "Claude")
+    await selectOption(modelSelect, "GPT-5.6 Terra")
+    await selectOption(effortSelect, "High")
+    await selectOption(accessSelect, "Read only")
     await user.click(within(sheet).getByRole("button", { name: "Standard" }))
 
     expect(onAgentKindChange).toHaveBeenCalledWith("claude")
@@ -132,9 +138,8 @@ describe("ChatInputSettings mobile", () => {
 
     await user.click(screen.getByRole("button", { name: "Session controls" }))
     const sheet = await screen.findByRole("dialog", { name: "Session controls" })
-    fireEvent.change(within(sheet).getByRole("combobox", { name: "Access policy" }), {
-      target: { value: "bypassPermissions" },
-    })
+    await user.click(within(sheet).getByRole("combobox", { name: "Access policy" }))
+    await user.click(screen.getByRole("option", { name: "Full access" }))
 
     expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")

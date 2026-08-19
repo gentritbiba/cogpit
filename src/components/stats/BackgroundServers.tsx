@@ -3,6 +3,8 @@ import { Server, Square, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import { SectionHeading } from "@/components/stats/SectionHeading"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import type { Turn } from "@/lib/types"
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -75,17 +77,17 @@ function getTaskTitle(task: BgTask): string {
 
 function PortBadge({ port, isActive }: { port: number; isActive: boolean }): React.JSX.Element {
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-elevation-2 px-1.5 py-0.5 text-[10px] font-mono">
+    <Badge variant="secondary" className="font-mono">
       <span
         className={cn(
           "inline-block size-1.5 rounded-full",
-          isActive ? "bg-green-400" : "bg-muted"
+          isActive ? "bg-success" : "bg-muted-foreground/40"
         )}
       />
-      <span className={isActive ? "text-green-400" : "text-muted-foreground"}>
+      <span className={isActive ? "text-success" : "text-muted-foreground"}>
         :{port}
       </span>
-    </span>
+    </Badge>
   )
 }
 
@@ -113,6 +115,7 @@ export function BackgroundServers({
         if (cancelled) return
         if (res.ok) {
           const apiTasks: BgTask[] = await res.json()
+          if (cancelled) return
           if (apiTasks.length > 0) {
             setTasks(apiTasks)
             return
@@ -130,6 +133,7 @@ export function BackgroundServers({
         if (cancelled) return
         if (portRes.ok) {
           const portStatus: Record<number, boolean> = await portRes.json()
+          if (cancelled) return
           const fallbackTasks: BgTask[] = []
           const seen = new Set<number>()
           for (const [port, info] of jsonlPorts) {
@@ -193,7 +197,7 @@ export function BackgroundServers({
   return (
     <section>
       <SectionHeading>Active Servers ({tasks.length})</SectionHeading>
-      <div className="space-y-1.5">
+      <div className="flex flex-col gap-1.5">
         {tasks.map((task) => {
           const activePorts = task.ports.filter((p) => task.portStatus[p])
           const title = getTaskTitle(task)
@@ -201,23 +205,14 @@ export function BackgroundServers({
           return (
             <div
               key={task.id}
-              className="rounded elevation-2 depth-low px-2.5 py-2 transition-colors hover:bg-elevation-3"
+              className="border-b border-border px-2 py-2 last:border-b-0"
             >
-              <button
-                className="w-full text-left"
-                onClick={() =>
-                  task.outputPath
-                    ? onToggleServer?.(task.id, task.outputPath, title)
-                    : undefined
-                }
-              >
-                <div className="flex items-center gap-1.5">
-                  <Server className="size-3 shrink-0 text-green-400" />
-                  <span className="truncate text-[11px] font-medium text-foreground">
+              <div className="flex items-center gap-1.5">
+                  <Server className="size-3 shrink-0 text-success" data-icon="inline-start" />
+                  <span className="truncate text-xs font-medium text-foreground">
                     {title}
                   </span>
-                </div>
-              </button>
+              </div>
 
               <div className="mt-1.5 flex items-center gap-1.5">
                 {task.ports.map((port) => (
@@ -227,25 +222,28 @@ export function BackgroundServers({
                 <div className="flex-1" />
 
                 {task.outputPath && (
-                  <button
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => onToggleServer?.(task.id, task.outputPath!, title)}
                     title="View server output"
                     aria-label="View server output"
                   >
-                    <TerminalSquare className="size-3" />
-                  </button>
+                    <TerminalSquare data-icon="inline-start" />
+                  </Button>
                 )}
                 {activePorts.length > 0 && (
-                  <button
-                    className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-red-950/50 hover:text-red-300"
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="text-destructive"
                     onClick={() => activePorts.forEach((p) => handleKillPort(p))}
                     title="Stop server"
                     aria-label="Stop server"
                   >
-                    <Square className="size-2.5 fill-current" />
+                    <Square data-icon="inline-start" className="fill-current" />
                     <span>Stop</span>
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

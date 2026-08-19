@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent } from "react"
 import { Shield, Terminal, PenLine, Eye, Search, Globe, Wrench, Check, X, Infinity as InfinityIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 
 interface PermissionRequestBarProps {
@@ -115,105 +116,98 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
   const isMulti = remaining > 1
 
   return (
-    <div className="border-b border-amber-500/20 bg-gradient-to-b from-amber-500/[0.07] to-transparent">
+    <div className="border-b border-warning/20 bg-warning/5">
       <div className="flex items-center gap-3 px-4 py-2.5">
-        {/* Leading: shield + tool label */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center justify-center size-6 rounded-md bg-amber-500/15 ring-1 ring-amber-500/30">
-            <Shield className="size-3.5 text-amber-400" />
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex size-7 items-center justify-center rounded-md bg-warning/10 text-warning">
+            <Shield className="size-4" />
           </div>
           <div className="flex items-center gap-1.5">
-            <Icon className="size-3.5 text-amber-300/70" />
-            <span className="text-xs font-medium text-foreground">{meta.label}</span>
+            <Icon className="size-4 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">{meta.label}</span>
           </div>
         </div>
 
-        {/* Detail — fills available space, truncates */}
         {detail && (
-          <div className="flex-1 min-w-0">
-            <code className="block truncate text-[11px] text-muted-foreground/90 font-mono bg-black/25 rounded px-2 py-1 border border-white/5">
+          <div className="min-w-0 flex-1">
+            <code className="block truncate rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
               {detail}
             </code>
           </div>
         )}
 
         {rationale && rationale !== detail && (
-          <p className="hidden max-w-64 truncate text-[10px] text-muted-foreground xl:block" title={rationale}>
+          <p className="hidden max-w-64 truncate text-xs text-muted-foreground xl:block" title={rationale}>
             {rationale}
           </p>
         )}
 
-        {/* Multi-request counter */}
         {isMulti && (
-          <span className="shrink-0 text-[10px] font-medium text-amber-300/70 tabular-nums bg-amber-500/10 rounded px-1.5 py-0.5">
+          <Badge variant="outline" className="shrink-0 tabular-nums">
             +{remaining - 1} more
-          </span>
+          </Badge>
         )}
 
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex shrink-0 items-center gap-1.5">
           {canDeny && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2.5 text-xs text-muted-foreground hover:text-red-400 hover:bg-red-500/10 gap-1"
+              className="text-destructive"
               disabled={isLoading}
               onClick={() => onRespond(current.requestId, "deny")}
               title="Deny (D)"
             >
-              <X className="size-3" />
+              <X data-icon="inline-start" />
               Deny
-              <kbd className="ml-0.5 text-[9px] font-mono text-muted-foreground/50">D</kbd>
+              <kbd className="ml-0.5 font-mono text-xs text-muted-foreground">D</kbd>
             </Button>
           )}
 
           {canAllowAlways && (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 px-2.5 text-xs text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10 gap-1"
               disabled={isLoading}
               onClick={() => onRespond(current.requestId, "allow_always")}
               title={hasScopedSuggestion
                 ? "Apply Claude's suggested scoped permission rule (S)"
                 : `Allow ${current.toolName} for this session (S)`}
             >
-              <InfinityIcon className="size-3" />
+              <InfinityIcon data-icon="inline-start" />
               {hasScopedSuggestion ? "Remember rule" : "Session"}
-              <kbd className="ml-0.5 text-[9px] font-mono text-amber-300/50">S</kbd>
+              <kbd className="ml-0.5 font-mono text-xs text-muted-foreground">S</kbd>
             </Button>
           )}
 
           {canAllowAll && (
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
-              className="h-7 px-2.5 text-xs text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10 gap-1"
               disabled={isLoading}
               onClick={() => onRespondAll("allow")}
               title="Allow all pending (⇧A)"
             >
               Allow all
-              <kbd className="ml-0.5 text-[9px] font-mono text-amber-300/50">⇧A</kbd>
+              <kbd className="ml-0.5 font-mono text-xs text-muted-foreground">⇧A</kbd>
             </Button>
           )}
 
           {canAllow && (
             <Button
               size="sm"
-              className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white border-0 font-medium gap-1 shadow-sm shadow-emerald-900/40"
               disabled={isLoading}
               onClick={() => onRespond(current.requestId, "allow")}
               title="Allow once (A)"
             >
-              <Check className="size-3" />
+              <Check data-icon="inline-start" />
               Allow
-              <kbd className="ml-0.5 text-[9px] font-mono text-emerald-100/70">A</kbd>
+              <kbd className="ml-0.5 font-mono text-xs opacity-70">A</kbd>
             </Button>
           )}
 
           {!canAllow && !canAllowAlways && !canDeny && (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               Resolve this approval in Codex
             </span>
           )}

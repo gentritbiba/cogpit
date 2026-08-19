@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState } from "react"
 import { ChevronRight, ChevronDown, NotebookPen, CheckCircle, Clock, XCircle } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -7,6 +7,8 @@ import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { ToolCallCard } from "./ToolCallCard"
 import { markdownComponents } from "./markdown-components"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface Props {
   plan: string
@@ -20,77 +22,75 @@ interface Props {
 
 export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls, expandAll = false, isAgentActive, skillMetadata }: Props) {
   const [open, setOpen] = useState(true)
+  const hasPendingQuestion = toolCalls.some(
+    (tc) => tc.name === "AskUserQuestion" && tc.result === null,
+  )
   // An unanswered question inside a collapsed plan block is unreachable, so it
   // forces the list open. Latched: once opened it stays open, so the list does
   // not collapse out from under the user the moment they answer. An explicit
   // toggle always wins.
   const [callsOverride, setCallsOverride] = useState<boolean | null>(null)
-  const hasPendingQuestion = toolCalls.some(
-    (tc) => tc.name === "AskUserQuestion" && tc.result === null,
-  )
-  const autoOpened = useRef(false)
-  if (hasPendingQuestion) autoOpened.current = true
-  const callsOpen = callsOverride ?? autoOpened.current
+  const autoOpened = useRef(hasPendingQuestion)
+  useEffect(() => {
+    if (hasPendingQuestion) autoOpened.current = true
+  }, [hasPendingQuestion])
+  const callsOpen = callsOverride ?? (hasPendingQuestion || autoOpened.current)
 
   const Icon = status === "approved" ? CheckCircle : status === "rejected" ? XCircle : Clock
   const Chev = open ? ChevronDown : ChevronRight
   const CallsChev = callsOpen ? ChevronDown : ChevronRight
 
   return (
-    <div
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
       className={cn(
         "my-2 rounded-lg border",
         status === "approved"
-          ? "border-purple-500/20 bg-purple-950/5"
+          ? "border-success/20 bg-success/5"
           : status === "rejected"
-            ? "border-red-500/20 bg-red-950/5"
-            : "border-amber-500/20 bg-amber-950/5",
+            ? "border-destructive/20 bg-destructive/5"
+            : "border-warning/20 bg-warning/5",
       )}
     >
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full text-left p-2"
-      >
-        <Chev className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-        <NotebookPen className="w-4 h-4 text-purple-400" />
+      <CollapsibleTrigger render={<Button type="button" variant="ghost" className="h-auto w-full justify-start rounded-b-none p-2 text-left" />}>
+        <Chev className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+        <NotebookPen className="size-4 text-muted-foreground" data-icon="inline-start" />
         <span className="text-sm font-medium">Plan Mode</span>
         <Icon
           className={cn(
-            "w-4 h-4",
+            "size-4",
             status === "approved"
-              ? "text-green-500/60"
+              ? "text-success"
               : status === "rejected"
-                ? "text-red-400"
-                : "text-amber-400",
+                ? "text-destructive"
+                : "text-warning",
           )}
         />
         <span className="text-xs text-muted-foreground capitalize">{status}</span>
         {planFilePath && (
-          <span className="text-[10px] text-muted-foreground/50 font-mono ml-auto truncate">
+          <span className="ml-auto truncate font-mono text-xs text-muted-foreground">
             {planFilePath}
           </span>
         )}
-      </button>
+      </CollapsibleTrigger>
 
-      {open && (
+      <CollapsibleContent>
         <div className="px-3 pb-2">
-          <div className="prose prose-sm dark:prose-invert max-w-none border-t border-purple-500/10 pt-2">
+          <div className="prose prose-sm dark:prose-invert max-w-none border-t pt-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {plan}
             </ReactMarkdown>
           </div>
 
           {toolCalls.length > 0 && (
-            <div className="mt-2">
-              <button
-                onClick={() => setCallsOverride(!callsOpen)}
-                className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
-              >
-                <CallsChev className="w-3 h-3" />
+            <Collapsible open={callsOpen} onOpenChange={setCallsOverride} className="mt-2">
+              <CollapsibleTrigger render={<Button type="button" variant="ghost" size="xs" className="-ml-2 text-muted-foreground" />}>
+                <CallsChev data-icon="inline-start" />
                 {toolCalls.length} call{toolCalls.length === 1 ? "" : "s"} during planning
-              </button>
-              {callsOpen && (
-                <div className="mt-1 ml-4 space-y-1">
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="ml-4 mt-1 flex flex-col gap-1">
                   {toolCalls.map((tc) => (
                     <ToolCallCard
                       key={tc.id}
@@ -101,11 +101,11 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
                     />
                   ))}
                 </div>
-              )}
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
           )}
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })

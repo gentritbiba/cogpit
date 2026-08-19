@@ -8,7 +8,7 @@ const STORAGE_KEY = "cogpit-theme"
 interface ThemeDefinition {
   id: ThemeId
   name: string
-  /** 5 elevation colors (0–4) for the swatch preview */
+  /** Core surface colors shown in the theme preview. */
   swatches: string[]
 }
 
@@ -17,11 +17,11 @@ export const themes: ThemeDefinition[] = [
     id: "dark",
     name: "Default Dark",
     swatches: [
-      "oklch(0.12 0.005 265)",
-      "oklch(0.18 0.008 265)",
-      "oklch(0.24 0.010 265)",
-      "oklch(0.30 0.012 265)",
-      "oklch(0.34 0.014 265)",
+      "oklch(0.105 0 0)",
+      "oklch(0.13 0 0)",
+      "oklch(0.16 0 0)",
+      "oklch(0.2 0 0)",
+      "oklch(0.24 0 0)",
     ],
   },
   {
@@ -30,20 +30,20 @@ export const themes: ThemeDefinition[] = [
     swatches: [
       "oklch(0 0 0)",
       "oklch(0.08 0 0)",
-      "oklch(0.14 0 0)",
+      "oklch(0.10 0 0)",
+      "oklch(0.10 0 0)",
       "oklch(0.18 0 0)",
-      "oklch(0.22 0 0)",
     ],
   },
   {
     id: "light",
     name: "Light",
     swatches: [
-      "oklch(0.965 0 0)",
-      "oklch(0.990 0 0)",
-      "oklch(1.000 0 0)",
-      "oklch(1.000 0 0)",
-      "oklch(1.000 0 0)",
+      "oklch(1 0 0)",
+      "oklch(1 0 0)",
+      "oklch(1 0 0)",
+      "oklch(0.96 0 0)",
+      "oklch(0.922 0 0)",
     ],
   },
 ]

@@ -137,8 +137,8 @@ describe("getToolTextStyle", () => {
   })
 
   it("reserves red for failures, whatever the tool was", () => {
-    expect(getToolTextStyle("Read", true)).toBe("text-red-400")
-    expect(getToolTextStyle("Bash", true)).toBe("text-red-400")
+    expect(getToolTextStyle("Read", true)).toBe("text-destructive")
+    expect(getToolTextStyle("Bash", true)).toBe("text-destructive")
   })
 })
 
@@ -480,6 +480,10 @@ describe("ToolCallCard AskUserQuestion inline form", () => {
     const optionA = screen.getByRole("button", { name: "Option A" })
     expect(optionA).toHaveAttribute("aria-pressed", "false")
     expect(screen.getByText("Option B")).toBeTruthy()
+
+    fireEvent.click(optionA)
+
+    expect(optionA).toHaveAttribute("aria-pressed", "true")
 
     fireEvent.click(optionA)
 

@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Card,
   CardAction,
@@ -28,6 +29,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Separator } from "@/components/ui/separator"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/Spinner"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { authFetch } from "@/lib/auth"
@@ -102,7 +110,7 @@ export function WorkflowDetailView({
                 {confirming ? "Confirm stop" : "Stop workflow"}
               </Button>
               {!canStop && (
-                <span className="text-[11px] text-muted-foreground">This run is not controlled by Cogpit</span>
+                <span className="text-xs text-muted-foreground">This run is not controlled by Cogpit</span>
               )}
             </div>
           )}
@@ -122,22 +130,11 @@ export function WorkflowDetailView({
         </div>
 
         <div className="flex items-center gap-3">
-          <div
-            className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"
-            role="progressbar"
+          <Progress
+            value={Math.round(progress * 100)}
             aria-label="Workflow progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(progress * 100)}
-          >
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width]",
-                detail.agentCounts.error > 0 ? "bg-destructive" : active ? "bg-primary" : "bg-emerald-500",
-              )}
-              style={{ width: `${Math.round(progress * 100)}%` }}
-            />
-          </div>
+            className="flex-1"
+          />
           <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
             {Math.round(progress * 100)}%
           </span>
@@ -145,16 +142,15 @@ export function WorkflowDetailView({
       </section>
 
       {detail.error && (
-        <Card size="sm" className="border-destructive/40 bg-destructive/5">
-          <CardHeader>
-            <CardTitle>Workflow error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-destructive">
+        <Alert variant="destructive">
+          <Octagon />
+          <AlertTitle>Workflow error</AlertTitle>
+          <AlertDescription>
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">
               {detail.error}
             </pre>
-          </CardContent>
-        </Card>
+          </AlertDescription>
+        </Alert>
       )}
 
       {detail.resultPreview && (
@@ -168,23 +164,25 @@ export function WorkflowDetailView({
 
       <div className="grid items-start gap-6 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav className="sticky top-0 hidden rounded-lg border bg-card p-2 md:block" aria-label="Workflow phases">
-          <p className="px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">
             Run outline
           </p>
           <div className="flex flex-col gap-1">
             {groups.map((group) => (
-              <button
+              <Button
                 key={`${group.index}-${group.title}`}
+                variant="ghost"
+                size="sm"
                 type="button"
                 onClick={() => document.getElementById(`workflow-phase-${group.index}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-left text-xs text-muted-foreground"
               >
-                <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-semibold text-foreground">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-medium text-foreground">
                   {group.index}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{group.title}</span>
                 <span className="tabular-nums">{group.agents.length}</span>
-              </button>
+              </Button>
             ))}
           </div>
         </nav>
@@ -223,7 +221,7 @@ function RunStat({
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold tabular-nums text-foreground">{value}</p>
-        <p className="truncate text-[10px] text-muted-foreground">{label}</p>
+        <p className="truncate text-xs text-muted-foreground">{label}</p>
       </div>
     </div>
   )
@@ -260,9 +258,12 @@ function PhaseSection({
       </div>
 
       {group.agents.length === 0 ? (
-        <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
-          No agents have started this phase.
-        </div>
+        <Empty className="border py-6">
+          <EmptyHeader>
+            <EmptyTitle>No agents yet</EmptyTitle>
+            <EmptyDescription>No agents have started this phase.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <div className="flex flex-col gap-2">
           {group.agents.map((agent) => (
@@ -320,11 +321,11 @@ function WorkflowOutcomeCard({
   }, [dirName, runId, sessionId])
 
   return (
-    <Card className="gap-0 py-0">
-      <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card className="gap-0 py-0">
         <CardHeader className="py-4">
           <CollapsibleTrigger className="group flex min-w-0 items-center gap-3 text-left outline-none">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
               <Sparkles className="size-4" />
             </span>
             <span className="min-w-0">
@@ -347,7 +348,7 @@ function WorkflowOutcomeCard({
               aria-label={copied ? "Outcome copied" : "Copy outcome"}
               title={copied ? "Copied" : "Copy outcome"}
             >
-              {copied ? <Check /> : <Copy />}
+              {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
             </Button>
           </CardAction>
         </CardHeader>
@@ -357,8 +358,8 @@ function WorkflowOutcomeCard({
             <WorkflowResponse value={result} />
           </CardContent>
         </CollapsibleContent>
-      </Collapsible>
-    </Card>
+      </Card>
+    </Collapsible>
   )
 }
 
@@ -366,12 +367,12 @@ function WorkflowScript({ script }: { script: string }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <Card size="sm" className="gap-0 py-0">
-      <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card size="sm" className="gap-0 py-0">
         <CardHeader className="px-0 py-0">
           <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium text-muted-foreground outline-none transition-colors hover:bg-muted/40 hover:text-foreground">
             <Code2 className="size-4" />
-            Orchestration script
+            <CardTitle>Orchestration script</CardTitle>
             <ChevronDown className="ml-auto size-4 transition-transform group-data-panel-open:rotate-180" />
           </CollapsibleTrigger>
         </CardHeader>
@@ -383,7 +384,7 @@ function WorkflowScript({ script }: { script: string }) {
             </pre>
           </CardContent>
         </CollapsibleContent>
-      </Collapsible>
-    </Card>
+      </Card>
+    </Collapsible>
   )
 }

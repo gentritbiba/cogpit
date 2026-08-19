@@ -39,7 +39,7 @@ export const MobileNav = memo(function MobileNav({
 
   return (
     <nav
-      className="flex shrink-0 items-stretch border-t border-border/40 bg-elevation-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      className="flex shrink-0 items-stretch border-t bg-background pb-[env(safe-area-inset-bottom)]"
       aria-label="Navigation"
     >
       {visibleTabs.map((tab) => {
@@ -54,18 +54,17 @@ export const MobileNav = memo(function MobileNav({
             title={tab.label}
             onClick={() => { hapticLight(); onTabChange(tab.id) }}
             className={cn(
-              "flex min-h-11 flex-1 items-center justify-center transition-colors duration-150",
-              "active:bg-elevation-2",
-              isActive ? "text-primary" : "text-muted-foreground",
+              "flex min-h-14 flex-1 items-center justify-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+              isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             <div className={cn(
-              "relative flex size-8 items-center justify-center rounded-xl transition-colors",
-              isActive && "bg-primary/10",
+              "relative flex size-9 items-center justify-center rounded-md transition-colors",
+              isActive && "bg-accent",
             )}>
-              <Icon className="size-[18px]" />
+              <Icon className="size-[18px]" aria-hidden="true" />
               {tab.id === "chat" && isLive && (
-                <LiveIndicator className="absolute -right-1 -top-1" />
+                <LiveIndicator className="absolute right-0.5 top-0.5 size-1.5 ring-2 ring-background" />
               )}
             </div>
           </button>

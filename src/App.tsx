@@ -1,6 +1,15 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, startTransition, lazy, Suspense } from "react"
-import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, Bot } from "lucide-react"
+import { Loader2, AlertTriangle, RefreshCw, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { AppStatusToasts } from "@/components/AppStatusToasts"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
@@ -679,8 +688,8 @@ export default function App() {
 
   // Read-only banner shown when viewing a sub-agent session (replaces chat input)
   const subAgentReadOnlyNode = isSubAgentView ? (
-    <div className="shrink-0 flex items-center justify-center gap-2 border-t border-border/50 bg-elevation-1 px-4 py-2.5">
-      <Bot className="size-3.5 text-muted-foreground" />
+    <div className="flex shrink-0 items-center justify-center gap-2 border-t bg-card px-4 py-2.5">
+      <Bot data-icon="inline-start" className="size-3.5 text-muted-foreground" />
       <span className="text-xs text-muted-foreground">Viewing sub-agent session (read-only)</span>
     </div>
   ) : null
@@ -691,12 +700,11 @@ export default function App() {
   if (actions.loadError) clearActiveError = actions.clearLoadError
   else if (createError) clearActiveError = clearCreateError
 
-  // Auto-dismiss error toasts after 8 seconds
-  useEffect(() => {
-    if (!activeError || !clearActiveError) return
-    const timer = setTimeout(clearActiveError, 8000)
-    return () => clearTimeout(timer)
-  }, [activeError, clearActiveError])
+  const showSseWarning = Boolean(
+    state.session
+    && state.sessionSource
+    && sseState === "disconnected",
+  )
 
   // ─── Build context values ──────────────────────────────────────────────────
 
@@ -798,11 +806,11 @@ export default function App() {
   if (!networkAuth.authChecked) {
     return (
       <div
-        className="dark flex h-dvh items-center justify-center bg-elevation-0"
+        className="dark flex h-dvh items-center justify-center bg-background"
         role="status"
         aria-label="Checking authentication"
       >
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -826,11 +834,11 @@ export default function App() {
   if (!identityReady) {
     return (
       <div
-        className="dark flex h-dvh items-center justify-center bg-elevation-0"
+        className="dark flex h-dvh items-center justify-center bg-background"
         role="status"
         aria-label="Loading identity"
       >
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
@@ -838,31 +846,30 @@ export default function App() {
   // ─── CONFIG GATE ────────────────────────────────────────────────────────────
   if (config.configLoading) {
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-elevation-0" role="status" aria-label="Loading">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      <div className="dark flex h-dvh items-center justify-center bg-background" role="status" aria-label="Loading">
+        <Loader2 data-icon="inline-start" className="size-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   if (config.configError) {
     return (
-      <div className="dark flex h-dvh flex-col items-center justify-center gap-4 bg-elevation-0 text-foreground">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
-          <AlertTriangle className="size-7 text-red-400" />
-        </div>
-        <div className="text-center space-y-1">
-          <h2 className="text-sm font-medium text-foreground">Failed to connect</h2>
-          <p className="text-xs text-muted-foreground max-w-sm">{config.configError}</p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          onClick={config.retryConfig}
-        >
-          <RefreshCw className="size-3" />
-          Retry
-        </Button>
+      <div className="dark flex h-dvh items-center justify-center bg-background text-foreground">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <AlertTriangle className="text-destructive" />
+            </EmptyMedia>
+            <EmptyTitle>Failed to connect</EmptyTitle>
+            <EmptyDescription>{config.configError}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button variant="outline" size="sm" onClick={config.retryConfig}>
+              <RefreshCw data-icon="inline-start" />
+              Retry
+            </Button>
+          </EmptyContent>
+        </Empty>
       </div>
     )
   }
@@ -870,7 +877,7 @@ export default function App() {
   if (!config.claudeDir) {
     if (configAdminEnabled) return <SetupScreen onConfigured={config.setClaudeDir} />
     return (
-      <div className="dark flex h-dvh items-center justify-center bg-elevation-0 text-sm text-muted-foreground">
+      <div className="dark flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
         Cogpit is waiting for an administrator to finish server setup.
       </div>
     )
@@ -878,33 +885,15 @@ export default function App() {
 
   // ─── Shared elements ──────────────────────────────────────────────────────
 
-  // SSE connection indicator (shows when session loaded but SSE disconnected)
-  const sseIndicator = state.session && state.sessionSource && sseState === "disconnected" && (
-    <div role="status" title="Connection lost — reconnecting..." className="fixed bottom-3 left-1/2 -translate-x-1/2 z-50 rounded-full border border-amber-900/50 bg-elevation-3 p-1.5 depth-high toast-enter">
-      <WifiOff className="size-3 text-amber-400" />
-    </div>
-  )
-
-  // Error toast
-  const errorToast = activeError && (
-    <div role="alert" className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-lg border border-red-900/50 bg-elevation-3 px-3 py-2 depth-high max-w-md toast-enter">
-      <AlertTriangle className="size-3.5 text-red-400 shrink-0" />
-      <span className="text-xs text-red-400 flex-1">{activeError}</span>
-      {clearActiveError && (
-        <button type="button" onClick={clearActiveError} className="text-muted-foreground hover:text-foreground shrink-0" aria-label="Dismiss error">
-          <X className="size-3.5" />
-        </button>
-      )}
-    </div>
-  )
-  const modelFallbackToast = modelFallbackNotice && (
-    <div role="status" className="fixed bottom-4 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-2 rounded-lg border border-amber-900/50 bg-elevation-3 px-3 py-2 depth-high toast-enter">
-      <AlertTriangle className="size-3.5 shrink-0 text-amber-400" />
-      <span className="flex-1 text-xs text-amber-300">{modelFallbackNotice}</span>
-      <button type="button" onClick={dismissModelFallbackNotice} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label="Dismiss model notice">
-        <X className="size-3.5" />
-      </button>
-    </div>
+  const toasterNode = (
+    <AppStatusToasts
+      activeError={activeError}
+      clearActiveError={clearActiveError}
+      modelFallbackNotice={modelFallbackNotice}
+      dismissModelFallbackNotice={dismissModelFallbackNotice}
+      connectionLost={showSseWarning}
+      theme={themeCtx.activeTheme}
+    />
   )
   const undoConfirmDialog = hostFilesEnabled ? (
     <UndoConfirmDialog
@@ -1026,7 +1015,7 @@ export default function App() {
   const previewChatInputSettingsNode = buildChatInputSettings(false)
 
   const chatInputNode = (
-    <div className="shrink-0 bg-elevation-1">
+    <div className="shrink-0 bg-background">
       {!isMobile && goalBarNode}
       <ChatInput
         ref={chatInputRef}
@@ -1041,7 +1030,7 @@ export default function App() {
   )
 
   const previewChatInputNode = (
-    <div className="shrink-0 bg-elevation-1">
+    <div className="shrink-0 bg-background">
       <ChatInput
         ref={chatInputRef}
         allowImages={imageInputAvailable}
@@ -1091,11 +1080,11 @@ export default function App() {
           hasMoreTurns={chunkedSession.hasMore}
           isLoadingOlderTurns={chunkedSession.isLoadingOlder}
           onLoadMoreTurns={chunkedSession.loadMore}
-          status={errorToast || modelFallbackToast || sseIndicator}
         />
       </StreamingOverlayProvider>
       </SessionProvider>
       </PtyProvider>
+      {toasterNode}
       </AppProvider>
     )
   }
@@ -1146,7 +1135,6 @@ export default function App() {
             workflowsPanel: workflowsPanelNode,
             undoDialog: undoConfirmDialog,
             branchModal,
-            status: errorToast || modelFallbackToast || sseIndicator,
             fileChangesOpen: showMobileFileChanges,
             onFileChangesOpenChange: setShowMobileFileChanges,
             searchOpen: mobileSearchOpen,
@@ -1156,6 +1144,7 @@ export default function App() {
       </StreamingOverlayProvider>
       </SessionProvider>
       </PtyProvider>
+      {toasterNode}
       </AppProvider>
     )
   }
@@ -1221,7 +1210,6 @@ export default function App() {
             workflowsPanel: workflowsPanelNode,
             undoDialog: undoConfirmDialog,
             branchModal,
-            status: errorToast || modelFallbackToast || sseIndicator,
             killing,
             onKillAll: handleKillAll,
             commandPaletteOpen: showCommandPalette,
@@ -1237,6 +1225,7 @@ export default function App() {
       </StreamingOverlayProvider>
       </SessionProvider>
     </PtyProvider>
+    {toasterNode}
     </AppProvider>
   )
 }

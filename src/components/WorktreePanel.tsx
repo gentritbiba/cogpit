@@ -10,13 +10,34 @@ import {
   FileCode2,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { authFetch } from "@/lib/auth"
 import { useCapability } from "@/hooks/useCapability"
+import { toast } from "sonner"
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
@@ -38,10 +59,15 @@ interface WorktreePanelProps {
 }
 
 const statusColors: Record<string, string> = {
-  M: "text-amber-400",
-  A: "text-emerald-400",
-  D: "text-red-400",
-  R: "text-blue-400",
+  M: "text-warning",
+  A: "text-success",
+  D: "text-destructive",
+  R: "text-info",
+}
+
+interface DeleteConfirmation {
+  worktree: WorktreeInfo
+  reason: "dirty" | "unpushed"
 }
 
 export function WorktreePanel({
@@ -57,25 +83,48 @@ export function WorktreePanel({
   const [deleting, setDeleting] = useState<string | null>(null)
   const [creatingPr, setCreatingPr] = useState<string | null>(null)
   const [cleaningUp, setCleaningUp] = useState(false)
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
+  const [cleanupCandidates, setCleanupCandidates] = useState<string[] | null>(null)
 
-  const handleDelete = async (wt: WorktreeInfo) => {
+  const deleteWorktree = async (wt: WorktreeInfo) => {
     if (!canManageHostFiles || !dirName) return
-    const force = wt.isDirty
-    if (wt.isDirty && !confirm(`"${wt.name}" has uncommitted changes. Delete anyway?`)) return
-    if (wt.commitsAhead > 0 && !confirm(`"${wt.name}" has ${wt.commitsAhead} unpushed commit(s). Delete anyway?`)) return
-
     setDeleting(wt.name)
     try {
       await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/${encodeURIComponent(wt.name)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify({ force: wt.isDirty }),
       })
       onRefetch()
     } catch (err) {
-      alert(`Failed to delete worktree: ${err instanceof Error ? err.message : "Unknown error"}`)
+      toast.error(`Failed to delete worktree: ${err instanceof Error ? err.message : "Unknown error"}`)
+    } finally {
+      setDeleting(null)
     }
-    setDeleting(null)
+  }
+
+  const handleDelete = (wt: WorktreeInfo) => {
+    if (!canManageHostFiles || !dirName) return
+    if (wt.isDirty) {
+      setDeleteConfirmation({ worktree: wt, reason: "dirty" })
+      return
+    }
+    if (wt.commitsAhead > 0) {
+      setDeleteConfirmation({ worktree: wt, reason: "unpushed" })
+      return
+    }
+    void deleteWorktree(wt)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteConfirmation) return
+    const { worktree, reason } = deleteConfirmation
+    if (reason === "dirty" && worktree.commitsAhead > 0) {
+      setDeleteConfirmation({ worktree, reason: "unpushed" })
+      return
+    }
+    setDeleteConfirmation(null)
+    void deleteWorktree(worktree)
   }
 
   const handleCreatePr = async (wt: WorktreeInfo) => {
@@ -93,18 +142,19 @@ export function WorktreePanel({
       if (res.ok) {
         const data = await res.json()
         if (data.url) {
-          window.open(data.url, "_blank")
+          window.open(data.url, "_blank", "noopener,noreferrer")
         } else {
-          alert("PR created but no URL was returned")
+          toast.warning("PR created but no URL was returned")
         }
       } else {
         const error = await res.json().catch(() => ({ error: "Unknown error" }))
-        alert(`Failed to create PR: ${error.error || "Unknown error"}`)
+        toast.error(`Failed to create PR: ${error.error || "Unknown error"}`)
       }
     } catch (err) {
-      alert(`Error creating PR: ${err instanceof Error ? err.message : "Unknown error"}`)
+      toast.error(`Error creating PR: ${err instanceof Error ? err.message : "Unknown error"}`)
+    } finally {
+      setCreatingPr(null)
     }
-    setCreatingPr(null)
   }
 
   const handleCleanup = async () => {
@@ -117,22 +167,37 @@ export function WorktreePanel({
         body: JSON.stringify({}),
       })
       if (listRes.ok) {
-        const { stale } = await listRes.json()
+        const { stale } = await listRes.json() as { stale: Array<{ name: string }> }
         if (stale.length === 0) {
-          alert("No stale worktrees found.")
-        } else if (confirm(`Remove ${stale.length} stale worktree(s)?\n\n${stale.map((s: { name: string }) => s.name).join("\n")}`)) {
-          await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/cleanup`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirm: true, names: stale.map((s: { name: string }) => s.name) }),
-          })
-          onRefetch()
+          toast.info("No stale worktrees found")
+        } else {
+          setCleanupCandidates(stale.map((item) => item.name))
         }
       }
     } catch (err) {
-      alert(`Cleanup failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+      toast.error(`Cleanup failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    } finally {
+      setCleaningUp(false)
     }
-    setCleaningUp(false)
+  }
+
+  const confirmCleanup = async () => {
+    if (!canManageHostFiles || !dirName || !cleanupCandidates) return
+    const names = cleanupCandidates
+    setCleanupCandidates(null)
+    setCleaningUp(true)
+    try {
+      await authFetch(`/api/worktrees/${encodeURIComponent(dirName)}/cleanup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true, names }),
+      })
+      onRefetch()
+    } catch (err) {
+      toast.error(`Cleanup failed: ${err instanceof Error ? err.message : "Unknown error"}`)
+    } finally {
+      setCleaningUp(false)
+    }
   }
 
   return (
@@ -141,33 +206,36 @@ export function WorktreePanel({
         <SheetHeader>
           <div className="flex items-center justify-between pr-8">
             <SheetTitle className="flex items-center gap-2">
-              <GitBranch className="size-4" />
+              <GitBranch data-icon="inline-start" className="size-4" />
               Worktrees
             </SheetTitle>
             <div className="flex items-center gap-1">
               {canManageHostFiles && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={handleCleanup}
                   disabled={cleaningUp}
-                  className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
-                  title="Cleanup stale worktrees"
+                  aria-label="Cleanup stale worktrees"
                 >
-                  <Sparkles className="size-3.5" />
-                </button>
+                  <Sparkles data-icon="inline-start" />
+                </Button>
               )}
-              <button
+              <Button
+                variant="ghost"
+                size="icon-xs"
                 onClick={onRefetch}
                 disabled={loading}
-                className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-elevation-1 transition-colors"
-                title="Refresh"
+                aria-label="Refresh worktrees"
               >
-                <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-              </button>
+                <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
+              </Button>
             </div>
           </div>
+          <SheetDescription>Review isolated branches and their file changes.</SheetDescription>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
           {!dirName && (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               Select a project to view worktrees
@@ -175,13 +243,15 @@ export function WorktreePanel({
           )}
 
           {dirName && worktrees.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <GitBranch className="size-8 mb-2 opacity-40" />
-              <p className="text-sm">No worktrees</p>
-              <p className="text-xs mt-1 text-center px-4">
+            <Empty className="border-0 py-16">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><GitBranch /></EmptyMedia>
+                <EmptyTitle>No worktrees</EmptyTitle>
+                <EmptyDescription>
                 Create a new session with &ldquo;Isolate in worktree&rdquo; enabled
-              </p>
-            </div>
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
 
           {worktrees.map((wt) => {
@@ -192,62 +262,66 @@ export function WorktreePanel({
             return (
               <div
                 key={wt.name}
-                className="rounded-lg p-3 hover:bg-elevation-1/50 transition-colors"
+                className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/40"
               >
                 {/* Header row */}
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium text-foreground truncate">{wt.name}</span>
                     {wt.isDirty && (
-                      <span className="flex h-2 w-2 shrink-0 rounded-full bg-amber-400" title="Uncommitted changes" />
+                      <span className="flex size-2 shrink-0 rounded-full bg-warning" title="Uncommitted changes" />
                     )}
                     {wt.commitsAhead > 0 && (
-                      <Badge variant="outline" className="h-4 px-1 text-[9px] shrink-0">
+                      <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-xs">
                         {wt.commitsAhead} ahead
                       </Badge>
                     )}
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     {wt.linkedSessions.length > 0 && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
                         onClick={() => onOpenSession(wt.linkedSessions[0])}
-                        className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors"
-                        title="Open session"
+                        aria-label="Open session"
                       >
-                        <ExternalLink className="size-3.5" />
-                      </button>
+                        <ExternalLink data-icon="inline-start" />
+                      </Button>
                     )}
                     {canManageHostFiles && (
                       <>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() => handleCreatePr(wt)}
                           disabled={creatingPr === wt.name || wt.commitsAhead === 0}
-                          className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors disabled:opacity-30"
-                          title="Create PR"
+                          aria-label="Create PR"
                         >
-                          <GitPullRequest className="size-3.5" />
-                        </button>
-                        <button
+                          <GitPullRequest data-icon="inline-start" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
                           onClick={() => handleDelete(wt)}
                           disabled={deleting === wt.name}
-                          className="rounded p-1 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                          title="Delete worktree"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          aria-label="Delete worktree"
                         >
-                          <Trash2 className="size-3.5" />
-                        </button>
+                          <Trash2 data-icon="inline-start" />
+                        </Button>
                       </>
                     )}
                   </div>
                 </div>
 
                 {/* Commit info */}
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="font-mono shrink-0">{wt.head}</span>
                   <span className="truncate">{wt.headMessage}</span>
                 </div>
 
                 {wt.createdAt && (
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     {formatRelativeTime(wt.createdAt)}
                   </div>
                 )}
@@ -255,30 +329,30 @@ export function WorktreePanel({
                 {/* File changes accordion */}
                 {fileCount > 0 && (
                   <Collapsible className="mt-2">
-                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors group w-full">
-                      <ChevronRight className="size-3 transition-transform group-data-open:rotate-90" />
-                      <FileCode2 className="size-3" />
+                    <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+                      <ChevronRight data-icon="inline-start" className="size-3 transition-transform group-data-open:rotate-90" />
+                      <FileCode2 data-icon="inline-start" className="size-3" />
                       <span>
                         {fileCount} file{fileCount !== 1 ? "s" : ""} changed
                       </span>
                       <span className="ml-1">
-                        <span className="text-emerald-400">+{totalAdded}</span>
+                        <span className="text-success">+{totalAdded}</span>
                         {" "}
-                        <span className="text-red-400">-{totalDeleted}</span>
+                        <span className="text-destructive">-{totalDeleted}</span>
                       </span>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                      <div className="mt-1.5 space-y-px rounded-md bg-elevation-1/50 p-1.5">
+                      <div className="mt-1.5 flex flex-col gap-px rounded-md bg-muted/40 p-1.5">
                         {wt.changedFiles.map((f) => (
-                          <div key={f.path} className="flex items-center gap-2 text-[10px] font-mono py-0.5 px-1">
+                          <div key={f.path} className="flex items-center gap-2 px-1 py-0.5 font-mono text-xs">
                             <span className={cn("shrink-0 w-3 text-center", statusColors[f.status] ?? "text-muted-foreground")}>
                               {f.status}
                             </span>
                             <span className="truncate text-foreground/80">{f.path}</span>
                             <span className="ml-auto shrink-0 text-muted-foreground">
-                              <span className="text-emerald-400/70">+{f.additions}</span>
+                              <span className="text-success">+{f.additions}</span>
                               {" "}
-                              <span className="text-red-400/70">-{f.deletions}</span>
+                              <span className="text-destructive">-{f.deletions}</span>
                             </span>
                           </div>
                         ))}
@@ -291,6 +365,62 @@ export function WorktreePanel({
           })}
         </div>
       </SheetContent>
+
+      <AlertDialog
+        open={deleteConfirmation !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setDeleteConfirmation(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <Trash2 />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              {deleteConfirmation?.reason === "dirty"
+                ? "Delete worktree with uncommitted changes?"
+                : "Delete worktree with unpushed commits?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirmation?.reason === "dirty"
+                ? `"${deleteConfirmation.worktree.name}" has uncommitted changes.`
+                : `"${deleteConfirmation?.worktree.name}" has ${deleteConfirmation?.worktree.commitsAhead} unpushed commit(s).`} {" "}
+              Deleting it cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={confirmDelete}>
+              {deleteConfirmation?.reason === "dirty" && deleteConfirmation.worktree.commitsAhead > 0
+                ? "Continue"
+                : "Delete worktree"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={cleanupCandidates !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setCleanupCandidates(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove stale worktrees?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {cleanupCandidates?.length} stale worktree{cleanupCandidates?.length === 1 ? "" : "s"} will be removed: {cleanupCandidates?.join(", ")}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={() => void confirmCleanup()}>
+              Remove worktrees
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   )
 }

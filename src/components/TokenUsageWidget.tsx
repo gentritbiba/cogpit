@@ -7,6 +7,10 @@ import {
 } from "@/components/ui/tooltip"
 import type { AgentKind } from "@/lib/sessionSource"
 import { formatTokenCount } from "@/lib/format"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { Separator } from "@/components/ui/separator"
 
 type UsageLevel = "nominal" | "caution" | "warning" | "danger"
 
@@ -20,16 +24,9 @@ function usageLevel(pct: number): UsageLevel {
 
 const USAGE_TEXT_COLOR: Record<UsageLevel, string> = {
   nominal: "text-muted-foreground",
-  caution: "text-yellow-400",
-  warning: "text-orange-400",
-  danger: "text-red-400",
-}
-
-const USAGE_BAR_COLOR: Record<UsageLevel, string> = {
-  nominal: "bg-muted-foreground",
-  caution: "bg-yellow-400",
-  warning: "bg-orange-400",
-  danger: "bg-red-400",
+  caution: "text-warning",
+  warning: "text-warning",
+  danger: "text-destructive",
 }
 
 function TooltipBody({ usage }: { usage: UsageData }) {
@@ -41,13 +38,13 @@ function TooltipBody({ usage }: { usage: UsageData }) {
   if (usage.sevenDaySonnet) rows.push({ label: "Sonnet", pct: usage.sevenDaySonnet.utilization, resetsAt: usage.sevenDaySonnet.resetsAt })
 
   return (
-    <div className="space-y-2 min-w-[180px]">
+    <div className="flex min-w-[200px] flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-medium uppercase tracking-wider">{usage.providerName ?? "Agent"} Usage</span>
+        <span className="text-xs font-medium uppercase tracking-wide">{usage.providerName ?? "Agent"} usage</span>
         {usage.subscriptionType && (
-          <span className="text-[9px] font-medium text-cyan-300 bg-cyan-500/15 border border-cyan-500/30 rounded px-1 py-0.5">
+          <Badge variant="secondary">
             {usage.subscriptionType}
-          </span>
+          </Badge>
         )}
       </div>
       {rows.map((r) => {
@@ -57,32 +54,29 @@ function TooltipBody({ usage }: { usage: UsageData }) {
         const resetH = resetMs != null ? Math.max(0, Math.round(resetMs / 3_600_000)) : null
         const level = usageLevel(r.pct)
         return (
-          <div key={r.label} className="space-y-0.5">
-            <div className="flex items-center justify-between text-[10px]">
+          <div key={r.label} className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-xs">
               <span className="text-muted-foreground">{r.label}</span>
               <span className={cn("font-semibold", USAGE_TEXT_COLOR[level])}>
                 {r.pct.toFixed(1)}%
               </span>
             </div>
-            <div className="h-1 w-full rounded-full bg-elevation-3 overflow-hidden">
-              <div
-                className={cn("h-full rounded-full", USAGE_BAR_COLOR[level])}
-                style={{ width: `${Math.min(r.pct, 100)}%`, opacity: 0.6 }}
-              />
-            </div>
+            <Progress value={Math.min(r.pct, 100)} />
             {resetH != null && (
-              <div className="text-[9px] text-muted-foreground">resets in {resetH}h</div>
+              <div className="text-xs text-muted-foreground">Resets in {resetH}h</div>
             )}
           </div>
         )
       })}
       {usage.extraUsage?.isEnabled && usage.extraUsage.usedCredits != null && usage.extraUsage.monthlyLimit != null && (
-        <div className="pt-1 border-t border-border/30 text-[10px] text-muted-foreground">
+        <div className="flex flex-col gap-1 pt-1 text-xs text-muted-foreground">
+          <Separator />
           Extra: ${usage.extraUsage.usedCredits.toFixed(2)} / ${usage.extraUsage.monthlyLimit.toFixed(2)}
         </div>
       )}
       {(usage.lifetimeTokens != null || usage.creditBalance || usage.creditsUnlimited) && (
-        <div className="space-y-1 border-t border-border/30 pt-1 text-[10px] text-muted-foreground">
+        <div className="flex flex-col gap-1 pt-1 text-xs text-muted-foreground">
+          <Separator />
           {usage.lifetimeTokens != null && <div>Lifetime: {formatTokenCount(usage.lifetimeTokens)} tokens</div>}
           {usage.creditsUnlimited
             ? <div>Credits: Unlimited</div>
@@ -109,7 +103,7 @@ export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: Agen
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<button type="button" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="rounded-md px-1.5 py-1 text-xs font-mono hover:bg-elevation-2 transition-colors mr-1" />}>
+      <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="mr-1 font-mono" />}>
           <span className={cn(
             "tabular-nums",
             USAGE_TEXT_COLOR[usageLevel(primary)],

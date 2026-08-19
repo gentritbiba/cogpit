@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event"
 import { CommandPaletteHost } from "@/components/CommandPaletteHost"
 import { createCommandPaletteProps } from "./commandPaletteProps"
 
+Element.prototype.scrollIntoView = vi.fn()
+
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
   spawnTerminal: vi.fn(() => "pty_test"),

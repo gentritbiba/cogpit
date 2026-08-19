@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react"
 import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 export function TurnWorkFold({
   label,
@@ -14,14 +15,13 @@ export function TurnWorkFold({
   compact?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onToggle}
       aria-expanded={expanded}
       className={cn(
-        "group/fold flex min-h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1 text-left outline-none",
-        "text-[11px] text-muted-foreground/55 hover:text-muted-foreground",
-        "transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "group/fold h-auto min-h-8 w-full cursor-pointer justify-start gap-1.5 px-1 text-left text-xs font-normal text-muted-foreground",
         compact && "min-h-9",
       )}
     >
@@ -37,6 +37,6 @@ export function TurnWorkFold({
         aria-hidden
         className="pointer-events-none ml-1 h-px flex-1 bg-border/40 transition-colors group-hover/fold:bg-border/70"
       />
-    </button>
+    </Button>
   )
 }

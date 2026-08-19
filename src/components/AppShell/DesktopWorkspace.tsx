@@ -52,10 +52,10 @@ function DesktopSessionContent({
   if (!session) return null
 
   return (
-    <div className="flex flex-1 min-h-0">
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0">
+    <div className="flex min-h-0 flex-1 bg-background">
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={project.hasFileChanges && navigation.panels.showFileChanges ? 70 : 100} minSize="500px">
-          <div className="relative h-full min-h-0 flex flex-col">
+          <div className="relative flex h-full min-h-0 flex-col">
             {sessionView.teamMembersBar}
             <SessionInfoBar
               creatingSession={navigation.creatingSession}
@@ -161,7 +161,7 @@ function DesktopMainView({
     return (
       <div
         className={cn(
-          "flex flex-1 min-h-0 flex-col min-w-0",
+          "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
           // Before the first message there is no transcript to sit above, so the
           // composer becomes the page instead of hugging the bottom edge.
           !hasPendingTurns && "justify-center gap-4",
@@ -178,17 +178,16 @@ function DesktopMainView({
         )}
         <SessionInputFooter>{sessionView.pendingComposer}</SessionInputFooter>
         {!hasPendingTurns && (
-          <div className="flex items-center justify-center gap-1">
+          <div className="flex items-center justify-center gap-2">
             {can("terminal") && (
               <DisabledHint reason={hostActionReason}>
                 <Button
-                  variant="ghost"
-                  size="sm"
+                  variant="outline"
+                  size="xs"
                   disabled={Boolean(hostActionReason)}
-                  className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
                   onClick={project.onOpenTerminal}
                 >
-                  <TerminalSquare className="size-3" />
+                  <TerminalSquare data-icon="inline-start" />
                   Terminal
                 </Button>
               </DisabledHint>
@@ -197,26 +196,24 @@ function DesktopMainView({
               <>
                 <DisabledHint reason={hostActionReason}>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="outline"
+                    size="xs"
                     disabled={Boolean(hostActionReason)}
-                    className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-blue-400 hover:bg-blue-500/20"
                     onClick={() => project.onPostProjectAction("/api/open-in-editor")}
                   >
-                    <Code2 className="size-3" />
-                    Open
+                    <Code2 data-icon="inline-start" />
+                    Open in editor
                   </Button>
                 </DisabledHint>
                 <DisabledHint reason={hostActionReason}>
                   <Button
-                    variant="ghost"
-                    size="sm"
+                    variant="outline"
+                    size="xs"
                     disabled={Boolean(hostActionReason)}
-                    className="h-6 px-2 gap-1.5 text-[11px] text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10"
                     onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
                   >
-                    <FolderSearch className="size-3" />
-                    Reveal
+                    <FolderSearch data-icon="inline-start" />
+                    Reveal in files
                   </Button>
                 </DisabledHint>
               </>
@@ -258,18 +255,14 @@ export function DesktopWorkspace({
   }
 
   return (
-    <div className="relative flex flex-1 min-h-0 overflow-hidden">
-      <HoverRevealPanel
-        side="left"
-        visible={navigation.panels.showSidebar && state.mainView !== "config"}
-        enabled={state.mainView !== "config"}
-      >
-        <PrimarySessionBrowser
-          navigation={navigation}
-        />
-      </HoverRevealPanel>
+    <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
+      {navigation.panels.showSidebar && state.mainView !== "config" && (
+        <div className="w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground">
+          <PrimarySessionBrowser navigation={navigation} />
+        </div>
+      )}
 
-      <main className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <DesktopMainView
           navigation={navigation}
           sessionView={sessionView}

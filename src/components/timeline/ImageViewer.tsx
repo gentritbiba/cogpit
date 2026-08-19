@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 export interface ImageViewerItem {
   id: string
@@ -51,21 +52,23 @@ function IconButton({
   className?: string
 }): React.ReactElement {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.06] text-white/75 transition-colors",
-        "hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70",
+        "size-8 border border-white/10 bg-white/[0.06] text-white/75",
+        "hover:bg-white/10 hover:text-white focus-visible:ring-white/40",
         "disabled:pointer-events-none disabled:opacity-30",
         className,
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -142,7 +145,7 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
         showCloseButton={false}
         onKeyDown={handleKeyDown}
         className={cn(
-          "flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-2xl border-white/10 bg-[#0b0d10] p-0 text-white shadow-2xl",
+          "flex h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl border-white/10 bg-black p-0 text-white",
           "sm:h-[min(820px,calc(100dvh-2rem))] sm:w-[min(1120px,calc(100vw-2rem))] sm:max-w-none",
         )}
       >
@@ -153,14 +156,14 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
 
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 bg-black/20 px-2.5 sm:px-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-white/[0.06]">
-            <ImageIcon className="size-3.5 text-white/65" />
+            <ImageIcon className="size-3.5 text-white/65" data-icon="icon" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs font-medium text-white/90">
               {current.label || current.alt || "Session image"}
             </div>
             {hasMultiple && (
-              <div className="text-[10px] tabular-nums text-white/45">
+              <div className="text-xs tabular-nums text-white/50">
                 {index + 1} of {images.length}
               </div>
             )}
@@ -172,33 +175,35 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
               disabled={zoomPercent <= 100}
               onClick={zoomOut}
             >
-              <Minus className="size-3.5" />
+              <Minus className="size-3.5" data-icon="icon" />
             </IconButton>
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={resetZoom}
-              className="h-8 min-w-12 rounded-md px-1.5 font-mono text-[10px] tabular-nums text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="min-w-12 px-1.5 font-mono text-xs tabular-nums text-white/60 hover:bg-white/[0.06] hover:text-white"
               aria-label="Reset zoom"
               title="Reset zoom"
             >
               {zoomPercent}%
-            </button>
+            </Button>
             <IconButton
               label="Zoom in"
               disabled={zoomPercent >= MAX_ZOOM * 100}
               onClick={zoomIn}
             >
-              <Plus className="size-3.5" />
+              <Plus className="size-3.5" data-icon="icon" />
             </IconButton>
             <div className="mx-1 h-5 w-px bg-white/10" />
             <IconButton label="Close image viewer" onClick={onClose}>
-              <X className="size-4" />
+              <X className="size-4" data-icon="icon" />
             </IconButton>
           </div>
         </header>
 
         <div
-          className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.055),transparent_65%)]"
+          className="relative min-h-0 flex-1 overflow-hidden bg-black"
           onPointerDown={handlePointerDown}
           onPointerUp={handlePointerUp}
         >
@@ -225,7 +230,7 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
                 alt={current.alt}
                 draggable={false}
                 className={cn(
-                  "max-h-full max-w-full select-none object-contain shadow-2xl",
+                  "max-h-full max-w-full select-none object-contain",
                   isZoomedIn ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in",
                 )}
               />
@@ -240,7 +245,7 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
                 onClick={goPrev}
                 className="absolute left-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-black/45 backdrop-blur sm:left-3"
               >
-                <ChevronLeft className="size-5" />
+                <ChevronLeft className="size-5" data-icon="icon" />
               </IconButton>
               <IconButton
                 label="Next image"
@@ -248,14 +253,14 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
                 onClick={goNext}
                 className="absolute right-2 top-1/2 size-10 -translate-y-1/2 rounded-full bg-black/45 backdrop-blur sm:right-3"
               >
-                <ChevronRight className="size-5" />
+                <ChevronRight className="size-5" data-icon="icon" />
               </IconButton>
             </>
           )}
 
           {zoomPercent === 100 && (
-            <div className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-[10px] text-white/45 backdrop-blur sm:flex">
-              <Maximize2 className="size-3" />
+            <div className="pointer-events-none absolute bottom-2 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white/60 sm:flex">
+              <Maximize2 className="size-3" data-icon="inline-start" />
               Scroll or double-click to zoom · drag to pan
             </div>
           )}
@@ -265,16 +270,17 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
           <footer className="shrink-0 border-t border-white/10 bg-black/25 px-2 py-2">
             <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5">
               {images.map((image, imageIndex) => (
-                <button
-                  key={image.id}
+                <Button
+                  key={`${image.id}-${imageIndex}`}
                   type="button"
+                  variant="ghost"
                   onClick={() => goTo(imageIndex)}
                   aria-label={`View image ${imageIndex + 1}`}
                   aria-current={imageIndex === index ? "true" : undefined}
                   className={cn(
-                    "relative size-12 shrink-0 overflow-hidden rounded-md border bg-white/[0.04] p-0.5 transition-all sm:h-14 sm:w-[4.5rem]",
+                    "relative size-12 shrink-0 overflow-hidden rounded-md border bg-white/[0.04] p-0.5 sm:h-14 sm:w-[4.5rem]",
                     imageIndex === index
-                      ? "border-blue-400 ring-1 ring-blue-400/35"
+                      ? "border-white ring-1 ring-white/40"
                       : "border-white/10 opacity-55 hover:border-white/25 hover:opacity-90",
                   )}
                 >
@@ -284,10 +290,10 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
                     draggable={false}
                     className="size-full rounded-[3px] object-cover"
                   />
-                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/65 px-1 font-mono text-[8px] text-white/70">
+                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 font-mono text-xs text-white/80">
                     {imageIndex + 1}
                   </span>
-                </button>
+                </Button>
               ))}
             </div>
           </footer>

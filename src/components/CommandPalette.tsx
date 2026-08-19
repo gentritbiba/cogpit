@@ -1,5 +1,4 @@
 import { type ComponentType } from "react"
-import { Autocomplete } from "@base-ui/react/autocomplete"
 import {
   BarChart3,
   ChevronsDownUp,
@@ -31,13 +30,16 @@ import {
   TerminalSquare,
 } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Separator } from "@/components/ui/separator"
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@/components/ui/command"
+import { Spinner } from "@/components/ui/Spinner"
 import { DEVICE_SWITCH_COMMANDS, shortcutLabel } from "@/lib/keybindings"
 
 export interface CommandPaletteProject {
@@ -412,92 +414,58 @@ export function CommandPalette(props: CommandPaletteProps) {
   }
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent
-        className="top-[30%] max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
-        showCloseButton={false}
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>Command palette</DialogTitle>
-          <DialogDescription>Search for a Cogpit action to run.</DialogDescription>
-        </DialogHeader>
+    <CommandDialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title="Command palette"
+      description="Search for a Cogpit action to run."
+      className="max-w-xl"
+    >
+      <Command label="Search commands" loop>
+        <CommandInput
+          aria-label="Search commands"
+          autoFocus
+          placeholder="Search commands..."
+        />
 
-        <Autocomplete.Root
-          autoHighlight="always"
-          inline
-          items={groups}
-          itemToStringValue={(item) => item.value}
-          keepHighlight
-          open
-        >
-          <div className="flex h-12 items-center gap-2 px-3 [&>svg]:size-4">
-            <Search aria-hidden="true" className="shrink-0 text-muted-foreground" />
-            <Autocomplete.Input
-              aria-label="Search commands"
-              autoFocus
-              className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              placeholder="Search Cogpit actions…"
-            />
-            <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              {shortcutLabel("commandPalette")}
-            </kbd>
+        {props.loadingNavigation && (
+          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
+            <Spinner className="size-3.5" />
+            Loading projects and sessions...
           </div>
+        )}
 
-          <Separator />
-
-          <Autocomplete.Empty className="py-8 text-center text-sm text-muted-foreground">
-            No matching actions.
-          </Autocomplete.Empty>
-
-          <Autocomplete.List className="max-h-[min(26rem,60vh)] overflow-y-auto p-1 outline-none">
-            {(group: PaletteGroup) => (
-              <Autocomplete.Group key={group.value} items={group.items} className="py-1">
-                <Autocomplete.GroupLabel className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                  {group.value}
-                </Autocomplete.GroupLabel>
-                <Autocomplete.Collection>
-                  {(item: PaletteAction) => {
-                    const Icon = item.icon
-                    return (
-                      <Autocomplete.Item
-                        key={item.id}
-                        value={item}
-                        className="flex min-h-8 cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
-                        onClick={() => runAction(item)}
-                      >
-                        <Icon />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{item.label}</span>
-                          {item.description && (
-                            <span className="block truncate text-[11px] text-muted-foreground">
-                              {item.description}
-                            </span>
-                          )}
+        <CommandList className="max-h-[min(26rem,60vh)]">
+          <CommandEmpty>No matching actions.</CommandEmpty>
+          {groups.map((group) => (
+            <CommandGroup key={group.value} heading={group.value}>
+              {group.items.map((item) => {
+                const Icon = item.icon
+                return (
+                  <CommandItem
+                    key={item.id}
+                    value={item.value}
+                    onSelect={() => runAction(item)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{item.label}</span>
+                      {item.description && (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {item.description}
                         </span>
-                        {item.shortcut && (
-                          <kbd className="font-mono text-[10px] tracking-wide text-muted-foreground">
-                            {item.shortcut}
-                          </kbd>
-                        )}
-                      </Autocomplete.Item>
-                    )
-                  }}
-                </Autocomplete.Collection>
-              </Autocomplete.Group>
-            )}
-          </Autocomplete.List>
-
-          <Separator />
-
-          <div className="flex items-center justify-between gap-3 px-3 py-2 text-[11px] text-muted-foreground">
-            <span>{props.loadingNavigation ? "Loading projects and sessions…" : "Type to filter actions"}</span>
-            <span className="flex items-center gap-2">
-              <span>Navigate ↑↓</span>
-              <span>Run ↵</span>
-            </span>
-          </div>
-        </Autocomplete.Root>
-      </DialogContent>
-    </Dialog>
+                      )}
+                    </span>
+                    {item.shortcut && (
+                      <CommandShortcut>{item.shortcut}</CommandShortcut>
+                    )}
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </Command>
+    </CommandDialog>
   )
 }

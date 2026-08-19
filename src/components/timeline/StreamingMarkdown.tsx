@@ -19,13 +19,13 @@ const streamingMarkdownComponents: Components = {
     const isInline = !className && typeof children === "string" && !children.includes("\n")
     if (isInline) {
       return (
-        <code className="text-[0.9em] font-mono px-1 py-0.5 rounded bg-elevation-2 text-orange-600 dark:text-orange-300">
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground">
           {children}
         </code>
       )
     }
     return (
-      <pre className="my-1.5 overflow-x-auto rounded border border-border/40 bg-elevation-1 p-2 text-[11px] leading-[1.5] font-mono">
+      <pre className="my-1.5 overflow-x-auto rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed">
         <code>{String(children).replace(/\n$/, "")}</code>
       </pre>
     )

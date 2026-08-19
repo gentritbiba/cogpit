@@ -22,13 +22,13 @@ export function LineCounts({
   return (
     <span
       className={cn(
-        "flex items-center gap-1 shrink-0 text-[10px] font-mono tabular-nums",
+        "flex shrink-0 items-center gap-1 font-mono text-xs tabular-nums",
         dimmed && "opacity-40",
         className,
       )}
     >
-      {add > 0 && <span className="text-green-500">+{add}</span>}
-      {del > 0 && <span className="text-red-400">-{del}</span>}
+      {add > 0 && <span className="text-success">+{add}</span>}
+      {del > 0 && <span className="text-destructive">-{del}</span>}
     </span>
   )
 }
@@ -44,10 +44,10 @@ export function ChangeBar({ add, del }: { add: number; del: number }) {
   return (
     <span className="flex items-center gap-[1px] shrink-0 ml-1">
       {Array.from({ length: addBlocks }, (_, i) => (
-        <span key={`a${i}`} className="inline-block w-[6px] h-[6px] rounded-[1px] bg-green-500/70" />
+        <span key={`a${i}`} className="inline-block size-1.5 rounded-xs bg-success/70" />
       ))}
       {Array.from({ length: delBlocks }, (_, i) => (
-        <span key={`d${i}`} className="inline-block w-[6px] h-[6px] rounded-[1px] bg-red-400/70" />
+        <span key={`d${i}`} className="inline-block size-1.5 rounded-xs bg-destructive/70" />
       ))}
     </span>
   )

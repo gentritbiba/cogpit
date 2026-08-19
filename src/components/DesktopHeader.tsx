@@ -1,10 +1,10 @@
 import { memo } from "react"
 import {
-  ChevronRight,
   Eye,
-  BarChart3,
   PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
+  PanelRightOpen,
   Check,
   Skull,
   Settings,
@@ -13,7 +13,26 @@ import {
   SlidersHorizontal,
   FileCode2,
   Search,
+  MoreHorizontal,
+  LayoutGrid,
 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Tooltip,
   TooltipTrigger,
@@ -29,9 +48,8 @@ import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { can } from "@/lib/capabilities"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { projectName } from "@/lib/format"
 import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
-import { MissionControlButton } from "@/components/MissionControl/MissionControlButton"
-import packageJson from "../../package.json"
 
 interface DesktopHeaderProps {
   showSidebar: boolean
@@ -95,51 +113,82 @@ export const DesktopHeader = memo(function DesktopHeader({
     copyUrl(networkUrl)
   }
 
+  const sessionLabel = session?.slug || session?.sessionId.slice(0, 8)
+  const projectLabel = session?.cwd ? projectName(session.cwd) : null
+
   return (
-    <header className="flex h-8 shrink-0 items-center border-b border-border/50 bg-elevation-2 px-2.5 electron-drag">
-      <div className="flex items-center gap-2 min-w-0">
+    <header className="electron-drag flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
+      <HeaderIconButton
+        icon={showSidebar ? PanelLeftClose : PanelLeftOpen}
+        label={showSidebar ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
+        onClick={onToggleSidebar}
+        size="default"
+      />
+
+      <div className="flex min-w-0 items-center gap-2">
         <Tooltip>
-          <TooltipTrigger render={<button
-              type="button"
-              onClick={onGoHome}
-              className="shrink-0 transition-opacity hover:opacity-70"
-              aria-label={session ? "Back to Dashboard" : "Cogpit"}
-            />}>
-              <Eye className="size-4 text-blue-400" />
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onGoHome}
+                aria-label={session ? "Back to dashboard" : "Cogpit"}
+              />
+            }
+          >
+              <Eye data-icon="inline-start" />
           </TooltipTrigger>
-          <TooltipContent>{session ? "Back to Dashboard" : "Cogpit"}</TooltipContent>
+          <TooltipContent>{session ? "Back to dashboard" : "Cogpit"}</TooltipContent>
         </Tooltip>
 
-        <span className="text-[10px] font-mono text-muted-foreground/50 select-none">v{packageJson.version}</span>
-
         {session ? (
-          <>
-            <Tooltip>
-              <TooltipTrigger render={<button
-                  type="button"
-                  className="truncate max-w-[220px] text-sm font-medium text-foreground hover:text-foreground transition-colors"
-                  onClick={handleCopyResumeCmd}
-                />}>
-                  {cmdCopied ? (
-                    <span className="flex items-center gap-1.5 text-green-400">
-                      <Check className="size-3" /> Copied
-                    </span>
-                  ) : (
-                    session.slug || session.sessionId.slice(0, 8)
-                  )}
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <div>Click to copy resume command</div>
-                {session.cwd && (
-                  <div className="font-mono text-muted-foreground">{session.cwd}</div>
-                )}
-              </TooltipContent>
-            </Tooltip>
-            {isLive && <LiveIndicator aria-label="Session is live" />}
-          </>
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap">
+              {projectLabel && (
+                <>
+                  <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
+                    <BreadcrumbLink
+                      render={<button type="button" onClick={onGoHome} />}
+                      className="max-w-40 truncate"
+                    >
+                      {projectLabel}
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden sm:list-item" />
+                </>
+              )}
+              <BreadcrumbItem className="min-w-0">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <BreadcrumbLink
+                        render={<button type="button" onClick={handleCopyResumeCmd} />}
+                        className="max-w-64 truncate font-medium text-foreground"
+                      />
+                    }
+                  >
+                    {cmdCopied ? (
+                      <span className="flex items-center gap-1 text-success">
+                        <Check className="size-3.5" />
+                        Copied
+                      </span>
+                    ) : sessionLabel}
+                  </TooltipTrigger>
+                  <TooltipContent className="flex max-w-sm flex-col gap-1 text-xs">
+                    <span>Copy resume command</span>
+                    {session.cwd && <span className="truncate font-mono text-muted-foreground">{session.cwd}</span>}
+                  </TooltipContent>
+                </Tooltip>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
         ) : (
-          <h1 className="text-sm font-semibold tracking-tight">Cogpit</h1>
+          <h1 className="text-sm font-semibold">Cogpit</h1>
         )}
+
+        {isLive && <LiveIndicator aria-label="Session is live" />}
       </div>
 
       <div className="flex-1" />
@@ -158,69 +207,87 @@ export const DesktopHeader = memo(function DesktopHeader({
         onCopyUrl={handleCopyNetworkUrl}
       />
 
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex shrink-0 items-center gap-1">
         <PowerMonitor />
-        <HeaderIconButton
-          icon={Search}
-          label={`Command palette (${commandPaletteShortcut})`}
+        <Button
+          variant="outline"
+          size="sm"
           onClick={onOpenCommandPalette}
-        />
-        {onToggleMission && (
-          <MissionControlButton active={showMission ?? false} onToggle={onToggleMission} />
-        )}
-        {onToggleConfig && (
-          <HeaderIconButton
-            icon={SlidersHorizontal}
-            label={showConfig ? "Close Config Browser" : "Config Browser"}
-            onClick={onToggleConfig}
-            className={showConfig ? "bg-blue-500/20" : undefined}
-            iconClassName={showConfig ? "text-blue-400" : undefined}
-          />
-        )}
-        <HeaderIconButton
-          icon={Settings}
-          label="Settings"
-          onClick={onOpenSettings}
-        />
-        {can("killAny") && (
-          <HeaderIconButton
-            icon={Skull}
-            label="Kill all tracked agent processes"
-            onClick={onKillAll}
-            disabled={killing}
-            className="hover:text-red-400 hover:bg-red-500/10"
-            iconClassName={killing ? "text-red-400" : undefined}
-          />
-        )}
-        {onToggleWorktrees && (
-          <HeaderIconButton
-            icon={GitBranch}
-            label={showWorktrees ? "Hide Worktrees" : "Show Worktrees"}
-            onClick={onToggleWorktrees}
-            className={showWorktrees ? "text-foreground" : undefined}
-          />
-        )}
-        {hasFileChanges && onToggleFileChanges && (
-          <HeaderIconButton
-            icon={FileCode2}
-            label={showFileChanges ? "Hide File Changes" : "Show File Changes"}
-            onClick={onToggleFileChanges}
-            className={showFileChanges ? "text-amber-400" : undefined}
-            iconClassName={showFileChanges ? "text-amber-400" : undefined}
-          />
-        )}
-        <HeaderIconButton
-          icon={showSidebar ? PanelLeftClose : ChevronRight}
-          label={showSidebar ? "Hide Sidebar (Ctrl+B)" : "Show Sidebar (Ctrl+B)"}
-          onClick={onToggleSidebar}
-        />
-        {session && (
-          <HeaderIconButton
-            icon={showStats ? PanelRightClose : BarChart3}
-            label={showStats ? "Hide Stats (⌘⇧B)" : "Show Stats (⌘⇧B)"}
-            onClick={onToggleStats}
-          />
-        )}
+        >
+          <Search data-icon="inline-start" />
+          Search
+          <kbd className="hidden font-mono text-xs text-muted-foreground lg:inline">{commandPaletteShortcut}</kbd>
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" aria-label="More actions" />}
+          >
+            <MoreHorizontal data-icon="inline-start" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Workspace</DropdownMenuLabel>
+              {onToggleMission && (
+                <DropdownMenuItem onClick={onToggleMission}>
+                  <LayoutGrid />
+                  Mission Control
+                  {showMission && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              )}
+              {onToggleConfig && (
+                <DropdownMenuItem onClick={onToggleConfig}>
+                  <SlidersHorizontal />
+                  Config
+                  {showConfig && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              )}
+              {onToggleWorktrees && (
+                <DropdownMenuItem onClick={onToggleWorktrees}>
+                  <GitBranch />
+                  Worktrees
+                  {showWorktrees && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              )}
+              {hasFileChanges && onToggleFileChanges && (
+                <DropdownMenuItem onClick={onToggleFileChanges}>
+                  <FileCode2 />
+                  File changes
+                  {showFileChanges && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              )}
+              {session && (
+                <DropdownMenuItem onClick={onToggleStats}>
+                  {showStats ? <PanelRightClose /> : <PanelRightOpen />}
+                  Session details
+                  {showStats && <Check className="ml-auto" />}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={onOpenSettings}>
+                <Settings />
+                Settings
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            {can("killAny") && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={onKillAll}
+                    disabled={killing}
+                  >
+                    <Skull />
+                    {killing ? "Stopping processes…" : "Stop all agent processes"}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   )
@@ -243,19 +310,20 @@ function NetworkStatus({ networkUrl, urlCopied, onCopyUrl }: NetworkStatusProps)
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<button
-          type="button"
-          onClick={onCopyUrl}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-elevation-2 transition-colors mr-1"
-        />}>
-          <Globe className="size-3 text-green-500" />
-          {urlCopied ? (
-            <span className="text-green-400">Copied!</span>
-          ) : (
-            networkUrl
-          )}
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={onCopyUrl}
+            aria-label={urlCopied ? `Copied network URL ${networkUrl}` : `Copy network URL ${networkUrl}`}
+          />
+        }
+      >
+          {urlCopied ? <Check data-icon="inline-start" className="text-success" /> : <Globe data-icon="inline-start" className="text-success" />}
       </TooltipTrigger>
-      <TooltipContent>Reachable on your network — click to copy the connection URL</TooltipContent>
+      <TooltipContent>{urlCopied ? "Copied" : networkUrl}</TooltipContent>
     </Tooltip>
   )
 }

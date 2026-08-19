@@ -27,7 +27,6 @@ const commonProps = {
   hasMoreTurns: false,
   isLoadingOlderTurns: false,
   onLoadMoreTurns: vi.fn(),
-  status: null,
 }
 
 describe("PreviewAppShell", () => {

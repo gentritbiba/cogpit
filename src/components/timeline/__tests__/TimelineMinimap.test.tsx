@@ -47,6 +47,25 @@ describe("TimelineMinimap", () => {
     expect(screen.getByRole("button", { name: "Turn 2: now ship it" })).toBeInTheDocument()
   })
 
+  it("keeps duplicate turn ids distinct while live turns settle", () => {
+    const turns = makeTurns(["first", "streaming copy", "latest"])
+    turns[1].id = turns[0].id
+    const scrollRef = createRef<HTMLElement>()
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    render(
+      <TimelineMinimap
+        turns={turns}
+        scrollContainerRef={scrollRef}
+        onJumpToTurn={vi.fn()}
+      />,
+    )
+
+    expect(screen.getAllByRole("button")).toHaveLength(3)
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key")
+    consoleError.mockRestore()
+  })
+
   it("jumps to a turn when its tick is clicked", () => {
     const onJump = renderRail(["a", "b", "c"])
 

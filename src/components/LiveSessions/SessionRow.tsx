@@ -1,12 +1,15 @@
 import { useState } from "react"
 import { X, GitBranch, Play, Bot, Users, ChevronRight } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
-import { SessionPreview, isIdleStatus, getStatusColor } from "./SessionPreview"
+import { SessionPreview } from "./SessionPreview"
+import { getStatusColor, isIdleStatus } from "./sessionStatusPresentation"
 import { sessionTitle } from "./sessionListView"
 import { STATUS_DOT } from "./statusDot"
 import { useHoverPrefetch } from "./useHoverPrefetch"
@@ -102,145 +105,131 @@ export function SessionRow({
   }
 
   const sessionRow = (
-    <Tooltip>
-      <TooltipTrigger render={<div
-          role="button"
-          tabIndex={0}
-          data-live-session
-          onClick={() => onSelectSession(s.dirName, s.fileName)}
-          onKeyDown={(e) => {
-            if (e.target !== e.currentTarget) return
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              onSelectSession(s.dirName, s.fileName)
-            }
-          }}
-          onMouseEnter={handleHoverStart}
-          onMouseLeave={handleHoverEnd}
-          onFocus={handleHoverStart}
-          onBlur={handleHoverEnd}
-          className={cn(
-            "group relative w-full flex items-center gap-1.5 rounded-md px-2 py-[7px] text-left transition-colors duration-100 cursor-pointer",
-            cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
-          )}
-        />}>
-          {/* Status dot — fixed-width slot so titles stay aligned when there's no dot */}
+    <div
+      className={cn(
+        "group relative flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-2 transition-colors",
+        cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              data-live-session
+              onClick={() => onSelectSession(s.dirName, s.fileName)}
+              onMouseEnter={handleHoverStart}
+              onMouseLeave={handleHoverEnd}
+              onFocus={handleHoverStart}
+              onBlur={handleHoverEnd}
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
           <span className="flex w-1.5 shrink-0 items-center justify-center" aria-hidden="true">
             {dotState && (
               <span data-status-dot={dotState} className={cn("size-1.5 rounded-full", STATUS_DOT[dotState])} />
             )}
           </span>
-
-          {/* Title */}
-          <span className="text-xs leading-tight truncate flex-1 text-foreground">
-            {title}
-          </span>
-
-          {/* Teammate badge — marks sessions spawned as agent-team members */}
+          <span className="flex-1 truncate text-sm leading-tight text-foreground">{title}</span>
           {isTeammate && (
-            <span className="flex items-center gap-0.5 rounded bg-violet-500/10 text-violet-400 px-1 py-px text-[9px] font-medium shrink-0">
-              <Bot className="size-2" />
-              {title !== s.agentName && s.agentName}
-            </span>
+            <Badge variant="outline">
+              <Bot data-icon="inline-start" />
+              {title !== s.agentName ? s.agentName : "Agent"}
+            </Badge>
           )}
-
-          {/* Native app-server turns have no killable OS process, but are live. */}
           {isLive && !isDeferred && statusLabel && (
-            <span
+            <Badge
+              variant="secondary"
               data-session-live-state
               className={cn(
-                "flex items-center rounded px-1 py-px text-[9px] font-medium shrink-0",
-                isNativeIdle
-                  ? "bg-blue-500/10 text-blue-400"
-                  : "bg-muted/60",
+                "shrink-0",
+                isNativeIdle && "text-success",
                 !isNativeIdle && getStatusColor(s.agentStatus),
               )}
             >
               {statusLabel}
-            </span>
+            </Badge>
           )}
-
-          {/* Team collapse chip — on lead rows with nested teammate sessions */}
-          {!!teammateCount && onToggleTeammates && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onToggleTeammates() }}
-              className="flex items-center gap-0.5 rounded bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:text-violet-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors"
-              title={teammatesCollapsed ? "Show team agents" : "Hide team agents"}
-              aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
-              aria-expanded={!teammatesCollapsed}
-            >
-              <Users className="size-2" />
-              {teammateCount}
-              <ChevronRight className={cn(
-                "size-2 transition-transform duration-150",
-                !teammatesCollapsed && "rotate-90"
-              )} />
-            </button>
-          )}
-
-          {/* Deferred pill + resume button */}
           {isDeferred && (
-            <>
-              <span className="flex items-center rounded bg-amber-500/15 text-amber-400 px-1 py-px text-[9px] font-medium shrink-0">
-                deferred
-              </span>
-              {onResumeSession && (
-                <button
-                  type="button"
-                  onClick={handleResume}
-                  disabled={resuming}
-                  className="flex items-center gap-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 hover:text-amber-300 px-1 py-px text-[9px] font-medium shrink-0 transition-colors disabled:opacity-50"
-                  title="Resume to evaluate deferred permission"
-                  aria-label="Resume to evaluate"
-                >
-                  <Play className="size-2 fill-current" />
-                  Resume
-                </button>
-              )}
-            </>
+            <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
+              deferred
+            </Badge>
           )}
-
-          {/* Worktree badge */}
           {worktreeName && (
-            <span className="flex items-center gap-0.5 rounded bg-emerald-500/10 text-emerald-400 px-1 py-px text-[9px] font-medium shrink-0">
-              <GitBranch className="size-2" />
+            <Badge variant="outline">
+              <GitBranch data-icon="inline-start" />
               {worktreeName}
-            </span>
+            </Badge>
           )}
+        </TooltipTrigger>
+        <TooltipContent side="right" className="max-w-[280px]">
+          <SessionPreview
+            session={s}
+            proc={proc}
+            statusLabel={statusLabel}
+            customName={customName}
+            worktreeName={worktreeName}
+          />
+        </TooltipContent>
+      </Tooltip>
 
-          {/* Pull requests opened by this session */}
-          <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
+      {!!teammateCount && onToggleTeammates && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={onToggleTeammates}
+          className="shrink-0"
+          title={teammatesCollapsed ? "Show team agents" : "Hide team agents"}
+          aria-label={teammatesCollapsed ? `Show ${teammateCount} team agents` : `Hide ${teammateCount} team agents`}
+          aria-expanded={!teammatesCollapsed}
+        >
+          <Users data-icon="inline-start" />
+          {teammateCount}
+          <ChevronRight data-icon="inline-end" className={cn(
+            "transition-transform duration-150",
+            !teammatesCollapsed && "rotate-90"
+          )} />
+        </Button>
+      )}
 
-          {/* Relative time */}
-          <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">
-            {formatRelativeTime(s.lastActivityAt || s.lastModified)}
-          </span>
+      {isDeferred && onResumeSession && (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          onClick={handleResume}
+          disabled={resuming}
+          className="shrink-0 text-warning"
+          title="Resume to evaluate deferred permission"
+          aria-label="Resume to evaluate"
+        >
+          <Play data-icon="inline-start" />
+          Resume
+        </Button>
+      )}
 
-          {/* Kill button — absolute badge, no layout space */}
-          {hasProcess && onKill && (
-            <button
-              type="button"
-              onClick={(e) => onKill(proc.pid, e)}
-              disabled={killingPids.has(proc.pid)}
-              className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity rounded-bl rounded-tr-md p-0.5 hover:bg-red-500/20 text-muted-foreground hover:text-red-400 disabled:opacity-50 z-10"
-              title={`Kill PID ${proc.pid}`}
-              aria-label={`Kill process ${proc.pid}`}
-            >
-              <X className="size-2.5" />
-            </button>
-          )}
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-[280px]">
-        <SessionPreview
-          session={s}
-          proc={proc}
-          statusLabel={statusLabel}
-          customName={customName}
-          worktreeName={worktreeName}
-        />
-      </TooltipContent>
-    </Tooltip>
+      <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
+      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+        {formatRelativeTime(s.lastActivityAt || s.lastModified)}
+      </span>
+
+      {hasProcess && onKill && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={(event) => onKill(proc.pid, event)}
+          disabled={killingPids.has(proc.pid)}
+          className="absolute right-0 top-0 text-destructive opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+          title={`Kill PID ${proc.pid}`}
+          aria-label={`Kill process ${proc.pid}`}
+        >
+          <X data-icon="inline-start" />
+        </Button>
+      )}
+    </div>
   )
 
   if (onDuplicateSession || onDeleteSession || onRenameSession) {
@@ -263,7 +252,7 @@ export function SessionRow({
 // -- Helpers --
 
 function cardStyle(isActive: boolean, isNewlyCompleted: boolean): string {
-  if (isActive) return "border-l-2 border-l-blue-500 rounded-l-none"
-  if (isNewlyCompleted) return "border-l-2 border-l-green-500 rounded-l-none"
-  return "hover:bg-white/[0.03]"
+  if (isActive) return "bg-accent"
+  if (isNewlyCompleted) return "bg-success/10"
+  return "hover:bg-accent/60"
 }

@@ -101,31 +101,31 @@ describe("PlanModeBlock", () => {
     expect(screen.getByText(/Step 1/)).toBeInTheDocument()
   })
 
-  it("shows 'approved' status text and purple border styling", () => {
+  it("shows approved semantic status styling", () => {
     const { container } = render(
       <PlanModeBlock plan="Do the thing" status="approved" toolCalls={[]} />
     )
     expect(screen.getByText("approved")).toBeInTheDocument()
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/border-purple-500/)
+    expect(wrapper.className).toMatch(/border-success/)
   })
 
-  it("shows 'pending' status text and amber border styling", () => {
+  it("shows pending semantic status styling", () => {
     const { container } = render(
       <PlanModeBlock plan="Do the thing" status="pending" toolCalls={[]} />
     )
     expect(screen.getByText("pending")).toBeInTheDocument()
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/border-amber-500/)
+    expect(wrapper.className).toMatch(/border-warning/)
   })
 
-  it("shows 'rejected' status text and red border styling", () => {
+  it("shows rejected semantic status styling", () => {
     const { container } = render(
       <PlanModeBlock plan="Do the thing" status="rejected" toolCalls={[]} />
     )
     expect(screen.getByText("rejected")).toBeInTheDocument()
     const wrapper = container.firstChild as HTMLElement
-    expect(wrapper.className).toMatch(/border-red-500/)
+    expect(wrapper.className).toMatch(/border-destructive/)
   })
 
   it("shows planFilePath when provided", () => {

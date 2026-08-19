@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Globe, FolderCode, Save, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
 
 interface NewFileDialogProps {
@@ -23,6 +25,7 @@ export function NewFileDialog({
   const [scope, setScope] = useState<"global" | "project">(projectDir ? "project" : "global")
   const [creating, setCreating] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const nameId = useId()
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
@@ -48,52 +51,68 @@ export function NewFileDialog({
   }
 
   return (
-    <div className="px-3 py-1.5 space-y-1.5">
+    <FieldGroup className="gap-3 px-3 py-2">
       {hasBothScopes && (
-        <div className="flex items-center gap-1 rounded-md bg-elevation-0 p-0.5">
-          <button
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
-              scope === "global" ? "bg-blue-500/20 text-blue-400" : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => setScope("global")}
+        <Field>
+          <FieldLabel>Scope</FieldLabel>
+          <ToggleGroup
+            aria-label="File scope"
+            value={[scope]}
+            onValueChange={(values) => {
+              const nextScope = values[0]
+              if (nextScope === "global" || nextScope === "project") {
+                setScope(nextScope)
+              }
+            }}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            className="w-full"
           >
-            <Globe className="size-2.5" />
-            Global
-          </button>
-          <button
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
-              scope === "project" ? "bg-green-500/20 text-green-400" : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => setScope("project")}
-          >
-            <FolderCode className="size-2.5" />
-            Project
-          </button>
-        </div>
+            <ToggleGroupItem value="global" className="flex-1">
+              <Globe data-icon="inline-start" />
+              Global
+            </ToggleGroupItem>
+            <ToggleGroupItem value="project" className="flex-1">
+              <FolderCode data-icon="inline-start" />
+              Project
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
       )}
-      <div className="flex items-center gap-1">
-        <input
-          ref={inputRef}
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleCreate()
-            if (e.key === "Escape") onCancel()
-          }}
-          placeholder={`${fileType} name...`}
-          className="flex-1 bg-elevation-0 border border-border rounded px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-blue-500/50 min-w-0"
-          disabled={creating}
-        />
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={handleCreate} disabled={creating || !name.trim()}>
-          <Save className="size-3 text-green-400" />
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={onCancel}>
-          <X className="size-3" />
-        </Button>
-      </div>
-    </div>
+      <Field>
+        <FieldLabel htmlFor={nameId}>
+          {fileType.charAt(0).toUpperCase() + fileType.slice(1)} name
+        </FieldLabel>
+        <div className="flex items-center gap-1">
+          <Input
+            id={nameId}
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void handleCreate()
+              if (event.key === "Escape") onCancel()
+            }}
+            placeholder={`${fileType} name...`}
+            className="h-7 min-w-0 flex-1 text-xs"
+            disabled={creating}
+          />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Create ${fileType}`}
+            onClick={() => void handleCreate()}
+            disabled={creating || !name.trim() || !targetDir}
+          >
+            <Save data-icon="inline-start" />
+          </Button>
+          <Button variant="ghost" size="icon-xs" aria-label="Cancel create" onClick={onCancel}>
+            <X data-icon="inline-start" />
+          </Button>
+        </div>
+      </Field>
+    </FieldGroup>
   )
 }

@@ -1,6 +1,5 @@
 import { useState, memo, useMemo } from "react"
 import { Users, ChevronRight, ChevronDown, Clock, Wrench, CheckCircle2, XCircle, Loader2, ExternalLink } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { formatDuration, parseSubAgentPath } from "@/lib/format"
 import type { SubAgentMessage } from "@/lib/types"
 import { LiveSubagentTranscript } from "./LiveSubagentTranscript"
@@ -9,27 +8,14 @@ import { useSubagentContent } from "@/hooks/useSubagentContent"
 import { useSessionContext } from "@/contexts/SessionContext"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins, preprocessImagePaths } from "./markdown-components"
-
-interface AgentColor {
-  badge: string
-  bar: string
-}
-
-interface AgentPanelStyle {
-  border: string
-  icon: string
-  label: string
-  countBadge: string
-}
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 interface AgentPanelProps {
   messages: SubAgentMessage[]
   expandAll: boolean
   label: string
   countLabel: string
-  style: AgentPanelStyle
-  colors: AgentColor[]
-  thinkingIconColor?: string
   /** Enable lazy loading of subagent JSONL files for async_launched agents */
   lazyLoad?: boolean
 }
@@ -48,9 +34,6 @@ export const AgentPanel = memo(function AgentPanel({
   expandAll,
   label,
   countLabel,
-  style,
-  colors,
-  thinkingIconColor: _thinkingIconColor,
   lazyLoad = false,
 }: AgentPanelProps): React.ReactElement | null {
   const [open, setOpen] = useState(false)
@@ -71,7 +54,6 @@ export const AgentPanel = memo(function AgentPanel({
   }, [sessionSource])
 
   const agentIds = useMemo(() => [...new Set(displayMessages.map((m) => m.agentId))], [displayMessages])
-  const agentColorMap = useMemo(() => new Map(agentIds.map((id, i) => [id, colors[i % colors.length]])), [agentIds, colors])
   const agentLabelMap = useMemo(() => buildAgentLabelMap(displayMessages), [displayMessages])
 
   // Per-agent stats — merge anything present on the launch event summary or on
@@ -131,56 +113,51 @@ export const AgentPanel = memo(function AgentPanel({
 
   return (
     <div>
-      <button
+      <Button
+        type="button"
+        variant="ghost"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full min-w-0 text-left py-1 hover:opacity-80 transition-opacity flex-wrap"
+        className="h-auto w-full min-w-0 flex-wrap justify-start gap-2 px-0 py-1 text-left whitespace-normal"
       >
         {isOpen
-          ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-        <Users className={cn("w-3.5 h-3.5 shrink-0", style.icon)} />
-        <span className={cn("text-xs font-medium", style.label)}>
-          {label}
-        </span>
+          ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+          : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />}
+        <Users className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+        <span className="text-xs font-medium text-foreground">{label}</span>
         {agentIds.length > 1 && (
-          <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-full", style.countBadge)}>
+          <Badge variant="secondary">
             {agentIds.length} {countLabel}
-          </span>
+          </Badge>
         )}
         {agentIds.map((id) => {
-          const color = agentColorMap.get(id)!
           return (
-            <span
-              key={id}
-              className={cn("text-[10px] px-1.5 py-0 h-4 inline-flex items-center gap-1 rounded border", color.badge)}
-            >
-              <span className={cn("w-1.5 h-1.5 rounded-full", color.bar)} />
+            <Badge key={id} variant="outline">
               {agentLabelMap.get(id)}
-            </span>
+            </Badge>
           )
         })}
         {summaryStats ? (
-          <span className="text-[10px] text-muted-foreground/50 inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
             {summaryStats.allCompleted
-              ? <CheckCircle2 className="w-3 h-3 text-green-400" />
-              : <XCircle className="w-3 h-3 text-red-400" />}
+              ? <CheckCircle2 className="size-3 text-success" data-icon="inline-start" />
+              : <XCircle className="size-3 text-destructive" data-icon="inline-start" />}
             <span className="inline-flex items-center gap-0.5">
-              <Clock className="w-3 h-3" />
+              <Clock className="size-3" data-icon="inline-start" />
               {formatDuration(summaryStats.totalDuration)}
             </span>
             {summaryStats.totalToolUses > 0 && (
               <span className="inline-flex items-center gap-0.5">
-                <Wrench className="w-3 h-3" />
+                <Wrench className="size-3" data-icon="inline-start" />
                 {summaryStats.totalToolUses}
               </span>
             )}
           </span>
         ) : (
-          <span className="text-[10px] text-muted-foreground/50">
+          <span className="text-xs text-muted-foreground">
             ({agentIds.length} agent{agentIds.length !== 1 ? "s" : ""})
           </span>
         )}
-      </button>
+      </Button>
 
       {/* Live transcript is visible even while the panel is collapsed —
           running agents stream here before any return text exists. */}
@@ -190,15 +167,14 @@ export const AgentPanel = memo(function AgentPanel({
       })}
 
       {isOpen && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 flex flex-col gap-2">
           {isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
+              <Loader2 className="size-3 animate-spin" />
               Loading agent output...
             </div>
           )}
           {agentIds.map((id) => {
-            const color = agentColorMap.get(id) ?? colors[0]
             const msg = finalMessageByAgent.get(id)
             const stats = statsByAgent.get(id)
             const canNavigate = !!sessionSource && !!parentSessionId
@@ -206,8 +182,6 @@ export const AgentPanel = memo(function AgentPanel({
               <AgentReturnItem
                 key={id}
                 agentLabel={agentLabelMap.get(id) ?? id}
-                barColor={color.bar}
-                badgeClass={color.badge}
                 message={msg}
                 stats={stats}
                 parentToolUseId={parentToolByAgent.get(id)}
@@ -232,8 +206,6 @@ export const AgentPanel = memo(function AgentPanel({
 
 interface AgentReturnItemProps {
   agentLabel: string
-  barColor: string
-  badgeClass: string
   message: SubAgentMessage | undefined
   stats: { durationMs?: number; toolUseCount?: number; status?: string } | undefined
   parentToolUseId: string | undefined
@@ -243,8 +215,6 @@ interface AgentReturnItemProps {
 
 function AgentReturnItem({
   agentLabel,
-  barColor,
-  badgeClass,
   message,
   stats,
   parentToolUseId,
@@ -258,41 +228,42 @@ function AgentReturnItem({
   const isCompleted = stats?.status === "completed"
 
   return (
-    <div className="flex gap-0">
-      <div className={cn("w-[3px] shrink-0 rounded-full", barColor)} />
-      <div className="space-y-1.5 pl-3 min-w-0 flex-1">
+    <div className="border-l pl-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         {/* Header: agent label + stats + open button */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={cn("text-[10px] px-1.5 py-0 h-4 inline-flex items-center gap-1 rounded border", badgeClass)}>
-            <span className={cn("w-1.5 h-1.5 rounded-full", barColor)} />
+          <Badge variant="outline">
             {agentLabel}
-          </span>
+          </Badge>
           {stats && (
-            <span className="text-[10px] text-muted-foreground/60 inline-flex items-center gap-2">
-              {isCompleted && <CheckCircle2 className="w-3 h-3 text-green-400/80" />}
+            <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+              {isCompleted && <CheckCircle2 className="size-3 text-success" />}
               {stats.durationMs != null && (
                 <span className="inline-flex items-center gap-0.5">
-                  <Clock className="w-3 h-3" />
+                  <Clock className="size-3" />
                   {formatDuration(stats.durationMs)}
                 </span>
               )}
               {stats.toolUseCount != null && stats.toolUseCount > 0 && (
                 <span className="inline-flex items-center gap-0.5">
-                  <Wrench className="w-3 h-3" />
+                  <Wrench className="size-3" />
                   {stats.toolUseCount}
                 </span>
               )}
             </span>
           )}
           {canNavigate && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
               onClick={onOpen}
-              className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-foreground transition-colors"
+              className="ml-auto"
               title="Open this sub-agent's full chat session"
             >
-              <ExternalLink className="w-3 h-3" />
+              <ExternalLink data-icon="inline-start" />
               Open chat
-            </button>
+            </Button>
           )}
         </div>
 
@@ -304,11 +275,11 @@ function AgentReturnItem({
             </ReactMarkdown>
           </div>
         ) : (
-          <div className="space-y-1">
-            <div className="text-[11px] text-muted-foreground/60 italic inline-flex items-center gap-1.5">
+          <div className="flex flex-col gap-1">
+            <div className="inline-flex items-center gap-1.5 text-xs italic text-muted-foreground">
               {isRunning ? (
                 <>
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <Loader2 className="size-3 animate-spin" />
                   Working — no return yet
                 </>
               ) : (

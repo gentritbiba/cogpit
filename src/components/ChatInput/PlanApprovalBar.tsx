@@ -1,5 +1,7 @@
 import { CheckCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 
 interface PlanApprovalBarProps {
   allowedPrompts?: Array<{ tool: string; prompt: string }>
@@ -9,20 +11,15 @@ interface PlanApprovalBarProps {
 
 export function PlanApprovalBar({ allowedPrompts, onApprove, onSend }: PlanApprovalBarProps) {
   return (
-    <div className="mb-2.5 rounded-lg border border-purple-500/30 bg-purple-500/5 p-2.5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="flex items-center justify-center w-5 h-5 rounded-full bg-purple-500/20 shrink-0">
-            <CheckCircle className="size-3 text-purple-400" />
-          </div>
-          <span className="text-xs font-medium text-purple-300">
-            Plan ready for review
-          </span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+    <Alert className="mb-3 pr-44">
+      <CheckCircle />
+      <AlertTitle>Plan ready for review</AlertTitle>
+      <AlertDescription>
+        Approve the plan or ask the agent to revise it.
+      </AlertDescription>
+      <AlertAction className="flex gap-2">
           <Button
             size="sm"
-            className="h-7 px-3 text-xs bg-purple-600 hover:bg-purple-500 text-white border-0"
             onClick={onApprove}
           >
             Approve
@@ -30,26 +27,21 @@ export function PlanApprovalBar({ allowedPrompts, onApprove, onSend }: PlanAppro
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-3 text-xs text-purple-400 hover:text-purple-300 hover:bg-purple-500/10"
             onClick={() => onSend("no")}
           >
             Reject
           </Button>
-        </div>
-      </div>
+      </AlertAction>
       {allowedPrompts && allowedPrompts.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          <span className="text-[10px] text-muted-foreground self-center mr-1">Permissions requested:</span>
+        <div className="col-span-full mt-2 flex flex-wrap gap-1">
+          <span className="mr-1 self-center text-xs text-muted-foreground">Permissions requested:</span>
           {allowedPrompts.map((p, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center rounded border border-purple-500/20 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-purple-400"
-            >
+            <Badge key={i} variant="outline">
               {p.prompt}
-            </span>
+            </Badge>
           ))}
         </div>
       )}
-    </div>
+    </Alert>
   )
 }

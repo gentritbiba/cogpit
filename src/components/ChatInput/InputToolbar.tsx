@@ -26,9 +26,9 @@ export function InputToolbar({
     <>
       {/* Active session indicator */}
       {showIndicator && !isPlanApproval && !isUserQuestion && (
-        <div className="flex items-center gap-1.5 mr-1">
+        <div className="mr-1 flex items-center gap-1.5">
           {elapsedSec > 0 && (
-            <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
+            <span className="font-mono text-xs tabular-nums text-muted-foreground">
               {formatElapsed(elapsedSec)}
             </span>
           )}
@@ -57,19 +57,19 @@ export function ActionButtons({
   const interruptLabel = agentKind === "codex" ? "Stop active turn" : "Interrupt agent"
 
   return (
-    <div className="flex items-center">
+    <div className="flex items-center gap-1">
       {/* Interrupt button -- sends a stop request to the active agent */}
       {showAgentControls && (
         <Tooltip>
           <TooltipTrigger render={<Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 shrink-0 p-0 rounded-full text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+              variant="outline"
+              size="icon-sm"
+              className="shrink-0 rounded-full text-warning"
               onClick={onInterrupt}
               aria-label={interruptLabel}
               title={interruptLabel}
             />}>
-              <Square className="size-3 fill-current" />
+              <Square data-icon="inline-start" className="fill-current" />
           </TooltipTrigger>
           <TooltipContent>{interruptLabel} (Esc)</TooltipContent>
         </Tooltip>
@@ -80,33 +80,28 @@ export function ActionButtons({
         <Tooltip>
           <TooltipTrigger render={<Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 shrink-0 p-0 rounded-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              size="icon-sm"
+              className="shrink-0 rounded-full text-destructive"
               onClick={onStopSession}
               aria-label="Stop session"
               title="Stop session"
             />}>
-              <Power className="size-3.5" />
+              <Power data-icon="inline-start" />
           </TooltipTrigger>
           <TooltipContent>Stop session</TooltipContent>
         </Tooltip>
       )}
 
       <Button
-        variant="ghost"
-        size="sm"
-        className={cn(
-          "h-7 w-7 shrink-0 p-0 rounded-full transition-colors duration-200",
-          hasContent
-            ? "text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
-            : "text-muted-foreground"
-        )}
+        variant={hasContent ? "default" : "secondary"}
+        size="icon-sm"
+        className={cn("shrink-0 rounded-full", !hasContent && "text-muted-foreground")}
         disabled={!hasContent}
         onClick={onSubmit}
         aria-label={submitLabel}
         title={submitLabel}
       >
-        <Send className="size-3.5" />
+        <Send data-icon="inline-start" />
       </Button>
     </div>
   )

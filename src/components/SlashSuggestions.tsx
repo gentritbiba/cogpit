@@ -1,7 +1,15 @@
 import { memo, useCallback, useEffect, useRef } from "react"
 import { Terminal, Sparkles, Loader2, Pencil } from "lucide-react"
-import { cn } from "@/lib/utils"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+  CommandShortcut,
+} from "@/components/ui/command"
 
 interface SlashSuggestionsProps {
   suggestions: SlashSuggestion[]
@@ -14,32 +22,10 @@ interface SlashSuggestionsProps {
 }
 
 function getSourceBadge(suggestion: SlashSuggestion) {
-  if (suggestion.source === "project") {
-    return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-green-500/15 text-green-400 border border-green-500/20">
-        project
-      </span>
-    )
-  }
-  if (suggestion.source === "user") {
-    return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/20">
-        user
-      </span>
-    )
-  }
-  if (suggestion.source === "built-in") {
-    return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20">
-        built-in
-      </span>
-    )
-  }
-  // Plugin name
   return (
-    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium bg-purple-500/15 text-purple-400 border border-purple-500/20">
+    <Badge variant={suggestion.source === "built-in" ? "secondary" : "outline"}>
       {suggestion.source}
-    </span>
+    </Badge>
   )
 }
 
@@ -52,25 +38,20 @@ export const SlashSuggestions = memo(function SlashSuggestions({
   onHover,
   onEdit,
 }: SlashSuggestionsProps) {
-  const listRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Map<number, HTMLElement>>(new Map())
-
-  // Group pre-filtered suggestions by type
-  const commands = suggestions.filter((s) => s.type === "command")
-  const skills = suggestions.filter((s) => s.type === "skill")
 
   // Scroll selected item into view
   useEffect(() => {
     const el = itemRefs.current.get(selectedIndex)
     if (el) {
-      el.scrollIntoView({ block: "nearest" })
+      el.scrollIntoView?.({ block: "nearest" })
     }
   }, [selectedIndex])
 
   if (loading) {
     return (
-      <div className="absolute bottom-full left-0 right-0 mb-1.5 mx-auto max-w-3xl">
-        <div className="rounded-lg border border-border/60 bg-elevation-2 shadow-lg p-3 flex items-center gap-2">
+      <div className="absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+        <div className="flex items-center gap-2 rounded-lg border bg-popover p-3 text-popover-foreground shadow-sm">
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Loading suggestions...</span>
         </div>
@@ -80,8 +61,8 @@ export const SlashSuggestions = memo(function SlashSuggestions({
 
   if (suggestions.length === 0) {
     return (
-      <div className="absolute bottom-full left-0 right-0 mb-1.5 mx-auto max-w-3xl">
-        <div className="rounded-lg border border-border/60 bg-elevation-2 shadow-lg p-3">
+      <div className="absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+        <div className="rounded-lg border bg-popover p-3 text-popover-foreground shadow-sm">
           <span className="text-xs text-muted-foreground">
             {filter ? `No commands or skills matching "${filter}"` : "No commands or skills found"}
           </span>
@@ -90,64 +71,50 @@ export const SlashSuggestions = memo(function SlashSuggestions({
     )
   }
 
-  let globalIndex = 0
+  const commands = suggestions.filter((suggestion) => suggestion.type === "command")
+  const groups = [
+    { heading: "Commands", suggestions: commands, offset: 0 },
+    {
+      heading: "Skills",
+      suggestions: suggestions.filter((suggestion) => suggestion.type === "skill"),
+      offset: commands.length,
+    },
+  ]
 
   return (
-    <div className="absolute bottom-full left-0 right-0 mb-1.5 mx-auto max-w-3xl z-50">
-      <div
-        ref={listRef}
-        className="rounded-lg border border-border/60 bg-elevation-2 shadow-lg overflow-y-auto max-h-[280px]"
-        role="listbox"
+    <div className="absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+      <Command
+        id="slash-suggestions"
+        value={suggestions[selectedIndex] ? `${suggestions[selectedIndex].type}-${suggestions[selectedIndex].name}` : undefined}
+        onValueChange={(value) => {
+          const index = suggestions.findIndex((suggestion) => `${suggestion.type}-${suggestion.name}` === value)
+          if (index >= 0) onHover(index)
+        }}
+        shouldFilter={false}
+        className="border shadow-sm"
       >
-        {commands.length > 0 && (
-          <>
-            <div className="sticky top-0 bg-elevation-2 px-3 pt-2 pb-1 border-b border-border/30">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Commands
-              </span>
-            </div>
-            {commands.map((suggestion) => {
-              const idx = globalIndex++
-              return (
-                <SuggestionItem
-                  key={`cmd-${suggestion.name}`}
-                  suggestion={suggestion}
-                  index={idx}
-                  isSelected={idx === selectedIndex}
-                  onSelect={onSelect}
-                  onHover={onHover}
-                  onEdit={onEdit}
-                  itemRefs={itemRefs}
-                />
-              )
-            })}
-          </>
-        )}
-        {skills.length > 0 && (
-          <>
-            <div className="sticky top-0 bg-elevation-2 px-3 pt-2 pb-1 border-b border-border/30">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Skills
-              </span>
-            </div>
-            {skills.map((suggestion) => {
-              const idx = globalIndex++
-              return (
-                <SuggestionItem
-                  key={`skill-${suggestion.name}`}
-                  suggestion={suggestion}
-                  index={idx}
-                  isSelected={idx === selectedIndex}
-                  onSelect={onSelect}
-                  onHover={onHover}
-                  onEdit={onEdit}
-                  itemRefs={itemRefs}
-                />
-              )
-            })}
-          </>
-        )}
-      </div>
+        <CommandList>
+          {groups.map((group) => group.suggestions.length > 0 && (
+            <CommandGroup key={group.heading} heading={group.heading}>
+              {group.suggestions.map((suggestion, index) => {
+                const globalIndex = group.offset + index
+                return (
+                  <SuggestionItem
+                    key={`${suggestion.type}-${suggestion.name}`}
+                    suggestion={suggestion}
+                    index={globalIndex}
+                    isSelected={globalIndex === selectedIndex}
+                    onSelect={onSelect}
+                    onHover={onHover}
+                    onEdit={onEdit}
+                    itemRefs={itemRefs}
+                  />
+                )
+              })}
+            </CommandGroup>
+          ))}
+        </CommandList>
+      </Command>
     </div>
   )
 })
@@ -171,64 +138,73 @@ function SuggestionItem({
 }) {
   const setRef = useCallback(
     (el: HTMLElement | null) => {
-      if (el) itemRefs.current.set(index, el)
-      else itemRefs.current.delete(index)
+      if (el) {
+        el.id = `slash-suggestion-${index}`
+        itemRefs.current.set(index, el)
+      } else {
+        itemRefs.current.delete(index)
+      }
     },
     [index, itemRefs],
   )
 
   return (
-    <div
-      ref={setRef}
-      className={cn(
-        "group flex items-start gap-2.5 px-3 py-2 cursor-pointer transition-colors duration-75",
-        isSelected ? "bg-blue-500/10" : "hover:bg-elevation-3",
-      )}
-      role="option"
-      aria-selected={isSelected}
-      onMouseEnter={() => onHover(index)}
-      onMouseDown={(e) => {
-        e.preventDefault() // don't blur textarea
-        onSelect(suggestion)
-      }}
-    >
-      <div className="mt-0.5 shrink-0">
-        {suggestion.type === "command" ? (
-          <Terminal className="size-3.5 text-blue-400" />
-        ) : (
-          <Sparkles className="size-3.5 text-purple-400" />
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-foreground font-mono">
-            /{suggestion.name}
-          </span>
-          {getSourceBadge(suggestion)}
+    <div className="group/suggestion relative">
+      <CommandItem
+        ref={setRef}
+        value={`${suggestion.type}-${suggestion.name}`}
+        className="items-start gap-2.5 px-2 py-2 pr-10"
+        onMouseEnter={() => onHover(index)}
+        onSelect={() => onSelect(suggestion)}
+        onMouseDown={(e) => {
+          e.preventDefault()
+        }}
+      >
+        <div className="mt-0.5 shrink-0">
+          {suggestion.type === "command" ? (
+            <Terminal className="size-4 text-muted-foreground" />
+          ) : (
+            <Sparkles className="size-4 text-muted-foreground" />
+          )}
         </div>
-        {suggestion.description && (
-          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-            {suggestion.description}
-          </p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm font-medium text-foreground">
+              /{suggestion.name}
+            </span>
+            {getSourceBadge(suggestion)}
+          </div>
+          {suggestion.description && (
+            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+              {suggestion.description}
+            </p>
+          )}
+        </div>
+        {isSelected && (
+          <CommandShortcut className={onEdit && suggestion.filePath ? "mr-6" : undefined}>
+            Enter
+          </CommandShortcut>
         )}
-      </div>
+      </CommandItem>
       {onEdit && suggestion.filePath && (
-        <button
-          className="self-center shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground hover:bg-elevation-3"
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/suggestion:opacity-100 focus-visible:opacity-100"
           onMouseDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
             onEdit(suggestion.filePath)
           }}
           aria-label={`Edit ${suggestion.name}`}
         >
-          <Pencil className="size-3" />
-        </button>
-      )}
-      {isSelected && (
-        <span className="text-[10px] text-muted-foreground self-center shrink-0 font-mono">
-          ↵
-        </span>
+          <Pencil data-icon="inline-start" />
+        </Button>
       )}
     </div>
   )

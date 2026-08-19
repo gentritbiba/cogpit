@@ -10,6 +10,17 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
@@ -20,23 +31,23 @@ function ValidationStatus({ status, error }: { status: string; error: string | n
   if (status === "validating") {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
+        <Loader2 data-icon="inline-start" className="size-3.5 animate-spin" />
         Checking path...
       </div>
     )
   }
   if (status === "valid") {
     return (
-      <div className="flex items-center gap-2 text-sm text-green-400">
-        <CheckCircle className="size-3.5" />
+      <div className="flex items-center gap-2 text-sm text-success">
+        <CheckCircle data-icon="inline-start" className="size-3.5" />
         Valid .claude directory found
       </div>
     )
   }
   if (status === "invalid" && error) {
     return (
-      <div className="flex items-center gap-2 text-sm text-red-400">
-        <XCircle className="size-3.5" />
+      <div className="flex items-center gap-2 text-sm text-destructive">
+        <XCircle data-icon="inline-start" className="size-3.5" />
         {error}
       </div>
     )
@@ -168,66 +179,67 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-foreground">Configuration</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            Change the path to your .claude directory.
+            Manage local paths, preferred apps, and remote access.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div className="relative">
-            <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={path}
-              onChange={handleChange}
-              placeholder="/Users/you/.claude"
-              className="pl-10 bg-elevation-0 border-border/70 focus:border-border"
-              disabled={!canWriteConfig}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canSave && !saving) handleSave()
-              }}
-            />
-          </div>
-
-          <ValidationStatus status={status} error={error} />
-
-          {/* Terminal App */}
-          <div className="space-y-2 pt-3 border-t border-border">
-            <div className="flex items-center gap-2">
-              <TerminalSquare className="size-4 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium text-foreground">Terminal Application</p>
-                <p className="text-xs text-muted-foreground">Custom terminal for Ctrl+Cmd+T (blank = system default)</p>
-              </div>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="claude-directory">Claude directory</FieldLabel>
+            <FieldDescription>The directory containing your Claude configuration.</FieldDescription>
+            <InputGroup>
+              <InputGroupAddon>
+                <FolderOpen data-icon="inline-start" />
+              </InputGroupAddon>
+              <InputGroupInput
+                id="claude-directory"
+                value={path}
+                onChange={handleChange}
+                placeholder="/Users/you/.claude"
+                disabled={!canWriteConfig}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canSave && !saving) handleSave()
+                }}
+              />
+            </InputGroup>
+            <div aria-live="polite">
+              <ValidationStatus status={status} error={error} />
             </div>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="terminal-application">
+              <TerminalSquare data-icon="inline-start" className="size-4 text-muted-foreground" />
+              Terminal application
+            </FieldLabel>
+            <FieldDescription>Leave blank to use the system default for Ctrl+Cmd+T.</FieldDescription>
             <Input
+              id="terminal-application"
               value={terminalApp}
               onChange={(e) => setTerminalApp(e.target.value)}
               placeholder="Ghostty, iTerm, or /path/to/binary"
-              className="bg-elevation-0 border-border/70 focus:border-border text-sm"
               disabled={!canWriteConfig}
             />
-          </div>
+          </Field>
 
-          {/* Editor App */}
-          <div className="space-y-2 pt-3 border-t border-border">
-            <div className="flex items-center gap-2">
-              <Code2 className="size-4 text-muted-foreground" />
-              <div>
-                <p className="text-sm font-medium text-foreground">Editor Application</p>
-                <p className="text-xs text-muted-foreground">Override editor for "Open in Editor" (blank = $VISUAL or auto-detect)</p>
-              </div>
-            </div>
+          <Field>
+            <FieldLabel htmlFor="editor-application">
+              <Code2 data-icon="inline-start" className="size-4 text-muted-foreground" />
+              Editor application
+            </FieldLabel>
+            <FieldDescription>Leave blank to use $VISUAL or automatic detection.</FieldDescription>
             <Input
+              id="editor-application"
               value={editorApp}
               onChange={(e) => setEditorApp(e.target.value)}
               placeholder="cursor, code, zed, or /path/to/binary"
-              className="bg-elevation-0 border-border/70 focus:border-border text-sm"
               disabled={!canWriteConfig}
             />
-          </div>
+          </Field>
 
           {/* Network Access — hidden for remote devices: changing it through the
               proxy would revoke the very sessions this hub depends on. Hidden
@@ -244,17 +256,17 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             connectedDevices={connectedDevices}
             minPasswordLength={MIN_PASSWORD_LENGTH}
           />}
-        </div>
+        </FieldGroup>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           {canWriteConfig && (
             <Button disabled={!canSave || saving} onClick={handleSave}>
               {saving ? (
                 <>
-                  <Loader2 className="size-4 animate-spin mr-2" />
+                  <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
                   Saving...
                 </>
               ) : (

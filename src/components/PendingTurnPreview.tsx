@@ -1,5 +1,6 @@
 import { memo } from "react"
 import { UserMessage } from "./timeline/UserMessage"
+import { Badge } from "@/components/ui/badge"
 
 interface PendingTurnPreviewProps {
   message: string
@@ -11,15 +12,12 @@ export const PendingTurnPreview = memo(function PendingTurnPreview({
   turnNumber,
 }: PendingTurnPreviewProps) {
   return (
-    <div className="group relative py-5 px-4">
-      {/* Turn header */}
-      <div className="flex items-center gap-2 mb-4">
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-elevation-2 border border-border/50 text-[10px] font-mono text-muted-foreground shrink-0">
-          {turnNumber}
-        </div>
+    <div className="group relative px-4 py-5">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="font-mono text-xs text-muted-foreground">Turn {turnNumber}</span>
+        <Badge variant="outline">Queued</Badge>
       </div>
-
-      <div className="rounded-lg bg-blue-500/[0.06] border border-blue-500/10 p-3">
+      <div className="rounded-lg border border-dashed bg-muted/30 p-3">
         <UserMessage content={message} timestamp="" />
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConfigEditor } from "@/components/config/ConfigEditor"
 
@@ -58,5 +59,36 @@ describe("ConfigEditor read-only capability", () => {
     expect(mocks.authFetch.mock.calls.some(([, init]) =>
       ["POST", "DELETE"].includes((init as RequestInit | undefined)?.method ?? "")
     )).toBe(false)
+  })
+
+  it("confirms before deleting an editable configuration file", async () => {
+    const user = userEvent.setup()
+    const onDeleted = vi.fn()
+    render(
+      <ConfigEditor
+        file={{
+          name: "example.md",
+          path: "/tmp/example.md",
+          fileType: "command",
+          description: "",
+          scope: "global",
+          readOnly: false,
+        }}
+        onDeleted={onDeleted}
+      />,
+    )
+
+    await screen.findByRole("textbox", { name: "Config contents" })
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete configuration file?" })
+    expect(within(dialog).getByText(/example\.md/)).toBeInTheDocument()
+    expect(mocks.authFetch).toHaveBeenCalledTimes(1)
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete file" }))
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledOnce())
+    expect(mocks.authFetch).toHaveBeenCalledWith(
+      "/api/config-browser/file?path=%2Ftmp%2Fexample.md",
+      { method: "DELETE" },
+    )
   })
 })

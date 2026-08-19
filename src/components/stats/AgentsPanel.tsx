@@ -1,5 +1,6 @@
 import { useMemo, useEffect, useRef } from "react"
 import { ChevronRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { AgentCard, type AgentStatus } from "@/components/stats/AgentCard"
 import type { ParsedSession, ToolCall } from "@/lib/types"
@@ -198,17 +199,19 @@ export function AgentsPanel({
 
       {/* Back to Main button when viewing a sub-agent */}
       {subAgentView && onLoadSession && (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => onLoadSession(subAgentView.dirName, subAgentView.parentFileName)}
-          className="mb-2 flex w-full items-center gap-1.5 rounded border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/20 hover:border-blue-500/50"
+          className="mb-2 w-full justify-start"
         >
-          <ChevronRight className="size-3 rotate-180" />
+          <ChevronRight data-icon="inline-start" className="rotate-180" />
           Back to Main Agent
-        </button>
+        </Button>
       )}
 
-      <div className="max-h-[280px] overflow-y-auto space-y-1.5 pr-0.5">
+      <div className="flex max-h-[280px] flex-col gap-1.5 overflow-y-auto pr-0.5">
         {/* Background agents (sorted by latest modified) */}
         {sortedBgAgents.map((agent, idx) => {
           const preview = firstLine(agent.preview ?? "")

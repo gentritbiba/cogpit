@@ -96,6 +96,33 @@ describe("ProjectFilesPanel", () => {
     expect(screen.getByText("Unsaved")).toBeInTheDocument()
   })
 
+  it("asks before discarding edits to switch files or close the workspace", async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={onClose} />)
+
+    await user.click(await screen.findByRole("button", { name: /App\.tsx/ }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Editing src/App.tsx" }), {
+      target: { value: "const value = 2\n" },
+    })
+
+    await user.click(screen.getByRole("button", { name: /README\.md/ }))
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Editing src/App.tsx")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Keep editing" }))
+
+    await user.click(screen.getByRole("button", { name: /README\.md/ }))
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }))
+    const readmeEditor = await screen.findByRole("textbox", { name: "Editing README.md" })
+    fireEvent.change(readmeEditor, { target: { value: "changed readme" } })
+
+    await user.click(screen.getByRole("button", { name: "Close project files" }))
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Discard changes" }))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
   it("filters the browser to whole-worktree changes", async () => {
     const user = userEvent.setup()
     render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
@@ -178,6 +205,29 @@ describe("ProjectFilesPanel", () => {
       expect(mocks.authFetch.mock.calls.some((call) => String(call[0]).includes("refresh=1"))).toBe(true)
     })
     expect(mocks.authFetch.mock.calls.filter((call) => String(call[0]).startsWith("/api/git-status"))).toHaveLength(2)
+  })
+
+  it("persists the latest resized width when the drag ends", async () => {
+    const setPointerCapture = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
+      configurable: true,
+      value: setPointerCapture,
+    })
+    try {
+      const { container } = render(<ProjectFilesPanel cwd="/workspace/cogpit" onClose={vi.fn()} />)
+      await screen.findByRole("button", { name: /App\.tsx/ })
+      const resizeHandle = container.querySelector<HTMLElement>(".cursor-col-resize")
+      expect(resizeHandle).not.toBeNull()
+
+      fireEvent.pointerDown(resizeHandle!, { clientX: 760, pointerId: 1 })
+      fireEvent.pointerMove(resizeHandle!, { clientX: 700, pointerId: 1 })
+      expect(localStorage.getItem("cogpit-project-files-width")).toBeNull()
+
+      fireEvent.pointerUp(resizeHandle!, { pointerId: 1 })
+      expect(localStorage.getItem("cogpit-project-files-width")).toBe("820")
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "setPointerCapture")
+    }
   })
 
   it("sends selected file lines back to the composer context", async () => {

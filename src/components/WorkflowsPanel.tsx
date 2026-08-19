@@ -3,12 +3,14 @@ import { Workflow as WorkflowIcon, RefreshCw, ChevronLeft } from "lucide-react"
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Empty,
   EmptyDescription,
@@ -123,7 +125,7 @@ export function WorkflowsPanel({
       } else if (data?.controllable === false) {
         setStopNote("This workflow runs in a session Cogpit doesn't control.")
       } else {
-        setStopNote("Couldn't stop — the session may have already exited.")
+        setStopNote("Couldn't stop. The session may have already exited.")
       }
       fetchDetail()
       onRefetchList()
@@ -140,24 +142,25 @@ export function WorkflowsPanel({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full !max-w-[1120px]">
-        <SheetHeader className="min-h-16 justify-center py-3">
+      <SheetContent side="right" className="w-full data-[side=right]:max-w-[1120px]">
+        <SheetHeader className="min-h-14 justify-center border-b py-3">
           <div className="flex items-center justify-between gap-3 pr-9">
-            <SheetTitle className="flex items-center gap-2.5 text-base">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <WorkflowIcon className="size-4" />
-              </span>
+            <SheetTitle className="flex items-center gap-2">
+              <WorkflowIcon className="size-4" />
               Workflows
               {workflows.length > 0 && (
                 <Badge variant="secondary">{workflows.length}</Badge>
               )}
               {isLive && (
-                <Badge variant="outline" className="border-emerald-700/50 text-emerald-500">
+                <Badge variant="outline" className="border-info/30 text-info">
                   <LiveIndicator className="size-1.5" />
                   Live
                 </Badge>
               )}
             </SheetTitle>
+            <SheetDescription className="sr-only">
+              Inspect workflow runs, agent progress, and run controls for this session.
+            </SheetDescription>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -165,13 +168,13 @@ export function WorkflowsPanel({
               aria-label="Refresh workflows"
               title="Refresh workflows"
             >
-              <RefreshCw />
+              <RefreshCw data-icon="inline-start" />
             </Button>
           </div>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100dvh-4rem)]">
-          <div className="px-5 py-5 sm:px-6">
+        <ScrollArea className="h-[calc(100dvh-3.5rem)]">
+          <div className="px-5 py-6 sm:px-6">
             {workflows.length === 0 ? (
               <Empty className="min-h-[60dvh]">
                 <EmptyHeader>
@@ -185,7 +188,7 @@ export function WorkflowsPanel({
             ) : (
               <>
                 {hasMultipleRuns && (
-                  <div className="mb-5 flex flex-col gap-2">
+                  <div className="mb-6 flex flex-col gap-2">
                     {selectedRunId && detail && (
                       <Button
                         variant="ghost"
@@ -220,9 +223,9 @@ export function WorkflowsPanel({
                 ) : detail ? (
                   <>
                     {stopNote && (
-                      <div className="mb-4 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                        {stopNote}
-                      </div>
+                      <Alert className="mb-4">
+                        <AlertDescription>{stopNote}</AlertDescription>
+                      </Alert>
                     )}
                     <WorkflowDetailView
                       detail={detail}
@@ -262,11 +265,12 @@ function WorkflowListRow({
   const status = workflowStatusStyle(workflow.status)
   const done = workflow.agentCounts.done + workflow.agentCounts.error
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors",
-        active ? "border-primary/40 bg-primary/5" : "bg-card hover:bg-muted/40",
+        "h-auto w-full justify-start gap-3 whitespace-normal border px-3 py-3 text-left",
+        active ? "border-foreground/20 bg-accent" : "bg-background hover:bg-muted/50",
       )}
     >
       <span className={cn("size-2 shrink-0 rounded-full", status.dot)} />
@@ -278,11 +282,11 @@ function WorkflowListRow({
           </Badge>
         </div>
         {workflow.summary && <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{workflow.summary}</p>}
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
           <span>{done}/{workflow.agentCount} agents</span>
           {workflow.startTime > 0 && <span>{formatRelativeTime(new Date(workflow.startTime).toISOString())}</span>}
         </div>
       </div>
-    </button>
+    </Button>
   )
 }

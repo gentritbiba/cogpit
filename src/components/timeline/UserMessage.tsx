@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils"
 import { CompletedIcon, FailedIcon, RunningIcon, ProcessingIcon } from "@/components/ui/StatusIcons"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
   const isError = output.stream === "stderr"
@@ -28,15 +30,15 @@ function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
   return (
     <div className={cn(
       "rounded-md border px-3 py-2 my-1 font-mono text-xs",
-      isError && "border-red-500/20 bg-red-500/10 text-red-300",
-      isInput && "border-blue-500/20 bg-blue-500/10 text-blue-300",
-      !isError && !isInput && "border-border/40 bg-elevation-2 text-muted-foreground",
+      isError && "border-destructive/20 bg-destructive/5 text-destructive",
+      isInput && "border-border bg-muted/50 text-foreground",
+      !isError && !isInput && "border-border bg-muted/40 text-muted-foreground",
     )}>
       <div className="flex items-center gap-1.5">
         {isInput ? (
-          <ChevronRight className="w-3 h-3 flex-shrink-0 text-blue-400" />
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-start" />
         ) : (
-          <Terminal className={cn("w-3 h-3 flex-shrink-0", isError ? "text-red-400" : "text-muted-foreground/60")} />
+          <Terminal className={cn("size-3 shrink-0", isError ? "text-destructive" : "text-muted-foreground")} data-icon="inline-start" />
         )}
         <span className="whitespace-pre-wrap break-words">{output.text}</span>
       </div>
@@ -44,13 +46,18 @@ function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
   )
 }
 
-const ERROR_STYLE = { Icon: FailedIcon, color: "text-red-400", bg: "bg-red-500/10 border-red-500/20" } as const
+const ERROR_STYLE = {
+  Icon: FailedIcon,
+  color: "text-destructive",
+  bg: "border-destructive/20 bg-destructive/5",
+  badgeVariant: "destructive",
+} as const
 
 const STATUS_STYLES = {
-  completed: { Icon: CompletedIcon, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", label: "Completed" },
+  completed: { Icon: CompletedIcon, color: "text-success", bg: "border-success/20 bg-success/5", badgeVariant: "secondary", label: "Completed" },
   failed: { ...ERROR_STYLE, label: "Failed" },
   error: { ...ERROR_STYLE, label: "Error" },
-  running: { Icon: RunningIcon, color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/20", label: "Running" },
+  running: { Icon: RunningIcon, color: "text-warning", bg: "border-warning/20 bg-warning/5", badgeVariant: "outline", label: "Running" },
 } as const
 
 function TaskNotificationCard({ notification }: { notification: TaskNotification }) {
@@ -61,25 +68,28 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
   const Chevron = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className={`rounded-lg border ${statusStyle.bg} p-3 my-1`}>
+    <div className={cn("my-1 rounded-lg border p-3", statusStyle.bg)}>
       <div className="flex items-start gap-2">
-        <StatusIcon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${statusStyle.color}`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+        <StatusIcon className={cn("mt-0.5 size-4 shrink-0", statusStyle.color)} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-foreground">{notification.summary}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statusStyle.color} ${statusStyle.bg}`}>
+            <Badge variant={statusStyle.badgeVariant} className={statusStyle.color}>
               {statusStyle.label}
-            </span>
+            </Badge>
           </div>
           {hasDetail && (
             <>
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
                 onClick={() => setExpanded(!expanded)}
-                className="mt-1.5 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                className="mt-1.5 -ml-2 text-muted-foreground"
               >
-                <Chevron className="w-3 h-3" />
+                <Chevron data-icon="inline-start" />
                 {expanded ? "Hide detail" : "Show detail"}
-              </button>
+              </Button>
               {expanded && (
                 <div className="mt-2 text-sm text-foreground/90 border-t border-border/30 pt-2">
                   {notification.result && (
@@ -89,8 +99,8 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
                   )}
                   {notification.outputFile && (
                     <div className="mt-2">
-                      <div className="text-[10px] font-medium text-muted-foreground/70">OUTPUT FILE</div>
-                      <div className="mt-0.5 select-all break-all rounded bg-elevation-2 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                      <div className="text-xs font-medium text-muted-foreground">Output file</div>
+                      <div className="mt-1 select-all break-all rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
                         {notification.outputFile}
                       </div>
                     </div>
@@ -122,7 +132,7 @@ function ExpandedCommandContent({ loading, content }: { loading: boolean; conten
   }
 
   return (
-    <div className="mt-2 rounded-md border border-border/50 bg-elevation-2 p-3 text-xs text-muted-foreground overflow-auto max-h-80">
+    <div className="mt-2 max-h-80 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
       {inner}
     </div>
   )
@@ -172,9 +182,12 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     if (!onExpandCommand || !commandName) return
     setCommandLoading(true)
     setCommandExpanded(true)
-    const result = await onExpandCommand(commandName, commandArgs ?? undefined)
-    setCommandContent(result)
-    setCommandLoading(false)
+    try {
+      const result = await onExpandCommand(commandName, commandArgs ?? undefined)
+      setCommandContent(result)
+    } finally {
+      setCommandLoading(false)
+    }
   }, [commandExpanded, commandContent, onExpandCommand, commandName, commandArgs])
 
   const images = useMemo(() => getUserMessageImages(content), [content])
@@ -219,68 +232,77 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           {hasTags && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
               onClick={() => setShowRaw(!showRaw)}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+              className="-ml-2 text-muted-foreground"
             >
               {showRaw ? (
                 <>
-                  <EyeOff className="w-3 h-3" /> Hide raw
+                  <EyeOff data-icon="inline-start" /> Hide raw
                 </>
               ) : (
                 <>
-                  <Eye className="w-3 h-3" /> Show raw
+                  <Eye data-icon="inline-start" /> Show raw
                 </>
               )}
-            </button>
+            </Button>
           )}
         </div>
 
         {!showRaw && isSystemNotification && (
           <div className="mb-2">
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-300">
-              <Terminal className="w-3 h-3" />
+            <Badge variant="outline" className="text-muted-foreground">
+              <Terminal data-icon="inline-start" />
               System event
-            </span>
+            </Badge>
           </div>
         )}
 
         {!showRaw && isTeammate && (
           <div className="mb-2">
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/25 bg-violet-500/10 px-2 py-1 text-xs font-medium text-violet-300">
-              <Users className="w-3 h-3" />
+            <Badge variant="outline" className="text-muted-foreground">
+              <Users data-icon="inline-start" />
               {teammateId ? `From ${teammateId}` : "Teammate message"}
-            </span>
+            </Badge>
           </div>
         )}
 
         {commandName && (
           <div className="mb-2">
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-500/25 bg-blue-500/10 px-2 py-1 text-xs font-mono text-blue-400">
-                <Terminal className="w-3 h-3" />
+              <Badge variant="outline" className="font-mono text-foreground">
+                <Terminal data-icon="inline-start" />
                 /{commandName}
                 {commandArgs && (
-                  <span className="text-blue-400/60">{commandArgs}</span>
+                  <span className="text-muted-foreground">{commandArgs}</span>
                 )}
-              </span>
+              </Badge>
               {onExpandCommand && (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
                   onClick={handleToggleExpand}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-3 transition-colors"
+                  className="text-muted-foreground"
                 >
-                  {commandExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  {commandExpanded ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
                   {commandExpanded ? "Collapse" : "Expand"}
-                </button>
+                </Button>
               )}
               {commandExpanded && onEditCommand && (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
                   onClick={() => onEditCommand(commandName)}
-                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-3 transition-colors"
+                  className="text-muted-foreground"
                 >
-                  <Pencil className="w-3 h-3" />
+                  <Pencil data-icon="inline-start" />
                   Edit
-                </button>
+                </Button>
               )}
             </div>
             {commandExpanded && (
@@ -292,14 +314,15 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         {imageUrls.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {imageUrls.map((url, i) => (
-              <button
+              <Button
                 key={`${images[i].source.media_type}-${images[i].source.data.slice(0, 24)}-${i}`}
                 type="button"
+                variant="ghost"
                 onClick={() => openImage(i)}
                 aria-label={`Open attached image ${i + 1}`}
                 className={cn(
-                  "group/image relative max-w-full overflow-hidden rounded-xl border border-border/50 bg-elevation-2 p-1 text-left",
-                  "transition-[border-color,background-color] hover:border-blue-400/45 hover:bg-elevation-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60",
+                  "group/image relative h-auto max-w-full overflow-hidden rounded-lg border border-border bg-background p-1 text-left",
+                  "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
                 )}
               >
                 <img
@@ -310,20 +333,20 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                   className="max-h-64 max-w-full rounded-lg object-contain sm:max-w-md"
                 />
                 <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
-                  <Maximize2 className="size-3.5" />
+                  <Maximize2 className="size-3.5" data-icon="icon" />
                 </span>
                 {imageUrls.length > 1 && (
-                  <span className="absolute bottom-2 right-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-[9px] text-white/70 backdrop-blur">
+                  <span className="absolute bottom-2 right-2 rounded-md bg-black/55 px-1.5 py-0.5 font-mono text-xs text-white/80">
                     {i + 1} / {imageUrls.length}
                   </span>
                 )}
-              </button>
+              </Button>
             ))}
           </div>
         )}
 
         {!showRaw && notifications.length > 0 && (
-          <div className="space-y-2 mb-2">
+          <div className="mb-2 flex flex-col gap-2">
             {notifications.map((n) => (
               <TaskNotificationCard key={n.taskId} notification={n} />
             ))}
@@ -331,7 +354,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {!showRaw && cmdOutputs.length > 0 && (
-          <div className="space-y-1 mb-2">
+          <div className="mb-2 flex flex-col gap-1">
             {cmdOutputs.map((o, i) => (
               <LocalCommandOutputCard key={i} output={o} />
             ))}
@@ -339,10 +362,10 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {!showRaw && interrupts.length > 0 && (
-          <div className="space-y-1 mb-2">
+          <div className="mb-2 flex flex-col gap-1">
             {interrupts.map((text, i) => (
-              <div key={i} className="flex items-center gap-1.5 text-xs font-medium text-red-400">
-                <Hand className="w-3 h-3 flex-shrink-0" />
+              <div key={i} className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                <Hand className="size-3 shrink-0" data-icon="inline-start" />
                 <span>{text}</span>
               </div>
             ))}
@@ -350,29 +373,32 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {visibleText && (
-          <div className={cn("max-w-none break-words overflow-hidden", compact ? "text-[13px] leading-[1.55]" : "text-sm")}>
+          <div className="max-w-none overflow-hidden break-words text-sm leading-relaxed">
             <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{visibleText}</ReactMarkdown>
           </div>
         )}
         {displayText.length > 500 && (
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
             onClick={() => setExpanded(!expanded)}
-            className="mt-1 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            className="mt-1 -ml-2 text-muted-foreground"
           >
             {expanded ? (
               <>
-                <ChevronDown className="w-3 h-3" /> Show less
+                <ChevronDown data-icon="inline-start" /> Show less
               </>
             ) : (
               <>
-                <ChevronRight className="w-3 h-3" /> Show more
+                <ChevronRight data-icon="inline-start" /> Show more
               </>
             )}
-          </button>
+          </Button>
         )}
         {!compact && timestamp && (
           <div className="flex items-center mt-1.5 ml-auto">
-            <span className="text-[10px] text-muted-foreground/50">
+            <span className="text-xs text-muted-foreground">
               {new Date(timestamp).toLocaleTimeString()}
             </span>
           </div>

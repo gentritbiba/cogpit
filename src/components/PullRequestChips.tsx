@@ -2,6 +2,7 @@ import type { MouseEvent } from "react"
 import { GitPullRequest, GitPullRequestDraft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { SessionPullRequest } from "../../shared/session/prLinks"
+import { Badge } from "@/components/ui/badge"
 
 interface Props {
   pullRequests?: SessionPullRequest[]
@@ -55,7 +56,7 @@ export function PullRequestChips({ pullRequests, max = 3, compact, layout = "chi
             <a
               key={pr.url}
               {...linkProps(pr)}
-              className="flex items-center gap-1 text-violet-300 hover:text-violet-200"
+              className="flex items-center gap-1 text-foreground hover:underline"
             >
               <Icon className="size-2.5 shrink-0" />
               <span className="shrink-0">#{pr.number}</span>
@@ -74,7 +75,7 @@ export function PullRequestChips({ pullRequests, max = 3, compact, layout = "chi
     <>
       {hidden.length > 0 && (
         <span
-          className={cn("shrink-0 text-muted-foreground", compact ? "text-[9px]" : "text-[11px]")}
+          className="shrink-0 text-xs text-muted-foreground"
           title={hidden.map((pr) => `#${pr.number} ${pr.title ?? pr.repo}`).join("\n")}
         >
           +{hidden.length}
@@ -83,20 +84,15 @@ export function PullRequestChips({ pullRequests, max = 3, compact, layout = "chi
       {visible.map((pr) => {
         const Icon = pr.isDraft ? GitPullRequestDraft : GitPullRequest
         return (
-          <a
+          <Badge
             key={pr.url}
-            {...linkProps(pr)}
-            className={cn(
-              "flex shrink-0 items-center gap-1 rounded-full border transition-colors",
-              compact ? "px-1 text-[9px] font-medium" : "px-1.5 py-px",
-              pr.isDraft
-                ? "border-border/60 bg-elevation-1 text-muted-foreground hover:text-foreground"
-                : "border-violet-500/30 bg-violet-500/10 text-violet-300 hover:border-violet-500/50 hover:bg-violet-500/20",
-            )}
+            variant={pr.isDraft ? "outline" : "secondary"}
+            render={<a {...linkProps(pr)} />}
+            className={cn("shrink-0", compact && "px-1")}
           >
-            <Icon className={compact ? "size-2" : "w-3 h-3"} />
+            <Icon data-icon="inline-start" />
             #{pr.number}
-          </a>
+          </Badge>
         )
       })}
     </>

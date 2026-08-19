@@ -69,7 +69,7 @@ describe("markdown file links", () => {
 
     fireEvent.click(screen.getByRole("link", { name: "Open docs" }))
 
-    expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank")
+    expect(open).toHaveBeenCalledWith("https://example.com/docs", "_blank", "noopener,noreferrer")
     expect(authFetch).not.toHaveBeenCalled()
     open.mockRestore()
   })

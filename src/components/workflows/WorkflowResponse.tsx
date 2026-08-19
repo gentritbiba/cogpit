@@ -138,7 +138,7 @@ function StructuredValue({ value, depth = 0 }: { value: unknown; depth?: number 
     return (
       <div className="flex flex-col gap-3">
         {value.map((item, index) => (
-          <article key={index} className="rounded-lg border bg-muted/20 p-3.5">
+          <article key={index} className="border-l pl-4">
             <StructuredValue value={item} depth={depth + 1} />
           </article>
         ))}
@@ -165,7 +165,7 @@ function StructuredValue({ value, depth = 0 }: { value: unknown; depth?: number 
 
         if (isLead) {
           return (
-            <div key={key} className="rounded-lg border-l-2 border-primary/50 bg-muted/30 px-4 py-3 text-[15px] font-medium leading-relaxed">
+            <div key={key} className="border-l-2 border-foreground/30 pl-4 text-sm font-medium leading-relaxed">
               <MarkdownText>{item}</MarkdownText>
             </div>
           )
@@ -173,7 +173,7 @@ function StructuredValue({ value, depth = 0 }: { value: unknown; depth?: number 
 
         return (
           <section key={key} className="flex min-w-0 flex-col gap-2">
-            <h4 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <h4 className="text-xs font-medium text-muted-foreground">
               {humanizeKey(key)}
             </h4>
             <div className="min-w-0 text-sm leading-relaxed">

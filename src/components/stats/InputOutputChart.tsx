@@ -53,23 +53,23 @@ function computeTurnData(turns: Turn[]): TurnData[] {
 function ChartTooltip({ data }: { data: TurnData }): React.JSX.Element {
   return (
     <div className="pointer-events-none absolute left-0 right-0 top-[28px] z-10 px-1">
-      <div className="rounded-md bg-elevation-2 px-2.5 py-2 text-[10px] shadow-lg w-fit">
-        <div className="font-medium text-foreground mb-1">Turn {data.turn}</div>
+      <div className="w-fit rounded-md border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-xs">
+        <div className="mb-1 font-medium text-foreground">Turn {data.turn}</div>
         <div className="flex flex-col gap-0.5 text-muted-foreground">
-          <span>Input: <span className="text-blue-400">{formatTokenCount(data.totalInput)}</span>
-            <span className="text-[9px] ml-1 opacity-60">
+          <span>Input: <span className="text-info">{formatTokenCount(data.totalInput)}</span>
+            <span className="ml-1 opacity-60">
               ({formatTokenCount(data.cacheRead)} cached, {formatTokenCount(data.cacheWrite)} written, {formatTokenCount(data.newInput)} new)
             </span>
           </span>
-          <span>Output: <span className="text-green-400">{formatTokenCount(data.totalOutput)}</span>
+          <span>Output: <span className="text-success">{formatTokenCount(data.totalOutput)}</span>
             {data.thinkingTokens > 0 && (
-              <span className="text-[9px] ml-1 opacity-60">
+              <span className="ml-1 opacity-60">
                 ({formatTokenCount(data.thinkingTokens)} thinking, {formatTokenCount(data.visibleTokens)} text)
               </span>
             )}
           </span>
-          {data.cost > 0 && <span>Cost: <span className="text-amber-400">~{formatCost(data.cost)}</span></span>}
-          {data.hasSubAgents && <span className="text-amber-400/70">Has sub-agent activity</span>}
+          {data.cost > 0 && <span>Cost: <span className="text-warning">~{formatCost(data.cost)}</span></span>}
+          {data.hasSubAgents && <span className="text-warning">Has sub-agent activity</span>}
         </div>
       </div>
     </div>
@@ -81,14 +81,14 @@ function ChartTooltip({ data }: { data: TurnData }): React.JSX.Element {
 function ChartLegend({ padLeft, svgHeight }: { padLeft: number; svgHeight: number }): React.JSX.Element {
   return (
     <>
-      <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#60a5fa" opacity={0.85} />
-      <text x={padLeft + 9} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Input</text>
-      <rect x={padLeft + 38} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#4ade80" opacity={0.7} />
-      <text x={padLeft + 47} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Output</text>
-      <rect x={padLeft + 76} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="#a78bfa" opacity={0.45} />
-      <text x={padLeft + 85} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Think</text>
-      <circle cx={padLeft + 112} cy={svgHeight - 7} r={2} fill="#f59e0b" opacity={0.8} />
-      <text x={padLeft + 117} y={svgHeight - 4} className="fill-muted-foreground text-[7px]">Agent</text>
+      <rect x={padLeft} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="var(--info)" opacity={0.85} />
+      <text x={padLeft + 9} y={svgHeight - 4} className="fill-muted-foreground text-xs">Input</text>
+      <rect x={padLeft + 48} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="var(--success)" opacity={0.7} />
+      <text x={padLeft + 57} y={svgHeight - 4} className="fill-muted-foreground text-xs">Output</text>
+      <rect x={padLeft + 104} y={svgHeight - 10} width={6} height={6} rx={1.5} fill="var(--muted-foreground)" opacity={0.45} />
+      <text x={padLeft + 113} y={svgHeight - 4} className="fill-muted-foreground text-xs">Think</text>
+      <circle cx={padLeft + 155} cy={svgHeight - 7} r={2} fill="var(--warning)" opacity={0.8} />
+      <text x={padLeft + 162} y={svgHeight - 4} className="fill-muted-foreground text-xs">Agent</text>
     </>
   )
 }
@@ -125,26 +125,26 @@ function BarGroup({ data: d, groupX, barW, groupW, baseY, chartH, maxVal, isHove
 
       {/* Input bar -- left half */}
       {cacheReadH > 0 && (
-        <rect x={groupX} y={baseY - cacheReadH} width={barW} height={cacheReadH} rx={1} fill="#60a5fa" opacity={isHovered ? 0.45 : 0.25} />
+        <rect x={groupX} y={baseY - cacheReadH} width={barW} height={cacheReadH} rx={1} fill="var(--info)" opacity={isHovered ? 0.45 : 0.25} />
       )}
       {cacheWriteH > 0 && (
-        <rect x={groupX} y={baseY - cacheReadH - cacheWriteH} width={barW} height={cacheWriteH} rx={1} fill="#60a5fa" opacity={isHovered ? 0.7 : 0.5} />
+        <rect x={groupX} y={baseY - cacheReadH - cacheWriteH} width={barW} height={cacheWriteH} rx={1} fill="var(--info)" opacity={isHovered ? 0.7 : 0.5} />
       )}
       {newInputH > 0 && (
-        <rect x={groupX} y={baseY - cacheReadH - cacheWriteH - newInputH} width={barW} height={newInputH} rx={1} fill="#60a5fa" opacity={isHovered ? 1 : 0.85} />
+        <rect x={groupX} y={baseY - cacheReadH - cacheWriteH - newInputH} width={barW} height={newInputH} rx={1} fill="var(--info)" opacity={isHovered ? 1 : 0.85} />
       )}
 
       {/* Output bar -- right half: thinking (dim purple) + visible (bright green) */}
       {thinkingH > 0 && (
-        <rect x={groupX + barW + 1} y={baseY - thinkingH} width={barW} height={thinkingH} rx={1} fill="#a78bfa" opacity={isHovered ? 0.7 : 0.45} />
+        <rect x={groupX + barW + 1} y={baseY - thinkingH} width={barW} height={thinkingH} rx={1} fill="var(--muted-foreground)" opacity={isHovered ? 0.7 : 0.45} />
       )}
       {visibleH > 0 && (
-        <rect x={groupX + barW + 1} y={baseY - thinkingH - visibleH} width={barW} height={visibleH} rx={1} fill="#4ade80" opacity={isHovered ? 0.95 : 0.7} />
+        <rect x={groupX + barW + 1} y={baseY - thinkingH - visibleH} width={barW} height={visibleH} rx={1} fill="var(--success)" opacity={isHovered ? 0.95 : 0.7} />
       )}
 
       {/* Sub-agent indicator dot */}
       {d.hasSubAgents && (
-        <circle cx={groupX + groupW / 2} cy={baseY + 5} r={1.5} fill="#f59e0b" opacity={0.8} />
+        <circle cx={groupX + groupW / 2} cy={baseY + 5} r={1.5} fill="var(--warning)" opacity={0.8} />
       )}
     </g>
   )
@@ -188,10 +188,10 @@ export function InputOutputChart({ turns }: { turns: Turn[] }): React.JSX.Elemen
         onMouseLeave={() => setHoveredIdx(null)}
       >
         {/* Y-axis labels */}
-        <text x={PAD_LEFT - 4} y={PAD_TOP} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-[8px]">
+        <text x={PAD_LEFT - 4} y={PAD_TOP} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-xs">
           {formatTokenCount(maxVal)}
         </text>
-        <text x={PAD_LEFT - 4} y={baseY} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-[8px]">
+        <text x={PAD_LEFT - 4} y={baseY} textAnchor="end" dominantBaseline="central" className="fill-muted-foreground text-xs">
           0
         </text>
         {/* Grid line */}

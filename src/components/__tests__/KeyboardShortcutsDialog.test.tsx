@@ -38,7 +38,9 @@ describe("KeyboardShortcutsDialog", () => {
     await user.click(screen.getByRole("button", { name: "Change shortcut for Open command palette" }))
     fireEvent.keyDown(window, { key: "j", ctrlKey: true })
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Toggle integrated terminal")
+    const conflict = screen.getByRole("alert")
+    expect(conflict).toHaveAttribute("data-slot", "alert")
+    expect(conflict).toHaveTextContent("Toggle integrated terminal")
     expect(getKeybinding("commandPalette")).toMatchObject({ key: "k", modKey: true })
   })
 

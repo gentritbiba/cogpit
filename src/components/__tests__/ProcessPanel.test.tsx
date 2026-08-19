@@ -154,11 +154,65 @@ describe("ProcessPanel", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Select Shell" }))
-    fireEvent.click(screen.getByRole("button", { name: "Close Shell" }))
+    const tab = screen.getByRole("tab", { name: "Shell" })
+    const closeButton = screen.getByRole("button", { name: "Close Shell" })
+
+    expect(tab).toHaveAttribute("aria-selected", "true")
+    expect(tab.contains(closeButton)).toBe(false)
+
+    fireEvent.click(tab)
+    fireEvent.click(closeButton)
 
     expect(onSetActive).toHaveBeenCalledWith("terminal-1")
     expect(mocks.killSession).toHaveBeenCalledWith("terminal-1")
     expect(onRemove).toHaveBeenCalledWith("terminal-1")
+  })
+
+  it("links the controlled process tabs to their panels", () => {
+    const onSetActive = vi.fn()
+    const processes = new Map([
+      [
+        "terminal-1",
+        {
+          id: "terminal-1",
+          name: "Shell",
+          type: "terminal" as const,
+          status: "running" as const,
+        },
+      ],
+      [
+        "terminal-2",
+        {
+          id: "terminal-2",
+          name: "Server",
+          type: "terminal" as const,
+          status: "running" as const,
+        },
+      ],
+    ])
+
+    render(
+      <ProcessPanel
+        {...defaultProps}
+        processes={processes}
+        activeProcessId="terminal-1"
+        collapsed={false}
+        onSetActive={onSetActive}
+      />,
+    )
+
+    const tabList = screen.getByRole("tablist", { name: "Open processes" })
+    const shellTab = screen.getByRole("tab", { name: "Shell" })
+    const serverTab = screen.getByRole("tab", { name: "Server" })
+    const panel = screen.getByRole("tabpanel")
+
+    expect(tabList).toContainElement(shellTab)
+    expect(shellTab).toHaveAttribute("aria-selected", "true")
+    expect(serverTab).toHaveAttribute("aria-selected", "false")
+    expect(shellTab).toHaveAttribute("aria-controls", panel.id)
+    expect(panel).toHaveAttribute("aria-labelledby", shellTab.id)
+
+    fireEvent.click(serverTab)
+    expect(onSetActive).toHaveBeenCalledWith("terminal-2")
   })
 })

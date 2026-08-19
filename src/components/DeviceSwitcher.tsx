@@ -1,6 +1,15 @@
 import { useCallback, useState } from "react"
-import { Menu } from "@base-ui/react/menu"
 import { Check, ChevronDown, Laptop, Plus, Server, Settings2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { can } from "@/lib/capabilities"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
@@ -8,15 +17,12 @@ import { deviceVersion, useDevices, type PublicDevice } from "@/hooks/useDevices
 import { DevicesDialog } from "@/components/DevicesDialog"
 import packageJson from "../../package.json"
 
-const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer select-none data-highlighted:bg-elevation-2 hover:bg-elevation-2"
-
 const HUB_VERSION = packageJson.version
 
 const AUTH_STATE_DOT: Record<PublicDevice["runtime"]["authState"], string> = {
-  ok: "bg-green-500",
-  unknown: "bg-amber-500",
-  "bad-password": "bg-red-500",
+  ok: "bg-success",
+  unknown: "bg-warning",
+  "bad-password": "bg-destructive",
 }
 
 const AUTH_STATE_LABEL: Record<PublicDevice["runtime"]["authState"], string> = {
@@ -41,7 +47,6 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
 
   const activeName = activeDevice?.name ?? "This machine"
   const activeIsRemote = activeDeviceId !== LOCAL_DEVICE_ID
-  const menuItemClass = cn(MENU_ITEM_CLASS, compact && "min-h-10")
   const canManageDevices = can("manageDevices")
 
   // Probe every device once when the dropdown opens — the only probing that
@@ -63,97 +68,88 @@ export function DeviceSwitcher({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <Menu.Root onOpenChange={probeOnOpen}>
-        <Menu.Trigger
+      <DropdownMenu onOpenChange={probeOnOpen}>
+        <DropdownMenuTrigger
           render={
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size={compact ? "sm" : "xs"}
               aria-label="Switch device"
               className={cn(
-                "flex items-center rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-elevation-2 hover:text-foreground",
-                compact ? "h-10 max-w-[120px] gap-1" : "mr-1 gap-1.5 py-1",
+                "max-w-40 justify-start",
+                compact && "h-10",
               )}
             />
           }
         >
-          {activeIsRemote ? <Server className="size-3 text-blue-400" /> : <Laptop className="size-3" />}
-          <span className={cn("truncate", compact ? "max-w-[88px]" : "max-w-[140px]")}>{activeName}</span>
-          <ChevronDown className="size-3 opacity-60" />
-        </Menu.Trigger>
+          {activeIsRemote ? <Server data-icon="inline-start" /> : <Laptop data-icon="inline-start" />}
+          <span className="truncate">{activeName}</span>
+          <ChevronDown data-icon="inline-end" className="opacity-60" />
+        </DropdownMenuTrigger>
 
-        <Menu.Portal>
-          <Menu.Positioner sideOffset={6} align="end" className="z-50">
-            <Menu.Popup className="min-w-[248px] rounded-lg elevation-3 border border-border/30 p-1">
-              <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                Devices
-              </div>
+        <DropdownMenuContent align="end" sideOffset={6} className="w-64">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Devices</DropdownMenuLabel>
 
-              <Menu.Item
-                className={menuItemClass}
-                onClick={() => switchDevice(LOCAL_DEVICE_ID)}
-              >
-                <Laptop className="size-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">This machine</span>
-                {!activeIsRemote && <Check className="size-3.5 shrink-0 text-green-400" />}
-              </Menu.Item>
+            <DropdownMenuItem onClick={() => switchDevice(LOCAL_DEVICE_ID)}>
+              <Laptop />
+              <span className="flex-1 truncate">This machine</span>
+              {!activeIsRemote && <Check className="ml-auto text-success" />}
+            </DropdownMenuItem>
 
-              {devices.map((device) => {
-                const version = deviceVersion(device)
-                const skewed = version !== undefined && version !== HUB_VERSION
-                const isActive = device.id === activeDeviceId
-                return (
-                  <Menu.Item
-                    key={device.id}
-                    className={menuItemClass}
-                    onClick={() => switchDevice(device.id)}
-                  >
-                    <StatusDot state={device.runtime.authState} />
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate">{device.name}</span>
-                        {version && (
-                          <span
-                            className={cn(
-                              "shrink-0 text-[10px] font-mono",
-                              skewed ? "text-amber-400" : "text-muted-foreground/60",
-                            )}
-                            title={skewed ? `Device runs v${version}; hub runs v${HUB_VERSION}` : undefined}
-                          >
-                            v{version}
-                            {skewed && " ≠ hub"}
-                          </span>
-                        )}
-                      </div>
-                      <span className="truncate text-[11px] text-muted-foreground/70">
-                        {device.host}:{device.port}
-                        {device.auth === "none" && " · unauthenticated"}
-                      </span>
-                    </div>
-                    {isActive && <Check className="size-3.5 shrink-0 text-green-400" />}
-                  </Menu.Item>
-                )
-              })}
+            {devices.map((device) => {
+              const version = deviceVersion(device)
+              const skewed = version !== undefined && version !== HUB_VERSION
+              const isActive = device.id === activeDeviceId
+              return (
+                <DropdownMenuItem
+                  key={device.id}
+                  onClick={() => switchDevice(device.id)}
+                  className={cn(compact && "min-h-10")}
+                >
+                  <StatusDot state={device.runtime.authState} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate">{device.name}</span>
+                      {skewed && (
+                        <span
+                          className="shrink-0 font-mono text-xs text-warning"
+                          title={`Device runs v${version}; hub runs v${HUB_VERSION}`}
+                        >
+                          v{version}
+                        </span>
+                      )}
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {device.host}:{device.port}
+                      {device.auth === "none" && " · unauthenticated"}
+                    </span>
+                  </div>
+                  {isActive && <Check className="ml-auto text-success" />}
+                </DropdownMenuItem>
+              )
+            })}
+          </DropdownMenuGroup>
 
-              {canManageDevices && (
-                <>
-                  <div className="my-1 h-px bg-border/40" />
-
-                  <Menu.Item className={menuItemClass} onClick={() => setDialogMode("add")}>
-                    <Plus className="size-4 shrink-0 text-muted-foreground" />
-                    <span>Add device…</span>
-                  </Menu.Item>
-                  {devices.length > 0 && (
-                    <Menu.Item className={menuItemClass} onClick={() => setDialogMode("manage")}>
-                      <Settings2 className="size-4 shrink-0 text-muted-foreground" />
-                      <span>Manage devices…</span>
-                    </Menu.Item>
-                  )}
-                </>
-              )}
-            </Menu.Popup>
-          </Menu.Positioner>
-        </Menu.Portal>
-      </Menu.Root>
+          {canManageDevices && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => setDialogMode("add")}>
+                  <Plus />
+                  <span>Add device…</span>
+                </DropdownMenuItem>
+                {devices.length > 0 && (
+                  <DropdownMenuItem onClick={() => setDialogMode("manage")}>
+                    <Settings2 />
+                    <span>Manage devices…</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuGroup>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {canManageDevices && (
         <DevicesDialog

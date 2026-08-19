@@ -1,4 +1,14 @@
-import { useState, useRef, useCallback, useEffect, type ReactNode } from "react"
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useId,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 interface HoverRevealPanelProps {
@@ -21,18 +31,23 @@ export function HoverRevealPanel({
   visible,
   enabled = true,
 }: HoverRevealPanelProps) {
+  if (visible) return <>{children}</>
+  if (!enabled) return null
+
+  return <HoverRevealOverlay side={side}>{children}</HoverRevealOverlay>
+}
+
+function HoverRevealOverlay({
+  side,
+  children,
+}: Pick<HoverRevealPanelProps, "side" | "children">) {
   const [isRevealed, setIsRevealed] = useState(false)
   const enterTimer = useRef(0)
   const leaveTimer = useRef(0)
-
-  // When sidebar becomes visible in normal flow, dismiss the overlay
-  useEffect(() => {
-    if (visible) {
-      setIsRevealed(false)
-      clearTimeout(enterTimer.current)
-      clearTimeout(leaveTimer.current)
-    }
-  }, [visible])
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const suppressNextTriggerFocus = useRef(false)
+  const panelId = useId()
 
   // Cleanup timers on unmount
   useEffect(() => () => {
@@ -40,55 +55,89 @@ export function HoverRevealPanel({
     clearTimeout(leaveTimer.current)
   }, [])
 
-  // Shared enter/leave handlers used by both the trigger zone and the overlay.
-  // When the mouse transitions from trigger → overlay (or vice-versa), the
-  // leave timer from one element is cancelled by the enter of the other.
   const handleEnter = useCallback(() => {
     clearTimeout(leaveTimer.current)
     clearTimeout(enterTimer.current)
     enterTimer.current = window.setTimeout(() => setIsRevealed(true), 200)
   }, [])
 
+  const handleFocusEnter = useCallback(() => {
+    clearTimeout(leaveTimer.current)
+    clearTimeout(enterTimer.current)
+    setIsRevealed(true)
+  }, [])
+
+  const handleTriggerFocus = useCallback(() => {
+    if (suppressNextTriggerFocus.current) {
+      suppressNextTriggerFocus.current = false
+      return
+    }
+    handleFocusEnter()
+  }, [handleFocusEnter])
+
   const handleLeave = useCallback(() => {
     clearTimeout(enterTimer.current)
     leaveTimer.current = window.setTimeout(() => setIsRevealed(false), 300)
   }, [])
 
-  // When visible in normal flow, just render children directly
-  if (visible) return <>{children}</>
+  const handleMouseLeave = useCallback(() => {
+    const focused = document.activeElement
+    if (triggerRef.current?.contains(focused) || overlayRef.current?.contains(focused)) return
+    handleLeave()
+  }, [handleLeave])
 
-  // When not enabled (e.g. no session for right sidebar, config view), render nothing
-  if (!enabled) return null
+  const handleFocusLeave = useCallback((event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget
+    if (triggerRef.current?.contains(next) || overlayRef.current?.contains(next)) return
+    handleLeave()
+  }, [handleLeave])
+
+  const handleOverlayKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape") return
+    event.preventDefault()
+    clearTimeout(enterTimer.current)
+    clearTimeout(leaveTimer.current)
+    setIsRevealed(false)
+    suppressNextTriggerFocus.current = true
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }, [])
 
   return (
     <>
-      {/* Thin trigger zone at the window edge — in flex flow */}
-      <div
-        className="shrink-0 group relative z-10"
-        style={{ width: 6 }}
+      <Button
+        ref={triggerRef}
+        type="button"
+        variant="ghost"
+        aria-label={`Reveal ${side} sidebar`}
+        aria-controls={panelId}
+        aria-expanded={isRevealed}
+        title={`Reveal ${side} sidebar`}
+        className="group relative z-10 h-auto w-1.5 shrink-0 rounded-none p-0 focus-visible:ring-inset"
         onMouseEnter={handleEnter}
-        onMouseLeave={handleLeave}
+        onMouseLeave={handleMouseLeave}
+        onFocus={handleTriggerFocus}
+        onBlur={handleFocusLeave}
+        onClick={handleFocusEnter}
       >
-        <div
-          className="w-[2px] h-full mx-auto opacity-0 group-hover:opacity-100 bg-blue-500/40 transition-opacity duration-150"
+        <span
+          aria-hidden="true"
+          className="mx-auto h-full w-px bg-border opacity-0 transition-opacity duration-150 group-hover:opacity-100"
         />
-      </div>
+      </Button>
 
-      {/* Overlay sidebar — absolutely positioned, does not displace content */}
       {isRevealed && (
         <div
+          ref={overlayRef}
+          id={panelId}
           className={cn(
-            "absolute top-0 bottom-0 z-40",
-            side === "left" ? "left-0" : "right-0",
+            "absolute inset-y-0 z-40 bg-background shadow-sm",
+            side === "left" ? "left-0 border-r" : "right-0 border-l",
           )}
-          style={{
-            boxShadow:
-              side === "left"
-                ? "4px 0 24px rgba(0,0,0,0.35)"
-                : "-4px 0 24px rgba(0,0,0,0.35)",
-          }}
           onMouseEnter={handleEnter}
-          onMouseLeave={handleLeave}
+          onMouseLeave={handleMouseLeave}
+          onFocusCapture={handleFocusEnter}
+          onBlurCapture={handleFocusLeave}
+          onKeyDown={handleOverlayKeyDown}
         >
           {children}
         </div>

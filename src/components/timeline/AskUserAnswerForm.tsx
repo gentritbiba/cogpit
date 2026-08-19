@@ -4,6 +4,10 @@ import type { ToolCall } from "@/lib/types"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 import { useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Field, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
+import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 interface AskUserQuestion {
   question: string
@@ -72,9 +76,9 @@ export function AskUserAnswerForm({
     <form
       onSubmit={(event) => { void handleSubmit(event) }}
       className={cn(
-        "space-y-3",
-        !embedded && "mt-2 rounded-md border border-pink-500/30 bg-pink-500/5 p-2.5",
-        submitted && "opacity-50 pointer-events-none",
+        "flex flex-col gap-3",
+        !embedded && "mt-2 rounded-md border bg-card p-3",
+        submitted && "pointer-events-none opacity-50",
       )}
     >
       {questions.map((question, questionIndex) => {
@@ -86,103 +90,101 @@ export function AskUserAnswerForm({
         )
         const answerInputId = `ask-user-answer-${toolCall.id}-${questionIndex}`
         return (
-          <div key={questionIndex} className="space-y-2">
+          <FieldSet key={questionIndex} className="gap-2 border-b border-border pb-3 last:border-b-0 last:pb-0">
             {(question.header || question.question) && (
-              <div>
+              <FieldLegend variant="label" className="flex flex-col items-start gap-1">
                 {question.header && (
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-pink-300/75">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {question.header}
-                  </div>
+                  </span>
                 )}
-                <div className="text-[13px] leading-relaxed text-foreground/90">
+                <span className="text-sm leading-relaxed text-foreground">
                   {question.question}
-                </div>
-              </div>
+                </span>
+              </FieldLegend>
             )}
             {isMultipleChoice ? (
-              <div className="grid gap-1.5">
+              <ToggleGroup
+                multiple={question.multiSelect}
+                orientation="vertical"
+                variant="outline"
+                value={question.multiSelect
+                  ? Array.from(selectedAnswers)
+                  : answers[question.question]
+                    ? [answers[question.question]]
+                    : []}
+                onValueChange={(nextSelected) => {
+                  if (!question.multiSelect && nextSelected.length === 0) return
+                  const nextValue = question.multiSelect
+                    ? nextSelected.join(", ")
+                    : nextSelected[0]
+                  setAnswers({ ...answers, [question.question]: nextValue })
+                }}
+                className="grid w-full gap-1.5"
+              >
                 {question.options!.map((option, optionIndex) => {
                   const isSelected = question.multiSelect
                     ? selectedAnswers.has(option.label)
                     : answers[question.question] === option.label
                   return (
-                    <button
+                    <ToggleGroupItem
                       key={optionIndex}
-                      type="button"
-                      aria-pressed={isSelected}
-                      onClick={() => {
-                        const nextSelected = new Set(selectedAnswers)
-                        if (nextSelected.has(option.label)) {
-                          nextSelected.delete(option.label)
-                        } else {
-                          nextSelected.add(option.label)
-                        }
-                        const nextValue = question.multiSelect
-                          ? Array.from(nextSelected).join(", ")
-                          : option.label
-                        setAnswers({ ...answers, [question.question]: nextValue })
-                      }}
-                      className={cn(
-                        "flex items-start gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors",
-                        isSelected
-                          ? "border-pink-500/50 bg-pink-500/15 text-pink-100"
-                          : "border-border/50 bg-elevation-1/70 text-foreground/80 hover:border-pink-500/30 hover:bg-pink-500/[0.07]",
-                      )}
+                      value={option.label}
+                      aria-label={option.label}
+                      className="h-auto w-full justify-start whitespace-normal px-3 py-2.5 text-left"
                     >
                       <span
                         className={cn(
                           "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
                           question.multiSelect ? "rounded" : "rounded-full",
                           isSelected
-                            ? "border-pink-400 bg-pink-500 text-white"
+                            ? "border-primary bg-primary text-primary-foreground"
                             : "border-muted-foreground/30",
                         )}
                         aria-hidden="true"
                       >
-                        {isSelected && <Check className="size-3" strokeWidth={3} />}
+                        {isSelected && <Check className="size-3" strokeWidth={3} data-icon="icon" />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-xs font-medium">{option.label}</span>
                         {option.description && (
-                          <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                          <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
                             {option.description}
                           </span>
                         )}
                       </span>
-                    </button>
+                    </ToggleGroupItem>
                   )
                 })}
-              </div>
+              </ToggleGroup>
             ) : (
-              <div className="space-y-1">
-                <label
+              <Field>
+                <FieldLabel
                   htmlFor={answerInputId}
-                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-pink-300/75"
                 >
                   Answer
-                </label>
-                <textarea
+                </FieldLabel>
+                <Textarea
                   id={answerInputId}
                   value={answers[question.question] ?? ""}
                   onChange={(event) => {
                     setAnswers({ ...answers, [question.question]: event.target.value })
                   }}
                   rows={2}
-                  className="w-full resize-none rounded-md border border-pink-500/20 bg-elevation-1 p-2.5 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:border-pink-500/50 focus:outline-none"
                   placeholder="Type your answer..."
                 />
-              </div>
+              </Field>
             )}
-          </div>
+          </FieldSet>
         )
       })}
-      <button
+      <Button
         type="submit"
+        size="sm"
         disabled={submitting || submitted}
-        className="rounded-md border border-pink-500/40 bg-pink-500/15 px-3 py-1.5 text-xs font-medium text-pink-200 transition-colors hover:bg-pink-500/25 disabled:opacity-50"
       >
         {submitted ? "Sent" : submitting ? "Sending..." : "Send answer"}
-      </button>
+      </Button>
     </form>
   )
 }

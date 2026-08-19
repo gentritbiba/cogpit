@@ -1,8 +1,27 @@
-import { useState, useCallback } from "react"
-import { Cog, FolderOpen, CheckCircle, XCircle, Loader2 } from "lucide-react"
+import { useCallback, useState } from "react"
+import { CheckCircle, FolderOpen, Settings2, XCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/Spinner"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
 
 interface SetupScreenProps {
@@ -14,14 +33,11 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
   const [saving, setSaving] = useState(false)
   const { status, error, debouncedValidate, save } = useConfigValidation()
 
-  const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value
-      setPath(value)
-      debouncedValidate(value)
-    },
-    [debouncedValidate]
-  )
+  const handleChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value
+    setPath(value)
+    debouncedValidate(value)
+  }, [debouncedValidate])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -30,78 +46,93 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
       onConfigured(result.claudeDir)
     }
     setSaving(false)
-  }, [path, save, onConfigured])
+  }, [onConfigured, path, save])
 
   return (
-    <div className="flex h-dvh items-center justify-center bg-elevation-0 text-foreground">
-      <Card className="w-full max-w-md mx-4 p-6 elevation-1 border-border">
-        <div className="flex flex-col items-center gap-4">
-          <Cog className="size-8 text-blue-400" />
-          <h1 className="text-xl font-semibold tracking-tight">Connect your coding agent</h1>
-          <p className="text-sm text-muted-foreground text-center leading-relaxed">
-            Cogpit connects to Codex automatically when{" "}
-            <code className="rounded bg-elevation-2 px-1.5 py-0.5 text-xs text-foreground">~/.codex</code>{" "}
-            is available. To connect Claude Code, enter its data directory, typically{" "}
-            <code className="rounded bg-elevation-2 px-1.5 py-0.5 text-xs text-foreground">~/.claude</code>.
-          </p>
-
-          <div className="w-full space-y-3 mt-2">
-            <div className="relative">
-              <label htmlFor="claude-data-directory" className="sr-only">Claude Code data directory</label>
-              <FolderOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="claude-data-directory"
-                value={path}
-                onChange={handleChange}
-                placeholder="/Users/you/.claude"
-                className="pl-10 bg-elevation-0 border-border/70 focus:border-border"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && status === "valid" && !saving) handleSave()
-                }}
-                autoFocus
-                aria-invalid={status === "invalid"}
-                aria-describedby="claude-directory-status"
-              />
+    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8 text-foreground">
+      <form
+        className="w-full max-w-lg"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (status === "valid" && !saving) void handleSave()
+        }}
+      >
+        <Card>
+          <CardHeader>
+            <div className="mb-2 flex size-9 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+              <Settings2 className="size-4" />
             </div>
+            <CardTitle>Connect your coding agent</CardTitle>
+            <CardDescription>
+              Cogpit connects to Codex automatically when{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.codex</code>{" "}
+              is available. For Claude Code, enter its data directory, usually{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.claude</code>.
+            </CardDescription>
+          </CardHeader>
 
-            <div id="claude-directory-status" role="status" aria-live="polite">
-            {status === "validating" && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" />
-                Checking path...
-              </div>
-            )}
-            {status === "valid" && (
-              <div className="flex items-center gap-2 text-sm text-green-400">
-                <CheckCircle className="size-3.5" />
-                Claude Code history found
-              </div>
-            )}
-            {status === "invalid" && error && (
-              <div className="flex items-center gap-2 text-sm text-red-400">
-                <XCircle className="size-3.5" />
-                {error}
-              </div>
-            )}
-            </div>
+          <CardContent>
+            <FieldGroup>
+              <Field data-invalid={status === "invalid"}>
+                <FieldLabel htmlFor="claude-data-directory">
+                  Claude Code data directory
+                </FieldLabel>
+                <InputGroup>
+                  <InputGroupAddon>
+                    <FolderOpen aria-hidden="true" />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    id="claude-data-directory"
+                    value={path}
+                    onChange={handleChange}
+                    placeholder="/Users/you/.claude"
+                    autoFocus
+                    aria-invalid={status === "invalid"}
+                    aria-describedby="claude-directory-status"
+                  />
+                </InputGroup>
 
+                <div
+                  id="claude-directory-status"
+                  className="min-h-5"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {status === "validating" && (
+                    <FieldDescription className="flex items-center gap-2">
+                      <Spinner className="size-4" />
+                      Checking path...
+                    </FieldDescription>
+                  )}
+                  {status === "valid" && (
+                    <FieldDescription className="flex items-center gap-2 text-success">
+                      <CheckCircle className="size-4" />
+                      Claude Code history found
+                    </FieldDescription>
+                  )}
+                  {status === "invalid" && error && (
+                    <FieldError className="flex items-center gap-2">
+                      <XCircle className="size-4" />
+                      {error}
+                    </FieldError>
+                  )}
+                </div>
+              </Field>
+            </FieldGroup>
+          </CardContent>
+
+          <CardFooter>
             <Button
+              type="submit"
               className="w-full"
               disabled={status !== "valid" || saving}
-              onClick={handleSave}
             >
-              {saving ? (
-                <>
-                  <Loader2 className="size-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                "Connect Claude Code"
-              )}
+              {saving && <Spinner data-icon="inline-start" />}
+              {saving ? "Saving..." : "Connect Claude Code"}
             </Button>
-          </div>
-        </div>
-      </Card>
-    </div>
+          </CardFooter>
+        </Card>
+      </form>
+    </main>
   )
 }

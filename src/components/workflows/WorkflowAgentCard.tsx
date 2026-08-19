@@ -11,7 +11,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Collapsible,
   CollapsibleContent,
@@ -94,16 +94,16 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
   const canRetry = resultState.status === "unavailable"
 
   return (
-    <Card size="sm" className="gap-0 rounded-lg py-0">
-      <Collapsible open={open} onOpenChange={handleOpenChange}>
+    <Collapsible open={open} onOpenChange={handleOpenChange}>
+      <Card size="sm" className="gap-0 py-0">
         <CardHeader className="px-0 py-0">
           <CollapsibleTrigger className="group flex w-full items-start gap-3 rounded-lg px-3.5 py-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50">
             <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", style.dot)} />
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-sm font-medium capitalize text-foreground" title={agent.label}>
+                <CardTitle className="truncate capitalize" title={agent.label}>
                   {readableAgentName(agent.label)}
-                </span>
+                </CardTitle>
                 {agent.attempt && agent.attempt > 1 && (
                   <Badge variant="outline" className="text-muted-foreground">
                     Attempt {agent.attempt}
@@ -120,7 +120,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
                   {agent.lastToolSummary ? `: ${agent.lastToolSummary}` : ""}
                 </p>
               ) : null}
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 {agent.model && <span>{cleanModelName(agent.model)}</span>}
                 {typeof agent.tokens === "number" && agent.tokens > 0 && (
                   <Metric icon={Coins}>{formatTokens(agent.tokens)} tokens</Metric>
@@ -168,7 +168,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
                     aria-label={copied ? "Response copied" : "Copy response"}
                     title={copied ? "Copied" : "Copy response"}
                   >
-                    {copied ? <Check /> : <Copy />}
+                    {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
                   </Button>
                 )}
               </div>
@@ -197,7 +197,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
                   <ChevronDown data-icon="inline-end" className={cn("ml-auto transition-transform", promptOpen && "rotate-180")} />
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-2">
-                  <div className="rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
+                  <div className="rounded-md border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
                     <WorkflowResponse value={agent.promptPreview} />
                   </div>
                 </CollapsibleContent>
@@ -205,8 +205,8 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
             )}
           </CardContent>
         </CollapsibleContent>
-      </Collapsible>
-    </Card>
+      </Card>
+    </Collapsible>
   )
 }
 

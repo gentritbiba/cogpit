@@ -9,17 +9,17 @@ import type { SessionStatus, SessionStatusInfo } from "@/lib/sessionStatus"
 function StatusIcon({ status }: { status: SessionStatus }) {
   switch (status) {
     case "thinking":
-      return <Brain className="size-5 text-amber-500" />
+      return <Brain className="size-5 text-warning" />
     case "tool_use":
-      return <TerminalSquare className="size-5 text-blue-400" />
+      return <TerminalSquare className="size-5 text-info" />
     case "processing":
-      return <CircleEllipsis className="size-5 text-amber-500" />
+      return <CircleEllipsis className="size-5 text-warning" />
     case "compacting":
-      return <ChevronsDownUp className="size-5 text-amber-500" />
+      return <ChevronsDownUp className="size-5 text-warning" />
     case "awaiting_agents":
-      return <Bot className="size-5 text-blue-400" />
+      return <Bot className="size-5 text-info" />
     case "completed":
-      return <CheckCircle2 className="size-5 text-emerald-400" />
+      return <CheckCircle2 className="size-5 text-success" />
     default:
       return null
   }
@@ -57,8 +57,8 @@ function AgentStatusLine({
         className={cn(
           "text-xs font-medium shrink-0",
           !isCompleted && "text-muted-foreground",
-          isCompleted && status.terminalReason && "text-amber-400",
-          isCompleted && !status.terminalReason && "text-green-400",
+          isCompleted && status.terminalReason && "text-warning",
+          isCompleted && !status.terminalReason && "text-success",
         )}
       >
         {label}
@@ -68,14 +68,14 @@ function AgentStatusLine({
       )}
       {pendingDescriptions.length > 0 && (
         <span
-          className="text-[10px] text-muted-foreground/60 truncate"
+          className="truncate text-xs text-muted-foreground"
           title={pendingDescriptions.join("\n")}
         >
           {pendingDescriptions.join(" · ")}
         </span>
       )}
       {(status.pendingQueue ?? 0) > 0 && (
-        <span className="text-[10px] text-muted-foreground/60 ml-1 shrink-0">
+        <span className="ml-1 shrink-0 text-xs text-muted-foreground">
           +{status.pendingQueue} queued
         </span>
       )}
@@ -112,15 +112,15 @@ function CompletedAgentStatus({
   if (fadePhase === "ready") {
     return (
       <div className="flex items-center gap-2.5 py-3 px-4" data-agent-ready>
-        <CheckCircle2 className="size-4 shrink-0 text-emerald-400/80" />
+        <CheckCircle2 className="size-4 shrink-0 text-success" />
         <span className={cn(
           "text-xs font-medium",
-          status.terminalReason ? "text-amber-400" : "text-muted-foreground",
+          status.terminalReason ? "text-warning" : "text-muted-foreground",
         )}>
           {status.terminalReason ? getTerminalReasonLabel(status.terminalReason) : "Waiting for your input"}
         </span>
         {durationLabel && (
-          <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
             {durationLabel}
           </span>
         )}
@@ -137,7 +137,7 @@ function CompletedAgentStatus({
         fading={fadePhase === "fading"}
       />
       {durationLabel && (
-        <span className="text-[10px] text-muted-foreground/50 font-mono tabular-nums">
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
           in {durationLabel}
         </span>
       )}
@@ -235,8 +235,8 @@ export const AgentStatusIndicator = memo(function AgentStatusIndicator() {
   if (pendingInteraction && sseState === "connected") {
     return (
       <div className="flex items-center gap-2.5 py-3 px-4">
-        <CircleHelp className="size-5 shrink-0 text-pink-400" />
-        <span className="text-xs font-medium text-pink-300">
+        <CircleHelp className="size-5 shrink-0 text-info" />
+        <span className="text-xs font-medium text-info">
           {pendingInteraction.type === "plan"
             ? "Waiting for plan approval"
             : "Waiting for your answer"}
@@ -297,7 +297,7 @@ function LiveElapsedTimer({ startTimestamp, className }: { startTimestamp: strin
   return (
     <span
       ref={labelRef}
-      className={cn("text-[10px] text-muted-foreground/40 tabular-nums font-mono", className)}
+      className={cn("font-mono text-xs tabular-nums text-muted-foreground", className)}
     >
       {formatDuration(Math.max(0, Date.now() - startMs))}
     </span>

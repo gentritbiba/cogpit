@@ -12,9 +12,9 @@ import { useSessionContext } from "@/contexts/SessionContext"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { can } from "@/lib/capabilities"
 import { hapticLight } from "@/lib/haptics"
-import { shortPath } from "@/lib/format"
 import type { MobileAppShellProps } from "./mobileTypes"
 import { adjacentMobileTab, visibleMobileTabs } from "./mobileView"
+import { NewSessionHeadline } from "./NewSessionHero"
 import {
   PrimarySessionBrowser,
   ProjectDashboard,
@@ -63,11 +63,11 @@ export function MobileAppShell({
   }
 
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
+    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
       {!(state.mobileTab === "chat" && session) && (
-        <div className="flex h-10 shrink-0 items-center border-b border-border/40 bg-elevation-0 px-1.5">
+        <div className="flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />
         </div>
       )}
@@ -111,21 +111,17 @@ export function MobileAppShell({
                     {sessionView.pendingTurns}
                   </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center gap-1">
-                    <p className="text-sm text-muted-foreground">New session — type your first message below</p>
-                    <p className="text-xs text-muted-foreground font-mono">{shortPath(sessionView.pendingPath ?? "")}</p>
+                  <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
+                    <NewSessionHeadline projectPath={sessionView.pendingPath ?? null} />
                     {can("terminal") && (
-                      <div className="flex items-center gap-1 mt-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 gap-1.5 text-[11px] text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/20"
-                          onClick={project.onOpenTerminal}
-                        >
-                          <TerminalSquare className="size-3" />
-                          Terminal
-                        </Button>
-                      </div>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={project.onOpenTerminal}
+                      >
+                        <TerminalSquare data-icon="inline-start" />
+                        Terminal
+                      </Button>
                     )}
                   </div>
                 )}
@@ -164,7 +160,6 @@ export function MobileAppShell({
 
       {chrome.undoDialog}
       {chrome.branchModal}
-      {chrome.status}
       {session && project.hasFileChanges && (
         <Suspense fallback={null}>
           <MobileFileChanges

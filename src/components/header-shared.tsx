@@ -26,7 +26,7 @@ export const LiveIndicator = memo(function LiveIndicator({
 }: LiveIndicatorProps) {
   return (
     <span
-      className={cn("inline-block size-2 shrink-0 rounded-full bg-green-500", className)}
+      className={cn("inline-block size-2 shrink-0 rounded-full bg-success", className)}
       {...rest}
     />
   )
@@ -62,11 +62,21 @@ export const HeaderIconButton = memo(function HeaderIconButton({
   iconClassName,
   size = "sm",
 }: HeaderIconButtonProps) {
-  const sizeClass = size === "sm" ? "h-6 w-6 p-0" : "h-7 w-7 p-0"
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button variant="ghost" size="sm" className={cn(sizeClass, "text-muted-foreground hover:text-foreground", className)} onClick={onClick} disabled={disabled} aria-label={label} />}>
-          <Icon className={cn("size-3.5", iconClassName)} />
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size={size === "sm" ? "icon-xs" : "icon-sm"}
+            className={className}
+            onClick={onClick}
+            disabled={disabled}
+            aria-label={label}
+          />
+        }
+      >
+          <Icon data-icon="inline-start" className={iconClassName} />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
@@ -91,10 +101,10 @@ function contextPressure(pctLeft: number): ContextPressure {
   return "healthy"
 }
 
-const CONTEXT_COLORS: Record<ContextPressure, { border: string; text: string; bg: string }> = {
-  critical: { border: "border-red-700/60", text: "text-red-400", bg: "bg-red-500/5" },
-  warning: { border: "border-amber-700/60", text: "text-amber-400", bg: "bg-amber-500/5" },
-  healthy: { border: "border-green-700/60", text: "text-green-400", bg: "bg-green-500/5" },
+const CONTEXT_STYLES: Record<ContextPressure, string> = {
+  critical: "border-destructive/30 bg-destructive/10 text-destructive",
+  warning: "border-warning/30 bg-warning/10 text-warning",
+  healthy: "text-muted-foreground",
 }
 
 /**
@@ -114,7 +124,6 @@ export const ContextBadge = memo(function ContextBadge({
   const pressure = contextPressure(pctLeft)
   if (warnOnly && pressure === "healthy") return null
   const remaining = Math.max(0, ctx.compactAt - ctx.used)
-  const colors = CONTEXT_COLORS[pressure]
 
   const label = showRemaining
     ? `${pctLeft.toFixed(0)}% \u00b7 ${formatTokenCount(remaining)}`
@@ -124,10 +133,8 @@ export const ContextBadge = memo(function ContextBadge({
     <Badge
       variant="outline"
       className={cn(
-        "h-5 px-1.5 text-[10px] font-semibold shrink-0",
-        colors.border,
-        colors.text,
-        colors.bg,
+        "shrink-0 tabular-nums",
+        CONTEXT_STYLES[pressure],
         showRemaining && "gap-1",
       )}
     >
@@ -140,8 +147,8 @@ export const ContextBadge = memo(function ContextBadge({
   return (
     <Tooltip>
       <TooltipTrigger render={badge} />
-      <TooltipContent className="text-xs space-y-1">
-        <div className="font-medium">Context Left Until Auto-Compact</div>
+      <TooltipContent className="flex flex-col gap-1 text-xs">
+        <div className="font-medium">Context before auto-compact</div>
         <div>{formatTokenCount(remaining)} remaining ({pctLeft.toFixed(1)}%)</div>
         <div className="text-muted-foreground">
           {formatTokenCount(ctx.used)} / {formatTokenCount(ctx.limit)} tokens used ({ctx.percentAbsolute.toFixed(1)}%)

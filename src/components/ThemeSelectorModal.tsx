@@ -1,6 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Palette, Check } from "lucide-react"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@/components/ui/toggle-group"
 import { type ThemeId, themes } from "@/hooks/useTheme"
 
 interface ThemeSelectorModalProps {
@@ -19,7 +29,6 @@ export function ThemeSelectorModal({
   onPreviewTheme,
 }: ThemeSelectorModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
-  const listRef = useRef<HTMLDivElement>(null)
 
   // Reset selection to current theme when modal opens
   useEffect(() => {
@@ -51,62 +60,37 @@ export function ThemeSelectorModal({
     [onSelectTheme, onClose]
   )
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault()
-        setSelectedIndex((i) => Math.min(i + 1, themes.length - 1))
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault()
-        setSelectedIndex((i) => Math.max(i - 1, 0))
-      } else if (e.key === "Enter") {
-        e.preventDefault()
-        handleSelect(themes[selectedIndex])
-      }
-    },
-    [selectedIndex, handleSelect]
-  )
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent
-        className="max-w-sm p-0 elevation-4 border-border/30 gap-0 overflow-hidden [&>button:last-child]:hidden"
-        onKeyDown={handleKeyDown}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-          <Palette className="size-4 text-muted-foreground shrink-0" />
-          <span className="text-sm text-foreground font-medium">Select Theme</span>
-          <div className="ml-auto flex items-center gap-1.5">
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
-              &uarr;&darr;
-            </kbd>
-            <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
-              ESC
-            </kbd>
-          </div>
-        </div>
+      <DialogContent className="max-w-sm gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b p-4 pr-12">
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Palette data-icon="inline-start" className="size-4 text-muted-foreground" />
+            Select theme
+          </DialogTitle>
+          <DialogDescription>Preview and apply a color theme.</DialogDescription>
+        </DialogHeader>
 
-        {/* Theme list */}
-        <div ref={listRef} className="py-1">
+        <ToggleGroup
+          aria-label="Theme"
+          orientation="vertical"
+          value={[themes[selectedIndex].id]}
+          className="w-full items-stretch p-1"
+        >
           {themes.map((theme, i) => (
-            <button
+            <ToggleGroupItem
               key={theme.id}
-              data-theme-item
-              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
-                i === selectedIndex
-                  ? "bg-elevation-2 text-foreground"
-                  : "text-muted-foreground hover:bg-elevation-1 hover:text-foreground"
-              }`}
+              value={theme.id}
+              className="h-auto w-full justify-start gap-3 px-3 py-2.5 text-left text-muted-foreground data-pressed:bg-accent data-pressed:text-accent-foreground"
               onClick={() => handleSelect(theme)}
               onMouseEnter={() => setSelectedIndex(i)}
+              onFocus={() => setSelectedIndex(i)}
             >
-              {/* Elevation swatch strip */}
               <div className="flex gap-1">
                 {theme.swatches.map((color, j) => (
                   <div
                     key={j}
-                    className="size-4 rounded-full border border-white/10"
+                    className="size-4 rounded-full border"
                     style={{ backgroundColor: color }}
                   />
                 ))}
@@ -115,17 +99,11 @@ export function ThemeSelectorModal({
               <span className="flex-1 text-sm font-medium">{theme.name}</span>
 
               {currentTheme === theme.id && (
-                <Check className="size-3.5 text-blue-400 shrink-0" />
+                <Check data-icon="inline-end" className="size-4 shrink-0 text-foreground" />
               )}
-
-              {i === selectedIndex && (
-                <kbd className="hidden sm:inline-flex items-center rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
-                  &crarr;
-                </kbd>
-              )}
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
       </DialogContent>
     </Dialog>
   )

@@ -3,11 +3,19 @@ import { ChevronLeft, ChevronRight, RotateCcw, GitFork } from "lucide-react"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Separator } from "@/components/ui/separator"
 import type { Branch, Turn, ArchivedTurn } from "@/lib/types"
 import { parseSession } from "@/lib/parser"
@@ -118,37 +126,38 @@ export function BranchModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-2xl max-h-[80vh] elevation-4 border-border/30 flex flex-col !top-[10%] !translate-y-0">
-        <DialogHeader className="shrink-0">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="flex items-center gap-2 text-foreground">
-              <GitFork className="size-4 text-purple-400" />
+      <DialogContent className="flex max-h-[80dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="shrink-0 p-5 pb-4 pr-14">
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle className="flex items-center gap-2">
+              <GitFork className="size-4" />
               Branches from Turn {branchPointTurnIndex + 1}
             </DialogTitle>
           </div>
+          <DialogDescription>
+            Compare alternate continuations and resume from an earlier point.
+          </DialogDescription>
 
-          {/* Branch navigation */}
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-3 pt-3">
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon-sm"
               onClick={goPrev}
               disabled={totalCount <= 1}
               aria-label="Previous branch"
             >
-              <ChevronLeft className="size-4" />
+              <ChevronLeft data-icon="inline-start" />
             </Button>
             <div className="flex-1 text-center">
-              <div className="text-sm font-medium text-foreground truncate">
+              <div className="truncate text-sm font-medium">
                 {current.label}
                 {isCurrent && (
-                  <Badge variant="outline" className="ml-2 text-[10px] px-1.5 py-0 h-4 border-green-700/50 text-green-400">
-                    active
+                  <Badge variant="secondary" className="ml-2">
+                    Active
                   </Badge>
                 )}
               </div>
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 Branch {currentIndex + 1} of {totalCount}
                 {!isCurrent && (
                   <> &middot; {new Date(current.createdAt).toLocaleString()}</>
@@ -157,21 +166,19 @@ export function BranchModal({
             </div>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
+              size="icon-sm"
               onClick={goNext}
               disabled={totalCount <= 1}
               aria-label="Next branch"
             >
-              <ChevronRight className="size-4" />
+              <ChevronRight data-icon="inline-start" />
             </Button>
           </div>
         </DialogHeader>
 
-        <Separator className="bg-border" />
+        <Separator />
 
-        {/* Branch graph -- at the top */}
-        <div className="shrink-0">
+        <div className="shrink-0 px-5 py-4">
           <MiniBranchGraph
             branches={displayBranches}
             activeBranchIdx={currentIndex}
@@ -179,46 +186,52 @@ export function BranchModal({
           />
         </div>
 
-        <Separator className="bg-border" />
+        <Separator />
 
-        {/* Branch turns -- full content, scrollable */}
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 py-3 px-1">
-          {current.fullTurns
-            ? current.fullTurns.map((turn, i) => (
-                <FullTurnCard
-                  key={i}
-                  turn={turn}
-                  archiveIndex={i}
-                  branchId={current.id}
-                  onRedoToHere={isCurrent ? undefined : onRedoToTurn}
-                />
-              ))
-            : current.archivedTurns?.map((turn, i) => (
-                <ArchivedTurnCard
-                  key={i}
-                  turn={turn}
-                  archiveIndex={i}
-                  branchId={current.id}
-                  onRedoToHere={onRedoToTurn}
-                />
-              ))
-          }
-        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-3 p-4">
+            {turnCount === 0 ? (
+              <Empty className="min-h-40">
+                <EmptyHeader>
+                  <EmptyTitle>No turns in this branch</EmptyTitle>
+                  <EmptyDescription>This continuation has no saved turns.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : current.fullTurns
+              ? current.fullTurns.map((turn, i) => (
+                  <FullTurnCard
+                  key={turn.id}
+                    turn={turn}
+                    archiveIndex={i}
+                    branchId={current.id}
+                    onRedoToHere={isCurrent ? undefined : onRedoToTurn}
+                  />
+                ))
+              : current.archivedTurns?.map((turn, i) => (
+                  <ArchivedTurnCard
+                  key={turn.index}
+                    turn={turn}
+                    archiveIndex={i}
+                    branchId={current.id}
+                    onRedoToHere={onRedoToTurn}
+                  />
+                ))
+            }
+          </div>
+        </ScrollArea>
 
-        <Separator className="bg-border" />
+        <Separator />
 
-        {/* Footer */}
-        <div className="shrink-0 flex items-center justify-between py-2">
+        <div className="flex shrink-0 items-center justify-between p-4">
           <span className="text-xs text-muted-foreground">
             {turnCount} turn{turnCount !== 1 ? "s" : ""} in this branch
           </span>
           {!isCurrent && (
             <Button
               size="sm"
-              className="bg-blue-600 hover:bg-blue-500 text-white gap-1.5"
               onClick={() => onRedoEntireBranch(current.id)}
             >
-              <RotateCcw className="size-3.5 scale-x-[-1]" />
+              <RotateCcw data-icon="inline-start" className="scale-x-[-1]" />
               Redo entire branch
             </Button>
           )}

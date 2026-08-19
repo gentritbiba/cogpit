@@ -194,7 +194,7 @@ export function countMissionCards(cards: MissionCard[]): MissionCounts {
  * nearly full.
  */
 export function contextPercentColor(percent: number): string {
-  if (percent >= 90) return "text-red-400"
-  if (percent >= 70) return "text-amber-400"
-  return "text-muted-foreground/70"
+  if (percent >= 90) return "text-destructive"
+  if (percent >= 70) return "text-warning"
+  return "text-muted-foreground"
 }

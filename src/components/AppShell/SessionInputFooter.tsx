@@ -9,8 +9,8 @@ interface SessionInputFooterProps {
 export function SessionInputFooter({ floating, children }: SessionInputFooterProps) {
   if (floating) {
     return (
-      <div className="absolute bottom-0 left-0 right-0 z-20 flex justify-center pointer-events-none">
-        <div className="w-full max-w-3xl px-3 pt-6 bg-gradient-to-t from-elevation-1 from-80% to-transparent pointer-events-auto">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center">
+        <div className="pointer-events-auto w-full max-w-3xl border-t bg-background px-3 pt-3">
           {children}
         </div>
       </div>
@@ -18,7 +18,7 @@ export function SessionInputFooter({ floating, children }: SessionInputFooterPro
   }
 
   return (
-    <div className="w-full flex justify-center shrink-0">
+    <div className="flex w-full shrink-0 justify-center">
       <div className="w-full max-w-3xl px-3">
         {children}
       </div>

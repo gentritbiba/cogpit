@@ -545,7 +545,7 @@ export {
 
 // ── Security headers middleware ──────────────────────────────────────
 
-export function securityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
   res.removeHeader?.("X-Powered-By")
   res.setHeader("X-Content-Type-Options", "nosniff")
   res.setHeader("X-Frame-Options", "DENY")
@@ -569,6 +569,19 @@ export function securityHeaders(req: IncomingMessage, res: ServerResponse, next:
   if (path.startsWith("/api/") || path.startsWith("/hub/") || path.startsWith("/__pty")) {
     res.setHeader("Cache-Control", "no-store")
   }
+}
+
+export function securityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  setSecurityHeaders(req, res)
+  next()
+}
+
+export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
+  const path = (req.url || "/").split("?")[0].toLowerCase()
+  const isProtectedTransport = path.startsWith("/api/")
+    || path.startsWith("/hub/")
+    || path.startsWith("/__pty")
+  if (isProtectedTransport) setSecurityHeaders(req, res)
   next()
 }
 

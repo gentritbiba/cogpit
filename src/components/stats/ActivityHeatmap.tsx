@@ -34,7 +34,7 @@ export function ActivityHeatmap({ turns }: { turns: Turn[] }): React.JSX.Element
                 width={segW - 1}
                 height={SVG_HEIGHT}
                 rx={2}
-                fill="#60a5fa"
+                fill="var(--foreground)"
                 opacity={alpha}
                 onMouseEnter={() => setHoveredTurn(i)}
                 onMouseLeave={() => setHoveredTurn(null)}
@@ -44,7 +44,7 @@ export function ActivityHeatmap({ turns }: { turns: Turn[] }): React.JSX.Element
           })}
         </svg>
         {hoveredTurn !== null && (
-          <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-elevation-2 px-2 py-1 text-[10px] text-foreground depth-low">
+          <div className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-xs">
             Turn {hoveredTurn + 1}: {turns[hoveredTurn].toolCalls.length} tool calls
           </div>
         )}

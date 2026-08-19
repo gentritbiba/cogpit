@@ -1,6 +1,8 @@
 import { useState, memo } from "react"
 import { ChevronRight, ChevronDown } from "lucide-react"
 import type { ThinkingBlock as ThinkingBlockType } from "@/lib/types"
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface ThinkingBlockProps {
   blocks: ThinkingBlockType[]
@@ -13,18 +15,22 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks, expandAll }: 
 
   if (blocks.length === 0) return null
 
-  if (isOpen) {
-    return (
-      <div className="space-y-2">
-        {!expandAll && (
-          <button
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ChevronDown className="size-3" />
-            <span>Thinking... ({blocks.length} block{blocks.length > 1 ? "s" : ""})</span>
-          </button>
-        )}
+  return (
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        if (!expandAll) setOpen(nextOpen)
+      }}
+    >
+      {!expandAll && (
+        <CollapsibleTrigger render={<Button type="button" variant="ghost" size="xs" className="-ml-2 text-muted-foreground" />}>
+          {isOpen
+            ? <ChevronDown data-icon="inline-start" />
+            : <ChevronRight data-icon="inline-start" />}
+          <span>Thinking... ({blocks.length} block{blocks.length > 1 ? "s" : ""})</span>
+        </CollapsibleTrigger>
+      )}
+      <CollapsibleContent className="mt-1 flex flex-col gap-2">
         {blocks.map((block, i) => (
           <pre
             key={i}
@@ -33,19 +39,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ blocks, expandAll }: 
             {block.thinking}
           </pre>
         ))}
-      </div>
-    )
-  }
-
-  return (
-    <button
-      onClick={() => setOpen(true)}
-      className="flex items-center gap-2 w-full py-1 text-left transition-colors hover:opacity-80"
-    >
-      <ChevronRight className="size-3.5 text-muted-foreground shrink-0" />
-      <span className="text-xs text-muted-foreground shrink-0">
-        Thinking... ({blocks.length} block{blocks.length > 1 ? "s" : ""})
-      </span>
-    </button>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })

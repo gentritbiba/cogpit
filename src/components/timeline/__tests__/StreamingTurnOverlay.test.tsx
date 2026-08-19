@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import type { StreamingOverlay } from "@/lib/streamingOverlay"
 import { StreamingTurnOverlay } from "../StreamingTurnOverlay"
@@ -42,5 +42,34 @@ describe("StreamingTurnOverlay", () => {
     expect(pre?.textContent).toContain("const answer = 42")
     expect(within(liveOutput).queryByRole("button")).toBeNull()
     expect(pre?.className).toContain("overflow-x-auto")
+  })
+
+  it("renders repeated message IDs without duplicate-key warnings", () => {
+    const overlay: StreamingOverlay = [
+      {
+        messageId: "msg_repeated",
+        parentToolUseId: null,
+        stopped: false,
+        blocks: [{ index: 0, blockType: "text", text: "First update" }],
+      },
+      {
+        messageId: "msg_repeated",
+        parentToolUseId: null,
+        stopped: false,
+        blocks: [{ index: 0, blockType: "text", text: "Second update" }],
+      },
+    ]
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    render(
+      <StreamingOverlayProvider value={overlay}>
+        <StreamingTurnOverlay />
+      </StreamingOverlayProvider>,
+    )
+
+    expect(screen.getByText("First update")).toBeInTheDocument()
+    expect(screen.getByText("Second update")).toBeInTheDocument()
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key")
+    consoleError.mockRestore()
   })
 })

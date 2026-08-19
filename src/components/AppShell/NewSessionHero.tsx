@@ -12,14 +12,12 @@ export function NewSessionHeadline({ projectPath }: { projectPath: string | null
   const name = projectPath ? projectName(projectPath) : null
 
   return (
-    <div className="flex flex-col items-center gap-1.5 px-4 text-center">
-      <h1 className="text-balance text-lg font-medium text-foreground/90">
+    <div className="flex flex-col items-center gap-2 px-4 text-center">
+      <h1 className="text-balance text-2xl font-semibold tracking-tight text-foreground">
         {name ? (
           <>
             What should we build in{" "}
-            <span className="underline decoration-dotted decoration-muted-foreground/40 underline-offset-4">
-              {name}
-            </span>
+            <span>{name}</span>
             ?
           </>
         ) : (
@@ -27,7 +25,7 @@ export function NewSessionHeadline({ projectPath }: { projectPath: string | null
         )}
       </h1>
       {projectPath && (
-        <p className="font-mono text-[11px] text-muted-foreground/60">{shortPath(projectPath)}</p>
+        <p className="font-mono text-xs text-muted-foreground">{shortPath(projectPath)}</p>
       )}
     </div>
   )

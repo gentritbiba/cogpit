@@ -209,7 +209,6 @@ export function DesktopOverlays({
         </Suspense>
       )}
 
-      {chrome.status}
     </>
   )
 }

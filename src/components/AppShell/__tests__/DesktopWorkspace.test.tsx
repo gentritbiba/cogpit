@@ -275,4 +275,14 @@ describe("DesktopWorkspace", () => {
     expect(screen.getByTestId("dashboard")).toBeInTheDocument()
   })
 
+  it("removes the permanent session rail when the sidebar is disabled", () => {
+    setContexts()
+    const props = makeProps()
+    props.navigation.panels.showSidebar = false
+
+    render(<DesktopWorkspace {...props} />)
+
+    expect(screen.queryByTestId("session-browser")).not.toBeInTheDocument()
+  })
+
 })

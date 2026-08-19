@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { MINIMAP_MIN_TURNS, tickWidthClass, turnPreviewText } from "@/lib/minimap"
 import type { Turn } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 /**
  * A table of contents for the conversation: one tick per turn, down the gutter.
@@ -23,6 +24,14 @@ export const TimelineMinimap = memo(function TimelineMinimap({
   const [hovered, setHovered] = useState<number | null>(null)
   const railRef = useRef<HTMLElement>(null)
   const turnCount = turns.length
+  const turnKeys = useMemo(() => {
+    const occurrences = new Map<string, number>()
+    return turns.map((turn) => {
+      const occurrence = occurrences.get(turn.id) ?? 0
+      occurrences.set(turn.id, occurrence + 1)
+      return occurrence === 0 ? turn.id : `${turn.id}#${occurrence}`
+    })
+  }, [turns])
 
   useEffect(() => {
     const scroller = scrollContainerRef.current
@@ -91,7 +100,7 @@ export const TimelineMinimap = memo(function TimelineMinimap({
       onMouseLeave={() => setHovered(null)}
       onKeyDown={handleKeyDown}
       className={cn(
-        "absolute left-0 top-0 z-10 hidden h-full max-h-full flex-col items-start gap-1",
+        "absolute left-0 top-0 hidden h-full max-h-full flex-col items-start gap-1",
         // Spread across the height so the rail reads as a contents column rather
         // than a cluster of marks; once the ticks fill it they pack and scroll.
         "justify-evenly overflow-y-auto py-6 pl-2",
@@ -104,16 +113,17 @@ export const TimelineMinimap = memo(function TimelineMinimap({
       {turns.map((turn, index) => {
         const preview = turnPreviewText(turn)
         return (
-          <button
-            key={turn.id}
+          <Button
+            key={turnKeys[index]}
             type="button"
+            variant="ghost"
             data-tick-index={index}
             onMouseEnter={() => setHovered(index)}
             onFocus={() => setHovered(index)}
             onClick={() => onJumpToTurn(index)}
             aria-label={`Turn ${index + 1}: ${preview}`}
             className={cn(
-              "group/tick relative h-1 shrink-0 rounded-full bg-muted-foreground/30",
+              "group/tick relative h-1 shrink-0 rounded-full bg-muted-foreground/30 p-0",
               "transition-[width,background-color] duration-150 motion-reduce:transition-none",
               "hover:bg-muted-foreground/80 focus-visible:outline-none focus-visible:bg-muted-foreground/80",
               "data-[current=true]:bg-primary/70",
@@ -122,16 +132,16 @@ export const TimelineMinimap = memo(function TimelineMinimap({
           >
             <span
               className={cn(
-                "pointer-events-none absolute left-full top-1/2 z-20 ml-2 hidden w-64 -translate-y-1/2",
-                "rounded-md border border-border/60 bg-popover px-2 py-1.5 text-left",
-                "text-[11px] leading-snug text-popover-foreground shadow-md",
+                "pointer-events-none absolute left-full top-1/2 ml-2 hidden w-64 -translate-y-1/2",
+                "rounded-md border bg-popover px-2 py-1.5 text-left",
+                "text-xs leading-relaxed text-popover-foreground shadow-sm",
                 "group-hover/tick:block group-focus-visible/tick:block",
               )}
             >
               <span className="mr-1 font-mono text-muted-foreground/60">{index + 1}</span>
               <span className="line-clamp-2 align-middle">{preview}</span>
             </span>
-          </button>
+          </Button>
         )
       })}
     </nav>

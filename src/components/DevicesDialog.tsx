@@ -20,6 +20,27 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { cn } from "@/lib/utils"
 import { switchDevice } from "@/lib/device"
 import {
@@ -121,26 +142,26 @@ export function probeMessage(
 }
 
 const TONE_CLASS: Record<ProbeTone, string> = {
-  ok: "text-green-400",
-  warn: "text-amber-400",
-  info: "text-blue-400",
-  error: "text-red-400",
+  ok: "text-success",
+  warn: "text-warning",
+  info: "text-info",
+  error: "text-destructive",
 }
 
 function ToneIcon({ tone }: { tone: ProbeTone }) {
   const className = cn("size-3.5 shrink-0", TONE_CLASS[tone])
-  if (tone === "ok") return <CheckCircle2 className={className} />
-  if (tone === "warn") return <AlertTriangle className={className} />
-  if (tone === "info") return <RefreshCw className={className} />
-  return <XCircle className={className} />
+  if (tone === "ok") return <CheckCircle2 data-icon="inline-start" className={className} />
+  if (tone === "warn") return <AlertTriangle data-icon="inline-start" className={className} />
+  if (tone === "info") return <RefreshCw data-icon="inline-start" className={className} />
+  return <XCircle data-icon="inline-start" className={className} />
 }
 
 // ── Existing-device row ──────────────────────────────────────────────────────
 
 const AUTH_STATE_DOT: Record<PublicDevice["runtime"]["authState"], string> = {
-  ok: "bg-green-500",
-  unknown: "bg-amber-500",
-  "bad-password": "bg-red-500",
+  ok: "bg-success",
+  unknown: "bg-warning",
+  "bad-password": "bg-destructive",
 }
 
 interface DeviceRowProps {
@@ -159,7 +180,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
   const [credentialUsername, setCredentialUsername] = useState(device.username ?? "")
   const [credentialPassword, setCredentialPassword] = useState("")
   const [credentialError, setCredentialError] = useState<string | null>(null)
-  const [confirmRemove, setConfirmRemove] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
   const [busy, setBusy] = useState<null | "rename" | "credentials" | "remove" | "test">(null)
 
   useEffect(() => {
@@ -220,7 +241,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
   }
 
   return (
-    <div className="rounded-md border border-border bg-elevation-0">
+    <div className="rounded-lg border bg-card">
       <div className="flex items-center gap-2.5 px-3 py-2">
         <span
           aria-label={`Status: ${device.runtime.authState}`}
@@ -248,7 +269,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
               <span className="truncate text-sm text-foreground">{device.name}</span>
               {version && (
                 <span
-                  className={cn("shrink-0 font-mono text-[10px]", skewed ? "text-amber-400" : "text-muted-foreground/60")}
+                  className={cn("shrink-0 font-mono text-xs", skewed ? "text-warning" : "text-muted-foreground")}
                   title={skewed ? `Device runs v${version}; hub runs v${hubVersion}` : undefined}
                 >
                   v{version}
@@ -256,104 +277,112 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
                 </span>
               )}
               {device.auth === "none" && (
-                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
-                  unauthenticated
-                </span>
+                <Badge variant="secondary">Unauthenticated</Badge>
               )}
             </div>
           )}
-          <span className="truncate font-mono text-[11px] text-muted-foreground">
+          <span className="truncate font-mono text-xs text-muted-foreground">
             {device.tls ? "https://" : ""}{device.host}:{device.port}
           </span>
           {device.username ? (
-            <span className="truncate text-[11px] text-muted-foreground" title={device.username}>
+            <span className="truncate text-xs text-muted-foreground" title={device.username}>
               Team account: {device.username}
             </span>
           ) : teamDevice ? (
-            <span className="text-[11px] text-amber-400">Team account not configured</span>
+            <span className="text-xs text-warning">Team account not configured</span>
           ) : null}
         </div>
 
-        {confirmRemove ? (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-red-400 hover:text-red-300"
-              disabled={busy === "remove"}
-              onClick={async () => {
-                setBusy("remove")
-                await onRemove(device.id)
-                setBusy(null)
-              }}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Re-test ${device.name}`}
+            disabled={busy === "test"}
+            onClick={async () => {
+              setBusy("test")
+              await onTest(device.id)
+              setBusy(null)
+            }}
+          >
+            <RefreshCw data-icon="inline-start" className={cn(busy === "test" && "animate-spin")} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Edit account for ${device.name}`}
+            onClick={() => {
+              setEditingCredentials((value) => !value)
+              setCredentialUsername(device.username ?? "")
+              setCredentialPassword("")
+              setCredentialError(null)
+            }}
+          >
+            <KeyRound data-icon="inline-start" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Rename ${device.name}`}
+            onClick={() => setEditing(true)}
+          >
+            <Pencil data-icon="inline-start" />
+          </Button>
+          <AlertDialog
+            open={removeOpen}
+            onOpenChange={(nextOpen) => {
+              if (busy !== "remove") setRemoveOpen(nextOpen)
+            }}
+          >
+            <AlertDialogTrigger
+              render={(
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Remove ${device.name}`}
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                />
+              )}
             >
-              {busy === "remove" ? <Loader2 className="size-3.5 animate-spin" /> : "Confirm"}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-muted-foreground"
-              onClick={() => setConfirmRemove(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        ) : (
-          <div className="flex shrink-0 items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Re-test ${device.name}`}
-              disabled={busy === "test"}
-              onClick={async () => {
-                setBusy("test")
-                await onTest(device.id)
-                setBusy(null)
-              }}
-            >
-              <RefreshCw className={cn("size-3.5", busy === "test" && "animate-spin")} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Edit account for ${device.name}`}
-              onClick={() => {
-                setEditingCredentials((value) => !value)
-                setCredentialUsername(device.username ?? "")
-                setCredentialPassword("")
-                setCredentialError(null)
-              }}
-            >
-              <KeyRound className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Rename ${device.name}`}
-              onClick={() => setEditing(true)}
-            >
-              <Pencil className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove ${device.name}`}
-              className="text-muted-foreground hover:text-red-400"
-              onClick={() => setConfirmRemove(true)}
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
-        )}
+              <Trash2 data-icon="inline-start" />
+            </AlertDialogTrigger>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove {device.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This device will disappear from Cogpit. You can add it again later.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy === "remove"}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={busy === "remove"}
+                  onClick={async () => {
+                    setBusy("remove")
+                    try {
+                      await onRemove(device.id)
+                    } finally {
+                      setBusy(null)
+                    }
+                  }}
+                >
+                  {busy === "remove" && <Loader2 data-icon="inline-start" className="animate-spin" />}
+                  Remove device
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
 
       {editingCredentials && (
-        <div className="space-y-2 border-t border-border/60 px-3 py-2.5">
+        <div className="flex flex-col gap-3 border-t px-3 py-3">
           <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground" htmlFor={`device-username-${device.id}`}>
+            <Field>
+              <FieldLabel htmlFor={`device-username-${device.id}`}>
                 Username <span className="text-muted-foreground/60">(team devices)</span>
-              </label>
+              </FieldLabel>
               <Input
                 id={`device-username-${device.id}`}
                 aria-label={`Username for ${device.name}`}
@@ -363,11 +392,11 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
                 autoComplete="off"
                 spellCheck={false}
               />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground" htmlFor={`device-password-${device.id}`}>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`device-password-${device.id}`}>
                 New password <span className="text-muted-foreground/60">(optional)</span>
-              </label>
+              </FieldLabel>
               <Input
                 id={`device-password-${device.id}`}
                 aria-label={`New password for ${device.name}`}
@@ -377,17 +406,17 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
                 placeholder="Leave blank to keep the stored password"
                 autoComplete="new-password"
               />
-            </div>
+            </Field>
           </div>
           {device.username && credentialUsername.trim() === "" && (
-            <p className="text-[11px] text-amber-400">
+            <p className="text-xs text-warning">
               Clearing the username switches this device back to password-only authentication.
             </p>
           )}
-          {credentialError && <p role="alert" className="text-xs text-red-400">{credentialError}</p>}
+          {credentialError && <FieldError>{credentialError}</FieldError>}
           <div className="flex justify-end gap-1.5">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => {
                 setEditingCredentials(false)
@@ -399,7 +428,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
               Cancel
             </Button>
             <Button size="sm" disabled={busy === "credentials"} onClick={() => void saveCredentials()}>
-              {busy === "credentials" ? <Loader2 className="size-3.5 animate-spin" /> : "Save account"}
+              {busy === "credentials" ? <Loader2 data-icon="inline-start" className="animate-spin" /> : "Save account"}
             </Button>
           </div>
         </div>
@@ -537,7 +566,7 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Devices</DialogTitle>
           <DialogDescription>
@@ -546,9 +575,8 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
           </DialogDescription>
         </DialogHeader>
 
-        {/* Existing devices */}
         {devices.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="flex flex-col gap-2">
             {devices.map((device) => (
               <DeviceRow
                 key={device.id}
@@ -563,137 +591,135 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
           </div>
         )}
 
-        {/* Add device */}
-        <div className="space-y-3 border-t border-border pt-4">
+        <div className="flex flex-col gap-4 border-t pt-4">
           <div className="flex items-center gap-2">
-            <Plus className="size-4 text-muted-foreground" />
+            <Plus data-icon="inline-start" className="size-4 text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">Add a device</p>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="device-host">
-              Host
-            </label>
-            <Input
-              id="device-host"
-              ref={hostRef}
-              value={hostInput}
-              onChange={(event) => {
-                probeSeq.current += 1
-                setHostInput(event.target.value)
-                setUsername("")
-                setProbeState(null)
-                setSubmitError(null)
-              }}
-              onBlur={() => void runProbe()}
-              placeholder="192.168.1.42, my-mac.local:19384 or https://cogpit.example.com"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            {probing && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Checking device…
-              </p>
-            )}
-            {!probing && probeState && (
-              <p role="status" className={cn("flex items-center gap-1.5 text-xs", TONE_CLASS[probeState.tone])}>
-                <ToneIcon tone={probeState.tone} />
-                {probeState.text}
-              </p>
-            )}
-            {submitError?.field === "host" && (
-              <p role="alert" className="text-xs text-red-400">{submitError.message}</p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground" htmlFor="device-name">
-              Name <span className="text-muted-foreground/60">(optional)</span>
-            </label>
-            <Input
-              id="device-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Defaults to the device's own name"
-            />
-          </div>
-
-          {targetIsTeam && (
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="device-username">
-                Username
-              </label>
+          <FieldGroup>
+            <Field data-invalid={submitError?.field === "host"}>
+              <FieldLabel htmlFor="device-host">Host</FieldLabel>
+              <FieldDescription>Enter a local address or an HTTPS URL.</FieldDescription>
               <Input
-                id="device-username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="Team account username"
-                autoComplete="username"
+                id="device-host"
+                ref={hostRef}
+                value={hostInput}
+                onChange={(event) => {
+                  probeSeq.current += 1
+                  setHostInput(event.target.value)
+                  setUsername("")
+                  setProbeState(null)
+                  setSubmitError(null)
+                }}
+                onBlur={() => void runProbe()}
+                placeholder="192.168.1.42, my-mac.local:19384 or https://cogpit.example.com"
                 spellCheck={false}
+                autoComplete="off"
               />
-              <p className="text-[11px] text-muted-foreground">
-                Requests through this hub will act as this account on the team server.
-              </p>
-              {submitError?.field === "username" && (
-                <p role="alert" className="text-xs text-red-400">{submitError.message}</p>
+              {probing && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 data-icon="inline-start" className="size-3.5 animate-spin" /> Checking device…
+                </p>
               )}
-            </div>
-          )}
+              {!probing && probeState && (
+                <p role="status" className={cn("flex items-center gap-1.5 text-xs", TONE_CLASS[probeState.tone])}>
+                  <ToneIcon tone={probeState.tone} />
+                  {probeState.text}
+                </p>
+              )}
+              {submitError?.field === "host" && (
+                <FieldError>{submitError.message}</FieldError>
+              )}
+            </Field>
 
-          {credentialsRequired && (
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="device-password">
-                Password
-              </label>
+            <Field>
+              <FieldLabel htmlFor="device-name">
+                Name <span className="text-muted-foreground/60">(optional)</span>
+              </FieldLabel>
               <Input
-                id="device-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={targetIsTeam ? "Password for that team account" : "Network access password for that device"}
-                autoComplete={targetIsTeam ? "current-password" : "off"}
+                id="device-name"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Defaults to the device's own name"
               />
-              {submitError?.field === "password" && (
-                <p role="alert" className="text-xs text-red-400">{submitError.message}</p>
-              )}
-            </div>
-          )}
+            </Field>
 
-          <label className="flex items-start gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
+            {targetIsTeam && (
+              <Field data-invalid={submitError?.field === "username"}>
+                <FieldLabel htmlFor="device-username">Username</FieldLabel>
+                <Input
+                  id="device-username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Team account username"
+                  autoComplete="username"
+                  spellCheck={false}
+                />
+                <FieldDescription>
+                  Requests through this hub will act as this account on the team server.
+                </FieldDescription>
+                {submitError?.field === "username" && (
+                  <FieldError>{submitError.message}</FieldError>
+                )}
+              </Field>
+            )}
+
+            {credentialsRequired && (
+              <Field data-invalid={submitError?.field === "password"}>
+                <FieldLabel htmlFor="device-password">Password</FieldLabel>
+                <Input
+                  id="device-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={targetIsTeam ? "Password for that team account" : "Network access password for that device"}
+                  autoComplete={targetIsTeam ? "current-password" : "off"}
+                />
+                {submitError?.field === "password" && (
+                  <FieldError>{submitError.message}</FieldError>
+                )}
+              </Field>
+            )}
+          </FieldGroup>
+
+          <Field orientation="horizontal">
+            <Checkbox
+              id="device-local-tunnel"
+              name="device-local-tunnel"
               checked={allowLocalTunnel}
-              onChange={(event) => {
+              onCheckedChange={(checked) => {
                 probeSeq.current += 1
-                setAllowLocalTunnel(event.target.checked)
+                setAllowLocalTunnel(checked === true)
                 setProbeState(null)
                 setSubmitError(null)
               }}
-              className="mt-0.5"
             />
-            <span>This is a local tunnel{targetIsTeam ? "" : " — no password"}</span>
-          </label>
+            <FieldLabel htmlFor="device-local-tunnel">
+              This is a local tunnel{targetIsTeam ? "" : " — no password"}
+            </FieldLabel>
+          </Field>
           {allowLocalTunnel && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-              <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-amber-400" />
-              <p className="text-[11px] text-amber-300/90">
+            <Alert className="border-warning/40 bg-warning/10 text-warning">
+              <ShieldAlert />
+              <AlertDescription className="text-warning">
                 {targetIsTeam ? (
                   <>The loopback address is allowed because the tunnel is local; team account authentication still applies.</>
                 ) : (
                   <>Traffic to this device is forwarded <strong>unauthenticated</strong>. Only use this for an SSH tunnel or another already-secured local channel.</>
                 )}
-              </p>
-            </div>
+              </AlertDescription>
+            </Alert>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <Button variant="outline" onClick={onClose}>
               Close
             </Button>
             <Button disabled={!canSubmit} onClick={() => void handleSubmit()}>
               {submitting ? (
                 <>
-                  <Loader2 className="mr-2 size-4 animate-spin" /> Adding…
+                  <Loader2 data-icon="inline-start" className="size-4 animate-spin" /> Adding…
                 </>
               ) : (
                 "Add device"

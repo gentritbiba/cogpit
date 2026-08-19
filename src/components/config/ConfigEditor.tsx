@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback } from "react"
 import { Lock, Save, Undo2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Spinner } from "@/components/ui/Spinner"
 import { cn } from "@/lib/utils"
 import { authFetch } from "@/lib/auth"
 import type { ConfigItem } from "./config-types"
@@ -27,7 +39,8 @@ export function ConfigEditor({
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const hasChanges = content !== null && content !== originalContent
   const isReadOnly = readOnly || file.readOnly
@@ -38,7 +51,7 @@ export function ConfigEditor({
     setContent(null)
     setOriginalContent(null)
     setSaved(false)
-    setConfirmDelete(false)
+    setDeleteDialogOpen(false)
 
     authFetch(`/api/config-browser/file?path=${encodeURIComponent(file.path)}`)
       .then((res) => res.json())
@@ -74,22 +87,24 @@ export function ConfigEditor({
 
   const handleDiscard = useCallback(() => {
     setContent(originalContent)
-    setConfirmDelete(false)
   }, [originalContent])
 
   const handleDelete = useCallback(async () => {
     if (isReadOnly) return
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
+    setDeleting(true)
     try {
       const res = await authFetch(`/api/config-browser/file?path=${encodeURIComponent(file.path)}`, {
         method: "DELETE",
       })
-      if (res.ok) onDeleted()
+      if (res.ok) {
+        setDeleteDialogOpen(false)
+        onDeleted()
+      }
     } catch { /* ignore */ }
-  }, [confirmDelete, file.path, isReadOnly, onDeleted])
+    finally {
+      setDeleting(false)
+    }
+  }, [file.path, isReadOnly, onDeleted])
 
   // Ctrl+S / Cmd+S to save
   useEffect(() => {
@@ -111,30 +126,28 @@ export function ConfigEditor({
 
   return (
     <div className="flex flex-1 flex-col min-h-0 min-w-0">
-      {/* Metadata bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 bg-elevation-1 shrink-0">
-        <Badge variant="outline" className={cn("text-[10px] h-5", BADGE_COLORS[file.fileType] || "bg-zinc-500/20 text-zinc-300 border-zinc-500/30")}>
+      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b bg-card px-4 py-2">
+        <Badge variant="outline" className={cn("h-5 text-xs", BADGE_COLORS[file.fileType] || "bg-muted text-muted-foreground")}>
           {file.fileType}
         </Badge>
         <ScopeBadge scope={file.scope} pluginName={file.pluginName} />
         <CliBadge cli={file.cli} variant="full" />
         {isReadOnly && (
-          <Badge variant="outline" className="text-[10px] h-5 bg-zinc-500/20 text-zinc-400 border-zinc-500/30">
-            <Lock className="size-2.5 mr-0.5" /> read-only
+          <Badge variant="outline" className="h-5 bg-muted text-xs text-muted-foreground">
+            <Lock data-icon="inline-start" className="size-3" /> read-only
           </Badge>
         )}
         {hasChanges && (
-          <span className="size-2 rounded-full bg-amber-400 shrink-0" title="Unsaved changes" />
+          <span className="size-2 shrink-0 rounded-full bg-warning" title="Unsaved changes" />
         )}
         <div className="flex items-center gap-2 ml-auto min-w-0">
           <LinkIndicator linkTarget={file.linkTarget} variant="full" />
-          <span className="text-[11px] font-mono text-muted-foreground/50 truncate" title={file.path}>
+          <span className="truncate font-mono text-xs text-muted-foreground" title={file.path}>
             {file.path}
           </span>
         </div>
       </div>
 
-      {/* Editor */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
           Loading...
@@ -148,45 +161,52 @@ export function ConfigEditor({
             filePath={file.path}
           />
 
-          {/* Action bar */}
           {!isReadOnly && (
-            <div className="flex items-center gap-2 px-4 py-2 border-t border-border/50 bg-elevation-1 shrink-0">
+            <div className="flex shrink-0 items-center gap-2 border-t bg-card px-4 py-2">
               <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-7 px-3 text-xs gap-1.5",
-                  hasChanges ? "text-green-400 hover:text-green-300 hover:bg-green-500/10" : "text-muted-foreground",
-                )}
+                size="xs"
                 onClick={handleSave}
                 disabled={!hasChanges || saving}
               >
-                <Save className="size-3" />
+                <Save data-icon="inline-start" />
                 {getSaveLabel()}
               </Button>
               <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-3 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                variant="outline"
+                size="xs"
                 onClick={handleDiscard}
                 disabled={!hasChanges}
               >
-                <Undo2 className="size-3" />
+                <Undo2 data-icon="inline-start" />
                 Discard
               </Button>
               <div className="flex-1" />
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-7 px-3 text-xs gap-1.5",
-                  confirmDelete ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-muted-foreground hover:text-red-400 hover:bg-red-500/10",
-                )}
-                onClick={handleDelete}
-              >
-                <Trash2 className="size-3" />
-                {confirmDelete ? "Confirm delete?" : "Delete"}
-              </Button>
+              <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogTrigger render={<Button variant="outline" size="xs" />}>
+                  <Trash2 data-icon="inline-start" />
+                  Delete
+                </AlertDialogTrigger>
+                <AlertDialogContent size="sm">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete configuration file?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Delete "{file.name}" permanently? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel size="sm" disabled={deleting}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      size="sm"
+                      disabled={deleting}
+                      onClick={() => void handleDelete()}
+                    >
+                      {deleting && <Spinner data-icon="inline-start" />}
+                      {deleting ? "Deleting..." : "Delete file"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           )}
         </div>

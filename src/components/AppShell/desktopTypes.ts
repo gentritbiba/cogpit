@@ -124,7 +124,6 @@ export interface DesktopChrome {
   workflowsPanel: ReactNode
   undoDialog: ReactNode
   branchModal: ReactNode
-  status: ReactNode
   killing: boolean
   onKillAll: () => void
   commandPaletteOpen: boolean

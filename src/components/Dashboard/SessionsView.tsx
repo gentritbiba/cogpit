@@ -1,12 +1,35 @@
-import { MessageSquare, GitBranch, Clock, FolderOpen, Plus, Loader2, FileText, ChevronLeft } from "lucide-react"
+import { Fragment } from "react"
+import { ChevronRight, FolderOpen, GitBranch, MessageSquare, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
+import { Separator } from "@/components/ui/separator"
+import { Spinner } from "@/components/ui/Spinner"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
-import { cn } from "@/lib/utils"
-import { shortenModel, formatRelativeTime, formatFileSize, truncate, shortPath, projectName } from "@/lib/format"
-import { SearchInput, ErrorBanner, SkeletonCards, LiveDot } from "./DashboardWidgets"
+import {
+  formatFileSize,
+  formatRelativeTime,
+  projectName,
+  shortenModel,
+  shortPath,
+  truncate,
+} from "@/lib/format"
+import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
 
 const LIVE_THRESHOLD_MS = 2 * 60 * 1000
 
@@ -46,7 +69,7 @@ interface SessionsViewProps {
   sessionsTotal: number
   sessionsLoading: boolean
   searchFilter: string
-  setSearchFilter: (v: string) => void
+  setSearchFilter: (value: string) => void
   filteredSessions: SessionInfo[]
   fetchError: string | null
   onSelectSession: (dirName: string, fileName: string) => void
@@ -77,176 +100,185 @@ export function SessionsView({
   onRetryFetch,
   loadMoreSessions,
 }: SessionsViewProps) {
-  function handleDeleteSession(dirName: string, fileName: string) {
-    onDeleteSession?.(dirName, fileName)
-  }
+  function withContextMenu(session: SessionInfo, content: React.ReactNode): React.ReactNode {
+    if (!onDuplicateSession && !onDeleteSession) return content
 
-  function wrapWithContextMenu(key: string, label: string, dirName: string, fileName: string, content: React.ReactNode): React.ReactNode {
-    if (!onDuplicateSession && !onDeleteSession) {
-      return <div key={key}>{content}</div>
-    }
     return (
       <SessionContextMenu
-        key={key}
-        sessionLabel={label}
-        onDuplicate={onDuplicateSession ? () => onDuplicateSession(dirName, fileName) : undefined}
-        onDelete={onDeleteSession ? () => handleDeleteSession(dirName, fileName) : undefined}
+        sessionLabel={session.slug || session.sessionId.slice(0, 12)}
+        onDuplicate={onDuplicateSession
+          ? () => onDuplicateSession(selectedProject.dirName, session.fileName)
+          : undefined}
+        onDelete={onDeleteSession
+          ? () => onDeleteSession(selectedProject.dirName, session.fileName)
+          : undefined}
       >
         {content}
       </SessionContextMenu>
     )
   }
 
+  const selectedProjectName = projectName(selectedProject.path)
+
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto max-w-5xl px-6 py-8 fade-in">
-        {/* Header with back button */}
-        <div className="mb-6">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-3"
-          >
-            <ChevronLeft className="size-3.5" />
-            All Projects
-          </button>
-          <div className="flex items-center gap-3">
-            <FolderOpen className="size-6 text-blue-400" />
-            <div className="flex-1 min-w-0">
-              <h1 className="text-xl font-bold tracking-tight text-foreground truncate">
-                {projectName(selectedProject.path)}
-              </h1>
-              <p className="text-xs text-muted-foreground truncate mt-0.5">{shortPath(selectedProject.path)}</p>
-            </div>
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink render={<button type="button" onClick={onBack} />}>
+                Projects
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage className="truncate">{selectedProjectName}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        <header className="flex min-w-0 flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <h1 className="truncate text-2xl font-semibold tracking-tight">
+              {selectedProjectName}
+            </h1>
+            <Badge variant="secondary">{sessionsTotal}</Badge>
+          </div>
+          <p className="truncate text-sm text-muted-foreground">
+            {shortPath(selectedProject.path)}
+          </p>
+        </header>
+
+        <section className="flex flex-col gap-4" aria-label="Sessions">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <SearchInput
+              value={searchFilter}
+              onChange={setSearchFilter}
+              placeholder="Filter sessions..."
+            />
             {onNewSession && (
-              <Tooltip>
-                <TooltipTrigger render={<Button
+              <Button
+                size="sm"
+                disabled={creatingSession}
+                onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
+              >
+                {creatingSession ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <Plus data-icon="inline-start" />
+                )}
+                New Session
+              </Button>
+            )}
+          </div>
+
+          {fetchError && <ErrorBanner message={fetchError} onRetry={onRetryFetch} />}
+
+          {sessionsLoading && sessions.length === 0 ? (
+            <SkeletonRows includeMessagePlaceholder />
+          ) : filteredSessions.length === 0 ? (
+            <Empty className="min-h-72 border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <MessageSquare />
+                </EmptyMedia>
+                <EmptyTitle>
+                  {searchFilter ? "No sessions match your search" : "No sessions yet"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {searchFilter
+                    ? "Try a session title, model, or ID."
+                    : "Start a session in this project and it will appear here."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <>
+              <div className="overflow-hidden rounded-lg border bg-card">
+                {filteredSessions.map((session, index) => {
+                  const live = isLive(session.lastModified)
+                  const title = session.slug || truncate(session.sessionId, 16)
+
+                  const row = (
+                    <button
+                      type="button"
+                      onClick={() => onSelectSession(selectedProject.dirName, session.fileName)}
+                      className="group flex w-full flex-col gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-row sm:items-center"
+                    >
+                      <span className="flex min-w-0 flex-1 items-center gap-3">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+                          <FolderOpen className="size-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">{title}</span>
+                          <span className="block truncate text-sm text-muted-foreground">
+                            {session.firstUserMessage
+                              ? truncate(session.firstUserMessage, 100)
+                              : "No opening message"}
+                          </span>
+                        </span>
+                      </span>
+
+                      <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-11 text-xs text-muted-foreground sm:justify-end sm:pl-0">
+                        {live && (
+                          <Badge variant="secondary">
+                            <span
+                              aria-hidden="true"
+                              data-icon="inline-start"
+                              className="size-1.5 rounded-full bg-success"
+                            />
+                            Active
+                          </Badge>
+                        )}
+                        {session.model && (
+                          <Badge variant="outline">{shortenModel(session.model)}</Badge>
+                        )}
+                        {(session.turnCount ?? 0) > 0 && (
+                          <span>{session.turnCount} turns</span>
+                        )}
+                        {session.gitBranch && (
+                          <span className="flex max-w-36 items-center gap-1 truncate">
+                            <GitBranch className="size-3 shrink-0" />
+                            {truncate(session.gitBranch, 20)}
+                          </span>
+                        )}
+                        <span>{formatFileSize(session.size)}</span>
+                        {session.lastModified && (
+                          <span className="hidden whitespace-nowrap md:inline">
+                            {formatRelativeTime(session.lastModified)}
+                          </span>
+                        )}
+                        <ChevronRight className="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                      </span>
+                    </button>
+                  )
+
+                  return (
+                    <Fragment key={session.fileName}>
+                      {index > 0 && <Separator />}
+                      {withContextMenu(session, row)}
+                    </Fragment>
+                  )
+                })}
+              </div>
+
+              {sessions.length < sessionsTotal && !searchFilter && (
+                <div className="flex justify-center">
+                  <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 gap-1.5 text-xs border-border hover:border-border/80"
-                    disabled={creatingSession}
-                    onClick={() => onNewSession(selectedProject.dirName, selectedProject.path)}
-                  />}>
-                    {creatingSession ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="size-3.5" />
-                    )}
-                    New Session
-                </TooltipTrigger>
-                <TooltipContent>
-                  {creatingSession ? "Creating session..." : `Start a new session in ${projectName(selectedProject.path)}`}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-        </div>
-
-        <SearchInput value={searchFilter} onChange={setSearchFilter} placeholder="Filter sessions..." />
-
-        {fetchError && (
-          <ErrorBanner
-            message={fetchError}
-            onRetry={onRetryFetch}
-          />
-        )}
-
-        {sessionsLoading && sessions.length === 0 ? (
-          <SkeletonCards includeMessagePlaceholder />
-        ) : filteredSessions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
-            <FileText className="size-8 text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground">
-              {searchFilter ? "No matching sessions" : "No sessions in this project"}
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredSessions.map((s) => {
-                const live = isLive(s.lastModified)
-
-                const card = (
-                  <button
-                    onClick={() => onSelectSession(selectedProject.dirName, s.fileName)}
-                    className={cn(
-                      "card-glow group relative w-full rounded-lg elevation-1 p-4 text-left transition-smooth",
-                      "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
-                      live && "border-l-[3px] border-l-green-500"
-                    )}
+                    disabled={sessionsLoading}
+                    onClick={loadMoreSessions}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-xs font-medium text-foreground truncate">
-                        {s.slug || truncate(s.sessionId, 12)}
-                      </span>
-                      {s.model && (
-                        <Badge variant="secondary" className="h-4 px-1.5 text-[9px] font-normal shrink-0">
-                          {shortenModel(s.model)}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {s.firstUserMessage && (
-                      <p className="text-[13px] text-muted-foreground mb-2.5 line-clamp-2 leading-relaxed">
-                        {truncate(s.firstUserMessage, 120)}
-                      </p>
-                    )}
-
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                      {(s.turnCount ?? 0) > 0 && (
-                        <span className="flex items-center gap-1">
-                          <MessageSquare className="size-3" />
-                          {s.turnCount}
-                        </span>
-                      )}
-                      {s.gitBranch && (
-                        <span className="flex items-center gap-1 truncate max-w-[100px]">
-                          <GitBranch className="size-3 shrink-0" />
-                          {truncate(s.gitBranch, 16)}
-                        </span>
-                      )}
-                      <span className="text-[10px]">{formatFileSize(s.size)}</span>
-                      {s.lastModified && (
-                        <span className="flex items-center gap-1 ml-auto shrink-0">
-                          <Clock className="size-3" />
-                          {formatRelativeTime(s.lastModified)}
-                        </span>
-                      )}
-                    </div>
-
-                    {live && (
-                      <span className="absolute top-3 right-3">
-                        <LiveDot />
-                      </span>
-                    )}
-                  </button>
-                )
-
-                return wrapWithContextMenu(
-                  s.fileName,
-                  s.slug || s.sessionId.slice(0, 12),
-                  selectedProject.dirName,
-                  s.fileName,
-                  card
-                )
-              })}
-            </div>
-
-            {sessions.length < sessionsTotal && !searchFilter && (
-              <div className="mt-4 text-center">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs border-border/40 hover:border-border"
-                  disabled={sessionsLoading}
-                  onClick={loadMoreSessions}
-                >
-                  {sessionsLoading ? "Loading..." : "Load more sessions"}
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+                    {sessionsLoading && <Spinner data-icon="inline-start" />}
+                    {sessionsLoading ? "Loading..." : "Load more sessions"}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </main>
     </ScrollArea>
   )
 }

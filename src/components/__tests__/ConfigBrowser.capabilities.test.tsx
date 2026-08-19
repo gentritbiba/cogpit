@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
@@ -16,16 +17,20 @@ vi.mock("@/components/config/CategorySection", () => ({
     items: Array<{ name: string }>
     onSelect: (item: never) => void
     onNewFile?: () => void
-    onDeleteItem?: () => void
+    onDeleteItem?: (item: never) => void
     onRenameItem?: () => void
   }) => (
     <div>
       {props.items[0] && (
-        <button onClick={() => props.onSelect(props.items[0] as never)}>Open {props.items[0].name}</button>
+        <>
+          <button onClick={() => props.onSelect(props.items[0] as never)}>Open {props.items[0].name}</button>
+          {props.onDeleteItem && (
+            <button onClick={() => props.onDeleteItem?.(props.items[0] as never)}>Delete config</button>
+          )}
+          {props.onRenameItem && <button>Rename config</button>}
+        </>
       )}
       {props.onNewFile && <button>New config</button>}
-      {props.onDeleteItem && <button>Delete config</button>}
-      {props.onRenameItem && <button>Rename config</button>}
     </div>
   ),
 }))
@@ -96,5 +101,23 @@ describe("ConfigBrowser capability gating", () => {
       expect(screen.queryAllByRole("button", { name: "Delete config" })).toHaveLength(0)
     })
     expect(mocks.authFetch).toHaveBeenCalledTimes(initialFetchCount)
+  })
+
+  it("confirms before deleting a configuration file", async () => {
+    const user = userEvent.setup()
+    render(<ConfigBrowser projectPath={null} />)
+
+    await user.click(await screen.findByRole("button", { name: "Delete config" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete configuration file?" })
+    expect(within(dialog).getByText(/example\.md/)).toBeInTheDocument()
+    expect(mocks.authFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "DELETE")).toBe(false)
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete file" }))
+    await waitFor(() => {
+      expect(mocks.authFetch).toHaveBeenCalledWith(
+        "/api/config-browser/file?path=%2Fhome%2Fmember%2F.claude%2Fcommands%2Fexample.md",
+        { method: "DELETE" },
+      )
+    })
   })
 })

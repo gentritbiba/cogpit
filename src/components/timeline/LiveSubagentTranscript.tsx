@@ -58,10 +58,10 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
 
   return (
     <div
-      className="mt-2 rounded-md border border-border/40 bg-elevation-2/50 px-3 py-2"
+      className="mt-2 rounded-md border bg-muted/30 px-3 py-2"
       data-testid="live-subagent-transcript"
     >
-      <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">live</div>
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Live</div>
       <div
         ref={scrollRef}
         onScroll={handleScroll}

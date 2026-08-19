@@ -17,7 +17,7 @@ export function DesktopAppShell({
   const { state, config, theme } = useAppContext()
 
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-elevation-0 text-foreground`}>
+    <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
       <DesktopHeader

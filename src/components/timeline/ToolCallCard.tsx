@@ -23,6 +23,8 @@ import {
   tryPrettyJson,
 } from "./ToolCallResult"
 import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 export { getToolSummary }
 
@@ -41,12 +43,7 @@ const TOOL_TIER_STYLES: Record<ToolTier, string> = {
   readOnly: "text-muted-foreground",
 }
 
-/**
- * The timeline's error ink. `text-destructive` resolves to a near-black red in
- * this app's dark theme, which would make the one state that matters the least
- * legible of the three.
- */
-const FAILED_TOOL_TEXT_STYLE = "text-red-400"
+const FAILED_TOOL_TEXT_STYLE = "text-destructive"
 
 const TOOL_TIERS: Record<string, ToolTier> = {
   // Mutating — writes files, runs commands, spawns work, sends things out.
@@ -102,14 +99,16 @@ function ToggleButton({
 }): React.ReactElement {
   const Chevron = isOpen ? ChevronDown : ChevronRight
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
       onClick={onClick}
-      className="text-[10px] flex items-center gap-0.5 text-muted-foreground transition-colors hover:text-foreground"
+      className="-ml-2 text-muted-foreground"
     >
-      <Chevron className="w-3 h-3" />
+      <Chevron data-icon="inline-start" />
       {label}
-    </button>
+    </Button>
   )
 }
 
@@ -128,10 +127,10 @@ function StatusIcon({
   isAgentActive?: boolean
 }): React.ReactElement | null {
   if (toolCall.isError) {
-    return <XCircle role="img" aria-label="Tool call failed" className="w-4 h-4 text-red-400" />
+    return <XCircle role="img" aria-label="Tool call failed" className="size-4 text-destructive" data-icon="icon" />
   }
   if (toolCall.result === null && isAgentActive) {
-    return <Loader2 role="img" aria-label="Tool call running" className="w-4 h-4 animate-spin text-blue-400" />
+    return <Loader2 role="img" aria-label="Tool call running" className="size-4 animate-spin text-info" data-icon="icon" />
   }
   return null
 }
@@ -237,33 +236,35 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     <div
       className={cn(
         isCompactMobile ? "py-1" : "py-1.5",
-        toolCall.isError && !isCompactMobile && "rounded-md bg-red-950/10 px-2",
+        toolCall.isError && !isCompactMobile && "rounded-md bg-destructive/5 px-2",
       )}
     >
       {isCompactMobile ? (
-        <button
+        <Button
           type="button"
-          className="flex w-full items-center gap-1.5 rounded-sm text-left active:bg-white/[0.03]"
+          variant="ghost"
+          size="xs"
+          className="h-auto w-full justify-start px-1 py-1 text-left"
           onClick={handleCompactTap}
           aria-label={`Expand ${displayName} tool call`}
           title={timeLabel}
         >
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
-              className={cn("shrink-0 font-mono text-[10px]", nameClass)}
+              className={cn("shrink-0 font-mono text-xs", nameClass)}
               title={nameTitle}
             >
               {displayName}
             </span>
             {summary && (
-              <span className="truncate font-mono text-[11px] text-muted-foreground">
+              <span className="truncate font-mono text-xs text-muted-foreground">
                 {summary}
               </span>
             )}
           </div>
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" />
+          <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-end" />
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
-        </button>
+        </Button>
       ) : (
         <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")} title={timeLabel}>
         {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
@@ -271,7 +272,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <span
             className={cn(
               "shrink-0 font-mono",
-              isMobile ? "text-[10px]" : "text-[11px]",
+              "text-xs",
               nameClass,
             )}
             title={nameTitle}
@@ -279,17 +280,17 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             {displayName}
           </span>
           {summary && (
-            <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
+            <span className="truncate font-mono text-xs text-muted-foreground">
               {summary}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
-            <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
+            <span className="text-xs tabular-nums text-muted-foreground" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
           )}
           {toolCall.outputReplacedByHook && (
-            <span className="text-[10px] text-blue-400" title="Output replaced by hook">hook</span>
+            <Badge variant="outline" title="Output replaced by hook">hook</Badge>
           )}
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </div>
@@ -297,11 +298,13 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
       )}
 
       {skillMeta && !isCompactMobile && (
-        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground/60 font-mono">
+        <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">
           <span>source: {skillMeta.source}</span>
           {skillMeta.filePath && !isRemoteDeviceActive() && (
-            <button
+            <Button
               type="button"
+              variant="link"
+              size="xs"
               onClick={(e) => {
                 e.stopPropagation()
                 authFetch("/api/open-in-editor", {
@@ -310,12 +313,12 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
                   body: JSON.stringify({ path: skillMeta.filePath }),
                 })
               }}
-              className="flex items-center gap-0.5 text-indigo-400/70 hover:text-indigo-400 transition-colors"
+              className="h-auto px-0 text-muted-foreground"
               title={skillMeta.filePath}
             >
-              <ExternalLink className="w-2.5 h-2.5" />
+              <ExternalLink data-icon="inline-start" />
               Open SKILL.md
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -386,23 +389,25 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           ) : (
             <pre
               className={cn(
-                "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border",
+                "max-h-96 overflow-y-auto whitespace-pre-wrap break-all rounded border p-2 font-mono text-xs",
                 toolCall.isError
-                  ? "text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border-red-500/20"
-                  : "text-muted-foreground bg-elevation-0 border-border/30"
+                  ? "border-destructive/20 bg-destructive/5 text-destructive"
+                  : "border-border bg-muted/40 text-muted-foreground"
               )}
             >
               {visibleResult}
             </pre>
           )}
           {isLongResult && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               onClick={() => setResultExpanded(!resultExpanded)}
-              className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+              className="mt-1 -ml-2 text-muted-foreground"
             >
               {resultExpanded ? "Show less" : "Show more"}
-            </button>
+            </Button>
           )}
         </div>
       )}

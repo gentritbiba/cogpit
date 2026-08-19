@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react"
 import { X, Download, ArrowUpCircle } from "lucide-react"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 
 interface UpdateInfo {
   version: string
@@ -32,57 +34,58 @@ export function UpdateBanner() {
   // Windows / AppImage: update downloaded, show restart prompt
   if (downloadedInfo && !dismissed) {
     return (
-      <div className="flex items-center gap-3 bg-emerald-500/10 border-b border-emerald-500/20 px-4 py-2 text-sm">
-        <ArrowUpCircle className="size-4 text-emerald-400 shrink-0" />
-        <span className="text-emerald-300">
-          Cogpit v{downloadedInfo.version} is ready — restart to apply
-        </span>
-        <div className="flex-1" />
-        <button
-          onClick={() => setDismissed(true)}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Dismiss"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
+      <Alert className="grid-cols-[auto_minmax(0,1fr)_auto] rounded-none border-x-0 border-t-0 border-success/30 bg-success/10 px-4 py-2 pr-4 text-success has-data-[slot=alert-action]:pr-4">
+        <ArrowUpCircle />
+        <AlertTitle>Cogpit v{downloadedInfo.version} is ready</AlertTitle>
+        <AlertDescription className="text-success/80">Restart to apply the update.</AlertDescription>
+        <AlertAction className="static col-start-3 row-span-2 row-start-1 self-center">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setDismissed(true)}
+            aria-label="Dismiss update"
+          >
+            <X data-icon="inline-start" />
+          </Button>
+        </AlertAction>
+      </Alert>
     )
   }
 
   // macOS / Linux system pkg: update available notification
   if (updateInfo && !dismissed) {
     return (
-      <div className="flex items-center gap-3 bg-blue-500/10 border-b border-blue-500/20 px-4 py-2 text-sm">
-        <ArrowUpCircle className="size-4 text-blue-400 shrink-0" />
-        <span className="text-blue-300">
-          Cogpit v{updateInfo.version} is available
-        </span>
-        <div className="flex-1" />
-        {updateInfo.platform === "mac" ? (
-          <a
-            href={updateInfo.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 rounded-md bg-blue-500/20 px-2.5 py-1 text-xs font-medium text-blue-300 hover:bg-blue-500/30 transition-colors"
-          >
-            <Download className="size-3" />
-            Download
-          </a>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            Update via your package manager
-          </span>
+      <Alert className="grid-cols-[auto_minmax(0,1fr)_auto] rounded-none border-x-0 border-t-0 border-info/30 bg-info/10 px-4 py-2 pr-4 text-info has-data-[slot=alert-action]:pr-4">
+        <ArrowUpCircle />
+        <AlertTitle>Cogpit v{updateInfo.version} is available</AlertTitle>
+        {updateInfo.platform !== "mac" && (
+          <AlertDescription>Update through your package manager.</AlertDescription>
         )}
-        <button
-          onClick={() => {
-            setDismissed(true)
-            window.electronUpdater?.dismissVersion(updateInfo.version)
-          }}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
-        >
-          Don't show again
-        </button>
-      </div>
+        <AlertAction className="static col-start-3 row-span-2 row-start-1 flex items-center gap-2 self-center">
+          {updateInfo.platform === "mac" && (
+            <Button
+              variant="outline"
+              size="xs"
+              render={<a href={updateInfo.url} target="_blank" rel="noopener noreferrer" />}
+              nativeButton={false}
+            >
+              <Download data-icon="inline-start" />
+              Download
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              setDismissed(true)
+              window.electronUpdater?.dismissVersion(updateInfo.version)
+            }}
+            className="whitespace-nowrap text-muted-foreground"
+          >
+            Don't show again
+          </Button>
+        </AlertAction>
+      </Alert>
     )
   }
 

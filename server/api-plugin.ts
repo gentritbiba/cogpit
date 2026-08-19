@@ -2,7 +2,7 @@ import type { Plugin } from "vite"
 import { fileURLToPath } from "node:url"
 import { registerApiRoutes } from "./api-routes"
 import { getConfiguredEditionValue, loadConfig, getConfig } from "./config"
-import { authMiddleware, securityHeaders, bodySizeLimit } from "./helpers"
+import { authMiddleware, devSecurityHeaders, bodySizeLimit } from "./helpers"
 import { prefixMatches } from "./http"
 import { cleanupProcesses } from "./processRegistry"
 import { refreshDirs } from "./sessionPaths"
@@ -40,7 +40,7 @@ export function sessionApiPlugin(): Plugin {
       if (suppression) console.warn(suppression)
 
       // Security middleware (before all routes)
-      server.middlewares.use(securityHeaders)
+      server.middlewares.use(devSecurityHeaders)
       server.middlewares.use(bodySizeLimit)
       server.middlewares.use(authMiddleware)
       // Parity with app-server: a no-op here since the dev shell is always

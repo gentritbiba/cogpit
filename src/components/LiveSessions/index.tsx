@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react"
-import { Loader2, RefreshCw, Activity, AlertTriangle, Search, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { cn } from "@/lib/utils"
+import { Separator } from "@/components/ui/separator"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
@@ -22,6 +20,7 @@ import { countLiveSessions } from "./liveSessionSummary"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
+import { LiveSessionsFeedback, LiveSessionsToolbar } from "./LiveSessionsChrome"
 import { ProjectGroupList } from "./ProjectGroupList"
 
 // Re-export extracted modules so external imports remain unchanged
@@ -249,92 +248,28 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Provider-neutral session search + truthful live summary */}
-      <div className="shrink-0 flex items-center gap-1.5 px-2 py-2">
-        <div className="relative min-w-0 flex-1">
-          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search sessions…"
-            aria-label="Search sessions by project, branch, title, first prompt, or latest prompt"
-            className="w-full rounded-md border border-border/60 py-1.5 pl-7 pr-7 text-[13px] text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              aria-label="Clear session search"
-            >
-              <X className="size-3" />
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {liveSessionCount > 0 && (
-            <span className="text-[11px] text-muted-foreground whitespace-nowrap" aria-label={`${liveSessionCount} live sessions`}>
-              {liveSessionCount} live
-            </span>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn("p-0 shrink-0", isMobile ? "h-8 w-8" : "h-6 w-6")}
-            onClick={() => { hapticMedium(); fetchData() }}
-            aria-label="Refresh sessions"
-          >
-            <RefreshCw
-              className={cn(isMobile ? "size-4" : "size-3", loading && "animate-spin")}
-            />
-          </Button>
-        </div>
-      </div>
+      <LiveSessionsToolbar
+        liveSessionCount={liveSessionCount}
+        loading={loading}
+        isMobile={isMobile}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onRefresh={() => { hapticMedium(); fetchData() }}
+      />
 
       <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-3 px-1.5 pt-0.5 pb-3">
-          {fetchError && (
-            <div className="mx-1 mb-1 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-2 py-1.5">
-              <AlertTriangle className="size-3 text-red-400 shrink-0" />
-              <span className="text-[10px] text-red-400 flex-1 truncate">{fetchError}</span>
-              <button
-                type="button"
-                onClick={fetchData}
-                className="text-[10px] text-red-400 hover:text-red-300 shrink-0"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+        <div className="flex flex-col gap-4 p-2">
+          <LiveSessionsFeedback
+            fetchError={fetchError}
+            showEmpty={filteredSessions.length === 0 && !pendingSession && !loading && !fetchError}
+            searching={Boolean(searchQuery.trim())}
+            loading={loading}
+            sessionCount={sessions.length}
+            onRetry={fetchData}
+          />
 
-          {filteredSessions.length === 0 && !pendingSession && !loading && !fetchError && (
-            <div className="px-3 py-8 text-center">
-              {searchQuery.trim() ? (
-                <>
-                  <Search className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-[13px] text-muted-foreground">No matching sessions</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Try a project, branch, title, first prompt, or latest prompt</p>
-                </>
-              ) : (
-                <>
-                  <Activity className="size-5 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-[13px] text-muted-foreground">No sessions yet</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">Start Claude Code or Codex to see live and recent work here</p>
-                </>
-              )}
-            </div>
-          )}
-
-          {loading && sessions.length === 0 && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-
-          {/* Attention strip — cross-project triage: who needs me, who's working */}
           {showAttentionStrip && (
-            <div className="flex flex-col gap-2 pt-1.5">
+            <div className="flex flex-col gap-3">
               <AttentionStrip
                 groups={attention}
                 activeSessionKey={activeSessionKey}
@@ -347,11 +282,9 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
                 onResumeSession={canUseTerminal ? handleResumeSession : undefined}
                 onPrefetchSession={onPrefetchSession}
               />
-              <div className="flex items-center gap-1.5 px-0.5 pt-1">
-                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground/50">
-                  PROJECTS
-                </span>
-                <div className="h-px flex-1 bg-border/40" />
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-muted-foreground">Projects</span>
+                <Separator className="flex-1" />
               </div>
             </div>
           )}

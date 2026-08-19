@@ -67,7 +67,7 @@ export function HighlightedEditor({
   }, [textareaRef])
 
   return (
-    <div className="relative flex-1 min-h-0 bg-elevation-0">
+    <div className="relative min-h-0 flex-1 bg-background">
       {/* Highlighted layer (behind) */}
       <pre
         ref={preRef}
@@ -104,7 +104,7 @@ export function HighlightedEditor({
         spellCheck={false}
         className={cn(
           "absolute inset-0 w-full h-full resize-none bg-transparent font-mono text-[13px] leading-relaxed p-4 outline-none",
-          "text-transparent caret-foreground selection:bg-blue-500/30",
+          "text-transparent caret-foreground selection:bg-info/30",
           "scrollbar-thin scrollbar-track-transparent scrollbar-thumb-border",
           readOnly && "cursor-default",
         )}

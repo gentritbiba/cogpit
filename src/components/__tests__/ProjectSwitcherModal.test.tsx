@@ -33,7 +33,7 @@ describe("ProjectSwitcherModal", () => {
       screen.getByPlaceholderText("Search projects or paste an absolute path..."),
       "/workspace/new-project",
     )
-    await user.click(screen.getByRole("button", { name: /Start in this folder/ }))
+    await user.click(screen.getByRole("option", { name: /Start in this folder/ }))
 
     expect(onNewFolder).toHaveBeenCalledWith("/workspace/new-project")
     expect(onClose).toHaveBeenCalled()

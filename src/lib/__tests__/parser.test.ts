@@ -1266,51 +1266,51 @@ describe("getUserMessageImages", () => {
 
 describe("getToolColor", () => {
   it("returns correct color for Read tool", () => {
-    expect(getToolColor("Read")).toBe("text-blue-400")
+    expect(getToolColor("Read")).toBe("text-muted-foreground")
   })
 
   it("returns correct color for Write tool", () => {
-    expect(getToolColor("Write")).toBe("text-green-400")
+    expect(getToolColor("Write")).toBe("text-foreground")
   })
 
   it("returns correct color for Edit tool", () => {
-    expect(getToolColor("Edit")).toBe("text-amber-400")
+    expect(getToolColor("Edit")).toBe("text-foreground")
   })
 
   it("returns correct color for Bash tool", () => {
-    expect(getToolColor("Bash")).toBe("text-red-400")
+    expect(getToolColor("Bash")).toBe("text-foreground")
   })
 
   it("returns correct color for Grep tool", () => {
-    expect(getToolColor("Grep")).toBe("text-purple-400")
+    expect(getToolColor("Grep")).toBe("text-muted-foreground")
   })
 
   it("returns correct color for Glob tool", () => {
-    expect(getToolColor("Glob")).toBe("text-cyan-400")
+    expect(getToolColor("Glob")).toBe("text-muted-foreground")
   })
 
   it("returns correct color for Task tool", () => {
-    expect(getToolColor("Task")).toBe("text-indigo-400")
+    expect(getToolColor("Task")).toBe("text-foreground")
   })
 
   it("returns correct color for WebFetch tool", () => {
-    expect(getToolColor("WebFetch")).toBe("text-orange-400")
+    expect(getToolColor("WebFetch")).toBe("text-muted-foreground")
   })
 
   it("returns correct color for WebSearch tool", () => {
-    expect(getToolColor("WebSearch")).toBe("text-orange-400")
+    expect(getToolColor("WebSearch")).toBe("text-muted-foreground")
   })
 
   it("returns correct color for AskUserQuestion tool", () => {
-    expect(getToolColor("AskUserQuestion")).toBe("text-pink-400")
+    expect(getToolColor("AskUserQuestion")).toBe("text-foreground")
   })
 
   it("returns default color for unknown tools", () => {
-    expect(getToolColor("UnknownTool")).toBe("text-slate-400")
+    expect(getToolColor("UnknownTool")).toBe("text-muted-foreground")
   })
 
   it("returns default color for empty string", () => {
-    expect(getToolColor("")).toBe("text-slate-400")
+    expect(getToolColor("")).toBe("text-muted-foreground")
   })
 })
 
@@ -1849,8 +1849,8 @@ describe("Agent tool with toolUseResult (new format)", () => {
   })
 
   it("assigns Agent tool the correct color", () => {
-    expect(getToolColor("Agent")).toBe("text-indigo-400")
-    expect(getToolColor("Task")).toBe("text-indigo-400")
+    expect(getToolColor("Agent")).toBe("text-foreground")
+    expect(getToolColor("Task")).toBe("text-foreground")
   })
 })
 

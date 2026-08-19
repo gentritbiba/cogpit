@@ -1,8 +1,9 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Activity, Check, Copy, RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
   Card,
   CardAction,
@@ -73,9 +74,9 @@ function SystemProcessRow({ metric, onKill }: { metric: SystemProcessMetric; onK
       </div>
       {metric.suspectedLeak && onKill && (
         <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 text-destructive hover:bg-destructive/10"
+          variant="destructive"
+          size="xs"
+          className="shrink-0"
           onClick={() => onKill(metric.pid)}
         >
           Kill
@@ -107,8 +108,8 @@ function processHint(metric: ElectronProcessMetric): string {
 function diagnosis(totalCpu: number, hottest?: ElectronProcessMetric, systemLeaks = 0): string {
   if (systemLeaks > 0) {
     return systemLeaks === 1
-      ? '1 agent process outside Cogpit looks leaked — it drains the battery even while Cogpit itself is idle. See "Agent processes" below.'
-      : `${systemLeaks} agent processes outside Cogpit look leaked — they drain the battery even while Cogpit itself is idle. See "Agent processes" below.`
+      ? '1 agent process outside Cogpit looks leaked. See "Agent processes" below.'
+      : `${systemLeaks} agent processes outside Cogpit look leaked. See "Agent processes" below.`
   }
   if (totalCpu < 5) return "Cogpit is currently idle. Leave this open while the power spike happens."
   if (!hottest) return "The server is active. The lists below show its busiest recent work."
@@ -219,7 +220,7 @@ export function PowerMonitor() {
   const refreshInFlight = useRef(false)
   const [copied, copy] = useCopyWithFeedback()
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (refreshInFlight.current) return
     refreshInFlight.current = true
     setRefreshing(true)
@@ -248,17 +249,13 @@ export function PowerMonitor() {
 
     refreshInFlight.current = false
     setRefreshing(false)
-  }
-
-  const refreshOnInterval = useEffectEvent(() => {
-    void refresh()
-  })
+  }, [])
 
   useEffect(() => {
     if (!open) return
-    const interval = window.setInterval(refreshOnInterval, POLL_INTERVAL_MS)
+    const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [open, refreshOnInterval])
+  }, [open, refresh])
 
   const processes = [...(electronSnapshot?.processes ?? [])]
     .sort((a, b) => b.cpuPercent - a.cpuPercent)
@@ -302,7 +299,6 @@ export function PowerMonitor() {
           setOpen(true)
           void refresh()
         }}
-        className="text-muted-foreground hover:text-foreground"
       />
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -315,7 +311,7 @@ export function PowerMonitor() {
                   <Badge variant={status === "High" ? "destructive" : "secondary"}>{status}</Badge>
                 </div>
                 <DialogDescription className="mt-1">
-                  Live CPU and wakeups are used as a power proxy. Sampling only runs while this window is open.
+                  Live CPU, memory, and wakeups. Sampling runs only while this window is open.
                 </DialogDescription>
               </div>
               <div className="flex shrink-0 gap-1">
@@ -335,7 +331,11 @@ export function PowerMonitor() {
 
           <ScrollArea className="min-h-0 min-w-0 flex-1">
             <div className="flex flex-col gap-4 p-5">
-              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
 
               <Card size="sm">
                 <CardHeader>
@@ -385,9 +385,7 @@ export function PowerMonitor() {
                   <CardHeader>
                     <CardTitle>Agent processes</CardTitle>
                     <CardDescription>
-                      Claude sessions, browsers, and scripts running system-wide. macOS bills
-                      their energy to the app that spawned them, so a leaked one drains the
-                      battery while the numbers above look idle.
+                      Claude sessions, browsers, and scripts running outside Cogpit.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

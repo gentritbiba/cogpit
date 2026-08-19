@@ -1,24 +1,29 @@
 /**
  * Shared indicator components used by both GroupedFileCard and TurnChangedFiles.
- */
+*/
+import { Button } from "@/components/ui/button"
 
 /** Custom event name for navigating to a sub-agent's chat view. */
 export const OPEN_SUBAGENT_EVENT = "cogpit:open-subagent"
 
 export function OpIndicator({ hasEdit, hasWrite }: { hasEdit: boolean; hasWrite: boolean }) {
   if (hasEdit && hasWrite) {
-    return <span className="text-[9px] font-bold shrink-0 text-amber-400/60">E+W</span>
+    return <span className="shrink-0 text-xs font-bold text-warning">E+W</span>
   }
   if (hasWrite) {
-    return <span className="text-[9px] font-bold shrink-0 text-green-400/60">W</span>
+    return <span className="shrink-0 text-xs font-bold text-success">W</span>
   }
-  return <span className="text-[9px] font-bold shrink-0 text-amber-400/60">E</span>
+  return <span className="shrink-0 text-xs font-bold text-warning">E</span>
 }
 
 export function SubAgentIndicator({ agentId }: { agentId: string }) {
   return (
-    <span
-      className="text-[9px] font-bold shrink-0 text-indigo-400/60 cursor-pointer hover:text-indigo-400 transition-colors"
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      className="size-5 shrink-0 font-mono text-xs font-bold text-muted-foreground"
+      aria-label="Open sub-agent view"
       title="Open sub-agent view"
       onClick={(e) => {
         e.stopPropagation()
@@ -26,6 +31,6 @@ export function SubAgentIndicator({ agentId }: { agentId: string }) {
       }}
     >
       S
-    </span>
+    </Button>
   )
 }

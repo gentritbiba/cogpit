@@ -31,13 +31,13 @@ export const AssistantText = memo(function AssistantText({
     <div className="group">
       {!compact && <div className="mb-1 flex min-h-6 items-center justify-end gap-1.5">
         {model && (
-          <span className="text-[10px] text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground">
             {shortenModel(model)}
           </span>
         )}
-        {model && timestamp && <span className="text-[10px] text-muted-foreground/20">·</span>}
+        {model && timestamp && <span className="text-xs text-muted-foreground">·</span>}
         {timestamp && (
-          <span className="text-[10px] text-muted-foreground/40">
+          <span className="text-xs text-muted-foreground">
             {new Date(timestamp).toLocaleTimeString()}
           </span>
         )}
@@ -52,7 +52,7 @@ export const AssistantText = memo(function AssistantText({
           {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
         </Button>
       </div>}
-      <div className={cn("break-words overflow-hidden", compact ? "text-[13px] leading-[1.55]" : "text-sm")}>
+      <div className={cn("overflow-hidden break-words text-sm", compact && "leading-relaxed")}>
         <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>{markdownText}</ReactMarkdown>
       </div>
     </div>

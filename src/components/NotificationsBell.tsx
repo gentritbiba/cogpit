@@ -1,5 +1,21 @@
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { Bell, CheckCheck, CircleAlert, MessageSquare } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { useNotifications, type CogpitNotification } from "@/hooks/useNotifications"
 import { getActiveDeviceId, LOCAL_DEVICE_ID } from "@/lib/device"
 import { revealSessionPath } from "@/lib/revealSession"
@@ -14,24 +30,6 @@ import { cn } from "@/lib/utils"
 export function NotificationsBell() {
   const { notifications, unreadCount, refresh, markRead, markAllRead } = useNotifications()
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    void refresh()
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("mousedown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open, refresh])
 
   function openNotification(notification: CogpitNotification): void {
     void markRead([notification.id])
@@ -45,60 +43,69 @@ export function NotificationsBell() {
   }
 
   return (
-    <div ref={containerRef} className="relative shrink-0">
-      <button
-        type="button"
-        aria-label={unreadCount > 0 ? `Notifications — ${unreadCount} unread` : "Notifications"}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          "relative flex items-center rounded-md p-1.5 transition-colors",
-          open
-            ? "bg-elevation-2 text-foreground"
-            : "text-muted-foreground hover:text-foreground hover:bg-elevation-2",
-        )}
+    <DropdownMenu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (nextOpen) void refresh()
+      }}
+    >
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant={open ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="relative"
+            aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          />
+        }
       >
-        <Bell className="size-3.5" />
+        <Bell data-icon="inline-start" />
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-blue-500 px-0.5 text-[9px] font-semibold tabular-nums text-white">
+          <Badge className="absolute -right-1 -top-1 h-4 min-w-4 px-1 tabular-nums">
             {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
+          </Badge>
         )}
-      </button>
+      </DropdownMenuTrigger>
 
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-[340px] overflow-hidden rounded-lg border border-border/60 bg-elevation-1 shadow-xl">
-          <div className="flex items-center justify-between border-b border-border/40 px-3 py-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Notifications
-            </span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={() => void markAllRead()}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-elevation-2 hover:text-foreground"
-              >
-                <CheckCheck className="size-3" /> Mark all read
-              </button>
-            )}
-          </div>
-          <div className="max-h-[420px] overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                No notifications yet
-              </div>
-            ) : (
-              notifications.map((notification) => (
+      <DropdownMenuContent align="end" sideOffset={6} className="w-80 overflow-hidden p-0">
+        <div className="flex h-11 items-center justify-between border-b px-3">
+          <span className="text-sm font-medium">Notifications</span>
+          {unreadCount > 0 && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => void markAllRead()}
+            >
+              <CheckCheck data-icon="inline-start" />
+              Mark all read
+            </Button>
+          )}
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          {notifications.length === 0 ? (
+            <Empty className="min-h-40 p-6">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><Bell /></EmptyMedia>
+                <EmptyTitle>No notifications</EmptyTitle>
+                <EmptyDescription>Session updates will appear here.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <DropdownMenuGroup>
+              {notifications.map((notification) => (
                 <NotificationRow
                   key={notification.id}
                   notification={notification}
                   onOpen={openNotification}
                 />
-              ))
-            )}
-          </div>
+              ))}
+            </DropdownMenuGroup>
+          )}
         </div>
-      )}
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -114,19 +121,18 @@ function NotificationRow({ notification, onOpen }: NotificationRowProps) {
   const Icon = notification.kind === "permission" ? CircleAlert : MessageSquare
 
   return (
-    <button
-      type="button"
+    <DropdownMenuItem
       onClick={() => onOpen(notification)}
       className={cn(
-        "flex w-full items-start gap-2.5 border-b border-border/20 px-3 py-2.5 text-left transition-colors last:border-b-0",
-        hasTarget ? "hover:bg-elevation-2" : "cursor-default",
-        unread ? "bg-blue-500/5" : "opacity-70",
+        "rounded-none border-b px-3 py-2.5 last:border-b-0",
+        !hasTarget && "cursor-default",
+        unread && "bg-accent/50",
       )}
     >
       <Icon
         className={cn(
-          "mt-0.5 size-3.5 shrink-0",
-          notification.kind === "permission" ? "text-amber-400" : "text-blue-400",
+          "mt-0.5",
+          notification.kind === "permission" ? "text-warning" : "text-info",
         )}
       />
       <span className="min-w-0 flex-1">
@@ -134,15 +140,15 @@ function NotificationRow({ notification, onOpen }: NotificationRowProps) {
           <span className={cn("truncate text-xs", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
             {notification.title}
           </span>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {formatAge(ageSeconds)}
           </span>
         </span>
-        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
           {notification.body}
         </span>
       </span>
-      {unread && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-blue-400" />}
-    </button>
+      {unread && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />}
+    </DropdownMenuItem>
   )
 }

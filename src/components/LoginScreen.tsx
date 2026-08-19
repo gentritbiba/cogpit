@@ -1,9 +1,25 @@
-import { useState, useEffect, useCallback } from "react"
-import { Eye, EyeOff, Lock } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import { AlertCircle, Eye, EyeOff, Lock } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { clearToken, getServerEdition } from "@/lib/auth"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/Spinner"
+import { clearToken, getServerEdition } from "@/lib/auth"
 import type { CogpitEdition } from "../../shared/contracts/team"
 
 interface LoginScreenProps {
@@ -11,8 +27,6 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
-  // null until the public hello handshake resolves; team servers replace the
-  // shared-password flow with per-user credentials.
   const [edition, setEdition] = useState<CogpitEdition | null>(null)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -30,15 +44,15 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     return () => { cancelled = true }
   }, [])
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = useCallback(async (event: React.FormEvent) => {
+    event.preventDefault()
     if (!password.trim() || (isTeam && !username.trim())) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const res = await fetch("/api/auth/verify", isTeam
+      const response = await fetch("/api/auth/verify", isTeam
         ? {
             method: "POST",
             credentials: "same-origin",
@@ -60,10 +74,8 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
             },
           })
 
-      const data = await res.json() as { valid?: boolean; error?: string }
-      if (res.ok && data.valid) {
-        // The server stores the session in an HttpOnly cookie. Scrub any token
-        // left behind by an older build, then remove the credentials from memory.
+      const data = await response.json() as { valid?: boolean; error?: string }
+      if (response.ok && data.valid) {
         clearToken()
         setPassword("")
         setUsername("")
@@ -76,77 +88,97 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
     } finally {
       setLoading(false)
     }
-  }, [password, username, isTeam, onAuthenticated])
+  }, [isTeam, onAuthenticated, password, username])
 
   const submitDisabled = loading || !password.trim() || (isTeam && !username.trim())
 
   return (
-    <div className="dark flex h-dvh items-center justify-center bg-elevation-0">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 px-6">
-        <div className="flex flex-col items-center gap-3 mb-6">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20">
-            <Lock className="size-5 text-blue-400" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-lg font-semibold text-foreground">Cogpit</h1>
-            <p className="text-sm text-muted-foreground">
-              {isTeam ? "Sign in to connect" : "Enter the password to connect"}
-            </p>
-          </div>
-        </div>
-
-        {edition === null ? (
-          // The fields wait for the hello handshake: mounting them earlier
-          // would autofocus the password, and a late "team" answer would then
-          // steal focus into the freshly mounted username field mid-typing.
-          <div className="flex justify-center py-2" role="status" aria-label="Checking server">
-            <Spinner className="size-5 text-muted-foreground" />
-          </div>
-        ) : (
-          <>
-            {isTeam && (
-              <Input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Username"
-                autoComplete="username"
-                className="bg-elevation-1 border-border/70 focus:border-border"
-                autoFocus
-              />
-            )}
-
-            <div className="relative">
-              <Input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                autoComplete="current-password"
-                className="pr-10 bg-elevation-1 border-border/70 focus:border-border"
-                autoFocus={!isTeam}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
+    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm">
+        <Card>
+          <CardHeader>
+            <div className="mb-2 flex size-9 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+              <Lock className="size-4" />
             </div>
+            <CardTitle>Sign in to Cogpit</CardTitle>
+            <CardDescription>
+              {isTeam ? "Use your team account to continue." : "Enter the server password to continue."}
+            </CardDescription>
+          </CardHeader>
 
-            {error && (
-              <p className="text-sm text-red-400">{error}</p>
-            )}
+          {edition === null ? (
+            <CardContent>
+              <div
+                className="flex min-h-24 items-center justify-center"
+                role="status"
+                aria-label="Checking server"
+              >
+                <Spinner className="size-5 text-muted-foreground" />
+              </div>
+            </CardContent>
+          ) : (
+            <>
+              <CardContent className="flex flex-col gap-4">
+                <FieldGroup>
+                  {isTeam && (
+                    <Field>
+                      <FieldLabel htmlFor="login-username">Username</FieldLabel>
+                      <Input
+                        id="login-username"
+                        type="text"
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        placeholder="Username"
+                        autoComplete="username"
+                        autoFocus
+                      />
+                    </Field>
+                  )}
 
-            <Button type="submit" className="w-full" disabled={submitDisabled}>
-              {loading ? <Spinner className="size-4 mr-2" /> : null}
-              Connect
-            </Button>
-          </>
-        )}
+                  <Field>
+                    <FieldLabel htmlFor="login-password">Password</FieldLabel>
+                    <InputGroup>
+                      <InputGroupInput
+                        id="login-password"
+                        type={showPassword ? "text" : "password"}
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder="Password"
+                        autoComplete="current-password"
+                        autoFocus={!isTeam}
+                      />
+                      <InputGroupAddon align="inline-end">
+                        <InputGroupButton
+                          size="icon-xs"
+                          onClick={() => setShowPassword((visible) => !visible)}
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? <EyeOff /> : <Eye />}
+                        </InputGroupButton>
+                      </InputGroupAddon>
+                    </InputGroup>
+                  </Field>
+                </FieldGroup>
+
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertCircle aria-hidden="true" />
+                    <AlertTitle>Sign in failed</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+
+              <CardFooter>
+                <Button type="submit" className="w-full" disabled={submitDisabled}>
+                  {loading && <Spinner data-icon="inline-start" />}
+                  Connect
+                </Button>
+              </CardFooter>
+            </>
+          )}
+        </Card>
       </form>
-    </div>
+    </main>
   )
 }

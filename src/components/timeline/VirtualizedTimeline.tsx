@@ -9,6 +9,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isNearTop, isPrepend, type TimelineSnapshot } from "@/lib/timelinePaging"
 import type { Turn } from "@/lib/types"
+import { Button } from "@/components/ui/button"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,13 +77,16 @@ function RedoSection() {
                 index={sessionTurnCount + i}
               />
               {requestRedoUpTo && (
-                <button
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
                   onClick={() => requestRedoUpTo(i)}
-                  className="absolute top-4 right-4 opacity-0 group-hover/ghost:opacity-100 transition-opacity z-10 flex items-center gap-1 text-[10px] text-green-400 hover:text-green-300 bg-elevation-1 border border-border/50 rounded px-2 py-1"
+                  className="absolute right-4 top-4 text-success opacity-0 transition-opacity group-hover/ghost:opacity-100"
                 >
-                  <Redo2 className="size-3" />
+                  <Redo2 data-icon="inline-start" />
                   Redo to here
-                </button>
+                </Button>
               )}
             </div>
           ))}
@@ -100,10 +104,10 @@ function RedoSection() {
  */
 function HistoryStatusSlot({ hasMore, isLoadingOlder }: { hasMore: boolean; isLoadingOlder: boolean }) {
   return (
-    <div className="flex h-8 items-center justify-center text-[11px] text-muted-foreground/70 select-none" data-testid="history-status">
+    <div className="flex h-8 select-none items-center justify-center text-xs text-muted-foreground" data-testid="history-status">
       {isLoadingOlder ? (
         <span className="flex items-center gap-1.5">
-          <Loader2 className="size-3 animate-spin" />
+          <Loader2 className="size-3 animate-spin" data-icon="inline-start" />
           Loading older turns…
         </span>
       ) : hasMore ? null : (
@@ -155,8 +159,10 @@ export function VirtualizedTimeline({
   // Once history paging has been observed, keep the status slot mounted so its
   // appearance/disappearance can never shift content.
   const showSlotRef = useRef(hasMore)
-  if (hasMore) showSlotRef.current = true
-  const showSlot = showSlotRef.current
+  useEffect(() => {
+    if (hasMore) showSlotRef.current = true
+  }, [hasMore])
+  const showSlot = hasMore || showSlotRef.current
 
   // The virtualizer needs to know how much non-virtualized content sits above
   // it inside the scroll container (padding + status slot).

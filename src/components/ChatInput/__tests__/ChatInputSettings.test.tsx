@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ChatInputSettings } from "../ChatInputSettings"
 import { resetDynamicModelOptions, setDynamicModelOptions } from "@/lib/utils"
 
@@ -31,7 +32,7 @@ describe("ChatInputSettings", () => {
     expect(onAgentKindChange).toHaveBeenCalledWith("codex")
   })
 
-  it("shows codex defaults and selects codex models from the combined dropdown", () => {
+  it("shows codex defaults, selects a model, and closes the dropdown", async () => {
     const onModelChange = vi.fn()
 
     render(
@@ -50,6 +51,9 @@ describe("ChatInputSettings", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-5\.6 Terra/i }))
 
     expect(onModelChange).toHaveBeenCalledWith("gpt-5.6-terra")
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "Agent and model" })).not.toBeInTheDocument()
+    })
   })
 
   it("keeps the model-only dropdown for active sessions", () => {
@@ -204,6 +208,7 @@ describe("ChatInputSettings", () => {
   })
 
   it("supports keyboard navigation and restores focus when a dropdown closes", async () => {
+    const user = userEvent.setup()
     render(
       <ChatInputSettings
         agentKind="claude"
@@ -218,18 +223,20 @@ describe("ChatInputSettings", () => {
     const trigger = screen.getByRole("button", { name: "Opus" })
     fireEvent.click(trigger)
 
-    const selected = screen.getByRole("menuitemradio", { name: /Opus \(default\)/i })
+    const selected = await screen.findByRole("menuitemradio", { name: /Opus \(default\)/i })
     await vi.waitFor(() => expect(selected).toHaveFocus())
 
-    fireEvent.keyDown(document, { key: "ArrowDown" })
+    await user.keyboard("{ArrowDown}")
     expect(screen.getByRole("menuitemradio", { name: /^Fable$/i })).toHaveFocus()
 
-    fireEvent.keyDown(document, { key: "Escape" })
-    expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
-    expect(trigger).toHaveFocus()
+    await user.keyboard("{Escape}")
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+      expect(trigger).toHaveFocus()
+    })
   })
 
-  it("closes a portaled dropdown when clicking outside it", () => {
+  it("closes a portaled dropdown when clicking outside it", async () => {
     render(
       <ChatInputSettings
         agentKind="claude"
@@ -242,13 +249,16 @@ describe("ChatInputSettings", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Opus" }))
-    expect(screen.getByRole("menu", { name: "Model" })).toBeInTheDocument()
+    expect(await screen.findByRole("menu", { name: "Model" })).toBeInTheDocument()
 
-    fireEvent.mouseDown(document.body)
-    expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+    fireEvent.pointerDown(document.body)
+    fireEvent.click(document.body)
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "Model" })).not.toBeInTheDocument()
+    })
   })
 
-  it("preserves MCP toggle, refresh, and authentication interactions", () => {
+  it("preserves MCP toggle, refresh, and authentication interactions", async () => {
     const onToggleMcpServer = vi.fn()
     const onRefreshMcpServers = vi.fn()
     const onMcpAuth = vi.fn()
@@ -274,7 +284,7 @@ describe("ChatInputSettings", () => {
 
     const trigger = screen.getByRole("button", { name: "MCPs 0/1" })
     fireEvent.click(trigger)
-    fireEvent.click(screen.getByRole("button", { name: "Refresh MCP server status" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh status" }))
     expect(onRefreshMcpServers).toHaveBeenCalledOnce()
     expect(screen.getByRole("menu", { name: "MCP servers" })).toBeInTheDocument()
 
@@ -283,6 +293,8 @@ describe("ChatInputSettings", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: /^githubNeeds auth$/i }))
     expect(onMcpAuth).toHaveBeenCalledWith("github")
-    expect(screen.queryByRole("menu", { name: "MCP servers" })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: "MCP servers" })).not.toBeInTheDocument()
+    })
   })
 })

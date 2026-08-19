@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react"
 import { AlertTriangle, RefreshCw } from "lucide-react"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 
 interface Props {
@@ -33,29 +34,26 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center gap-4 p-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 border border-red-500/20">
-            <AlertTriangle className="size-6 text-red-400" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-sm font-medium text-foreground">
-              {this.props.fallbackMessage || "Something went wrong"}
-            </h3>
+        <div className="flex justify-center p-8">
+          <Alert variant="destructive" className="max-w-md has-data-[slot=alert-action]:pr-2.5">
+            <AlertTriangle />
+            <AlertTitle>
+              <h3>
+                {this.props.fallbackMessage || "Something went wrong"}
+              </h3>
+            </AlertTitle>
             {this.state.error && (
-              <p className="text-xs text-muted-foreground max-w-md font-mono">
+              <AlertDescription className="font-mono text-xs">
                 {this.state.error.message}
-              </p>
+              </AlertDescription>
             )}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={this.handleRetry}
-            className="gap-1.5"
-          >
-            <RefreshCw className="size-3" />
-            Try again
-          </Button>
+            <AlertAction className="static col-start-2 mt-2">
+              <Button variant="outline" size="sm" onClick={this.handleRetry}>
+                <RefreshCw data-icon="inline-start" />
+                Try again
+              </Button>
+            </AlertAction>
+          </Alert>
         </div>
       )
     }

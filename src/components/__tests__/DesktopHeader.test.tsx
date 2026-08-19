@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { DesktopHeader } from "@/components/DesktopHeader"
 import { getResumeCommand } from "@/lib/sessionSource"
@@ -83,5 +84,17 @@ describe("DesktopHeader", () => {
     fireEvent.click(screen.getByRole("button", { name: /10\.0\.0\.4/ }))
 
     expect(mocks.copy).toHaveBeenCalledWith("http://10.0.0.4:19384")
+  })
+
+  it("keeps secondary workspace actions in the overflow menu", async () => {
+    const user = userEvent.setup()
+    render(<DesktopHeader {...PROPS} />)
+
+    expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Settings" }))
+
+    expect(PROPS.onOpenSettings).toHaveBeenCalledOnce()
   })
 })

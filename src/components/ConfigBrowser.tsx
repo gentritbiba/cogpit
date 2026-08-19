@@ -1,6 +1,23 @@
 import { useState, useEffect, useCallback, useRef, memo } from "react"
 import { Search, X } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { authFetch } from "@/lib/auth"
 import { useCapability } from "@/hooks/useCapability"
 import type { ConfigTreeSection, Category, ConfigItem } from "@/components/config/config-types"
@@ -48,6 +65,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
   const [searchQuery, setSearchQuery] = useState("")
   const [renamingItem, setRenamingItem] = useState<ConfigItem | null>(null)
   const [renameValue, setRenameValue] = useState("")
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<ConfigItem | null>(null)
   const initialFileLoadedRef = useRef(false)
 
   // Fetch tree
@@ -127,9 +145,15 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
     })
   }, [canWriteConfig, globalBaseDir, projectBaseDir])
 
-  const handleDeleteItem = useCallback(async (item: ConfigItem) => {
+  const handleDeleteItem = useCallback((item: ConfigItem) => {
     if (!canWriteConfig || item.readOnly) return
-    if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return
+    setPendingDeleteItem(item)
+  }, [canWriteConfig])
+
+  const confirmDeleteItem = useCallback(async () => {
+    if (!canWriteConfig || !pendingDeleteItem || pendingDeleteItem.readOnly) return
+    const item = pendingDeleteItem
+    setPendingDeleteItem(null)
     try {
       const res = await authFetch(`/api/config-browser/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" })
       if (res.ok) {
@@ -137,7 +161,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
         fetchTree()
       }
     } catch { /* ignore */ }
-  }, [canWriteConfig, fetchTree, selectedFile])
+  }, [canWriteConfig, fetchTree, pendingDeleteItem, selectedFile])
 
   const handleStartRename = useCallback((item: ConfigItem) => {
     if (!canWriteConfig || item.readOnly) return
@@ -187,37 +211,46 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
   return (
     <div className="flex flex-1 min-h-0 min-w-0">
-      {/* Sidebar */}
-      <div className="w-[260px] shrink-0 border-r border-border/50 bg-elevation-1 flex flex-col min-h-0">
-        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border/50">
-          <span className="text-xs font-medium text-foreground">Config Browser</span>
+      <div className="flex min-h-0 w-72 shrink-0 flex-col border-r bg-sidebar">
+        <div className="flex h-11 items-center gap-2 border-b px-3">
+          <span className="text-sm font-medium text-foreground">Configuration</span>
           {projectPath && (
-            <span className="text-[10px] text-muted-foreground/40 truncate ml-auto" title={projectPath}>
+            <span className="ml-auto truncate text-xs text-muted-foreground" title={projectPath}>
               {projectPath.split("/").pop()}
             </span>
           )}
         </div>
-        <div className="px-2 py-1.5 border-b border-border/50">
-          <div className="flex items-center gap-1.5 bg-elevation-0 border border-border rounded px-2 py-1">
-            <Search className="size-3 text-muted-foreground/50 shrink-0" />
-            <input
-              type="text"
+        <div className="border-b p-2">
+          <InputGroup>
+            <InputGroupAddon>
+              <Search data-icon="inline-start" />
+            </InputGroupAddon>
+            <InputGroupInput
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files..."
-              className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none min-w-0"
+              placeholder="Search configuration"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery("")} className="text-muted-foreground/50 hover:text-foreground">
-                <X className="size-3" />
-              </button>
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label="Clear search"
+                  onClick={() => setSearchQuery("")}
+                >
+                  <X data-icon="inline-start" />
+                </InputGroupButton>
+              </InputGroupAddon>
             )}
-          </div>
+          </InputGroup>
         </div>
         <ScrollArea className="flex-1">
-          <div className="py-2">
+          <div className="flex flex-col gap-1 py-2">
             {loading ? (
-              <p className="text-xs text-muted-foreground px-3 py-4 text-center">Loading...</p>
+              <div className="flex flex-col gap-2 px-3 py-2" aria-label="Loading configuration">
+                {Array.from({ length: 6 }, (_, index) => (
+                  <Skeleton key={index} className="h-8 w-full" />
+                ))}
+              </div>
             ) : (
               CATEGORY_ORDER.map((cat) => {
                 const canCreate = cat === "agents" || cat === "skills" || cat === "commands"
@@ -247,12 +280,33 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
         </ScrollArea>
       </div>
 
-      {/* Editor area */}
       {selectedFile ? (
         <ConfigEditor file={selectedFile} onDeleted={handleDeleted} readOnly={!canWriteConfig} />
       ) : (
         <EmptyState />
       )}
+
+      <AlertDialog
+        open={pendingDeleteItem !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setPendingDeleteItem(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete configuration file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete "{pendingDeleteItem?.name}" permanently? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" size="sm" onClick={() => void confirmDeleteItem()}>
+              Delete file
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 })

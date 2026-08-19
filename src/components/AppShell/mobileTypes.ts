@@ -67,7 +67,6 @@ export interface MobileChrome {
   workflowsPanel: ReactNode
   undoDialog: ReactNode
   branchModal: ReactNode
-  status: ReactNode
   fileChangesOpen: boolean
   onFileChangesOpenChange: (open: boolean) => void
   searchOpen: boolean

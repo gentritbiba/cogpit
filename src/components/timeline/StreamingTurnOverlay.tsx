@@ -26,7 +26,7 @@ function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor
   if (block.blockType === "thinking") {
     if (!block.text) return null
     return (
-      <div className="text-[13px] leading-relaxed text-muted-foreground/70 italic whitespace-pre-wrap break-words border-l border-border/40 pl-3 my-2">
+      <div className="my-2 whitespace-pre-wrap break-words border-l pl-3 text-sm italic leading-relaxed text-muted-foreground">
         {block.text}
         {showCursor && <StreamCursor />}
       </div>
@@ -44,7 +44,7 @@ function StreamingBlock({ block, showCursor }: { block: OverlayBlock; showCursor
 
 function StreamCursor() {
   return (
-    <span className="inline-block w-[7px] h-[15px] ml-0.5 align-text-bottom bg-blue-400/80 rounded-[1px]" />
+    <span className="ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-foreground/70 align-text-bottom" />
   )
 }
 
@@ -52,16 +52,19 @@ export const StreamingTurnOverlay = memo(function StreamingTurnOverlay() {
   const overlay = useStreamingOverlay()
   const messages = mainThreadMessages(overlay)
   if (messages.length === 0) return null
+  const messageOccurrences = new Map<string, number>()
 
   return (
     <div className="px-4" data-testid="streaming-turn-overlay">
       {messages.map((msg) => {
+        const occurrence = messageOccurrences.get(msg.messageId) ?? 0
+        messageOccurrences.set(msg.messageId, occurrence + 1)
         const lastVisibleIdx = msg.blocks.reduce(
           (acc, b, i) => (b.blockType !== "tool_use" && b.text ? i : acc),
           -1,
         )
         return (
-          <div key={msg.messageId}>
+          <div key={`${msg.messageId}:${occurrence}`}>
             {msg.blocks.map((block, i) => (
               <StreamingBlock
                 key={block.index}

@@ -10,8 +10,9 @@ import type { ActivitySummary } from "@/lib/activitySummary"
 import { cn } from "@/lib/utils"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { getToolPresentation } from "../../../shared/session/toolSummary"
+import { Button } from "@/components/ui/button"
 
-const THINKING_TEXT_STYLE = "text-violet-400/70"
+const THINKING_TEXT_STYLE = "text-muted-foreground"
 
 /**
  * The Claude Code CLI activity line, e.g.
@@ -24,8 +25,8 @@ function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
         <span key={clause.key}>
           {i > 0 && ", "}
           {i === 0 ? clause.text[0].toUpperCase() + clause.text.slice(1) : clause.text}
-          {clause.added ? <span className="text-green-500/80"> +{clause.added}</span> : null}
-          {clause.removed ? <span className="text-red-400/80"> -{clause.removed}</span> : null}
+          {clause.added ? <span className="text-success"> +{clause.added}</span> : null}
+          {clause.removed ? <span className="text-destructive"> -{clause.removed}</span> : null}
         </span>
       ))}
     </span>
@@ -125,7 +126,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
         key={tc.id}
         ref={tc.id === activeToolCallId ? targetRef : undefined}
         className={cn(
-          tc.id === activeToolCallId && "ring-1 ring-blue-500/50 rounded-md"
+          tc.id === activeToolCallId && "rounded-md ring-1 ring-ring"
         )}
       >
         <ToolCallCard toolCall={tc} expandAll={expandAll} isAgentActive={isLastWithoutResult} skillMetadata={skillMetadata} />
@@ -135,27 +136,29 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   // Single tool call with no thinking → render directly, no collapsible wrapper
   if (toolCalls.length === 1 && thinkingCount === 0 && !activityItems) {
-    return <div className="space-y-2">{renderToolCallCard(toolCalls[0], true)}</div>
+    return <div className="flex flex-col gap-2">{renderToolCallCard(toolCalls[0], true)}</div>
   }
 
   if (isOpen) {
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {!expandAll && !hasUserQuestion && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             onClick={() => setOpenOverride(false)}
-            className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            className="-ml-2 text-muted-foreground"
           >
-            <ChevronDown className="size-3" />
+            <ChevronDown data-icon="inline-start" />
             {summary.clauses.length > 0 ? (
               <ActivitySummaryLine summary={summary} />
             ) : (
-              <span className={cn("font-mono text-[10px]", THINKING_TEXT_STYLE)}>
+              <span className={cn("font-mono text-xs", THINKING_TEXT_STYLE)}>
                 Thinking{thinkingCount > 1 ? ` ×${thinkingCount}` : ""}
               </span>
             )}
-          </button>
+          </Button>
         )}
         {activityItems ? (
           (() => {
@@ -199,42 +202,45 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => setOpenOverride(true)}
-      className="flex items-start gap-2 w-full py-1 text-left transition-colors hover:opacity-80"
+      className="h-auto w-full items-start justify-start gap-2 px-0 py-1 text-left whitespace-normal"
     >
-      <ChevronRight className="size-3.5 mt-0.5 text-muted-foreground shrink-0" />
-      <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+      <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {summary.clauses.length > 0 && <ActivitySummaryLine summary={summary} />}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2">
           {thinkingCount > 0 && (
-            <span className={cn("font-mono text-[10px]", THINKING_TEXT_STYLE)}>
+            <span className={cn("font-mono text-xs", THINKING_TEXT_STYLE)}>
               Thinking{thinkingCount > 1 ? ` ×${thinkingCount}` : ""}
             </span>
           )}
           {toolCounts.map(([name, { count, styleName, hasError }]) => (
-            <span key={name} className={cn("font-mono text-[10px]", getToolTextStyle(styleName, hasError))}>
+            <span key={name} className={cn("font-mono text-xs", getToolTextStyle(styleName, hasError))}>
               {name}
               {count > 1 ? ` ×${count}` : ""}
             </span>
           ))}
         </div>
       </div>
-    </button>
+    </Button>
   )
 })
 
 /** Reveals the older head of a working group that is currently tailing. */
 function EarlierSteps({ count, onReveal }: { count: number; onReveal: () => void }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
       onClick={onReveal}
-      className="flex items-center gap-1.5 py-0.5 text-[10px] text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+      className="-ml-2 text-muted-foreground"
     >
-      <ChevronDown className="size-3" />
+      <ChevronDown data-icon="inline-start" />
       {workLogTailLabel(count)}
-    </button>
+    </Button>
   )
 }

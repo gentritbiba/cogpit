@@ -6,8 +6,8 @@
  */
 
 import { ShieldAlert } from "lucide-react"
-import { cn } from "@/lib/utils"
-import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
+import { Alert, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import type { PermissionDecision } from "@/lib/permissionApi"
 import type { MissionControlPermission } from "../../../shared/contracts/missionControl"
 
@@ -21,14 +21,14 @@ interface PermissionPromptProps {
 
 const DEFAULT_DECISIONS: PermissionDecision[] = ["allow", "allow_always", "deny"]
 
-const ALLOW = "border-green-600/50 bg-green-600/20 px-2.5 font-medium text-green-300 hover:bg-green-600/35"
-const DENY = "border-red-700/50 bg-red-600/15 px-2.5 font-medium text-red-300 hover:bg-red-600/30"
-const ALWAYS = "border-border/60 px-2 text-muted-foreground hover:text-foreground"
-
-const DECISION_BUTTONS: { decision: PermissionDecision; label: string; tone: string }[] = [
-  { decision: "allow", label: "Allow", tone: ALLOW },
-  { decision: "deny", label: "Deny", tone: DENY },
-  { decision: "allow_always", label: "Always", tone: ALWAYS },
+const DECISION_BUTTONS: {
+  decision: PermissionDecision
+  label: string
+  variant: "default" | "destructive" | "outline"
+}[] = [
+  { decision: "allow", label: "Allow", variant: "default" },
+  { decision: "deny", label: "Deny", variant: "destructive" },
+  { decision: "allow_always", label: "Always", variant: "outline" },
 ]
 
 function supports(request: MissionControlPermission, decision: PermissionDecision): boolean {
@@ -47,52 +47,47 @@ export function PermissionPrompt({
   const answerable = available.some((button) => button.decision !== "allow_always")
 
   return (
-    <div className="rounded-md border border-amber-500/40 bg-amber-500/[0.07] p-2">
-      <div className="flex items-center gap-1.5">
-        <ShieldAlert className="size-3.5 shrink-0 text-amber-400" />
-        <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-amber-200">
+    <Alert className="border-warning/40 bg-warning/5">
+      <ShieldAlert className="text-warning" />
+      <AlertTitle className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate">
           {request.title || `Allow ${request.toolName}?`}
         </span>
         {queued > 0 && (
-          <span className="shrink-0 font-mono text-[10px] text-amber-400/70">+{queued}</span>
+          <span className="shrink-0 font-mono text-xs text-warning">+{queued}</span>
         )}
-      </div>
+      </AlertTitle>
 
-      <div className="mt-1.5 flex items-center gap-1.5">
-        <span
-          className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(request.toolName))}
-        >
+      <div className="col-start-2 mt-2 flex min-w-0 items-center gap-2">
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">
           {request.toolName}
         </span>
         {request.summary && (
-          <code className="min-w-0 flex-1 truncate rounded bg-black/30 px-1.5 py-0.5 font-mono text-[10.5px] text-foreground/80">
+          <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
             {request.summary}
           </code>
         )}
       </div>
 
       {answerable ? (
-        <div className="mt-2 flex items-center gap-1.5">
-          {available.map(({ decision, label, tone }) => (
-            <button
+        <div className="col-start-2 mt-3 flex items-center gap-2">
+          {available.map(({ decision, label, variant }) => (
+            <Button
               key={decision}
-              type="button"
+              size="xs"
+              variant={variant}
               disabled={responding}
               onClick={() => onRespond(request.requestId, decision)}
-              className={cn(
-                "rounded border py-1 text-[11px] transition-colors disabled:opacity-50",
-                tone,
-              )}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </div>
       ) : (
-        <p className="mt-2 text-[11px] text-amber-300/80">
+        <p className="col-start-2 mt-2 text-xs text-warning">
           Resolve this approval in its own provider
         </p>
       )}
-    </div>
+    </Alert>
   )
 }

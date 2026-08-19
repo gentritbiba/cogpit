@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { WifiOff, Loader2 } from "lucide-react"
 import App from "@/App"
 import {
@@ -13,6 +13,12 @@ import { revealSessionPath } from "@/lib/revealSession"
 import { useDevices } from "@/hooks/useDevices"
 import { SessionInventoryProvider } from "@/contexts/SessionInventoryContext"
 import { PendingHumanInputProvider } from "@/contexts/PendingHumanInputContext"
+import { Button } from "@/components/ui/button"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 
 /**
  * Owns the active device identity and remounts the whole {@link App} subtree
@@ -55,8 +61,6 @@ export function DeviceRoot() {
   const [badPassword, setBadPassword] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const { devices, testDevice } = useDevices()
-  const devicesRef = useRef(devices)
-  devicesRef.current = devices
 
   useEffect(() => {
     const sync = () => {
@@ -104,7 +108,7 @@ export function DeviceRoot() {
   // Device shortcuts: slot 1 is always this machine, 2..9 follow registry order.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const ids = [LOCAL_DEVICE_ID, ...devicesRef.current.map((d) => d.id)]
+      const ids = [LOCAL_DEVICE_ID, ...devices.map((device) => device.id)]
       const current = getActiveDeviceId()
       let target: string | undefined
       const index = matchDeviceSwitchIndex(event)
@@ -120,7 +124,7 @@ export function DeviceRoot() {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [devices])
 
   // Unreachable banner: authFetch dispatches this on any proxied 502.
   useEffect(() => {
@@ -172,31 +176,40 @@ export function DeviceRoot() {
   return (
     <>
       {unreachable && activeDeviceId !== LOCAL_DEVICE_ID && (
-        <div className="fixed inset-x-0 top-0 z-[9999] flex items-center justify-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-300 backdrop-blur">
-          <WifiOff className="size-3.5 shrink-0" />
-          <span>
-            {badPassword ? (
-              <><span className="font-medium">{deviceName}</span> rejected the stored password — update it in Devices</>
-            ) : (
-              <>Can’t reach <span className="font-medium">{deviceName}</span> — retrying…</>
+        <Alert
+          role="status"
+          className="fixed inset-x-3 top-3 z-40 mx-auto max-w-2xl border-warning/40 bg-popover shadow-md"
+        >
+          <WifiOff data-icon="inline-start" className="text-warning" />
+          <AlertTitle>
+            {badPassword ? "Device credentials need attention" : "Remote device unavailable"}
+          </AlertTitle>
+          <AlertDescription>
+            {badPassword
+              ? `${deviceName} rejected the stored password. Update it in Devices.`
+              : `Can’t reach ${deviceName}. Cogpit will keep retrying.`}
+          </AlertDescription>
+          <div className="col-start-2 mt-2 flex flex-wrap gap-2">
+            {!badPassword && (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => void retry()}
+                disabled={retrying}
+              >
+                {retrying && <Loader2 data-icon="inline-start" className="animate-spin" />}
+                {retrying ? "Retrying" : "Retry now"}
+              </Button>
             )}
-          </span>
-          {!badPassword && (
-            <button
-              onClick={() => void retry()}
-              disabled={retrying}
-              className="rounded border border-amber-500/40 px-2 py-0.5 hover:bg-amber-500/20 disabled:opacity-50"
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => switchDevice(LOCAL_DEVICE_ID)}
             >
-              {retrying ? <Loader2 className="size-3 animate-spin" /> : "Retry now"}
-            </button>
-          )}
-          <button
-            onClick={() => switchDevice(LOCAL_DEVICE_ID)}
-            className="rounded border border-amber-500/40 px-2 py-0.5 hover:bg-amber-500/20"
-          >
-            Switch to this machine
-          </button>
-        </div>
+              Switch to this machine
+            </Button>
+          </div>
+        </Alert>
       )}
       <SessionInventoryProvider key={`${activeDeviceId}:${connectionRevision}:${retryNonce}:${identityKey ?? ""}`}>
         <PendingHumanInputProvider>

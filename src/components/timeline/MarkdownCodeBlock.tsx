@@ -3,6 +3,8 @@ import { Check, Copy, ChevronDown, ChevronRight } from "lucide-react"
 import { highlightCode } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
 import { cn, copyToClipboard } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 // ── Language display name mapping ───────────────────────────────────────────
 
@@ -67,22 +69,24 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
       onClick={handleCopy}
-      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-white/5"
+      className="text-muted-foreground"
       title="Copy code"
       aria-label={copied ? "Copied" : "Copy code"}
     >
       {copied ? (
         <>
-          <Check className="w-3 h-3 text-green-400" />
-          <span className="text-green-400">Copied</span>
+          <Check className="text-success" data-icon="inline-start" />
+          <span className="text-success">Copied</span>
         </>
       ) : (
-        <Copy className="w-3 h-3" />
+        <Copy data-icon="icon" />
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -90,7 +94,7 @@ function CopyButton({ text }: { text: string }): React.ReactElement {
 
 function LineNumber({ num }: { num: number }): React.ReactElement {
   return (
-    <span className="inline-block w-8 text-right mr-3 text-muted-foreground/30 select-none text-[11px]">
+    <span className="mr-3 inline-block w-8 select-none text-right text-xs text-muted-foreground/60">
       {num}
     </span>
   )
@@ -112,7 +116,7 @@ export function MarkdownCodeBlock({ children, className, node: _node, ...rest }:
   if (isInline) {
     return (
       <code
-        className="text-[0.9em] font-mono px-1.5 py-0.5 rounded-md bg-elevation-2 text-orange-600 dark:text-orange-300 border border-border/30"
+        className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.9em] text-foreground"
         {...rest}
       >
         {children}
@@ -163,26 +167,28 @@ function HighlightedCodeBlock({
   const Chevron = collapsed ? ChevronRight : ChevronDown
 
   return (
-    <div className="my-3 rounded-lg border border-border/50 bg-elevation-1 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-elevation-2/50 border-b border-border/30">
+    <div className="my-3 overflow-hidden rounded-lg border border-border bg-muted/20">
+      <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-1.5">
         <div className="flex items-center gap-2">
           {isLong && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => setCollapsed(!collapsed)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              className="text-muted-foreground"
               aria-label={collapsed ? "Expand code" : "Collapse code"}
             >
-              <Chevron className="w-3.5 h-3.5" />
-            </button>
+              <Chevron data-icon="icon" />
+            </Button>
           )}
           {lang && (
-            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            <Badge variant="ghost" className="px-0 uppercase tracking-wide text-muted-foreground">
               {getLangDisplay(lang)}
-            </span>
+            </Badge>
           )}
           {isLong && (
-            <span className="text-[10px] text-muted-foreground/60">
+            <span className="text-xs text-muted-foreground">
               {lineCount} lines
             </span>
           )}
@@ -192,7 +198,7 @@ function HighlightedCodeBlock({
 
       {!collapsed && (
         <div className="overflow-x-auto">
-          <pre className="p-3 text-[12px] leading-[1.6] font-mono m-0">
+          <pre className="m-0 p-3 font-mono text-xs leading-relaxed">
             <code className={cn("block", !tokens && "text-foreground/90")} {...rest}>
               {lines.map((line, i) => {
                 const tokenLine = tokens?.[i]
@@ -216,14 +222,16 @@ function HighlightedCodeBlock({
       )}
 
       {collapsed && (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => setCollapsed(false)}
-          className="w-full px-3 py-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-elevation-2/30 transition-colors text-left"
+          className="h-auto w-full justify-start rounded-none px-3 py-2 text-xs text-muted-foreground"
           aria-label={`Expand ${lineCount} lines of code`}
         >
           Show {lineCount} lines...
-        </button>
+        </Button>
       )}
     </div>
   )

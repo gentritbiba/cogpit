@@ -1,10 +1,5 @@
 import type { ToolCall as ParsedToolCall } from "@/lib/types"
 
-// ─── Branch Colors ────────────────────────────────────────────
-
-export const BRANCH_COLORS = ["#3b82f6", "#a855f7", "#f59e0b", "#06b6d4", "#ec4899", "#22c55e"]
-export const BRANCH_INNER = ["#60a5fa", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6", "#4ade80"]
-
 /**
  * Compact preview for tools that carry a familiar input key.
  *

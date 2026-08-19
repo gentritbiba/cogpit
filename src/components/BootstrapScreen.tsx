@@ -1,19 +1,31 @@
-import { useState, useCallback } from "react"
-import { Eye, EyeOff, ShieldPlus } from "lucide-react"
+import { useCallback, useState } from "react"
+import { AlertCircle, AlertTriangle, Eye, EyeOff, ShieldPlus } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/Spinner"
 
-/**
- * First-run screen for a team server with no accounts. Creates the founding
- * admin through `POST /api/team/bootstrap`, which also issues the session
- * cookie — so a success lands straight in the app, exactly like a login.
- *
- * The server owns every rule; the checks here only keep an obviously incomplete
- * form from making a round trip. Its error strings are shown verbatim.
- */
-
-/** Mirrors the server rule so the button is not disabled without saying why. */
 const MIN_PASSWORD_LENGTH = 16
 const BOOTSTRAP_TOKEN_STATE_KEY = "__cogpitBootstrapToken"
 
@@ -27,9 +39,6 @@ function takeBootstrapToken(): string {
       : "")
 
   if (fromFragment) {
-    // Fragments are not sent to the server, proxies, or referrers. Remove the
-    // credential from the visible URL immediately, retaining it in this
-    // history entry so React StrictMode's development remount does not lose it.
     window.history.replaceState(
       { ...priorState, [BOOTSTRAP_TOKEN_STATE_KEY]: fromFragment },
       "",
@@ -46,9 +55,7 @@ function forgetBootstrapToken(): void {
 }
 
 interface BootstrapScreenProps {
-  /** Same handler LoginScreen uses — the session cookie is already set. */
   onAuthenticated: () => void
-  /** Re-read the server handshake once the bootstrap is no longer open. */
   onBootstrapClosed: () => Promise<void>
 }
 
@@ -68,15 +75,15 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
     || password.length < MIN_PASSWORD_LENGTH
     || confirmPassword !== password
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = useCallback(async (event: React.FormEvent) => {
+    event.preventDefault()
     if (incomplete) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const res = await fetch("/api/team/bootstrap", {
+      const response = await fetch("/api/team/bootstrap", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
@@ -92,8 +99,8 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
         }),
       })
 
-      const data = await res.json() as { error?: string }
-      if (res.ok) {
+      const data = await response.json() as { error?: string }
+      if (response.ok) {
         forgetBootstrapToken()
         setPassword("")
         setConfirmPassword("")
@@ -103,9 +110,7 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
         onAuthenticated()
         return
       }
-      if (res.status === 410) {
-        // Someone else founded the server first. Re-reading the handshake
-        // closes this screen and hands the browser to the login form.
+      if (response.status === 410) {
         forgetBootstrapToken()
         await onBootstrapClosed()
         return
@@ -116,100 +121,122 @@ export function BootstrapScreen({ onAuthenticated, onBootstrapClosed }: Bootstra
     } finally {
       setLoading(false)
     }
-  }, [username, displayName, password, bootstrapToken, incomplete, onAuthenticated, onBootstrapClosed])
+  }, [bootstrapToken, displayName, incomplete, onAuthenticated, onBootstrapClosed, password, username])
 
   return (
-    <div className="dark flex h-dvh items-center justify-center bg-elevation-0">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 px-6">
-        <div className="flex flex-col items-center gap-3 mb-6">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/10 border border-blue-500/20">
-            <ShieldPlus className="size-5 text-blue-400" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-lg font-semibold text-foreground">Create the first admin</h1>
-            <p className="text-sm text-muted-foreground">
-              This Cogpit team server has no accounts yet.
-            </p>
-          </div>
-        </div>
+    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8">
+      <form onSubmit={handleSubmit} className="w-full max-w-md">
+        <Card>
+          <CardHeader>
+            <div className="mb-2 flex size-9 items-center justify-center rounded-lg border bg-muted text-muted-foreground">
+              <ShieldPlus className="size-4" />
+            </div>
+            <CardTitle>Create the first admin</CardTitle>
+            <CardDescription>
+              Set up the account that will manage this Cogpit team server.
+            </CardDescription>
+          </CardHeader>
 
-        {!bootstrapToken && (
-          <p className="text-sm text-amber-400">
-            Open the one-time setup URL shown in the Cogpit server log.
-          </p>
-        )}
+          <CardContent className="flex flex-col gap-4">
+            {!bootstrapToken && (
+              <Alert>
+                <AlertTriangle aria-hidden="true" />
+                <AlertTitle>Setup link required</AlertTitle>
+                <AlertDescription>
+                  Open the one-time setup URL shown in the Cogpit server log.
+                </AlertDescription>
+              </Alert>
+            )}
 
-        <div className="space-y-1.5">
-          <Input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Username"
-            autoComplete="username"
-            className="bg-elevation-1 border-border/70 focus:border-border"
-            autoFocus
-          />
-          <p className="text-xs text-muted-foreground">
-            Lowercase letters, numbers, dots, underscores or hyphens. 2–32 characters.
-          </p>
-        </div>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="bootstrap-username">Username</FieldLabel>
+                <Input
+                  id="bootstrap-username"
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Username"
+                  autoComplete="username"
+                  autoFocus
+                />
+                <FieldDescription>
+                  Use 2 to 32 lowercase letters, numbers, dots, underscores, or hyphens.
+                </FieldDescription>
+              </Field>
 
-        <Input
-          type="text"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Display name (optional)"
-          autoComplete="name"
-          className="bg-elevation-1 border-border/70 focus:border-border"
-        />
+              <Field>
+                <FieldLabel htmlFor="bootstrap-display-name">
+                  Display name <span className="font-normal text-muted-foreground">Optional</span>
+                </FieldLabel>
+                <Input
+                  id="bootstrap-display-name"
+                  type="text"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Display name (optional)"
+                  autoComplete="name"
+                />
+              </Field>
 
-        <div className="space-y-1.5">
-          <div className="relative">
-            <Input
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              autoComplete="new-password"
-              className="pr-10 bg-elevation-1 border-border/70 focus:border-border"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            At least {MIN_PASSWORD_LENGTH} characters.
-          </p>
-        </div>
+              <Field>
+                <FieldLabel htmlFor="bootstrap-password">Password</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="bootstrap-password"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Password"
+                    autoComplete="new-password"
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton
+                      size="icon-xs"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff /> : <Eye />}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+                <FieldDescription>
+                  Use at least {MIN_PASSWORD_LENGTH} characters.
+                </FieldDescription>
+              </Field>
 
-        <Input
-          type={showPassword ? "text" : "password"}
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder="Confirm password"
-          autoComplete="new-password"
-          className="bg-elevation-1 border-border/70 focus:border-border"
-          aria-invalid={mismatch}
-        />
+              <Field data-invalid={mismatch}>
+                <FieldLabel htmlFor="bootstrap-confirm-password">Confirm password</FieldLabel>
+                <Input
+                  id="bootstrap-confirm-password"
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Confirm password"
+                  autoComplete="new-password"
+                  aria-invalid={mismatch}
+                />
+                {mismatch && <FieldError>Passwords do not match</FieldError>}
+              </Field>
+            </FieldGroup>
 
-        {mismatch && (
-          <p className="text-sm text-red-400">Passwords do not match</p>
-        )}
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle aria-hidden="true" />
+                <AlertTitle>Could not create the account</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
 
-        {error && (
-          <p className="text-sm text-red-400">{error}</p>
-        )}
-
-        <Button type="submit" className="w-full" disabled={loading || incomplete}>
-          {loading ? <Spinner className="size-4 mr-2" /> : null}
-          Create admin account
-        </Button>
+          <CardFooter>
+            <Button type="submit" className="w-full" disabled={loading || incomplete}>
+              {loading && <Spinner data-icon="inline-start" />}
+              Create admin account
+            </Button>
+          </CardFooter>
+        </Card>
       </form>
-    </div>
+    </main>
   )
 }

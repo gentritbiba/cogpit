@@ -5,6 +5,14 @@ import { shouldShowEmptyState } from "@/lib/timelinePaging"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { SessionImageGalleryProvider } from "./timeline/SessionImageGallery"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { MessageSquareText, SearchX } from "lucide-react"
 
 // ── Main component ───────────────────────────────────────────────────────────
 
@@ -47,9 +55,19 @@ export const ConversationTimeline = memo(function ConversationTimeline({
   return (
     <SessionImageGalleryProvider>
       {showEmptyState ? (
-        <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-          {searchQuery ? "No turns match your search." : "No turns in this session."}
-        </div>
+        <Empty className="min-h-64 border-0">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              {searchQuery ? <SearchX /> : <MessageSquareText />}
+            </EmptyMedia>
+            <EmptyTitle>{searchQuery ? "No matching turns" : "No conversation yet"}</EmptyTitle>
+            <EmptyDescription>
+              {searchQuery
+                ? "Try a different search term."
+                : "Messages and tool activity will appear here."}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <VirtualizedTimeline
           // Remount per session so the height cache and prepend detection

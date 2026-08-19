@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 import { CommandPalette } from "@/components/CommandPalette"
 import { createCommandPaletteProps as createProps } from "./commandPaletteProps"
 
+Element.prototype.scrollIntoView = vi.fn()
+
 describe("CommandPalette", () => {
   it("runs an action and closes the palette", async () => {
     const user = userEvent.setup()

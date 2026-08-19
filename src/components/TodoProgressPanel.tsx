@@ -2,6 +2,13 @@ import { memo, useState } from "react"
 import { ChevronDown, ChevronUp, Circle, CircleCheck, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TodoProgress } from "@/hooks/useTodoProgress"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 
 interface TodoProgressPanelProps {
   progress: TodoProgress
@@ -17,62 +24,41 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
   const [internalExpanded, setInternalExpanded] = useState(false)
   const expanded = controlledExpanded ?? internalExpanded
 
-  function toggleExpanded(): void {
-    const next = !expanded
-    onExpandedChange?.(next)
-    setInternalExpanded(next)
-  }
-
   const { todos, completed, total } = progress
   const pct = total > 0 ? (completed / total) * 100 : 0
 
   return (
-    <div className="shrink-0 bg-elevation-1">
-      {/* Header — always visible */}
-      <button
-        type="button"
-        onClick={toggleExpanded}
-        className="flex w-full items-center gap-2.5 py-1.5 text-left transition-colors hover:bg-elevation-2 rounded-md px-2"
+    <Collapsible
+      open={expanded}
+      onOpenChange={(next) => {
+        onExpandedChange?.(next)
+        setInternalExpanded(next)
+      }}
+      className="shrink-0 border-t bg-background"
+    >
+      <CollapsibleTrigger
+        render={<Button type="button" variant="ghost" className="h-auto w-full justify-start rounded-none px-3 py-2" />}
       >
         {expanded ? (
-          <ChevronDown className="size-3 text-muted-foreground" />
+          <ChevronDown data-icon="inline-start" />
         ) : (
-          <ChevronUp className="size-3 text-muted-foreground" />
+          <ChevronUp data-icon="inline-start" />
         )}
-        <span className="text-[11px] font-medium text-muted-foreground">
-          Tasks
-        </span>
-        <span className="text-[10px] font-mono tabular-nums text-muted-foreground">
+        <span className="text-sm font-medium">Tasks</span>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
           {completed}/{total}
         </span>
-
-        {/* Progress bar */}
-        <div className="flex-1 max-w-[200px]">
-          <div className="h-1 rounded-full bg-elevation-2 overflow-hidden">
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width] duration-500",
-                pct === 100
-                  ? "bg-green-500"
-                  : "bg-blue-500"
-              )}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Active task label */}
+        <Progress value={pct} className="max-w-[200px] flex-1" aria-label={`${pct.toFixed(0)}% of tasks complete`} />
         {progress.inProgress && (
-          <span className="flex items-center gap-1 text-[10px] text-blue-400 truncate min-w-0">
-            <Loader2 className="size-2.5 animate-spin shrink-0" />
+          <span className="flex min-w-0 items-center gap-1 truncate text-xs text-info">
+            <Loader2 className="size-3 shrink-0 animate-spin" />
             <span className="truncate">{progress.inProgress.activeForm}</span>
           </span>
         )}
-      </button>
+      </CollapsibleTrigger>
 
-      {/* Task list — collapsible */}
-      {expanded && (
-        <div className="pb-2 pt-0.5 px-2">
+      <CollapsibleContent>
+        <div className="px-3 pb-3 pt-1">
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             {todos.map((todo, i) => (
               <div
@@ -80,17 +66,17 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                 className="flex items-center gap-1.5 min-w-0"
               >
                 {todo.status === "completed" ? (
-                  <CircleCheck className="size-3 shrink-0 text-green-500/70" />
+                  <CircleCheck className="size-3 shrink-0 text-success" />
                 ) : todo.status === "in_progress" ? (
-                  <Loader2 className="size-3 shrink-0 text-blue-400 animate-spin" />
+                  <Loader2 className="size-3 shrink-0 animate-spin text-info" />
                 ) : (
                   <Circle className="size-3 shrink-0 text-muted-foreground" />
                 )}
                 <span
                   className={cn(
-                    "text-[11px] truncate",
+                    "truncate text-xs",
                     todo.status === "in_progress"
-                      ? "text-blue-300"
+                      ? "text-foreground"
                       : "text-muted-foreground",
                     todo.status === "completed" && "line-through",
                   )}
@@ -98,7 +84,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
                   {todo.content}
                 </span>
                 {todo.owner && (
-                  <span className="shrink-0 text-[9px] text-muted-foreground/70">
+                  <span className="shrink-0 text-xs text-muted-foreground">
                     {todo.owner}
                   </span>
                 )}
@@ -106,7 +92,7 @@ export const TodoProgressPanel = memo(function TodoProgressPanel({
             ))}
           </div>
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 })

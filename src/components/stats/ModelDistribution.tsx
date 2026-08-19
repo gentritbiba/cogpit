@@ -18,11 +18,11 @@ export function ModelDistribution({ turns }: { turns: Turn[] }): React.JSX.Eleme
   return (
     <section>
       <SectionHeading>Models</SectionHeading>
-      <div className="space-y-1">
+      <div className="flex flex-col gap-1">
         {models.map(([model, count]) => (
           <div
             key={model}
-            className="flex items-center justify-between rounded elevation-2 depth-low px-2.5 py-1.5 text-[11px]"
+            className="flex items-center justify-between rounded-md border bg-card px-2.5 py-1.5 text-xs"
           >
             <span className="truncate text-foreground">{model}</span>
             <span className="ml-2 shrink-0 text-muted-foreground">{count}</span>

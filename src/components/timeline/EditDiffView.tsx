@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { getHighlighter, ensureLang, getLangFromPath, type ThemedToken } from "@/lib/shiki"
 import { useIsDarkMode } from "@/hooks/useIsDarkMode"
+import { Button } from "@/components/ui/button"
 
 // ── Simple line-level diff (LCS-based, optimized) ──────────────────────────
 
@@ -192,20 +193,20 @@ function useHighlightedTokens(
 // ── Diff line style lookups ─────────────────────────────────────────────────
 
 const LINE_BG: Record<DiffLine["type"], string> = {
-  removed: "bg-red-50 dark:bg-red-950/40",
-  added: "bg-green-50 dark:bg-green-950/40",
+  removed: "bg-destructive/10",
+  added: "bg-success/10",
   unchanged: "",
 }
 
 const GUTTER_STYLE: Record<DiffLine["type"], string> = {
-  removed: "text-red-500/50 border-red-500/20",
-  added: "text-green-500/50 border-green-500/20",
-  unchanged: "text-muted-foreground border-border/40",
+  removed: "border-destructive/20 text-destructive/70",
+  added: "border-success/20 text-success/70",
+  unchanged: "border-border text-muted-foreground",
 }
 
 const PLAIN_TEXT_STYLE: Record<DiffLine["type"], string> = {
-  removed: "text-red-700 dark:text-red-300",
-  added: "text-green-700 dark:text-green-300",
+  removed: "text-destructive",
+  added: "text-success",
   unchanged: "text-muted-foreground",
 }
 
@@ -243,9 +244,9 @@ function resolveTokens(
 
 function GutterIcon({ type }: { type: DiffLine["type"] }): React.ReactElement {
   switch (type) {
-    case "removed": return <Minus className="w-3 h-3 inline" />
-    case "added":   return <Plus className="w-3 h-3 inline" />
-    default:        return <span className="text-[9px]">&nbsp;</span>
+    case "removed": return <Minus className="inline size-3" data-icon="icon" />
+    case "added":   return <Plus className="inline size-3" data-icon="icon" />
+    default:        return <span className="inline-block size-3" aria-hidden="true" />
   }
 }
 
@@ -298,14 +299,17 @@ function collapseUnchangedLines(lines: DiffLine[]): CollapsedItem[] {
 
 function CollapsedSeparator({ count, onExpand }: { count: number; onExpand: () => void }) {
   return (
-    <button
+    <Button
+      type="button"
+      variant="ghost"
+      size="xs"
       onClick={onExpand}
-      className="flex items-center w-full gap-2 px-2 py-0.5 text-[9px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-elevation-2/50 transition-colors cursor-pointer select-none"
+      className="h-auto w-full justify-start rounded-none px-2 py-1 text-xs text-muted-foreground"
     >
-      <ChevronsUpDown className="size-2.5 shrink-0" />
+      <ChevronsUpDown className="shrink-0" data-icon="inline-start" />
       <span className="font-mono">{count} unchanged lines</span>
-      <span className="flex-1 border-b border-border/20" />
-    </button>
+      <span className="flex-1 border-b border-border" />
+    </Button>
   )
 }
 
@@ -325,7 +329,7 @@ const DiffLineRow = memo(function DiffLineRow({
   const tokens = resolveTokens(line, oldTokens, newTokens)
   return (
     <div className={cn("flex", LINE_BG[line.type])}>
-      <span className={cn("select-none shrink-0 w-8 text-right pr-1 text-[9px] leading-[1.95] border-r tabular-nums", GUTTER_STYLE[line.type])}>
+      <span className={cn("w-8 shrink-0 select-none border-r pr-1 text-right text-xs leading-relaxed tabular-nums", GUTTER_STYLE[line.type])}>
         {lineNum}
       </span>
       <span className={cn("select-none shrink-0 w-5 text-right pr-1 border-r", GUTTER_STYLE[line.type])}>
@@ -396,7 +400,7 @@ function DiffLines({
   return (
     <div
       className={cn(
-        "font-mono text-[11px] leading-[1.6] overflow-x-auto",
+        "overflow-x-auto font-mono text-xs leading-relaxed",
         compact && "max-h-64 overflow-y-auto"
       )}
     >
@@ -455,10 +459,10 @@ function DiffStats({ lines }: { lines: DiffLine[] }): React.ReactElement {
     return { added, removed }
   }, [lines])
   return (
-    <span className="text-[10px] text-muted-foreground font-mono">
-      {removed > 0 && <span className="text-red-400">-{removed}</span>}
+    <span className="font-mono text-xs text-muted-foreground">
+      {removed > 0 && <span className="text-destructive">-{removed}</span>}
       {removed > 0 && added > 0 && " "}
-      {added > 0 && <span className="text-green-400">+{added}</span>}
+      {added > 0 && <span className="text-success">+{added}</span>}
     </span>
   )
 }
@@ -500,25 +504,29 @@ export function EditDiffView({
   return (
     <>
       <div className={cn(
-        "rounded border border-border/40 bg-elevation-1 overflow-hidden",
+        "overflow-hidden rounded border border-border bg-muted/20",
         isCompact && "mt-1.5",
         hideHeader && "border-0 rounded-none"
       )}>
         {!hideHeader && (
-          <div className="flex items-center justify-between px-2 py-1 border-b border-border/40 bg-elevation-1">
-            <span className="text-[10px] text-muted-foreground font-mono truncate">
+          <div className="flex items-center justify-between border-b border-border bg-muted/40 px-2 py-1">
+            <span className="truncate font-mono text-xs text-muted-foreground">
               {shortPath}
             </span>
             <div className="flex items-center gap-2">
               <DiffStats lines={lines} />
               {isCompact && (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => setModalOpen(true)}
-                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded hover:bg-elevation-2"
+                  className="text-muted-foreground"
                   title="Expand diff"
+                  aria-label="Expand diff"
                 >
-                  <Maximize2 className="w-3 h-3" />
-                </button>
+                  <Maximize2 data-icon="icon" />
+                </Button>
               )}
             </div>
           </div>
@@ -534,7 +542,7 @@ export function EditDiffView({
 
       {isCompact && (
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col bg-elevation-0 border-border/40">
+          <DialogContent className="flex max-h-[85vh] flex-col border-border bg-background sm:max-w-4xl">
             <DialogHeader>
               <DialogTitle className="font-mono text-sm text-foreground flex items-center gap-3">
                 {filePath}
@@ -544,7 +552,7 @@ export function EditDiffView({
                 Diff view for edit operation
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-auto rounded border border-border/40 bg-elevation-0">
+            <div className="flex-1 overflow-auto rounded border border-border bg-background">
               <DiffLines
                 lines={lines}
                 oldTokens={oldTokens}

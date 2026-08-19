@@ -13,7 +13,20 @@ import {
   ZoomOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Field, FieldError, FieldGroup } from "@/components/ui/field"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
@@ -120,7 +133,11 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
   const [width, setWidth] = useState(loadWidth)
   const [viewport, setViewport] = useState<PreviewViewport>(loadViewport)
   const [zoom, setZoom] = useState(loadZoom)
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const dragRef = useRef<{
+    startX: number
+    startWidth: number
+    currentWidth: number
+  } | null>(null)
   const panelRef = useRef<HTMLElement>(null)
   const urlInputRef = useRef<HTMLInputElement>(null)
 
@@ -252,7 +269,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
 
   const handlePointerDown = useCallback((event: React.PointerEvent) => {
     event.preventDefault()
-    dragRef.current = { startX: event.clientX, startWidth: width }
+    dragRef.current = { startX: event.clientX, startWidth: width, currentWidth: width }
     ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
   }, [width])
 
@@ -260,27 +277,27 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
     if (!dragRef.current) return
     const maxWidth = Math.max(MIN_WIDTH, window.innerWidth * 0.7)
     const next = dragRef.current.startWidth + (dragRef.current.startX - event.clientX)
-    setWidth(Math.min(maxWidth, Math.max(MIN_WIDTH, next)))
+    const nextWidth = Math.min(maxWidth, Math.max(MIN_WIDTH, next))
+    dragRef.current.currentWidth = nextWidth
+    setWidth(nextWidth)
   }, [])
 
   const handlePointerUp = useCallback(() => {
     if (!dragRef.current) return
+    const finalWidth = dragRef.current.currentWidth
     dragRef.current = null
-    setWidth((current) => {
-      try {
-        localStorage.setItem(WIDTH_KEY, String(current))
-      } catch {
-        // Ignore persistence failures.
-      }
-      return current
-    })
+    try {
+      localStorage.setItem(WIDTH_KEY, String(finalWidth))
+    } catch {
+      // Ignore persistence failures.
+    }
   }, [])
 
   return (
     <aside
       ref={panelRef}
       aria-label="Development preview"
-      className="relative flex min-h-0 shrink-0 flex-col border-l border-border bg-elevation-0"
+      className="relative flex min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width }}
     >
       <div
@@ -304,43 +321,47 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
       <Separator />
 
       <form
-        className="flex items-center gap-1.5 p-2"
+        className="p-2"
         onSubmit={(event) => {
           event.preventDefault()
           navigate(draft)
         }}
       >
-        <Input
-          ref={urlInputRef}
-          aria-label="Preview URL"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="localhost:3000"
-          spellCheck={false}
-        />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          type="button"
-          disabled={!url}
-          onClick={refresh}
-          aria-label="Refresh preview"
-        >
-          <RefreshCw data-icon="inline-start" className={loading ? "animate-spin" : undefined} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          type="button"
-          disabled={!url}
-          onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-          aria-label="Open preview in browser"
-        >
-          <ExternalLink data-icon="inline-start" />
-        </Button>
+        <FieldGroup className="gap-2">
+          <Field data-invalid={Boolean(urlError)}>
+            <InputGroup>
+              <InputGroupInput
+                ref={urlInputRef}
+                aria-label="Preview URL"
+                aria-invalid={Boolean(urlError)}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="localhost:3000"
+                spellCheck={false}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  disabled={!url}
+                  onClick={refresh}
+                  aria-label="Refresh preview"
+                >
+                  <RefreshCw data-icon="inline-start" className={loading ? "animate-spin" : undefined} />
+                </InputGroupButton>
+                <InputGroupButton
+                  size="icon-xs"
+                  disabled={!url}
+                  onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                  aria-label="Open preview in browser"
+                >
+                  <ExternalLink data-icon="inline-start" />
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+            <FieldError>{urlError}</FieldError>
+          </Field>
+        </FieldGroup>
       </form>
-
-      {urlError && <p role="alert" className="px-3 pb-2 text-xs text-destructive">{urlError}</p>}
 
       {activePorts.length > 0 && (
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto px-2 pb-2">
@@ -349,10 +370,10 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
             <Button
               key={port}
               variant="outline"
-              size="sm"
-              className="h-6 px-2 font-mono text-[10px]"
+              size="xs"
+              className="font-mono text-xs"
               onClick={() => navigate(urlForPort(port, previewHost))}
-              aria-label={`Open localhost:${port} preview`}
+              aria-label={`Open ${previewHost}:${port} preview`}
             >
               :{port}
             </Button>
@@ -422,7 +443,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
         {url ? (
           <div
             className={cn(
-              "relative mx-auto overflow-hidden bg-white shadow-sm",
+              "relative mx-auto overflow-hidden bg-white ring-1 ring-border",
               viewport === "responsive" && "size-full",
             )}
             style={viewport === "responsive" ? undefined : {
@@ -452,13 +473,15 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
             />
           </div>
         ) : (
-          <div className="flex size-full flex-col items-center justify-center gap-2 p-8 text-center">
-            <Globe2 aria-hidden="true" className="size-8 text-muted-foreground" />
-            <p className="text-sm font-medium">No preview selected</p>
-            <p className="max-w-sm text-xs text-muted-foreground">
-              Start a local development server or enter its URL above. Detected ports appear automatically.
-            </p>
-          </div>
+          <Empty className="size-full">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Globe2 /></EmptyMedia>
+              <EmptyTitle>No preview selected</EmptyTitle>
+              <EmptyDescription>
+                Start a local development server or enter its URL above. Detected ports appear automatically.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </div>
     </aside>

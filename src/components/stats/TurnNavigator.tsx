@@ -6,6 +6,7 @@ import type { Turn } from "@/lib/types"
 import { truncate } from "@/lib/format"
 import { getUserMessageText } from "@/lib/parser"
 import { getTurnKey } from "@/components/stats/turnKey"
+import { Button } from "@/components/ui/button"
 
 interface TurnNavigatorProps {
   turns: Turn[]
@@ -26,21 +27,22 @@ export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): Reac
             const preview = getUserMessageText(turn.userMessage)
             const isActive = activeTurn === i
             return (
-              <button
+              <Button
                 key={getTurnKey(turn, i)}
                 type="button"
+                variant="ghost"
                 onClick={() => {
                   setActiveTurn(i)
                   onJumpToTurn?.(i)
                 }}
                 className={cn(
-                  "group flex items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                  "group h-auto w-full justify-start gap-2 px-2 py-1.5 text-left font-normal",
                   isActive
-                    ? "bg-elevation-2 text-foreground"
-                    : "text-muted-foreground hover:bg-elevation-1 hover:text-foreground"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
-                <span className="mt-0.5 shrink-0 text-[10px] font-mono text-muted-foreground">
+                <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground">
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs">
@@ -50,13 +52,13 @@ export function TurnNavigator({ turns, onJumpToTurn }: TurnNavigatorProps): Reac
                   {turn.toolCalls.length > 0 && (
                     <Badge
                       variant="secondary"
-                      className="h-4 px-1 text-[10px] font-normal"
+                      className="font-normal"
                     >
                       {turn.toolCalls.length}
                     </Badge>
                   )}
                 </span>
-              </button>
+              </Button>
             )
           })}
         </div>

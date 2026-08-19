@@ -89,28 +89,28 @@ export interface StatusStyle {
 export function workflowStatusStyle(status: string): StatusStyle {
   switch (status) {
     case "completed":
-      return { label: "Completed", badge: "text-emerald-400 border-emerald-700/50 bg-emerald-500/10", dot: "bg-emerald-500" }
+      return { label: "Completed", badge: "border-success/30 bg-success/10 text-success", dot: "bg-success" }
     case "failed":
-      return { label: "Failed", badge: "text-red-400 border-red-700/50 bg-red-500/10", dot: "bg-red-500" }
+      return { label: "Failed", badge: "border-destructive/30 bg-destructive/10 text-destructive", dot: "bg-destructive" }
     case "killed":
-      return { label: "Stopped", badge: "text-amber-400 border-amber-700/50 bg-amber-500/10", dot: "bg-amber-500" }
+      return { label: "Stopped", badge: "border-warning/30 bg-warning/10 text-warning", dot: "bg-warning" }
     default:
-      return { label: "Running", badge: "text-blue-400 border-blue-700/50 bg-blue-500/10", dot: "bg-blue-500" }
+      return { label: "Running", badge: "border-info/30 bg-info/10 text-info", dot: "bg-info" }
   }
 }
 
 export function agentStateStyle(state: string): StatusStyle {
   switch (state) {
     case "done":
-      return { label: "Done", badge: "text-emerald-400 border-emerald-700/50 bg-emerald-500/10", dot: "bg-emerald-500" }
+      return { label: "Done", badge: "border-success/30 bg-success/10 text-success", dot: "bg-success" }
     case "skipped":
-      return { label: "Skipped", badge: "text-zinc-400 border-border bg-muted/30", dot: "bg-zinc-500" }
+      return { label: "Skipped", badge: "border-border bg-muted/30 text-muted-foreground", dot: "bg-muted-foreground" }
     case "error":
-      return { label: "Error", badge: "text-red-400 border-red-700/50 bg-red-500/10", dot: "bg-red-500" }
+      return { label: "Error", badge: "border-destructive/30 bg-destructive/10 text-destructive", dot: "bg-destructive" }
     case "queued":
-      return { label: "Queued", badge: "text-zinc-400 border-border bg-muted/30", dot: "bg-zinc-500" }
+      return { label: "Queued", badge: "border-border bg-muted/30 text-muted-foreground", dot: "bg-muted-foreground" }
     default:
-      return { label: "Running", badge: "text-blue-400 border-blue-700/50 bg-blue-500/10", dot: "bg-blue-500" }
+      return { label: "Running", badge: "border-info/30 bg-info/10 text-info", dot: "bg-info" }
   }
 }
 

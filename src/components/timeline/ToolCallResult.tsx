@@ -5,7 +5,7 @@ import { getLangFromPath, highlightCode } from "@/lib/shiki"
 type TokenLine = Array<{ content: string; color?: string }>
 
 const CODE_BLOCK_CLASS =
-  "text-[11px] font-mono whitespace-pre-wrap break-all rounded p-2 max-h-96 overflow-y-auto border text-muted-foreground bg-elevation-0 border-border/30 leading-[1.6]"
+  "max-h-96 overflow-y-auto whitespace-pre-wrap break-all rounded-md border bg-muted/30 p-2 font-mono text-xs leading-relaxed text-muted-foreground"
 
 function useHighlightedTokens(
   code: string,

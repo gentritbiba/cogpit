@@ -1,33 +1,22 @@
 import { Fragment, useMemo } from "react"
-import {
-  Cog,
-  RefreshCw,
-  FolderOpen,
-  Clock,
-  ChevronRight,
-  FileText,
-  Activity,
-  Keyboard,
-} from "lucide-react"
+import { ChevronRight, FolderOpen, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { ProjectFavicon } from "@/components/ProjectFavicon"
-import { cn } from "@/lib/utils"
-import { formatRelativeTime, shortPath, projectName } from "@/lib/format"
-import { useProjectNames } from "@/hooks/useProjectNames"
-import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import {
-  DEVICE_CYCLE_COMMAND,
-  DEVICE_SWITCH_COMMANDS,
-  KEYBINDING_DEFINITIONS,
-  KEYBINDING_GROUPS,
-  formatShortcut,
-  shortcutLabel,
-  type KeybindingCommand,
-  type KeybindingShortcut,
-} from "@/lib/keybindings"
-import { SearchInput, ErrorBanner, SkeletonCards, LiveDot, Shortcut } from "./DashboardWidgets"
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { ProjectFavicon } from "@/components/ProjectFavicon"
+import { ProjectContextMenu } from "@/components/ProjectContextMenu"
+import { useProjectNames } from "@/hooks/useProjectNames"
+import { cn } from "@/lib/utils"
+import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
+import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
 
 interface ProjectInfo {
   dirName: string
@@ -44,77 +33,6 @@ interface ActiveSessionInfo {
 
 const LIVE_THRESHOLD_MS = 2 * 60 * 1000
 
-/**
- * Device switching has its own switcher UI plus nine near-identical chords, so
- * the quick card leaves that family to the full shortcuts dialog.
- */
-const DEVICE_COMMANDS = new Set<KeybindingCommand>([...DEVICE_SWITCH_COMMANDS, DEVICE_CYCLE_COMMAND])
-
-/**
- * The only two chords that cannot live in the keybinding registry, so they are
- * the only two spelled out here. Session jump matches on `event.code` (the
- * registry compares `event.key`, which Shift turns into a symbol), and Escape
- * has no editable-target guard, so allowing a rebind to a printable key would
- * clear the search on every keystroke. Every other chord is generated from the
- * registry above — repeating one here would leave a stale row after a rebind.
- */
-const FIXED_SHORTCUTS: { shortcut: KeybindingShortcut; label: string }[] = [
-  { shortcut: { key: "1\u20139", modKey: true, shiftKey: true }, label: "Jump to Nth live session" },
-  { shortcut: { key: "escape" }, label: "Clear search" },
-]
-
-interface ShortcutSection {
-  title: string
-  rows: { id: string; keys: string; label: string }[]
-}
-
-/**
- * Chords that only fire once a particular panel is already open, so they are
- * noise on a dashboard where no panel is. They stay in the full reference that
- * `?` opens; this card is a starting point, not a manual.
- */
-const PANEL_SUBACTIONS = new Set<KeybindingCommand>([
-  "newIntegratedTerminal",
-  "closeIntegratedTerminal",
-  "previewRefresh",
-  "previewFocusUrl",
-  "previewZoomIn",
-  "previewZoomOut",
-  "previewResetZoom",
-  "projectFileSave",
-])
-
-/**
- * The cheat sheet, read out of the keybinding registry so a rebind shows up
- * here too. Called during render rather than memoized because the resolved
- * chords change the moment the user edits them.
- */
-function buildShortcutSections(): ShortcutSection[] {
-  return [
-    ...KEYBINDING_GROUPS.map((group) => ({
-      title: group,
-      rows: KEYBINDING_DEFINITIONS
-        .filter((definition) =>
-          definition.group === group
-          && !DEVICE_COMMANDS.has(definition.command)
-          && !PANEL_SUBACTIONS.has(definition.command))
-        .map((definition) => ({
-          id: definition.command,
-          keys: shortcutLabel(definition.command),
-          label: definition.label,
-        })),
-    })),
-    {
-      title: "Navigation",
-      rows: FIXED_SHORTCUTS.map((item) => ({
-        id: item.label,
-        keys: formatShortcut(item.shortcut),
-        label: item.label,
-      })),
-    },
-  ]
-}
-
 function isLive(lastModified: string | null): boolean {
   if (!lastModified) return false
   return Date.now() - new Date(lastModified).getTime() < LIVE_THRESHOLD_MS
@@ -126,7 +44,7 @@ interface ProjectsViewProps {
   loading: boolean
   refreshing: boolean
   searchFilter: string
-  setSearchFilter: (v: string) => void
+  setSearchFilter: (value: string) => void
   fetchError: string | null
   selectedProjectDirName: string | null
   onSelectProject?: (dirName: string | null) => void
@@ -146,179 +64,151 @@ export function ProjectsView({
   onRefresh,
 }: ProjectsViewProps) {
   const activeCountByProject = useMemo(() => {
-    const map: Record<string, number> = {}
-    for (const s of activeSessions) {
-      if (isLive(s.lastModified)) {
-        map[s.dirName] = (map[s.dirName] || 0) + 1
+    const counts: Record<string, number> = {}
+    for (const session of activeSessions) {
+      if (isLive(session.lastModified)) {
+        counts[session.dirName] = (counts[session.dirName] || 0) + 1
       }
     }
-    return map
+    return counts
   }, [activeSessions])
 
   const { names: projectNames, rename: renameProject } = useProjectNames()
 
-  const shortcutSections = buildShortcutSections()
-
   const filteredProjects = useMemo(() => {
     if (!searchFilter) return projects
-    const q = searchFilter.toLowerCase()
-    return projects.filter(
-      (p) =>
-        p.path.toLowerCase().includes(q) ||
-        p.shortName.toLowerCase().includes(q) ||
-        (projectNames[p.dirName]?.toLowerCase().includes(q))
+    const query = searchFilter.toLowerCase()
+    return projects.filter((project) =>
+      project.path.toLowerCase().includes(query)
+      || project.shortName.toLowerCase().includes(query)
+      || projectNames[project.dirName]?.toLowerCase().includes(query),
     )
-  }, [projects, searchFilter, projectNames])
+  }, [projects, projectNames, searchFilter])
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto max-w-5xl px-3 py-4 sm:px-6 sm:py-8 fade-in">
-        {/* Header */}
-        <div className="mb-4 sm:mb-8">
-          <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
-            <Cog className="size-5 sm:size-7 text-blue-400" />
-            <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-foreground">
-              Cogpit
-            </h1>
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+        <header className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
+            <Badge variant="secondary">{projects.length}</Badge>
           </div>
-          <p className="text-xs sm:text-sm text-muted-foreground">Session Viewer & Monitor</p>
-        </div>
+          <p className="text-sm text-muted-foreground">
+            Open a project to browse and resume its sessions.
+          </p>
+        </header>
 
-        {/* Projects Section */}
-        <div className="mb-4 sm:mb-8">
-          <div className="flex items-center gap-3 mb-3 sm:mb-4">
-            <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
-              Projects
-            </h2>
-            <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-medium">
-              {projects.length}
-            </Badge>
-            <div className="flex-1" />
+        <section className="flex flex-col gap-4" aria-label="Projects">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <SearchInput
+              value={searchFilter}
+              onChange={setSearchFilter}
+              placeholder="Filter projects..."
+            />
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
               onClick={onRefresh}
               disabled={refreshing}
               aria-label="Refresh projects"
             >
-              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+              <RefreshCw
+                data-icon="inline-start"
+                className={cn(refreshing && "animate-spin")}
+              />
+              Refresh
             </Button>
           </div>
 
-          <SearchInput value={searchFilter} onChange={setSearchFilter} placeholder="Filter projects..." />
-
           {fetchError && !selectedProjectDirName && (
-            <ErrorBanner
-              message={fetchError}
-              onRetry={onRefresh}
-            />
+            <ErrorBanner message={fetchError} onRetry={onRefresh} />
           )}
 
           {loading ? (
-            <SkeletonCards />
+            <SkeletonRows />
           ) : filteredProjects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-elevation-1 py-12 px-6 text-center">
-              <Activity className="size-8 text-muted-foreground mb-3" />
-              <p className="text-sm text-muted-foreground">
-                {searchFilter ? "No matching projects" : "No projects found. Start Claude Code or Codex to see projects here."}
-              </p>
-            </div>
+            <Empty className="min-h-72 border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FolderOpen />
+                </EmptyMedia>
+                <EmptyTitle>
+                  {searchFilter ? "No projects match your search" : "No projects yet"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {searchFilter
+                    ? "Try a project name or path."
+                    : "Start Claude Code or Codex and its project will appear here."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredProjects.map((project) => {
+            <div className="overflow-hidden rounded-lg border bg-card">
+              {filteredProjects.map((project, index) => {
                 const activeCount = activeCountByProject[project.dirName] || 0
-                const custom = projectNames[project.dirName]
+                const customName = projectNames[project.dirName]
 
                 return (
-                  <ProjectContextMenu
-                    key={project.dirName}
-                    projectLabel={projectName(project.path)}
-                    customName={custom}
-                    onRename={(name) => renameProject(project.dirName, name)}
-                  >
-                    <button
-                      onClick={() => onSelectProject?.(project.dirName)}
-                      className={cn(
-                        "card-glow group relative rounded-lg elevation-1 p-4 text-left transition-smooth",
-                        "hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40",
-                        activeCount > 0 && "border-l-[3px] border-l-green-500"
-                      )}
+                  <Fragment key={project.dirName}>
+                    {index > 0 && <Separator />}
+                    <ProjectContextMenu
+                      projectLabel={projectName(project.path)}
+                      customName={customName}
+                      onRename={(name) => renameProject(project.dirName, name)}
                     >
-                      <div className="flex items-center gap-2.5 mb-2">
-                        <ProjectFavicon
-                          projectPath={project.path}
-                          className="size-4"
-                          fallback={
-                            <FolderOpen className="size-4 shrink-0 text-muted-foreground group-hover:text-blue-400 transition-colors" />
-                          }
-                        />
-                        <span className="text-sm font-medium text-foreground truncate flex-1">
-                          {custom || projectName(project.path)}
-                        </span>
-                        <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
-                      </div>
-
-                      <p className="text-[11px] text-muted-foreground mb-3 truncate font-mono">
-                        {shortPath(project.path)}
-                      </p>
-
-                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <FileText className="size-3" />
-                          {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
-                        </span>
-                        {activeCount > 0 && (
-                          <span className="flex items-center gap-1 text-green-400">
-                            <LiveDot size="sm" />
-                            {activeCount} active
+                      <button
+                        type="button"
+                        onClick={() => onSelectProject?.(project.dirName)}
+                        className="group flex w-full flex-col gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-row sm:items-center"
+                      >
+                        <span className="flex min-w-0 flex-1 items-center gap-3">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40">
+                            <ProjectFavicon
+                              projectPath={project.path}
+                              className="size-4"
+                              fallback={<FolderOpen className="size-4 text-muted-foreground" />}
+                            />
                           </span>
-                        )}
-                        {project.lastModified && (
-                          <span className="flex items-center gap-1 ml-auto shrink-0">
-                            <Clock className="size-3" />
-                            {formatRelativeTime(project.lastModified)}
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">
+                              {customName || projectName(project.path)}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {shortPath(project.path)}
+                            </span>
                           </span>
-                        )}
-                      </div>
-
-                      {activeCount > 0 && (
-                        <span className="absolute top-3 right-3">
-                          <LiveDot />
                         </span>
-                      )}
-                    </button>
-                  </ProjectContextMenu>
+
+                        <span className="flex items-center gap-4 pl-11 text-sm text-muted-foreground sm:pl-0">
+                          {activeCount > 0 && (
+                            <Badge variant="secondary">
+                              <span
+                                aria-hidden="true"
+                                data-icon="inline-start"
+                                className="size-1.5 rounded-full bg-success"
+                              />
+                              {activeCount} active
+                            </Badge>
+                          )}
+                          <span className="whitespace-nowrap">
+                            {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
+                          </span>
+                          {project.lastModified && (
+                            <span className="hidden w-24 whitespace-nowrap text-right md:inline">
+                              {formatRelativeTime(project.lastModified)}
+                            </span>
+                          )}
+                          <ChevronRight className="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                        </span>
+                      </button>
+                    </ProjectContextMenu>
+                  </Fragment>
                 )
               })}
             </div>
           )}
-        </div>
-
-        {/* Keyboard shortcuts (hidden on mobile — not useful for touch) */}
-        <div className="mt-6 rounded-lg bg-elevation-1 px-5 py-4 hidden sm:block">
-          <div className="flex items-center gap-2 mb-3">
-            <Keyboard className="size-3.5 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">Keyboard Shortcuts</span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11px]">
-            {shortcutSections.map((section) => (
-              <Fragment key={section.title}>
-                <div className="col-span-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                  {section.title}
-                </div>
-                {section.rows.map((row) => (
-                  <Shortcut key={row.id} keys={row.keys} label={row.label} />
-                ))}
-              </Fragment>
-            ))}
-            <div className="col-span-2 pt-2 text-[10px] text-muted-foreground/60">
-              {shortcutLabel("keyboardShortcuts")} shows every shortcut, including the ones scoped to a panel.
-            </div>
-          </div>
-        </div>
-
-      </div>
+        </section>
+      </main>
     </ScrollArea>
   )
 }

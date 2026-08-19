@@ -1,6 +1,6 @@
-import { useState } from "react"
 import { Lock, Plus, Save, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Tooltip,
   TooltipTrigger,
@@ -13,7 +13,15 @@ import { ScopeBadge } from "./ScopeBadge"
 import { CliBadge } from "./CliBadge"
 import { LinkIndicator } from "./LinkIndicator"
 import { NewFileDialog } from "./NewFileDialog"
-import { ItemContextPopup } from "./ItemContextPopup"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 
 interface CategorySectionProps {
   category: Category
@@ -52,24 +60,25 @@ export function CategorySection({
 }: CategorySectionProps) {
   const meta = CATEGORY_META[category]
   const Icon = meta.icon
-  const [contextMenu, setContextMenu] = useState<{ item: ConfigItem; position: { x: number; y: number } } | null>(null)
 
   if (items.length === 0 && !onNewFile) return null
 
   return (
-    <div className="mb-0.5">
-      {/* Category header */}
-      <div className="flex items-center gap-1.5 px-3 py-1.5 group">
-        <Icon className={cn("size-3", meta.color)} />
-        <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider flex-1">{meta.label}</span>
-        <span className="text-[10px] text-muted-foreground/40">{items.length}</span>
+    <section>
+      <div className="group flex h-8 items-center gap-1.5 px-3">
+        <Icon data-icon="inline-start" className={cn("size-3.5", meta.color)} />
+        <span className="flex-1 text-xs font-medium text-muted-foreground">{meta.label}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">{items.length}</span>
         {onNewFile && (
           <Tooltip>
-            <TooltipTrigger render={<button
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+            <TooltipTrigger render={<Button
+                variant="ghost"
+                size="icon-xs"
+                className="opacity-0 transition-opacity group-hover:opacity-100"
+                aria-label={`New ${category.slice(0, -1)}`}
                 onClick={onNewFile}
               />}>
-                <Plus className="size-3" />
+                <Plus data-icon="inline-start" />
             </TooltipTrigger>
             <TooltipContent>New {category.slice(0, -1)}</TooltipContent>
           </Tooltip>
@@ -83,9 +92,8 @@ export function CategorySection({
 
         if (isRenaming) {
           return (
-            <div key={item.path} className="flex items-center gap-1 px-3 py-1 border-l-2 border-blue-400 bg-blue-500/10">
-              <input
-                type="text"
+            <div key={item.path} className="flex items-center gap-1 border-l-2 border-foreground/30 bg-accent px-3 py-1">
+              <Input
                 value={renameValue}
                 onChange={(e) => onRenameValueChange(e.target.value)}
                 onKeyDown={(e) => {
@@ -93,55 +101,100 @@ export function CategorySection({
                   if (e.key === "Escape") onRenameCancel()
                 }}
                 autoFocus
-                className="flex-1 bg-elevation-0 border border-border rounded px-2 py-0.5 text-xs text-foreground outline-none focus:border-blue-500/50 min-w-0"
+                className="h-7 min-w-0 flex-1 text-xs"
               />
-              <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={onRenameSubmit} disabled={!renameValue.trim()}>
-                <Save className="size-3 text-green-400" />
+              <Button variant="ghost" size="icon-xs" aria-label="Save name" onClick={onRenameSubmit} disabled={!renameValue.trim()}>
+                <Save data-icon="inline-start" />
               </Button>
-              <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={onRenameCancel}>
-                <X className="size-3" />
+              <Button variant="ghost" size="icon-xs" aria-label="Cancel rename" onClick={onRenameCancel}>
+                <X data-icon="inline-start" />
               </Button>
             </div>
           )
         }
 
-        return (
-          <button
-            key={item.path}
-            className={cn(
-              "flex items-center gap-2 w-full text-left px-3 py-1.5 transition-colors",
-              isSelected
-                ? "bg-blue-500/10 text-foreground border-l-2 border-blue-400"
-                : "hover:bg-elevation-2 text-foreground/80 hover:text-foreground border-l-2 border-transparent",
-            )}
-            onClick={() => onSelect(item)}
-            onDoubleClick={(e) => {
-              if (!onDeleteItem || !onRenameItem) return
-              e.preventDefault()
-              setContextMenu({ item, position: { x: e.clientX, y: e.clientY } })
-            }}
-          >
-            <div className="flex-1 min-w-0">
+        const itemContent = (
+          <>
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs truncate">{item.name}</span>
+                <span className="truncate text-sm">{item.name}</span>
                 <LinkIndicator linkTarget={item.linkTarget} />
-                {item.readOnly && <Lock className="size-2.5 text-muted-foreground/40 shrink-0" />}
+                {item.readOnly && <Lock className="size-2.5 shrink-0 text-muted-foreground/40" />}
               </div>
               {item.description && (
-                <p className="text-[10px] text-muted-foreground/50 truncate mt-0.5">{item.description}</p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description}</p>
               )}
             </div>
             <CliBadge cli={item.cli} />
             <ScopeBadge scope={item.scope} pluginName={item.pluginName} />
-          </button>
+          </>
+        )
+
+        const itemClassName = cn(
+          "flex w-full items-center gap-2 border-l-2 px-3 py-2 text-left text-sm transition-colors",
+          isSelected
+            ? "border-foreground/30 bg-accent text-accent-foreground"
+            : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+        )
+
+        if (!onDeleteItem || !onRenameItem) {
+          return (
+            <button
+              type="button"
+              key={item.path}
+              className={itemClassName}
+              onClick={() => onSelect(item)}
+            >
+              {itemContent}
+            </button>
+          )
+        }
+
+        return (
+          <ContextMenu key={item.path}>
+            <ContextMenuTrigger
+              render={(
+                <button
+                  type="button"
+                  className={itemClassName}
+                  onClick={() => onSelect(item)}
+                />
+              )}
+            >
+              {itemContent}
+            </ContextMenuTrigger>
+            <ContextMenuContent className="min-w-36">
+              {item.readOnly ? (
+                <ContextMenuGroup>
+                  <ContextMenuLabel>Read-only file</ContextMenuLabel>
+                </ContextMenuGroup>
+              ) : (
+                <>
+                  <ContextMenuGroup>
+                    <ContextMenuItem onClick={() => onRenameItem(item)}>
+                      Rename
+                    </ContextMenuItem>
+                  </ContextMenuGroup>
+                  <ContextMenuSeparator />
+                  <ContextMenuGroup>
+                    <ContextMenuItem
+                      variant="destructive"
+                      onClick={() => onDeleteItem(item)}
+                    >
+                      Delete
+                    </ContextMenuItem>
+                  </ContextMenuGroup>
+                </>
+              )}
+            </ContextMenuContent>
+          </ContextMenu>
         )
       })}
 
       {items.length === 0 && !creatingInCategory && (
-        <p className="text-[10px] text-muted-foreground/30 px-3 py-1">None configured</p>
+        <p className="px-3 py-1 text-xs text-muted-foreground">None configured</p>
       )}
 
-      {/* Inline creation */}
       {creatingInCategory && (
         <NewFileDialog
           globalDir={creatingInCategory.globalDir}
@@ -151,17 +204,6 @@ export function CategorySection({
           onCancel={onCancelCreate}
         />
       )}
-
-      {/* Context popup */}
-      {contextMenu && onDeleteItem && onRenameItem && (
-        <ItemContextPopup
-          item={contextMenu.item}
-          position={contextMenu.position}
-          onRename={() => onRenameItem(contextMenu.item)}
-          onDelete={() => onDeleteItem(contextMenu.item)}
-          onClose={() => setContextMenu(null)}
-        />
-      )}
-    </div>
+    </section>
   )
 }

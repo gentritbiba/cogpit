@@ -20,7 +20,6 @@ interface PreviewAppShellProps {
   hasMoreTurns: boolean
   isLoadingOlderTurns: boolean
   onLoadMoreTurns: () => void
-  status: ReactNode
 }
 
 /** Session-only local surface used by `cogpit preview <session-id>`. */
@@ -32,13 +31,12 @@ export function PreviewAppShell({
   hasMoreTurns,
   isLoadingOlderTurns,
   onLoadMoreTurns,
-  status,
 }: PreviewAppShellProps) {
   const { theme, isMobile } = useAppContext()
   const { session } = useSessionContext()
 
   return (
-    <div className={`${theme.themeClasses} flex h-dvh flex-col overflow-hidden bg-elevation-0 text-foreground`}>
+    <div className={`${theme.themeClasses} flex h-dvh flex-col overflow-hidden bg-background text-foreground`}>
       {session ? (
         <main className="relative flex min-h-0 flex-1 flex-col">
           <ChatArea
@@ -68,7 +66,6 @@ export function PreviewAppShell({
           </Empty>
         </main>
       )}
-      {status}
     </div>
   )
 }

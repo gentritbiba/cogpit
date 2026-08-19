@@ -2,10 +2,11 @@ import { useState, useRef, useEffect, memo, useCallback, startTransition } from 
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { ChevronDown, ChevronRight, Code2, GitCompareArrows } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { EditDiffView } from "../timeline/EditDiffView"
 import { cn } from "@/lib/utils"
-import { fileExtension, fileTypeColor } from "@/lib/fileTypeColors"
+import { fileExtension } from "@/lib/fileTypeColors"
 import { ChangeBar } from "@/components/shared/ChangeCounts"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
 import { openInEditor } from "./open-in-editor"
@@ -49,16 +50,13 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
     if (isHighlighted) setOpenWithTransition(true)
   }, [isHighlighted, setOpenWithTransition])
 
-  const effectiveDiffMode = diffMode
-
   const ext = fileExtension(file.filePath)
-  const extColor = fileTypeColor(file.filePath)
 
   const oldString = file.netOriginal
   const newString = file.netCurrent
   const hasNetDiff = Boolean(oldString || newString)
   const hasPerEditDiff = file.edits.some((e) => Boolean(e.oldString || e.newString))
-  const hasDiff = effectiveDiffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
+  const hasDiff = diffMode === "per-edit" ? hasPerEditDiff : hasNetDiff
 
   const showDiff = deferredOpen && isNear && hasDiff
   const [lastDiffHeight, setLastDiffHeight] = useState(0)
@@ -77,73 +75,77 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
       ref={nearRef}
       data-file-path={file.filePath}
       className={cn(
-        "rounded border elevation-2 depth-low transition-colors",
+        "rounded-lg border bg-card transition-colors",
         isHighlighted
-          ? "border-blue-500/40 ring-1 ring-blue-500/20"
+          ? "border-ring ring-2 ring-ring/20"
           : "border-border",
       )}
     >
-      <div className="sticky top-0 z-10 flex items-center w-full bg-elevation-2 rounded-t hover:bg-elevation-3 transition-colors group">
-        <button
+      <div className="group sticky top-0 z-10 flex w-full items-center rounded-t-lg bg-card transition-colors hover:bg-accent">
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setOpenWithTransition(!open)}
-          className="flex items-center gap-1.5 flex-1 min-w-0 px-2 py-1"
+          className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-r-none px-2 py-1 font-normal"
+          aria-expanded={open}
         >
           {open ? (
-            <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+            <ChevronDown data-icon="inline-start" className="size-3 shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight className="size-3 text-muted-foreground shrink-0" />
+            <ChevronRight data-icon="inline-start" className="size-3 shrink-0 text-muted-foreground" />
           )}
-          <span className={cn("text-[10px] font-mono font-bold shrink-0", extColor)}>
+          <span className="shrink-0 font-mono text-xs font-bold text-muted-foreground">
             {ext}
           </span>
           <OpIndicator hasEdit={file.opTypes.includes("Edit")} hasWrite={file.opTypes.includes("Write")} />
-          {file.subAgentId && <SubAgentIndicator agentId={file.subAgentId} />}
-          <span className="text-[10px] text-muted-foreground font-mono truncate">
+          <span className="truncate font-mono text-xs text-muted-foreground">
             {file.shortPath}
           </span>
-          <span className="text-[10px] text-muted-foreground/50 shrink-0">
+          <span className="shrink-0 text-xs text-muted-foreground">
             {turnLabel}
           </span>
           {file.editCount > 1 && (
             <Badge
               variant="outline"
-              className="text-[9px] px-1 py-0 h-3.5 font-mono shrink-0 border-border/50 text-muted-foreground/60"
+              className="h-5 shrink-0 px-1 font-mono text-xs text-muted-foreground"
             >
               {file.editCount}x
             </Badge>
           )}
-        </button>
+        </Button>
         <div className="flex items-center gap-1.5 pr-2 shrink-0">
+          {file.subAgentId && <SubAgentIndicator agentId={file.subAgentId} />}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             <Tooltip>
-              <TooltipTrigger render={<button
+              <TooltipTrigger render={<Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => openInEditor(file.filePath, "file")}
-                  className="p-1 text-muted-foreground hover:text-blue-400 transition-colors"
                   aria-label="Open file in editor"
                 />}>
-                  <Code2 className="size-3" />
+                  <Code2 data-icon="inline-start" />
               </TooltipTrigger>
               <TooltipContent>Open in editor</TooltipContent>
             </Tooltip>
             <Tooltip>
-              <TooltipTrigger render={<button
+              <TooltipTrigger render={<Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => openInEditor(file.filePath, "diff")}
-                  className="p-1 text-muted-foreground hover:text-amber-400 transition-colors"
                   aria-label="View git diff"
                 />}>
-                  <GitCompareArrows className="size-3" />
+                  <GitCompareArrows data-icon="inline-start" />
               </TooltipTrigger>
               <TooltipContent>View git diff</TooltipContent>
             </Tooltip>
           </div>
           {file.addCount > 0 && (
-            <span className="text-[10px] font-mono tabular-nums text-green-500/80">+{file.addCount}</span>
+            <span className="font-mono text-xs tabular-nums text-success">+{file.addCount}</span>
           )}
           {file.delCount > 0 && (
-            <span className="text-[10px] font-mono tabular-nums text-red-400/80">-{file.delCount}</span>
+            <span className="font-mono text-xs tabular-nums text-destructive">-{file.delCount}</span>
           )}
           <ChangeBar add={file.addCount} del={file.delCount} />
         </div>
@@ -157,7 +159,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
         oldString={oldString}
         newString={newString}
         filePath={file.filePath}
-        diffMode={effectiveDiffMode}
+        diffMode={diffMode}
         edits={file.edits}
         netStartLine={file.netStartLine}
       />
@@ -213,7 +215,7 @@ const DiffContent = memo(function DiffContent({
   }
   if (open && !hasDiff) {
     return (
-      <div className="px-3 py-2 text-[10px] text-muted-foreground/50 italic">
+      <div className="px-3 py-2 text-xs italic text-muted-foreground">
         {diffMode === "per-edit" ? "No edits" : "No net changes (all edits cancelled out)"}
       </div>
     )
@@ -248,16 +250,14 @@ const PerEditDiffs = memo(function PerEditDiffs({ edits, filePath }: { edits: In
       {editsToRender.map((edit, i) => (
         <div key={edit.id}>
           {total > 1 && (
-            <div className="flex items-center gap-2 px-2.5 py-1 bg-elevation-1/50">
-              <span className="text-[9px] font-mono text-muted-foreground/60">
+            <div className="flex items-center gap-2 bg-muted/30 px-2.5 py-1">
+              <span className="font-mono text-xs text-muted-foreground">
                 {edit.toolName} {i + 1}/{total}
               </span>
-              <span className="text-[9px] text-muted-foreground/40">
+              <span className="text-xs text-muted-foreground">
                 T{edit.turnIndex + 1}
               </span>
-              {edit.agentId && (
-                <span className="text-[9px] font-bold text-indigo-400/60">S</span>
-              )}
+              {edit.agentId && <SubAgentIndicator agentId={edit.agentId} />}
             </div>
           )}
           <EditDiffView
@@ -271,7 +271,7 @@ const PerEditDiffs = memo(function PerEditDiffs({ edits, filePath }: { edits: In
         </div>
       ))}
       {renderedCount < contentEdits.length && (
-        <div className="py-1.5 text-center text-[9px] text-muted-foreground/40">
+        <div className="py-1.5 text-center text-xs text-muted-foreground">
           Loading {contentEdits.length - renderedCount} more edits…
         </div>
       )}

@@ -1,13 +1,16 @@
 import { AlertTriangle, Loader2 } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { UndoConfirmState } from "@/hooks/useUndoRedo"
 
 interface UndoConfirmDialogProps {
@@ -40,19 +43,19 @@ export function UndoConfirmDialog({
   if (!state) return null
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
-      <DialogContent className="sm:max-w-md elevation-4 border-border/30">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-foreground">
-            <AlertTriangle className="size-4 text-amber-400" />
-            {TITLES[state.type]}
-          </DialogTitle>
-          <DialogDescription className="text-muted-foreground">
+    <AlertDialog open onOpenChange={(open) => { if (!open) onCancel() }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogMedia>
+            <AlertTriangle className="text-warning" />
+          </AlertDialogMedia>
+          <AlertDialogTitle>{TITLES[state.type]}</AlertDialogTitle>
+          <AlertDialogDescription>
             {DESCRIPTIONS[state.type]}
-          </DialogDescription>
-        </DialogHeader>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
-        <div className="space-y-2 py-2">
+        <div className="flex flex-col gap-2 py-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Turns affected</span>
             <span className="text-foreground font-mono">{state.summary.turnCount}</span>
@@ -66,9 +69,9 @@ export function UndoConfirmDialog({
             <span className="text-foreground font-mono">{state.summary.operationCount}</span>
           </div>
           {state.summary.filePaths.length > 0 && (
-            <div className="mt-2 max-h-32 overflow-y-auto rounded border border-border bg-elevation-0 p-2">
+            <div className="mt-2 max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">
               {state.summary.filePaths.map((fp) => (
-                <div key={fp} className="text-[11px] font-mono text-muted-foreground truncate">
+                <div key={fp} className="truncate font-mono text-xs text-muted-foreground">
                   {fp}
                 </div>
               ))}
@@ -77,36 +80,30 @@ export function UndoConfirmDialog({
         </div>
 
         {applyError && (
-          <div className="rounded border border-red-800/60 bg-red-900/20 px-3 py-2 text-sm text-red-400">
-            {applyError}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{applyError}</AlertDescription>
+          </Alert>
         )}
 
-        <DialogFooter className="gap-2">
-          <Button
-            variant="ghost"
-            onClick={onCancel}
-            disabled={isApplying}
-            className="text-muted-foreground hover:text-foreground"
-          >
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={onCancel} disabled={isApplying}>
             Cancel
-          </Button>
-          <Button
+          </AlertDialogCancel>
+          <AlertDialogAction
             onClick={onConfirm}
             disabled={isApplying}
-            className="bg-amber-600 hover:bg-amber-500 text-white"
           >
             {isApplying ? (
               <>
-                <Loader2 className="size-4 animate-spin mr-2" />
+                <Loader2 data-icon="inline-start" className="animate-spin" />
                 Applying...
               </>
             ) : (
               state.type === "undo" ? "Undo" : state.type === "redo" ? "Redo" : "Switch"
             )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }

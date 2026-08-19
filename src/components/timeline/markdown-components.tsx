@@ -8,6 +8,16 @@ import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 import { useCapability } from "@/hooks/useCapability"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 
 const IMAGE_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".avif",
@@ -116,7 +126,7 @@ function ExternalLink({
         column: fileTarget.column,
       })
     } else {
-      window.open(href, "_blank")
+      window.open(href, "_blank", "noopener,noreferrer")
     }
   }
 
@@ -171,11 +181,12 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={openImage}
         aria-label={`Open ${alt || "rendered image"}`}
-        className="group/image relative my-3 block max-w-full overflow-hidden rounded-xl border border-border/40 bg-elevation-1 p-1 transition-[border-color,background-color] hover:border-blue-400/40 hover:bg-elevation-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+        className="group/image relative my-3 block h-auto max-w-full overflow-hidden rounded-lg border border-border bg-background p-1 transition-colors hover:bg-muted focus-visible:ring-ring/40"
       >
         <img
           src={resolved}
@@ -186,9 +197,9 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
           className="max-h-96 max-w-full rounded-lg object-contain"
         />
         <span className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md border border-white/10 bg-black/45 text-white/70 opacity-80 backdrop-blur transition-[color,background-color,opacity] group-hover/image:bg-black/65 group-hover/image:text-white sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100">
-          <Maximize2 className="size-3.5" />
+          <Maximize2 className="size-3.5" data-icon="icon" />
         </span>
-      </button>
+      </Button>
       {expanded && viewerImage && (
         <ImageViewer
           images={[viewerImage]}
@@ -287,7 +298,7 @@ export const markdownComponents: Components = {
   // ── Blockquote ─────────────────────────────────────────────────────────────
   blockquote({ children }) {
     return (
-      <blockquote className="my-2 rounded-r-md border-l-[3px] border-blue-400/40 bg-blue-500/5 py-1.5 pl-3 pr-2.5 text-foreground/80 [&>p]:my-1 md:my-3 md:py-2 md:pl-4 md:pr-3">
+      <blockquote className="my-2 rounded-r-md border-l-2 border-border bg-muted/30 py-1.5 pl-3 pr-2.5 text-foreground/80 [&>p]:my-1 md:my-3 md:py-2 md:pl-4 md:pr-3">
         {children}
       </blockquote>
     )
@@ -296,14 +307,14 @@ export const markdownComponents: Components = {
   // ── Lists ──────────────────────────────────────────────────────────────────
   ul({ children }) {
     return (
-      <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:space-y-1 md:pl-6">
+      <ul className="my-1.5 flex list-disc flex-col gap-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:gap-1 md:pl-6">
         {children}
       </ul>
     )
   },
   ol({ children }) {
     return (
-      <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:space-y-1 md:pl-6">
+      <ol className="my-1.5 flex list-decimal flex-col gap-0.5 pl-5 marker:text-muted-foreground/50 [&_ol]:my-1 [&_ul]:my-1 md:my-2 md:gap-1 md:pl-6">
         {children}
       </ol>
     )
@@ -318,48 +329,48 @@ export const markdownComponents: Components = {
 
   // ── Horizontal Rule ────────────────────────────────────────────────────────
   hr() {
-    return <hr className="my-4 border-border/40" />
+    return <Separator className="my-4" />
   },
 
   // ── Table (GitHub-style) ───────────────────────────────────────────────────
   table({ children }) {
     return (
       <div className="my-3 overflow-x-auto rounded-lg border border-border/40">
-        <table className="w-full text-sm border-collapse">
+        <Table className="border-collapse text-sm">
           {children}
-        </table>
+        </Table>
       </div>
     )
   },
   thead({ children }) {
     return (
-      <thead className="bg-elevation-2/60">
+      <TableHeader className="bg-muted/50">
         {children}
-      </thead>
+      </TableHeader>
     )
   },
   tbody({ children }) {
-    return <tbody className="divide-y divide-border/30">{children}</tbody>
+    return <TableBody>{children}</TableBody>
   },
   tr({ children }) {
     return (
-      <tr className="hover:bg-elevation-2/30 transition-colors even:bg-elevation-1/50">
+      <TableRow className="even:bg-muted/20">
         {children}
-      </tr>
+      </TableRow>
     )
   },
   th({ children }) {
     return (
-      <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/40">
+      <TableHead className="h-9 px-3 py-2 text-xs font-medium text-muted-foreground">
         {children}
-      </th>
+      </TableHead>
     )
   },
   td({ children }) {
     return (
-      <td className="px-3 py-2 text-foreground/90">
+      <TableCell className="px-3 py-2 text-foreground/90">
         {children}
-      </td>
+      </TableCell>
     )
   },
 
@@ -384,7 +395,7 @@ export const markdownComponents: Components = {
         type="checkbox"
         checked={checked}
         readOnly
-        className="mr-2 rounded border-border accent-blue-500"
+        className="mr-2 rounded border-border accent-primary"
         {...rest}
       />
     )

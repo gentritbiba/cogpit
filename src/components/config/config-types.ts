@@ -25,11 +25,11 @@ export type Category = "instructions" | "agents" | "skills" | "commands" | "sett
 // ── Constants ──────────────────────────────────────────────────────────
 
 export const BADGE_COLORS: Record<string, string> = {
-  agent: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  skill: "bg-amber-500/20 text-amber-300 border-amber-500/30",
-  command: "bg-green-500/20 text-green-300 border-green-500/30",
-  instructions: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  settings: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  agent: "bg-muted text-muted-foreground",
+  skill: "bg-muted text-muted-foreground",
+  command: "bg-muted text-muted-foreground",
+  instructions: "bg-muted text-muted-foreground",
+  settings: "bg-muted text-muted-foreground",
 }
 
 export const CATEGORY_DIR_MAP: Record<string, { subdir: string; fileType: "command" | "skill" | "agent" }> = {
@@ -41,11 +41,11 @@ export const CATEGORY_DIR_MAP: Record<string, { subdir: string; fileType: "comma
 export const CATEGORY_ORDER: Category[] = ["instructions", "agents", "skills", "commands", "settings"]
 
 export const CATEGORY_META: Record<Category, { label: string; icon: typeof BookOpen; color: string }> = {
-  instructions: { label: "Instructions", icon: BookOpen, color: "text-blue-400" },
-  agents: { label: "Agents", icon: Bot, color: "text-purple-400" },
-  skills: { label: "Skills", icon: Sparkles, color: "text-amber-400" },
-  commands: { label: "Commands", icon: Terminal, color: "text-green-400" },
-  settings: { label: "Settings", icon: FileJson, color: "text-cyan-400" },
+  instructions: { label: "Instructions", icon: BookOpen, color: "text-muted-foreground" },
+  agents: { label: "Agents", icon: Bot, color: "text-muted-foreground" },
+  skills: { label: "Skills", icon: Sparkles, color: "text-muted-foreground" },
+  commands: { label: "Commands", icon: Terminal, color: "text-muted-foreground" },
+  settings: { label: "Settings", icon: FileJson, color: "text-muted-foreground" },
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

@@ -2,7 +2,9 @@ import { useId, useMemo, useState, type MouseEvent } from "react"
 import { ChevronDown, ChevronRight, ChevronUp, Loader2, Plus } from "lucide-react"
 
 import { ProjectContextMenu } from "@/components/ProjectContextMenu"
+import { LiveIndicator } from "@/components/header-shared"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
+import { Button } from "@/components/ui/button"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -236,12 +238,12 @@ function ProjectGroup({
       <ProjectContextMenu
         projectLabel={projectPath}
         customName={customProjectName}
-        className="sticky top-0 z-20 elevation-1"
+        className="sticky top-0 z-20 bg-background"
         onRename={(name) => {
           if (dirName && onRenameProject) onRenameProject(dirName, name)
         }}
       >
-        <div className="flex items-center gap-1 px-1.5 pt-2 pb-0.5 w-full">
+        <div className="flex w-full items-center gap-1 px-2 pb-1 pt-3">
           <button
             type="button"
             onClick={() => onToggleCollapsed(projectPath, !collapsed)}
@@ -249,37 +251,39 @@ function ProjectGroup({
             aria-expanded={!isCollapsed}
             aria-controls={sessionGroupId}
             title={forceExpand ? "Groups stay expanded while searching" : undefined}
-            className="flex items-center gap-1 flex-1 min-w-0 text-left hover:bg-white/[0.02] rounded-sm transition-colors"
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left transition-colors hover:bg-accent"
           >
             <ChevronRight className={cn(
-              "size-2.5 text-muted-foreground/50 transition-transform duration-150 shrink-0",
+              "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
               !isCollapsed && "rotate-90",
             )} />
-            <span className="text-[11px] font-medium text-muted-foreground/70 truncate">
+            <span className="truncate text-xs font-medium text-foreground">
               {customProjectName || projectPath}
             </span>
             {customProjectName && (
-              <span className="text-[10px] text-muted-foreground/40 truncate">
+              <span className="truncate text-xs text-muted-foreground">
                 {projectPath}
               </span>
             )}
             {liveCount > 0 && (
               <span
-                className="flex items-center gap-1 shrink-0 text-[10px] font-medium text-green-400"
+                className="flex shrink-0 items-center gap-1 text-xs font-medium text-success"
                 aria-label={`${liveCount} live sessions`}
               >
-                <span className="size-1.5 rounded-full bg-green-400" aria-hidden="true" />
+                <LiveIndicator className="size-1.5" aria-hidden="true" />
                 {liveCount}
               </span>
             )}
-            <span className="text-[10px] text-muted-foreground/40 shrink-0">
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
               {totalCount}
             </span>
           </button>
           {onNewSession && sessions.length > 0 && (
-            <button
+            <Button
               type="button"
-              className="shrink-0 rounded p-0.5 text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.05] transition-colors"
+              variant="ghost"
+              size="icon-xs"
+              className="shrink-0"
               disabled={creatingSession}
               onClick={(event) => {
                 event.stopPropagation()
@@ -289,11 +293,11 @@ function ProjectGroup({
               aria-label={`New session in ${projectPath}`}
             >
               {creatingSession ? (
-                <Loader2 className="size-3 animate-spin" />
+                <Loader2 data-icon="inline-start" className="animate-spin" />
               ) : (
-                <Plus className="size-3" />
+                <Plus data-icon="inline-start" />
               )}
-            </button>
+            </Button>
           )}
         </div>
       </ProjectContextMenu>
@@ -301,7 +305,7 @@ function ProjectGroup({
       {!isCollapsed && (
         <div
           id={sessionGroupId}
-          className="flex flex-col gap-px ml-2.5 border-l border-border/40 pl-1"
+          className="ml-3 flex flex-col gap-px border-l pl-1"
         >
           {pendingSession && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
@@ -321,7 +325,7 @@ function ProjectGroup({
                   onToggle: () => toggleTeamCollapse(session.sessionId),
                 })}
                 {!teamCollapsed && (
-                  <div className="flex flex-col gap-px ml-3 border-l border-violet-500/30 pl-1">
+                  <div className="ml-3 flex flex-col gap-px border-l pl-1">
                     {teammates.map((teammate) => renderSessionRow(teammate))}
                   </div>
                 )}
@@ -329,24 +333,28 @@ function ProjectGroup({
             )
           })}
           {hiddenCount > 0 && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               onClick={() => setShowAll(true)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
+              className="justify-start"
             >
-              <ChevronDown className="size-2.5" />
+              <ChevronDown data-icon="inline-start" />
               Show {hiddenCount} more
-            </button>
+            </Button>
           )}
           {canShowLess && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               onClick={() => setShowAll(false)}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-left text-[11px] text-muted-foreground/60 hover:text-foreground hover:bg-white/[0.03] transition-colors"
+              className="justify-start"
             >
-              <ChevronUp className="size-2.5" />
+              <ChevronUp data-icon="inline-start" />
               Show less
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -356,9 +364,9 @@ function ProjectGroup({
 
 function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
   return (
-    <div className="relative w-full flex items-center gap-1.5 rounded-r-md px-2 py-1 text-left border-l-2 border-l-blue-500 rounded-l-none">
-      <Loader2 className="size-2.5 animate-spin text-blue-400 shrink-0" />
-      <span className="text-xs leading-tight truncate flex-1 text-foreground">
+    <div className="relative flex w-full items-center gap-1.5 rounded-md bg-accent px-2 py-2 text-left">
+      <Loader2 className="size-3 shrink-0 animate-spin text-info" />
+      <span className="flex-1 truncate text-xs leading-tight text-foreground">
         {firstMessage || "New session"}
       </span>
     </div>

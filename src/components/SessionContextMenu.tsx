@@ -1,7 +1,26 @@
-import { useState, useRef, useEffect } from "react"
-import { ContextMenu } from "@base-ui/react/context-menu"
+import { useState, useRef } from "react"
 import { Copy, Trash2, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Field, FieldLabel } from "@/components/ui/field"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -10,9 +29,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-
-const MENU_ITEM_CLASS =
-  "flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none cursor-pointer hover:bg-elevation-2 hover:text-foreground"
 
 interface SessionContextMenuProps {
   children: React.ReactNode
@@ -36,129 +52,113 @@ export function SessionContextMenu({
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (showRename) {
-      setRenameValue(customName || "")
-      setTimeout(() => renameInputRef.current?.select(), 0)
-    }
-  }, [showRename, customName])
+  function openRename(): void {
+    setRenameValue(customName || "")
+    setShowRename(true)
+    requestAnimationFrame(() => renameInputRef.current?.select())
+  }
 
   return (
     <>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger render={<div className="w-full" />}>{children}</ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Positioner>
-            <ContextMenu.Popup className="min-w-[180px] rounded-lg elevation-3 border border-border/30 p-1 z-50">
+      <ContextMenu>
+        <ContextMenuTrigger render={<div className="w-full" />}>{children}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-44">
+          {(onRename || onDuplicate) && (
+            <ContextMenuGroup>
               {onRename && (
-                <ContextMenu.Item
-                  className={MENU_ITEM_CLASS}
-                  onClick={() => setShowRename(true)}
-                >
-                  <Pencil className="size-3.5" />
+                <ContextMenuItem onClick={openRename}>
+                  <Pencil data-icon="inline-start" />
                   Rename session
-                </ContextMenu.Item>
+                </ContextMenuItem>
               )}
               {onDuplicate && (
-                <ContextMenu.Item
-                  className={MENU_ITEM_CLASS}
-                  onClick={onDuplicate}
-                >
-                  <Copy className="size-3.5" />
+                <ContextMenuItem onClick={onDuplicate}>
+                  <Copy data-icon="inline-start" />
                   Duplicate session
-                </ContextMenu.Item>
+                </ContextMenuItem>
               )}
-              {onDelete && (
-                <>
-                  {(onDuplicate || onRename) && (
-                    <ContextMenu.Separator className="my-1 h-px bg-border" />
-                  )}
-                  <ContextMenu.Item
-                    className="flex items-center gap-2 rounded px-2.5 py-1.5 text-sm text-red-400 outline-none cursor-pointer hover:bg-red-500/10 hover:text-red-300"
-                    onClick={() => setShowDeleteConfirm(true)}
-                  >
-                    <Trash2 className="size-3.5" />
-                    Delete session
-                  </ContextMenu.Item>
-                </>
-              )}
-            </ContextMenu.Popup>
-          </ContextMenu.Positioner>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+            </ContextMenuGroup>
+          )}
+          {onDelete && (
+            <>
+              {(onDuplicate || onRename) && <ContextMenuSeparator />}
+              <ContextMenuGroup>
+                <ContextMenuItem
+                  variant="destructive"
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  <Trash2 data-icon="inline-start" />
+                  Delete session
+                </ContextMenuItem>
+              </ContextMenuGroup>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
 
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent className="elevation-4 border-border/30 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Delete session?</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete session?</AlertDialogTitle>
+            <AlertDialogDescription>
               This will permanently delete{" "}
               <span className="font-medium text-foreground">{sessionLabel}</span>.
               This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={() => setShowDeleteConfirm(false)}
-            >
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">
               Cancel
-            </Button>
-            <Button
+            </AlertDialogCancel>
+            <AlertDialogAction
               variant="destructive"
               size="sm"
-              className="bg-red-600 hover:bg-red-700 text-white"
               onClick={() => {
                 onDelete?.()
                 setShowDeleteConfirm(false)
               }}
             >
               Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={showRename} onOpenChange={setShowRename}>
-        <DialogContent className="elevation-4 border-border/30 sm:max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-foreground">Rename session</DialogTitle>
             <DialogDescription className="text-muted-foreground">
               Give this session a custom name. Clear to reset to default.
             </DialogDescription>
           </DialogHeader>
-          <form
+          <form className="flex flex-col gap-4"
             onSubmit={(e) => {
               e.preventDefault()
               onRename?.(renameValue)
               setShowRename(false)
             }}
           >
-            <input
-              ref={renameInputRef}
-              type="text"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              placeholder={sessionLabel}
-              className="w-full rounded-lg border border-border/60 elevation-2 depth-low py-2 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-blue-500/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-colors"
-            />
-            <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Field>
+              <FieldLabel htmlFor="session-rename">Session name</FieldLabel>
+              <Input
+                id="session-rename"
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                placeholder={sessionLabel}
+              />
+            </Field>
+            <DialogFooter>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-foreground"
                 onClick={() => setShowRename(false)}
               >
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
+              <Button type="submit" size="sm">
                 Save
               </Button>
             </DialogFooter>

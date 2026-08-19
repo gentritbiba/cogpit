@@ -16,6 +16,8 @@ import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 import { useCapability } from "@/hooks/useCapability"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 export interface ChatInputHandle {
   focus: () => void
@@ -88,10 +90,9 @@ function getPlaceholder(isPlanApproval: boolean, isUserQuestion: boolean, isConn
 }
 
 function getTextareaBorderClass(isPlanApproval: boolean, isUserQuestion: boolean, hasPermissionRequests?: boolean): string {
-  if (hasPermissionRequests) return "border-amber-700/50 focus-within:border-amber-500/30 focus-within:ring-amber-500/20"
-  if (isPlanApproval) return "border-purple-700/50 focus-within:border-purple-500/30 focus-within:ring-purple-500/20"
-  if (isUserQuestion) return "border-pink-700/50 focus-within:border-pink-500/30 focus-within:ring-pink-500/20"
-  return "border-border/50 focus-within:border-blue-500/30 focus-within:ring-blue-500/20"
+  if (hasPermissionRequests) return "border-warning/40 focus-within:border-warning/60 focus-within:ring-warning/15"
+  if (isPlanApproval || isUserQuestion) return "border-info/40 focus-within:border-info/60 focus-within:ring-info/15"
+  return "border-input focus-within:border-ring focus-within:ring-ring/20"
 }
 
 export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({ allowImages = true, agentKind, projectCwd, leadingAccessory, compact = false }, ref) {
@@ -256,21 +257,27 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const hasPermissions = permissionRequests.length > 0
   const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
   const isSteering = agentKind === "codex" && canInterrupt
+  const suggestionListId = showFiles ? "file-suggestions" : showSlash ? "slash-suggestions" : undefined
+  const activeSuggestionId = showFiles && fileSuggestions.files[fileSelectedIndex]
+    ? `file-suggestion-${fileSelectedIndex}`
+    : showSlash && filteredSlashList[slashSelectedIndex]
+      ? `slash-suggestion-${slashSelectedIndex}`
+      : undefined
 
   return (
     <div
       className={cn(
-        "relative border-border/50 bg-elevation-1 pb-0",
-        compact ? "px-2 pt-1.5" : "pt-2.5",
-        isDragOver && "ring-2 ring-blue-500/50 ring-inset",
+        "relative bg-background pb-0",
+        compact ? "px-2 pt-2" : "px-3 pt-3",
+        isDragOver && "ring-2 ring-info/40 ring-inset",
       )}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {isDragOver && (
-        <div className="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-500/40 rounded-lg flex items-center justify-center z-10 pointer-events-none">
-          <span className="text-sm text-blue-400 font-medium">Drop images here</span>
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg border-2 border-dashed border-info/40 bg-info/10">
+          <span className="text-sm font-medium text-info">Drop images here</span>
         </div>
       )}
 
@@ -293,34 +300,33 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
           {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
 
         {images.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+          <div className="mb-2 flex flex-wrap gap-2">
             {images.map((img, i) => (
               <div key={img.id} className="relative group/thumb">
-                <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-lg border border-border/50 object-contain bg-muted" />
-                <button type="button" onClick={() => removeImage(i)} className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted opacity-100 transition-opacity hover:border-red-600 hover:bg-red-900 sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
-                  <X className="w-3 h-3 text-foreground" />
-                </button>
+                <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
+                <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeImage(i)} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-background p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
+                  <X className="size-3" data-icon="icon" />
+                </Button>
               </div>
             ))}
           </div>
         )}
 
         {imageError && (
-          <div role="status" aria-live="polite" className="mb-2 flex items-center gap-2 text-xs text-amber-400">
+          <div role="status" aria-live="polite" className="mb-2 flex items-center gap-2 text-xs text-warning">
             <span className="flex-1">{imageError}</span>
             {!hasUnsupportedAttachments && (
-              <button type="button" onClick={dismissImageError} className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Dismiss image notice">
-                <X className="size-3" />
-              </button>
+              <Button type="button" variant="ghost" size="icon-xs" onClick={dismissImageError} className="text-muted-foreground" aria-label="Dismiss image notice">
+                <X data-icon="icon" />
+              </Button>
             )}
           </div>
         )}
 
         <div className={cn(
-          "relative overflow-hidden border bg-elevation-2 chat-input-3d",
-          compact ? "rounded-2xl" : "rounded-3xl",
+          "relative overflow-hidden rounded-xl border bg-card shadow-xs",
           getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
-          "focus-within:ring-2",
+          "focus-within:ring-3",
         )}>
           {hasPermissions && (
             <PermissionRequestBar
@@ -342,7 +348,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
                 {leadingAccessory}
               </div>
             )}
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={text}
               onChange={handleInput}
@@ -353,13 +359,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
                 setTimeout(() => textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 300)
               }}
               placeholder={getPlaceholder(isPlanApproval, isUserQuestion, isConnected, hasPermissions, isSteering, compact)}
+              aria-label="Message"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={Boolean(suggestionListId)}
+              aria-controls={suggestionListId}
+              aria-activedescendant={activeSuggestionId}
               rows={1}
               className={cn(
-                "w-full resize-none bg-transparent text-foreground placeholder:text-muted-foreground focus:outline-none",
+                "min-h-0 w-full resize-none rounded-none border-0 bg-transparent text-foreground shadow-none placeholder:text-muted-foreground focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent",
                 isMultiline
                   ? cn("col-span-2 row-start-1", compact ? "py-2.5 pr-3" : "py-3 pr-4")
                   : cn("col-start-2 row-start-1", compact ? "py-2 pr-1" : "py-2.5 pr-2"),
-                compact ? "pl-2 text-[13px]" : "pl-4 text-sm",
+                compact ? "pl-2 text-sm" : "pl-4 text-sm",
               )}
             />
             <div className={cn(

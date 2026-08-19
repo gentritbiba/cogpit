@@ -11,8 +11,8 @@ import { memo } from "react"
 import { CheckCircle2, ChevronRight, MessageCircleQuestion, XCircle } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { formatRelativeTime, shortenModel } from "@/lib/format"
-import { getToolTextStyle } from "@/components/timeline/ToolCallCard"
 import { LineCounts } from "@/components/shared/ChangeCounts"
 import { sessionTitle } from "@/components/LiveSessions/sessionListView"
 import type { PermissionDecision } from "@/lib/permissionApi"
@@ -37,35 +37,30 @@ interface StateStyle {
 const STATE_STYLES: Record<MissionCardState, StateStyle> = {
   awaiting_approval: {
     label: "Waiting for approval",
-    text: "text-amber-400",
-    shell: "border-amber-500/60 bg-amber-500/[0.045] ring-1 ring-amber-500/20",
+    text: "text-warning",
+    shell: "border-warning/40 bg-warning/5",
     icon: MessageCircleQuestion,
   },
-  // Pink separates "answer a question" from "approve a tool" at a glance,
-  // matching the colour the rest of the app already uses for AskUserQuestion.
   awaiting_question: {
     label: "Waiting for your answer",
-    text: "text-pink-400",
-    shell: "border-pink-500/60 bg-pink-500/[0.05] ring-1 ring-pink-500/20",
+    text: "text-info",
+    shell: "border-info/40 bg-info/5",
     icon: MessageCircleQuestion,
   },
   awaiting_answer: {
     label: "Waiting for your answer",
-    text: "text-amber-400",
-    shell: "border-amber-500/40 bg-amber-500/[0.03]",
+    text: "text-warning",
+    shell: "border-warning/40 bg-warning/5",
     icon: MessageCircleQuestion,
   },
-  running: { label: "Running", text: "text-blue-400", shell: "border-border/70", icon: null },
-  done: { label: "Done", text: "text-green-400", shell: "border-green-500/25", icon: CheckCircle2 },
-  failed: { label: "Failed", text: "text-red-400", shell: "border-red-500/35", icon: XCircle },
+  running: { label: "Running", text: "text-info", shell: "border-border", icon: null },
+  done: { label: "Done", text: "text-success", shell: "border-border", icon: CheckCircle2 },
+  failed: { label: "Failed", text: "text-destructive", shell: "border-destructive/40", icon: XCircle },
 }
 
 function StateIcon({ icon: Icon }: { icon: LucideIcon | null }) {
-  // "Running" has no glyph, so a dot with a static halo carries it. Motion is
-  // globally disabled to keep Chromium's compositor idle, and the halo has to
-  // match the dot: the old shared class painted a green ring on this blue dot.
   if (!Icon) {
-    return <span className="size-[7px] shrink-0 rounded-full bg-blue-400 ring-2 ring-blue-400/40" />
+    return <span className="size-2 shrink-0 rounded-full bg-info" />
   }
   return <Icon className="size-3.5 shrink-0" />
 }
@@ -104,42 +99,42 @@ export const SessionCard = memo(function SessionCard({
   return (
     <div
       className={cn(
-        "group flex min-w-0 flex-col gap-2 rounded-lg border bg-elevation-2 p-3 text-left transition-colors",
+        "group flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-foreground/20",
         style.shell,
         compact && "gap-1.5 py-2",
       )}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={onOpen}
-        className="flex min-w-0 flex-col gap-1 text-left"
+        className="-m-1 h-auto min-w-0 flex-col items-stretch justify-start gap-1 whitespace-normal p-1 text-left"
         aria-label={`Open session ${title}`}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {projectLabel}
           </span>
           {summary?.model && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/60">
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
               {shortenModel(summary.model)}
             </span>
           )}
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/60" />
+          <ChevronRight data-icon="inline-end" className="shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
         </span>
         <span
           className={cn(
-            "text-[13.5px] font-semibold leading-tight tracking-tight text-foreground/95",
+            "text-sm font-medium leading-snug text-foreground",
             compact ? "truncate" : "line-clamp-2",
           )}
         >
           {title}
         </span>
-      </button>
+      </Button>
 
-      <div className={cn("flex items-center gap-1.5 text-[11.5px] font-semibold", style.text)}>
+      <div className={cn("flex items-center gap-1.5 text-xs font-medium", style.text)}>
         <StateIcon icon={style.icon} />
         <span className="truncate">{style.label}</span>
-        <span className="ml-auto shrink-0 font-mono text-[10.5px] font-normal text-muted-foreground/70">
+        <span className="ml-auto shrink-0 font-mono text-xs font-normal text-muted-foreground">
           {formatRelativeTime(session.lastActivityAt || session.lastModified)}
         </span>
       </div>
@@ -156,6 +151,7 @@ export const SessionCard = memo(function SessionCard({
       {/* A pending permission outranks a question when a session has both. */}
       {!request && question && (
         <QuestionPrompt
+          key={question.toolUseId}
           request={question}
           responding={responding.has(question.toolUseId)}
           gone={goneQuestions.has(question.toolUseId)}
@@ -167,7 +163,7 @@ export const SessionCard = memo(function SessionCard({
       {!blocked && summary?.currentTool && <CurrentTool tool={summary.currentTool} />}
 
       {!compact && !blocked && summary?.lastAssistantText && (
-        <p className="line-clamp-5 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="line-clamp-4 text-sm leading-relaxed text-muted-foreground">
           {summary.lastAssistantText}
         </p>
       )}
@@ -179,11 +175,11 @@ export const SessionCard = memo(function SessionCard({
 
 function CurrentTool({ tool }: { tool: MissionControlCurrentTool }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-border/40 bg-black/25 px-2 py-1.5">
-      <span className={cn("shrink-0 font-mono text-[10px]", getToolTextStyle(tool.name))}>
+    <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/50 px-2.5 py-2">
+      <span className="shrink-0 font-mono text-xs text-muted-foreground">
         {tool.name}
       </span>
-      <code className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-foreground/75">
+      <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground/80">
         {tool.summary}
       </code>
     </div>
@@ -199,7 +195,7 @@ function Footer({ summary }: { summary: MissionControlSummary }) {
   if (!hasFiles && !hasContext) return null
 
   return (
-    <div className="mt-auto flex items-center gap-2 border-t border-border/40 pt-1.5 font-mono text-[10px] text-muted-foreground/70">
+    <div className="mt-auto flex items-center gap-2 border-t pt-2 font-mono text-xs text-muted-foreground">
       {hasFiles && (
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate">

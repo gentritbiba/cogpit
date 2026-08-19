@@ -7,9 +7,9 @@
  */
 export const STATUS_DOT = {
   /** Blocked on a human — permission prompt, question, deferred decision. */
-  attention: "bg-amber-400",
+  attention: "bg-warning",
   /** The agent is producing output right now. */
-  working: "bg-green-400 ring-2 ring-green-400/40",
+  working: "bg-success ring-2 ring-success/30",
   /** Live session whose agent is waiting for the next instruction. */
-  idle: "bg-green-400/40",
+  idle: "bg-success/40",
 } as const

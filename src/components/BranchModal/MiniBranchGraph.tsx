@@ -1,5 +1,3 @@
-import { BRANCH_COLORS, BRANCH_INNER } from "./branchStyles"
-
 interface BranchGraphItem {
   id: string
   graphTurnCount: number
@@ -30,33 +28,35 @@ export function MiniBranchGraph({
   const height = firstY + (numBranches - 1) * branchGap + 15
 
   return (
-    <div className="rounded-lg bg-elevation-1 px-3 py-2">
-      <svg width="100%" height={height} viewBox={`0 0 340 ${height}`}>
-        {/* Shared trunk */}
-        <line x1={20} y1={firstY} x2={bpX} y2={firstY} stroke="#3b82f6" strokeWidth={2} />
+    <div className="rounded-lg border bg-muted/20 px-3 py-2">
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 340 ${height}`}
+        role="img"
+        aria-label={`${numBranches} branches from turn ${branchPointTurnIndex + 1}`}
+      >
+        <line x1={20} y1={firstY} x2={bpX} y2={firstY} stroke="var(--muted-foreground)" strokeWidth={2} />
         {Array.from({ length: sharedCount }).map((_, i) => (
           <g key={`s-${i}`}>
-            <circle cx={20 + i * ss} cy={firstY} r={3.5} fill="var(--background)" stroke="#3b82f6" strokeWidth={1.5} />
-            <circle cx={20 + i * ss} cy={firstY} r={1.5} fill="#60a5fa" />
+            <circle cx={20 + i * ss} cy={firstY} r={3.5} fill="var(--background)" stroke="var(--muted-foreground)" strokeWidth={1.5} />
+            <circle cx={20 + i * ss} cy={firstY} r={1.5} fill="var(--muted-foreground)" />
           </g>
         ))}
-        {/* Branch point */}
-        <circle cx={bpX} cy={firstY} r={5} fill="var(--background)" stroke="#a855f7" strokeWidth={2} />
-        <circle cx={bpX} cy={firstY} r={2} fill="#c084fc" />
+        <circle cx={bpX} cy={firstY} r={5} fill="var(--background)" stroke="var(--foreground)" strokeWidth={2} />
+        <circle cx={bpX} cy={firstY} r={2} fill="var(--foreground)" />
 
         {/* Branches */}
         {branches.map((branch, bi) => {
           const isActive = bi === activeBranchIdx
-          const ci = bi % BRANCH_COLORS.length
-          const color = isActive ? BRANCH_COLORS[ci] : "var(--muted)"
-          const inner = isActive ? BRANCH_INNER[ci] : "var(--border)"
+          const color = isActive ? "var(--foreground)" : "var(--border)"
+          const inner = isActive ? "var(--foreground)" : "var(--border)"
           const y = firstY + bi * branchGap
           const count = Math.min(branch.graphTurnCount, cappedMax)
 
           return (
             <g
               key={branch.id}
-              className="transition-opacity duration-500"
               style={{ opacity: isActive ? 1 : 0.3 }}
             >
               {bi === 0 ? (
@@ -81,7 +81,7 @@ export function MiniBranchGraph({
               {branch.graphTurnCount > cappedMax && (
                 <text
                   x={bpX + (count + 0.4) * ns} y={y + 3}
-                  fill={isActive ? BRANCH_COLORS[ci] : "var(--border)"}
+                  fill={isActive ? "var(--foreground)" : "var(--border)"}
                   fontSize="8" fontFamily="monospace"
                 >
                   +{branch.graphTurnCount - cappedMax}

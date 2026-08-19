@@ -363,6 +363,7 @@ export {
   MIN_PASSWORD_LENGTH,
   validatePasswordStrength,
   securityHeaders,
+  devSecurityHeaders,
   bodySizeLimit,
   authMiddleware,
 } from "./security"

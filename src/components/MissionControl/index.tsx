@@ -4,9 +4,20 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Activity, AlertTriangle, LayoutGrid, List, Loader2, RefreshCw } from "lucide-react"
+import { Activity, AlertTriangle, LayoutGrid, List, RefreshCw } from "lucide-react"
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Spinner } from "@/components/ui/Spinner"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 import { deviceScopedKey } from "@/lib/device"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
@@ -112,96 +123,101 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border/50 px-4">
-        <h2 className="text-[13px] font-semibold tracking-tight">Mission Control</h2>
-        <div className="flex items-center gap-2.5 font-mono text-[11px] text-muted-foreground/60">
-          {counts.running > 0 && <span className="text-blue-400">{counts.running} running</span>}
-          {counts.needsYou > 0 && <span className="text-amber-400">{counts.needsYou} need you</span>}
-          {counts.finished > 0 && <span className="text-green-400">{counts.finished} done</span>}
-          {counts.failed > 0 && <span className="text-red-400">{counts.failed} failed</span>}
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="truncate text-sm font-semibold">Mission Control</h2>
+          <Badge variant="secondary">{counts.total}</Badge>
+          {counts.needsYou > 0 && (
+            <Badge variant="outline" className="border-warning/40 text-warning">
+              {counts.needsYou} need you
+            </Badge>
+          )}
+          {counts.failed > 0 && <Badge variant="destructive">{counts.failed} failed</Badge>}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-md border border-border/60">
+          <ToggleGroup
+            value={[filter]}
+            onValueChange={(values) => {
+              const next = values.at(-1) as MissionFilter | undefined
+              if (next) setFilter(next)
+            }}
+            variant="outline"
+            size="sm"
+            spacing={0}
+            aria-label="Filter sessions"
+          >
             {FILTERS.map((f) => (
-              <button
+              <ToggleGroupItem
                 key={f.id}
-                type="button"
-                onClick={() => setFilter(f.id)}
-                aria-pressed={filter === f.id}
-                className={cn(
-                  "border-r border-border/60 px-2.5 py-1 text-[11.5px] transition-colors last:border-r-0",
-                  filter === f.id
-                    ? "bg-elevation-3 text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                value={f.id}
+                aria-label={`Show ${f.label.toLowerCase()} sessions`}
               >
                 {f.label}
                 {f.id === "needs-you" && counts.needsYou > 0 && (
-                  <span className="ml-1 font-mono text-amber-400">{counts.needsYou}</span>
+                  <span className="font-mono text-warning">{counts.needsYou}</span>
                 )}
-              </button>
+              </ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
 
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1">
             {LAYOUTS.map(({ id, label, Icon }) => (
               <Button
                 key={id}
                 variant="ghost"
-                size="sm"
-                className="size-6 p-0"
+                size="icon-xs"
                 aria-label={label}
                 aria-pressed={layout === id}
                 onClick={() => setLayout(id)}
+                className={cn(layout === id && "bg-accent text-accent-foreground")}
               >
-                <Icon className={cn("size-3.5", layout === id ? "text-foreground" : "text-muted-foreground/50")} />
+                <Icon data-icon="inline-start" />
               </Button>
             ))}
             <Button
               variant="ghost"
-              size="sm"
-              className="size-6 p-0"
+              size="icon-xs"
               aria-label="Refresh Mission Control"
               onClick={refresh}
             >
-              <RefreshCw className={cn("size-3", loading && "animate-spin")} />
+              <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
             </Button>
           </div>
         </div>
-      </div>
+      </header>
 
       <ScrollArea className="flex-1">
         <div className="p-4">
           {error && (
-            <div className="mb-3 flex items-center gap-2 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-2">
-              <AlertTriangle className="size-3.5 shrink-0 text-red-400" />
-              <span className="flex-1 truncate text-[11px] text-red-400">{error}</span>
-              <button
-                type="button"
-                onClick={refresh}
-                className="shrink-0 text-[11px] text-red-400 hover:text-red-300"
-              >
-                Retry
-              </button>
-            </div>
+            <Alert variant="destructive" className="mb-4">
+              <AlertTriangle />
+              <AlertTitle>Mission Control could not refresh</AlertTitle>
+              <AlertDescription className="truncate">{error}</AlertDescription>
+              <AlertAction>
+                <Button variant="outline" size="xs" onClick={refresh}>Retry</Button>
+              </AlertAction>
+            </Alert>
           )}
 
           {visible.length === 0 && !loading && (
-            <div className="py-16 text-center">
-              <Activity className="mx-auto mb-2 size-5 text-muted-foreground" />
-              <p className="text-[13px] text-muted-foreground">
-                {cards.length === 0 ? "No live sessions" : `Nothing matches "${filter}"`}
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {cards.length === 0 ? EMPTY_HINT : "Try a different filter"}
-              </p>
-            </div>
+            <Empty className="min-h-64">
+              <EmptyHeader>
+                <EmptyMedia variant="icon"><Activity /></EmptyMedia>
+                <EmptyTitle>
+                  {cards.length === 0 ? "No live sessions" : `Nothing matches "${filter}"`}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {cards.length === 0 ? EMPTY_HINT : "Try a different filter."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
 
           {visible.length === 0 && loading && cards.length === 0 && (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Spinner />
+              Loading sessions…
             </div>
           )}
 

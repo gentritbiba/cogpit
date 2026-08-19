@@ -8,6 +8,16 @@ import {
 import type { PermissionMode } from "@/lib/permissions"
 import type { AgentKind } from "@/lib/sessionSource"
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Field, FieldLabel } from "@/components/ui/field"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Sheet,
   SheetClose,
@@ -21,9 +31,6 @@ import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
 import type { CommonSettingsControlProps, DropdownOption, McpServer } from "./types"
 
-const MOBILE_SELECT_CLASS =
-  "h-10 w-full rounded-md bg-transparent text-xs font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 disabled:text-muted-foreground/50"
-
 interface MobileControlProps {
   label: string
   children: ReactNode
@@ -32,19 +39,19 @@ interface MobileControlProps {
 
 function MobileControl({ label, children, wide = false }: MobileControlProps) {
   return (
-    <div
+    <Field
       className={cn(
-        "flex min-w-0 flex-col gap-1 rounded-xl border border-border/40 bg-elevation-2 px-2.5 py-2",
+        "min-w-0 gap-1 py-1",
         wide && "col-span-2",
       )}
     >
-      <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+      <FieldLabel className="text-xs text-muted-foreground">
         {label}
-      </span>
-      <div className="min-w-0 [&>button]:w-full [&>button]:justify-between [&>button]:px-0">
+      </FieldLabel>
+      <div className="min-w-0 [&>button]:w-full [&>button]:justify-between">
         {children}
       </div>
-    </div>
+    </Field>
   )
 }
 
@@ -69,20 +76,30 @@ function MobileSelectControl({
 }: MobileSelectControlProps) {
   return (
     <MobileControl label={label}>
-      <select
-        aria-label={ariaLabel}
+      <Select
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={(nextValue) => {
+          if (nextValue !== null) onChange(nextValue)
+        }}
         disabled={disabled}
-        title={title}
-        className={MOBILE_SELECT_CLASS}
       >
-        {options.map((option) => (
-          <option key={option.value || "default"} value={option.value}>
-            {option.menuLabel ?? option.label}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger
+          aria-label={ariaLabel}
+          title={title}
+          className="h-10 w-full"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {options.map((option) => (
+              <SelectItem key={option.value || "default"} value={option.value}>
+                {option.menuLabel ?? option.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </MobileControl>
   )
 }
@@ -128,7 +145,7 @@ function MobileModelControls({
 
   return (
     <section aria-labelledby="mobile-model-controls" className="flex flex-col gap-2">
-      <h3 id="mobile-model-controls" className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h3 id="mobile-model-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Model and behavior
       </h3>
       <div className="grid grid-cols-2 gap-2">
@@ -164,19 +181,17 @@ function MobileModelControls({
 
         {fastTier && onFastModeEnabledChange && (
           <MobileControl label="Speed">
-            <button
+            <Button
               type="button"
+              variant={fastModeEnabled ? "secondary" : "ghost"}
               aria-pressed={!!fastModeEnabled}
               onClick={() => changeAndApply(() => onFastModeEnabledChange(!fastModeEnabled))}
               title={fastTier.description}
-              className={cn(
-                "flex h-10 items-center gap-1 text-xs font-medium transition-colors",
-                fastModeEnabled ? "text-primary" : "text-muted-foreground hover:text-foreground",
-              )}
+              className="h-10 justify-start"
             >
-              <Zap className={cn("size-3.5", fastModeEnabled && "fill-current")} />
+              <Zap data-icon="inline-start" className={cn(fastModeEnabled && "fill-current")} />
               {fastModeEnabled ? "Fast" : "Standard"}
-            </button>
+            </Button>
           </MobileControl>
         )}
 
@@ -243,79 +258,77 @@ function MobileAdvancedControls({
 
   return (
     <section aria-labelledby="mobile-advanced-controls" className="flex flex-col gap-2">
-      <h3 id="mobile-advanced-controls" className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h3 id="mobile-advanced-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Advanced
       </h3>
       <div className="grid grid-cols-2 gap-2">
         {showWorktree && isNewSession && onWorktreeEnabledChange && (
           <MobileControl label="Isolation">
-            <button
+            <Button
               type="button"
+              variant={worktreeEnabled ? "secondary" : "ghost"}
               aria-pressed={!!worktreeEnabled}
               onClick={() => onWorktreeEnabledChange(!worktreeEnabled)}
-              className={cn(
-                "flex h-10 items-center gap-1 text-xs font-medium transition-colors",
-                worktreeEnabled ? "text-primary" : "text-muted-foreground hover:text-foreground",
-              )}
+              className="h-10 justify-start"
             >
-              <GitBranch className="size-3.5" />
+              <GitBranch data-icon="inline-start" />
               Worktree
-            </button>
+            </Button>
           </MobileControl>
         )}
 
         {showWorktree && onUltracodeEnabledChange && (
           <MobileControl label="Workflow">
-            <button
+            <Button
               type="button"
+              variant={ultracodeEnabled ? "secondary" : "ghost"}
               aria-pressed={!!ultracodeEnabled}
               onClick={() => changeAndApply(() => onUltracodeEnabledChange(!ultracodeEnabled))}
-              className={cn(
-                "flex h-10 items-center gap-1 text-xs font-medium transition-colors",
-                ultracodeEnabled ? "text-primary" : "text-muted-foreground hover:text-foreground",
-              )}
+              className="h-10 justify-start"
             >
-              <Zap className={cn("size-3.5", ultracodeEnabled && "fill-current")} />
+              <Zap data-icon="inline-start" className={cn(ultracodeEnabled && "fill-current")} />
               Ultracode
-            </button>
+            </Button>
           </MobileControl>
         )}
 
         {showMcp && onToggleMcpServer && onRefreshMcpServers && onMcpAuth && (
           <MobileControl label="Connections" wide>
             <div className="flex flex-col gap-1">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={onRefreshMcpServers}
-                className="flex min-h-10 items-center gap-2 text-xs font-medium text-muted-foreground"
+                className="min-h-10 justify-start"
               >
-                <RefreshCw className={cn("size-3.5", mcpLoading && "animate-spin")} />
+                <RefreshCw data-icon="inline-start" className={cn(mcpLoading && "animate-spin")} />
                 Refresh MCP status
-              </button>
+              </Button>
               {(mcpServers ?? []).map((server) => {
                 const selected = selectedNames.has(server.name)
                 const connected = server.status === "connected"
                 return (
-                  <button
+                  <Button
                     key={server.name}
                     type="button"
+                    variant="ghost"
                     aria-pressed={connected ? selected : undefined}
                     onClick={() => connected
                       ? changeAndApply(() => onToggleMcpServer(server.name))
                       : onMcpAuth(server.name)}
-                    className="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 px-2 text-left text-xs text-foreground"
+                    className="min-h-10 justify-start text-left"
                   >
                     <span className={cn(
                       "size-2 shrink-0 rounded-full",
                       connected && selected
-                        ? "bg-emerald-500"
-                        : connected ? "bg-muted-foreground" : "bg-amber-500",
+                        ? "bg-success"
+                        : connected ? "bg-muted-foreground" : "bg-warning",
                     )} />
                     <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-xs text-muted-foreground">
                       {connected ? (selected ? "On" : "Off") : "Connect"}
                     </span>
-                  </button>
+                  </Button>
                 )
               })}
             </div>
@@ -390,7 +403,7 @@ export function MobileChatInputSettings({
               type="button"
               variant="ghost"
               size="icon"
-              className="ml-0.5 size-10 shrink-0 rounded-full text-muted-foreground"
+              className="ml-0.5 shrink-0 rounded-full text-muted-foreground"
               aria-label="Session controls"
               title="Session controls"
             />
@@ -411,8 +424,8 @@ export function MobileChatInputSettings({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="absolute right-2 top-2 size-10"
+                  size="icon-lg"
+                  className="absolute right-2 top-2"
                   aria-label="Close session controls"
                 />
               )}
@@ -458,8 +471,9 @@ export function MobileChatInputSettings({
             />
 
             {mobileExtra && (
-              <section aria-labelledby="mobile-goal-controls" className="flex flex-col gap-2 border-t border-border/40 pt-4">
-                <h3 id="mobile-goal-controls" className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <section aria-labelledby="mobile-goal-controls" className="flex flex-col gap-2 pt-1">
+                <Separator className="mb-3" />
+                <h3 id="mobile-goal-controls" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Long-running goal
                 </h3>
                 <div className="[&>*]:mx-0 [&>*]:mb-0 [&_button]:min-h-10">{mobileExtra}</div>
@@ -467,7 +481,7 @@ export function MobileChatInputSettings({
             )}
 
             {!isNewSession && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {agentKind === "claude" ? "Changes apply live." : "Changes apply on the next turn."}
               </p>
             )}

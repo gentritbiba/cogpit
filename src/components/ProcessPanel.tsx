@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, memo, lazy, Suspense } from "
 import { stripAnsi } from "@/lib/ansi"
 import { authUrl } from "@/lib/auth"
 import { ChevronDown, ChevronRight, Plus, TerminalSquare, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -12,6 +13,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { ProcessPanelScripts } from "@/components/ProcessPanelScripts"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 import { usePty } from "@/contexts/PtyContext"
@@ -19,14 +21,6 @@ import { usePty } from "@/contexts/PtyContext"
 const TerminalOutput = lazy(() =>
   import("@/components/TerminalOutput").then((module) => ({ default: module.TerminalOutput })),
 )
-
-// ── Type badge colors ────────────────────────────────────────────────────────
-
-const TYPE_STYLES: Record<ProcessEntry["type"], string> = {
-  script: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  task: "bg-green-500/15 text-green-400 border-green-500/30",
-  terminal: "bg-purple-500/15 text-purple-400 border-purple-500/30",
-}
 
 function ProcessOutput({
   process,
@@ -86,7 +80,7 @@ function ProcessOutput({
   return (
     <pre
       ref={outputRef}
-      className="flex-1 overflow-auto bg-elevation-0 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap break-words"
+      className="flex-1 overflow-auto bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap break-words"
     >
       {output || (
         <span className="text-muted-foreground">
@@ -100,61 +94,60 @@ function ProcessOutput({
 function ProcessTab({
   process,
   isActive,
-  onClick,
+  onSelectActive,
   onClose,
   mobile,
 }: {
   process: ProcessEntry
   isActive: boolean
-  onClick: () => void
+  onSelectActive: () => void
   onClose: () => void
   mobile: boolean
 }) {
   return (
     <div
       title={process.source ?? process.name}
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-full text-[10px] font-medium transition-colors",
-        isActive
-          ? "bg-elevation-2 text-foreground border border-border"
-          : "text-muted-foreground hover:text-foreground hover:bg-elevation-2 border border-transparent"
-      )}
+      className="inline-flex h-6 shrink-0 items-center"
     >
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label={`Select ${process.name}`}
+      <TabsTrigger
+        value={process.id}
+        aria-label={process.name}
+        onClick={() => {
+          if (isActive) onSelectActive()
+        }}
         className={cn(
-          "inline-flex min-w-0 items-center",
-          mobile ? "gap-1 py-0.5 pl-1.5" : "gap-1.5 py-0.5 pl-2.5",
+          "h-6 min-w-0 justify-start py-0 text-xs",
+          mobile ? "gap-1 px-1.5" : "gap-1.5 px-2",
         )}
       >
         {process.status === "running" && (
-          <span className="inline-block size-1.5 rounded-full bg-green-400 shrink-0" />
+          <span className="inline-block size-1.5 shrink-0 rounded-full bg-success" />
         )}
         {process.status === "errored" && (
-          <span className="inline-block size-1.5 rounded-full bg-red-400 shrink-0" />
+          <span className="inline-block size-1.5 shrink-0 rounded-full bg-destructive" />
         )}
 
         <span className="truncate max-w-[100px]">{process.name}</span>
 
-        <span className={cn(
-          "inline-flex items-center rounded px-1 py-px text-[9px] border",
-          mobile && "hidden",
-          TYPE_STYLES[process.type]
-        )}>
+        <Badge
+          variant="secondary"
+          className={cn("px-1 py-0 font-normal", mobile && "hidden")}
+        >
           {process.type}
-        </span>
-      </button>
+        </Badge>
+      </TabsTrigger>
 
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         aria-label={`Close ${process.name}`}
+        title={`Close ${process.name}`}
         onClick={onClose}
-        className="mx-1 rounded p-0.5 hover:bg-elevation-3 text-muted-foreground hover:text-foreground"
+        className="mr-0.5 text-muted-foreground"
       >
-        <X className="size-2.5" />
-      </button>
+        <X data-icon="inline-start" />
+      </Button>
     </div>
   )
 }
@@ -249,10 +242,16 @@ export const ProcessPanel = memo(function ProcessPanel({
   const processList = [...processes.values()]
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-border/70 bg-elevation-0">
+    <Tabs
+      value={activeProcessId}
+      onValueChange={(value) => {
+        if (typeof value === "string") onSetActive(value)
+      }}
+      className="shrink-0 gap-0 border-t bg-background"
+    >
       {!mobile && !collapsed && activeProcess && (
         <div
-          className="h-1 cursor-row-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors"
+          className="h-1 cursor-row-resize transition-colors hover:bg-accent active:bg-muted-foreground/30"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -261,7 +260,7 @@ export const ProcessPanel = memo(function ProcessPanel({
       )}
 
       <div className={cn(
-        "flex shrink-0 items-center border-b border-border bg-elevation-1",
+        "flex shrink-0 items-center border-b bg-card",
         mobile ? "h-7 gap-1 px-2" : "h-8 gap-2 px-3",
       )}>
         <Button
@@ -281,18 +280,25 @@ export const ProcessPanel = memo(function ProcessPanel({
           <span className={cn(mobile && "sr-only")}>Terminal</span>
         </Button>
 
-        <div className={cn("flex flex-1 items-center gap-1 overflow-x-auto no-scrollbar", !mobile && "ml-2")}>
+        <TabsList
+          variant="default"
+          aria-label="Open processes"
+          className={cn(
+            "min-w-0 flex-1 justify-start overflow-x-auto no-scrollbar",
+            !mobile && "ml-2",
+          )}
+        >
           {processList.map((proc) => (
             <ProcessTab
               key={proc.id}
               process={proc}
               isActive={proc.id === activeProcessId}
-              onClick={() => onSetActive(proc.id)}
+              onSelectActive={() => onSetActive(proc.id)}
               onClose={() => handleClose(proc)}
               mobile={mobile}
             />
           ))}
-        </div>
+        </TabsList>
 
         {onRequestTerminal && (
           <Button
@@ -309,66 +315,71 @@ export const ProcessPanel = memo(function ProcessPanel({
         )}
       </div>
 
-      {!collapsed && (
-        <div className="flex min-h-0" style={{ height: mobile ? "min(36dvh, 260px)" : height }}>
-          {!mobile && (
-            <ProcessPanelScripts
-              projectDir={projectDir}
-              onProcessStarted={onProcessStarted}
-            />
+      <div
+        className={cn("min-h-0", collapsed ? "hidden" : "flex")}
+        style={{ height: mobile ? "min(36dvh, 260px)" : height }}
+      >
+        {!collapsed && !mobile && (
+          <ProcessPanelScripts
+            projectDir={projectDir}
+            onProcessStarted={onProcessStarted}
+          />
+        )}
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {processList.map((process) => (
+            <TabsContent
+              key={process.id}
+              value={process.id}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              {!collapsed && process.type === "task" && (
+                <ProcessOutput process={process} />
+              )}
+
+              {!collapsed && process.type !== "task" && (
+                <Suspense
+                  fallback={(
+                    <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
+                      Loading terminal…
+                    </div>
+                  )}
+                >
+                  <TerminalOutput
+                    processId={process.id}
+                    autoFocus
+                    onRequestNew={onRequestTerminal}
+                    onRequestClose={() => handleClose(process)}
+                    onAddContext={onAddTerminalContext}
+                  />
+                </Suspense>
+              )}
+            </TabsContent>
+          ))}
+
+          {!collapsed && !activeProcess && (
+            <Empty className="rounded-none">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <TerminalSquare />
+                </EmptyMedia>
+                <EmptyTitle>No terminal open</EmptyTitle>
+                <EmptyDescription>
+                  Start a terminal here or run a project script from the left.
+                </EmptyDescription>
+              </EmptyHeader>
+              {onRequestTerminal && projectDir && (
+                <EmptyContent>
+                  <Button type="button" size="sm" onClick={onRequestTerminal}>
+                    <Plus data-icon="inline-start" />
+                    New terminal
+                  </Button>
+                </EmptyContent>
+              )}
+            </Empty>
           )}
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            {activeProcess?.type === "task" && (
-              <ProcessOutput
-                key={activeProcess.id}
-                process={activeProcess}
-              />
-            )}
-
-            {activeProcess && activeProcess.type !== "task" && (
-              <Suspense
-                fallback={(
-                  <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
-                    Loading terminal…
-                  </div>
-                )}
-              >
-                <TerminalOutput
-                  key={activeProcess.id}
-                  processId={activeProcess.id}
-                  autoFocus
-                  onRequestNew={onRequestTerminal}
-                  onRequestClose={() => handleClose(activeProcess)}
-                  onAddContext={onAddTerminalContext}
-                />
-              </Suspense>
-            )}
-
-            {!activeProcess && (
-              <Empty className="rounded-none">
-                <EmptyHeader>
-                  <EmptyMedia variant="icon">
-                    <TerminalSquare />
-                  </EmptyMedia>
-                  <EmptyTitle>No terminal open</EmptyTitle>
-                  <EmptyDescription>
-                    Start a terminal here or run a project script from the left.
-                  </EmptyDescription>
-                </EmptyHeader>
-                {onRequestTerminal && projectDir && (
-                  <EmptyContent>
-                    <Button type="button" size="sm" onClick={onRequestTerminal}>
-                      <Plus data-icon="inline-start" />
-                      New terminal
-                    </Button>
-                  </EmptyContent>
-                )}
-              </Empty>
-            )}
-          </div>
         </div>
-      )}
-    </div>
+      </div>
+    </Tabs>
   )
 })

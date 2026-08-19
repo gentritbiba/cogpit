@@ -19,8 +19,9 @@ function routeHub(options: {
   probe?: unknown
   add?: { body: unknown; ok?: boolean; status?: number }
   update?: { body: unknown; ok?: boolean; status?: number }
+  remove?: Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>
 }) {
-  const { devices = [], probe, add, update } = options
+  const { devices = [], probe, add, update, remove } = options
   mocks.hubFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url === "/api/hub/devices" && init?.method === "POST") {
       return Promise.resolve({
@@ -35,6 +36,9 @@ function routeHub(options: {
         status: update?.status ?? 200,
         json: async () => update?.body ?? { device: { id: "dev_updated" } },
       })
+    }
+    if (url.startsWith("/api/hub/devices/") && init?.method === "DELETE") {
+      return remove ?? Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
     }
     if (url === "/api/hub/devices/probe") {
       return Promise.resolve({ ok: true, status: 200, json: async () => probe })
@@ -251,6 +255,44 @@ describe("DevicesDialog", () => {
       ([url, init]) => url === "/api/hub/devices/dev_team" && init?.method === "PATCH",
     )
     expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ username: null })
+  })
+
+  it("confirms device removal in an alert dialog and waits for the request", async () => {
+    const device = {
+      id: "dev_studio",
+      name: "Studio",
+      host: "10.0.0.5",
+      port: 19384,
+      auth: "none",
+      addedAt: 1,
+      runtime: { authState: "ok", lastHello: { version: "1.0.1" } },
+    }
+    let finishRemove: (() => void) | undefined
+    const remove = new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>(
+      (resolve) => {
+        finishRemove = () => resolve({ ok: true, status: 204, json: async () => ({}) })
+      },
+    )
+    routeHub({ devices: [device], remove })
+    const user = userEvent.setup()
+    render(<DevicesDialog open initialMode="manage" onClose={vi.fn()} />)
+
+    await screen.findByText("Studio")
+    expect(screen.getByText("Unauthenticated")).toHaveAttribute("data-slot", "badge")
+    await user.click(screen.getByRole("button", { name: "Remove Studio" }))
+
+    expect(screen.getByRole("alertdialog", { name: "Remove Studio?" })).toBeInTheDocument()
+    expect(mocks.hubFetch.mock.calls.some(
+      ([url, init]) => url === "/api/hub/devices/dev_studio" && init?.method === "DELETE",
+    )).toBe(false)
+
+    const confirm = screen.getByRole("button", { name: "Remove device" })
+    await user.click(confirm)
+    expect(confirm).toBeDisabled()
+    expect(screen.getByRole("alertdialog", { name: "Remove Studio?" })).toBeInTheDocument()
+
+    finishRemove?.()
+    await waitFor(() => expect(confirm).toBeEnabled())
   })
 
   it("maps a rejected password to an inline field error", async () => {

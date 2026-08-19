@@ -25,6 +25,7 @@ import {
   clearBrowserSessionCookie,
   friendlySpawnError,
   securityHeaders,
+  devSecurityHeaders,
   bodySizeLimit,
   authMiddleware,
   buildPermArgs,
@@ -420,6 +421,36 @@ describe("securityHeaders", () => {
       ?.slice(1)
     expect(connectSources).toContain("wss://mb.cogpit.dev")
     expect(connectSources).not.toContain("wss:")
+  })
+})
+
+describe("devSecurityHeaders", () => {
+  it("leaves Vite documents free to inject the React refresh preamble", () => {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: {}, url: "/" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+    const next = vi.fn()
+
+    devSecurityHeaders(req, res, next)
+
+    expect(headers["X-Content-Type-Options"]).toBeUndefined()
+    expect(headers["Content-Security-Policy"]).toBeUndefined()
+    expect(next).toHaveBeenCalledOnce()
+  })
+
+  it("keeps the production policy on dev API responses", () => {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: {}, url: "/api/projects" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+
+    devSecurityHeaders(req, res, vi.fn())
+
+    expect(headers["Content-Security-Policy"]).toContain("script-src 'self'")
+    expect(headers["Cache-Control"]).toBe("no-store")
   })
 })
 

@@ -1,9 +1,27 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react"
-import { FolderOpen, FolderPlus, Search } from "lucide-react"
+import { useState, useEffect, useMemo, useCallback } from "react"
+import { FolderOpen, FolderPlus } from "lucide-react"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { authFetch } from "@/lib/auth"
 import { shortPath } from "@/lib/format"
 import { useProjectNames } from "@/hooks/useProjectNames"
@@ -41,26 +59,15 @@ export function ProjectSwitcherModal({
 }: ProjectSwitcherModalProps) {
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [filter, setFilter] = useState("")
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
 
   // Load projects when modal opens
   useEffect(() => {
     if (!open) return
     setFilter("")
-    setSelectedIndex(0)
     authFetch("/api/projects")
       .then((res) => (res.ok ? res.json() : []))
       .then((data: ProjectInfo[]) => setProjects(data))
       .catch(() => setProjects([]))
-  }, [open])
-
-  // Auto-focus input when modal opens
-  useEffect(() => {
-    if (open) {
-      requestAnimationFrame(() => inputRef.current?.focus())
-    }
   }, [open])
 
   // Second press of the shortcut while modal is open → new session in current project
@@ -107,9 +114,6 @@ export function ProjectSwitcherModal({
     const normalizedProjectPath = project.path.replace(/[\\/]+$/, "") || project.path
     return normalizedProjectPath === normalizedFolderPath
   })
-  const folderOffset = canAddFolder ? 1 : 0
-  const selectableCount = filtered.length + folderOffset
-
   const handleSelect = useCallback(
     (project: ProjectInfo) => {
       onNewSession(project.dirName, project.path)
@@ -118,137 +122,76 @@ export function ProjectSwitcherModal({
     [onNewSession, onClose]
   )
 
-  // Scroll selected item into view
-  useEffect(() => {
-    const container = listRef.current
-    if (!container) return
-    const items = container.querySelectorAll("[data-project-item]")
-    const item = items[selectedIndex] as HTMLElement | undefined
-    if (item) {
-      item.scrollIntoView({ block: "nearest" })
-    }
-  }, [selectedIndex])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault()
-        setSelectedIndex((i) => Math.min(i + 1, Math.max(0, selectableCount - 1)))
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault()
-        setSelectedIndex((i) => Math.max(i - 1, 0))
-      } else if (e.key === "Enter") {
-        e.preventDefault()
-        if (canAddFolder && selectedIndex === 0) {
-          onNewFolder(folderPath)
-          onClose()
-          return
-        }
-        const target = filtered[selectedIndex - folderOffset]
-        if (target) handleSelect(target)
-      }
-    },
-    [canAddFolder, filtered, folderOffset, folderPath, handleSelect, onClose, onNewFolder, selectableCount, selectedIndex]
-  )
-
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent
-        className="max-w-md p-0 elevation-4 border-border/30 gap-0 overflow-hidden [&>button:last-child]:hidden"
-        onKeyDown={handleKeyDown}
-      >
-        {/* Search input */}
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Search className="size-4 text-muted-foreground shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
+      <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Start a session</DialogTitle>
+          <DialogDescription>Choose a project or enter an absolute folder path.</DialogDescription>
+        </DialogHeader>
+        <Command shouldFilter={false} className="rounded-none p-0">
+          <CommandInput
+            autoFocus
             placeholder="Search projects or paste an absolute path..."
             value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value)
-              setSelectedIndex(0)
-            }}
-            className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+            onValueChange={setFilter}
           />
-          <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
-            ESC
-          </kbd>
-        </div>
-
-        {/* Project list */}
-        <div ref={listRef} className="max-h-[320px] overflow-y-auto py-1">
-          {filtered.length === 0 && !canAddFolder ? (
-            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-              No projects found
-            </div>
-          ) : (
-            <>
+          <CommandList className="max-h-80 p-1">
+            <CommandEmpty className="py-0">
+              <Empty className="border-0 py-8">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon"><FolderOpen /></EmptyMedia>
+                  <EmptyTitle>No projects found</EmptyTitle>
+                  <EmptyDescription>Try another name or paste an absolute path.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            </CommandEmpty>
+            <CommandGroup className="p-0">
               {canAddFolder && (
-                <button
-                  type="button"
-                  data-project-item
-                  className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                    selectedIndex === 0
-                      ? "bg-elevation-2 text-foreground"
-                      : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
-                  }`}
-                  onClick={() => {
+                <CommandItem
+                  value={`folder:${folderPath}`}
+                  className="h-auto gap-3 px-3 py-2.5"
+                  onSelect={() => {
                     onNewFolder(folderPath)
                     onClose()
                   }}
-                  onMouseEnter={() => setSelectedIndex(0)}
                 >
-                  <FolderPlus className="size-4 shrink-0 text-primary" />
+                  <FolderPlus data-icon="inline-start" className="size-4 shrink-0 text-foreground" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">Start in this folder</div>
-                    <div className="truncate text-[11px] text-muted-foreground">
+                    <div className="truncate text-xs text-muted-foreground">
                       {folderPath} · {defaultAgentKind === "codex" ? "Codex" : "Claude"}
                     </div>
                   </div>
-                </button>
+                </CommandItem>
               )}
-              {filtered.map((project, i) => {
-                const itemIndex = i + folderOffset
-                return (
-              <button
-                type="button"
-                key={project.dirName}
-                data-project-item
-                className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
-                  itemIndex === selectedIndex
-                    ? "bg-elevation-2 text-foreground"
-                    : "text-muted-foreground hover:bg-elevation-2 hover:text-foreground"
-                }`}
-                onClick={() => handleSelect(project)}
-                onMouseEnter={() => setSelectedIndex(itemIndex)}
-              >
-                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
-                    {projectNames[project.dirName] || shortPath(project.path)}
+              {filtered.map((project) => (
+                <CommandItem
+                  key={project.dirName}
+                  value={`project:${project.dirName}`}
+                  className="h-auto gap-3 px-3 py-2.5"
+                  onSelect={() => handleSelect(project)}
+                >
+                  <FolderOpen data-icon="inline-start" className="size-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">
+                      {projectNames[project.dirName] || shortPath(project.path)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {projectNames[project.dirName] && (
+                        <span className="mr-1.5">{shortPath(project.path)}</span>
+                      )}
+                      {project.sessionCount} session{project.sessionCount !== 1 ? "s" : ""}
+                      {project.lastModified && (
+                        <> &middot; {new Date(project.lastModified).toLocaleDateString()}</>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {projectNames[project.dirName] && (
-                      <span className="mr-1.5">{shortPath(project.path)}</span>
-                    )}
-                    {project.sessionCount} session{project.sessionCount !== 1 ? "s" : ""}
-                    {project.lastModified && (
-                      <> &middot; {new Date(project.lastModified).toLocaleDateString()}</>
-                    )}
-                  </div>
-                </div>
-                {itemIndex === selectedIndex && (
-                  <kbd className="hidden sm:inline-flex items-center rounded border border-border/70 bg-elevation-2 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
-                    ↵
-                  </kbd>
-                )}
-              </button>
-                )
-              })}
-            </>
-          )}
-        </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
       </DialogContent>
     </Dialog>
   )
