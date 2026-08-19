@@ -66,9 +66,12 @@ function createMockReqRes(method: string, url: string, body?: string) {
     _getStatus: () => statusCode,
   }
   const next = vi.fn()
-  const sendBody = () => {
+  // The route parses through withJsonBody, so its handler runs on the microtask
+  // queue rather than inside the "end" call; drain it before asserting.
+  const sendBody = async () => {
     if (body) for (const h of dataHandlers) h(body)
     for (const h of endHandlers) h()
+    await drainBodyParse()
   }
   return { req: asIncomingMessage(req), res: asServerResponse(res), next, sendBody }
 }
@@ -87,6 +90,15 @@ const journalJson = (over: Record<string, unknown> = {}) =>
     ],
     ...over,
   })
+
+/**
+ * Drain the microtask queue that withJsonBody parses on. Deliberately not
+ * setImmediate: several tests here run with fake timers, which never fire it.
+ * readJsonBody settles through promises only, so yielding is enough.
+ */
+async function drainBodyParse() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve()
+}
 
 describe("workflow routes", () => {
   let handlers: Map<string, Middleware>
@@ -246,14 +258,14 @@ describe("workflow routes", () => {
     it("returns 400 when sessionId is missing", async () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ runId: "wf_abc-123" }))
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      sendBody()
+      await sendBody()
       expect(res._getStatus()).toBe(400)
     })
 
     it("reports controllable=false for an unmanaged session", async () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "ghost", runId: "wf_abc-123" }))
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      sendBody()
+      await sendBody()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(false)
       expect(data.controllable).toBe(false)
@@ -264,7 +276,7 @@ describe("workflow routes", () => {
       activeProcesses.set("sess", { kill })
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", JSON.stringify({ sessionId: "sess", runId: "wf_abc-123" }))
       await getRouteHandler(handlers, "/api/workflow-stop")(req, res, next)
-      sendBody()
+      await sendBody()
       const data = JSON.parse(res._getData())
       expect(data.success).toBe(true)
       expect(data.controllable).toBe(true)

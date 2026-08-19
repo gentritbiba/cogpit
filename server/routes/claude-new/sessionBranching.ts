@@ -12,7 +12,7 @@ import {
   join,
   randomUUID,
 } from "../../helpers"
-import type { UseFn } from "../../http"
+import { withJsonBody, type UseFn } from "../../http"
 
 /**
  * Find the JSONL line index where the turn AFTER targetTurnIndex starts.
@@ -106,13 +106,13 @@ export function registerBranchSessionRoute(use: UseFn) {
   use("/api/branch-session", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", async () => {
+    withJsonBody<{
+      dirName?: string
+      fileName?: string
+      turnIndex?: number
+      turnUuid?: string
+    }>(req, res, async ({ dirName, fileName, turnIndex, turnUuid }) => {
       try {
-        const { dirName, fileName, turnIndex, turnUuid } = JSON.parse(body)
 
         if (!dirName || !fileName) {
           res.statusCode = 400

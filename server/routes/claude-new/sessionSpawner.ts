@@ -30,7 +30,9 @@ import {
   findNewestCodexSessionForCwd,
   formatCodexRolloutFileName,
 } from "../../helpers"
-import type { UseFn } from "../../http"
+import { withJsonBody, type UseFn } from "../../http"
+import type { ImageAttachment } from "../../sdk-session"
+import type { PermissionsConfig } from "../../../shared/providers/types"
 import type { PersistentSession } from "../../helpers"
 import { CODEX_IMAGE_ONLY_PROMPT } from "../../lib/streamMessage"
 import { createSDKSession, attachSubagentWatcher } from "../../sdk-session"
@@ -181,17 +183,28 @@ async function tryRespondWithCodexAppServerSession(
   }
 }
 
+/** Payload shared by the two session-spawn routes. */
+interface NewSessionBody {
+  dirName?: string
+  cwd?: string
+  message?: string
+  images?: ImageAttachment[]
+  permissions?: PermissionsConfig
+  model?: string
+  effort?: string
+  fastMode?: boolean
+  ultracode?: boolean
+  worktreeName?: string
+  mcpConfig?: string | null
+  name?: string
+}
+
 export function registerNewSessionRoute(use: UseFn) {
   use("/api/new-session", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", async () => {
+    withJsonBody<NewSessionBody>(req, res, async ({ dirName, message, permissions, model, effort, fastMode, name }) => {
       try {
-        const { dirName, message, permissions, model, effort, fastMode, name } = JSON.parse(body)
 
         if (!dirName || !message) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message are required"))
@@ -404,13 +417,8 @@ export function registerCreateAndSendRoute(use: UseFn) {
   use("/api/create-and-send", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", async () => {
+    withJsonBody<NewSessionBody>(req, res, async ({ dirName, cwd: requestedCwd, message, images, permissions, model, effort, fastMode, ultracode, worktreeName, mcpConfig, name }) => {
       try {
-        const { dirName, cwd: requestedCwd, message, images, permissions, model, effort, fastMode, ultracode, worktreeName, mcpConfig, name } = JSON.parse(body)
 
         if (!dirName || (!message && (!images || !images.length))) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message (or images) are required"))
@@ -611,8 +619,10 @@ export function registerCreateAndSendRoute(use: UseFn) {
         // Use the Agent SDK for Claude sessions
         const sdkState = createSDKSession({
           sessionId,
+          // An images-only send has no prompt; the SDK substitutes its own
+          // "See the attached image(s)." for a falsy one either way.
+          message: message ?? "",
           cwd: projectPath,
-          message,
           images,
           permissionMode: permissions?.mode,
           allowedTools: permissions?.allowedTools,

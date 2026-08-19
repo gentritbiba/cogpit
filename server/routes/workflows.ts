@@ -15,7 +15,7 @@
  * Mirrors the team-watch SSE pattern (debounced fs.watch → {type:"update"}).
  */
 import { watch, activeProcesses, persistentSessions } from "../helpers"
-import type { UseFn } from "../http"
+import { withJsonBody, type UseFn } from "../http"
 import { sdkSessions, stopSDKSession } from "../sdk-session"
 import {
   listSessionWorkflows,
@@ -270,18 +270,7 @@ export function registerWorkflowRoutes(use: UseFn) {
   use("/api/workflow-stop", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => { body += chunk })
-    req.on("end", () => {
-      let parsed: { sessionId?: string; runId?: string }
-      try {
-        parsed = JSON.parse(body)
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: "Invalid JSON body" }))
-        return
-      }
-
+    withJsonBody<{ sessionId?: string; runId?: string }>(req, res, (parsed) => {
       const sessionId = parsed.sessionId
       if (!sessionId || typeof sessionId !== "string") {
         res.statusCode = 400

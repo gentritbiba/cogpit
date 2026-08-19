@@ -1,5 +1,5 @@
 import { createConnection } from "../../helpers"
-import type { UseFn } from "../../http"
+import { withJsonBody, type UseFn } from "../../http"
 import { handleBackgroundTasks } from "./backgroundTasks"
 import { handleBackgroundAgents } from "./backgroundAgents"
 import { findListeningPids, killListeningProcess } from "./listeningProcesses"
@@ -59,21 +59,8 @@ export function registerPortRoutes(use: UseFn) {
   use("/api/kill-port", (req, res, next) => {
     if (req.method !== "POST") return next()
 
-    let body = ""
-    req.on("data", (chunk: string) => {
-      body += chunk
-    })
-    req.on("end", () => {
+    withJsonBody<{ port?: number }>(req, res, ({ port }) => {
       void (async () => {
-        let port: number
-        try {
-          port = JSON.parse(body).port
-        } catch {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: "Invalid JSON body" }))
-          return
-        }
-
         if (!port || port < 1 || port > 65535) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "Valid port required" }))
