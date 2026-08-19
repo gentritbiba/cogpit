@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { getToolSummary, getToolTextStyle, ToolCallCard } from "../ToolCallCard"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "@/lib/types"
@@ -29,6 +30,12 @@ vi.mock("@/contexts/SessionContext", () => ({
 vi.mock("@/lib/shiki", () => ({
   highlightCode: vi.fn().mockResolvedValue([]),
   getLangFromPath: vi.fn().mockReturnValue(null),
+}))
+
+vi.mock("@/components/timeline/LiveSubagentTranscript", () => ({
+  LiveSubagentTranscript: ({ toolUseId }: { toolUseId: string }) => (
+    <div data-testid="live-subagent-transcript">{toolUseId}</div>
+  ),
 }))
 
 // Mock window.matchMedia — required by useIsMobile
@@ -242,6 +249,7 @@ describe("ToolCallCard Skill rendering", () => {
     const btn = screen.getByText("Open SKILL.md")
     fireEvent.click(btn)
 
+    expect(screen.getByRole("button", { name: /Skill details: commit/ })).toHaveAttribute("aria-expanded", "false")
     expect(mockAuthFetchFn).toHaveBeenCalledWith(
       "/api/open-in-editor",
       expect.objectContaining({
@@ -337,6 +345,164 @@ describe("ToolCallCard hook badge rendering", () => {
   })
 })
 
+describe("ToolCallCard desktop disclosure", () => {
+  it("uses the entire one-line header as the accessible disclosure target", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "src/example.ts" }),
+      result: "export const answer = 42",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    const disclosure = screen.getByRole("button", { name: /Read details: src\/example\.ts/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("button", { name: "Input" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Result" })).toBeNull()
+
+    fireEvent.click(screen.getByText("Read"))
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    const panelId = disclosure.getAttribute("aria-controls")
+    expect(panelId).toBeTruthy()
+    expect(document.getElementById(panelId!)).toBeTruthy()
+    expect(screen.getByText("export const answer = 42")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "input" })).toBeTruthy()
+  })
+
+  it("supports Enter and Space through native button keyboard behavior", async () => {
+    const user = userEvent.setup()
+    const toolCall: ToolCall = {
+      ...makeToolCall("Grep", { pattern: "needle" }),
+      result: "src/example.ts:1:needle",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    const disclosure = screen.getByRole("button", { name: /Grep details: needle/ })
+    disclosure.focus()
+    await user.keyboard("{Enter}")
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+
+    await user.keyboard(" ")
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("selects the diff for a valid Edit instead of its result", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Edit", {
+        file_path: "src/example.ts",
+        old_string: "const answer = 41",
+        new_string: "const answer = 42",
+      }),
+      result: "Edit applied successfully",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    const disclosure = screen.getByRole("button", { name: /Edit details: src\/example\.ts/ })
+    expect(screen.queryByRole("button", { name: "Diff" })).toBeNull()
+    fireEvent.click(disclosure)
+
+    expect(screen.getAllByText("src/example.ts")).toHaveLength(2)
+    fireEvent.click(screen.getByTitle("Expand diff"))
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(screen.queryByText("Edit applied successfully")).toBeNull()
+  })
+
+  it("falls back to the result when an Edit cannot produce a diff", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Edit", { file_path: "src/example.ts", new_string: "const answer = 42" }),
+      result: "Edit could not find the old text",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Edit details: src\/example\.ts/ }))
+
+    expect(screen.getByText("Edit could not find the old text")).toBeTruthy()
+    expect(screen.queryByTitle("Expand diff")).toBeNull()
+  })
+
+  it.each(["Read", "Grep"])("selects the result for %s", (name) => {
+    const toolCall: ToolCall = {
+      ...makeToolCall(name, name === "Read" ? { file_path: "src/example.ts" } : { pattern: "needle" }),
+      result: `${name} result`,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`${name} details`) }))
+
+    expect(screen.getByText(`${name} result`)).toBeTruthy()
+    expect(screen.queryByLabelText("Bash command")).toBeNull()
+  })
+
+  it("uses the result as the fallback for other tools", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Write", { file_path: "src/example.ts", content: "export {}" }),
+      result: "Wrote src/example.ts",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Write details: src\/example\.ts/ }))
+
+    expect(screen.getByText("Wrote src/example.ts")).toBeTruthy()
+    expect(screen.queryByText('"content"')).toBeNull()
+  })
+
+  it("keeps raw JSON input behind the nested input link", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Write", { file_path: "src/example.ts", content: "export {}" }),
+      result: "Wrote src/example.ts",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    const disclosure = screen.getByRole("button", { name: /Write details: src\/example\.ts/ })
+    fireEvent.click(disclosure)
+
+    expect(screen.queryByText('"content"')).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "input" }))
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText(/"content"/)).toBeTruthy()
+  })
+
+  it("opens only the primary panel during bulk payload expansion", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "src/example.ts", offset: 12 }),
+      result: "bulk result",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll expandToolPayloads />)
+
+    expect(screen.getByRole("button", { name: /Read details: src\/example\.ts/ })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("bulk result")).toBeTruthy()
+    expect(screen.queryByText('"offset"')).toBeNull()
+    expect(screen.getByRole("button", { name: "input" })).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("does not collapse when a nested copy control is used", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Bash", { command: "bun test" }),
+      result: "all tests passed",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    const disclosure = screen.getByRole("button", { name: /Bash details: bun test/ })
+    fireEvent.click(disclosure)
+    fireEvent.click(screen.getByRole("button", { name: "Copy command" }))
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("all tests passed")).toBeTruthy()
+  })
+
+  it("keeps a live Task transcript visible independently of the disclosure", () => {
+    const toolCall = makeToolCall("Task", { description: "Audit the parser" })
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive />)
+
+    expect(screen.getByTestId("live-subagent-transcript")).toHaveTextContent("test-id")
+    expect(screen.getByRole("button", { name: /Task details: Audit the parser/ })).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
 describe("ToolCallCard Bash input rendering", () => {
   it("keeps payloads closed when only containing groups are expanded", () => {
     const toolCall = makeToolCall("Bash", { command: "bun test" })
@@ -347,11 +513,14 @@ describe("ToolCallCard Bash input rendering", () => {
   })
 
   it("renders Bash input as a readable command card", () => {
-    const toolCall = makeToolCall("Bash", {
-      command: "cd /workspace && npm test",
-      description: "Run the focused test suite",
-      timeout: 600_000,
-    })
+    const toolCall: ToolCall = {
+      ...makeToolCall("Bash", {
+        command: "cd /workspace && npm test",
+        description: "Run the focused test suite",
+        timeout: 600_000,
+      }),
+      result: "18 tests passed",
+    }
 
     render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
@@ -360,6 +529,7 @@ describe("ToolCallCard Bash input rendering", () => {
     expect(screen.getByText("10 min")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Copy command" })).toBeTruthy()
     expect(screen.queryByText('"command"')).toBeNull()
+    expect(screen.getByText("18 tests passed")).toBeTruthy()
   })
 
   it("shows execution mode and additional Bash options", () => {
@@ -399,7 +569,10 @@ describe("ToolCallCard Codex exec input rendering", () => {
   max_output_tokens: 20000
 });
 text(r.output);`
-    const toolCall = makeToolCall("exec", { raw: script })
+    const toolCall: ToolCall = {
+      ...makeToolCall("exec", { raw: script }),
+      result: "focused tests passed",
+    }
 
     render(<ToolCallCard toolCall={toolCall} expandAll={true} expandToolPayloads />)
 
@@ -412,6 +585,7 @@ text(r.output);`
     expect(screen.getByText("20,000 tokens")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Copy script" })).toBeTruthy()
     expect(screen.queryByText('"raw"')).toBeNull()
+    expect(screen.getByText("focused tests passed")).toBeTruthy()
   })
 
   it("supports namespaced Codex exec tool names", () => {
@@ -801,6 +975,46 @@ describe("CollapsibleToolCalls", () => {
     )
 
     expect(screen.getByText("Bash").className).not.toContain(getToolTextStyle("Bash", true))
+  })
+})
+
+describe("ToolCallCard mobile payload controls", () => {
+  beforeEach(() => {
+    mobileViewport = true
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390,
+    })
+  })
+
+  afterEach(() => {
+    mobileViewport = false
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024,
+    })
+  })
+
+  it("preserves the existing Diff, Input, and Result toggles", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Edit", {
+        file_path: "src/mobile.ts",
+        old_string: "const mobile = false",
+        new_string: "const mobile = true",
+      }),
+      result: "Edit applied",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} isAgentActive={false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Expand Edit tool call" }))
+
+    expect(screen.getByRole("button", { name: "Diff" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Input" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Result" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "input" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Result" }))
+    expect(screen.getByText("Edit applied")).toBeTruthy()
   })
 })
 

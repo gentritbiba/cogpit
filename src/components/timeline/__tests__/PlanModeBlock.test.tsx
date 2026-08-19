@@ -255,7 +255,7 @@ describe("PlanModeBlock", () => {
     expect(screen.queryByText(/"file_path"/)).toBeNull()
   })
 
-  it("opens embedded tool payloads and their containing groups at level two", () => {
+  it("opens embedded primary panels while keeping raw input nested at level two", () => {
     const call = makeToolCall({
       id: "tc_expand_2",
       name: "Read",
@@ -273,7 +273,10 @@ describe("PlanModeBlock", () => {
       />
     )
 
-    expect(screen.getByText(/"file_path"/)).toBeInTheDocument()
     expect(screen.getByText("file content here")).toBeInTheDocument()
+    expect(screen.queryByText(/"file_path"/)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "input" }))
+    expect(screen.getByText(/"file_path"/)).toBeInTheDocument()
   })
 })
