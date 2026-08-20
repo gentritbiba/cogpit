@@ -29,6 +29,7 @@ import { registerPortRoutes } from "./routes/ports"
 import { registerProjectFileContentRoutes } from "./routes/project-file"
 import { registerProjectFileRoutes } from "./routes/project-files"
 import { registerProjectRoutes } from "./routes/projects"
+import { registerProviderUpdateRoutes } from "./routes/provider-updates"
 import { registerScriptRoutes } from "./routes/scripts"
 import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
@@ -118,6 +119,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("models", registerModelRoutes),
   apiRoute("codex-runtime", registerCodexRuntimeRoutes),
   apiRoute("claude-runtime", registerClaudeRuntimeRoutes),
+  apiRoute("provider-updates", registerProviderUpdateRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 
 export function registerApiRoutes(use: UseFn, context: ApiRouteContext): void {

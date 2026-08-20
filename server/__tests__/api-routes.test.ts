@@ -57,6 +57,7 @@ const CANONICAL_ROUTE_IDS = [
   "models",
   "codex-runtime",
   "claude-runtime",
+  "provider-updates",
 ] as const
 
 function captureRegistrations(mode: HubMode): Array<{

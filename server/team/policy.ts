@@ -148,6 +148,12 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     ...authed("/api/codex/goals", "/api/codex/threads"),
   ],
   "claude-runtime": admin("/api/claude/runtime"),
+  // Reading CLI versions is harmless; running the upgrade installs software on
+  // the host, so that half stays an admin capability.
+  "provider-updates": [
+    { prefix: "/api/provider-updates", methods: ["GET"], requires: "authed" },
+    { prefix: "/api/provider-updates/run", requires: "admin" },
+  ],
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()

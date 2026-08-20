@@ -14,6 +14,7 @@ import type {
   Turn,
   ToolCall,
 } from "@/lib/types"
+import type { ProviderUpdateInfo } from "../../shared/contracts/providerUpdates"
 
 // ── Factory Helpers ─────────────────────────────────────────────────────────
 
@@ -431,4 +432,25 @@ export function makeWriteToolCall(
     result: "File written",
     ...overrides,
   })
+}
+
+// ── Provider update advisories ──────────────────────────────────────────────
+
+export function makeProviderUpdateInfo(
+  overrides: Partial<ProviderUpdateInfo> = {},
+): ProviderUpdateInfo {
+  return {
+    provider: "claude",
+    displayName: "Claude Code",
+    packageName: "@anthropic-ai/claude-code",
+    installed: true,
+    binaryPath: "/usr/local/bin/claude",
+    currentVersion: "2.1.19",
+    latestVersion: "2.1.20",
+    status: "behind",
+    installMethod: "npm",
+    updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+    checkedAt: "2026-08-21T00:00:00.000Z",
+    ...overrides,
+  }
 }

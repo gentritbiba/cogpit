@@ -1,4 +1,5 @@
 import { DesktopHeader } from "@/components/DesktopHeader"
+import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
 import { shortcutLabel } from "@/lib/keybindings"
@@ -20,6 +21,7 @@ export function DesktopAppShell({
     <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
+      <ProviderUpdateBanner />
       <DesktopHeader
         showSidebar={navigation.panels.showSidebar}
         showStats={navigation.panels.showStats}

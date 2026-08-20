@@ -6,6 +6,7 @@ import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { MobileNav, type MobileTab } from "@/components/MobileNav"
 import { SessionInfoBar } from "@/components/SessionInfoBar"
 import { StatsPanel } from "@/components/StatsPanel"
+import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
@@ -66,6 +67,7 @@ export function MobileAppShell({
     <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
+      <ProviderUpdateBanner />
       {!(state.mobileTab === "chat" && session) && (
         <div className="flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />
