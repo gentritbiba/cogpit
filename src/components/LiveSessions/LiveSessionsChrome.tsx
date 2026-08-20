@@ -1,6 +1,5 @@
 import { Activity, AlertTriangle, RefreshCw, Search, X } from "lucide-react"
 
-import { LiveIndicator } from "@/components/header-shared"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,7 +19,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 
 interface LiveSessionsToolbarProps {
-  liveSessionCount: number
   loading: boolean
   isMobile: boolean
   searchQuery: string
@@ -29,7 +27,6 @@ interface LiveSessionsToolbarProps {
 }
 
 export function LiveSessionsToolbar({
-  liveSessionCount,
   loading,
   isMobile,
   searchQuery,
@@ -37,51 +34,39 @@ export function LiveSessionsToolbar({
   onRefresh,
 }: LiveSessionsToolbarProps) {
   return (
-    <>
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
-        <h2 className="flex-1 text-sm font-semibold">Sessions</h2>
-        {liveSessionCount > 0 && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-label={`${liveSessionCount} live sessions`}>
-            <LiveIndicator className="size-1.5" aria-hidden="true" />
-            {liveSessionCount} live
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size={isMobile ? "icon-sm" : "icon-xs"}
-          onClick={onRefresh}
-          aria-label="Refresh sessions"
-        >
-          <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
-        </Button>
-      </div>
-
-      <div className="shrink-0 border-b px-2.5 py-2">
-        <InputGroup>
-          <InputGroupInput
-            type="search"
-            value={searchQuery}
-            onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="Filter sessions"
-            aria-label="Search sessions by project, branch, title, first prompt, or latest prompt"
-          />
-          <InputGroupAddon align="inline-start">
-            <Search />
+    <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2">
+      <InputGroup>
+        <InputGroupInput
+          type="search"
+          value={searchQuery}
+          onChange={(event) => onSearchQueryChange(event.target.value)}
+          placeholder="Filter sessions"
+          aria-label="Search sessions by project, branch, title, first prompt, or latest prompt"
+        />
+        <InputGroupAddon align="inline-start">
+          <Search />
+        </InputGroupAddon>
+        {searchQuery && (
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              size="icon-xs"
+              onClick={() => onSearchQueryChange("")}
+              aria-label="Clear session search"
+            >
+              <X data-icon="inline-start" />
+            </InputGroupButton>
           </InputGroupAddon>
-          {searchQuery && (
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton
-                size="icon-xs"
-                onClick={() => onSearchQueryChange("")}
-                aria-label="Clear session search"
-              >
-                <X data-icon="inline-start" />
-              </InputGroupButton>
-            </InputGroupAddon>
-          )}
-        </InputGroup>
-      </div>
-    </>
+        )}
+      </InputGroup>
+      <Button
+        variant="ghost"
+        size={isMobile ? "icon-sm" : "icon-xs"}
+        onClick={onRefresh}
+        aria-label="Refresh sessions"
+      >
+        <RefreshCw data-icon="inline-start" className={cn(loading && "animate-spin")} />
+      </Button>
+    </div>
   )
 }
 

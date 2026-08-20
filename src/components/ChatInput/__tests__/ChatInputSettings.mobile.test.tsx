@@ -139,7 +139,7 @@ describe("ChatInputSettings mobile", () => {
     await user.click(screen.getByRole("button", { name: "Session controls" }))
     const sheet = await screen.findByRole("dialog", { name: "Session controls" })
     await user.click(within(sheet).getByRole("combobox", { name: "Access policy" }))
-    await user.click(screen.getByRole("option", { name: "Full access" }))
+    await user.click(await screen.findByRole("option", { name: "Full access" }))
 
     expect(screen.queryByRole("dialog", { name: /Enable full access/i })).not.toBeInTheDocument()
     expect(onPermissionModeChange).toHaveBeenCalledWith("bypassPermissions")

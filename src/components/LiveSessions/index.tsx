@@ -16,7 +16,6 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
-import { countLiveSessions } from "./liveSessionSummary"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -113,11 +112,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [fetchData, refreshRef])
 
   const isMobile = useIsMobile()
-
-  const liveSessionCount = useMemo(
-    () => countLiveSessions(sessions, procBySession),
-    [sessions, procBySession]
-  )
 
   const filteredSessions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -249,7 +243,6 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   return (
     <div className="flex h-full min-h-0 flex-col">
       <LiveSessionsToolbar
-        liveSessionCount={liveSessionCount}
         loading={loading}
         isMobile={isMobile}
         searchQuery={searchQuery}
