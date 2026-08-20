@@ -149,7 +149,7 @@ export const StickyPromptBanner = memo(function StickyPromptBanner({
       size="sm"
       aria-label={`Scroll to turn ${prompt.index + 1} prompt`}
       title={prompt.text}
-      className="motion-slide-down-in absolute inset-x-0 top-0 z-20 h-10 justify-start rounded-none border-x-0 bg-background px-4 text-left shadow-xs"
+      className="motion-slide-down-in absolute left-1/2 top-2 z-20 h-9 max-w-[calc(100%-5rem)] -translate-x-1/2 justify-start gap-2 rounded-full bg-background px-3 text-left shadow-sm"
       onClick={scrollToPrompt}
     >
       <MessageSquareText data-icon="inline-start" />
