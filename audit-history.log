@@ -4,6 +4,20 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-08-20 14:35 UTC — Session search toolbar cleanup (7b196c2)
+- **File:** `audit-history/audit-20260820T143543Z-7b196c2.md`
+- **Status:** PASS
+- **Scope:** Removed the separate Sessions heading and live-count row, then
+  placed refresh directly to the right of the existing search field. Added
+  focused toolbar coverage and stabilized one asynchronous mobile settings
+  assertion.
+- **Documentation:** Active README, architecture, hosting, team-edition,
+  deployment, and agent guidance remain accurate. Historical plans and dated
+  design notes were left unchanged.
+- **Risk:** LOW (localized renderer layout and test changes; no API,
+  persisted-data, configuration, or deployment contract change)
+- **Commit:** `7b196c2`
+
 ### 2026-08-19 17:53 UTC — Whole-interface redesign (b328450)
 - **File:** `audit-history/audit-20260819T175302Z-b328450.md`
 - **Status:** PASS AFTER UPDATES
