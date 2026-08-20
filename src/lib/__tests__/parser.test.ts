@@ -219,6 +219,143 @@ not valid json
     expect(session.turns[0].contentBlocks.some((block) => block.kind === "queued_prompt")).toBe(false)
   })
 
+  it("renders a mid-turn prompt persisted only as a queued_command attachment", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Inspect the project"),
+      toolUseAssistant("Read", { file_path: "src/app.ts" }, "read-1"),
+      toolResultMsg("read-1", "file contents"),
+      // Claude Code writes the enqueue with no content, then the text lands in
+      // a separate attachment record.
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      {
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt: [{ type: "text", text: "also check the tests" }],
+          commandMode: "prompt",
+          timestamp: "2026-08-20T22:38:31.551Z",
+        },
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      {
+        type: "queue-operation",
+        operation: "remove",
+        timestamp: "2026-08-20T22:38:34.276Z",
+      },
+      textAssistant("Checked both."),
+    ]))
+
+    const queued = session.turns[0].contentBlocks.filter((block) => block.kind === "queued_prompt")
+    expect(queued).toHaveLength(1)
+    if (queued[0].kind !== "queued_prompt") return
+    expect(queued[0].content).toBe("also check the tests")
+    expect(queued[0].timestamp).toBe("2026-08-20T22:38:31.551Z")
+  })
+
+  it("reads string-shaped queued_command prompts", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Start"),
+      toolUseAssistant("Read", { file_path: "a.ts" }, "r1"),
+      toolResultMsg("r1", "ok"),
+      {
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt: "I mean floating dock*",
+          commandMode: "prompt",
+          timestamp: "2026-08-20T22:55:32.449Z",
+        },
+        timestamp: "2026-08-20T22:55:32.449Z",
+      },
+      textAssistant("Got it."),
+    ]))
+
+    const queued = session.turns[0].contentBlocks.filter((block) => block.kind === "queued_prompt")
+    expect(queued).toHaveLength(1)
+    if (queued[0].kind !== "queued_prompt") return
+    expect(queued[0].content).toBe("I mean floating dock*")
+  })
+
+  it("ignores task-notification queued_command attachments", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Run the audit"),
+      toolUseAssistant("Read", { file_path: "a.ts" }, "r1"),
+      toolResultMsg("r1", "ok"),
+      {
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt: "<task-notification>\n<task-id>abc</task-id>\n</task-notification>",
+          commandMode: "task-notification",
+          timestamp: "2026-08-20T22:38:31.551Z",
+        },
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      textAssistant("Done."),
+    ]))
+
+    expect(session.turns[0].contentBlocks.some((block) => block.kind === "queued_prompt")).toBe(false)
+  })
+
+  it("does not duplicate a prompt carried by both the enqueue and the attachment", () => {
+    const prompt = "also check the tests"
+    const session = parseSession(toJsonl([
+      userMsg("Inspect the project"),
+      toolUseAssistant("Read", { file_path: "a.ts" }, "r1"),
+      toolResultMsg("r1", "ok"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: prompt,
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      {
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt,
+          commandMode: "prompt",
+          timestamp: "2026-08-20T22:38:31.551Z",
+        },
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      textAssistant("Checked."),
+    ]))
+
+    const queued = session.turns[0].contentBlocks.filter((block) => block.kind === "queued_prompt")
+    expect(queued).toHaveLength(1)
+  })
+
+  it("does not duplicate an attachment prompt that also lands as a user record", () => {
+    const prompt = "run the tests too"
+    const session = parseSession(toJsonl([
+      userMsg("Inspect the project"),
+      toolUseAssistant("Read", { file_path: "a.ts" }, "r1"),
+      toolResultMsg("r1", "ok"),
+      {
+        type: "attachment",
+        attachment: {
+          type: "queued_command",
+          prompt,
+          commandMode: "prompt",
+          timestamp: "2026-08-20T22:38:31.551Z",
+        },
+        timestamp: "2026-08-20T22:38:31.551Z",
+      },
+      userMsg(prompt, { version: "2.1.238" }),
+      textAssistant("Ran them."),
+    ]))
+
+    const queued = session.turns.flatMap((turn) => turn.contentBlocks)
+      .filter((block) => block.kind === "queued_prompt")
+    expect(queued).toHaveLength(0)
+    expect(session.turns[1].userMessage).toBe(prompt)
+  })
+
   it("parses a session with thinking blocks", () => {
     const session = parseSession(thinkingSession())
     expect(session.turns).toHaveLength(1)

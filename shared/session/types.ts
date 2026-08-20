@@ -269,6 +269,21 @@ export interface QueueOperationMessage extends BaseMessage {
   content?: string | null
 }
 
+/**
+ * Claude Code persists the text of a prompt queued mid-turn here, not on the
+ * queue-operation record. `commandMode` separates prompts the user typed
+ * ("prompt") from Claude's own injected notices ("task-notification").
+ */
+export interface AttachmentMessage extends BaseMessage {
+  type: "attachment"
+  attachment?: {
+    type?: string
+    prompt?: string | ContentBlock[] | null
+    commandMode?: string
+    timestamp?: string
+  } | null
+}
+
 export type RawMessage =
   | UserMessage
   | AssistantMessage
@@ -277,6 +292,7 @@ export type RawMessage =
   | FileHistorySnapshotMessage
   | SummaryMessage
   | QueueOperationMessage
+  | AttachmentMessage
 
 // ── Parsed Structures ───────────────────────────────────────────────────────
 

@@ -15,6 +15,7 @@ import type {
   SystemMessage,
   SummaryMessage,
   QueueOperationMessage,
+  AttachmentMessage,
 } from "./types"
 
 export function isUserMessage(msg: RawMessage): msg is UserMessage {
@@ -39,6 +40,10 @@ export function isSummaryMessage(msg: RawMessage): msg is SummaryMessage {
 
 export function isQueueOperationMessage(msg: RawMessage): msg is QueueOperationMessage {
   return msg.type === "queue-operation"
+}
+
+export function isAttachmentMessage(msg: RawMessage): msg is AttachmentMessage {
+  return msg.type === "attachment"
 }
 
 export function isCompactBoundary(

@@ -24,6 +24,7 @@ import {
   isSummaryMessage,
   isCompactBoundary,
   isQueueOperationMessage,
+  isAttachmentMessage,
 } from "./messageTypeGuards"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
@@ -52,6 +53,22 @@ function isVisibleQueuedPrompt(content: string | null | undefined): content is s
   const trimmed = content.trimStart()
   return !trimmed.startsWith("<task-notification>")
     && !trimmed.startsWith("<local-command-")
+}
+
+/**
+ * Text of a prompt the user typed mid-turn, or null for anything else.
+ * Claude Code leaves `content` empty on the queue-operation record and writes
+ * the prompt here instead, so this is the only copy for most queued prompts.
+ */
+function queuedCommandPromptText(msg: RawMessage): string | null {
+  if (!isAttachmentMessage(msg)) return null
+  const attachment = msg.attachment
+  if (!attachment || attachment.type !== "queued_command") return null
+  if (attachment.commandMode !== "prompt") return null
+  const prompt = attachment.prompt
+  if (prompt == null) return null
+  const text = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
+  return isVisibleQueuedPrompt(text) ? text : null
 }
 
 // ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
@@ -332,6 +349,31 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     timestamp?: string
   }> = []
 
+  // Prompt text already recorded from a queue-operation enqueue, counted per
+  // turn. Claude Code writes the same prompt a second time as a queued_command
+  // attachment once it reaches the model, so that later copy is matched against
+  // this ledger and dropped. Counting (rather than a set) keeps a prompt the
+  // user genuinely queued twice in one turn rendering twice.
+  const enqueueSourcedPrompts = new Map<Turn, Map<string, number>>()
+
+  function noteEnqueueSourced(turn: Turn, content: string) {
+    let counts = enqueueSourcedPrompts.get(turn)
+    if (!counts) {
+      counts = new Map()
+      enqueueSourcedPrompts.set(turn, counts)
+    }
+    counts.set(content, (counts.get(content) ?? 0) + 1)
+  }
+
+  function consumeEnqueueSourced(turn: Turn, content: string): boolean {
+    const counts = enqueueSourcedPrompts.get(turn)
+    const remaining = counts?.get(content)
+    if (!counts || !remaining) return false
+    if (remaining === 1) counts.delete(content)
+    else counts.set(content, remaining - 1)
+    return true
+  }
+
   function flushPendingQueuedPrompts() {
     for (const prompt of pendingQueuedPrompts) {
       prompt.turn.contentBlocks.push({
@@ -448,6 +490,22 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           content: msg.content,
           timestamp: msg.timestamp,
         })
+        noteEnqueueSourced(current, msg.content)
+      }
+      continue
+    }
+
+    // The durable copy of a prompt queued mid-turn. Held alongside enqueue
+    // prompts so the shared flush can drop it if an ordinary user record for
+    // the same text follows.
+    if (isAttachmentMessage(msg)) {
+      const queuedText = queuedCommandPromptText(msg)
+      if (current && queuedText !== null && !consumeEnqueueSourced(current, queuedText)) {
+        pendingQueuedPrompts.push({
+          turn: current,
+          content: queuedText,
+          timestamp: msg.attachment?.timestamp ?? msg.timestamp,
+        })
       }
       continue
     }
@@ -460,7 +518,10 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
         const duplicateIndex = pendingQueuedPrompts.findIndex(
           (prompt) => prompt.content === userContent
         )
-        if (duplicateIndex >= 0) pendingQueuedPrompts.splice(duplicateIndex, 1)
+        if (duplicateIndex >= 0) {
+          const [dropped] = pendingQueuedPrompts.splice(duplicateIndex, 1)
+          consumeEnqueueSourced(dropped.turn, dropped.content)
+        }
       }
       flushPendingQueuedPrompts()
     }
