@@ -1,4 +1,4 @@
-import { useState, useMemo, memo, useCallback } from "react"
+import { useState, useMemo, memo, useCallback, useId } from "react"
 import {
   XCircle,
   ChevronRight,
@@ -20,10 +20,10 @@ import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import {
   JsonResultHighlighted,
   ReadResultHighlighted,
+  type ToolResultVariant,
   tryPrettyJson,
 } from "./ToolCallResult"
 import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
 export { getToolSummary }
@@ -44,6 +44,15 @@ const TOOL_TIER_STYLES: Record<ToolTier, string> = {
 }
 
 const FAILED_TOOL_TEXT_STYLE = "text-destructive"
+const DESKTOP_RESULT_LINE_LIMIT = 8
+const DESKTOP_RESULT_CLASS =
+  "whitespace-pre-wrap break-all border-l border-border pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
+const MOBILE_RESULT_CLASS =
+  "max-h-96 overflow-y-auto whitespace-pre-wrap break-all rounded-md border p-2 font-mono text-xs leading-relaxed"
+
+function splitLogicalLines(text: string): string[] {
+  return text.split(/\r\n|\r|\n/)
+}
 
 const TOOL_TIERS: Record<string, ToolTier> = {
   // Mutating — writes files, runs commands, spawns work, sends things out.
@@ -135,11 +144,156 @@ function StatusIcon({
   return null
 }
 
+function ToolResultPanel({
+  toolCall,
+  resultExpanded,
+  onToggleExpanded,
+  isMobile,
+}: {
+  toolCall: ToolCall
+  resultExpanded: boolean
+  onToggleExpanded: () => void
+  isMobile: boolean
+}): React.ReactElement {
+  const resultText = toolCall.result ?? ""
+  const isLongResult = resultText.length > 1000
+  const mobileVisibleResult = isLongResult && !resultExpanded
+    ? resultText.slice(0, 500) + "..."
+    : resultText
+  const prettyJson = useMemo(
+    () => (!toolCall.isError && toolCall.name !== "Read") ? tryPrettyJson(resultText) : null,
+    [toolCall.isError, toolCall.name, resultText],
+  )
+  const desktopResult = prettyJson ?? resultText
+  const desktopLines = useMemo(() => splitLogicalLines(desktopResult), [desktopResult])
+  const hiddenLineCount = Math.max(0, desktopLines.length - DESKTOP_RESULT_LINE_LIMIT)
+  const desktopVisibleResult = resultExpanded
+    ? desktopResult
+    : desktopLines.slice(0, DESKTOP_RESULT_LINE_LIMIT).join("\n")
+  const showExpander = isMobile ? isLongResult : hiddenLineCount > 0
+  const highlightedExpanded = !isMobile || !isLongResult || resultExpanded
+  const highlightedVariant: ToolResultVariant = isMobile ? "boxed" : "unboxed"
+
+  return (
+    <div className="mt-1.5">
+      {toolCall.name === "Read" &&
+      !toolCall.isError &&
+      typeof toolCall.input.file_path === "string" ? (
+        <ReadResultHighlighted
+          result={isMobile ? resultText : desktopVisibleResult}
+          filePath={toolCall.input.file_path}
+          expanded={highlightedExpanded}
+          variant={highlightedVariant}
+        />
+      ) : prettyJson !== null ? (
+        <JsonResultHighlighted
+          result={isMobile ? prettyJson : desktopVisibleResult}
+          expanded={highlightedExpanded}
+          alreadyPretty
+          variant={highlightedVariant}
+        />
+      ) : (
+        <pre
+          className={cn(
+            isMobile ? MOBILE_RESULT_CLASS : DESKTOP_RESULT_CLASS,
+            toolCall.isError
+              ? cn(
+                  "border-destructive/20 text-destructive",
+                  isMobile && "bg-destructive/5",
+                )
+              : isMobile && "border-border bg-muted/30 text-muted-foreground",
+          )}
+        >
+          {isMobile ? mobileVisibleResult : desktopVisibleResult}
+        </pre>
+      )}
+      {showExpander && (
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {resultExpanded
+            ? "Show less"
+            : isMobile
+              ? "Show more"
+              : `+${hiddenLineCount} lines`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ToolCallHeaderContent({
+  toolCall,
+  isMobile,
+  isAgentActive,
+  displayName,
+  summary,
+  nameTitle,
+  nameClass,
+  timeLabel,
+  timeIso,
+}: {
+  toolCall: ToolCall
+  isMobile: boolean
+  isAgentActive?: boolean
+  displayName: string
+  summary: string
+  nameTitle: string
+  nameClass: string
+  timeLabel?: string
+  timeIso?: string
+}): React.ReactElement {
+  return (
+    <>
+      {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
+      <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
+        <span
+          className={cn(
+            "shrink-0 font-mono",
+            isMobile ? "text-[10px]" : "text-[11px]",
+            nameClass,
+          )}
+          title={nameTitle}
+        >
+          {displayName}
+        </span>
+        {summary && (
+          <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
+            {summary}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
+          <span className="text-[10px] text-muted-foreground/50 tabular-nums" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
+        )}
+        {toolCall.outputReplacedByHook && (
+          <span className="text-[10px] text-blue-400" title="Output replaced by hook">hook</span>
+        )}
+        <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
+      </div>
+    </>
+  )
+}
+
+function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement {
+  return (
+    <EditDiffView
+      oldString={toolCall.input.old_string as string}
+      newString={toolCall.input.new_string as string}
+      filePath={toolCall.input.file_path as string}
+    />
+  )
+}
+
 // ── Main component ───────────────────────────────────────────────────────
 
 interface ToolCallCardProps {
   toolCall: ToolCall
   expandAll: boolean
+  expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
 }
@@ -156,13 +310,23 @@ const MOBILE_TOOL_LABELS: Record<string, string> = {
   ToolSearch: "Tool search",
 }
 
-export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, isAgentActive, skillMetadata }: ToolCallCardProps) {
+export const ToolCallCard = memo(function ToolCallCard({
+  toolCall,
+  expandAll,
+  expandToolPayloads = false,
+  isAgentActive,
+  skillMetadata,
+}: ToolCallCardProps) {
   const { session, pendingInteraction } = useSessionContext()
   const isMobile = useIsMobile()
   const [inputOpen, setInputOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState(false)
   const [resultExpanded, setResultExpanded] = useState(false)
   const [diffOpen, setDiffOpen] = useState(false)
+  const [desktopPanelOpen, setDesktopPanelOpen] = useState(false)
+  const [desktopInputOpen, setDesktopInputOpen] = useState(false)
+  const desktopPanelId = useId()
+  const desktopInputId = useId()
   // Historical tool calls are one-line rows on mobile. Live tools remain open
   // so questions, approvals, and streaming output stay actionable.
   const [mobileExpanded, setMobileExpanded] = useState(false)
@@ -187,29 +351,35 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     : undefined
   const timeIso = toolCall.timestamp ? new Date(toolCall.timestamp).toISOString() : undefined
 
-  const showInput = expandAll || inputOpen
-  const showResult = expandAll || resultOpen
-  const showDiff = expandAll || diffOpen
+  const payloadsExpanded = expandToolPayloads || (isMobile && expandAll)
+  const showMobileInput = payloadsExpanded || inputOpen
+  const showMobileResult = payloadsExpanded || resultOpen
+  const showMobileDiff = payloadsExpanded || diffOpen
 
   const summary = presentation.summary
   const skillMeta = toolCall.name === "Skill" && skillMetadata
     ? skillMetadata.get(summary) ?? null
     : null
-  const resultText = toolCall.result ?? ""
-  const isLongResult = resultText.length > 1000
-  const visibleResult =
-    isLongResult && !resultExpanded ? resultText.slice(0, 500) + "..." : resultText
-  const prettyJson = useMemo(
-    () => (!toolCall.isError && toolCall.name !== "Read") ? tryPrettyJson(resultText) : null,
-    [toolCall.isError, toolCall.name, resultText],
-  )
-  const isJsonResult = prettyJson !== null
-
   const hasEditDiff =
     toolCall.name === "Edit" &&
     typeof toolCall.input.old_string === "string" &&
     typeof toolCall.input.new_string === "string" &&
     typeof toolCall.input.file_path === "string"
+
+  const desktopPrimaryPanel = hasEditDiff
+    ? "diff"
+    : toolCall.name === "Bash" || isCodexExec
+      ? "command"
+      : "result"
+  const showDesktopPanel = expandToolPayloads || desktopPanelOpen
+  const renderedResult = toolCall.result !== null ? (
+    <ToolResultPanel
+      toolCall={toolCall}
+      resultExpanded={resultExpanded}
+      onToggleExpanded={() => setResultExpanded(!resultExpanded)}
+      isMobile={isMobile}
+    />
+  ) : null
 
   const handleCompactTap = useCallback(() => {
     if (isCompactMobile) setMobileExpanded(true)
@@ -222,7 +392,7 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
     return (
       <AskUserQuestionCard
         toolCall={toolCall}
-        expandAll={expandAll}
+        expandToolPayloads={payloadsExpanded}
         isAwaitingAnswer={
           pendingInteraction?.type === "question" &&
           pendingInteraction.toolUseId === toolCall.id
@@ -265,36 +435,44 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-end" />
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
         </Button>
+      ) : isMobile ? (
+        <div className="flex items-center gap-1.5" title={timeLabel}>
+          <ToolCallHeaderContent
+            toolCall={toolCall}
+            isMobile
+            isAgentActive={isAgentActive}
+            displayName={displayName}
+            summary={summary}
+            nameTitle={nameTitle}
+            nameClass={nameClass}
+            timeLabel={timeLabel}
+            timeIso={timeIso}
+          />
+        </div>
       ) : (
-        <div className={cn("flex items-center", isMobile ? "gap-1.5" : "gap-2")} title={timeLabel}>
-        {timeLabel && <time className="sr-only" dateTime={timeIso}>{timeLabel}</time>}
-        <div className={cn("flex min-w-0 flex-1 items-center", isMobile ? "gap-1.5" : "gap-2")}>
-          <span
-            className={cn(
-              "shrink-0 font-mono",
-              "text-xs",
-              nameClass,
-            )}
-            title={nameTitle}
-          >
-            {displayName}
-          </span>
-          {summary && (
-            <span className="truncate font-mono text-xs text-muted-foreground">
-              {summary}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
-            <span className="text-xs tabular-nums text-muted-foreground" title="PostToolUse hook duration">{toolCall.hookDurationMs}ms</span>
-          )}
-          {toolCall.outputReplacedByHook && (
-            <Badge variant="outline" title="Output replaced by hook">hook</Badge>
-          )}
-          <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
-        </div>
-      </div>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-sm text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          title={timeLabel}
+          aria-label={`Toggle ${displayName} details${summary ? `: ${summary}` : ""}`}
+          aria-expanded={showDesktopPanel}
+          aria-controls={desktopPanelId}
+          onClick={() => {
+            if (!expandToolPayloads) setDesktopPanelOpen((open) => !open)
+          }}
+        >
+          <ToolCallHeaderContent
+            toolCall={toolCall}
+            isMobile={false}
+            isAgentActive={isAgentActive}
+            displayName={displayName}
+            summary={summary}
+            nameTitle={nameTitle}
+            nameClass={nameClass}
+            timeLabel={timeLabel}
+            timeIso={timeIso}
+          />
+        </button>
       )}
 
       {skillMeta && !isCompactMobile && (
@@ -323,23 +501,23 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         </div>
       )}
 
-      {!isCompactMobile && (
+      {isMobile && !isCompactMobile && (
         <div className="flex gap-3 mt-1">
           {hasEditDiff && (
             <ToggleButton
-              isOpen={showDiff}
+              isOpen={showMobileDiff}
               onClick={() => setDiffOpen(!diffOpen)}
               label="Diff"
             />
           )}
           <ToggleButton
-            isOpen={showInput}
+            isOpen={showMobileInput}
             onClick={() => setInputOpen(!inputOpen)}
             label="Input"
           />
           {toolCall.result !== null && (
             <ToggleButton
-              isOpen={showResult}
+              isOpen={showMobileResult}
               onClick={() => setResultOpen(!resultOpen)}
               label="Result"
             />
@@ -347,16 +525,15 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
         </div>
       )}
 
-      {showDiff && hasEditDiff && (
-        <EditDiffView
-          oldString={toolCall.input.old_string as string}
-          newString={toolCall.input.new_string as string}
-          filePath={toolCall.input.file_path as string}
-        />
+      {isMobile && showMobileDiff && hasEditDiff && (
+        <EditToolDiff toolCall={toolCall} />
       )}
 
-      {showInput && (
-        toolCall.name === "Bash" && (typeof toolCall.input.command === "string" || typeof toolCall.input.cmd === "string") ? (
+      {isMobile &&
+        showMobileInput &&
+        (toolCall.name === "Bash" &&
+        (typeof toolCall.input.command === "string" ||
+          typeof toolCall.input.cmd === "string") ? (
           <BashToolInput input={toolCall.input} />
         ) : isCodexExec ? (
           <CodexExecToolInput input={toolCall.input} />
@@ -365,49 +542,53 @@ export const ToolCallCard = memo(function ToolCallCard({ toolCall, expandAll, is
             result={JSON.stringify(toolCall.input)}
             expanded={true}
           />
-        )
-      )}
+        ))}
 
-      {(toolCall.name === "Task" || toolCall.name === "Agent") && toolCall.result === null && (
-        <LiveSubagentTranscript toolUseId={toolCall.id} />
-      )}
+      {(toolCall.name === "Task" || toolCall.name === "Agent") &&
+        toolCall.result === null && (
+          <LiveSubagentTranscript toolUseId={toolCall.id} />
+        )}
 
-      {showResult && toolCall.result !== null && (
-        <div className="mt-1.5">
-          {toolCall.name === "Read" && !toolCall.isError && typeof toolCall.input.file_path === "string" ? (
-            <ReadResultHighlighted
-              result={resultText}
-              filePath={toolCall.input.file_path as string}
-              expanded={!isLongResult || resultExpanded}
-            />
-          ) : isJsonResult ? (
-            <JsonResultHighlighted
-              result={prettyJson!}
-              expanded={!isLongResult || resultExpanded}
-              alreadyPretty
-            />
-          ) : (
-            <pre
-              className={cn(
-                "max-h-96 overflow-y-auto whitespace-pre-wrap break-all rounded border p-2 font-mono text-xs",
-                toolCall.isError
-                  ? "border-destructive/20 bg-destructive/5 text-destructive"
-                  : "border-border bg-muted/40 text-muted-foreground"
-              )}
-            >
-              {visibleResult}
-            </pre>
+      {isMobile && showMobileResult && renderedResult}
+
+      {!isMobile && showDesktopPanel && (
+        <div
+          id={desktopPanelId}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {desktopPrimaryPanel === "diff" && hasEditDiff && (
+            <EditToolDiff toolCall={toolCall} />
           )}
-          {isLongResult && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => setResultExpanded(!resultExpanded)}
-              className="mt-1 -ml-2 text-muted-foreground"
-            >
-              {resultExpanded ? "Show less" : "Show more"}
-            </Button>
+
+          {desktopPrimaryPanel === "command" &&
+            (toolCall.name === "Bash" ? (
+              <BashToolInput input={toolCall.input} />
+            ) : (
+              <CodexExecToolInput input={toolCall.input} />
+            ))}
+
+          {(desktopPrimaryPanel === "result" ||
+            desktopPrimaryPanel === "command") && renderedResult}
+
+          <button
+            type="button"
+            className="mt-1 text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            aria-expanded={desktopInputOpen}
+            aria-controls={desktopInputId}
+            onClick={(event) => {
+              event.stopPropagation()
+              setDesktopInputOpen((open) => !open)
+            }}
+          >
+            input
+          </button>
+          {desktopInputOpen && (
+            <div id={desktopInputId}>
+              <JsonResultHighlighted
+                result={JSON.stringify(toolCall.input)}
+                expanded
+              />
+            </div>
           )}
         </div>
       )}

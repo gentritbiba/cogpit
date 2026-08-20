@@ -5,7 +5,7 @@ export type KeybindingCommand =
   | "newIntegratedTerminal"
   | "closeIntegratedTerminal"
   | "expandAll"
-  | "collapseAll"
+  | "expandToolPayloads"
   | "toggleSidebar"
   | "toggleStats"
   | "missionControl"
@@ -143,15 +143,15 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
   },
   {
     command: "expandAll",
-    label: "Expand all turns",
-    description: "Expand every conversation turn",
+    label: "Expand all groups",
+    description: "Expand conversation and tool groups without opening raw payloads",
     group: "View",
     defaultShortcut: { key: "e", modKey: true },
   },
   {
-    command: "collapseAll",
-    label: "Collapse all turns",
-    description: "Collapse every conversation turn",
+    command: "expandToolPayloads",
+    label: "Expand all tool payloads",
+    description: "Expand tool inputs, results, and diffs with their containing groups",
     group: "View",
     defaultShortcut: { key: "e", modKey: true, shiftKey: true },
   },

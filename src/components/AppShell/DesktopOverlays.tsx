@@ -166,6 +166,7 @@ export function DesktopOverlays({
           devices={paletteDevices}
           onFocusComposer={chrome.onFocusComposer}
           onExpandAll={chrome.onExpandAll}
+          onExpandToolPayloads={chrome.onExpandToolPayloads}
           onCollapseAll={chrome.onCollapseAll}
           canFocusComposer={Boolean(session || state.pendingDirName)}
           canOpenTerminal={can("terminal") && Boolean(

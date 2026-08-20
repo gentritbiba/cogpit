@@ -16,11 +16,21 @@ interface Props {
   status: "pending" | "approved" | "rejected"
   toolCalls: ToolCall[]
   expandAll?: boolean
+  expandToolPayloads?: boolean
   isAgentActive?: boolean
   skillMetadata?: Map<string, SkillMeta>
 }
 
-export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, status, toolCalls, expandAll = false, isAgentActive, skillMetadata }: Props) {
+export const PlanModeBlock = memo(function PlanModeBlock({
+  plan,
+  planFilePath,
+  status,
+  toolCalls,
+  expandAll = false,
+  expandToolPayloads = false,
+  isAgentActive,
+  skillMetadata,
+}: Props) {
   const [open, setOpen] = useState(true)
   const hasPendingQuestion = toolCalls.some(
     (tc) => tc.name === "AskUserQuestion" && tc.result === null,
@@ -34,15 +44,16 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
   useEffect(() => {
     if (hasPendingQuestion) autoOpened.current = true
   }, [hasPendingQuestion])
-  const callsOpen = callsOverride ?? (hasPendingQuestion || autoOpened.current)
+  const planOpen = expandAll || open
+  const callsOpen = expandAll || (callsOverride ?? (hasPendingQuestion || autoOpened.current))
 
   const Icon = status === "approved" ? CheckCircle : status === "rejected" ? XCircle : Clock
-  const Chev = open ? ChevronDown : ChevronRight
+  const Chev = planOpen ? ChevronDown : ChevronRight
   const CallsChev = callsOpen ? ChevronDown : ChevronRight
 
   return (
     <Collapsible
-      open={open}
+      open={planOpen}
       onOpenChange={setOpen}
       className={cn(
         "my-2 rounded-lg border",
@@ -96,6 +107,7 @@ export const PlanModeBlock = memo(function PlanModeBlock({ plan, planFilePath, s
                       key={tc.id}
                       toolCall={tc}
                       expandAll={expandAll}
+                      expandToolPayloads={expandToolPayloads}
                       isAgentActive={isAgentActive}
                       skillMetadata={skillMetadata}
                     />

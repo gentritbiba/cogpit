@@ -18,6 +18,20 @@ describe("CommandPalette", () => {
     expect(props.onGoHome).toHaveBeenCalledOnce()
   })
 
+  it("separates group expansion, payload expansion, and collapse actions", async () => {
+    const user = userEvent.setup()
+    const props = createProps()
+    render(<CommandPalette {...props} />)
+
+    await user.click(screen.getByText("Expand all groups"))
+    await user.click(screen.getByText("Expand all tool payloads"))
+    await user.click(screen.getByText("Collapse all"))
+
+    expect(props.onExpandAll).toHaveBeenCalledOnce()
+    expect(props.onExpandToolPayloads).toHaveBeenCalledOnce()
+    expect(props.onCollapseAll).toHaveBeenCalledOnce()
+  })
+
   it("uses the latest concise user message for recent Codex sessions", () => {
     render(
       <CommandPalette

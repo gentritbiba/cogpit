@@ -27,7 +27,14 @@ export function DesktopAppShell({
         showFileChanges={navigation.panels.showFileChanges}
         hasFileChanges={project.hasFileChanges}
         killing={chrome.killing}
+        creatingSession={navigation.creatingSession}
         onGoHome={navigation.actions.handleGoHome}
+        onNewSession={navigation.onStartNewSession}
+        onDuplicateSession={navigation.handlers.handleDuplicateSession}
+        onOpenTerminal={project.onOpenTerminal}
+        onBackToMain={sessionView.onBackToMain}
+        onShowWorkflows={sessionView.onShowWorkflows}
+        workflowCount={sessionView.workflowCount}
         onToggleSidebar={navigation.panels.handleToggleSidebar}
         onToggleStats={navigation.panels.handleToggleStats}
         onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}

@@ -131,6 +131,7 @@ export interface DesktopChrome {
   onOpenCommandPalette: () => void
   onFocusComposer: () => void
   onExpandAll: () => void
+  onExpandToolPayloads: () => void
   onCollapseAll: () => void
   keyboardShortcutsOpen: boolean
   onKeyboardShortcutsOpenChange: Dispatch<SetStateAction<boolean>>

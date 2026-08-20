@@ -135,6 +135,7 @@ function makeProps(): Pick<DesktopAppShellProps, "navigation" | "project" | "chr
       onCommandPaletteOpenChange: vi.fn(),
       onFocusComposer: vi.fn(),
       onExpandAll: vi.fn(),
+      onExpandToolPayloads: vi.fn(),
       onCollapseAll: vi.fn(),
       keyboardShortcutsOpen: false,
       onKeyboardShortcutsOpenChange: vi.fn(),

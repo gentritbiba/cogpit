@@ -103,6 +103,7 @@ export interface CommandPaletteProps {
   onSwitchDevice?: (deviceId: string) => void
   onFocusComposer: () => void
   onExpandAll: () => void
+  onExpandToolPayloads: () => void
   onCollapseAll: () => void
   canFocusComposer: boolean
   canOpenTerminal: boolean
@@ -374,8 +375,9 @@ export function CommandPalette(props: CommandPaletteProps) {
       props.onOpenTheme,
       shortcutLabel("themeSelector"),
     ),
-    action("expand", "Expand all turns", "conversation details", ChevronsDownUp, props.onExpandAll, shortcutLabel("expandAll")),
-    action("collapse", "Collapse all turns", "conversation details", ChevronsUpDown, props.onCollapseAll, shortcutLabel("collapseAll")),
+    action("expand", "Expand all groups", "conversation details", ChevronsDownUp, props.onExpandAll, shortcutLabel("expandAll")),
+    action("expand-payloads", "Expand all tool payloads", "raw input result diff conversation details", ChevronsDownUp, props.onExpandToolPayloads, shortcutLabel("expandToolPayloads")),
+    action("collapse", "Collapse all", "conversation groups payloads details", ChevronsUpDown, props.onCollapseAll),
     props.onKillAll && action(
       "kill-all",
       "Kill all agent processes",

@@ -54,7 +54,10 @@ interface TurnSectionProps {
 // ── TurnSection (thin context bridge → memo'd inner) ────────────────────────
 
 export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) {
-  const { state: { activeTurnIndex, activeToolCallId, expandAll }, isMobile } = useAppContext()
+  const {
+    state: { activeTurnIndex, activeToolCallId, expandAll, expandToolPayloads },
+    isMobile,
+  } = useAppContext()
   const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
 
   const isAgentActive = isLive && session !== null && index === session.turns.length - 1
@@ -80,6 +83,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       isActive={activeTurnIndex === index}
       activeToolCallId={activeToolCallId}
       expandAll={expandAll}
+      expandToolPayloads={expandToolPayloads}
       isAgentActive={isAgentActive}
       isTurnDone={isTurnDone}
       isSubAgentView={isSubAgentView}
@@ -103,6 +107,7 @@ interface TurnSectionInnerProps {
   isActive: boolean
   activeToolCallId: string | null
   expandAll: boolean
+  expandToolPayloads: boolean
   isAgentActive: boolean
   isTurnDone: boolean
   isSubAgentView: boolean
@@ -145,6 +150,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   isActive,
   activeToolCallId,
   expandAll,
+  expandToolPayloads,
   isAgentActive,
   isTurnDone,
   isSubAgentView,
@@ -245,6 +251,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   blocks={leadingBlocks}
                   model={turn.model}
                   expandAll={expandAll}
+                  expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
                   isSubAgentView={isSubAgentView}
@@ -269,6 +276,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   blocks={trailingBlocks}
                   model={turn.model}
                   expandAll={expandAll}
+                  expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
                   isSubAgentView={isSubAgentView}
@@ -282,6 +290,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
               blocks={turn.contentBlocks}
               model={turn.model}
               expandAll={expandAll}
+              expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
               isSubAgentView={isSubAgentView}
@@ -401,6 +410,7 @@ function ContentBlocks({
   blocks,
   model,
   expandAll,
+  expandToolPayloads,
   activeToolCallId,
   isAgentActive,
   isSubAgentView,
@@ -410,6 +420,7 @@ function ContentBlocks({
   blocks: TurnContentBlock[]
   model: string | null
   expandAll: boolean
+  expandToolPayloads: boolean
   activeToolCallId: string | null
   isAgentActive: boolean
   isSubAgentView: boolean
@@ -435,6 +446,7 @@ function ContentBlocks({
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
+              expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
               skillMetadata={skillMetadata}
@@ -448,6 +460,7 @@ function ContentBlocks({
             <CollapsibleToolCalls
               toolCalls={toolCalls}
               expandAll={expandAll}
+              expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
               activityItems={items}
@@ -480,6 +493,7 @@ function ContentBlocks({
                 <CollapsibleToolCalls
                   toolCalls={toolCalls}
                   expandAll={expandAll}
+                  expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
                   activityItems={thinkingCount > 0 ? items : undefined}
@@ -550,6 +564,7 @@ function ContentBlocks({
           status={block.status}
           toolCalls={block.toolCalls}
           expandAll={expandAll}
+          expandToolPayloads={expandToolPayloads}
           isAgentActive={isAgentActive}
           skillMetadata={skillMetadata}
         />

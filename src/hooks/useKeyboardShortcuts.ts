@@ -115,9 +115,9 @@ export function useKeyboardShortcuts({
         dispatch({ type: "SET_EXPAND_ALL", value: true })
         return
       }
-      if (matchesKeybinding("collapseAll", e)) {
+      if (matchesKeybinding("expandToolPayloads", e)) {
         e.preventDefault()
-        dispatch({ type: "SET_EXPAND_ALL", value: false })
+        dispatch({ type: "SET_EXPAND_TOOL_PAYLOADS", value: true })
         return
       }
       if (matchesKeybinding("toggleSidebar", e)) {
