@@ -81,7 +81,7 @@ export function ActionButtons({
           <TooltipTrigger render={<Button
               variant="ghost"
               size="icon-sm"
-              className="shrink-0 rounded-full text-destructive"
+              className="shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={onStopSession}
               aria-label="Stop session"
               title="Stop session"

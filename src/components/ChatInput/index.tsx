@@ -324,7 +324,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}
 
         <div className={cn(
-          "relative overflow-hidden rounded-xl border bg-card shadow-xs",
+          "relative overflow-hidden rounded-xl border bg-prompt-surface shadow-xs",
           getTextareaBorderClass(isPlanApproval, isUserQuestion, hasPermissions),
           "focus-within:ring-3",
         )}>
