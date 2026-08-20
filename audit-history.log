@@ -4,6 +4,21 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-08-20 16:38 UTC - Mission Control double-tap shortcut (2eef4ee)
+- **File:** `audit-history/audit-20260820T163837Z-2eef4ee.md`
+- **Status:** PASS AFTER UPDATES
+- **Scope:** Replaced Mission Control's `Cmd+Shift+M` default with a clean,
+  consecutive double-tap of the platform modifier. Preserved custom chord
+  overrides and updated registry formatting, shortcut UI coverage, and gesture
+  tests.
+- **Documentation:** Updated the Mission Control design note and UI
+  simplification record. Active README, architecture, hosting, team-edition,
+  deployment, and agent guidance remain accurate.
+- **Risk:** LOW (local renderer input behavior and a backward-compatible
+  keybinding value; no API, server, deployment, or external configuration
+  contract change)
+- **Commit:** `2eef4ee`
+
 ### 2026-08-20 14:35 UTC — Session search toolbar cleanup (7b196c2)
 - **File:** `audit-history/audit-20260820T143543Z-7b196c2.md`
 - **Status:** PASS
