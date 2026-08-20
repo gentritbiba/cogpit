@@ -14,10 +14,12 @@ import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { joinMultiSelect, type UserQuestionAnswerMap } from "@/lib/askUserApi"
 import type {
   MissionControlQuestion,
   MissionControlQuestionItem,
+  MissionControlQuestionOption,
 } from "../../../shared/contracts/missionControl"
 
 interface QuestionPromptProps {
@@ -120,16 +122,7 @@ export function QuestionPrompt({
         aria-label={current.question}
       >
         {current.options.map((option) => (
-          <ToggleGroupItem
-            key={option.label}
-            value={option.label}
-            disabled={responding}
-            className="w-full justify-start px-3"
-            title={option.description}
-            aria-description={option.description}
-          >
-            <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
-          </ToggleGroupItem>
+          <OptionItem key={option.label} option={option} disabled={responding} />
         ))}
       </ToggleGroup>
 
@@ -160,6 +153,55 @@ export function QuestionPrompt({
         </p>
       )}
     </Shell>
+  )
+}
+
+/**
+ * One answerable option.
+ *
+ * Descriptions are full sentences — inline they would triple the card height,
+ * so they live in a hover card. It is a real tooltip rather than the native
+ * `title` attribute because that renders on the OS's own delay and styling,
+ * which reads as no description at all next to the rest of the surface.
+ */
+function OptionItem({
+  option,
+  disabled,
+}: {
+  option: MissionControlQuestionOption
+  disabled: boolean
+}) {
+  const label = <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+
+  if (!option.description) {
+    return (
+      <ToggleGroupItem
+        value={option.label}
+        disabled={disabled}
+        className="w-full justify-start px-3"
+      >
+        {label}
+      </ToggleGroupItem>
+    )
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <ToggleGroupItem
+            value={option.label}
+            disabled={disabled}
+            className="w-full justify-start px-3"
+          />
+        )}
+      >
+        {label}
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-72 text-left">
+        {option.description}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
