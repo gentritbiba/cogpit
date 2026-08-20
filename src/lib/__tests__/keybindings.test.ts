@@ -35,6 +35,8 @@ describe("keybindings", () => {
     expect(matchesKeybinding("expandAll", event("e", { metaKey: true }))).toBe(true)
     expect(matchesKeybinding("expandAll", event("e", { metaKey: true, shiftKey: true }))).toBe(false)
     expect(matchesKeybinding("expandToolPayloads", event("e", { metaKey: true, shiftKey: true }))).toBe(true)
+    expect(getKeybinding("missionControl")).toEqual({ doubleTapModifier: "mod" })
+    expect(matchesKeybinding("missionControl", event("m", { metaKey: true, shiftKey: true }))).toBe(false)
   })
 
   it("persists and matches a custom shortcut", () => {
@@ -96,6 +98,7 @@ describe("keybindings", () => {
     expect(shortcutLabel("nextLiveSession")).toContain("↓")
     expect(shortcutLabel("recentSessionForward")).toContain("Tab")
     expect(shortcutLabel("focusComposer")).toBe("Space")
+    expect(shortcutLabel("missionControl")).toMatch(/^Double (?:⌘|Ctrl)$/)
     expect(shortcutLabel(DEVICE_SWITCH_COMMANDS[0])).toMatch(/1$/)
   })
 

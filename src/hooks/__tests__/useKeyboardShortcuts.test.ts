@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
+import { resetKeybinding, setKeybinding } from "@/lib/keybindings"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { SessionAction } from "@/hooks/useSessionState"
@@ -40,9 +41,21 @@ function fireKey(key: string, opts: Partial<KeyboardEventInit> = {}) {
   return event
 }
 
+function fireKeyUp(key: string, opts: Partial<KeyboardEventInit> = {}) {
+  const event = new KeyboardEvent("keyup", {
+    key,
+    bubbles: true,
+    cancelable: true,
+    ...opts,
+  })
+  window.dispatchEvent(event)
+  return event
+}
+
 describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetKeybinding("missionControl")
   })
 
   afterEach(() => {
@@ -194,20 +207,89 @@ describe("useKeyboardShortcuts", () => {
     })
   })
 
-  describe("Cmd+Shift+M - toggle Mission Control", () => {
-    it("calls onToggleMissionControl on Cmd+Shift+M", () => {
+  describe("double Cmd - toggle Mission Control", () => {
+    beforeEach(() => {
+      vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel")
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it("calls onToggleMissionControl after two Command taps", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+      vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_200)
+
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+      fireKey("Meta", { metaKey: true })
+      const secondKeyUp = fireKeyUp("Meta")
+
+      expect(opts.onToggleMissionControl).toHaveBeenCalledOnce()
+      expect(secondKeyUp.defaultPrevented).toBe(true)
+    })
+
+    it("does not fire after one Command tap", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+
+      expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
+    })
+
+    it("does not treat Command used in a chord as a tap", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+      fireKey("Meta", { metaKey: true })
+      fireKey("k", { metaKey: true })
+      fireKeyUp("Meta")
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+
+      expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
+    })
+
+    it("requires consecutive Command taps", () => {
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+      vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(1_200)
+
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+      fireKey("a")
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+
+      expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
+    })
+
+    it("uses a custom Mission Control chord instead of double Command", () => {
+      setKeybinding("missionControl", { key: "m", modKey: true, shiftKey: true })
+      const opts = createOpts()
+      renderHook(() => useKeyboardShortcuts(opts))
+
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+      fireKey("Meta", { metaKey: true })
+      fireKeyUp("Meta")
+      expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
+
+      fireKey("M", { metaKey: true, shiftKey: true })
+      expect(opts.onToggleMissionControl).toHaveBeenCalledOnce()
+    })
+
+    it("does not fire for the old Cmd+Shift+M shortcut", () => {
       const opts = createOpts()
       renderHook(() => useKeyboardShortcuts(opts))
 
       fireKey("M", { metaKey: true, shiftKey: true })
-      expect(opts.onToggleMissionControl).toHaveBeenCalled()
-    })
 
-    it("does not fire without the shift modifier", () => {
-      const opts = createOpts()
-      renderHook(() => useKeyboardShortcuts(opts))
-
-      fireKey("M", { metaKey: true })
       expect(opts.onToggleMissionControl).not.toHaveBeenCalled()
     })
   })

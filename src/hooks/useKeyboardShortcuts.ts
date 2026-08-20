@@ -2,7 +2,13 @@ import { useEffect, type RefObject, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import { can } from "@/lib/capabilities"
-import { isEditableTarget, matchesKeybinding } from "@/lib/keybindings"
+import {
+  getDoubleTapModifierKey,
+  isEditableTarget,
+  matchesKeybinding,
+} from "@/lib/keybindings"
+
+const DOUBLE_TAP_MODIFIER_WINDOW_MS = 400
 
 interface HistoryEntry {
   dirName: string
@@ -83,7 +89,26 @@ export function useKeyboardShortcuts({
 }: UseKeyboardShortcutsOpts) {
   useEffect(() => {
     if (isMobile) return
+    let doubleTapModifierDown = false
+    let doubleTapModifierUsed = false
+    let lastModifierTapAt: number | null = null
+
     function handleKeyDown(e: KeyboardEvent) {
+      const doubleTapModifier = getDoubleTapModifierKey("missionControl")
+      if (doubleTapModifier) {
+        if (e.key === doubleTapModifier) {
+          if (!e.repeat) {
+            doubleTapModifierDown = true
+            doubleTapModifierUsed = e.shiftKey
+              || e.altKey
+              || (doubleTapModifier === "Meta" ? e.ctrlKey : e.metaKey)
+          }
+          return
+        }
+        if (doubleTapModifierDown) doubleTapModifierUsed = true
+        lastModifierTapAt = null
+      }
+
       if (matchesKeybinding("commandPalette", e)) {
         e.preventDefault()
         onOpenCommandPalette?.()
@@ -209,16 +234,46 @@ export function useKeyboardShortcuts({
       }
     }
     function handleKeyUp(e: KeyboardEvent) {
+      const doubleTapModifier = getDoubleTapModifierKey("missionControl")
+      if (doubleTapModifier && e.key === doubleTapModifier && doubleTapModifierDown) {
+        const completedPureTap = !doubleTapModifierUsed
+        doubleTapModifierDown = false
+        doubleTapModifierUsed = false
+
+        if (completedPureTap) {
+          const now = Date.now()
+          if (
+            lastModifierTapAt !== null
+            && now - lastModifierTapAt <= DOUBLE_TAP_MODIFIER_WINDOW_MS
+          ) {
+            lastModifierTapAt = null
+            e.preventDefault()
+            onToggleMissionControl()
+          } else {
+            lastModifierTapAt = now
+          }
+        } else {
+          lastModifierTapAt = null
+        }
+      }
+
       // When Ctrl is released after Ctrl+Tab navigation, commit the selection
       if (e.key === "Control") {
         onCommitNavigation?.()
       }
     }
+    function resetDoubleTapModifier() {
+      doubleTapModifierDown = false
+      doubleTapModifierUsed = false
+      lastModifierTapAt = null
+    }
     window.addEventListener("keydown", handleKeyDown)
     window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("blur", resetDoubleTapModifier)
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("blur", resetDoubleTapModifier)
     }
   }, [isMobile, searchInputRef, chatInputRef, dispatch, onToggleSidebar, onToggleRightSidebar, onToggleMissionControl, onOpenCommandPalette, onOpenProjectSwitcher, onOpenThemeSelector, onOpenTerminal, onToggleIntegratedTerminal, onTogglePreview, onToggleProjectFiles, onHistoryBack, onHistoryForward, onNavigateToSession, onCommitNavigation])
 }

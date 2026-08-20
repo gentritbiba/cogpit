@@ -87,6 +87,7 @@ describe("KeyboardShortcutsDialog", () => {
     expect(chordFor("Next recent session")).toContain("Tab")
     expect(chordFor("Show keyboard shortcuts")).toContain("?")
     expect(chordFor("Switch to device 1")).toMatch(/1$/)
+    expect(chordFor("Toggle Mission Control")).toMatch(/^Double (?:⌘|Ctrl)$/)
   })
 
   it("rebinds a newly registered command", async () => {

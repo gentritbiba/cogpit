@@ -37,7 +37,7 @@ export type KeybindingCommand =
   | "device.switch.9"
   | "device.cycle"
 
-export interface KeybindingShortcut {
+export interface KeybindingChord {
   key: string
   modKey?: boolean
   platformChord?: boolean
@@ -46,6 +46,12 @@ export interface KeybindingShortcut {
   shiftKey?: boolean
   altKey?: boolean
 }
+
+export interface DoubleTapModifierShortcut {
+  doubleTapModifier: "mod"
+}
+
+export type KeybindingShortcut = KeybindingChord | DoubleTapModifierShortcut
 
 /**
  * The only list of shortcut groups. Both the shortcuts dialog and the dashboard
@@ -132,7 +138,7 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     label: "Toggle Mission Control",
     description: "Show every live session at once and answer whatever is blocked",
     group: "View",
-    defaultShortcut: { key: "m", modKey: true, shiftKey: true },
+    defaultShortcut: { doubleTapModifier: "mod" },
   },
   {
     command: "toggleStats",
@@ -344,7 +350,8 @@ function normalizeKey(key: string): string {
 function isShortcut(value: unknown): value is KeybindingShortcut {
   if (!value || typeof value !== "object") return false
   const candidate = value as Record<string, unknown>
-  return typeof candidate.key === "string" && candidate.key.length > 0
+  return candidate.doubleTapModifier === "mod"
+    || (typeof candidate.key === "string" && candidate.key.length > 0)
 }
 
 function loadOverrides(): Partial<Record<KeybindingCommand, KeybindingShortcut>> {
@@ -390,7 +397,10 @@ export function getResolvedKeybindings(): Record<KeybindingCommand, KeybindingSh
 }
 
 export function setKeybinding(command: KeybindingCommand, shortcut: KeybindingShortcut) {
-  persistOverrides({ ...loadOverrides(), [command]: { ...shortcut, key: normalizeKey(shortcut.key) } })
+  const normalized = "doubleTapModifier" in shortcut
+    ? { ...shortcut }
+    : { ...shortcut, key: normalizeKey(shortcut.key) }
+  persistOverrides({ ...loadOverrides(), [command]: normalized })
 }
 
 export function resetKeybinding(command: KeybindingCommand) {
@@ -426,6 +436,7 @@ export function isEditableTarget(node: EventTarget | null): boolean {
 
 export function matchesKeybinding(command: KeybindingCommand, event: KeyboardEvent): boolean {
   const shortcut = getKeybinding(command)
+  if ("doubleTapModifier" in shortcut) return false
   if (normalizeKey(event.key) !== normalizeKey(shortcut.key)) return false
 
   if (shortcut.modKey) {
@@ -465,6 +476,9 @@ function formatKey(key: string): string {
 
 export function formatShortcut(shortcut: KeybindingShortcut): string {
   const mac = isMac()
+  if ("doubleTapModifier" in shortcut) {
+    return mac ? "Double ⌘" : "Double Ctrl"
+  }
   if (shortcut.modKey) {
     return mac
       ? `${shortcut.shiftKey ? "⇧" : ""}⌘${formatKey(shortcut.key)}`
@@ -494,6 +508,7 @@ export function shortcutLabel(command: KeybindingCommand): string {
 }
 
 function shortcutSignatures(shortcut: KeybindingShortcut): string[] {
+  if ("doubleTapModifier" in shortcut) return [`double-tap:${shortcut.doubleTapModifier}`]
   const signature = (meta: boolean, ctrl: boolean, shift: boolean, alt: boolean) =>
     `${normalizeKey(shortcut.key)}|${meta}|${ctrl}|${shift}|${alt}`
   if (shortcut.modKey) {
@@ -525,6 +540,12 @@ export function findKeybindingConflict(
     definition.command !== except
     && shortcutSignatures(getKeybinding(definition.command)).some((value) => signatures.has(value)),
   ) ?? null
+}
+
+export function getDoubleTapModifierKey(command: KeybindingCommand): "Meta" | "Control" | null {
+  const shortcut = getKeybinding(command)
+  if (!("doubleTapModifier" in shortcut)) return null
+  return isMac() ? "Meta" : "Control"
 }
 
 // ── Multi-device switching helpers ───────────────────────────────────────────

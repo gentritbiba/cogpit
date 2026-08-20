@@ -1,7 +1,7 @@
 # Mission Control
 
 A center-pane grid of every live agent session, built so sessions blocked on the
-user are impossible to miss. Reached from the header button or `⌘⇧M`
+user are impossible to miss. Reached from the header button or a double-tap of Command
 (`mainView: "mission"`, `OPEN_MISSION` / `CLOSE_MISSION`).
 
 ## Where things live

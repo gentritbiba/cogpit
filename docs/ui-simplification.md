@@ -222,7 +222,7 @@ updating is strictly worse.
   `workflows/WorkflowAgentCard.tsx`.
 - The lying cheatsheet: `src/components/Dashboard/ProjectsView.tsx:226` advertises
   "Toggle voice input · Ctrl+Shift+M". `grep -rn voice src/` returns that one line — the feature
-  does not exist, and the chord now means Mission Control. None of its 13 rows call
+  does not exist, and the shortcut now opens Mission Control. None of its 13 rows call
   `getKeybinding()`, so user rebinds are ignored. Regenerate from `KEYBINDING_DEFINITIONS`
   through `shortcutLabel()`, or delete.
 - The six literal `<span>/</span>` separators and the "Changes apply live" caption in
@@ -372,7 +372,7 @@ control while *adding* information.
 - **Demoting Mission Control to "the stage when nothing is selected."** For a six-session
   operator it is a HUD you peek at, not the absence of a selection.
   `resolveDesktopMainView` deliberately ranks it above an open session and says so. It keeps its
-  button, its amber count and ⌘⇧M.
+  button, its amber count and double-tap Command shortcut.
 - **Deleting ⌘⇧1-9 "jump to Nth live session."** Three concepts proposed dropping it. A chord is
   not a mode. Fix the conflict by moving device switching, and add visible 1-9 numbering to the
   sidebar so there is something to count against.
