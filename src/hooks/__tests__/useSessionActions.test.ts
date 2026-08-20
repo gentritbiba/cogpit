@@ -53,7 +53,6 @@ function makeParsedSession(overrides?: Partial<ParsedSession>): ParsedSession {
       totalOutputTokens: 0,
       totalCacheCreationTokens: 0,
       totalCacheReadTokens: 0,
-      totalCostUSD: 0,
       toolCallCounts: {},
       errorCount: 0,
       totalDurationMs: 0,

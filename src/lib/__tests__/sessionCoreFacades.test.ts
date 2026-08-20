@@ -4,31 +4,25 @@ import * as legacyCodex from "../codex"
 import * as legacyInteractiveState from "../interactiveState"
 import * as legacyMessageTypeGuards from "../messageTypeGuards"
 import * as legacyParser from "../parser"
-import * as legacyPricingTiers from "../pricingTiers"
 import * as legacySessionStats from "../sessionStats"
 import * as legacySessionStatus from "../sessionStatus"
 import * as legacyTokenCosts from "../token-costs"
 import * as legacyTurnBuilder from "../turnBuilder"
 import type * as LegacyInteractiveTypes from "../interactiveState"
 import type * as LegacyParserTypes from "../parser"
-import type * as LegacyPricingTypes from "../pricingTiers"
 import type * as LegacySessionStatusTypes from "../sessionStatus"
-import type * as LegacyTokenCostTypes from "../token-costs"
 import type * as LegacyTypes from "../types"
 import * as canonicalCodex from "../../../shared/session/codex"
 import * as canonicalInteractiveState from "../../../shared/session/interactiveState"
 import * as canonicalMessageTypeGuards from "../../../shared/session/messageTypeGuards"
 import * as canonicalParser from "../../../shared/session/parser"
-import * as canonicalPricingTiers from "../../../shared/session/pricingTiers"
 import * as canonicalSessionStats from "../../../shared/session/sessionStats"
 import * as canonicalSessionStatus from "../../../shared/session/sessionStatus"
 import * as canonicalTokenCosts from "../../../shared/session/token-costs"
 import * as canonicalTurnBuilder from "../../../shared/session/turnBuilder"
 import type * as CanonicalInteractiveTypes from "../../../shared/session/interactiveState"
 import type * as CanonicalParserTypes from "../../../shared/session/parser"
-import type * as CanonicalPricingTypes from "../../../shared/session/pricingTiers"
 import type * as CanonicalSessionStatusTypes from "../../../shared/session/sessionStatus"
-import type * as CanonicalTokenCostTypes from "../../../shared/session/token-costs"
 import type * as CanonicalTypes from "../../../shared/session/types"
 
 type LegacyTypeSurface = {
@@ -104,8 +98,6 @@ type LegacyAuxiliaryTypeSurface = {
   ParserPendingInteraction: LegacyParserTypes.PendingInteraction
   SessionStatus: LegacySessionStatusTypes.SessionStatus
   SessionStatusInfo: LegacySessionStatusTypes.SessionStatusInfo
-  CostInput: LegacyTokenCostTypes.CostInput
-  PricingTier: LegacyPricingTypes.PricingTier
   PlanApprovalState: LegacyInteractiveTypes.PlanApprovalState
   UserQuestionState: LegacyInteractiveTypes.UserQuestionState
   PendingInteraction: LegacyInteractiveTypes.PendingInteraction
@@ -116,8 +108,6 @@ type CanonicalAuxiliaryTypeSurface = {
   ParserPendingInteraction: CanonicalParserTypes.PendingInteraction
   SessionStatus: CanonicalSessionStatusTypes.SessionStatus
   SessionStatusInfo: CanonicalSessionStatusTypes.SessionStatusInfo
-  CostInput: CanonicalTokenCostTypes.CostInput
-  PricingTier: CanonicalPricingTypes.PricingTier
   PlanApprovalState: CanonicalInteractiveTypes.PlanApprovalState
   UserQuestionState: CanonicalInteractiveTypes.UserQuestionState
   PendingInteraction: CanonicalInteractiveTypes.PendingInteraction
@@ -133,7 +123,6 @@ const modulePairs: ReadonlyArray<readonly [string, RuntimeModule, RuntimeModule]
   ["sessionStats", legacySessionStats, canonicalSessionStats],
   ["sessionStatus", legacySessionStatus, canonicalSessionStatus],
   ["token-costs", legacyTokenCosts, canonicalTokenCosts],
-  ["pricingTiers", legacyPricingTiers, canonicalPricingTiers],
   ["interactiveState", legacyInteractiveState, canonicalInteractiveState],
 ]
 
@@ -153,7 +142,6 @@ describe("session-core compatibility facades", () => {
     expectTypeOf(legacySessionStats).toEqualTypeOf(canonicalSessionStats)
     expectTypeOf(legacySessionStatus).toEqualTypeOf(canonicalSessionStatus)
     expectTypeOf(legacyTokenCosts).toEqualTypeOf(canonicalTokenCosts)
-    expectTypeOf(legacyPricingTiers).toEqualTypeOf(canonicalPricingTiers)
     expectTypeOf(legacyInteractiveState).toEqualTypeOf(canonicalInteractiveState)
   })
 

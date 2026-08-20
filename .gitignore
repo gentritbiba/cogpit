@@ -5,6 +5,7 @@ config.local.json
 **/.DS_Store
 undo-history/
 session-config/
+usage-model-rates.json
 audit-history/
 test-results/
 /out

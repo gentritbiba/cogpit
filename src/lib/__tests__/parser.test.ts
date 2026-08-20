@@ -65,7 +65,6 @@ describe("parseSession", () => {
       totalOutputTokens: 0,
       totalCacheCreationTokens: 0,
       totalCacheReadTokens: 0,
-      totalCostUSD: 0,
       toolCallCounts: {},
       errorCount: 0,
       totalDurationMs: 0,
@@ -363,7 +362,6 @@ not valid json
       totalOutputTokens: 0,
       totalCacheCreationTokens: 0,
       totalCacheReadTokens: 0,
-      totalCostUSD: 0,
       toolCallCounts: {},
       errorCount: 0,
       totalDurationMs: 0,
@@ -789,13 +787,12 @@ describe("stats computation", () => {
     expect(session.stats.turnCount).toBe(0)
     expect(session.stats.totalInputTokens).toBe(0)
     expect(session.stats.totalOutputTokens).toBe(0)
-    expect(session.stats.totalCostUSD).toBe(0)
     expect(session.stats.errorCount).toBe(0)
   })
 
-  it("computes cost based on model pricing", () => {
+  it("aggregates raw reported token usage", () => {
     const session = parseSession(simpleSession())
-    expect(session.stats.totalCostUSD).toBeGreaterThan(0)
+    expect(session.stats.totalInputTokens).toBeGreaterThan(0)
   })
 
   it("includes sub-agent tool calls and tokens in stats", () => {
@@ -1360,7 +1357,6 @@ describe("detectPendingInteraction", () => {
         totalOutputTokens: 0,
         totalCacheCreationTokens: 0,
         totalCacheReadTokens: 0,
-        totalCostUSD: 0,
         toolCallCounts: {},
         errorCount: 0,
         totalDurationMs: 0,
@@ -1385,7 +1381,6 @@ describe("detectPendingInteraction", () => {
         totalOutputTokens: 0,
         totalCacheCreationTokens: 0,
         totalCacheReadTokens: 0,
-        totalCostUSD: 0,
         toolCallCounts: {},
         errorCount: 0,
         totalDurationMs: 0,
@@ -1613,7 +1608,6 @@ describe("detectPendingInteraction", () => {
         totalOutputTokens: 0,
         totalCacheCreationTokens: 0,
         totalCacheReadTokens: 0,
-        totalCostUSD: 0,
         toolCallCounts: {},
         errorCount: 0,
         totalDurationMs: 0,

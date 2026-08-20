@@ -1,15 +1,13 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 /**
  * Session statistics computation — token usage aggregation and tool call tallying.
+ *
+ * Token totals are the raw figures the transcript reports. Costs are not
+ * computed here: pricing needs the live LiteLLM rate table, which callers
+ * apply via shared/usageCost/pricing.ts.
  */
 
 import type { Turn, SessionStats } from "./types"
-import {
-  calculateTurnCostEstimated,
-  calculateSubAgentCostEstimated,
-  estimateTotalOutputTokens,
-  estimateSubAgentOutput,
-} from "./token-costs"
 
 /**
  * Count tool calls in an array, accumulating into `counts` map.
@@ -29,15 +27,17 @@ function countToolCalls(
 
 function addUsageToStats(
   stats: SessionStats,
-  usage: { input_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number },
-  estimatedOutput: number,
-  cost: number,
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  },
 ): void {
   stats.totalInputTokens += usage.input_tokens
-  stats.totalOutputTokens += estimatedOutput
+  stats.totalOutputTokens += usage.output_tokens
   stats.totalCacheCreationTokens += usage.cache_creation_input_tokens ?? 0
   stats.totalCacheReadTokens += usage.cache_read_input_tokens ?? 0
-  stats.totalCostUSD += cost
 }
 
 export function createEmptySessionStats(turnCount: number): SessionStats {
@@ -46,7 +46,6 @@ export function createEmptySessionStats(turnCount: number): SessionStats {
     totalOutputTokens: 0,
     totalCacheCreationTokens: 0,
     totalCacheReadTokens: 0,
-    totalCostUSD: 0,
     toolCallCounts: {},
     errorCount: 0,
     totalDurationMs: 0,
@@ -55,30 +54,16 @@ export function createEmptySessionStats(turnCount: number): SessionStats {
 }
 
 export function computeStats(turns: Turn[]): SessionStats {
-  const stats: SessionStats = {
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalCacheCreationTokens: 0,
-    totalCacheReadTokens: 0,
-    totalCostUSD: 0,
-    toolCallCounts: {},
-    errorCount: 0,
-    totalDurationMs: 0,
-    turnCount: turns.length,
-  }
+  const stats = createEmptySessionStats(turns.length)
 
   for (const turn of turns) {
-    if (turn.tokenUsage) {
-      addUsageToStats(stats, turn.tokenUsage, estimateTotalOutputTokens(turn), calculateTurnCostEstimated(turn))
-    }
+    if (turn.tokenUsage) addUsageToStats(stats, turn.tokenUsage)
     if (turn.durationMs) stats.totalDurationMs += turn.durationMs
     stats.errorCount += countToolCalls(turn.toolCalls, stats.toolCallCounts)
 
     for (const sa of turn.subAgentActivity) {
       stats.errorCount += countToolCalls(sa.toolCalls, stats.toolCallCounts)
-      if (sa.tokenUsage) {
-        addUsageToStats(stats, sa.tokenUsage, estimateSubAgentOutput(sa), calculateSubAgentCostEstimated(sa))
-      }
+      if (sa.tokenUsage) addUsageToStats(stats, sa.tokenUsage)
     }
   }
 

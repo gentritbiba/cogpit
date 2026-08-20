@@ -38,6 +38,7 @@ const CANONICAL_ROUTE_IDS = [
   "editor",
   "worktrees",
   "usage",
+  "usage-cost",
   "slash-suggestions",
   "config-browser",
   "local-file",

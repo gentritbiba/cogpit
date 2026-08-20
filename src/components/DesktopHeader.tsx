@@ -50,6 +50,7 @@ import { NotificationsBell } from "@/components/NotificationsBell"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
+import { UsageCostDialog } from "@/components/UsageCostDialog"
 import { ContextBadge, HeaderIconButton, LiveIndicator } from "@/components/header-shared"
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { useAppContext } from "@/contexts/AppContext"
@@ -287,6 +288,8 @@ export const DesktopHeader = memo(function DesktopHeader({
       <div className="min-w-2 flex-1" />
 
       <TokenUsageIndicator agentKind={activeAgentKind} />
+
+      <UsageCostDialog />
 
       <LeakIndicator />
 

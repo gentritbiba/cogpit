@@ -1,17 +1,12 @@
 import { describe, it, expect } from "vitest"
 import {
-  calculateCost,
-  calculateTurnCost,
-  calculateTurnCostEstimated,
-  calculateSubAgentCostEstimated,
   estimateThinkingTokens,
   estimateVisibleOutputTokens,
-  estimateTotalOutputTokens,
-  estimateSubAgentOutput,
   formatCost,
   CHARS_PER_TOKEN,
 } from "@/lib/token-costs"
-import type { Turn, SubAgentMessage } from "@/lib/types"
+import { parseRateTable, priceTokenUsage } from "@/lib/usagePricing"
+import type { Turn } from "@/lib/types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,364 +27,89 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
   }
 }
 
-function makeSubAgent(overrides: Partial<SubAgentMessage> = {}): SubAgentMessage {
-  return {
-    agentId: "sa1",
-    agentName: null,
-    subagentType: null,
-    type: "assistant",
-    content: [],
-    toolCalls: [],
-    thinking: [],
-    text: [],
-    timestamp: "",
-    tokenUsage: null,
-    model: null,
-    isBackground: false,
-    ...overrides,
-  }
-}
-
-// ── calculateCost — pricing tiers ────────────────────────────────────────────
-
-describe("calculateCost", () => {
-  describe("OpenAI GPT tiers", () => {
-    const models = [
-      { model: "gpt-5.6-sol", input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.50 },
-      { model: "gpt-5.6", input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.50 },
-      { model: "gpt-5.6-terra", input: 2.50, output: 15, cacheWrite: 3.125, cacheRead: 0.25 },
-      { model: "gpt-5.6-luna", input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.10 },
-      { model: "gpt-5.5", input: 5, output: 30, cacheWrite: 5, cacheRead: 0.50 },
-      { model: "gpt-5.4", input: 2.50, output: 15, cacheWrite: 2.50, cacheRead: 0.25 },
-      { model: "gpt-5.4-mini", input: 0.75, output: 4.50, cacheWrite: 0.75, cacheRead: 0.075 },
-    ]
-
-    for (const prices of models) {
-      it(`${prices.model}: uses official token and cache prices`, () => {
-        expect(calculateCost({ model: prices.model, inputTokens: 1_000_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })).toBeCloseTo(prices.input)
-        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 1_000_000, cacheWriteTokens: 0, cacheReadTokens: 0 })).toBeCloseTo(prices.output)
-        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 1_000_000, cacheReadTokens: 0 })).toBeCloseTo(prices.cacheWrite)
-        expect(calculateCost({ model: prices.model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 1_000_000 })).toBeCloseTo(prices.cacheRead)
-      })
-    }
-  })
-
-  describe("frontier tier (fable 5, mythos 5, opus 4.8): $10/$50", () => {
-    const models = [
-      "claude-fable-5",
-      "claude-fable-5[1m]",
-      "claude-mythos-5",
-      "claude-opus-4-8",
-    ]
-    for (const model of models) {
-      it(`${model}: input=$10/M, output=$50/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-        // 100k input * $10/M + 100k output * $50/M = 1 + 5 = 6
-        expect(cost).toBeCloseTo(6)
-      })
-      it(`${model}: cacheWrite=$12.50/M, cacheRead=$1/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 100_000, cacheReadTokens: 100_000 })
-        // 100k cacheWrite * $12.50/M + 100k cacheRead * $1/M = 1.25 + 0.1 = 1.35
-        expect(cost).toBeCloseTo(1.35)
-      })
-    }
-  })
-
-  describe("opus 4.5/4.6/4.7 tier: $5/$25", () => {
-    const models = [
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-opus-4-5-20251101",
-    ]
-    for (const model of models) {
-      it(`${model}: input=$5/M, output=$25/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-        // 100k input * $5/M + 100k output * $25/M = 0.5 + 2.5 = 3
-        expect(cost).toBeCloseTo(3)
-      })
-      it(`${model}: cacheWrite=$6.25/M, cacheRead=$0.50/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 100_000, cacheReadTokens: 100_000 })
-        // 100k cacheWrite * $6.25/M + 100k cacheRead * $0.50/M = 0.625 + 0.05 = 0.675
-        expect(cost).toBeCloseTo(0.675)
-      })
-    }
-  })
-
-  describe("sonnet tier (3.5 through 4.6): $3/$15", () => {
-    const models = [
-      "claude-sonnet-4-6",
-      "claude-sonnet-4-5-20250929",
-      "claude-sonnet-4-0-20250514",
-      "claude-3-7-sonnet-20250219",
-      "claude-3-5-sonnet-20241022",
-    ]
-    for (const model of models) {
-      it(`${model}: input=$3/M, output=$15/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-        // 100k * $3/M + 100k * $15/M = 0.3 + 1.5 = 1.8
-        expect(cost).toBeCloseTo(1.8)
-      })
-    }
-  })
-
-  describe("opus legacy tier (4.0, 4.1): $15/$75", () => {
-    const models = [
-      "claude-opus-4-0-20250514",
-      "claude-opus-4-1-20250805",
-    ]
-    for (const model of models) {
-      it(`${model}: input=$15/M, output=$75/M`, () => {
-        const cost = calculateCost({ model, inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-        // 100k * $15/M + 100k * $75/M = 1.5 + 7.5 = 9
-        expect(cost).toBeCloseTo(9)
-      })
-    }
-  })
-
-  describe("haiku tiers", () => {
-    it("haiku 4.5: $1/$5", () => {
-      const cost = calculateCost({ model: "claude-haiku-4-5-20251001", inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-      expect(cost).toBeCloseTo(0.6) // 0.1 + 0.5
-    })
-    it("haiku 3.5: $0.80/$4", () => {
-      const cost = calculateCost({ model: "claude-3-5-haiku-20241022", inputTokens: 100_000, outputTokens: 100_000, cacheWriteTokens: 0, cacheReadTokens: 0 })
-      expect(cost).toBeCloseTo(0.48) // 0.08 + 0.4
-    })
-  })
-
-  describe("fast mode pricing (usage.speed === 'fast')", () => {
-    it("opus 4.6 fast: $30/$150", () => {
-      const cost = calculateCost({
-        model: "claude-opus-4-6",
-        inputTokens: 100_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 0,
-        speed: "fast",
-      })
-      const expected = (100_000 / 1e6) * 30 + (100_000 / 1e6) * 150
-      expect(cost).toBeCloseTo(expected)
-    })
-
-    it("opus 4.8 fast: same $10/$50 as standard", () => {
-      const cost = calculateCost({
-        model: "claude-opus-4-8",
-        inputTokens: 100_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 0,
-        speed: "fast",
-      })
-      expect(cost).toBeCloseTo(6) // 1 + 5
-    })
-
-    it("speed 'standard' uses normal pricing", () => {
-      const cost = calculateCost({
-        model: "claude-opus-4-6",
-        inputTokens: 100_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 0,
-        speed: "standard",
-      })
-      expect(cost).toBeCloseTo(3) // 0.5 + 2.5
-    })
-
-    it("fast on a non-fast-mode model (fable) uses normal pricing", () => {
-      const cost = calculateCost({
-        model: "claude-fable-5",
-        inputTokens: 100_000,
-        outputTokens: 100_000,
-        cacheWriteTokens: 0,
-        cacheReadTokens: 0,
-        speed: "fast",
-      })
-      expect(cost).toBeCloseTo(6) // 1 + 5
-    })
-  })
-
-  it("includes web search requests", () => {
-    const cost = calculateCost({
-      model: "claude-opus-4-6",
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheWriteTokens: 0,
-      cacheReadTokens: 0,
-      webSearchRequests: 5,
-    })
-    expect(cost).toBeCloseTo(0.05) // 5 * $0.01
-  })
-
-  it("fallback for unknown models uses the default tier ($5/M input)", () => {
-    const cost = calculateCost({ model: "unknown-model", inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
-    expect(cost).toBeCloseTo(0.5) // 100k * $5/M
-  })
-
-  it("null model uses the default tier", () => {
-    const cost = calculateCost({ model: null, inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
-    expect(cost).toBeCloseTo(0.5) // 100k * $5/M
-  })
-
-  it("does not invent a Claude price for an unknown GPT model", () => {
-    const cost = calculateCost({ model: "gpt-9.9-unknown", inputTokens: 100_000, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })
-    expect(cost).toBeNaN()
-    expect(formatCost(cost)).toBe("—")
-  })
-
-  it("returns 0 for zero everything", () => {
-    expect(calculateCost({ model: "claude-opus-4-6", inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 })).toBe(0)
-  })
-})
-
-// ── calculateTurnCost (backward-compat wrapper) ──────────────────────────────
-
-describe("calculateTurnCost", () => {
-  it("delegates to calculateCost correctly", () => {
-    const a = calculateTurnCost("claude-opus-4-6", 100_000, 50_000, 20_000, 10_000)
-    const b = calculateCost({ model: "claude-opus-4-6", inputTokens: 100_000, outputTokens: 50_000, cacheWriteTokens: 20_000, cacheReadTokens: 10_000 })
-    expect(a).toBe(b)
-  })
-})
-
-// ── Output token estimation ──────────────────────────────────────────────────
+// ── output token estimation (display only) ───────────────────────────────────
 
 describe("estimateThinkingTokens", () => {
-  it("returns 0 for no thinking blocks", () => {
+  it("returns 0 with no thinking blocks", () => {
     expect(estimateThinkingTokens(makeTurn())).toBe(0)
   })
 
-  it("estimates tokens from thinking content", () => {
+  it("estimates from thinking content at CHARS_PER_TOKEN", () => {
     const turn = makeTurn({
-      thinking: [{ type: "thinking", thinking: "a".repeat(400), signature: "" }],
+      thinking: [{ type: "thinking", thinking: "x".repeat(400), signature: "" }],
     })
-    expect(estimateThinkingTokens(turn)).toBe(100) // 400 / 4
-  })
-
-  it("sums multiple thinking blocks", () => {
-    const turn = makeTurn({
-      thinking: [
-        { type: "thinking", thinking: "a".repeat(100), signature: "" },
-        { type: "thinking", thinking: "b".repeat(300), signature: "" },
-      ],
-    })
-    expect(estimateThinkingTokens(turn)).toBe(100) // (100 + 300) / 4
+    expect(estimateThinkingTokens(turn)).toBe(400 / CHARS_PER_TOKEN)
   })
 })
 
 describe("estimateVisibleOutputTokens", () => {
-  it("estimates from text", () => {
+  it("estimates from assistant text", () => {
     const turn = makeTurn({ assistantText: ["hello world"] }) // 11 chars
     expect(estimateVisibleOutputTokens(turn)).toBe(Math.ceil(11 / CHARS_PER_TOKEN))
   })
 
-  it("includes tool call input JSON", () => {
-    const input = { file_path: "/foo/bar.ts" }
+  it("includes tool input JSON", () => {
     const turn = makeTurn({
-      toolCalls: [{ id: "tc1", name: "Read", input, result: null, isError: false, timestamp: "" }],
+      toolCalls: [
+        { id: "tc1", name: "Bash", input: { command: "ls" }, result: null, isError: false, timestamp: "" },
+      ],
     })
-    const expectedChars = JSON.stringify(input).length
-    expect(estimateVisibleOutputTokens(turn)).toBe(Math.ceil(expectedChars / CHARS_PER_TOKEN))
+    const jsonLen = JSON.stringify({ command: "ls" }).length
+    expect(estimateVisibleOutputTokens(turn)).toBe(Math.ceil(jsonLen / CHARS_PER_TOKEN))
   })
 })
 
-describe("estimateTotalOutputTokens", () => {
-  it("returns max of estimated and reported", () => {
-    const turn = makeTurn({
-      thinking: [{ type: "thinking", thinking: "a".repeat(400), signature: "" }],
-      assistantText: ["b".repeat(400)],
-      tokenUsage: { input_tokens: 0, output_tokens: 50 },
-    })
-    // estimated = 100 + 100 = 200, reported = 50 → max = 200
-    expect(estimateTotalOutputTokens(turn)).toBe(200)
+// ── raw API pricing via the LiteLLM rate table ───────────────────────────────
+
+describe("priceTokenUsage", () => {
+  const rates = parseRateTable({
+    "claude-opus-4-6": {
+      input_cost_per_token: 0.000005,
+      output_cost_per_token: 0.000025,
+      cache_read_input_token_cost: 0.0000005,
+      cache_creation_input_token_cost: 0.00000625,
+    },
   })
 
-  it("uses reported when higher", () => {
-    const turn = makeTurn({
-      assistantText: ["hi"], // 2 chars → 1 token
-      tokenUsage: { input_tokens: 0, output_tokens: 500 },
+  it("prices raw reported tokens per class", () => {
+    const cost = priceTokenUsage(rates, "claude-opus-4-6", {
+      input_tokens: 100_000,
+      output_tokens: 10_000,
+      cache_creation_input_tokens: 30_000,
+      cache_read_input_tokens: 50_000,
     })
-    expect(estimateTotalOutputTokens(turn)).toBe(500)
-  })
-})
-
-describe("estimateSubAgentOutput", () => {
-  it("estimates from thinking + text + tool calls", () => {
-    const sa = makeSubAgent({
-      thinking: ["a".repeat(100)],
-      text: ["b".repeat(200)],
-      toolCalls: [{ id: "tc1", name: "Bash", input: { command: "ls" }, result: null, isError: false, timestamp: "" }],
-    })
-    const inputChars = JSON.stringify({ command: "ls" }).length
-    const expected = Math.ceil((100 + 200 + inputChars) / CHARS_PER_TOKEN)
-    expect(estimateSubAgentOutput(sa)).toBe(expected)
-  })
-})
-
-// ── Turn-level cost helpers ──────────────────────────────────────────────────
-
-describe("calculateTurnCostEstimated", () => {
-  it("returns 0 if no usage", () => {
-    expect(calculateTurnCostEstimated(makeTurn())).toBe(0)
+    expect(cost).toBeCloseTo(
+      100_000 * 0.000005
+        + 10_000 * 0.000025
+        + 30_000 * 0.00000625
+        + 50_000 * 0.0000005,
+      10,
+    )
   })
 
-  it("uses estimated output in cost calculation", () => {
-    const turn = makeTurn({
-      model: "claude-opus-4-6",
-      assistantText: ["a".repeat(400)], // 100 tokens
-      tokenUsage: { input_tokens: 1000, output_tokens: 5 },
-    })
-    const cost = calculateTurnCostEstimated(turn)
-    // Should use estimated (100) not reported (5)
-    const expected = calculateCost({
-      model: "claude-opus-4-6",
-      inputTokens: 1000,
-      outputTokens: 100,
-      cacheWriteTokens: 0,
-      cacheReadTokens: 0,
-    })
-    expect(cost).toBeCloseTo(expected)
-  })
-})
-
-describe("calculateSubAgentCostEstimated", () => {
-  it("returns 0 if no usage", () => {
-    expect(calculateSubAgentCostEstimated(makeSubAgent())).toBe(0)
-  })
-
-  it("uses estimated output for sub-agent", () => {
-    const sa = makeSubAgent({
-      model: "claude-sonnet-4-6",
-      text: ["a".repeat(800)], // 200 tokens
-      tokenUsage: { input_tokens: 500, output_tokens: 3 },
-    })
-    const cost = calculateSubAgentCostEstimated(sa)
-    const expected = calculateCost({
-      model: "claude-sonnet-4-6",
-      inputTokens: 500,
-      outputTokens: 200,
-      cacheWriteTokens: 0,
-      cacheReadTokens: 0,
-    })
-    expect(cost).toBeCloseTo(expected)
+  it("returns 0 for unknown or missing models instead of guessing", () => {
+    const usage = { input_tokens: 100_000, output_tokens: 0 }
+    expect(priceTokenUsage(rates, "mystery-model", usage)).toBe(0)
+    expect(priceTokenUsage(rates, null, usage)).toBe(0)
   })
 })
 
 // ── formatCost ───────────────────────────────────────────────────────────────
 
 describe("formatCost", () => {
-  it("formats costs under $0.01 with 4 decimal places", () => {
+  it("formats sub-cent costs with 4 decimals", () => {
     expect(formatCost(0.0012)).toBe("$0.0012")
   })
 
-  it("formats costs under $1 with 3 decimal places", () => {
+  it("formats sub-dollar costs with 3 decimals", () => {
     expect(formatCost(0.123)).toBe("$0.123")
   })
 
-  it("formats costs >= $1 with 2 decimal places", () => {
+  it("formats dollar costs with 2 decimals", () => {
     expect(formatCost(12.345)).toBe("$12.35")
   })
 
-  it("formats zero", () => {
-    expect(formatCost(0)).toBe("$0.0000")
+  it("renders non-finite costs as a dash", () => {
+    expect(formatCost(Number.NaN)).toBe("—")
   })
 })

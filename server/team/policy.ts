@@ -115,6 +115,12 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/worktrees", requires: "admin" },
   ],
   usage: admin("/api/usage"),
+  // The rate table is public LiteLLM data; the summary reads machine-wide
+  // transcript directories, which is a host capability.
+  "usage-cost": [
+    ...authed("/api/usage-cost/rates"),
+    ...admin("/api/usage-cost"),
+  ],
   "slash-suggestions": [
     ...authed("/api/slash-suggestions"),
     ...admin("/api/expand-command"),

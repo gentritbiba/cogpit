@@ -356,7 +356,6 @@ export interface SessionStats {
   totalOutputTokens: number
   totalCacheCreationTokens: number
   totalCacheReadTokens: number
-  totalCostUSD: number
   toolCallCounts: Record<string, number>
   errorCount: number
   totalDurationMs: number

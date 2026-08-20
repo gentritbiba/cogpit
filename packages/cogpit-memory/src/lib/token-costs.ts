@@ -1,73 +1,19 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 /**
- * Token cost calculation library — single source of truth.
+ * Token display estimation and cost formatting.
  *
- * Pricing is reverse-engineered from the Claude Code binary (v2.1.53) to match
- * exactly what CC reports.  CC calculates cost per API call in the message_delta
- * handler using final usage from the streaming response — but the JSONL only
- * records the message_start placeholder usage (output_tokens is severely
- * undercounted, thinking tokens are omitted entirely).  We compensate by
- * estimating output from actual content (≈4 chars/token).
+ * Pricing lives in shared/usageCost/pricing.ts, driven by LiteLLM's live rate
+ * table — nothing here carries hardcoded rates. What remains is content-based
+ * estimation for display only: Claude Code's JSONL records the message_start
+ * placeholder usage, so thinking tokens are absent and output is undercounted;
+ * the chart's thinking/visible split is reconstructed from content at
+ * ≈4 chars/token.
  */
 
-import type { Turn, SubAgentMessage } from "./types"
-import { hasKnownPricing, resolveTier } from "./pricingTiers"
-
-// ── Constants ─────────────────────────────────────────────────────────────────
+import type { Turn } from "./types"
 
 /** Approximate characters per token for content-based estimation. */
 export const CHARS_PER_TOKEN = 4
-
-// ── Cost Calculation ─────────────────────────────────────────────────────────
-
-export interface CostInput {
-  model: string | null
-  inputTokens: number
-  outputTokens: number
-  cacheWriteTokens: number
-  cacheReadTokens: number
-  webSearchRequests?: number
-  /** Fast-mode flag from usage.speed — "fast" bills a higher tier on Opus 4.6/4.7 */
-  speed?: string
-}
-
-/**
- * Calculate the cost of a single API call / turn.
- *
- * This is the single entry point for all cost calculations.  All other
- * functions in the codebase should use this instead of computing cost
- * themselves.
- */
-export function calculateCost(c: CostInput): number {
-  if (!hasKnownPricing(c.model)) return Number.NaN
-  const p = resolveTier(c.model ?? "", c.speed)
-  return (
-    (c.inputTokens / 1_000_000) * p.input +
-    (c.outputTokens / 1_000_000) * p.output +
-    (c.cacheWriteTokens / 1_000_000) * p.cacheWrite +
-    (c.cacheReadTokens / 1_000_000) * p.cacheRead +
-    (c.webSearchRequests ?? 0) * p.webSearch
-  )
-}
-
-/**
- * Backward-compatible wrapper.  Prefer `calculateCost()` for new code.
- */
-export function calculateTurnCost(
-  model: string | null,
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationTokens: number,
-  cacheReadTokens: number,
-): number {
-  return calculateCost({ model, inputTokens, outputTokens, cacheWriteTokens: cacheCreationTokens, cacheReadTokens })
-}
-
-// ── Output Token Estimation ──────────────────────────────────────────────────
-//
-// Claude Code's JSONL records `output_tokens` from the streaming message_start
-// event — a placeholder that does NOT include the final count.  Thinking tokens
-// are never included.  We estimate real output from actual content.
 
 /** Convert character count to approximate token count. */
 function charsToTokens(chars: number): number {
@@ -96,48 +42,6 @@ export function estimateThinkingTokens(turn: Turn): number {
 /** Estimate non-thinking output tokens (text + tool use JSON). */
 export function estimateVisibleOutputTokens(turn: Turn): number {
   return charsToTokens(totalLength(turn.assistantText) + totalToolInputLength(turn.toolCalls))
-}
-
-/** Estimate total output tokens (thinking + visible). Uses max(estimated, reported). */
-export function estimateTotalOutputTokens(turn: Turn): number {
-  const estimated = estimateThinkingTokens(turn) + estimateVisibleOutputTokens(turn)
-  return Math.max(estimated, turn.tokenUsage?.output_tokens ?? 0)
-}
-
-/** Estimate output tokens for a sub-agent message. */
-export function estimateSubAgentOutput(sa: SubAgentMessage): number {
-  const chars = totalLength(sa.thinking) + totalLength(sa.text) + totalToolInputLength(sa.toolCalls)
-  return Math.max(charsToTokens(chars), sa.tokenUsage?.output_tokens ?? 0)
-}
-
-// ── Turn-level cost helpers ──────────────────────────────────────────────────
-
-/** Calculate cost for a turn using estimated output tokens. */
-export function calculateTurnCostEstimated(turn: Turn): number {
-  if (!turn.tokenUsage) return 0
-  const u = turn.tokenUsage
-  return calculateCost({
-    model: turn.model,
-    inputTokens: u.input_tokens,
-    outputTokens: estimateTotalOutputTokens(turn),
-    cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-    cacheReadTokens: u.cache_read_input_tokens ?? 0,
-    speed: u.speed,
-  })
-}
-
-/** Calculate cost for a sub-agent message using estimated output tokens. */
-export function calculateSubAgentCostEstimated(sa: SubAgentMessage): number {
-  if (!sa.tokenUsage) return 0
-  const u = sa.tokenUsage
-  return calculateCost({
-    model: sa.model,
-    inputTokens: u.input_tokens,
-    outputTokens: estimateSubAgentOutput(sa),
-    cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-    cacheReadTokens: u.cache_read_input_tokens ?? 0,
-    speed: u.speed,
-  })
 }
 
 // ── Formatting ───────────────────────────────────────────────────────────────

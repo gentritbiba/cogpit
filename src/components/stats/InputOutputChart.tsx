@@ -2,7 +2,9 @@ import { useMemo, useState } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn } from "@/lib/types"
 import { formatTokenCount } from "@/lib/format"
-import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
+import { formatCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
+import { priceTokenUsage, type RateTable } from "@/lib/usagePricing"
+import { useModelRates } from "@/hooks/useModelRates"
 
 interface TurnData {
   turn: number
@@ -17,7 +19,7 @@ interface TurnData {
   cost: number
 }
 
-function computeTurnData(turns: Turn[]): TurnData[] {
+function computeTurnData(turns: Turn[], rates: RateTable): TurnData[] {
   return turns.map((t, i) => {
     const newInput = t.tokenUsage?.input_tokens ?? 0
     const cacheRead = t.tokenUsage?.cache_read_input_tokens ?? 0
@@ -29,9 +31,7 @@ function computeTurnData(turns: Turn[]): TurnData[] {
     const visibleTokens = estimateVisibleOutputTokens(t)
     const totalOutput = Math.max(thinkingTokens + visibleTokens, t.tokenUsage?.output_tokens ?? 0)
 
-    const cost = t.tokenUsage
-      ? calculateCost({ model: t.model, inputTokens: newInput, outputTokens: totalOutput, cacheWriteTokens: cacheWrite, cacheReadTokens: cacheRead })
-      : 0
+    const cost = t.tokenUsage ? priceTokenUsage(rates, t.model, t.tokenUsage) : 0
 
     return {
       turn: i + 1,
@@ -68,7 +68,7 @@ function ChartTooltip({ data }: { data: TurnData }): React.JSX.Element {
               </span>
             )}
           </span>
-          {data.cost > 0 && <span>Cost: <span className="text-warning">~{formatCost(data.cost)}</span></span>}
+          {data.cost > 0 && <span>API cost: <span className="text-warning">{formatCost(data.cost)}</span></span>}
           {data.hasSubAgents && <span className="text-warning">Has sub-agent activity</span>}
         </div>
       </div>
@@ -163,8 +163,9 @@ const CHART_H = SVG_HEIGHT - PAD_TOP - PAD_BOTTOM
 
 export function InputOutputChart({ turns }: { turns: Turn[] }): React.JSX.Element | null {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
+  const rates = useModelRates()
 
-  const data = useMemo(() => computeTurnData(turns), [turns])
+  const data = useMemo(() => computeTurnData(turns, rates), [turns, rates])
 
   if (data.length === 0) return null
 

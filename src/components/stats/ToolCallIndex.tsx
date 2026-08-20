@@ -11,7 +11,9 @@ import { cn } from "@/lib/utils"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import type { Turn, ToolCall } from "@/lib/types"
 import { truncate } from "@/lib/format"
-import { formatCost, calculateCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
+import { formatCost } from "@/lib/token-costs"
+import { priceTokenUsage, type RateTable } from "@/lib/usagePricing"
+import { useModelRates } from "@/hooks/useModelRates"
 import { getToolPresentation, getToolSummary } from "../../../shared/session/toolSummary"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -32,19 +34,11 @@ function getToolCallPreview(tc: ToolCall): string {
   return truncate(getToolSummary(tc), 40)
 }
 
-function computeTurnCostShares(turns: Turn[]): number[] {
+function computeTurnCostShares(turns: Turn[], rates: RateTable): number[] {
   return turns.map((t) => {
     const u = t.tokenUsage
     if (!u || t.toolCalls.length === 0) return 0
-    const estOutput = estimateThinkingTokens(t) + estimateVisibleOutputTokens(t)
-    const output = Math.max(estOutput, u.output_tokens)
-    return calculateCost({
-      model: t.model,
-      inputTokens: u.input_tokens,
-      outputTokens: output,
-      cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: u.cache_read_input_tokens ?? 0,
-    }) / t.toolCalls.length
+    return priceTokenUsage(rates, t.model, u) / t.toolCalls.length
   })
 }
 
@@ -85,7 +79,8 @@ interface ToolCallIndexProps {
 }
 
 export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): React.JSX.Element | null {
-  const turnCostShares = useMemo(() => computeTurnCostShares(turns), [turns])
+  const rates = useModelRates()
+  const turnCostShares = useMemo(() => computeTurnCostShares(turns, rates), [turns, rates])
 
   const toolCallGroups = useMemo(
     () => groupToolCalls(turns, turnCostShares),
@@ -108,7 +103,7 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): Reac
                   <span className="ml-auto flex items-center gap-1.5">
                     {group.estimatedCost > 0 && (
                       <span className="font-mono text-xs text-warning">
-                        ~{formatCost(group.estimatedCost)}
+                        {formatCost(group.estimatedCost)}
                       </span>
                     )}
                     <Badge

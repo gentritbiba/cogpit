@@ -24,7 +24,6 @@ const FILES = [
   "sessionStats.ts",
   "sessionStatus.ts",
   "token-costs.ts",
-  "pricingTiers.ts",
   "interactiveState.ts",
 ] as const
 

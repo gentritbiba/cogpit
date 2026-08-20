@@ -39,6 +39,7 @@ import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
 import { registerTeamRoutes } from "./routes/teams"
 import { registerUndoRoutes } from "./routes/undo"
+import { registerUsageCostRoutes } from "./routes/usage-cost"
 import { registerUsageRoutes } from "./routes/usage"
 import { registerWorkflowRoutes } from "./routes/workflows"
 import { registerWorktreeRoutes } from "./routes/worktrees"
@@ -98,6 +99,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
   apiRoute("usage", registerUsageRoutes),
+  apiRoute("usage-cost", registerUsageCostRoutes),
   apiRoute("slash-suggestions", registerSlashSuggestionRoutes),
   apiRoute("config-browser", registerConfigBrowserRoutes),
   apiRoute("local-file", registerLocalFileRoutes),

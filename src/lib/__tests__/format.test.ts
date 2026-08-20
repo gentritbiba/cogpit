@@ -6,7 +6,6 @@ import {
   formatFileSize,
   formatRelativeTime,
   truncate,
-  calculateTurnCost,
   formatCost,
   getContextLimit,
   getContextUsage,
@@ -245,96 +244,6 @@ describe("truncate", () => {
 
   it("handles max of 0", () => {
     expect(truncate("hello", 0)).toBe("...")
-  })
-})
-
-// ── calculateTurnCost ─────────────────────────────────────────────────────
-// Pricing matches Claude Code v2.1.172 internal pricing tiers.
-
-describe("calculateTurnCost", () => {
-  it("calculates cost for opus 4.6 (latest tier: $5/$25)", () => {
-    const cost = calculateTurnCost("claude-opus-4-6-20250115", 100_000, 100_000, 0, 0)
-    // 100k input * $5/M + 100k output * $25/M = 0.5 + 2.5 = $3
-    expect(cost).toBeCloseTo(3)
-  })
-
-  it("calculates cost for sonnet 4.5 ($3/$15)", () => {
-    const cost = calculateTurnCost("claude-sonnet-4-5-20250101", 100_000, 100_000, 0, 0)
-    expect(cost).toBeCloseTo(1.8)
-  })
-
-  it("calculates cost for fable 5 (frontier tier: $10/$50)", () => {
-    const cost = calculateTurnCost("claude-fable-5", 100_000, 100_000, 0, 0)
-    // 100k input * $10/M + 100k output * $50/M = 1 + 5 = $6
-    expect(cost).toBeCloseTo(6)
-  })
-
-  it("calculates cost for haiku 4.5 ($1/$5)", () => {
-    const cost = calculateTurnCost("claude-haiku-4-5-20250101", 100_000, 100_000, 0, 0)
-    // 100k * $1/M + 100k * $5/M = 0.1 + 0.5 = $0.6
-    expect(cost).toBeCloseTo(0.6)
-  })
-
-  it("calculates cost for opus 4.0 (legacy tier: $15/$75)", () => {
-    const cost = calculateTurnCost("claude-opus-4-0-20250101", 100_000, 100_000, 0, 0)
-    // 100k * $15/M + 100k * $75/M = 1.5 + 7.5 = $9
-    expect(cost).toBeCloseTo(9)
-  })
-
-  it("calculates cost for sonnet 4.0 (legacy tier: $3/$15)", () => {
-    const cost = calculateTurnCost("claude-sonnet-4-0-20250101", 100_000, 100_000, 0, 0)
-    // 100k * $3/M + 100k * $15/M = 0.3 + 1.5 = $1.8
-    expect(cost).toBeCloseTo(1.8)
-  })
-
-  it("includes cache creation cost", () => {
-    const cost = calculateTurnCost("claude-opus-4-6-20250115", 0, 0, 100_000, 0)
-    // 100k cache write * $6.25/M = $0.625
-    expect(cost).toBeCloseTo(0.625)
-  })
-
-  it("includes cache read cost", () => {
-    const cost = calculateTurnCost("claude-opus-4-6-20250115", 0, 0, 0, 100_000)
-    // 100k cache read * $0.50/M = $0.05
-    expect(cost).toBeCloseTo(0.05)
-  })
-
-  it("uses default (latest) pricing for unknown models", () => {
-    const cost = calculateTurnCost("unknown-model", 100_000, 0, 0, 0)
-    // Falls back to latest tier: 100k * $5/M = $0.5
-    expect(cost).toBeCloseTo(0.5)
-  })
-
-  it("handles null model", () => {
-    const cost = calculateTurnCost(null, 100_000, 0, 0, 0)
-    expect(cost).toBeCloseTo(0.5)
-  })
-
-  it("returns 0 for zero tokens", () => {
-    expect(calculateTurnCost("claude-opus-4-6-20250115", 0, 0, 0, 0)).toBe(0)
-  })
-
-  it("calculates combined cost with all token types (under extended threshold)", () => {
-    // Opus 4.6 (latest tier): 50k input, 10k output, 30k cache write, 50k cache read
-    // Total input = 50k + 30k + 50k = 130k < 200k → standard pricing
-    const cost = calculateTurnCost(
-      "claude-opus-4-6-20250115",
-      50_000, 10_000, 30_000, 50_000
-    )
-    const expected =
-      (50_000 / 1_000_000) * 5 +
-      (10_000 / 1_000_000) * 25 +
-      (30_000 / 1_000_000) * 6.25 +
-      (50_000 / 1_000_000) * 0.5
-    expect(cost).toBeCloseTo(expected)
-  })
-
-  it("differentiates opus 4.0 from sonnet 4.0 pricing", () => {
-    const opusCost = calculateTurnCost("claude-opus-4-0-20250101", 100_000, 0, 0, 0)
-    const sonnetCost = calculateTurnCost("claude-sonnet-4-0-20250101", 100_000, 0, 0, 0)
-    expect(opusCost).toBeCloseTo(1.5) // opus 4.0 input = $15/M → 100k = $1.5
-    expect(sonnetCost).toBeCloseTo(0.3) // sonnet 4.0 input = $3/M → 100k = $0.3
-    expect(opusCost).toBeGreaterThan(sonnetCost)
   })
 })
 
