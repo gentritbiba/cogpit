@@ -33,6 +33,47 @@ const WORK_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "hook_event",
 ])
 
+/** Tools that stop the turn and hand control to the user. */
+const INTERACTIVE_TOOLS: ReadonlySet<string> = new Set([
+  "AskUserQuestion",
+  "ExitPlanMode",
+])
+
+/** Assistant output that proves the agent moved on past an earlier block. */
+const CONTINUATION_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
+  "text",
+  "thinking",
+  "tool_calls",
+])
+
+function holdsUnansweredPrompt(block: TurnContentBlock): boolean {
+  return block.kind === "tool_calls" && block.toolCalls.some(
+    (toolCall) => INTERACTIVE_TOOLS.has(toolCall.name) && toolCall.result == null,
+  )
+}
+
+/**
+ * Index of the block holding a prompt the turn is still blocked on, or -1.
+ *
+ * A blocked session writes nothing further to its JSONL, so the stream goes
+ * quiet and the turn reads as settled roughly half a minute later. Folding then
+ * files the prompt under finished work and hides the answer form, while the
+ * status line — which reads the parsed session rather than liveness — still
+ * says the session is waiting. Deciding this from the blocks themselves is what
+ * stops any caller from losing the prompt by mistaking silence for done.
+ *
+ * Assistant content after the prompt means the agent gave up on it, the same
+ * test `detectPendingInteraction` applies, so only a turn that ENDS on an open
+ * prompt is pinned.
+ */
+function findBlockingPromptIndex(blocks: TurnContentBlock[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (holdsUnansweredPrompt(blocks[i])) return i
+    if (CONTINUATION_KINDS.has(blocks[i].kind)) return -1
+  }
+  return -1
+}
+
 const EMPTY_PLAN: FoldPlan = {
   foldedIndices: [],
   foldAnchorIndex: -1,
@@ -62,11 +103,12 @@ export function planTurnFold(
     if (terminalTextIndex === -1) return EMPTY_PLAN
   }
 
+  const blockingPromptIndex = findBlockingPromptIndex(blocks)
   const foldedIndices: number[] = []
   let hiddenToolCalls = 0
 
   for (let i = 0; i < blocks.length; i++) {
-    if (i === terminalTextIndex) continue
+    if (i === terminalTextIndex || i === blockingPromptIndex) continue
     const block = blocks[i]
     if (PINNED_KINDS.has(block.kind)) continue
 

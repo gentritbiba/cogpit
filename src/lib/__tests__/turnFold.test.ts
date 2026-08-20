@@ -129,3 +129,86 @@ describe("turnFoldLabel", () => {
     expect(turnFoldLabel(null, 0)).toBe("Show work")
   })
 })
+
+// ── Interactive prompts ──────────────────────────────────────────────────────
+
+/**
+ * A question-blocked session writes nothing to its JSONL, so `isLive` goes false
+ * ~30s after the prompt and the turn reads as settled. The fold must not treat
+ * that as "work finished" and hide the one thing the turn is waiting on.
+ */
+const askUserQuestion = (result: string | null): TurnContentBlock => ({
+  kind: "tool_calls",
+  toolCalls: [{
+    id: "t-ask",
+    name: "AskUserQuestion",
+    input: { questions: [{ question: "Which one?", options: [{ label: "A" }] }] },
+    result,
+    isError: false,
+    timestamp: "",
+  }],
+})
+
+describe("planTurnFold — unanswered prompts", () => {
+  it("never folds an unanswered AskUserQuestion in a settled turn", () => {
+    const blocks = [text("Which is my one question for now:"), askUserQuestion(null)]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).not.toContain(1)
+  })
+
+  it("never folds an unanswered AskUserQuestion in a working turn", () => {
+    const blocks = [text("Checking"), tools("Read"), askUserQuestion(null)]
+
+    const plan = planTurnFold(blocks, "working")
+
+    expect(plan.foldedIndices).not.toContain(2)
+  })
+
+  it("folds an answered AskUserQuestion like any other tool call", () => {
+    const blocks = [askUserQuestion('"Which one?" = "A"'), text("Going with A")]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).toEqual([0])
+  })
+
+  it("excludes a pinned prompt from the hidden-step count", () => {
+    const blocks = [tools("Read"), text("Here is what I found:"), askUserQuestion(null)]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.hiddenToolCalls).toBe(1)
+  })
+
+  it("folds a prompt the agent gave up on and answered itself", () => {
+    // Assistant content after the prompt means the turn is not blocked on it,
+    // so it is ordinary history — the same test detectPendingInteraction makes.
+    const blocks = [askUserQuestion(null), text("No reply, so I picked A")]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).toEqual([0])
+  })
+
+  it("pins a prompt trailed only by non-assistant blocks", () => {
+    const blocks: TurnContentBlock[] = [
+      text("One question:"),
+      tools("Read"),
+      askUserQuestion(null),
+      { kind: "hook_event", events: [] },
+    ]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).toEqual([1, 3])
+  })
+
+  it("stays unfoldable when the only work is an unanswered prompt", () => {
+    // Folding would hide nothing, so the disclosure would be a dead control.
+    const plan = planTurnFold([text("One question:"), askUserQuestion(null)])
+
+    expect(plan.foldable).toBe(false)
+  })
+})

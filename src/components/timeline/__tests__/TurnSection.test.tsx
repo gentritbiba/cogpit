@@ -77,6 +77,17 @@ const turn: Turn = {
   model: null,
 }
 
+/** A turn the agent ended on an open question — nothing follows the prompt. */
+const blockedTurn: Turn = {
+  ...turn,
+  id: "turn-blocked",
+  contentBlocks: [
+    { kind: "text", text: ["Which is my one question for now:"] },
+    { kind: "tool_calls", toolCalls: [question] },
+  ],
+  assistantText: ["Which is my one question for now:"],
+}
+
 function makeSession(): ParsedSession {
   return {
     sessionId: "session-1",
@@ -114,6 +125,17 @@ describe("TurnSection work disclosure", () => {
       "true",
     )
     expect(screen.getByText("Streaming response")).toBeInTheDocument()
+    expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()
+  })
+
+  it("keeps a turn-ending unanswered prompt visible after the turn settles", () => {
+    // A question-blocked session emits no traffic, so the stream goes quiet and
+    // the turn reads as completed. Folding it away leaves the status line saying
+    // "Waiting for your answer" with no answer form anywhere on screen.
+    mocks.status = "completed"
+
+    render(<TurnSection turn={blockedTurn} index={0} />)
+
     expect(screen.getByText("AskUserQuestion")).toBeInTheDocument()
   })
 
