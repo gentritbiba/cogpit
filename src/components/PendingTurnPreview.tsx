@@ -17,7 +17,7 @@ export const PendingTurnPreview = memo(function PendingTurnPreview({
         <span className="font-mono text-xs text-muted-foreground">Turn {turnNumber}</span>
         <Badge variant="outline">Queued</Badge>
       </div>
-      <div className="rounded-lg border border-dashed bg-muted/30 p-3">
+      <div className="rounded-lg border border-dashed bg-prompt-surface p-3">
         <UserMessage content={message} timestamp="" />
       </div>
     </div>

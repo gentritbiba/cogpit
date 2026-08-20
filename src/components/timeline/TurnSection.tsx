@@ -29,10 +29,7 @@ import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
 
 // ── Style constants ──────────────────────────────────────────────────────────
 
-const CARD_STYLES = {
-  user: "border border-border bg-muted/40",
-  userAgent: "border border-border bg-muted/25",
-} as const
+const PROMPT_CARD = "border border-border bg-prompt-surface"
 
 /**
  * One rail for nesting. Depth is the only thing a rail has to communicate, so
@@ -86,7 +83,6 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       expandToolPayloads={expandToolPayloads}
       isAgentActive={isAgentActive}
       isTurnDone={isTurnDone}
-      isSubAgentView={isSubAgentView}
       isMobile={isMobile}
       cwd={cwd}
       skillMetadata={skillMetadata}
@@ -110,7 +106,6 @@ interface TurnSectionInnerProps {
   expandToolPayloads: boolean
   isAgentActive: boolean
   isTurnDone: boolean
-  isSubAgentView: boolean
   isMobile: boolean
   cwd: string
   skillMetadata: Map<string, SkillMeta>
@@ -153,7 +148,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
   expandToolPayloads,
   isAgentActive,
   isTurnDone,
-  isSubAgentView,
   isMobile,
   cwd,
   skillMetadata,
@@ -232,7 +226,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
           {turn.userMessage && (
             <div data-turn-prompt className={cn(
               isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
-              isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
+              PROMPT_CARD,
             )}>
               <UserMessage
                 content={turn.userMessage}
@@ -254,7 +248,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
-                  isSubAgentView={isSubAgentView}
                   isMobile={isMobile}
                   skillMetadata={skillMetadata}
                 />
@@ -279,7 +272,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
-                  isSubAgentView={isSubAgentView}
                   isMobile={isMobile}
                   skillMetadata={skillMetadata}
                 />
@@ -293,7 +285,6 @@ const TurnSectionInner = memo(function TurnSectionInner({
               expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
-              isSubAgentView={isSubAgentView}
               isMobile={isMobile}
               skillMetadata={skillMetadata}
             />
@@ -413,7 +404,6 @@ function ContentBlocks({
   expandToolPayloads,
   activeToolCallId,
   isAgentActive,
-  isSubAgentView,
   isMobile,
   skillMetadata,
 }: {
@@ -423,7 +413,6 @@ function ContentBlocks({
   expandToolPayloads: boolean
   activeToolCallId: string | null
   isAgentActive: boolean
-  isSubAgentView: boolean
   isMobile: boolean
   skillMetadata?: Map<string, SkillMeta>
 }) {
@@ -516,7 +505,7 @@ function ContentBlocks({
           key={`queued-prompt-${block.timestamp ?? "untimed"}-${block.content}`}
           className={cn(
             isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
-            isSubAgentView ? CARD_STYLES.userAgent : CARD_STYLES.user,
+            PROMPT_CARD,
           )}
         >
           <Badge variant="outline" className="mb-2">Queued while working</Badge>
