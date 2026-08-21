@@ -10,6 +10,7 @@ import type { SkillMeta } from "@/hooks/useSkillMetadata"
 const mockAuthFetchFn = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({}) })
 vi.mock("@/lib/auth", () => ({
   authFetch: (...args: unknown[]) => mockAuthFetchFn(...args),
+  authUrl: (url: string) => url,
   isRemoteClient: vi.fn().mockReturnValue(false),
 }))
 
@@ -342,6 +343,81 @@ describe("ToolCallCard hook badge rendering", () => {
     render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
 
     expect(screen.queryByText("0ms")).toBeNull()
+  })
+})
+
+describe("ToolCallCard image reads", () => {
+  it("previews an image read inline through the local-file proxy", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "/tmp/qa-09.png" }),
+      result: "",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    const img = screen.getByRole("img", { name: "qa-09.png" }) as HTMLImageElement
+    expect(img.getAttribute("src")).toBe("/api/local-file?path=%2Ftmp%2Fqa-09.png")
+    // Inline, so the preview is visible without opening the disclosure.
+    expect(screen.getByRole("button", { name: /Read details/ })).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("previews a Codex view_image call", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("view_image", { path: "/tmp/shot.jpeg" }),
+      result: "",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    const img = screen.getByRole("img", { name: "shot.jpeg" }) as HTMLImageElement
+    expect(img.getAttribute("src")).toBe("/api/local-file?path=%2Ftmp%2Fshot.jpeg")
+  })
+
+  it("drops the always-empty result well an image read leaves behind", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "/tmp/qa-09.png" }),
+      result: "",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Read details/ }))
+
+    expect(screen.getByRole("button", { name: "input" })).toBeTruthy()
+    expect(document.querySelector("pre")).toBeNull()
+  })
+
+  it("keeps the text result when a read returns one", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "src/example.ts" }),
+      result: "export const answer = 42",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByRole("img")).toBeNull()
+  })
+
+  it("does not preview a failed image read", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "/tmp/qa-09.png" }),
+      result: "",
+      isError: true,
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByRole("img", { name: "qa-09.png" })).toBeNull()
+  })
+
+  it("does not preview a relative path the proxy cannot resolve", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("Read", { file_path: "assets/logo.png" }),
+      result: "",
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.queryByRole("img")).toBeNull()
   })
 })
 

@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
+import { LocalImage, isLocalImagePath } from "./LocalImage"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
@@ -283,6 +284,17 @@ function ToolCallHeaderContent({
   )
 }
 
+/** Absolute path of the image a read opened, or null when it read something else. */
+function imageReadPath(toolCall: ToolCall): string | null {
+  if (toolCall.isError) return null
+  const path = toolCall.name === "Read"
+    ? toolCall.input.file_path
+    : toolCall.name === "view_image"
+      ? toolCall.input.path
+      : null
+  return typeof path === "string" && isLocalImagePath(path) ? path : null
+}
+
 function EditToolDiff({ toolCall }: { toolCall: ToolCall }): React.ReactElement {
   return (
     <EditDiffView
@@ -381,7 +393,11 @@ export const ToolCallCard = memo(function ToolCallCard({
       ? "command"
       : "result"
   const showDesktopPanel = expandToolPayloads || desktopPanelOpen
-  const renderedResult = toolCall.result !== null ? (
+  // An image read returns its pixels as a block the text parser drops, so the
+  // preview below stands in for a result well that would always be empty.
+  const imagePath = imageReadPath(toolCall)
+  const hasImagePreview = imagePath !== null && toolCall.result?.trim() === ""
+  const renderedResult = toolCall.result !== null && !hasImagePreview ? (
     <ToolResultPanel
       toolCall={toolCall}
       resultExpanded={resultExpanded}
@@ -484,6 +500,16 @@ export const ToolCallCard = memo(function ToolCallCard({
         </button>
       )}
 
+      {hasImagePreview && !isCompactMobile && (
+        <LocalImage
+          src={imagePath}
+          alt={imagePath.slice(imagePath.lastIndexOf("/") + 1)}
+          id={`tool-image:${toolCall.id}`}
+          className="my-1.5"
+          thumbnailClassName="max-h-40"
+        />
+      )}
+
       {skillMeta && !isCompactMobile && (
         <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">
           <span>source: {skillMeta.source}</span>
@@ -522,7 +548,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             label="Input"
             controlsId={mobileInputId}
           />
-          {toolCall.result !== null && (
+          {renderedResult && (
             <ToggleButton
               isOpen={showMobileResult}
               onClick={() => setResultOpen(!resultOpen)}
@@ -565,7 +591,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           <LiveSubagentTranscript toolUseId={toolCall.id} />
         )}
 
-      {isMobile && !isCompactMobile && toolCall.result !== null && (
+      {isMobile && !isCompactMobile && renderedResult && (
         <Collapsible open={showMobileResult}>
           <CollapsibleContent id={mobileResultId}>
             {renderedResult}
