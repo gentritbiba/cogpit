@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react"
-import { ChartColumn } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -9,8 +8,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/Spinner"
-import { HeaderIconButton } from "@/components/header-shared"
-import { useCapability } from "@/hooks/useCapability"
 import { useUsageCost } from "@/hooks/useUsageCost"
 import { cn } from "@/lib/utils"
 import { formatCost } from "@/lib/token-costs"
@@ -367,47 +364,42 @@ function UsageCostBody({ days }: { days: number }) {
   )
 }
 
-/** Header button + dialog showing raw API-equivalent spend across all sessions. */
-export function UsageCostDialog() {
-  const [open, setOpen] = useState(false)
-  const [days, setDays] = useState<number>(30)
-  // The summary endpoint is admin-only in team edition; hide the affordance
-  // from members who would only get a 403.
-  const canViewUsage = useCapability("viewUsage")
+interface UsageCostDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
 
-  if (!canViewUsage) return null
+/** Raw API-equivalent spend across all sessions. Opened from the overflow menu. */
+export function UsageCostDialog({ open, onOpenChange }: UsageCostDialogProps) {
+  const [days, setDays] = useState<number>(30)
 
   return (
-    <>
-      <HeaderIconButton icon={ChartColumn} label="API usage cost" onClick={() => setOpen(true)} />
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between gap-4 pr-6">
-              <div>
-                <DialogTitle>API usage</DialogTitle>
-                <DialogDescription>
-                  What this machine's agent usage would cost at raw API prices.
-                </DialogDescription>
-              </div>
-              <div className="flex rounded-md border p-0.5">
-                {WINDOW_OPTIONS.map((option) => (
-                  <Button
-                    key={option.days}
-                    variant={days === option.days ? "secondary" : "ghost"}
-                    size="xs"
-                    onClick={() => setDays(option.days)}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-4 pr-6">
+            <div>
+              <DialogTitle>API usage</DialogTitle>
+              <DialogDescription>
+                What this machine's agent usage would cost at raw API prices.
+              </DialogDescription>
             </div>
-          </DialogHeader>
-          {open && <UsageCostBody days={days} />}
-        </DialogContent>
-      </Dialog>
-    </>
+            <div className="flex rounded-md border p-0.5">
+              {WINDOW_OPTIONS.map((option) => (
+                <Button
+                  key={option.days}
+                  variant={days === option.days ? "secondary" : "ghost"}
+                  size="xs"
+                  onClick={() => setDays(option.days)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </DialogHeader>
+        {open && <UsageCostBody days={days} />}
+      </DialogContent>
+    </Dialog>
   )
 }
