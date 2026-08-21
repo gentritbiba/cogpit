@@ -4,8 +4,8 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
-### 2026-08-21 00:49 UTC - Session list detail endpoint enhancement (PLACEHOLDER)
-- **File:** `audit-history/audit-PLACEHOLDER-session-list-detail.md`
+### 2026-08-21 00:49 UTC - Session list detail endpoint enhancement (9439a0d)
+- **File:** `audit-history/audit-9439a0d-session-list-detail.md`
 - **Status:** PASS AFTER UPDATES
 - **Scope:** GET /api/sessions/:dirName endpoint enriched with agent status,
   last activity timestamp, model, branch, turn count, and pull requests —
@@ -14,7 +14,7 @@ Chronological record of all documentation audits for the agent-window project.
   documentation to list new fields and clarify conditional pullRequests. README,
   architecture, CLAUDE.md, and other guidance verified accurate.
 - **Risk:** LOW (non-breaking additions; new fields optional or conditional)
-- **Commit:** PLACEHOLDER
+- **Commit:** 9439a0d
 
 ### 2026-08-20 16:38 UTC - Mission Control double-tap shortcut (2eef4ee)
 - **File:** `audit-history/audit-20260820T163837Z-2eef4ee.md`
