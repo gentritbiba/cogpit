@@ -44,10 +44,14 @@ async function checkGitHubRelease(): Promise<{ version: string; url: string } | 
       headers: { "User-Agent": "Cogpit-Updater" },
     })
     if (!res.ok) return null
-    const data = await res.json()
-    const tag: string = data.tag_name ?? ""
+    const release = await res.json() as { tag_name?: unknown; html_url?: unknown } | null
+    const tag = typeof release?.tag_name === "string" ? release.tag_name : ""
+    const url = typeof release?.html_url === "string" ? release.html_url : ""
     const version = tag.replace(/^v/, "")
-    const url: string = data.html_url ?? ""
+    // The banner hands this url to shell.openExternal, which honours any
+    // scheme. Pin it to the release host so a compromised or spoofed response
+    // cannot open something else.
+    if (!version || !url.startsWith("https://github.com/")) return null
     return { version, url }
   } catch {
     return null
