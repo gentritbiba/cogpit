@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { startTransition, useCallback, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { useProcessPanel } from "@/hooks/useProcessPanel"
@@ -105,24 +105,20 @@ export function useProjectWorkspace({
 
   const handleTogglePreview = useCallback(() => {
     if (!currentCwd) return
-    setRightWorkspace((current) =>
-      current?.kind === "preview" && current.cwd === currentCwd
-        ? null
-        : { kind: "preview", cwd: currentCwd },
-    )
-  }, [currentCwd])
+    startTransition(() => {
+      setRightWorkspace(showPreview ? null : { kind: "preview", cwd: currentCwd })
+    })
+  }, [currentCwd, showPreview])
 
   const handleToggleProjectFiles = useCallback(() => {
     if (!currentCwd) return
-    setRightWorkspace((current) =>
-      current?.kind === "project-files" && current.cwd === currentCwd
-        ? null
-        : { kind: "project-files", cwd: currentCwd },
-    )
-  }, [currentCwd])
+    startTransition(() => {
+      setRightWorkspace(showProjectFiles ? null : { kind: "project-files", cwd: currentCwd })
+    })
+  }, [currentCwd, showProjectFiles])
 
   const closeRightWorkspace = useCallback(() => {
-    setRightWorkspace(null)
+    startTransition(() => setRightWorkspace(null))
   }, [])
 
   return {

@@ -13,6 +13,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { ProcessPanelScripts } from "@/components/ProcessPanelScripts"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
@@ -315,71 +316,73 @@ export const ProcessPanel = memo(function ProcessPanel({
         )}
       </div>
 
-      <div
-        className={cn("min-h-0", collapsed ? "hidden" : "flex")}
-        style={{ height: mobile ? "min(36dvh, 260px)" : height }}
-      >
-        {!collapsed && !mobile && (
-          <ProcessPanelScripts
-            projectDir={projectDir}
-            onProcessStarted={onProcessStarted}
-          />
-        )}
+      <Collapsible open={!collapsed} className="min-h-0">
+        <CollapsibleContent>
+          <div
+            className="flex min-h-0"
+            style={{ height: mobile ? "min(36dvh, 260px)" : height }}
+          >
+            {!mobile && (
+              <ProcessPanelScripts
+                projectDir={projectDir}
+                onProcessStarted={onProcessStarted}
+              />
+            )}
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          {processList.map((process) => (
-            <TabsContent
-              key={process.id}
-              value={process.id}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              {!collapsed && process.type === "task" && (
-                <ProcessOutput process={process} />
-              )}
-
-              {!collapsed && process.type !== "task" && (
-                <Suspense
-                  fallback={(
-                    <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
-                      Loading terminal…
-                    </div>
-                  )}
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1">
+              {processList.map((process) => (
+                <TabsContent
+                  key={process.id}
+                  value={process.id}
+                  className="col-start-1 row-start-1 flex min-h-0 flex-col"
                 >
-                  <TerminalOutput
-                    processId={process.id}
-                    autoFocus
-                    onRequestNew={onRequestTerminal}
-                    onRequestClose={() => handleClose(process)}
-                    onAddContext={onAddTerminalContext}
-                  />
-                </Suspense>
-              )}
-            </TabsContent>
-          ))}
+                  {process.type === "task" ? (
+                    <ProcessOutput process={process} />
+                  ) : (
+                    <Suspense
+                      fallback={(
+                        <div className="flex size-full items-center justify-center text-xs text-muted-foreground">
+                          Loading terminal…
+                        </div>
+                      )}
+                    >
+                      <TerminalOutput
+                        processId={process.id}
+                        autoFocus
+                        onRequestNew={onRequestTerminal}
+                        onRequestClose={() => handleClose(process)}
+                        onAddContext={onAddTerminalContext}
+                      />
+                    </Suspense>
+                  )}
+                </TabsContent>
+              ))}
 
-          {!collapsed && !activeProcess && (
-            <Empty className="rounded-none">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <TerminalSquare />
-                </EmptyMedia>
-                <EmptyTitle>No terminal open</EmptyTitle>
-                <EmptyDescription>
-                  Start a terminal here or run a project script from the left.
-                </EmptyDescription>
-              </EmptyHeader>
-              {onRequestTerminal && projectDir && (
-                <EmptyContent>
-                  <Button type="button" size="sm" onClick={onRequestTerminal}>
-                    <Plus data-icon="inline-start" />
-                    New terminal
-                  </Button>
-                </EmptyContent>
+              {!activeProcess && (
+                <Empty className="col-start-1 row-start-1 rounded-none">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <TerminalSquare />
+                    </EmptyMedia>
+                    <EmptyTitle>No terminal open</EmptyTitle>
+                    <EmptyDescription>
+                      Start a terminal here or run a project script from the left.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  {onRequestTerminal && projectDir && (
+                    <EmptyContent>
+                      <Button type="button" size="sm" onClick={onRequestTerminal}>
+                        <Plus data-icon="inline-start" />
+                        New terminal
+                      </Button>
+                    </EmptyContent>
+                  )}
+                </Empty>
               )}
-            </Empty>
-          )}
-        </div>
-      </div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </Tabs>
   )
 })

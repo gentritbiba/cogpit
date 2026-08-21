@@ -431,7 +431,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         />
 
         {props.loadingNavigation && (
-          <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
+          <div className="motion-enter flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground" role="status">
             <Spinner className="size-3.5" />
             Loading projects and sessions...
           </div>

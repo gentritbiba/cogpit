@@ -34,6 +34,7 @@ export function DesktopOverlays({
   const { session, sessionSource } = useSessionContext()
   const { devices, activeDeviceId } = useDevices()
   const [devicesDialogMode, setDevicesDialogMode] = useState<null | "add" | "manage">(null)
+  const [lastDevicesDialogMode, setLastDevicesDialogMode] = useState<null | "add" | "manage">(null)
   const canManageDevices = can("manageDevices")
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
@@ -41,6 +42,11 @@ export function DesktopOverlays({
     ?? state.pendingDirName
     ?? state.dashboardProject
     ?? null
+  const renderedDevicesDialogMode = devicesDialogMode ?? lastDevicesDialogMode
+
+  useEffect(() => {
+    if (devicesDialogMode) setLastDevicesDialogMode(devicesDialogMode)
+  }, [devicesDialogMode])
 
   const onKeyboardShortcutsOpenChange = chrome.onKeyboardShortcutsOpenChange
   // "?" is the only way in for someone who does not already know ⌘K.
@@ -200,12 +206,13 @@ export function DesktopOverlays({
         />
       </Suspense>
 
-      {canManageDevices && devicesDialogMode !== null && (
+      {canManageDevices && renderedDevicesDialogMode !== null && (
         <Suspense fallback={null}>
           <DevicesDialog
-            open
-            initialMode={devicesDialogMode}
+            open={devicesDialogMode !== null}
+            initialMode={renderedDevicesDialogMode}
             onClose={() => setDevicesDialogMode(null)}
+            onCloseComplete={() => setLastDevicesDialogMode(null)}
           />
         </Suspense>
       )}

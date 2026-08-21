@@ -213,7 +213,7 @@ export function VirtualizedTimeline({
   return (
     <>
       {showSlot && <HistoryStatusSlot hasMore={hasMore} isLoadingOlder={isLoadingOlder} />}
-      <div ref={listWrapRef}>
+      <div ref={listWrapRef} className="motion-session-enter">
         <Virtualizer
           ref={handleRef}
           scrollRef={scrollContainerRef}

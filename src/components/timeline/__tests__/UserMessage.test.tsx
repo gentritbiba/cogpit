@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { UserMessage } from "../UserMessage"
 import { ImageGalleryProvider } from "../SessionImageGallery"
 
@@ -102,5 +102,62 @@ describe("UserMessage — image attachments", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next image" }))
     expect(screen.getByRole("img", { name: "Image from turn 2" })).toBeInTheDocument()
+  })
+})
+
+describe("UserMessage — animated disclosures", () => {
+  it("uses the measured collapsible panel for task details", () => {
+    const notification = `<task-notification>
+<task-id>task-1</task-id>
+<status>completed</status>
+<summary>Audit complete</summary>
+<result>All files checked.</result>
+</task-notification>`
+
+    render(<UserMessage content={notification} timestamp="" />)
+
+    const disclosure = screen.getByRole("button", { name: "Show detail" })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(disclosure)
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    const panelId = disclosure.getAttribute("aria-controls")
+    expect(panelId).toBeTruthy()
+    expect(document.getElementById(panelId!)).toHaveClass("h-[var(--collapsible-panel-height)]")
+    expect(screen.getByText("All files checked.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide detail" }))
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("keeps fetched slash-command content in an animated panel", async () => {
+    const onExpandCommand = vi.fn().mockResolvedValue("Expanded command docs")
+    const command = [
+      "<command-name>/review</command-name>",
+      "<command-message>review</command-message>",
+      "<command-args>fast</command-args>",
+    ].join("")
+
+    render(
+      <UserMessage
+        content={command}
+        timestamp=""
+        onExpandCommand={onExpandCommand}
+      />,
+    )
+
+    const disclosure = screen.getByRole("button", { name: "Expand" })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(disclosure)
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    const panelId = disclosure.getAttribute("aria-controls")
+    expect(panelId).toBeTruthy()
+    expect(document.getElementById(panelId!)).toHaveClass("h-[var(--collapsible-panel-height)]")
+    await waitFor(() => expect(screen.getByText("Expanded command docs")).toBeInTheDocument())
+    expect(onExpandCommand).toHaveBeenCalledWith("review", "fast")
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse" }))
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
   })
 })

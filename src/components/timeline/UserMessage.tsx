@@ -23,6 +23,11 @@ import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 
 function LocalCommandOutputCard({ output }: { output: LocalCommandOutput }) {
   const isError = output.stream === "stderr"
@@ -68,7 +73,11 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
   const Chevron = expanded ? ChevronDown : ChevronRight
 
   return (
-    <div className={cn("my-1 rounded-lg border p-3", statusStyle.bg)}>
+    <Collapsible
+      open={expanded}
+      onOpenChange={setExpanded}
+      className={cn("my-1 rounded-lg border p-3", statusStyle.bg)}
+    >
       <div className="flex items-start gap-2">
         <StatusIcon className={cn("mt-0.5 size-4 shrink-0", statusStyle.color)} />
         <div className="min-w-0 flex-1">
@@ -80,18 +89,21 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
           </div>
           {hasDetail && (
             <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => setExpanded(!expanded)}
-                className="mt-1.5 -ml-2 text-muted-foreground"
+              <CollapsibleTrigger
+                render={(
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="mt-1.5 -ml-2 text-muted-foreground"
+                  />
+                )}
               >
                 <Chevron data-icon="inline-start" />
                 {expanded ? "Hide detail" : "Show detail"}
-              </Button>
-              {expanded && (
-                <div className="mt-2 text-sm text-foreground/90 border-t border-border/30 pt-2">
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="mt-2 border-t border-border/30 pt-2 text-sm text-foreground/90">
                   {notification.result && (
                     <ReactMarkdown components={markdownComponents} remarkPlugins={markdownPlugins}>
                       {notification.result}
@@ -106,12 +118,12 @@ function TaskNotificationCard({ notification }: { notification: TaskNotification
                     </div>
                   )}
                 </div>
-              )}
+              </CollapsibleContent>
             </>
           )}
         </div>
       </div>
-    </div>
+    </Collapsible>
   )
 }
 
@@ -155,7 +167,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const [commandExpanded, setCommandExpanded] = useState(false)
   const [commandContent, setCommandContent] = useState<string | null>(null)
   const [commandLoading, setCommandLoading] = useState(false)
-  const [standaloneImageIndex, setStandaloneImageIndex] = useState<number | null>(null)
+  const [standaloneViewer, setStandaloneViewer] = useState<{ index: number; open: boolean } | null>(null)
 
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
@@ -170,8 +182,8 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const { outputs: cmdOutputs, remainingText: textAfterOutputs } = useMemo(() => parseLocalCommandOutputs(textAfterNotifications), [textAfterNotifications])
   const { interrupts, remainingText: textAfterInterrupts } = useMemo(() => parseInterrupts(textAfterOutputs), [textAfterOutputs])
 
-  const handleToggleExpand = useCallback(async () => {
-    if (commandExpanded) {
+  const handleCommandOpenChange = useCallback(async (nextOpen: boolean) => {
+    if (!nextOpen) {
       setCommandExpanded(false)
       return
     }
@@ -188,7 +200,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     } finally {
       setCommandLoading(false)
     }
-  }, [commandExpanded, commandContent, onExpandCommand, commandName, commandArgs])
+  }, [commandContent, onExpandCommand, commandName, commandArgs])
 
   const images = useMemo(() => getUserMessageImages(content), [content])
   const imageUrls = useMemo(
@@ -223,7 +235,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
     if (imageGallery) {
       imageGallery.openImage(image)
     } else {
-      setStandaloneImageIndex(index)
+      setStandaloneViewer({ index, open: true })
     }
   }
 
@@ -271,7 +283,11 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
 
         {commandName && (
-          <div className="mb-2">
+          <Collapsible
+            open={commandExpanded}
+            onOpenChange={(nextOpen) => void handleCommandOpenChange(nextOpen)}
+            className="mb-2"
+          >
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="font-mono text-foreground">
                 <Terminal data-icon="inline-start" />
@@ -281,16 +297,19 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                 )}
               </Badge>
               {onExpandCommand && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  onClick={handleToggleExpand}
-                  className="text-muted-foreground"
+                <CollapsibleTrigger
+                  render={(
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="text-muted-foreground"
+                    />
+                  )}
                 >
                   {commandExpanded ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
                   {commandExpanded ? "Collapse" : "Expand"}
-                </Button>
+                </CollapsibleTrigger>
               )}
               {commandExpanded && onEditCommand && (
                 <Button
@@ -305,10 +324,10 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
                 </Button>
               )}
             </div>
-            {commandExpanded && (
+            <CollapsibleContent>
               <ExpandedCommandContent loading={commandLoading} content={commandContent} />
-            )}
-          </div>
+            </CollapsibleContent>
+          </Collapsible>
         )}
 
         {imageUrls.length > 0 && (
@@ -405,12 +424,14 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
         )}
       </div>
 
-      {standaloneImageIndex !== null && (
+      {standaloneViewer !== null && (
         <ImageViewer
-          key={standaloneImageIndex}
+          key={standaloneViewer.index}
+          open={standaloneViewer.open}
           images={viewerImages}
-          initialIndex={standaloneImageIndex}
-          onClose={() => setStandaloneImageIndex(null)}
+          initialIndex={standaloneViewer.index}
+          onClose={() => setStandaloneViewer((current) => current ? { ...current, open: false } : null)}
+          onCloseComplete={() => setStandaloneViewer(null)}
         />
       )}
     </div>

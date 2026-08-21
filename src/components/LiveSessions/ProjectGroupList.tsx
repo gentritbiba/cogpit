@@ -5,6 +5,7 @@ import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { LiveIndicator } from "@/components/header-shared"
 import type { PendingSessionInfo } from "@/components/session-browser/types"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 import { dirNameToPath, parseWorktreePath } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -234,7 +235,7 @@ function ProjectGroup({
   }
 
   return (
-    <div className="flex flex-col">
+    <Collapsible open={!isCollapsed} className="flex flex-col">
       <ProjectContextMenu
         projectLabel={projectPath}
         customName={customProjectName}
@@ -302,11 +303,11 @@ function ProjectGroup({
         </div>
       </ProjectContextMenu>
 
-      {!isCollapsed && (
-        <div
-          id={sessionGroupId}
-          className="ml-3 flex flex-col gap-px border-l pl-1"
-        >
+      <CollapsibleContent
+        id={sessionGroupId}
+        className="ml-3 border-l pl-1"
+      >
+        <div className="flex flex-col gap-px">
           {pendingSession && (
             <PendingSessionRow firstMessage={pendingSession.firstMessage} />
           )}
@@ -357,14 +358,14 @@ function ProjectGroup({
             </Button>
           )}
         </div>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
 function PendingSessionRow({ firstMessage }: { firstMessage?: string }) {
   return (
-    <div className="relative flex w-full items-center gap-1.5 rounded-md bg-accent px-2 py-2 text-left">
+    <div className="motion-enter relative flex w-full items-center gap-1.5 rounded-md bg-accent px-2 py-2 text-left">
       <Loader2 className="size-3 shrink-0 animate-spin text-info" />
       <span className="flex-1 truncate text-xs leading-tight text-foreground">
         {firstMessage || "New session"}

@@ -322,7 +322,7 @@ function WorkflowOutcomeCard({
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <Card className="gap-0 py-0">
+      <Card className="motion-enter gap-0 py-0">
         <CardHeader className="py-4">
           <CollapsibleTrigger className="group flex min-w-0 items-center gap-3 text-left outline-none">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -332,7 +332,7 @@ function WorkflowOutcomeCard({
               <CardTitle>Workflow outcome</CardTitle>
               <CardDescription>The synthesized answer from this run</CardDescription>
             </span>
-            <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180 motion-reduce:transition-none" />
           </CollapsibleTrigger>
           <CardAction className="flex items-center gap-1">
             {previewIsShortened && fullResult === undefined && (

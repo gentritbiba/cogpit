@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { renderHook, act } from "@testing-library/react"
+
 import { usePanelState } from "../usePanelState"
 import type { SessionState } from "../useSessionState"
 
@@ -72,5 +73,20 @@ describe("usePanelState", () => {
       result.current.handleToggleStats()
     })
     expect(result.current.showStats).toBe(true)
+  })
+
+  it("updates shell panels and lazy views without forcing synchronous commits", () => {
+    const dispatch = vi.fn()
+    const { result } = renderHook(() => usePanelState(state, dispatch))
+
+    act(() => {
+      result.current.handleToggleSidebar()
+      result.current.handleToggleStats()
+      result.current.handleToggleConfig()
+    })
+
+    expect(result.current.showSidebar).toBe(false)
+    expect(result.current.showStats).toBe(true)
+    expect(dispatch).toHaveBeenCalledWith({ type: "OPEN_CONFIG" })
   })
 })

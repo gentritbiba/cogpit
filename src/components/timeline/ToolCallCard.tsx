@@ -25,6 +25,7 @@ import {
 } from "./ToolCallResult"
 import { getToolPresentation, getToolSummary, isCodexExecCall } from "../../../shared/session/toolSummary"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible"
 
 export { getToolSummary }
 
@@ -101,10 +102,12 @@ function ToggleButton({
   isOpen,
   onClick,
   label,
+  controlsId,
 }: {
   isOpen: boolean
   onClick: () => void
   label: string
+  controlsId: string
 }): React.ReactElement {
   const Chevron = isOpen ? ChevronDown : ChevronRight
   return (
@@ -114,6 +117,8 @@ function ToggleButton({
       size="xs"
       onClick={onClick}
       className="-ml-2 text-muted-foreground"
+      aria-expanded={isOpen}
+      aria-controls={controlsId}
     >
       <Chevron data-icon="inline-start" />
       {label}
@@ -325,6 +330,9 @@ export const ToolCallCard = memo(function ToolCallCard({
   const [diffOpen, setDiffOpen] = useState(false)
   const [desktopPanelOpen, setDesktopPanelOpen] = useState(false)
   const [desktopInputOpen, setDesktopInputOpen] = useState(false)
+  const mobileDiffId = useId()
+  const mobileInputId = useId()
+  const mobileResultId = useId()
   const desktopPanelId = useId()
   const desktopInputId = useId()
   // Historical tool calls are one-line rows on mobile. Live tools remain open
@@ -508,89 +516,108 @@ export const ToolCallCard = memo(function ToolCallCard({
               isOpen={showMobileDiff}
               onClick={() => setDiffOpen(!diffOpen)}
               label="Diff"
+              controlsId={mobileDiffId}
             />
           )}
           <ToggleButton
             isOpen={showMobileInput}
             onClick={() => setInputOpen(!inputOpen)}
             label="Input"
+            controlsId={mobileInputId}
           />
           {toolCall.result !== null && (
             <ToggleButton
               isOpen={showMobileResult}
               onClick={() => setResultOpen(!resultOpen)}
               label="Result"
+              controlsId={mobileResultId}
             />
           )}
         </div>
       )}
 
-      {isMobile && showMobileDiff && hasEditDiff && (
-        <EditToolDiff toolCall={toolCall} />
+      {isMobile && !isCompactMobile && hasEditDiff && (
+        <Collapsible open={showMobileDiff}>
+          <CollapsibleContent id={mobileDiffId}>
+            <EditToolDiff toolCall={toolCall} />
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
-      {isMobile &&
-        showMobileInput &&
-        (toolCall.name === "Bash" &&
-        (typeof toolCall.input.command === "string" ||
-          typeof toolCall.input.cmd === "string") ? (
-          <BashToolInput input={toolCall.input} />
-        ) : isCodexExec ? (
-          <CodexExecToolInput input={toolCall.input} />
-        ) : (
-          <JsonResultHighlighted
-            result={JSON.stringify(toolCall.input)}
-            expanded={true}
-          />
-        ))}
+      {isMobile && !isCompactMobile && (
+        <Collapsible open={showMobileInput}>
+          <CollapsibleContent id={mobileInputId}>
+            {toolCall.name === "Bash" &&
+            (typeof toolCall.input.command === "string" ||
+              typeof toolCall.input.cmd === "string") ? (
+              <BashToolInput input={toolCall.input} />
+            ) : isCodexExec ? (
+              <CodexExecToolInput input={toolCall.input} />
+            ) : (
+              <JsonResultHighlighted
+                result={JSON.stringify(toolCall.input)}
+                expanded={true}
+              />
+            )}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {(toolCall.name === "Task" || toolCall.name === "Agent") &&
         toolCall.result === null && (
           <LiveSubagentTranscript toolUseId={toolCall.id} />
         )}
 
-      {isMobile && showMobileResult && renderedResult}
+      {isMobile && !isCompactMobile && toolCall.result !== null && (
+        <Collapsible open={showMobileResult}>
+          <CollapsibleContent id={mobileResultId}>
+            {renderedResult}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
-      {!isMobile && showDesktopPanel && (
-        <div
-          id={desktopPanelId}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {desktopPrimaryPanel === "diff" && hasEditDiff && (
-            <EditToolDiff toolCall={toolCall} />
-          )}
-
-          {desktopPrimaryPanel === "command" &&
-            (toolCall.name === "Bash" ? (
-              <BashToolInput input={toolCall.input} />
-            ) : (
-              <CodexExecToolInput input={toolCall.input} />
-            ))}
-
-          {(desktopPrimaryPanel === "result" ||
-            desktopPrimaryPanel === "command") && renderedResult}
-
-          <button
-            type="button"
-            className="mt-1 text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-            aria-expanded={desktopInputOpen}
-            aria-controls={desktopInputId}
-            onClick={(event) => {
-              event.stopPropagation()
-              setDesktopInputOpen((open) => !open)
-            }}
+      {!isMobile && (
+        <Collapsible open={showDesktopPanel}>
+          <CollapsibleContent
+            id={desktopPanelId}
+            onClick={(event) => event.stopPropagation()}
           >
-            input
-          </button>
-          {desktopInputOpen && (
-            <div id={desktopInputId}>
-              <JsonResultHighlighted
-                result={JSON.stringify(toolCall.input)}
-                expanded
-              />
-            </div>
-          )}
-        </div>
+            {desktopPrimaryPanel === "diff" && hasEditDiff && (
+              <EditToolDiff toolCall={toolCall} />
+            )}
+
+            {desktopPrimaryPanel === "command" &&
+              (toolCall.name === "Bash" ? (
+                <BashToolInput input={toolCall.input} />
+              ) : (
+                <CodexExecToolInput input={toolCall.input} />
+              ))}
+
+            {(desktopPrimaryPanel === "result" ||
+              desktopPrimaryPanel === "command") && renderedResult}
+
+            <button
+              type="button"
+              className="mt-1 text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              aria-expanded={desktopInputOpen}
+              aria-controls={desktopInputId}
+              onClick={(event) => {
+                event.stopPropagation()
+                setDesktopInputOpen((open) => !open)
+              }}
+            >
+              input
+            </button>
+            <Collapsible open={desktopInputOpen}>
+              <CollapsibleContent id={desktopInputId}>
+                <JsonResultHighlighted
+                  result={JSON.stringify(toolCall.input)}
+                  expanded
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   )

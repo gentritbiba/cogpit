@@ -20,9 +20,20 @@ describe("orientation-aware UI primitives", () => {
 
     expect(container.querySelector("[data-slot=tabs]")).toHaveClass(
       "data-[orientation=horizontal]:flex-col",
+      "has-[>[data-slot=tabs-content]]:grid",
+      "[&>[data-slot=tabs-content]]:row-start-2",
     )
     expect(container.querySelector("[data-slot=tabs-list]")).toHaveClass(
       "group-data-[orientation=horizontal]/tabs:h-8",
+    )
+    expect(container.querySelector("[data-slot=tabs-indicator]")).toHaveClass(
+      "w-(--active-tab-width)",
+      "translate-x-(--active-tab-left)",
+      "motion-reduce:transition-none",
+    )
+    expect(container.querySelector("[data-slot=tabs-content]")).toHaveClass(
+      "motion-safe:data-starting-style:opacity-0",
+      "motion-safe:data-ending-style:opacity-0",
     )
   })
 

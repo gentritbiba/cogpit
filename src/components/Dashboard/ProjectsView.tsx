@@ -159,7 +159,7 @@ export function ProjectsView({
                       <button
                         type="button"
                         onClick={() => onSelectProject?.(project.dirName)}
-                        className="group flex w-full flex-col gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-row sm:items-center"
+                        className="motion-list-item group flex w-full flex-col gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-row sm:items-center"
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-3">
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40">

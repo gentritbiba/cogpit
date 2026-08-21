@@ -40,7 +40,7 @@ export function ErrorBanner({ error }: { error: string }) {
         size="sm"
         onClick={() => setOpen(true)}
         title="Click to view the full error"
-        className="mt-1 w-full justify-start text-destructive"
+        className="motion-enter mt-1 w-full justify-start text-destructive"
       >
         <AlertCircle data-icon="inline-start" />
         <span className="truncate">{firstLine}</span>

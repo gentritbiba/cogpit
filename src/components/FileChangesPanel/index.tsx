@@ -294,7 +294,7 @@ export const FileChangesPanel = memo(function FileChangesPanel({ session, sessio
   const scopeLabel = getScopeLabel()
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-card">
+    <div className="view-transition-file-panel panel-enter-bottom flex h-full min-w-0 flex-col overflow-hidden bg-card">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
         <FileCode2 data-icon="inline-start" className="size-3.5 text-muted-foreground" />
         <span className="text-xs font-medium text-foreground">

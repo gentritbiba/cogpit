@@ -149,7 +149,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
 
   if (isOpen) {
     return (
-      <div className="flex flex-col gap-2">
+      <div className="motion-enter flex flex-col gap-2">
         {!expandAll && !hasUserQuestion && (
           <Button
             type="button"
@@ -214,7 +214,7 @@ export const CollapsibleToolCalls = memo(function CollapsibleToolCalls({
       type="button"
       variant="ghost"
       onClick={() => setOpenOverride(true)}
-      className="h-auto w-full items-start justify-start gap-2 px-0 py-1 text-left whitespace-normal"
+      className="motion-enter h-auto w-full items-start justify-start gap-2 px-0 py-1 text-left whitespace-normal"
     >
       <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

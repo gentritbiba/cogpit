@@ -34,7 +34,7 @@ function ScriptRow({ script, status, onRun, onStop }: ScriptRowProps) {
       type="button"
       variant="ghost"
       size="sm"
-      className="group w-full justify-start px-2"
+      className="motion-list-item group w-full justify-start px-2"
       onClick={isRunning ? onStop : onRun}
       title={isRunning ? `Stop ${script.name}` : `Run: ${script.command}`}
     >
@@ -130,7 +130,7 @@ export const ProcessPanelScripts = memo(function ProcessPanelScripts({
         </div>
 
         {searchOpen && (
-          <div className="px-2 pb-2">
+          <div className="motion-slide-down-in px-2 pb-2">
             <Input
               type="search"
               value={searchQuery}

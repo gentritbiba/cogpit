@@ -97,8 +97,8 @@ export function ToolCallIndex({ turns, onJumpToTurn }: ToolCallIndexProps): Reac
           {toolCallGroups.map(([name, group]) => {
             return (
               <Collapsible key={name}>
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted">
-                  <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform [[data-open]>&]:rotate-90" />
+                <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted">
+                  <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none" />
                   <span className="font-medium text-foreground">{name}</span>
                   <span className="ml-auto flex items-center gap-1.5">
                     {group.estimatedCost > 0 && (

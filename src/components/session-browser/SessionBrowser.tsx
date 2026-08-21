@@ -19,7 +19,7 @@ export const SessionBrowser = memo(function SessionBrowser({
     <aside
       className={cn(
         "flex h-full shrink-0 flex-col bg-sidebar",
-        isMobile ? "w-full" : "w-72 panel-enter",
+        isMobile ? "w-full" : "w-72",
       )}
       aria-label="Session browser"
     >

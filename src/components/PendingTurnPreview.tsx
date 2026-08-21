@@ -12,7 +12,7 @@ export const PendingTurnPreview = memo(function PendingTurnPreview({
   turnNumber,
 }: PendingTurnPreviewProps) {
   return (
-    <div className="group relative px-4 py-5">
+    <div className="motion-enter group relative px-4 py-5">
       <div className="mb-3 flex items-center gap-2">
         <span className="font-mono text-xs text-muted-foreground">Turn {turnNumber}</span>
         <Badge variant="outline">Queued</Badge>

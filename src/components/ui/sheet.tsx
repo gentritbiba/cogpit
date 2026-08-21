@@ -24,7 +24,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/55 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 z-50 bg-black/55 duration-200 ease-out data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 data-closed:duration-150 data-closed:ease-in motion-reduce:animate-none",
         className
       )}
       {...props}
@@ -49,7 +49,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "fixed z-50 flex flex-col border-border bg-popover text-popover-foreground shadow-lg duration-300",
+          "fixed z-50 flex flex-col border-border bg-popover text-popover-foreground shadow-lg duration-200 ease-out data-closed:duration-150 data-closed:ease-in motion-reduce:animate-none",
           "data-[side=right]:inset-y-0 data-[side=right]:right-0 data-[side=right]:h-full data-[side=right]:w-full data-[side=right]:max-w-[560px] data-[side=right]:border-l",
           "data-[side=left]:inset-y-0 data-[side=left]:left-0 data-[side=left]:h-full data-[side=left]:w-full data-[side=left]:max-w-[560px] data-[side=left]:border-r",
           "data-[side=bottom]:inset-x-0 data-[side=bottom]:bottom-0 data-[side=bottom]:h-auto data-[side=bottom]:border-t",
@@ -62,7 +62,7 @@ function SheetContent({
       >
         {children}
         {showCloseButton && (
-          <SheetPrimitive.Close className="absolute top-4 right-4 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:pointer-events-none">
+          <SheetPrimitive.Close className="absolute top-4 right-4 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-[color,background-color,transform,scale] duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-90 focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:pointer-events-none motion-reduce:transition-none motion-reduce:active:scale-100">
             <XIcon data-icon="inline-start" className="size-4" />
             <span className="sr-only">Close</span>
           </SheetPrimitive.Close>

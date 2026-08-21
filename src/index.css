@@ -51,9 +51,24 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --default-transition-duration: var(--motion-duration-fast);
+  --default-transition-timing-function: var(--motion-ease-standard);
 }
 
 :root {
+  --motion-duration-instant: 80ms;
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 180ms;
+  --motion-duration-slow: 240ms;
+  --motion-duration-spinner: 900ms;
+  --motion-duration-indicator: 1600ms;
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-distance-sm: 4px;
+  --motion-distance-md: 8px;
+  --motion-distance-lg: 12px;
+  --motion-stagger-step: 20ms;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -272,26 +287,337 @@ html.electron-win .electron-drag {
   }
 }
 
-.panel-enter {
-  animation: panel-enter 0.15s ease-out;
+/* Motion regions used by the same-document View Transitions API. Each name
+   must occur at most once in the rendered document at capture time. */
+.app-view-transition {
+  view-transition-name: app-view;
 }
-@keyframes panel-enter {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
+
+.view-transition-sidebar {
+  view-transition-name: app-sidebar;
+}
+
+.view-transition-right-panel {
+  view-transition-name: app-right-panel;
+}
+
+.view-transition-file-panel {
+  view-transition-name: app-file-panel;
+}
+
+@media (max-width: 767px) {
+  .view-transition-sidebar,
+  .view-transition-right-panel,
+  .view-transition-file-panel {
+    view-transition-name: none;
+  }
+}
+
+/* Keep stable application chrome live while the named regions animate. */
+html[data-view-transition-kind]::view-transition-old(root) {
+  display: none;
+}
+
+html[data-view-transition-kind]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(app-view) {
+  animation-duration: var(--motion-duration-slow);
+  animation-timing-function: var(--motion-ease-enter);
+}
+
+::view-transition-image-pair(app-view),
+::view-transition-image-pair(app-sidebar),
+::view-transition-image-pair(app-right-panel),
+::view-transition-image-pair(app-file-panel) {
+  isolation: isolate;
+}
+
+::view-transition-old(app-view),
+::view-transition-old(app-sidebar),
+::view-transition-old(app-right-panel),
+::view-transition-old(app-file-panel),
+::view-transition-new(app-view),
+::view-transition-new(app-sidebar),
+::view-transition-new(app-right-panel),
+::view-transition-new(app-file-panel) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-view-transition-kind="fade"]::view-transition-old(app-view) {
+  animation: motion-view-fade-out var(--motion-duration-fast) var(--motion-ease-exit) both;
+}
+
+html[data-view-transition-kind="fade"]::view-transition-new(app-view) {
+  animation: motion-view-fade-in var(--motion-duration-base) var(--motion-ease-enter) both;
+}
+
+::view-transition-group(app-sidebar),
+::view-transition-group(app-right-panel),
+::view-transition-group(app-file-panel) {
+  animation-duration: var(--motion-duration-base);
+  animation-timing-function: var(--motion-ease-enter);
+}
+
+html[data-view-transition-kind="panel-left"]::view-transition-old(app-sidebar) {
+  animation: motion-panel-left-out var(--motion-duration-fast) var(--motion-ease-exit) both;
+}
+
+html[data-view-transition-kind="panel-left"]::view-transition-new(app-sidebar) {
+  animation: motion-panel-left-in var(--motion-duration-base) var(--motion-ease-enter) both;
+}
+
+html[data-view-transition-kind="panel-right"]::view-transition-old(app-right-panel) {
+  animation: motion-panel-right-out var(--motion-duration-fast) var(--motion-ease-exit) both;
+}
+
+html[data-view-transition-kind="panel-right"]::view-transition-new(app-right-panel) {
+  animation: motion-panel-right-in var(--motion-duration-base) var(--motion-ease-enter) both;
+}
+
+html[data-view-transition-kind="panel-bottom"]::view-transition-old(app-file-panel) {
+  animation: motion-panel-bottom-out var(--motion-duration-fast) var(--motion-ease-exit) both;
+}
+
+html[data-view-transition-kind="panel-bottom"]::view-transition-new(app-file-panel) {
+  animation: motion-panel-bottom-in var(--motion-duration-base) var(--motion-ease-enter) both;
+}
+
+@keyframes motion-view-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes motion-view-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes motion-panel-left-in {
+  from { opacity: 0; transform: translate3d(calc(var(--motion-distance-lg) * -1), 0, 0); }
+}
+
+@keyframes motion-panel-left-out {
+  to { opacity: 0; transform: translate3d(calc(var(--motion-distance-md) * -1), 0, 0); }
+}
+
+@keyframes motion-panel-right-in {
+  from { opacity: 0; transform: translate3d(var(--motion-distance-lg), 0, 0); }
+}
+
+@keyframes motion-panel-right-out {
+  to { opacity: 0; transform: translate3d(var(--motion-distance-md), 0, 0); }
+}
+
+@keyframes motion-panel-bottom-in {
+  from { opacity: 0; transform: translate3d(0, var(--motion-distance-lg), 0); }
+}
+
+@keyframes motion-panel-bottom-out {
+  to { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0); }
+}
+
+/* Finite, opt-in entrances. These classes do not run decorative idle loops. */
+.motion-enter {
+  animation: motion-enter var(--motion-duration-base) var(--motion-ease-enter) backwards;
+}
+
+.motion-slide-down-in {
+  animation: motion-slide-down-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
+}
+
+.motion-popover-in {
+  transform-origin: var(--transform-origin, center);
+  animation: motion-popover-in var(--motion-duration-fast) var(--motion-ease-enter) backwards;
+}
+
+.motion-session-enter {
+  animation: motion-session-enter var(--motion-duration-slow) var(--motion-ease-enter) backwards;
+}
+
+.motion-list-item {
+  --motion-list-index: 0;
+  animation: motion-enter var(--motion-duration-base) var(--motion-ease-enter) backwards;
+  animation-delay: calc(var(--motion-list-index) * var(--motion-stagger-step));
+}
+
+.motion-list-item:nth-child(2) { --motion-list-index: 1; }
+.motion-list-item:nth-child(3) { --motion-list-index: 2; }
+.motion-list-item:nth-child(4) { --motion-list-index: 3; }
+.motion-list-item:nth-child(5) { --motion-list-index: 4; }
+.motion-list-item:nth-child(n + 6) { --motion-list-index: 5; }
+
+.motion-card {
+  transform-origin: center;
+  transition-property: transform, opacity, color, background-color, border-color;
+  transition-duration: var(--motion-duration-fast);
+  transition-timing-function: var(--motion-ease-standard);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion-card:hover {
+    transform: translate3d(0, -1px, 0) scale(1.002);
+  }
+}
+
+.motion-card:active {
+  transform: translate3d(0, 0, 0) scale(0.99);
+  transition-duration: var(--motion-duration-instant);
+}
+
+/* Functional status motion. These replace SVG SMIL so reduced-motion rules can
+   pause every loop and leave a legible static icon. */
+.status-icon-thinking-core,
+.status-icon-thinking-ring,
+.status-icon-compact-top,
+.status-icon-compact-bottom {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.status-icon-spin {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+}
+
+.status-icon-thinking-core {
+  animation: status-icon-thinking-core var(--motion-duration-indicator) ease-in-out infinite;
+}
+
+.status-icon-thinking-ring {
+  animation: status-icon-thinking-ring var(--motion-duration-indicator) var(--motion-ease-standard) infinite;
+}
+
+.status-icon-cursor {
+  animation: status-icon-cursor 1200ms ease-in-out infinite;
+}
+
+.status-icon-spin {
+  animation: status-icon-spin var(--motion-duration-spinner) linear infinite;
+}
+
+.status-icon-compact-top {
+  animation: status-icon-compact-top var(--motion-duration-indicator) ease-in-out infinite;
+}
+
+.status-icon-compact-bottom {
+  animation: status-icon-compact-bottom var(--motion-duration-indicator) ease-in-out infinite;
+}
+
+.status-icon-complete {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 0;
+  animation: status-icon-complete-draw calc(var(--motion-duration-base) * 2) var(--motion-ease-enter) backwards;
+}
+
+.panel-enter {
+  animation: motion-panel-left-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
 
 .panel-enter-right {
-  animation: panel-enter-right 0.15s ease-out;
+  animation: motion-panel-right-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
-@keyframes panel-enter-right {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
+
+.panel-enter-bottom {
+  animation: motion-panel-bottom-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
+}
+
+@keyframes motion-enter {
+  from { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0); }
+}
+
+@keyframes motion-slide-down-in {
+  from { opacity: 0; transform: translate3d(0, calc(var(--motion-distance-md) * -1), 0); }
+}
+
+@keyframes motion-popover-in {
+  from { opacity: 0; transform: translate3d(0, var(--motion-distance-sm), 0) scale(0.985); }
+}
+
+@keyframes motion-session-enter {
+  from { opacity: 0; transform: translate3d(0, var(--motion-distance-md), 0); }
+}
+
+@keyframes status-icon-thinking-core {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.92); }
+}
+
+@keyframes status-icon-thinking-ring {
+  0% { opacity: 0.75; transform: scale(0.45); }
+  75%, 100% { opacity: 0; transform: scale(1); }
+}
+
+@keyframes status-icon-cursor {
+  0%, 45%, 100% { opacity: 1; }
+  50%, 95% { opacity: 0.25; }
+}
+
+@keyframes status-icon-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes status-icon-compact-top {
+  0%, 100% { transform: translate3d(0, -1px, 0); }
+  50% { transform: translate3d(0, 2px, 0); }
+}
+
+@keyframes status-icon-compact-bottom {
+  0%, 100% { transform: translate3d(0, 1px, 0); }
+  50% { transform: translate3d(0, -2px, 0); }
+}
+
+@keyframes status-icon-complete-draw {
+  from { stroke-dashoffset: 24; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel-enter,
-  .panel-enter-right {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .motion-card,
+  .motion-card:hover,
+  .motion-card:active {
+    transform: none !important;
+  }
+
+  .status-icon-thinking-core,
+  .status-icon-thinking-ring,
+  .status-icon-cursor,
+  .status-icon-spin,
+  .status-icon-compact-top,
+  .status-icon-compact-bottom,
+  .status-icon-complete {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .status-icon-thinking-core,
+  .status-icon-cursor {
+    opacity: 1;
+  }
+
+  .status-icon-thinking-ring {
+    opacity: 0.2;
+  }
+
+  .status-icon-complete {
+    stroke-dashoffset: 0;
   }
 }
 

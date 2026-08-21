@@ -167,7 +167,7 @@ export const AgentPanel = memo(function AgentPanel({
       })}
 
       {isOpen && (
-        <div className="mt-2 flex flex-col gap-2">
+        <div className="motion-enter mt-2 flex flex-col gap-2">
           {isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
               <Loader2 className="size-3 animate-spin" />

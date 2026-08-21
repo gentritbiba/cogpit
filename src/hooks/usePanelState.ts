@@ -2,7 +2,7 @@
  * Panel/sidebar toggle state for the App shell.
  */
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, startTransition } from "react"
 import { useLocalStorage } from "./useLocalStorage"
 import type { SessionState, SessionAction } from "./useSessionState"
 
@@ -70,27 +70,33 @@ export function usePanelState(
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
 
-  const handleToggleSidebar = useCallback(() => setShowSidebar((p) => !p), [setShowSidebar])
-  const handleToggleStats = useCallback(() => setShowStats((p) => !p), [setShowStats])
+  const handleToggleSidebar = useCallback(() => {
+    startTransition(() => setShowSidebar(!showSidebar))
+  }, [setShowSidebar, showSidebar])
+  const handleToggleStats = useCallback(() => {
+    startTransition(() => setShowStats(!showStats))
+  }, [setShowStats, showStats])
   const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [setShowWorktrees])
   const handleToggleWorkflows = useCallback(() => setShowWorkflows((p) => !p), [setShowWorkflows])
-  const handleToggleFileChanges = useCallback(() => setShowFileChanges((p) => !p), [setShowFileChanges])
+  const handleToggleFileChanges = useCallback(() => {
+    startTransition(() => setShowFileChanges(!showFileChanges))
+  }, [setShowFileChanges, showFileChanges])
   const handleToggleConfig = useCallback(() => {
-    if (state.mainView === "config") {
-      dispatch({ type: "CLOSE_CONFIG" })
-    } else {
-      dispatch({ type: "OPEN_CONFIG" })
-    }
+    const closing = state.mainView === "config"
+    startTransition(() => {
+      dispatch({ type: closing ? "CLOSE_CONFIG" : "OPEN_CONFIG" })
+    })
   }, [state.mainView, dispatch])
   const handleToggleMission = useCallback(() => {
-    if (state.mainView === "mission") {
-      dispatch({ type: "CLOSE_MISSION" })
-    } else {
-      dispatch({ type: "OPEN_MISSION" })
-    }
+    const closing = state.mainView === "mission"
+    startTransition(() => {
+      dispatch({ type: closing ? "CLOSE_MISSION" : "OPEN_MISSION" })
+    })
   }, [state.mainView, dispatch])
   const handleEditConfig = useCallback((filePath: string) => {
-    dispatch({ type: "OPEN_CONFIG", filePath })
+    startTransition(() => {
+      dispatch({ type: "OPEN_CONFIG", filePath })
+    })
   }, [dispatch])
   const handleOpenProjectSwitcher = useCallback(() => setShowProjectSwitcher(true), [])
   const handleCloseProjectSwitcher = useCallback(() => setShowProjectSwitcher(false), [])

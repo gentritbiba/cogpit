@@ -40,6 +40,7 @@ export function ImageGalleryProvider({
 }): React.ReactElement {
   const [activeViewer, setActiveViewer] = useState<{
     key: number
+    open: boolean
     images: ImageViewerItem[]
     index: number
   } | null>(null)
@@ -51,6 +52,7 @@ export function ImageGalleryProvider({
       : [...images, { ...image, id: image.id ?? `supplemental-image-${images.length}` }]
     setActiveViewer((current) => ({
       key: (current?.key ?? 0) + 1,
+      open: true,
       images: viewerImages,
       index: existingIndex >= 0 ? existingIndex : viewerImages.length - 1,
     }))
@@ -64,9 +66,11 @@ export function ImageGalleryProvider({
       {activeViewer && (
         <ImageViewer
           key={activeViewer.key}
+          open={activeViewer.open}
           images={activeViewer.images}
           initialIndex={activeViewer.index}
-          onClose={() => setActiveViewer(null)}
+          onClose={() => setActiveViewer((current) => current ? { ...current, open: false } : null)}
+          onCloseComplete={() => setActiveViewer(null)}
         />
       )}
     </ImageGalleryContext.Provider>

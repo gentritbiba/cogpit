@@ -145,7 +145,11 @@ export default function App() {
   const handleExpandAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: true }), [dispatch])
   const handleExpandToolPayloads = useCallback(() => dispatch({ type: "SET_EXPAND_TOOL_PAYLOADS", value: true }), [dispatch])
   const handleCollapseAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: false }), [dispatch])
-  const handleSelectProject = useCallback((dirName: string | null) => dispatch({ type: "SET_DASHBOARD_PROJECT", dirName }), [dispatch])
+  const handleSelectProject = useCallback((dirName: string | null) => {
+    startTransition(() => {
+      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
+    })
+  }, [dispatch])
 
   // Real filesystem path for the pending (pre-created) session.
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
@@ -162,7 +166,9 @@ export default function App() {
   const handleEditCommand = useCallback((commandName: string) => {
     if (!configAdminEnabled) return
     const match = slashSuggestions.suggestions.find((s) => s.name === commandName)
-    dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
+    startTransition(() => {
+      dispatch({ type: "OPEN_CONFIG", filePath: match?.filePath })
+    })
   }, [configAdminEnabled, dispatch, slashSuggestions.suggestions])
 
   const handleExpandCommand = useCallback(async (commandName: string, args?: string): Promise<string | null> => {
@@ -277,8 +283,10 @@ export default function App() {
       if (isMobile) {
         setShowMobileFileChanges(true)
       } else {
-        setShowFileChanges(true)
-        setFileChangesCollapsed(false)
+        startTransition(() => {
+          setShowFileChanges(true)
+          setFileChangesCollapsed(false)
+        })
       }
     }
     window.addEventListener(FOCUS_FILE_EVENT, handler)
@@ -528,6 +536,7 @@ export default function App() {
   const actions = useSessionActions({
     dispatch,
     isMobile,
+    mobileTab: state.mobileTab,
     teamContext,
     scrollToBottomInstant: scroll.scrollToBottomInstant,
     resetTurnCount: scroll.resetTurnCount,
@@ -535,11 +544,12 @@ export default function App() {
     onBeforeSwitch: handlePreSessionSwitch,
   })
 
-  const goHome = actions.handleGoHome
   const handleOpenPaletteProject = useCallback((dirName: string) => {
-    goHome()
-    handleSelectProject(dirName)
-  }, [goHome, handleSelectProject])
+    startTransition(() => {
+      dispatch({ type: "GO_HOME", isMobile })
+      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
+    })
+  }, [dispatch, isMobile])
 
   // Sync URL <-> state
   const { previewLoadError } = useUrlSync({
@@ -685,7 +695,19 @@ export default function App() {
     return () => window.removeEventListener(OPEN_SUBAGENT_EVENT, handler)
   }, [state.sessionSource, subAgentInfo, navigateToSession])
 
-  const branchModalBranches = handlers.branchModalTurn !== null ? undoRedo.branchesAtTurn(handlers.branchModalTurn) : []
+  const [retainedBranchModalTurn, setRetainedBranchModalTurn] = useState<number | null>(null)
+  const branchModalOpen = handlers.branchModalTurn !== null
+  const renderedBranchModalTurn = handlers.branchModalTurn ?? retainedBranchModalTurn
+
+  useEffect(() => {
+    if (handlers.branchModalTurn !== null) {
+      setRetainedBranchModalTurn(handlers.branchModalTurn)
+    }
+  }, [handlers.branchModalTurn])
+
+  const branchModalBranches = renderedBranchModalTurn !== null
+    ? undoRedo.branchesAtTurn(renderedBranchModalTurn)
+    : []
 
   // Read-only banner shown when viewing a sub-agent session (replaces chat input)
   const subAgentReadOnlyNode = isSubAgentView ? (
@@ -906,17 +928,19 @@ export default function App() {
     />
   ) : null
 
-  const branchModalCurrentTurns = handlers.branchModalTurn !== null && state.session
-    ? state.session.turns.slice(handlers.branchModalTurn)
+  const branchModalCurrentTurns = renderedBranchModalTurn !== null && state.session
+    ? state.session.turns.slice(renderedBranchModalTurn)
     : []
 
-  const branchModal = hostFilesEnabled && handlers.branchModalTurn !== null && branchModalBranches.length > 0 && (
+  const branchModal = hostFilesEnabled && renderedBranchModalTurn !== null && branchModalBranches.length > 0 && (
     <Suspense fallback={null}>
       <BranchModal
+        open={branchModalOpen}
         branches={branchModalBranches}
-        branchPointTurnIndex={handlers.branchModalTurn}
+        branchPointTurnIndex={renderedBranchModalTurn}
         currentTurns={branchModalCurrentTurns}
         onClose={handlers.handleCloseBranchModal}
+        onCloseComplete={() => setRetainedBranchModalTurn(null)}
         onRedoToTurn={handleRedoToTurn}
         onRedoEntireBranch={handleRedoEntireBranch}
       />

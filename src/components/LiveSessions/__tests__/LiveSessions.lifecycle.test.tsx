@@ -367,6 +367,7 @@ describe("LiveSessions device and unmount lifecycle", () => {
         onSelectSession={vi.fn()}
       />,
     )
+    const unrelatedTimerCount = vi.getTimerCount()
 
     fireEvent.click(screen.getByRole("button", { name: "Kill timer-session" }))
     fireEvent.click(screen.getByRole("button", { name: "Resume timer-session" }))
@@ -375,11 +376,11 @@ describe("LiveSessions device and unmount lifecycle", () => {
     })
 
     expect(mocks.ptySend).toHaveBeenCalledOnce()
-    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(3)
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(unrelatedTimerCount + 3)
     const callsBeforeUnmount = mocks.authFetch.mock.calls.length
 
     view.unmount()
-    expect(vi.getTimerCount()).toBe(0)
+    expect(vi.getTimerCount()).toBe(unrelatedTimerCount)
 
     await act(async () => {
       vi.advanceTimersByTime(5_000)

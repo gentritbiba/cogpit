@@ -29,11 +29,16 @@ describe("HoverRevealPanel", () => {
     expect(trigger).toHaveAttribute("aria-controls", panel?.id)
 
     fireEvent.keyDown(action, { key: "Escape" })
+
+    expect(screen.getByText("Sidebar action")).toBeInTheDocument()
+    expect(panel).toHaveAttribute("aria-hidden", "true")
+    expect(panel).toHaveAttribute("inert")
+
     act(() => {
       vi.runAllTimers()
     })
 
-    expect(screen.queryByRole("button", { name: "Sidebar action" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Sidebar action")).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
   })
 
@@ -55,10 +60,74 @@ describe("HoverRevealPanel", () => {
       vi.advanceTimersByTime(1)
     })
     const action = screen.getByRole("button", { name: "Sidebar action" })
-    fireEvent.mouseLeave(action.parentElement!)
+    const panel = action.parentElement!
+    fireEvent.mouseLeave(panel)
     act(() => {
       vi.advanceTimersByTime(300)
     })
-    expect(screen.queryByRole("button", { name: "Sidebar action" })).not.toBeInTheDocument()
+
+    expect(screen.getByText("Sidebar action")).toBeInTheDocument()
+    expect(panel).toHaveClass("animate-out", "fade-out-0", "slide-out-to-right-3")
+
+    act(() => {
+      vi.advanceTimersByTime(149)
+    })
+    expect(screen.getByText("Sidebar action")).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(screen.queryByText("Sidebar action")).not.toBeInTheDocument()
+  })
+
+  it("cancels a pending exit when the trigger reopens the panel", () => {
+    render(
+      <HoverRevealPanel side="left" visible={false}>
+        <button type="button">Sidebar action</button>
+      </HoverRevealPanel>,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Reveal left sidebar" })
+    fireEvent.focus(trigger)
+
+    const panel = screen.getByRole("button", { name: "Sidebar action" }).parentElement!
+    fireEvent.keyDown(panel, { key: "Escape" })
+    expect(panel).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(trigger)
+
+    act(() => {
+      vi.advanceTimersByTime(150)
+    })
+
+    expect(screen.getByRole("button", { name: "Sidebar action" })).toBeInTheDocument()
+    expect(panel).toHaveAttribute("aria-hidden", "false")
+  })
+
+  it("skips the exit animation when reduced motion is requested", () => {
+    const originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia")
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({ matches: true }),
+    })
+
+    try {
+      render(
+        <HoverRevealPanel side="left" visible={false}>
+          <button type="button">Sidebar action</button>
+        </HoverRevealPanel>,
+      )
+
+      const trigger = screen.getByRole("button", { name: "Reveal left sidebar" })
+      fireEvent.focus(trigger)
+      fireEvent.keyDown(screen.getByRole("button", { name: "Sidebar action" }), { key: "Escape" })
+
+      expect(screen.queryByText("Sidebar action")).not.toBeInTheDocument()
+    } finally {
+      if (originalMatchMedia) {
+        Object.defineProperty(window, "matchMedia", originalMatchMedia)
+      } else {
+        Reflect.deleteProperty(window, "matchMedia")
+      }
+    }
   })
 })

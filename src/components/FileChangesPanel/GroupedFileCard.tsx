@@ -194,7 +194,7 @@ const DiffContent = memo(function DiffContent({
 }): React.ReactElement | null {
   if (showDiff) {
     return (
-      <div key={diffMode} ref={diffRef} className="overflow-hidden rounded-b">
+      <div key={diffMode} ref={diffRef} className="motion-enter overflow-hidden rounded-b">
         {diffMode === "per-edit" ? (
           <PerEditDiffs edits={edits} filePath={filePath} />
         ) : (
@@ -215,7 +215,7 @@ const DiffContent = memo(function DiffContent({
   }
   if (open && !hasDiff) {
     return (
-      <div className="px-3 py-2 text-xs italic text-muted-foreground">
+      <div className="motion-enter px-3 py-2 text-xs italic text-muted-foreground">
         {diffMode === "per-edit" ? "No edits" : "No net changes (all edits cancelled out)"}
       </div>
     )

@@ -107,7 +107,7 @@ export function SessionRow({
   const sessionRow = (
     <div
       className={cn(
-        "group relative flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-2 transition-colors",
+        "motion-list-item group relative flex min-h-9 w-full items-center gap-1.5 rounded-md px-2.5 py-2 transition-colors",
         cardStyle(isActiveSession, !isNativeLive && hasProcess && s.agentStatus === "completed" && !!isNewlyCompleted),
       )}
     >

@@ -1,12 +1,25 @@
 import { lazy, Suspense, type MutableRefObject } from "react"
 import { Dashboard } from "@/components/Dashboard"
 import { SessionBrowser } from "@/components/session-browser"
+import { Spinner } from "@/components/ui/Spinner"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
 import type { useSessionActions } from "@/hooks/useSessionActions"
 
 const MissionControl = lazy(() => import("@/components/MissionControl").then((module) => ({ default: module.MissionControl })))
+
+export function LazyViewFallback({ label }: { label: string }) {
+  return (
+    <div
+      className="motion-enter flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"
+      role="status"
+    >
+      <Spinner className="size-4" />
+      {label}
+    </div>
+  )
+}
 
 type ShellActions = Pick<
   ReturnType<typeof useSessionActions>,
@@ -83,8 +96,10 @@ export function ProjectDashboard({ navigation }: { navigation: ShellNavigation }
 /** Mission Control grid, shared by desktop and mobile shells. */
 export function MissionControlView({ navigation }: { navigation: ShellNavigation }) {
   return (
-    <Suspense fallback={null}>
-      <MissionControl onSelectSession={navigation.actions.handleDashboardSelect} />
+    <Suspense fallback={<LazyViewFallback label="Loading Mission Control…" />}>
+      <div className="motion-session-enter flex min-h-0 flex-1 flex-col">
+        <MissionControl onSelectSession={navigation.actions.handleDashboardSelect} />
+      </div>
     </Suspense>
   )
 }

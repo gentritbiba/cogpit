@@ -276,7 +276,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       onDrop={handleDrop}
     >
       {isDragOver && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg border-2 border-dashed border-info/40 bg-info/10">
+        <div className="motion-enter pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg border-2 border-dashed border-info/40 bg-info/10">
           <span className="text-sm font-medium text-info">Drop images here</span>
         </div>
       )}
@@ -302,7 +302,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         {images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {images.map((img, i) => (
-              <div key={img.id} className="relative group/thumb">
+              <div key={img.id} className="motion-list-item relative group/thumb">
                 <img src={img.preview} alt={`Upload ${i + 1}`} className="h-16 w-auto rounded-md border bg-muted object-contain" />
                 <Button type="button" variant="ghost" size="icon-xs" onClick={() => removeImage(i)} className="absolute -right-1.5 -top-1.5 size-5 rounded-full border bg-background p-0 text-muted-foreground opacity-100 hover:bg-destructive hover:text-destructive-foreground sm:opacity-0 sm:group-hover/thumb:opacity-100 sm:focus-visible:opacity-100" aria-label={`Remove image ${i + 1}`}>
                   <X className="size-3" data-icon="icon" />
@@ -313,7 +313,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}
 
         {imageError && (
-          <div role="status" aria-live="polite" className="mb-2 flex items-center gap-2 text-xs text-warning">
+          <div role="status" aria-live="polite" className="motion-enter mb-2 flex items-center gap-2 text-xs text-warning">
             <span className="flex-1">{imageError}</span>
             {!hasUnsupportedAttachments && (
               <Button type="button" variant="ghost" size="icon-xs" onClick={dismissImageError} className="text-muted-foreground" aria-label="Dismiss image notice">
@@ -330,6 +330,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
         )}>
           {hasPermissions && (
             <PermissionRequestBar
+              key={permissionRequests[0]?.requestId}
               requests={permissionRequests}
               responding={permissionResponding}
               onRespond={respondPermission}
@@ -383,11 +384,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
             </div>
           </div>
         </div>
-        {status === "error" && error && <ErrorBanner error={error} />}
+        {status === "error" && error && <ErrorBanner key={error} error={error} />}
         {/* Failures with no HTTP response behind them arrive over SSE instead.
             Mutually exclusive with the banner above: the server only publishes
             when nothing is waiting on a response. */}
-        {turnError && <ErrorBanner error={turnError} />}
+        {turnError && <ErrorBanner key={turnError} error={turnError} />}
       </div>
     </div>
   )

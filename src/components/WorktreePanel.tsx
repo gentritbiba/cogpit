@@ -330,7 +330,7 @@ export function WorktreePanel({
                 {fileCount > 0 && (
                   <Collapsible className="mt-2">
                     <CollapsibleTrigger className="group flex w-full items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                      <ChevronRight data-icon="inline-start" className="size-3 transition-transform group-data-open:rotate-90" />
+                      <ChevronRight data-icon="inline-start" className="size-3 transition-transform group-data-panel-open:rotate-90 motion-reduce:transition-none" />
                       <FileCode2 data-icon="inline-start" className="size-3" />
                       <span>
                         {fileCount} file{fileCount !== 1 ? "s" : ""} changed

@@ -95,7 +95,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
 
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
-      <Card size="sm" className="gap-0 py-0">
+      <Card size="sm" className="motion-card motion-list-item gap-0 py-0">
         <CardHeader className="px-0 py-0">
           <CollapsibleTrigger className="group flex w-full items-start gap-3 rounded-lg px-3.5 py-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50">
             <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", style.dot)} />
@@ -138,7 +138,7 @@ export function WorkflowAgentCard({ agent, dirName, sessionId, runId }: Workflow
                 {running && <Spinner data-icon="inline-start" />}
                 {style.label}
               </Badge>
-              <ChevronDown className="mt-0.5 size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+              <ChevronDown className="mt-0.5 size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180 motion-reduce:transition-none" />
             </div>
           </CollapsibleTrigger>
         </CardHeader>

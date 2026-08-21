@@ -20,6 +20,19 @@ interface HoverRevealPanelProps {
   enabled?: boolean
 }
 
+const EXIT_ANIMATION_MS = 150
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)"
+
+function prefersReducedMotion(): boolean {
+  if (typeof window.matchMedia !== "function") return false
+
+  try {
+    return window.matchMedia(REDUCED_MOTION_QUERY).matches
+  } catch {
+    return false
+  }
+}
+
 /**
  * Wraps a sidebar so that when toggled off it can be temporarily revealed
  * by hovering near the window edge. The sidebar appears as an absolute overlay
@@ -42,8 +55,10 @@ function HoverRevealOverlay({
   children,
 }: Pick<HoverRevealPanelProps, "side" | "children">) {
   const [isRevealed, setIsRevealed] = useState(false)
+  const [isPresent, setIsPresent] = useState(false)
   const enterTimer = useRef(0)
   const leaveTimer = useRef(0)
+  const exitTimer = useRef(0)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const overlayRef = useRef<HTMLDivElement>(null)
   const suppressNextTriggerFocus = useRef(false)
@@ -53,19 +68,41 @@ function HoverRevealOverlay({
   useEffect(() => () => {
     clearTimeout(enterTimer.current)
     clearTimeout(leaveTimer.current)
+    clearTimeout(exitTimer.current)
+  }, [])
+
+  const revealOverlay = useCallback(() => {
+    clearTimeout(exitTimer.current)
+    setIsPresent(true)
+    setIsRevealed(true)
+  }, [])
+
+  const hideOverlay = useCallback(() => {
+    clearTimeout(exitTimer.current)
+    setIsRevealed(false)
+
+    if (prefersReducedMotion()) {
+      setIsPresent(false)
+      return
+    }
+
+    exitTimer.current = window.setTimeout(() => {
+      exitTimer.current = 0
+      setIsPresent(false)
+    }, EXIT_ANIMATION_MS)
   }, [])
 
   const handleEnter = useCallback(() => {
     clearTimeout(leaveTimer.current)
     clearTimeout(enterTimer.current)
-    enterTimer.current = window.setTimeout(() => setIsRevealed(true), 200)
-  }, [])
+    enterTimer.current = window.setTimeout(revealOverlay, 200)
+  }, [revealOverlay])
 
   const handleFocusEnter = useCallback(() => {
     clearTimeout(leaveTimer.current)
     clearTimeout(enterTimer.current)
-    setIsRevealed(true)
-  }, [])
+    revealOverlay()
+  }, [revealOverlay])
 
   const handleTriggerFocus = useCallback(() => {
     if (suppressNextTriggerFocus.current) {
@@ -77,8 +114,8 @@ function HoverRevealOverlay({
 
   const handleLeave = useCallback(() => {
     clearTimeout(enterTimer.current)
-    leaveTimer.current = window.setTimeout(() => setIsRevealed(false), 300)
-  }, [])
+    leaveTimer.current = window.setTimeout(hideOverlay, 300)
+  }, [hideOverlay])
 
   const handleMouseLeave = useCallback(() => {
     const focused = document.activeElement
@@ -97,10 +134,10 @@ function HoverRevealOverlay({
     event.preventDefault()
     clearTimeout(enterTimer.current)
     clearTimeout(leaveTimer.current)
-    setIsRevealed(false)
+    hideOverlay()
     suppressNextTriggerFocus.current = true
     requestAnimationFrame(() => triggerRef.current?.focus())
-  }, [])
+  }, [hideOverlay])
 
   return (
     <>
@@ -125,13 +162,22 @@ function HoverRevealOverlay({
         />
       </Button>
 
-      {isRevealed && (
+      {isPresent && (
         <div
           ref={overlayRef}
           id={panelId}
+          aria-hidden={!isRevealed}
+          inert={!isRevealed}
           className={cn(
             "absolute inset-y-0 z-40 bg-background shadow-sm",
-            side === "left" ? "left-0 border-r" : "right-0 border-l",
+            !isRevealed && "pointer-events-none animate-out fade-out-0 fill-mode-forwards duration-150 ease-in",
+            side === "left"
+              ? isRevealed
+                ? "left-0 border-r panel-enter"
+                : "left-0 border-r slide-out-to-left-3"
+              : isRevealed
+                ? "right-0 border-l panel-enter-right"
+                : "right-0 border-l slide-out-to-right-3",
           )}
           onMouseEnter={handleEnter}
           onMouseLeave={handleMouseLeave}

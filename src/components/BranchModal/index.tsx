@@ -40,19 +40,23 @@ export interface DisplayBranch {
 }
 
 interface BranchModalProps {
+  open?: boolean
   branches: Branch[]
   branchPointTurnIndex: number
   currentTurns: Turn[]
   onClose: () => void
+  onCloseComplete?: () => void
   onRedoToTurn: (branchId: string, archiveTurnIndex: number) => void
   onRedoEntireBranch: (branchId: string) => void
 }
 
 export function BranchModal({
+  open = true,
   branches,
   branchPointTurnIndex,
   currentTurns,
   onClose,
+  onCloseComplete,
   onRedoToTurn,
   onRedoEntireBranch,
 }: BranchModalProps) {
@@ -125,7 +129,11 @@ export function BranchModal({
   const isCurrent = current.kind === "current"
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}
+      onOpenChangeComplete={(nextOpen) => { if (!nextOpen) onCloseComplete?.() }}
+    >
       <DialogContent className="flex max-h-[80dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <DialogHeader className="shrink-0 p-5 pb-4 pr-14">
           <div className="flex items-center justify-between gap-3">

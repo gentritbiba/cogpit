@@ -13,6 +13,7 @@ import { useSessionContext } from "@/contexts/SessionContext"
 import { useSwipeNavigation } from "@/hooks/useSwipeNavigation"
 import { can } from "@/lib/capabilities"
 import { hapticLight } from "@/lib/haptics"
+import { cn } from "@/lib/utils"
 import type { MobileAppShellProps } from "./mobileTypes"
 import { adjacentMobileTab, visibleMobileTabs } from "./mobileView"
 import { NewSessionHeadline } from "./NewSessionHero"
@@ -69,91 +70,101 @@ export function MobileAppShell({
       <UpdateBanner />
       <ProviderUpdateBanner />
       {!(state.mobileTab === "chat" && session) && (
-        <div className="flex h-12 shrink-0 items-center border-b bg-background px-2">
+        <div className="motion-slide-down-in flex h-12 shrink-0 items-center border-b bg-background px-2">
           <DeviceSwitcher compact />
         </div>
       )}
-      <main ref={swipeRef} className="flex flex-1 min-h-0 overflow-hidden">
-        {state.mobileTab === "sessions" && (
-          <PrimarySessionBrowser navigation={navigation} mobile />
-        )}
+      <main ref={swipeRef} className="app-view-transition flex flex-1 min-h-0 overflow-hidden">
+        <div
+          key={state.mobileTab}
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1",
+            !(state.mobileTab === "chat" && session) && "motion-session-enter",
+          )}
+        >
+          {state.mobileTab === "sessions" && (
+            <PrimarySessionBrowser navigation={navigation} mobile />
+          )}
 
-        {state.mobileTab === "chat" && (
-          <div className="flex flex-1 min-h-0 flex-col min-w-0">
-            {session ? (
-              <div className="flex flex-1 min-h-0 flex-col">
-                {sessionView.teamMembersBar}
-                <SessionInfoBar
-                  creatingSession={navigation.creatingSession}
-                  onNewSession={navigation.onStartNewSession}
-                  onDuplicateSession={navigation.handlers.handleDuplicateSession}
-                  onOpenTerminal={project.onOpenTerminal}
-                  onBackToMain={isSubAgentView ? sessionView.onBackToMain : undefined}
-                  onShowFileChanges={() => chrome.onFileChangesOpenChange(true)}
-                  hasFileChanges={project.hasFileChanges}
-                  onShowWorkflows={sessionView.onShowWorkflows}
-                  workflowCount={sessionView.workflowCount}
-                  onSearch={() => chrome.onSearchOpenChange(true)}
-                  expandAll={state.expandAll}
-                  onToggleExpandAll={sessionView.onToggleExpandAll}
-                />
-                <ChatArea
-                  searchInputRef={sessionView.searchInputRef}
-                  hasMore={sessionView.hasMoreTurns}
-                  isLoadingOlder={sessionView.isLoadingOlderTurns}
-                  onLoadMore={sessionView.onLoadMoreTurns}
-                  mobileSearchOpen={chrome.searchOpen}
-                  onMobileSearchClose={() => chrome.onSearchOpenChange(false)}
-                />
-              </div>
-            ) : state.pendingDirName ? (
-              <div className="flex flex-1 min-h-0 flex-col">
-                {sessionView.pendingTurns.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto px-1 py-3">
-                    {sessionView.pendingTurns}
-                  </div>
-                ) : (
-                  <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
-                    <NewSessionHeadline projectPath={sessionView.pendingPath ?? null} />
-                    {can("terminal") && (
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        onClick={project.onOpenTerminal}
-                      >
-                        <TerminalSquare data-icon="inline-start" />
-                        Terminal
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <ProjectDashboard navigation={navigation} />
-            )}
-          </div>
-        )}
+          {state.mobileTab === "chat" && (
+            <div className="flex flex-1 min-h-0 flex-col min-w-0">
+              {session ? (
+                <div className="flex flex-1 min-h-0 flex-col">
+                  {sessionView.teamMembersBar}
+                  <SessionInfoBar
+                    creatingSession={navigation.creatingSession}
+                    onNewSession={navigation.onStartNewSession}
+                    onDuplicateSession={navigation.handlers.handleDuplicateSession}
+                    onOpenTerminal={project.onOpenTerminal}
+                    onBackToMain={isSubAgentView ? sessionView.onBackToMain : undefined}
+                    onShowFileChanges={() => chrome.onFileChangesOpenChange(true)}
+                    hasFileChanges={project.hasFileChanges}
+                    onShowWorkflows={sessionView.onShowWorkflows}
+                    workflowCount={sessionView.workflowCount}
+                    onSearch={() => chrome.onSearchOpenChange(true)}
+                    expandAll={state.expandAll}
+                    onToggleExpandAll={sessionView.onToggleExpandAll}
+                  />
+                  <ChatArea
+                    searchInputRef={sessionView.searchInputRef}
+                    hasMore={sessionView.hasMoreTurns}
+                    isLoadingOlder={sessionView.isLoadingOlderTurns}
+                    onLoadMore={sessionView.onLoadMoreTurns}
+                    mobileSearchOpen={chrome.searchOpen}
+                    onMobileSearchClose={() => chrome.onSearchOpenChange(false)}
+                  />
+                </div>
+              ) : state.pendingDirName ? (
+                <div className="flex flex-1 min-h-0 flex-col">
+                  {sessionView.pendingTurns.length > 0 ? (
+                    <div className="flex-1 overflow-y-auto px-1 py-3">
+                      {sessionView.pendingTurns}
+                    </div>
+                  ) : (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
+                      <NewSessionHeadline projectPath={sessionView.pendingPath ?? null} />
+                      {can("terminal") && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={project.onOpenTerminal}
+                        >
+                          <TerminalSquare data-icon="inline-start" />
+                          Terminal
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <ProjectDashboard navigation={navigation} />
+              )}
+            </div>
+          )}
 
-        {state.mobileTab === "stats" && session && (
-          <StatsPanel
-            onJumpToTurn={navigation.handlers.handleMobileJumpToTurn}
-            onToggleServer={project.processPanel.handleToggleServer}
-            onServersChanged={project.processPanel.handleServersChanged}
-            onLoadSession={navigation.handlers.handleLoadSessionScrollAware}
-            backgroundAgents={project.backgroundAgents}
-          />
-        )}
-
+          {state.mobileTab === "stats" && session && (
+            <StatsPanel
+              onJumpToTurn={navigation.handlers.handleMobileJumpToTurn}
+              onToggleServer={project.processPanel.handleToggleServer}
+              onServersChanged={project.processPanel.handleServersChanged}
+              onLoadSession={navigation.handlers.handleLoadSessionScrollAware}
+              backgroundAgents={project.backgroundAgents}
+            />
+          )}
+        </div>
       </main>
 
-      {state.mobileTab === "chat" && chrome.processPanel}
+      <div className="shrink-0">
+        {state.mobileTab === "chat" && chrome.processPanel}
+        {state.mobileTab === "chat" && (session || state.pendingDirName) && (
+          <>
+            {sessionView.todoProgress}
+            {session ? sessionView.activeComposer : sessionView.pendingComposer}
+          </>
+        )}
+      </div>
+
       {chrome.workflowsPanel}
-      {state.mobileTab === "chat" && (session || state.pendingDirName) && (
-        <>
-          {sessionView.todoProgress}
-          {session ? sessionView.activeComposer : sessionView.pendingComposer}
-        </>
-      )}
 
       <MobileNav
         activeTab={state.mobileTab}

@@ -116,7 +116,7 @@ export function PermissionRequestBar({ requests, responding, onRespond, onRespon
   const isMulti = remaining > 1
 
   return (
-    <div className="border-b border-warning/20 bg-warning/5">
+    <div className="motion-slide-down-in border-b border-warning/20 bg-warning/5">
       <div className="flex items-center gap-3 px-4 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex size-7 items-center justify-center rounded-md bg-warning/10 text-warning">

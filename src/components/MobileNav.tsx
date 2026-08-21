@@ -54,15 +54,21 @@ export const MobileNav = memo(function MobileNav({
             title={tab.label}
             onClick={() => { hapticLight(); onTabChange(tab.id) }}
             className={cn(
-              "flex min-h-14 flex-1 items-center justify-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+              "flex min-h-14 flex-1 items-center justify-center outline-none transition-[color,transform] duration-150 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none",
               isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
             <div className={cn(
-              "relative flex size-9 items-center justify-center rounded-md transition-colors",
-              isActive && "bg-accent",
+              "relative flex size-9 items-center justify-center rounded-md transition-[background-color,transform,scale] duration-150 ease-out motion-reduce:transition-none",
+              isActive ? "scale-100 bg-accent" : "scale-95",
             )}>
-              <Icon className="size-[18px]" aria-hidden="true" />
+              <Icon
+                className={cn(
+                  "size-[18px] transition-transform duration-150 ease-out motion-reduce:transition-none",
+                  isActive && "scale-110",
+                )}
+                aria-hidden="true"
+              />
               {tab.id === "chat" && isLive && (
                 <LiveIndicator className="absolute right-0.5 top-0.5 size-1.5 ring-2 ring-background" />
               )}

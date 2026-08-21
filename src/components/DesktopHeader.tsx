@@ -1,5 +1,4 @@
-import { memo, useMemo } from "react"
-import { ContextMenu } from "@base-ui/react/context-menu"
+import { memo, startTransition, useMemo } from "react"
 import {
   Bot,
   Brain,
@@ -30,6 +29,13 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/Spinner"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,9 +71,6 @@ import { parseSubAgentPath, projectName, shortenModel } from "@/lib/format"
 import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
 import type { ParsedSession, RawMessage } from "@/lib/types"
 import { extractPullRequests, mergePullRequests } from "../../shared/session/prLinks"
-
-const CONTEXT_MENU_ITEM_CLASS =
-  "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-popover-foreground outline-none data-disabled:cursor-not-allowed data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground"
 
 interface DesktopHeaderProps {
   showSidebar: boolean
@@ -425,13 +428,15 @@ function SessionBreadcrumb({
   }
 
   function handleViewProjectSessions(): void {
-    dispatch({ type: "GO_HOME", isMobile: false })
-    dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
+    startTransition(() => {
+      dispatch({ type: "GO_HOME", isMobile: false })
+      dispatch({ type: "SET_DASHBOARD_PROJECT", dirName: sessionSource.dirName })
+    })
   }
 
   return (
-    <ContextMenu.Root>
-      <ContextMenu.Trigger
+    <ContextMenu>
+      <ContextMenuTrigger
         render={<button
           type="button"
           onClick={onCopyResume}
@@ -452,58 +457,51 @@ function SessionBreadcrumb({
             <span className="truncate">{sessionLabel}</span>
           </>
         )}
-      </ContextMenu.Trigger>
-      <ContextMenu.Portal>
-        <ContextMenu.Positioner className="z-50">
-          <ContextMenu.Popup className="min-w-56 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-            <ContextMenu.Item
-              className={CONTEXT_MENU_ITEM_CLASS}
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-56">
+            <ContextMenuItem
               disabled={creatingSession}
               onClick={() => onNewSession(sessionSource.dirName, session.cwd)}
             >
               {creatingSession ? <Spinner className="size-3.5" /> : <Plus className="size-3.5" />}
               New session in this project
-            </ContextMenu.Item>
+            </ContextMenuItem>
             {onDuplicateSession && (
-              <ContextMenu.Item className={CONTEXT_MENU_ITEM_CLASS} onClick={onDuplicateSession}>
+              <ContextMenuItem onClick={onDuplicateSession}>
                 <Copy className="size-3.5" />
                 Duplicate this session
-              </ContextMenu.Item>
+              </ContextMenuItem>
             )}
             {hasProject && !isRemote && (
               <>
-                <ContextMenu.Separator className="my-1 h-px bg-border" />
-                <ContextMenu.Item
-                  className={CONTEXT_MENU_ITEM_CLASS}
+                <ContextMenuSeparator />
+                <ContextMenuItem
                   onClick={() => postAction("/api/open-in-editor")}
                 >
                   <Code2 className="size-3.5" />
                   Open project in editor
-                </ContextMenu.Item>
-                <ContextMenu.Item
-                  className={CONTEXT_MENU_ITEM_CLASS}
+                </ContextMenuItem>
+                <ContextMenuItem
                   onClick={() => postAction("/api/reveal-in-folder")}
                 >
                   <FolderSearch className="size-3.5" />
                   Reveal in file manager
-                </ContextMenu.Item>
+                </ContextMenuItem>
               </>
             )}
             {onOpenTerminal && !isRemote && can("terminal") && (
-              <ContextMenu.Item className={CONTEXT_MENU_ITEM_CLASS} onClick={onOpenTerminal}>
+              <ContextMenuItem onClick={onOpenTerminal}>
                 <TerminalSquare className="size-3.5" />
                 Open terminal in project
-              </ContextMenu.Item>
+              </ContextMenuItem>
             )}
-            <ContextMenu.Separator className="my-1 h-px bg-border" />
-            <ContextMenu.Item className={CONTEXT_MENU_ITEM_CLASS} onClick={handleViewProjectSessions}>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={handleViewProjectSessions}>
               <FolderOpen className="size-3.5" />
               View all sessions in this project
-            </ContextMenu.Item>
-          </ContextMenu.Popup>
-        </ContextMenu.Positioner>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
+            </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 

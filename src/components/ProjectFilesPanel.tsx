@@ -504,7 +504,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     <aside
       ref={panelRef}
       aria-label="Project files"
-      className="relative flex min-h-0 shrink-0 flex-col border-l bg-background"
+      className="view-transition-right-panel panel-enter-right relative flex min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width }}
     >
       <div

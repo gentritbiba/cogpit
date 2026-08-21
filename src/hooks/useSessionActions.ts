@@ -12,6 +12,7 @@ import { loadSessionTailCached } from "@/lib/sessionLoader"
 interface UseSessionActionsOpts {
   dispatch: Dispatch<SessionAction>
   isMobile: boolean
+  mobileTab?: MobileTab
   teamContext: SessionTeamContext | null
   scrollToBottomInstant: () => void
   resetTurnCount: (count: number) => void
@@ -24,6 +25,7 @@ interface UseSessionActionsOpts {
 export function useSessionActions({
   dispatch,
   isMobile,
+  mobileTab = "sessions",
   teamContext,
   scrollToBottomInstant,
   resetTurnCount,
@@ -111,7 +113,9 @@ export function useSessionActions({
   const clearLoadError = useCallback(() => setLoadError(null), [])
 
   const handleGoHome = useCallback(() => {
-    dispatch({ type: "GO_HOME", isMobile })
+    startTransition(() => {
+      dispatch({ type: "GO_HOME", isMobile })
+    })
   }, [dispatch, isMobile])
 
   const handleJumpToTurn = useCallback(
@@ -123,9 +127,12 @@ export function useSessionActions({
 
   const handleMobileTabChange = useCallback(
     (tab: MobileTab) => {
-      dispatch({ type: "SET_MOBILE_TAB", tab })
+      if (tab === mobileTab) return
+      startTransition(() => {
+        dispatch({ type: "SET_MOBILE_TAB", tab })
+      })
     },
-    [dispatch]
+    [dispatch, mobileTab]
   )
 
   return {

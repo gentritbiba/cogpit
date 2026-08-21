@@ -150,6 +150,7 @@ function ExternalLink({
 function LocalImage({ src, alt }: { src?: string; alt?: string }) {
   const canAccessHostFiles = useCapability("hostFiles")
   const [expanded, setExpanded] = useState(false)
+  const [hasOpened, setHasOpened] = useState(false)
   const [failedSrc, setFailedSrc] = useState<string | undefined>()
   const imageGallery = useOptionalImageGallery()
   const localImageBlocked = isLocalImagePath(src) && !canAccessHostFiles
@@ -163,6 +164,7 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
     if (imageGallery) {
       imageGallery.openImage(viewerImage)
     } else {
+      setHasOpened(true)
       setExpanded(true)
     }
   }
@@ -200,11 +202,13 @@ function LocalImage({ src, alt }: { src?: string; alt?: string }) {
           <Maximize2 className="size-3.5" data-icon="icon" />
         </span>
       </Button>
-      {expanded && viewerImage && (
+      {hasOpened && viewerImage && (
         <ImageViewer
+          open={expanded}
           images={[viewerImage]}
           initialIndex={0}
           onClose={() => setExpanded(false)}
+          onCloseComplete={() => setHasOpened(false)}
         />
       )}
     </>

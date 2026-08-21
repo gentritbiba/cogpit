@@ -99,7 +99,7 @@ export const StatsPanel = memo(function StatsPanel({
   return (
     <aside className={cn(
       "h-full min-h-0 shrink-0 overflow-y-auto bg-background",
-      isMobile ? "mobile-scroll w-full flex-1" : "w-[320px] border-l panel-enter-right"
+      isMobile ? "mobile-scroll w-full flex-1" : "view-transition-right-panel panel-enter-right w-[320px] border-l"
     )}>
       {searchInputRef && (
         <SearchHeader

@@ -99,7 +99,7 @@ export const SessionCard = memo(function SessionCard({
   return (
     <div
       className={cn(
-        "group flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-foreground/20",
+        "motion-card motion-list-item group flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left transition-colors hover:border-foreground/20",
         style.shell,
         compact && "gap-1.5 py-2",
       )}

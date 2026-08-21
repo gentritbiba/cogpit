@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import {
   AlertDialog,
@@ -40,37 +41,48 @@ export function UndoConfirmDialog({
   onConfirm,
   onCancel,
 }: UndoConfirmDialogProps) {
-  if (!state) return null
+  const [lastState, setLastState] = useState(state)
+
+  useEffect(() => {
+    if (state) setLastState(state)
+  }, [state])
+
+  const renderedState = state ?? lastState
+  if (!renderedState) return null
 
   return (
-    <AlertDialog open onOpenChange={(open) => { if (!open) onCancel() }}>
+    <AlertDialog
+      open={state !== null}
+      onOpenChange={(open) => { if (!open) onCancel() }}
+      onOpenChangeComplete={(open) => { if (!open) setLastState(null) }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogMedia>
             <AlertTriangle className="text-warning" />
           </AlertDialogMedia>
-          <AlertDialogTitle>{TITLES[state.type]}</AlertDialogTitle>
+          <AlertDialogTitle>{TITLES[renderedState.type]}</AlertDialogTitle>
           <AlertDialogDescription>
-            {DESCRIPTIONS[state.type]}
+            {DESCRIPTIONS[renderedState.type]}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className="flex flex-col gap-2 py-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Turns affected</span>
-            <span className="text-foreground font-mono">{state.summary.turnCount}</span>
+            <span className="text-foreground font-mono">{renderedState.summary.turnCount}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Files affected</span>
-            <span className="text-foreground font-mono">{state.summary.fileCount}</span>
+            <span className="text-foreground font-mono">{renderedState.summary.fileCount}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Operations</span>
-            <span className="text-foreground font-mono">{state.summary.operationCount}</span>
+            <span className="text-foreground font-mono">{renderedState.summary.operationCount}</span>
           </div>
-          {state.summary.filePaths.length > 0 && (
+          {renderedState.summary.filePaths.length > 0 && (
             <div className="mt-2 max-h-32 overflow-y-auto rounded-md border bg-muted/30 p-2">
-              {state.summary.filePaths.map((fp) => (
+              {renderedState.summary.filePaths.map((fp) => (
                 <div key={fp} className="truncate font-mono text-xs text-muted-foreground">
                   {fp}
                 </div>
@@ -99,7 +111,7 @@ export function UndoConfirmDialog({
                 Applying...
               </>
             ) : (
-              state.type === "undo" ? "Undo" : state.type === "redo" ? "Redo" : "Switch"
+              renderedState.type === "undo" ? "Undo" : renderedState.type === "redo" ? "Redo" : "Switch"
             )}
           </AlertDialogAction>
         </AlertDialogFooter>

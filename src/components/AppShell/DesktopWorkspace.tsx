@@ -22,6 +22,7 @@ import { SessionInputFooter } from "./SessionInputFooter"
 import { NewSessionHeadline } from "./NewSessionHero"
 import {
   PrimarySessionBrowser,
+  LazyViewFallback,
   MissionControlView,
   ProjectDashboard,
 } from "./SharedAppViews"
@@ -113,16 +114,18 @@ function DesktopMainView({
 
   if (view === "config") {
     return (
-      <Suspense fallback={null}>
-        <ConfigBrowser
-          projectPath={resolveDesktopProjectPath({
-            sessionCwd: session?.cwd,
-            pendingPath,
-            sessionDirPath: sessionSource?.dirName ? dirNameToPath(sessionSource.dirName) : null,
-            dashboardProjectPath: state.dashboardProject ? dirNameToPath(state.dashboardProject) : null,
-          })}
-          initialFilePath={state.configFilePath}
-        />
+      <Suspense fallback={<LazyViewFallback label="Loading configuration…" />}>
+        <div className="motion-session-enter flex min-h-0 flex-1">
+          <ConfigBrowser
+            projectPath={resolveDesktopProjectPath({
+              sessionCwd: session?.cwd,
+              pendingPath,
+              sessionDirPath: sessionSource?.dirName ? dirNameToPath(sessionSource.dirName) : null,
+              dashboardProjectPath: state.dashboardProject ? dirNameToPath(state.dashboardProject) : null,
+            })}
+            initialFilePath={state.configFilePath}
+          />
+        </div>
       </Suspense>
     )
   }
@@ -247,12 +250,12 @@ export function DesktopWorkspace({
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
       {navigation.panels.showSidebar && state.mainView !== "config" && (
-        <div className="w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground">
+        <div className="view-transition-sidebar panel-enter w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground">
           <PrimarySessionBrowser navigation={navigation} />
         </div>
       )}
 
-      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <main className="app-view-transition relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <DesktopMainView
           navigation={navigation}
           sessionView={sessionView}

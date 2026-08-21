@@ -71,6 +71,7 @@ interface DevicesDialogProps {
   open: boolean
   initialMode: "add" | "manage"
   onClose: () => void
+  onCloseComplete?: () => void
 }
 
 /**
@@ -439,7 +440,7 @@ function DeviceRow({ device, hubVersion, onRename, onCredentials, onRemove, onTe
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
-export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps) {
+export function DevicesDialog({ open, initialMode, onClose, onCloseComplete }: DevicesDialogProps) {
   const { devices, refresh, probe, addDevice, updateDevice, removeDevice, testDevice } = useDevices()
 
   const [name, setName] = useState("")
@@ -565,7 +566,11 @@ export function DevicesDialog({ open, initialMode, onClose }: DevicesDialogProps
   )
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => { if (!next) onClose() }}
+      onOpenChangeComplete={(next) => { if (!next) onCloseComplete?.() }}
+    >
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Devices</DialogTitle>

@@ -297,7 +297,7 @@ export function PreviewPanel({ cwd, onClose }: PreviewPanelProps) {
     <aside
       ref={panelRef}
       aria-label="Development preview"
-      className="relative flex min-h-0 shrink-0 flex-col border-l bg-background"
+      className="view-transition-right-panel panel-enter-right relative flex min-h-0 shrink-0 flex-col border-l bg-background"
       style={{ width }}
     >
       <div

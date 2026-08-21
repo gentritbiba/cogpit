@@ -36,8 +36,22 @@ vi.mock("@/components/KeyboardShortcutsDialog", () => ({
 }))
 
 vi.mock("@/components/DevicesDialog", () => ({
-  DevicesDialog: ({ initialMode }: { initialMode: string }) => (
-    <div data-testid="devices-dialog">{initialMode}</div>
+  DevicesDialog: ({
+    open,
+    initialMode,
+    onClose,
+    onCloseComplete,
+  }: {
+    open: boolean
+    initialMode: string
+    onClose: () => void
+    onCloseComplete: () => void
+  }) => (
+    <div data-testid="devices-dialog" data-open={open}>
+      {initialMode}
+      <button onClick={onClose}>close devices</button>
+      <button onClick={onCloseComplete}>finish closing devices</button>
+    </div>
   ),
 }))
 
@@ -193,6 +207,24 @@ describe("DesktopOverlays", () => {
 
     await user.click(screen.getByText("palette add device"))
     await waitFor(() => expect(screen.getByTestId("devices-dialog")).toHaveTextContent("add"))
+  })
+
+  it("keeps the devices dialog mounted while its close transition finishes", async () => {
+    const user = userEvent.setup()
+    render(<DesktopOverlays {...makeProps()} />)
+
+    await user.click(screen.getByText("palette manage devices"))
+    await waitFor(() => {
+      expect(screen.getByTestId("devices-dialog")).toHaveAttribute("data-open", "true")
+    })
+
+    await user.click(screen.getByText("close devices"))
+
+    expect(screen.getByTestId("devices-dialog")).toHaveAttribute("data-open", "false")
+    expect(screen.getByTestId("devices-dialog")).toHaveTextContent("manage")
+
+    await user.click(screen.getByText("finish closing devices"))
+    expect(screen.queryByTestId("devices-dialog")).not.toBeInTheDocument()
   })
 
   it("offers every configured device to the palette, local machine first", () => {

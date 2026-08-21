@@ -26,7 +26,7 @@ export function InputToolbar({
     <>
       {/* Active session indicator */}
       {showIndicator && !isPlanApproval && !isUserQuestion && (
-        <div className="mr-1 flex items-center gap-1.5">
+        <div className="motion-enter mr-1 flex items-center gap-1.5">
           {elapsedSec > 0 && (
             <span className="font-mono text-xs tabular-nums text-muted-foreground">
               {formatElapsed(elapsedSec)}
@@ -64,7 +64,7 @@ export function ActionButtons({
           <TooltipTrigger render={<Button
               variant="outline"
               size="icon-sm"
-              className="shrink-0 rounded-full text-warning"
+              className="motion-enter shrink-0 rounded-full text-warning"
               onClick={onInterrupt}
               aria-label={interruptLabel}
               title={interruptLabel}
@@ -81,7 +81,7 @@ export function ActionButtons({
           <TooltipTrigger render={<Button
               variant="ghost"
               size="icon-sm"
-              className="shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="motion-enter shrink-0 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={onStopSession}
               aria-label="Stop session"
               title="Stop session"

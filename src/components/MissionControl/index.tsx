@@ -3,7 +3,7 @@
  * user sorted to the front and answerable in place.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react"
 import { Activity, AlertTriangle, LayoutGrid, List, RefreshCw } from "lucide-react"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -27,6 +27,7 @@ import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { usePendingHumanInput } from "@/contexts/PendingHumanInputContext"
 import { useMissionControl } from "@/hooks/useMissionControl"
 import { sessionGroupKey } from "@/components/LiveSessions/sessionListView"
+import { runViewTransition } from "@/lib/viewTransitions"
 import { SessionCard } from "./SessionCard"
 import {
   buildMissionCards,
@@ -37,6 +38,7 @@ import {
 
 /** How often the open grid re-reads the session inventory. */
 const INVENTORY_REFRESH_MS = 8_000
+const MAX_NATIVE_TRANSITION_CARDS = 12
 
 const EMPTY_HINT = "Start Claude Code or Codex and every session shows up here"
 
@@ -121,6 +123,14 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
     if (!result.ok) setGoneQuestions((prev) => new Set(prev).add(toolUseId))
   }, [answerQuestion])
 
+  function updateGrid(update: () => void): void {
+    if (cards.length <= MAX_NATIVE_TRANSITION_CARDS) {
+      runViewTransition(update, { kind: "fade" })
+    } else {
+      startTransition(update)
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b px-4 py-2">
@@ -140,7 +150,9 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
             value={[filter]}
             onValueChange={(values) => {
               const next = values.at(-1) as MissionFilter | undefined
-              if (next) setFilter(next)
+              if (next && next !== filter) {
+                updateGrid(() => setFilter(next))
+              }
             }}
             variant="outline"
             size="sm"
@@ -169,7 +181,11 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
                 size="icon-xs"
                 aria-label={label}
                 aria-pressed={layout === id}
-                onClick={() => setLayout(id)}
+                onClick={() => {
+                  if (id !== layout) {
+                    updateGrid(() => setLayout(id))
+                  }
+                }}
                 className={cn(layout === id && "bg-accent text-accent-foreground")}
               >
                 <Icon data-icon="inline-start" />

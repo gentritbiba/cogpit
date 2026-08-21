@@ -53,7 +53,7 @@ export function AgentCard({
   return (
     <div
       className={cn(
-        "flex w-full items-start border-b border-border text-left last:border-b-0",
+        "motion-list-item flex w-full items-start border-b border-border text-left transition-colors last:border-b-0",
         isViewing
           ? "bg-accent"
           : "hover:bg-muted/40"

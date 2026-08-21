@@ -30,9 +30,11 @@ export interface ImageViewerItem {
 }
 
 interface ImageViewerProps {
+  open?: boolean
   images: ImageViewerItem[]
   initialIndex: number
   onClose: () => void
+  onCloseComplete?: () => void
 }
 
 const MAX_ZOOM = 8
@@ -72,7 +74,13 @@ function IconButton({
   )
 }
 
-export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps): React.ReactElement | null {
+export function ImageViewer({
+  open = true,
+  images,
+  initialIndex,
+  onClose,
+  onCloseComplete,
+}: ImageViewerProps): React.ReactElement | null {
   const safeInitialIndex = Math.min(Math.max(initialIndex, 0), Math.max(images.length - 1, 0))
   const [index, setIndex] = useState(safeInitialIndex)
   const [zoomPercent, setZoomPercent] = useState(100)
@@ -140,7 +148,11 @@ export function ImageViewer({ images, initialIndex, onClose }: ImageViewerProps)
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => { if (!nextOpen) onClose() }}
+      onOpenChangeComplete={(nextOpen) => { if (!nextOpen) onCloseComplete?.() }}
+    >
       <DialogContent
         showCloseButton={false}
         onKeyDown={handleKeyDown}

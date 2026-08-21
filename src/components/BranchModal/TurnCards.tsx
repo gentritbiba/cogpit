@@ -26,7 +26,7 @@ export function FullTurnCard({
       : null
 
   return (
-    <Card size="sm" className="gap-0 py-0">
+    <Card size="sm" className="motion-list-item gap-0 py-0">
       <CardHeader className="border-b py-2">
         <CardTitle>Turn {archiveIndex + 1}</CardTitle>
       </CardHeader>
@@ -111,7 +111,7 @@ export function ArchivedTurnCard({
   onRedoToHere: (branchId: string, archiveTurnIndex: number) => void
 }) {
   return (
-    <Card size="sm" className="gap-0 py-0">
+    <Card size="sm" className="motion-list-item gap-0 py-0">
       <CardHeader className="border-b py-2">
         <CardTitle>Turn {archiveIndex + 1}</CardTitle>
       </CardHeader>

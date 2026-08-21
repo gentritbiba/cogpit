@@ -150,7 +150,7 @@ export function ProjectSwitcherModal({
               {canAddFolder && (
                 <CommandItem
                   value={`folder:${folderPath}`}
-                  className="h-auto gap-3 px-3 py-2.5"
+                  className="motion-list-item h-auto gap-3 px-3 py-2.5"
                   onSelect={() => {
                     onNewFolder(folderPath)
                     onClose()
@@ -169,7 +169,7 @@ export function ProjectSwitcherModal({
                 <CommandItem
                   key={project.dirName}
                   value={`project:${project.dirName}`}
-                  className="h-auto gap-3 px-3 py-2.5"
+                  className="motion-list-item h-auto gap-3 px-3 py-2.5"
                   onSelect={() => handleSelect(project)}
                 >
                   <FolderOpen data-icon="inline-start" className="size-4 shrink-0 text-muted-foreground" />

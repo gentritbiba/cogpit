@@ -563,6 +563,16 @@ describe("useSessionActions", () => {
         tab: "stats",
       })
     })
+
+    it("does not restart navigation when the selected tab is already active", () => {
+      const opts = makeDefaultOpts()
+      opts.mobileTab = "stats"
+      const { result } = renderHook(() => useSessionActions(opts))
+
+      act(() => result.current.handleMobileTabChange("stats"))
+
+      expect(opts.dispatch).not.toHaveBeenCalled()
+    })
   })
 
   describe("handleTeamMemberSwitch error recovery", () => {
