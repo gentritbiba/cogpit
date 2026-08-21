@@ -13,7 +13,7 @@ import { AppStatusToasts } from "@/components/AppStatusToasts"
 import { ChatInputSettings } from "@/components/ChatInput/ChatInputSettings"
 import { TeamMembersBar } from "@/components/TeamMembersBar"
 import { ChatInput, type ChatInputHandle } from "@/components/ChatInput"
-import { GoalBar } from "@/components/GoalBar"
+import { GoalControlsBlock, GoalProvider, GoalSection, GoalTrigger } from "@/components/goal"
 import { ProcessPanel } from "@/components/ProcessPanel"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { UndoConfirmDialog } from "@/components/UndoConfirmDialog"
@@ -62,6 +62,7 @@ import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-i
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
 import type { ParsedSession, Turn } from "@/lib/types"
+import { hasEditToolCalls } from "../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
@@ -225,11 +226,14 @@ export default function App() {
     identityReady && supportsWorktrees && panels.showWorktrees ? currentDirName : null,
   )
 
-  // Check if session has any Edit/Write tool calls for the file changes panel
+  // Does the session change files at all? Covers Edit/Write, MultiEdit, and the
+  // Bash writes that bypass-permissions sessions produce instead.
   const hasFileChanges = useMemo(() => {
-    if (!state.session) return false
-    return state.session.turns.some((turn) =>
-      turn.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write")
+    const session = state.session
+    if (!session) return false
+    return session.turns.some((turn) =>
+      hasEditToolCalls(turn.toolCalls, session.cwd)
+      || turn.subAgentActivity.some((msg) => hasEditToolCalls(msg.toolCalls, session.cwd))
     )
   }, [state.session])
 
@@ -999,15 +1003,9 @@ export default function App() {
     </Suspense>
   )
 
-  const goalBarNode = currentAgentKind && state.session ? (
-    <GoalBar
-      agentKind={currentAgentKind}
-      session={state.session}
-      onSendCommand={claudeChat.sendMessage}
-    />
-  ) : null
+  const goalSession = currentAgentKind && state.session ? state.session : null
 
-  const buildChatInputSettings = (includeMobileGoal: boolean) => (
+  const buildChatInputSettings = (includeGoal: boolean) => (
     <ChatInputSettings
       agentKind={currentAgentKind ?? "claude"}
       onAgentKindChange={isNewSession ? pendingAgentKindChange : undefined}
@@ -1032,16 +1030,17 @@ export default function App() {
       onMcpAuth={supportsMcp && configAdminEnabled ? handleMcpAuth : undefined}
       permissionMode={perms.config.mode}
       onPermissionModeChange={perms.setMode}
-      mobileExtra={isMobile && includeMobileGoal ? goalBarNode : undefined}
+      mobileExtra={isMobile && includeGoal && goalSession ? <GoalControlsBlock /> : undefined}
+      trailingExtra={!isMobile && includeGoal && goalSession ? <GoalTrigger /> : undefined}
       mobile={isMobile}
     />
   )
   const chatInputSettingsNode = buildChatInputSettings(true)
   const previewChatInputSettingsNode = buildChatInputSettings(false)
 
-  const chatInputNode = (
+  const composer = (
     <div className="shrink-0 bg-background">
-      {!isMobile && goalBarNode}
+      {!isMobile && <GoalSection />}
       <ChatInput
         ref={chatInputRef}
         allowImages={imageInputAvailable}
@@ -1053,6 +1052,16 @@ export default function App() {
       {!isMobile && chatInputSettingsNode}
     </div>
   )
+
+  const chatInputNode = goalSession && currentAgentKind ? (
+    <GoalProvider
+      agentKind={currentAgentKind}
+      session={goalSession}
+      onSendCommand={claudeChat.sendMessage}
+    >
+      {composer}
+    </GoalProvider>
+  ) : composer
 
   const previewChatInputNode = (
     <div className="shrink-0 bg-background">

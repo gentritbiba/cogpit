@@ -1,6 +1,7 @@
 import { useMemo, useState, memo } from "react"
 import { ChevronDown, ChevronRight, Folder, FileCode2 } from "lucide-react"
 import { diffLineCount } from "@/lib/diffUtils"
+import { expandEditToolCalls } from "../../../shared/session/edit-calls"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { OpIndicator, SubAgentIndicator } from "@/components/FileChangesPanel/file-change-indicators"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -41,11 +42,10 @@ interface TreeNode {
 
 // ── Compute per-turn file changes (aggregated by file path) ───────────────────
 
-function computeTurnFileChanges(turn: Turn): FileChangeInfo[] {
+function computeTurnFileChanges(turn: Turn, cwd: string): FileChangeInfo[] {
   const fileMap = new Map<string, { add: number; del: number; hasEdit: boolean; hasWrite: boolean; subAgentId: string | null }>()
 
   function processToolCall(tc: ToolCall, agentId?: string) {
-    if (tc.name !== "Edit" && tc.name !== "Write") return
     const fp = String(tc.input.file_path ?? tc.input.path ?? "")
     if (!fp) return
     const isEdit = tc.name === "Edit"
@@ -63,8 +63,10 @@ function computeTurnFileChanges(turn: Turn): FileChangeInfo[] {
     fileMap.set(fp, existing)
   }
 
-  turn.toolCalls.forEach((tc) => processToolCall(tc))
-  turn.subAgentActivity.forEach((msg) => msg.toolCalls.forEach((tc) => processToolCall(tc, msg.agentId)))
+  expandEditToolCalls(turn.toolCalls, cwd).forEach((tc) => processToolCall(tc))
+  turn.subAgentActivity.forEach((msg) =>
+    expandEditToolCalls(msg.toolCalls, cwd).forEach((tc) => processToolCall(tc, msg.agentId)),
+  )
 
   return [...fileMap.entries()].map(([filePath, { add, del, hasEdit, hasWrite, subAgentId }]) => ({
     filePath,
@@ -217,7 +219,7 @@ interface TurnChangedFilesProps {
 
 export const TurnChangedFiles = memo(function TurnChangedFiles({ turn, turnIndex, cwd }: TurnChangedFilesProps) {
   const canAccessHostFiles = useCapability("hostFiles")
-  const fileChanges = useMemo(() => computeTurnFileChanges(turn), [turn])
+  const fileChanges = useMemo(() => computeTurnFileChanges(turn, cwd), [turn, cwd])
   const tree = useMemo(() => buildFileTree(fileChanges, cwd), [fileChanges, cwd])
   const [expanded, setExpanded] = useState(false)
 

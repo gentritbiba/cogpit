@@ -1,5 +1,6 @@
 import type { Turn, ArchivedTurn, ArchivedToolCall, Branch, UndoState } from "./types"
 import { getUserMessageText } from "./parser"
+import { isSynthesized } from "../../shared/session/edit-calls"
 
 // ── Extract reversible tool calls from a Turn ────────────────────────────
 
@@ -11,6 +12,10 @@ export function extractReversibleCalls(turn: Turn): ArchivedToolCall[] {
   const calls: ArchivedToolCall[] = []
   for (const tc of turn.toolCalls) {
     if (tc.isError) continue
+    // Synthesized calls (recovered from Bash, split out of a MultiEdit) are
+    // display-only. Undoing a recovered Write would unlink a file we cannot
+    // prove was absent beforehand.
+    if (isSynthesized(tc)) continue
     const filePath = resolveFilePath(tc.input)
     if (!filePath) continue
 

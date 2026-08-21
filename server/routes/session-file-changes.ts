@@ -1,7 +1,8 @@
 import { sendJson, type UseFn } from "../http"
 import { findJsonlPath, readFile, stat } from "../helpers"
-import type { ToolUseBlock } from "../../shared/session/types"
+import type { ToolCall, ToolUseBlock } from "../../shared/session/types"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
+import { expandEditToolCalls } from "../../shared/session/edit-calls"
 import {
   findFailedNestedPatchCallIds,
   parseCustomToolOutput,
@@ -22,6 +23,23 @@ export interface ComputedFileChange {
     originalStr: string
     currentStr: string
   }
+}
+
+/**
+ * Edit/Write pass through; MultiEdit and the recoverable Bash writes (heredocs,
+ * literal `sed -i`) are normalized into the same shape. Errors are applied
+ * later from the matching tool_result, so the call starts out clean.
+ */
+function editCallsFromBlock(block: ToolUseBlock, cwd: string): ToolCall[] {
+  const tc: ToolCall = {
+    id: block.id,
+    name: block.name,
+    input: block.input,
+    result: null,
+    isError: false,
+    timestamp: "",
+  }
+  return expandEditToolCalls([tc], cwd)
 }
 
 export async function parseSessionFileChanges(
@@ -47,7 +65,7 @@ export async function parseSessionFileChanges(
   const fileMap = new Map<string, FileAccum>()
 
   // toolCallId → { filePath, isEdit, oldString, newString }
-  const toolCallDetails = new Map<string, { filePath: string; isEdit: boolean; oldString: string; newString: string }>()
+  const toolCallDetails = new Map<string, { sourceId: string; filePath: string; isEdit: boolean; oldString: string; newString: string }>()
   // toolCallId → error flag (populated from tool_result blocks)
   const resultMap = new Map<string, boolean>()
   // Parent custom tool call → synthetic per-file patch call IDs.
@@ -106,7 +124,7 @@ export async function parseSessionFileChanges(
           const oldString = isEdit ? String(tc.input.old_string ?? "") : ""
           const newString = isEdit ? String(tc.input.new_string ?? "") : String(tc.input.content ?? "")
 
-          toolCallDetails.set(tc.id, { filePath, isEdit, oldString, newString })
+          toolCallDetails.set(tc.id, { sourceId: tc.id, filePath, isEdit, oldString, newString })
           fileCallIds.push(tc.id)
 
           let accum = fileMap.get(filePath)
@@ -195,17 +213,18 @@ export async function parseSessionFileChanges(
         const b = block as ToolUseBlock
         if (b.type !== "tool_use") continue
 
-        if (b.name === "Edit" || b.name === "Write") {
-          const filePath = (b.input.file_path ?? b.input.path) as string
+        for (const call of editCallsFromBlock(b, cwd)) {
+          const filePath = String(call.input.file_path ?? call.input.path ?? "")
           if (!filePath) continue
 
-          const isEdit = b.name === "Edit"
-          const oldString = isEdit ? String(b.input.old_string ?? "") : ""
+          const isEdit = call.name === "Edit"
+          const oldString = isEdit ? String(call.input.old_string ?? "") : ""
           const newString = isEdit
-            ? String(b.input.new_string ?? "")
-            : String(b.input.content ?? "")
+            ? String(call.input.new_string ?? "")
+            : String(call.input.content ?? "")
 
-          toolCallDetails.set(b.id, { filePath, isEdit, oldString, newString })
+          // Keyed by the originating block so tool_result errors still land.
+          toolCallDetails.set(call.id, { sourceId: b.id, filePath, isEdit, oldString, newString })
 
           let accum = fileMap.get(filePath)
           if (!accum) {
@@ -220,7 +239,7 @@ export async function parseSessionFileChanges(
             fileMap.set(filePath, accum)
           }
 
-          accum.toolCallIds.push(b.id)
+          accum.toolCallIds.push(call.id)
           if (isEdit) accum.hasEdit = true
           else accum.hasWrite = true
           accum.ops.push({ oldString, newString, isWrite: !isEdit })
@@ -245,8 +264,8 @@ export async function parseSessionFileChanges(
   }
 
   // Apply error status from tool results
-  for (const [toolId, details] of toolCallDetails) {
-    const isError = resultMap.get(toolId)
+  for (const details of toolCallDetails.values()) {
+    const isError = resultMap.get(details.sourceId)
     if (isError) {
       const accum = fileMap.get(details.filePath)
       if (accum) accum.isError = true

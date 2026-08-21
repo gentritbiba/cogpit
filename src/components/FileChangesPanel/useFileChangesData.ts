@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react"
 import type { ParsedSession, ToolCall } from "@/lib/types"
 import { computeNetDiff, type EditOp } from "@/lib/diffUtils"
+import { expandEditToolCalls } from "../../../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
@@ -90,12 +91,7 @@ export function useFileChangesData(session: ParsedSession) {
             if (!res.ok) return
             const text = await res.text()
             const parsed = parseSubagentJsonl(text, agentId)
-            const tcs: ToolCall[] = []
-            for (const msg of parsed) {
-              for (const tc of msg.toolCalls) {
-                if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) tcs.push(tc)
-              }
-            }
+            const tcs = parsed.flatMap((msg) => expandEditToolCalls(msg.toolCalls, session.cwd))
             bgAgentCache.set(cacheKey, tcs)
             fetchedBgRef.current.add(cacheKey)
             results.set(agentId, tcs)
@@ -113,24 +109,20 @@ export function useFileChangesData(session: ParsedSession) {
 
     fetchAll()
     return () => { cancelled = true }
-  }, [dirName, session.sessionId, bgAgentsToLoad])
+  }, [dirName, session.sessionId, session.cwd, bgAgentsToLoad])
 
   const fileChanges = useMemo(() => {
     const changes: FileChange[] = []
     const processedBgAgents = new Set<string>()
     for (let turnIndex = 0; turnIndex < session.turns.length; turnIndex++) {
       const turn = session.turns[turnIndex]
-      for (const tc of turn.toolCalls) {
-        if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) {
-          changes.push({ turnIndex, toolCall: tc })
-        }
+      for (const tc of expandEditToolCalls(turn.toolCalls, session.cwd)) {
+        changes.push({ turnIndex, toolCall: tc })
       }
       for (const msg of turn.subAgentActivity) {
         // For foreground sub-agents with inline tool calls
-        for (const tc of msg.toolCalls) {
-          if ((tc.name === "Edit" || tc.name === "Write") && !tc.isError) {
-            changes.push({ turnIndex, toolCall: tc, agentId: msg.agentId })
-          }
+        for (const tc of expandEditToolCalls(msg.toolCalls, session.cwd)) {
+          changes.push({ turnIndex, toolCall: tc, agentId: msg.agentId })
         }
         // Use fetched tool calls for Claude background agents and Codex child
         // rollouts. Process each agent once to avoid duplication across turns.
