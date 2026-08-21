@@ -61,7 +61,15 @@ const richSession = {
   agentStatus: "tool_use" as const,
   agentToolName: "Bash",
   pullRequests: [
-    { number: 482, url: "https://github.com/acme/cogpit/pull/482", repo: "acme/cogpit" },
+    {
+      number: 482,
+      url: "https://github.com/acme/cogpit/pull/482",
+      repo: "acme/cogpit",
+      title: "Rewrite the dashboard rows",
+      isDraft: false,
+      toolCallId: "toolu_pr_482",
+      timestamp: new Date(Date.now() - 30 * 60_000).toISOString(),
+    },
   ],
 }
 

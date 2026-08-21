@@ -30,6 +30,7 @@ describe("sessionMetaCache", () => {
         slug: "",
         name: "",
         aiTitle: "",
+        customTitle: "",
         cwd: "/test",
         firstUserMessage: "hello",
         lastUserMessage: "world",
