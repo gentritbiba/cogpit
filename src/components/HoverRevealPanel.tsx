@@ -169,7 +169,7 @@ function HoverRevealOverlay({
           aria-hidden={!isRevealed}
           inert={!isRevealed}
           className={cn(
-            "absolute inset-y-0 z-40 bg-background shadow-sm",
+            "electron-no-drag absolute inset-y-0 z-40 bg-background shadow-sm",
             !isRevealed && "pointer-events-none animate-out fade-out-0 fill-mode-forwards duration-150 ease-in",
             side === "left"
               ? isRevealed

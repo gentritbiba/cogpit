@@ -187,7 +187,7 @@ export const FindInSession = forwardRef<FindInSessionHandle, FindInSessionProps>
     if (!isOpen) return null
 
     return (
-      <div className="motion-slide-down-in absolute right-4 top-0 z-30 flex items-center gap-1 rounded-b-lg border border-t-0 bg-popover p-2 text-popover-foreground shadow-sm">
+      <div className="motion-slide-down-in absolute right-4 top-12 z-30 flex items-center gap-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-sm">
         <InputGroup className="w-64">
           <InputGroupInput
             ref={inputRef}
