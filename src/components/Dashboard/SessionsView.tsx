@@ -70,7 +70,7 @@ export function SessionsView({
 
   return (
     <ScrollArea className="h-full">
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-10">
+      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:pb-10 sm:pt-14">
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>

@@ -1,4 +1,4 @@
-import { lazy, Suspense, type MutableRefObject } from "react"
+import { lazy, Suspense, type MutableRefObject, type ReactNode } from "react"
 import { Dashboard } from "@/components/Dashboard"
 import { SessionBrowser } from "@/components/session-browser"
 import { Spinner } from "@/components/ui/Spinner"
@@ -49,12 +49,14 @@ interface ShellNavigation {
 interface PrimarySessionBrowserProps {
   navigation: ShellNavigation
   mobile?: boolean
+  header?: ReactNode
 }
 
 /** Canonical primary session navigation shared by desktop and mobile shells. */
 export function PrimarySessionBrowser({
   navigation,
   mobile = false,
+  header,
 }: PrimarySessionBrowserProps) {
   const { sessionSource } = useSessionContext()
   const activeSessionKey = sessionSource
@@ -73,6 +75,7 @@ export function PrimarySessionBrowser({
       liveSessionsRefreshRef={navigation.liveSessionsRefreshRef}
       onPrefetchSession={navigation.onPrefetchSession}
       isMobile={mobile}
+      header={header}
     />
   )
 }

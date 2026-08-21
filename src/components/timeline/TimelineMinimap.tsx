@@ -103,7 +103,7 @@ export const TimelineMinimap = memo(function TimelineMinimap({
         "absolute left-0 top-0 hidden h-full max-h-full flex-col items-start gap-1",
         // Spread across the height so the rail reads as a contents column rather
         // than a cluster of marks; once the ticks fill it they pack and scroll.
-        "justify-evenly overflow-y-auto py-6 pl-2",
+        "justify-evenly overflow-y-auto pb-6 pl-2 pt-14",
         "opacity-60 transition-opacity hover:opacity-100 focus-within:opacity-100",
         // A coarse pointer cannot hover a 4px rail, and the phone shell has its
         // own navigation.

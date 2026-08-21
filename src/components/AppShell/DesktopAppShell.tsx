@@ -1,60 +1,30 @@
-import { DesktopHeader } from "@/components/DesktopHeader"
 import { ProviderUpdateBanner } from "@/components/ProviderUpdateBanner"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { useAppContext } from "@/contexts/AppContext"
-import { shortcutLabel } from "@/lib/keybindings"
-import { can } from "@/lib/capabilities"
 import { DesktopOverlays } from "./DesktopOverlays"
 import { DesktopWorkspace } from "./DesktopWorkspace"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
-/** Desktop-only application composition: chrome, workspace, and global overlays. */
+/** Desktop-only application composition: workspace and global overlays. */
 export function DesktopAppShell({
   navigation,
   sessionView,
   project,
   chrome,
 }: DesktopAppShellProps) {
-  const { state, config, theme } = useAppContext()
+  const { theme } = useAppContext()
 
   return (
     <div className={`${theme.themeClasses} flex h-dvh flex-col bg-background text-foreground`}>
       {chrome.backgroundServers}
       <UpdateBanner />
       <ProviderUpdateBanner />
-      <DesktopHeader
-        showSidebar={navigation.panels.showSidebar}
-        showStats={navigation.panels.showStats}
-        showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
-        showFileChanges={navigation.panels.showFileChanges}
-        hasFileChanges={project.hasFileChanges}
-        killing={chrome.killing}
-        creatingSession={navigation.creatingSession}
-        onGoHome={navigation.actions.handleGoHome}
-        onNewSession={navigation.onStartNewSession}
-        onDuplicateSession={navigation.handlers.handleDuplicateSession}
-        onOpenTerminal={project.onOpenTerminal}
-        onBackToMain={sessionView.onBackToMain}
-        onShowWorkflows={sessionView.onShowWorkflows}
-        workflowCount={sessionView.workflowCount}
-        onToggleSidebar={navigation.panels.handleToggleSidebar}
-        onToggleStats={navigation.panels.handleToggleStats}
-        onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
-        onToggleFileChanges={navigation.panels.handleToggleFileChanges}
-        showConfig={state.mainView === "config"}
-        onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
-        showMission={state.mainView === "mission"}
-        onToggleMission={navigation.panels.handleToggleMission}
-        onKillAll={chrome.onKillAll}
-        onOpenSettings={config.openConfigDialog}
-        onOpenCommandPalette={chrome.onOpenCommandPalette}
-        commandPaletteShortcut={shortcutLabel("commandPalette")}
-      />
 
       <DesktopWorkspace
         navigation={navigation}
         sessionView={sessionView}
         project={project}
+        chrome={chrome}
       />
 
       <DesktopOverlays

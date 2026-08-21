@@ -247,25 +247,36 @@
   transition: none !important;
 }
 
-/* Electron window drag region */
+/* Electron window drag regions. Chromium computes these geometrically, so a
+   no-drag element wins over any drag region it overlaps regardless of z-order. */
 .electron-drag {
   -webkit-app-region: drag;
 }
 .electron-drag button,
 .electron-drag a,
 .electron-drag input,
-.electron-drag [role="button"] {
+.electron-drag [role="button"],
+.electron-no-drag {
   -webkit-app-region: no-drag;
 }
+/* Invisible strip along the top of the chat pane that stands in for the
+   removed title bar. Inert outside Electron. */
+.drag-strip {
+  pointer-events: none;
+}
+html.electron .drag-strip {
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
 
-/* Native window control inset — only in Electron where the title bar is
-   hidden. The "electron"/"electron-win" classes are set on <html> via inline
-   script in index.html based on user-agent detection. */
-html.electron:not(.electron-win) .electron-drag {
-  padding-left: 96px;
+/* Native window control insets — only in Electron where the title bar is
+   hidden. public/theme-bootstrap.js sets "electron"/"electron-win" on <html>
+   from the user agent. */
+html.electron:not(.electron-win) .window-inset-start {
+  padding-left: 84px;
 }
 /* Windows draws its Window Controls Overlay (~138px) on the right. */
-html.electron-win .electron-drag {
+html.electron-win .window-inset-end {
   padding-right: 138px;
 }
 

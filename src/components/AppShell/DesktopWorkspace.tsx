@@ -1,10 +1,13 @@
 import { lazy, Suspense } from "react"
+import type { ReactNode } from "react"
 import { Code2, FolderSearch, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
+import { FloatingChrome } from "@/components/FloatingChrome"
 import { FileChangesPanel } from "@/components/FileChangesPanel"
 import { HoverRevealPanel } from "@/components/HoverRevealPanel"
+import { SidebarHeader } from "@/components/SidebarHeader"
 import { StatsPanel } from "@/components/StatsPanel"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
 import {
@@ -17,6 +20,7 @@ import { useSessionContext } from "@/contexts/SessionContext"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
+import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
 import { SessionInputFooter } from "./SessionInputFooter"
 import { NewSessionHeadline } from "./NewSessionHero"
@@ -31,13 +35,14 @@ import {
   resolveDesktopMainView,
   resolveDesktopProjectPath,
 } from "./desktopView"
+import type { DesktopMainView } from "./desktopView"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
 const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((module) => ({ default: module.ConfigBrowser })))
 const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then((module) => ({ default: module.PreviewPanel })))
 const ProjectFilesPanel = lazy(() => import("@/components/ProjectFilesPanel").then((module) => ({ default: module.ProjectFilesPanel })))
 
-type DesktopWorkspaceProps = Pick<
+type DesktopViewProps = Pick<
   DesktopAppShellProps,
   "navigation" | "sessionView" | "project"
 >
@@ -46,7 +51,8 @@ function DesktopSessionContent({
   navigation,
   sessionView,
   project,
-}: DesktopWorkspaceProps) {
+  floatingChrome,
+}: DesktopViewProps & { floatingChrome: ReactNode }) {
   const { state } = useAppContext()
   const { session } = useSessionContext()
   if (!session) return null
@@ -56,7 +62,10 @@ function DesktopSessionContent({
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={project.hasFileChanges && navigation.panels.showFileChanges ? 70 : 100} minSize="500px">
           <div className="relative flex h-full min-h-0 flex-col">
-            {sessionView.teamMembersBar}
+            {floatingChrome}
+            {sessionView.teamMembersBar && (
+              <div className="pt-10">{sessionView.teamMembersBar}</div>
+            )}
             <ChatArea
               searchInputRef={sessionView.searchInputRef}
               hasTodos={Boolean(sessionView.todoProgress) && sessionView.todosExpanded}
@@ -101,21 +110,18 @@ function DesktopMainView({
   navigation,
   sessionView,
   project,
-}: DesktopWorkspaceProps) {
+  view,
+  floatingChrome,
+}: DesktopViewProps & { view: DesktopMainView; floatingChrome: ReactNode }) {
   const { state } = useAppContext()
   const { session, sessionSource } = useSessionContext()
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
-  const view = resolveDesktopMainView({
-    mainView: state.mainView,
-    hasSession: Boolean(session),
-    pendingDirName: state.pendingDirName,
-  })
 
   if (view === "config") {
     return (
       <Suspense fallback={<LazyViewFallback label="Loading configuration…" />}>
-        <div className="motion-session-enter flex min-h-0 flex-1">
+        <div className="motion-session-enter flex min-h-0 flex-1 pt-10">
           <ConfigBrowser
             projectPath={resolveDesktopProjectPath({
               sessionCwd: session?.cwd,
@@ -131,7 +137,11 @@ function DesktopMainView({
   }
 
   if (view === "mission") {
-    return <MissionControlView navigation={navigation} />
+    return (
+      <div className="flex min-h-0 flex-1 flex-col pt-10">
+        <MissionControlView navigation={navigation} />
+      </div>
+    )
   }
 
   if (view === "session") {
@@ -140,6 +150,7 @@ function DesktopMainView({
         navigation={navigation}
         sessionView={sessionView}
         project={project}
+        floatingChrome={floatingChrome}
       />
     )
   }
@@ -161,7 +172,7 @@ function DesktopMainView({
         )}
       >
         {hasPendingTurns ? (
-          <div className="flex-1 overflow-y-auto px-4 py-6">
+          <div className="flex-1 overflow-y-auto px-4 pb-6 pt-14">
             <div className="mx-auto max-w-4xl">
               {sessionView.pendingTurns}
             </div>
@@ -224,8 +235,9 @@ export function DesktopWorkspace({
   navigation,
   sessionView,
   project,
-}: DesktopWorkspaceProps) {
-  const { state } = useAppContext()
+  chrome,
+}: DesktopAppShellProps) {
+  const { state, config } = useAppContext()
   const { session } = useSessionContext()
 
   function addProjectContext({
@@ -247,19 +259,73 @@ export function DesktopWorkspace({
     sessionView.chatInputRef.current?.focus()
   }
 
+  const view = resolveDesktopMainView({
+    mainView: state.mainView,
+    hasSession: Boolean(session),
+    pendingDirName: state.pendingDirName,
+  })
+
+  const sidebarHeader = (
+    <SidebarHeader
+      onToggleSidebar={navigation.panels.handleToggleSidebar}
+      onGoHome={navigation.actions.handleGoHome}
+      onOpenCommandPalette={chrome.onOpenCommandPalette}
+      sidebarShortcut={shortcutLabel("toggleSidebar")}
+      commandPaletteShortcut={shortcutLabel("commandPalette")}
+    />
+  )
+
+  const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config"
+
+  const floatingChrome = (
+    <FloatingChrome
+      showSidebar={navigation.panels.showSidebar}
+      sidebarRendered={sidebarRendered}
+      sidebarShortcut={shortcutLabel("toggleSidebar")}
+      showStats={navigation.panels.showStats}
+      showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
+      showFileChanges={navigation.panels.showFileChanges}
+      hasFileChanges={project.hasFileChanges}
+      killing={chrome.killing}
+      creatingSession={navigation.creatingSession}
+      onNewSession={navigation.onStartNewSession}
+      onDuplicateSession={navigation.handlers.handleDuplicateSession}
+      onOpenTerminal={project.onOpenTerminal}
+      onBackToMain={sessionView.onBackToMain}
+      onShowWorkflows={sessionView.onShowWorkflows}
+      workflowCount={sessionView.workflowCount}
+      onToggleSidebar={navigation.panels.handleToggleSidebar}
+      onToggleStats={navigation.panels.handleToggleStats}
+      onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
+      onToggleFileChanges={navigation.panels.handleToggleFileChanges}
+      showConfig={state.mainView === "config"}
+      onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
+      showMission={state.mainView === "mission"}
+      onToggleMission={navigation.panels.handleToggleMission}
+      onKillAll={chrome.onKillAll}
+      onOpenSettings={config.openConfigDialog}
+    />
+  )
+
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
-      {navigation.panels.showSidebar && state.mainView !== "config" && (
+      {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">
-          <PrimarySessionBrowser navigation={navigation} />
+          <PrimarySessionBrowser navigation={navigation} header={sidebarHeader} />
         </div>
       )}
 
       <main className="app-view-transition relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
+        {/* The session view hosts the chrome inside its transcript column so the
+            pills never sit on top of the file-changes panel beside it. */}
+        {view !== "session" && floatingChrome}
         <DesktopMainView
           navigation={navigation}
           sessionView={sessionView}
           project={project}
+          view={view}
+          floatingChrome={floatingChrome}
         />
       </main>
 

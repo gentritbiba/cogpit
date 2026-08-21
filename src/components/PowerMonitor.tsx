@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Activity, Check, Copy, RefreshCw } from "lucide-react"
+import { Check, Copy, RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -21,7 +21,6 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
-import { HeaderIconButton } from "@/components/header-shared"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { authFetch } from "@/lib/auth"
 import { formatAge } from "@/lib/format"
@@ -210,8 +209,12 @@ function CpuHistory({ values }: { values: number[] }) {
   )
 }
 
-export function PowerMonitor() {
-  const [open, setOpen] = useState(false)
+interface PowerMonitorProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function PowerMonitor({ open, onOpenChange }: PowerMonitorProps) {
   const [electronSnapshot, setElectronSnapshot] = useState<ElectronPerformanceSnapshot | null>(null)
   const [serverSnapshot, setServerSnapshot] = useState<ServerPerformanceSnapshot | null>(null)
   const [history, setHistory] = useState<number[]>([])
@@ -253,6 +256,7 @@ export function PowerMonitor() {
 
   useEffect(() => {
     if (!open) return
+    void refresh()
     const interval = window.setInterval(() => void refresh(), POLL_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [open, refresh])
@@ -291,153 +295,142 @@ export function PowerMonitor() {
   }
 
   return (
-    <>
-      <HeaderIconButton
-        icon={Activity}
-        label="Power & activity monitor"
-        onClick={() => {
-          setOpen(true)
-          void refresh()
-        }}
-      />
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="h-[min(780px,calc(100vh-2rem))] gap-0 p-0 sm:max-w-3xl">
-          <DialogHeader className="p-5 pb-4">
-            <div className="flex items-start gap-3 pr-8">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <DialogTitle>Power & activity monitor</DialogTitle>
-                  <Badge variant={status === "High" ? "destructive" : "secondary"}>{status}</Badge>
-                </div>
-                <DialogDescription className="mt-1">
-                  Live CPU, memory, and wakeups. Sampling runs only while this window is open.
-                </DialogDescription>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="h-[min(780px,calc(100vh-2rem))] gap-0 p-0 sm:max-w-3xl">
+        <DialogHeader className="p-5 pb-4">
+          <div className="flex items-start gap-3 pr-8">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <DialogTitle>Power & activity monitor</DialogTitle>
+                <Badge variant={status === "High" ? "destructive" : "secondary"}>{status}</Badge>
               </div>
-              <div className="flex shrink-0 gap-1">
-                <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
-                  <RefreshCw data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
-                  Refresh
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleCopy} disabled={!serverSnapshot && !electronSnapshot}>
-                  {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                  {copied ? "Copied" : "Copy data"}
-                </Button>
-              </div>
+              <DialogDescription className="mt-1">
+                Live CPU, memory, and wakeups. Sampling runs only while this window is open.
+              </DialogDescription>
             </div>
-          </DialogHeader>
+            <div className="flex shrink-0 gap-1">
+              <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
+                <RefreshCw data-icon="inline-start" className={cn(refreshing && "animate-spin")} />
+                Refresh
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleCopy} disabled={!serverSnapshot && !electronSnapshot}>
+                {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                {copied ? "Copied" : "Copy data"}
+              </Button>
+            </div>
+          </div>
+        </DialogHeader>
 
-          <Separator />
+        <Separator />
 
-          <ScrollArea className="min-h-0 min-w-0 flex-1">
-            <div className="flex flex-col gap-4 p-5">
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
+        <ScrollArea className="min-h-0 min-w-0 flex-1">
+          <div className="flex flex-col gap-4 p-5">
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>Current load</CardTitle>
+                <CardDescription>{diagnosis(totalCpu, hottest, systemLeaks)}</CardDescription>
+                <CardAction>
+                  <span className={cn(
+                    "font-mono text-lg font-semibold tabular-nums",
+                    totalCpu >= 80 && "text-destructive",
+                  )}>
+                    {formatCpu(totalCpu)} CPU
+                  </span>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <CpuHistory values={history} />
+              </CardContent>
+            </Card>
+
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>Processes</CardTitle>
+                <CardDescription>Which part of Cogpit is consuming CPU and memory.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {processes.length > 0 ? processes.map((metric, index) => (
+                  <div key={metric.pid}>
+                    {index > 0 && <Separator />}
+                    <ProcessRow metric={metric} />
+                  </div>
+                )) : serverSnapshot ? (
+                  <ProcessRow metric={{
+                    pid: 0,
+                    name: "Server",
+                    type: "Node",
+                    cpuPercent: serverSnapshot.cpuPercent,
+                    memoryMb: serverSnapshot.memory.rssMb,
+                  }} />
+                ) : (
+                  <p className="py-3 text-sm text-muted-foreground">Collecting process data…</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {systemProcesses.length > 0 && (
               <Card size="sm">
                 <CardHeader>
-                  <CardTitle>Current load</CardTitle>
-                  <CardDescription>{diagnosis(totalCpu, hottest, systemLeaks)}</CardDescription>
-                  <CardAction>
-                    <span className={cn(
-                      "font-mono text-lg font-semibold tabular-nums",
-                      totalCpu >= 80 && "text-destructive",
-                    )}>
-                      {formatCpu(totalCpu)} CPU
-                    </span>
-                  </CardAction>
+                  <CardTitle>Agent processes</CardTitle>
+                  <CardDescription>
+                    Claude sessions, browsers, and scripts running outside Cogpit.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <CpuHistory values={history} />
-                </CardContent>
-              </Card>
-
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle>Processes</CardTitle>
-                  <CardDescription>Which part of Cogpit is consuming CPU and memory.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {processes.length > 0 ? processes.map((metric, index) => (
+                  {systemProcesses.map((metric, index) => (
                     <div key={metric.pid}>
                       {index > 0 && <Separator />}
-                      <ProcessRow metric={metric} />
+                      <SystemProcessRow metric={metric} onKill={(pid) => void handleKillProcess(pid)} />
                     </div>
-                  )) : serverSnapshot ? (
-                    <ProcessRow metric={{
-                      pid: 0,
-                      name: "Server",
-                      type: "Node",
-                      cpuPercent: serverSnapshot.cpuPercent,
-                      memoryMb: serverSnapshot.memory.rssMb,
-                    }} />
-                  ) : (
-                    <p className="py-3 text-sm text-muted-foreground">Collecting process data…</p>
-                  )}
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Server activity</CardTitle>
+                  <CardDescription>
+                    File checks, streams, and agent work over the last {serverSnapshot?.sampleWindowSeconds ?? 10} seconds.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ActivityRows
+                    metrics={serverSnapshot?.activities ?? []}
+                    emptyLabel="No watched-file or stream activity in this sample."
+                  />
                 </CardContent>
               </Card>
 
-              {systemProcesses.length > 0 && (
-                <Card size="sm">
-                  <CardHeader>
-                    <CardTitle>Agent processes</CardTitle>
-                    <CardDescription>
-                      Claude sessions, browsers, and scripts running outside Cogpit.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {systemProcesses.map((metric, index) => (
-                      <div key={metric.pid}>
-                        {index > 0 && <Separator />}
-                        <SystemProcessRow metric={metric} onKill={(pid) => void handleKillProcess(pid)} />
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <Card size="sm">
-                  <CardHeader>
-                    <CardTitle>Server activity</CardTitle>
-                    <CardDescription>
-                      File checks, streams, and agent work over the last {serverSnapshot?.sampleWindowSeconds ?? 10} seconds.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ActivityRows
-                      metrics={serverSnapshot?.activities ?? []}
-                      emptyLabel="No watched-file or stream activity in this sample."
-                    />
-                  </CardContent>
-                </Card>
-
-                <Card size="sm">
-                  <CardHeader>
-                    <CardTitle>API activity</CardTitle>
-                    <CardDescription>Requests ranked by recent frequency and time.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ActivityRows
-                      metrics={serverSnapshot?.requests ?? []}
-                      emptyLabel="No API requests in this sample."
-                    />
-                  </CardContent>
-                </Card>
-              </div>
-
-              {serverSnapshot && (
-                <p className="text-xs text-muted-foreground">
-                  Server event loop {formatCpu(serverSnapshot.eventLoopPercent)} · heap {formatMemory(serverSnapshot.memory.heapUsedMb)} · RSS {formatMemory(serverSnapshot.memory.rssMb)}
-                </p>
-              )}
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>API activity</CardTitle>
+                  <CardDescription>Requests ranked by recent frequency and time.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ActivityRows
+                    metrics={serverSnapshot?.requests ?? []}
+                    emptyLabel="No API requests in this sample."
+                  />
+                </CardContent>
+              </Card>
             </div>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-    </>
+
+            {serverSnapshot && (
+              <p className="text-xs text-muted-foreground">
+                Server event loop {formatCpu(serverSnapshot.eventLoopPercent)} · heap {formatMemory(serverSnapshot.memory.heapUsedMb)} · RSS {formatMemory(serverSnapshot.memory.rssMb)}
+              </p>
+            )}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   )
 }

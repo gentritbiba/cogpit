@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 
 import { PowerMonitor } from "@/components/PowerMonitor"
 import type {
@@ -69,13 +68,12 @@ describe("PowerMonitor", () => {
   })
 
   it("does not sample until opened, then identifies the busiest process and activity", async () => {
-    const user = userEvent.setup()
-    const view = render(<PowerMonitor />)
+    const view = render(<PowerMonitor open={false} onOpenChange={vi.fn()} />)
 
     expect(mocks.authFetch).not.toHaveBeenCalled()
     expect(mocks.getElectronSnapshot).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole("button", { name: "Power & activity monitor" }))
+    view.rerender(<PowerMonitor open onOpenChange={vi.fn()} />)
 
     expect(await screen.findByRole("heading", { name: "Power & activity monitor" })).toBeInTheDocument()
     await waitFor(() => expect(mocks.authFetch).toHaveBeenCalledWith("/api/performance"))
