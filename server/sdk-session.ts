@@ -60,14 +60,10 @@ export interface ClaudeCliProbes {
   readVersion?: (binPath: string) => number[] | undefined
 }
 
-// The SDK ships the Claude CLI as a native binary inside a platform-specific
-// optional package (e.g. @anthropic-ai/claude-agent-sdk-darwin-arm64) — there
-// is no cli.js next to sdk.mjs anymore. That vendored copy lags whatever the
-// user has installed, and its model catalog is what feeds our model picker, so
-// prefer the CLI on PATH whenever it is at least as new. Failing that: inside a
-// packaged Electron app the vendored binary resolves into app.asar, which
-// cannot be spawned (asar is only virtualized inside Electron), so point at the
-// unpacked copy; everywhere else the SDK's own resolution already works.
+// The SDK ships a Claude CLI binary in a platform package. Development and
+// server installs can use it as a fallback, but Electron packages omit it
+// because Cogpit requires an installed CLI. Prefer that installed CLI whenever
+// it is at least as new as the SDK copy available in the current environment.
 export function resolveClaudeCliPath(
   resolveModule: (id: string) => string,
   probes: ClaudeCliProbes = {},
@@ -93,7 +89,9 @@ export function resolveClaudeCliPath(
   const installed = findOnPath()
   if (!installed) return fallback
   const installedVersion = readVersion(installed)
-  if (!installedVersion) return fallback
+  // Without a version there is nothing to compare, so only reach for the
+  // vendored copy when one exists; otherwise the installed CLI is all there is.
+  if (!installedVersion) return vendoredExecutable ? fallback : installed
 
   // Never downgrade: a CLI older than the one the SDK was built against can
   // break the control protocol, not just the model list.

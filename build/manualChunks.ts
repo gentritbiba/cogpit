@@ -36,7 +36,6 @@ const UI_PATTERNS = [
   "node_modules/@radix-ui/",
   "node_modules/lucide-react/",
   "node_modules/react-resizable-panels/",
-  "node_modules/@tanstack/react-virtual/",
   "node_modules/class-variance-authority/",
   "node_modules/clsx/",
   "node_modules/tailwind-merge/",

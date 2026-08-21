@@ -261,6 +261,17 @@ describe("resolveClaudeCliPath", () => {
     expect(result).toBeUndefined()
   })
 
+  it("uses an installed CLI with an unreadable version when no vendored binary exists", async () => {
+    const { resolveClaudeCliPath } = await loadModule()
+    const result = resolveClaudeCliPath(() => {
+      throw new Error("Cannot find module")
+    }, {
+      findOnPath: () => installedBin,
+      readVersion: () => undefined,
+    })
+    expect(result).toBe(installedBin)
+  })
+
   it("uses the installed CLI when the vendored binary has no readable version", async () => {
     const { resolveClaudeCliPath } = await loadModule()
     const result = resolveClaudeCliPath(devResolve, {
