@@ -268,7 +268,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     <div
       className={cn(
         "relative bg-background pb-0",
-        compact ? "px-2 pt-2" : "px-3 pt-3",
+        compact ? "px-2 pt-2" : "px-3 pt-2",
         isDragOver && "ring-2 ring-info/40 ring-inset",
       )}
       onDragOver={handleDragOver}

@@ -162,7 +162,7 @@ function DesktopMainView({
       >
         {hasPendingTurns ? (
           <div className="flex-1 overflow-y-auto px-4 py-6">
-            <div className="mx-auto max-w-3xl">
+            <div className="mx-auto max-w-4xl">
               {sessionView.pendingTurns}
             </div>
           </div>
@@ -250,7 +250,7 @@ export function DesktopWorkspace({
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
       {navigation.panels.showSidebar && state.mainView !== "config" && (
-        <div className="view-transition-sidebar panel-enter w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground">
+        <div className="view-transition-sidebar panel-enter w-80 shrink-0 border-r bg-sidebar text-sidebar-foreground">
           <PrimarySessionBrowser navigation={navigation} />
         </div>
       )}

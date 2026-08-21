@@ -10,7 +10,7 @@ export function SessionInputFooter({ floating, children }: SessionInputFooterPro
   if (floating) {
     return (
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center">
-        <div className="pointer-events-auto w-full max-w-3xl border-t bg-background px-3 pt-3">
+        <div className="pointer-events-auto w-full max-w-4xl border-t bg-background px-3 pt-3">
           {children}
         </div>
       </div>
@@ -19,7 +19,7 @@ export function SessionInputFooter({ floating, children }: SessionInputFooterPro
 
   return (
     <div className="flex w-full shrink-0 justify-center">
-      <div className="w-full max-w-3xl px-3">
+      <div className="w-full max-w-4xl px-3">
         {children}
       </div>
     </div>

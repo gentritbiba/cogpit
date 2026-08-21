@@ -50,7 +50,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
 
   if (loading) {
     return (
-      <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+      <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-4xl">
         <div className="flex items-center gap-2 rounded-lg border bg-popover p-3 text-popover-foreground shadow-sm">
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Loading suggestions...</span>
@@ -61,7 +61,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
 
   if (suggestions.length === 0) {
     return (
-      <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+      <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-4xl">
         <div className="rounded-lg border bg-popover p-3 text-popover-foreground shadow-sm">
           <span className="text-xs text-muted-foreground">
             {filter ? `No commands or skills matching "${filter}"` : "No commands or skills found"}
@@ -82,7 +82,7 @@ export const SlashSuggestions = memo(function SlashSuggestions({
   ]
 
   return (
-    <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-3xl">
+    <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-4xl">
       <Command
         id="slash-suggestions"
         value={suggestions[selectedIndex] ? `${suggestions[selectedIndex].type}-${suggestions[selectedIndex].name}` : undefined}

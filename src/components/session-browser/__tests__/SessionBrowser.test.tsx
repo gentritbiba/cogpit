@@ -26,7 +26,7 @@ describe("SessionBrowser", () => {
       />,
     )
 
-    expect(container.firstElementChild).toHaveClass("w-72")
+    expect(container.firstElementChild).toHaveClass("w-80")
     expect(screen.queryByRole("tab")).not.toBeInTheDocument()
     expect(screen.queryByText("Browse")).not.toBeInTheDocument()
     expect(screen.queryByText("Teams")).not.toBeInTheDocument()
@@ -46,6 +46,6 @@ describe("SessionBrowser", () => {
     )
 
     expect(container.firstElementChild).toHaveClass("w-full")
-    expect(container.firstElementChild).not.toHaveClass("w-72")
+    expect(container.firstElementChild).not.toHaveClass("w-80")
   })
 })

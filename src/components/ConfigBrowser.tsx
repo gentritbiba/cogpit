@@ -211,7 +211,7 @@ export const ConfigBrowser = memo(function ConfigBrowser({ projectPath, initialF
 
   return (
     <div className="flex flex-1 min-h-0 min-w-0">
-      <div className="flex min-h-0 w-72 shrink-0 flex-col border-r bg-sidebar">
+      <div className="flex min-h-0 w-80 shrink-0 flex-col border-r bg-sidebar">
         <div className="flex h-11 items-center gap-2 border-b px-3">
           <span className="text-sm font-medium text-foreground">Configuration</span>
           {projectPath && (
