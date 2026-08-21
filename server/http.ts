@@ -11,6 +11,13 @@ export type UseFn = (path: string, handler: Middleware) => void
 
 const DEFAULT_MAX_REQUEST_BODY_BYTES = 64 * 1024
 
+/**
+ * Ceiling enforced by the global bodySizeLimit middleware, and the cap a route
+ * must opt into to accept a pasted image — DEFAULT_MAX_REQUEST_BODY_BYTES is
+ * sized for small JSON.
+ */
+export const MAX_REQUEST_BODY_BYTES = 5 * 1024 * 1024
+
 export class HttpBodyError extends Error {
   constructor(
     message: string,

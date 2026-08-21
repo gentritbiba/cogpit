@@ -601,6 +601,32 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     expect(res._getData().code).toBe("INVALID_REQUEST")
     expect(mockedCreateSDKSession).not.toHaveBeenCalled()
   })
+  /**
+   * A pasted screenshot is base64 in the JSON body, and the client compresses
+   * only down to 3.5 MB (useImageUpload.ts). This route once inherited
+   * readJsonBody's 64 KB default, so every real image 413'd here while the same
+   * image sent to /api/send-message went through.
+   */
+  it("accepts a pasted image far larger than the default 64 KB body cap", async () => {
+    const images = [{ data: "A".repeat(200_000), mediaType: "image/png" }]
+    const body = JSON.stringify({
+      dirName: "-tmp-my-project",
+      cwd: "/tmp/my-project",
+      message: "look at this",
+      images,
+    })
+    expect(body.length).toBeGreaterThan(64 * 1024)
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(res._getStatus()).toBe(200)
+    expect(mockedCreateSDKSession).toHaveBeenCalledWith(
+      expect.objectContaining({ images }),
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------

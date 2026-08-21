@@ -30,7 +30,7 @@ import {
   findNewestCodexSessionForCwd,
   formatCodexRolloutFileName,
 } from "../../helpers"
-import { withJsonBody, type UseFn } from "../../http"
+import { withJsonBody, MAX_REQUEST_BODY_BYTES, type UseFn } from "../../http"
 import type { ImageAttachment } from "../../sdk-session"
 import type { PermissionsConfig } from "../../../shared/providers/types"
 import type { PersistentSession } from "../../helpers"
@@ -701,6 +701,6 @@ export function registerCreateAndSendRoute(use: UseFn) {
         res.statusCode = 400
         res.end(JSON.stringify({ error: "Invalid JSON body" }))
       }
-    })
+    }, { maxBytes: MAX_REQUEST_BODY_BYTES })
   })
 }

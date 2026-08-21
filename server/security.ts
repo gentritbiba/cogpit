@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Duplex } from "node:stream"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-import { sendJson, type NextFn } from "./http"
+import { sendJson, MAX_REQUEST_BODY_BYTES, type NextFn } from "./http"
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
@@ -587,14 +587,12 @@ export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, ne
 
 // ── Body size limit ─────────────────────────────────────────────────
 
-const MAX_BODY_SIZE = 5 * 1024 * 1024 // 5MB
-
 export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   if (req.method !== "POST" && req.method !== "PUT" && req.method !== "PATCH") return next()
 
   let size = 0
   const contentLength = parseInt(req.headers["content-length"] || "", 10)
-  if (contentLength > MAX_BODY_SIZE) {
+  if (contentLength > MAX_REQUEST_BODY_BYTES) {
     res.statusCode = 413
     res.setHeader("Content-Type", "application/json")
     res.end(JSON.stringify({ error: "Request body too large" }))
@@ -606,7 +604,7 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
     if (event === "data") {
       const wrapped = (chunk: Buffer | string) => {
         size += typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length
-        if (size > MAX_BODY_SIZE) {
+        if (size > MAX_REQUEST_BODY_BYTES) {
           res.statusCode = 413
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({ error: "Request body too large" }))
