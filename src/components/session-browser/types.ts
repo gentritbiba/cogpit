@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 export interface PendingSessionInfo {
   dirName: string
   cwd?: string | null
@@ -15,4 +17,6 @@ export interface SessionBrowserProps {
   onDeleteSession?: (dirName: string, fileName: string) => void
   liveSessionsRefreshRef?: React.MutableRefObject<(() => void) | null>
   onPrefetchSession?: (dirName: string, fileName: string) => void
+  /** Desktop-only row above the session list (home, search, collapse). */
+  header?: ReactNode
 }

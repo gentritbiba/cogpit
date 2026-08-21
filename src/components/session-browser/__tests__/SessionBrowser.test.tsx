@@ -48,4 +48,17 @@ describe("SessionBrowser", () => {
     expect(container.firstElementChild).toHaveClass("w-full")
     expect(container.firstElementChild).not.toHaveClass("w-72")
   })
+
+  it("renders the header slot above the sessions list", () => {
+    const { container } = render(
+      <SessionBrowser
+        activeSessionKey={null}
+        onSelectSession={vi.fn()}
+        header={<div data-testid="sidebar-header" />}
+      />,
+    )
+
+    const aside = container.firstElementChild
+    expect(aside?.firstElementChild).toBe(screen.getByTestId("sidebar-header"))
+  })
 })
