@@ -23,6 +23,7 @@ import { useSessionContext } from "@/contexts/SessionContext"
 import { useSkillMetadata } from "@/hooks/useSkillMetadata"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import type { Turn, TurnContentBlock } from "@/lib/types"
+import { hasEditToolCalls } from "../../../shared/session/edit-calls"
 import { cn } from "@/lib/utils"
 import { formatDuration, getTurnDuration } from "@/lib/format"
 import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
@@ -170,10 +171,8 @@ const TurnSectionInner = memo(function TurnSectionInner({
   }, [isNear])
 
   const hasFileChanges =
-    turn.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write") ||
-    turn.subAgentActivity.some((msg) =>
-      msg.toolCalls.some((tc) => tc.name === "Edit" || tc.name === "Write"),
-    )
+    hasEditToolCalls(turn.toolCalls, cwd) ||
+    turn.subAgentActivity.some((msg) => hasEditToolCalls(msg.toolCalls, cwd))
 
   const foldPhase = isTurnDone ? "settled" : "working"
   const foldPlan = useMemo(
@@ -397,6 +396,24 @@ function TurnTimer({
 
 // ── Content blocks renderer ──────────────────────────────────────────────────
 
+/**
+ * A key that follows a block rather than its position. Live updates re-derive
+ * every block, and a late sub-agent flush can insert one mid-turn; a positional
+ * key would remount everything after it and silently collapse groups the user
+ * had opened.
+ */
+function blockIdentity(block: TurnContentBlock): string | null {
+  switch (block.kind) {
+    case "tool_calls":
+      return block.toolCalls[0]?.id ?? null
+    case "sub_agent":
+    case "background_agent":
+      return block.messages[0]?.parentToolUseId ?? block.messages[0]?.agentId ?? null
+    default:
+      return block.timestamp ?? null
+  }
+}
+
 function ContentBlocks({
   blocks,
   model,
@@ -419,6 +436,15 @@ function ContentBlocks({
   const elements: React.ReactNode[] = []
   // Indent for every nested block, so the rails all line up.
   const nestIndent = isMobile ? "ml-0 pl-2" : "ml-1 pl-3"
+  const stackGap = isMobile ? "gap-2" : "gap-3"
+
+  const keyUses = new Map<string, number>()
+  const keyFor = (block: TurnContentBlock, index: number) => {
+    const base = blockIdentity(block) ?? `at-${index}`
+    const used = keyUses.get(base) ?? 0
+    keyUses.set(base, used + 1)
+    return used === 0 ? base : `${base}#${used}`
+  }
 
   let i = 0
   while (i < blocks.length) {
@@ -427,74 +453,65 @@ function ContentBlocks({
     // Group consecutive thinking + tool_calls blocks into one collapsible
     if (block.kind === "thinking" || block.kind === "tool_calls") {
       const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i)
+      // A lone tool_calls run has nothing to interleave, so it skips
+      // activityItems — but it keeps the same key, since a run that later grows
+      // a thinking block is still the same group to the user.
+      const isOrphanToolRun = items.length === 1 && items[0].kind === "tool_calls"
 
-      // Single tool_calls group with no thinking → render as orphan tool calls
-      if (items.length === 1 && items[0].kind === "tool_calls") {
-        elements.push(
-          <div key={`tools-${i}`} className={cn(NEST_RAIL, nestIndent)}>
-            <CollapsibleToolCalls
-              toolCalls={toolCalls}
-              expandAll={expandAll}
-              expandToolPayloads={expandToolPayloads}
-              activeToolCallId={activeToolCallId}
-              isAgentActive={isAgentActive}
-              skillMetadata={skillMetadata}
-            />
-          </div>
-        )
-      // Mixed or multiple items → grouped collapsible
-      } else {
-        elements.push(
-          <div key={`activity-${i}`} className={cn(NEST_RAIL, nestIndent)}>
-            <CollapsibleToolCalls
-              toolCalls={toolCalls}
-              expandAll={expandAll}
-              expandToolPayloads={expandToolPayloads}
-              activeToolCallId={activeToolCallId}
-              isAgentActive={isAgentActive}
-              activityItems={items}
-              thinkingCount={thinkingCount}
-              thoughtForMs={thoughtForMs}
-              skillMetadata={skillMetadata}
-            />
-          </div>
-        )
-      }
+      elements.push(
+        <div key={keyFor(block, i)} className={cn(NEST_RAIL, nestIndent)}>
+          <CollapsibleToolCalls
+            toolCalls={toolCalls}
+            expandAll={expandAll}
+            expandToolPayloads={expandToolPayloads}
+            activeToolCallId={activeToolCallId}
+            isAgentActive={isAgentActive}
+            activityItems={isOrphanToolRun ? undefined : items}
+            thinkingCount={thinkingCount}
+            thoughtForMs={thoughtForMs}
+            skillMetadata={skillMetadata}
+          />
+        </div>
+      )
       i = nextIndex
       continue
     }
 
     if (block.kind === "text") {
       const { items, toolCalls, thinkingCount, thoughtForMs, nextIndex } = collectActivity(blocks, i + 1)
-      block.text.forEach((text, ti) => {
-        const isLastTextInBlock = ti === block.text.length - 1
-        const hasFollowingActivity = isLastTextInBlock && (toolCalls.length > 0 || thinkingCount > 0)
-        elements.push(
-          <div key={`text-${i}-${ti}`}>
-            <AssistantText
-              text={text}
-              model={model}
-              timestamp={block.timestamp}
-              compact={isMobile}
-            />
-            {hasFollowingActivity && (
-              <div className={cn("mt-1.5", NEST_RAIL, nestIndent)}>
-                <CollapsibleToolCalls
-                  toolCalls={toolCalls}
-                  expandAll={expandAll}
-                  expandToolPayloads={expandToolPayloads}
-                  activeToolCallId={activeToolCallId}
-                  isAgentActive={isAgentActive}
-                  activityItems={thinkingCount > 0 ? items : undefined}
-                  thinkingCount={thinkingCount}
-                  thoughtForMs={thoughtForMs}
-                  skillMetadata={skillMetadata}
-                />
-              </div>
-            )}
+      // The trailing activity sits inside the text element rather than after it,
+      // so streaming another paragraph into this block never moves the group to
+      // a different element and remounts it.
+      elements.push(
+        <div key={keyFor(block, i)}>
+          <div className={cn("flex flex-col", stackGap)}>
+            {block.text.map((text, ti) => (
+              <AssistantText
+                key={ti}
+                text={text}
+                model={model}
+                timestamp={block.timestamp}
+                compact={isMobile}
+              />
+            ))}
           </div>
-        )
-      })
+          {(toolCalls.length > 0 || thinkingCount > 0) && (
+            <div className={cn("mt-1.5", NEST_RAIL, nestIndent)}>
+              <CollapsibleToolCalls
+                toolCalls={toolCalls}
+                expandAll={expandAll}
+                expandToolPayloads={expandToolPayloads}
+                activeToolCallId={activeToolCallId}
+                isAgentActive={isAgentActive}
+                activityItems={thinkingCount > 0 ? items : undefined}
+                thinkingCount={thinkingCount}
+                thoughtForMs={thoughtForMs}
+                skillMetadata={skillMetadata}
+              />
+            </div>
+          )}
+        </div>
+      )
       i = nextIndex
       continue
     }
@@ -502,7 +519,7 @@ function ContentBlocks({
     if (block.kind === "queued_prompt") {
       elements.push(
         <div
-          key={`queued-prompt-${block.timestamp ?? "untimed"}-${block.content}`}
+          key={keyFor(block, i)}
           className={cn(
             isMobile ? "rounded-lg p-2.5" : "rounded-lg p-3",
             PROMPT_CARD,
@@ -518,7 +535,7 @@ function ContentBlocks({
 
     if (block.kind === "sub_agent") {
       elements.push(
-        <div key={`agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
+        <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
           <SubAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -528,7 +545,7 @@ function ContentBlocks({
 
     if (block.kind === "background_agent") {
       elements.push(
-        <div key={`bg-agent-${i}`} className={cn(AGENT_RAIL, nestIndent)}>
+        <div key={keyFor(block, i)} className={cn(AGENT_RAIL, nestIndent)}>
           <BackgroundAgentPanel messages={block.messages} expandAll={expandAll} />
         </div>
       )
@@ -538,7 +555,7 @@ function ContentBlocks({
 
     if (block.kind === "hook_event") {
       elements.push(
-        <HookEventChip key={`hook-${i}`} events={block.events} />
+        <HookEventChip key={keyFor(block, i)} events={block.events} />
       )
       i++
       continue
@@ -547,7 +564,7 @@ function ContentBlocks({
     if (block.kind === "plan_mode") {
       elements.push(
         <PlanModeBlock
-          key={`plan-${i}`}
+          key={keyFor(block, i)}
           plan={block.plan}
           planFilePath={block.planFilePath}
           status={block.status}
@@ -565,7 +582,7 @@ function ContentBlocks({
     if (block.kind === "recap") {
       elements.push(
         <RecapBanner
-          key={`recap-${i}`}
+          key={keyFor(block, i)}
           content={block.content}
           timestamp={block.timestamp}
         />
