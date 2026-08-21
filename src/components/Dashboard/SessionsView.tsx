@@ -1,5 +1,5 @@
 import { Fragment } from "react"
-import { ChevronRight, FolderOpen, GitBranch, MessageSquare, Plus } from "lucide-react"
+import { MessageSquare, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -21,47 +21,12 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/Spinner"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
-import {
-  formatFileSize,
-  formatRelativeTime,
-  projectName,
-  shortenModel,
-  shortPath,
-  truncate,
-} from "@/lib/format"
+import { useSessionNames } from "@/hooks/useSessionNames"
+import { projectName, shortPath } from "@/lib/format"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
-
-const LIVE_THRESHOLD_MS = 2 * 60 * 1000
-
-function isLive(lastModified: string | null): boolean {
-  if (!lastModified) return false
-  return Date.now() - new Date(lastModified).getTime() < LIVE_THRESHOLD_MS
-}
-
-interface ProjectInfo {
-  dirName: string
-  path: string
-  shortName: string
-  sessionCount: number
-  lastModified: string | null
-}
-
-interface SessionInfo {
-  fileName: string
-  sessionId: string
-  size: number
-  lastModified: string | null
-  version?: string
-  gitBranch?: string
-  model?: string
-  slug?: string
-  cwd?: string
-  firstUserMessage?: string
-  timestamp?: string
-  turnCount?: number
-  lineCount?: number
-  branchedFrom?: { sessionId: string; turnIndex?: number | null }
-}
+import { SessionListRow } from "./SessionListRow"
+import { sessionRowTitle } from "./sessionPresentation"
+import type { ProjectInfo, SessionInfo } from "./types"
 
 interface SessionsViewProps {
   selectedProject: ProjectInfo
@@ -100,24 +65,7 @@ export function SessionsView({
   onRetryFetch,
   loadMoreSessions,
 }: SessionsViewProps) {
-  function withContextMenu(session: SessionInfo, content: React.ReactNode): React.ReactNode {
-    if (!onDuplicateSession && !onDeleteSession) return content
-
-    return (
-      <SessionContextMenu
-        sessionLabel={session.slug || session.sessionId.slice(0, 12)}
-        onDuplicate={onDuplicateSession
-          ? () => onDuplicateSession(selectedProject.dirName, session.fileName)
-          : undefined}
-        onDelete={onDeleteSession
-          ? () => onDeleteSession(selectedProject.dirName, session.fileName)
-          : undefined}
-      >
-        {content}
-      </SessionContextMenu>
-    )
-  }
-
+  const { names: sessionNames, rename: renameSession } = useSessionNames()
   const selectedProjectName = projectName(selectedProject.path)
 
   return (
@@ -187,7 +135,7 @@ export function SessionsView({
                 </EmptyTitle>
                 <EmptyDescription>
                   {searchFilter
-                    ? "Try a session title, model, or ID."
+                    ? "Try a session title, prompt, model, or branch."
                     : "Start a session in this project and it will appear here."}
                 </EmptyDescription>
               </EmptyHeader>
@@ -195,71 +143,28 @@ export function SessionsView({
           ) : (
             <>
               <div className="overflow-hidden rounded-lg border bg-card">
-                {filteredSessions.map((session, index) => {
-                  const live = isLive(session.lastModified)
-                  const title = session.slug || truncate(session.sessionId, 16)
-
-                  const row = (
-                    <button
-                      type="button"
-                      onClick={() => onSelectSession(selectedProject.dirName, session.fileName)}
-                      className="motion-list-item group flex w-full flex-col gap-3 px-4 py-3.5 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-row sm:items-center"
+                {filteredSessions.map((session, index) => (
+                  <Fragment key={session.fileName}>
+                    {index > 0 && <Separator />}
+                    <SessionContextMenu
+                      sessionLabel={sessionRowTitle(session)}
+                      customName={sessionNames[session.sessionId]}
+                      onRename={(name) => renameSession(session.sessionId, name)}
+                      onDuplicate={onDuplicateSession
+                        ? () => onDuplicateSession(selectedProject.dirName, session.fileName)
+                        : undefined}
+                      onDelete={onDeleteSession
+                        ? () => onDeleteSession(selectedProject.dirName, session.fileName)
+                        : undefined}
                     >
-                      <span className="flex min-w-0 flex-1 items-center gap-3">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
-                          <FolderOpen className="size-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium">{title}</span>
-                          <span className="block truncate text-sm text-muted-foreground">
-                            {session.firstUserMessage
-                              ? truncate(session.firstUserMessage, 100)
-                              : "No opening message"}
-                          </span>
-                        </span>
-                      </span>
-
-                      <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-11 text-xs text-muted-foreground sm:justify-end sm:pl-0">
-                        {live && (
-                          <Badge variant="secondary">
-                            <span
-                              aria-hidden="true"
-                              data-icon="inline-start"
-                              className="size-1.5 rounded-full bg-success"
-                            />
-                            Active
-                          </Badge>
-                        )}
-                        {session.model && (
-                          <Badge variant="outline">{shortenModel(session.model)}</Badge>
-                        )}
-                        {(session.turnCount ?? 0) > 0 && (
-                          <span>{session.turnCount} turns</span>
-                        )}
-                        {session.gitBranch && (
-                          <span className="flex max-w-36 items-center gap-1 truncate">
-                            <GitBranch className="size-3 shrink-0" />
-                            {truncate(session.gitBranch, 20)}
-                          </span>
-                        )}
-                        <span>{formatFileSize(session.size)}</span>
-                        {session.lastModified && (
-                          <span className="hidden whitespace-nowrap md:inline">
-                            {formatRelativeTime(session.lastModified)}
-                          </span>
-                        )}
-                        <ChevronRight className="size-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
-                      </span>
-                    </button>
-                  )
-
-                  return (
-                    <Fragment key={session.fileName}>
-                      {index > 0 && <Separator />}
-                      {withContextMenu(session, row)}
-                    </Fragment>
-                  )
-                })}
+                      <SessionListRow
+                        session={session}
+                        customName={sessionNames[session.sessionId]}
+                        onSelect={() => onSelectSession(selectedProject.dirName, session.fileName)}
+                      />
+                    </SessionContextMenu>
+                  </Fragment>
+                ))}
               </div>
 
               {sessions.length < sessionsTotal && !searchFilter && (

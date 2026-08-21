@@ -50,6 +50,21 @@ function renderView(overrides: Partial<React.ComponentProps<typeof SessionsView>
   return props
 }
 
+const richSession = {
+  ...session,
+  sessionId: "session-2",
+  fileName: "session-2.jsonl",
+  aiTitle: "Rewrite the dashboard rows",
+  lastUserMessage: "now make the rows denser",
+  lastActivityAt: new Date().toISOString(),
+  timestamp: new Date(Date.now() - 90 * 60_000).toISOString(),
+  agentStatus: "tool_use" as const,
+  agentToolName: "Bash",
+  pullRequests: [
+    { number: 482, url: "https://github.com/acme/cogpit/pull/482", repo: "acme/cogpit" },
+  ],
+}
+
 describe("SessionsView", () => {
   it("opens a session from the compact project list", async () => {
     const user = userEvent.setup()
@@ -81,6 +96,36 @@ describe("SessionsView", () => {
     renderView({ searchFilter: "missing", filteredSessions: [] })
 
     expect(screen.getByText("No sessions match your search")).toBeInTheDocument()
-    expect(screen.getByText("Try a session title, model, or ID.")).toBeInTheDocument()
+    expect(screen.getByText("Try a session title, prompt, model, or branch.")).toBeInTheDocument()
+  })
+
+  it("surfaces what a session actually did", () => {
+    renderView({ sessions: [richSession], filteredSessions: [richSession] })
+
+    // The generated title wins over the slug, and the latest prompt is the preview.
+    expect(screen.getByText("Rewrite the dashboard rows")).toBeInTheDocument()
+    expect(screen.getByText("now make the rows denser")).toBeInTheDocument()
+
+    expect(screen.getByText("Using Bash")).toBeInTheDocument()
+    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.getByText("5 turns")).toBeInTheDocument()
+    expect(screen.getByText("main")).toBeInTheDocument()
+    expect(screen.getByText("1h 30m")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Pull request #482" })).toBeInTheDocument()
+  })
+
+  it("flags a session that ended badly instead of claiming it is live", () => {
+    const stopped = {
+      ...richSession,
+      lastActivityAt: new Date(Date.now() - 86_400_000).toISOString(),
+      lastModified: new Date(Date.now() - 86_400_000).toISOString(),
+      agentStatus: "completed" as const,
+      agentToolName: undefined,
+      agentTerminalReason: "max_turns",
+    }
+    renderView({ sessions: [stopped], filteredSessions: [stopped] })
+
+    expect(screen.getByText("Stopped — turn limit reached")).toBeInTheDocument()
+    expect(screen.queryByText("Active")).not.toBeInTheDocument()
   })
 })

@@ -17,25 +17,12 @@ import { useProjectNames } from "@/hooks/useProjectNames"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
-
-interface ProjectInfo {
-  dirName: string
-  path: string
-  shortName: string
-  sessionCount: number
-  lastModified: string | null
-}
+import { isRecentlyActive } from "./sessionPresentation"
+import type { ProjectInfo } from "./types"
 
 interface ActiveSessionInfo {
   dirName: string
   lastModified: string
-}
-
-const LIVE_THRESHOLD_MS = 2 * 60 * 1000
-
-function isLive(lastModified: string | null): boolean {
-  if (!lastModified) return false
-  return Date.now() - new Date(lastModified).getTime() < LIVE_THRESHOLD_MS
 }
 
 interface ProjectsViewProps {
@@ -66,7 +53,7 @@ export function ProjectsView({
   const activeCountByProject = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const session of activeSessions) {
-      if (isLive(session.lastModified)) {
+      if (isRecentlyActive(session.lastModified)) {
         counts[session.dirName] = (counts[session.dirName] || 0) + 1
       }
     }

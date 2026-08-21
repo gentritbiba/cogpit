@@ -337,6 +337,33 @@ describe("project routes", () => {
       expect(response.sessions[0].sessionId).toBe("s1")
     })
 
+    it("reports each session's agent status and last activity", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const { req, res, next } = createMockReqRes("GET", "proj-status")
+      mockedIsWithinDir.mockReturnValueOnce(true)
+      mockedReaddir.mockResolvedValueOnce(["live.jsonl"] as unknown as Dirent[])
+      mockedStat.mockResolvedValueOnce({ mtime: new Date(5000), size: 120 } as unknown as Stats)
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
+        sessionId: "live", aiTitle: "Densify the rows", model: "claude-opus-4-1",
+        gitBranch: "main", cwd: "/code/cogpit", firstUserMessage: "start",
+        lastUserMessage: "keep going", timestamp: "2026-08-21T10:00:00.000Z",
+        lastTimestamp: "2026-08-21T11:00:00.000Z", turnCount: 7, lineCount: 40,
+      }))
+      mockedGetSessionStatus.mockResolvedValueOnce({ status: "tool_use" as const, toolName: "Bash" })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).sessions[0]).toEqual(expect.objectContaining({
+        sessionId: "live",
+        aiTitle: "Densify the rows",
+        lastUserMessage: "keep going",
+        lastActivityAt: "2026-08-21T11:00:00.000Z",
+        agentStatus: "tool_use",
+        agentToolName: "Bash",
+        turnCount: 7,
+      }))
+    })
+
     it("returns 500 on readdir error", async () => {
       const handler = getRouteHandler(handlers, "/api/sessions/")
       const { req, res, next } = createMockReqRes("GET", "proj-a")

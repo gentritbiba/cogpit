@@ -3,6 +3,8 @@ import { authFetch } from "@/lib/auth"
 import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
+import { matchesSessionFilter } from "./sessionPresentation"
+import type { ProjectInfo, SessionInfo } from "./types"
 import {
   readCachedList,
   readCachedSessionPage,
@@ -10,31 +12,6 @@ import {
   writeCachedList,
   writeCachedSessionPage,
 } from "@/lib/sessionListCache"
-
-interface ProjectInfo {
-  dirName: string
-  path: string
-  shortName: string
-  sessionCount: number
-  lastModified: string | null
-}
-
-interface SessionInfo {
-  fileName: string
-  sessionId: string
-  size: number
-  lastModified: string | null
-  version?: string
-  gitBranch?: string
-  model?: string
-  slug?: string
-  cwd?: string
-  firstUserMessage?: string
-  timestamp?: string
-  turnCount?: number
-  lineCount?: number
-  branchedFrom?: { sessionId: string; turnIndex?: number | null }
-}
 
 interface ActiveSessionInfo {
   dirName: string
@@ -214,14 +191,7 @@ export const Dashboard = memo(function Dashboard({
 
   const filteredSessions = useMemo(() => {
     if (!searchFilter) return sessions
-    const q = searchFilter.toLowerCase()
-    return sessions.filter(
-      (s) =>
-        s.firstUserMessage?.toLowerCase().includes(q) ||
-        s.slug?.toLowerCase().includes(q) ||
-        s.model?.toLowerCase().includes(q) ||
-        s.sessionId.toLowerCase().includes(q)
-    )
+    return sessions.filter((s) => matchesSessionFilter(s, searchFilter))
   }, [sessions, searchFilter])
 
   function handleDeleteSession(dirName: string, fileName: string) {

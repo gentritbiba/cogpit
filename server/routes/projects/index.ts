@@ -7,6 +7,7 @@ import {
   encodeCodexDirName,
   findJsonlPath,
   getSessionMeta,
+  getSessionStatus,
   isCodexDirName,
   isWithinDir,
   join,
@@ -22,6 +23,8 @@ import {
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
 import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
+import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
+import { getScannedSessionPullRequests } from "../../lib/sessionPrIndex"
 import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
 
 // ── Bottom-first loading helpers ────────────────────────────────────────────
@@ -368,26 +371,48 @@ export function registerProjectRoutes(use: UseFn) {
         const start = (page - 1) * limit
         const paged = fileStats.slice(start, start + limit)
 
-        const sessions = []
-        for (const fs of paged) {
-          try {
-            const meta = await getSessionMeta(fs.filePath)
-            sessions.push({
-              ...meta,
-              fileName: fs.fileName,
-              sessionId: meta.sessionId || fs.fileName.replace(".jsonl", ""),
-              size: fs.size,
-              lastModified: fs.mtime.toISOString(),
-            })
-          } catch {
-            sessions.push({
-              fileName: fs.fileName,
-              sessionId: fs.fileName.replace(".jsonl", ""),
-              size: fs.size,
-              lastModified: fs.mtime.toISOString(),
-            })
+        // Same shape as /api/active-sessions, so a row reads the same whether it
+        // came from the live list or this listing — and shares that route's meta
+        // cache, so a session in both costs one parse between them.
+        const sessions = await Promise.all(paged.map(async (file) => {
+          const fromFile = {
+            fileName: file.fileName,
+            sessionId: file.fileName.replace(".jsonl", ""),
+            size: file.size,
+            lastModified: file.mtime.toISOString(),
           }
-        }
+          try {
+            const { meta, status } = await getOrLoadSessionMeta(
+              file.filePath,
+              file.mtime.getTime(),
+              async () => {
+                const [loaded, derived] = await Promise.all([
+                  getSessionMeta(file.filePath),
+                  getSessionStatus(file.filePath),
+                ])
+                return { meta: loaded, status: derived }
+              },
+            )
+            // Read-only: this route serves one page view rather than a poll, so
+            // it cannot advance a partial scan. Whatever the live list already
+            // folded in comes along free.
+            const pullRequests = getScannedSessionPullRequests(file.filePath, file.size)
+            const { lastTimestamp, ...rest } = meta
+            return {
+              ...rest,
+              ...fromFile,
+              sessionId: meta.sessionId || fromFile.sessionId,
+              lastActivityAt: lastTimestamp || fromFile.lastModified,
+              agentStatus: status.status,
+              agentToolName: status.toolName,
+              agentTerminalReason: status.terminalReason,
+              agentPendingAgents: status.pendingAgents,
+              ...(pullRequests?.length && { pullRequests }),
+            }
+          } catch {
+            return fromFile
+          }
+        }))
 
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({ sessions, total, page, pageSize: limit }))

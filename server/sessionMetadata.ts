@@ -7,6 +7,21 @@ import { extractCodexMetadataFromLines } from "../shared/session/codex"
 const SKIP_RE = /^(Tool loaded\.?|Continue|compact)$/i
 const CODEX_IDENTITY_BYTES = 32768
 
+const MODEL_RE = /"model":"([^"]+)"/g
+
+/**
+ * Newest real model id in a slab of transcript text. Synthetic assistant
+ * messages (interrupts, local errors) are tagged "<synthetic>" and would
+ * otherwise mask the model that actually ran the turn.
+ */
+function lastRealModel(text: string): string | null {
+  let found: string | null = null
+  for (const match of text.matchAll(MODEL_RE)) {
+    if (!match[1].startsWith("<")) found = match[1]
+  }
+  return found
+}
+
 export interface CodexSessionIdentity {
   sessionId: string
   cwd: string
@@ -243,6 +258,7 @@ export async function getSessionMeta(filePath: string) {
   let lastTimestamp = ""
   let turnCount = 0
   let aiTitle = ""
+  let customTitle = ""
   let branchedFrom: { sessionId: string; turnIndex?: number | null } | undefined
   // Agent-team identity: teammate sessions (CC 2.1.19x+) tag their lines
   // with the team they belong to and their member name within it
@@ -257,6 +273,9 @@ export async function getSessionMeta(filePath: string) {
       if (typeof obj.agentName === "string" && obj.agentName && !agentName) agentName = obj.agentName
       // Claude Code v2.1.1xx+ writes AI-generated session titles; last one wins
       if (obj.type === "ai-title" && obj.aiTitle) aiTitle = obj.aiTitle
+      // The CLI's own title, seeded from the opening prompt — a label for
+      // sessions that never got an ai-title and whose prompts sit past the head read
+      if (obj.type === "custom-title" && obj.customTitle) customTitle = obj.customTitle
       if (obj.version && !version) version = obj.version
       if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
       if (obj.slug && !slug) slug = obj.slug
@@ -297,12 +316,22 @@ export async function getSessionMeta(filePath: string) {
       let foundMessage = false
       let foundTimestamp = false
       let foundAiTitle = false
+      let foundModel = !!model
       outer: for (let i = 0; i < MAX_CHUNKS && cursor > 0; i++) {
         const readSize = Math.min(CHUNK, cursor)
         cursor -= readSize
         const buf = Buffer.alloc(readSize)
         const { bytesRead } = await fh.read(buf, 0, readSize, cursor)
         const text = buf.subarray(0, bytesRead).toString("utf-8") + leftover
+        // Assistant records are far larger than one chunk, so they almost never
+        // survive as parseable lines here — the model is matched as raw text instead.
+        if (!foundModel) {
+          const found = lastRealModel(text)
+          if (found) {
+            model = found
+            foundModel = true
+          }
+        }
         const splitLines = text.split("\n")
         leftover = cursor > 0 ? splitLines[0] : ""
         const startIdx = cursor > 0 ? 1 : 0
@@ -336,7 +365,7 @@ export async function getSessionMeta(filePath: string) {
                 foundMessage = true
               }
             }
-            if (foundMessage && foundTimestamp && foundAiTitle) break outer
+            if (foundMessage && foundTimestamp && foundAiTitle && foundModel) break outer
           } catch { continue }
         }
       }
@@ -356,6 +385,7 @@ export async function getSessionMeta(filePath: string) {
     slug,
     name,
     aiTitle,
+    customTitle,
     cwd,
     firstUserMessage,
     lastUserMessage,

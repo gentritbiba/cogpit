@@ -83,6 +83,25 @@ export async function getSessionPullRequests(
   return entry.scanner.pullRequests
 }
 
+/**
+ * Pull requests for a session the index has already folded in completely.
+ * Returns null when it has not caught up to `size`.
+ *
+ * Callers that run once per page view rather than on a poll cannot advance the
+ * backlog themselves: a transcript past MAX_BYTES_PER_CALL would report "no
+ * pull requests" on every visit, and that is exactly the long-running kind of
+ * session most likely to have opened one. Absent beats confidently wrong.
+ */
+export function getScannedSessionPullRequests(
+  filePath: string,
+  size: number,
+): SessionPullRequest[] | null {
+  const entry = cache.get(filePath)
+  if (!entry || entry.parsedBytes < size) return null
+  touch(filePath, entry)
+  return entry.scanner.pullRequests
+}
+
 /** Test helper: drops all cached scan state. */
 export function resetSessionPrIndex(): void {
   cache.clear()

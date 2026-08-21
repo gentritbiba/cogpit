@@ -174,7 +174,7 @@ All projects with sessions: `[{ dirName, path, shortName, sessionCount, lastModi
 
 ### GET /api/sessions/:dirName?page=1&limit=20
 
-Paginated session list for a project, newest first: `{ sessions, total, page, pageSize }`. Each session has `sessionId`, `fileName`, `size`, `lastModified` plus metadata (`cwd`, `gitBranch`, `firstUserMessage`, `lastUserMessage`, `turnCount`, ...).
+Paginated session list for a project, newest first: `{ sessions, total, page, pageSize }`. Each session shares the shape of `/api/active-sessions` (see below): `sessionId`, `fileName`, `size`, `lastModified`, `lastActivityAt`, `model`, `gitBranch`, `turnCount`, `agentStatus`, `agentToolName`, `agentTerminalReason`, `agentPendingAgents`, and optional `pullRequests` (when the index has scanned the transcript). Plus session metadata (`cwd`, `firstUserMessage`, `lastUserMessage`, `timestamp`, `aiTitle`, `customTitle`, `version`, ...).
 
 ### GET /api/sessions/:dirName/:fileName
 
