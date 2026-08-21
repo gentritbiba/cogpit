@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react"
+import type { ReactNode } from "react"
 import { Code2, FolderSearch, TerminalSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
@@ -34,6 +35,7 @@ import {
   resolveDesktopMainView,
   resolveDesktopProjectPath,
 } from "./desktopView"
+import type { DesktopMainView } from "./desktopView"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
 const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((module) => ({ default: module.ConfigBrowser })))
@@ -49,7 +51,8 @@ function DesktopSessionContent({
   navigation,
   sessionView,
   project,
-}: DesktopViewProps) {
+  floatingChrome,
+}: DesktopViewProps & { floatingChrome: ReactNode }) {
   const { state } = useAppContext()
   const { session } = useSessionContext()
   if (!session) return null
@@ -59,6 +62,7 @@ function DesktopSessionContent({
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize={project.hasFileChanges && navigation.panels.showFileChanges ? 70 : 100} minSize="500px">
           <div className="relative flex h-full min-h-0 flex-col">
+            {floatingChrome}
             {sessionView.teamMembersBar && (
               <div className="pt-10">{sessionView.teamMembersBar}</div>
             )}
@@ -106,16 +110,13 @@ function DesktopMainView({
   navigation,
   sessionView,
   project,
-}: DesktopViewProps) {
+  view,
+  floatingChrome,
+}: DesktopViewProps & { view: DesktopMainView; floatingChrome: ReactNode }) {
   const { state } = useAppContext()
   const { session, sessionSource } = useSessionContext()
   const pendingPath = state.pendingCwd
     ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
-  const view = resolveDesktopMainView({
-    mainView: state.mainView,
-    hasSession: Boolean(session),
-    pendingDirName: state.pendingDirName,
-  })
 
   if (view === "config") {
     return (
@@ -149,6 +150,7 @@ function DesktopMainView({
         navigation={navigation}
         sessionView={sessionView}
         project={project}
+        floatingChrome={floatingChrome}
       />
     )
   }
@@ -257,6 +259,12 @@ export function DesktopWorkspace({
     sessionView.chatInputRef.current?.focus()
   }
 
+  const view = resolveDesktopMainView({
+    mainView: state.mainView,
+    hasSession: Boolean(session),
+    pendingDirName: state.pendingDirName,
+  })
+
   const sidebarHeader = (
     <SidebarHeader
       onToggleSidebar={navigation.panels.handleToggleSidebar}
@@ -267,9 +275,41 @@ export function DesktopWorkspace({
     />
   )
 
+  const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config"
+
+  const floatingChrome = (
+    <FloatingChrome
+      showSidebar={navigation.panels.showSidebar}
+      sidebarRendered={sidebarRendered}
+      sidebarShortcut={shortcutLabel("toggleSidebar")}
+      showStats={navigation.panels.showStats}
+      showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
+      showFileChanges={navigation.panels.showFileChanges}
+      hasFileChanges={project.hasFileChanges}
+      killing={chrome.killing}
+      creatingSession={navigation.creatingSession}
+      onNewSession={navigation.onStartNewSession}
+      onDuplicateSession={navigation.handlers.handleDuplicateSession}
+      onOpenTerminal={project.onOpenTerminal}
+      onBackToMain={sessionView.onBackToMain}
+      onShowWorkflows={sessionView.onShowWorkflows}
+      workflowCount={sessionView.workflowCount}
+      onToggleSidebar={navigation.panels.handleToggleSidebar}
+      onToggleStats={navigation.panels.handleToggleStats}
+      onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
+      onToggleFileChanges={navigation.panels.handleToggleFileChanges}
+      showConfig={state.mainView === "config"}
+      onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
+      showMission={state.mainView === "mission"}
+      onToggleMission={navigation.panels.handleToggleMission}
+      onKillAll={chrome.onKillAll}
+      onOpenSettings={config.openConfigDialog}
+    />
+  )
+
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-background">
-      {navigation.panels.showSidebar && state.mainView !== "config" && (
+      {sidebarRendered && (
         <div className="view-transition-sidebar panel-enter w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground">
           <PrimarySessionBrowser navigation={navigation} header={sidebarHeader} />
         </div>
@@ -277,36 +317,15 @@ export function DesktopWorkspace({
 
       <main className="app-view-transition relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
-        <FloatingChrome
-          showSidebar={navigation.panels.showSidebar}
-          sidebarShortcut={shortcutLabel("toggleSidebar")}
-          showStats={navigation.panels.showStats}
-          showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
-          showFileChanges={navigation.panels.showFileChanges}
-          hasFileChanges={project.hasFileChanges}
-          killing={chrome.killing}
-          creatingSession={navigation.creatingSession}
-          onNewSession={navigation.onStartNewSession}
-          onDuplicateSession={navigation.handlers.handleDuplicateSession}
-          onOpenTerminal={project.onOpenTerminal}
-          onBackToMain={sessionView.onBackToMain}
-          onShowWorkflows={sessionView.onShowWorkflows}
-          workflowCount={sessionView.workflowCount}
-          onToggleSidebar={navigation.panels.handleToggleSidebar}
-          onToggleStats={navigation.panels.handleToggleStats}
-          onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
-          onToggleFileChanges={navigation.panels.handleToggleFileChanges}
-          showConfig={state.mainView === "config"}
-          onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
-          showMission={state.mainView === "mission"}
-          onToggleMission={navigation.panels.handleToggleMission}
-          onKillAll={chrome.onKillAll}
-          onOpenSettings={config.openConfigDialog}
-        />
+        {/* The session view hosts the chrome inside its transcript column so the
+            pills never sit on top of the file-changes panel beside it. */}
+        {view !== "session" && floatingChrome}
         <DesktopMainView
           navigation={navigation}
           sessionView={sessionView}
           project={project}
+          view={view}
+          floatingChrome={floatingChrome}
         />
       </main>
 

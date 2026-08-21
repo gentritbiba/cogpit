@@ -55,7 +55,14 @@ import { cn, copyToClipboard } from "@/lib/utils"
 import { extractPullRequests, mergePullRequests } from "../../shared/session/prLinks"
 
 interface FloatingChromeProps {
+  /** Whether the sidebar is toggled on — decides if the expand pill is offered. */
   showSidebar: boolean
+  /**
+   * Whether a sidebar is actually on screen. Config view replaces it with its
+   * own rail, and without a sidebar the pills have to clear the traffic lights
+   * themselves.
+   */
+  sidebarRendered?: boolean
   sidebarShortcut: string
   showStats: boolean
   showWorktrees?: boolean
@@ -90,6 +97,7 @@ const PILL_ROW = "flex h-8 items-center px-0.5"
  */
 export const FloatingChrome = memo(function FloatingChrome({
   showSidebar,
+  sidebarRendered = showSidebar,
   sidebarShortcut,
   showStats,
   showWorktrees,
@@ -150,11 +158,17 @@ export const FloatingChrome = memo(function FloatingChrome({
 
   return (
     <>
+      {/* Content scrolls under the pills, so it has to fade out rather than
+          collide with them. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 z-20 h-16 bg-gradient-to-b from-background from-50% to-transparent"
+      />
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-3 px-3 pt-2">
         <div
           className={cn(
             "electron-no-drag pointer-events-auto flex min-w-0 items-center gap-1.5",
-            !showSidebar && "window-inset-start",
+            !sidebarRendered && "window-inset-start",
           )}
         >
           {!showSidebar && (
