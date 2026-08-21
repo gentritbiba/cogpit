@@ -1,4 +1,4 @@
-import { useId } from "react"
+import { useId, type ReactNode } from "react"
 import { GitBranch, Zap } from "lucide-react"
 import { cn, normalizeEffortForAgent } from "@/lib/utils"
 import { AgentModelDropdown } from "./AgentModelDropdown"
@@ -7,6 +7,11 @@ import { MiniDropdown } from "./MiniDropdown"
 import { PermissionDropdown } from "./PermissionDropdown"
 import type { CommonSettingsControlProps } from "./types"
 import { Button } from "@/components/ui/button"
+
+interface DesktopChatInputSettingsProps extends CommonSettingsControlProps {
+  /** Additional desktop-only controls appended to the settings row. */
+  trailingExtra?: ReactNode
+}
 
 export function DesktopChatInputSettings({
   agentKind,
@@ -36,7 +41,8 @@ export function DesktopChatInputSettings({
   mcpLoading,
   onMcpAuth,
   changeAndApply,
-}: CommonSettingsControlProps) {
+  trailingExtra,
+}: DesktopChatInputSettingsProps) {
   const showWorktree = agentKind === "claude"
   // Whether a change takes effect now or next turn is the one thing this row
   // has to tell you. It used to be a permanent caption; `title` alone would
@@ -46,15 +52,17 @@ export function DesktopChatInputSettings({
     ? undefined
     : agentKind === "claude" ? "Changes apply live" : "Changes apply next turn"
 
+  // pl-6 lines the chip labels up with the message placeholder: the composer's
+  // px-3 inset + 1px card border + the textarea's pl-4, less the chip's own px-1.5.
   return (
     <div
-      className="flex items-center pb-2"
+      className="flex items-center pb-1.5 pl-6 pr-3"
       role="group"
       title={applyHint}
       aria-describedby={applyHint ? applyHintId : undefined}
     >
       {applyHint && <span id={applyHintId} className="sr-only">{applyHint}</span>}
-      <div className="flex w-full flex-wrap items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-1.5">
         {onAgentKindChange
           ? (
             <AgentModelDropdown
@@ -149,6 +157,7 @@ export function DesktopChatInputSettings({
             onAuth={onMcpAuth}
           />
         )}
+        {trailingExtra}
       </div>
     </div>
   )

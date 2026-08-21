@@ -43,9 +43,6 @@ vi.mock("@/components/TokenUsageWidget", () => ({ TokenUsageIndicator: () => nul
 vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => null }))
 vi.mock("@/components/PowerMonitor", () => ({ PowerMonitor: () => null }))
 vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
-vi.mock("@/components/MissionControl/MissionControlButton", () => ({
-  MissionControlButton: () => null,
-}))
 
 const PROPS = {
   showSidebar: true,

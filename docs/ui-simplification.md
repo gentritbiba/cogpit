@@ -227,7 +227,7 @@ updating is strictly worse.
   through `shortcutLabel()`, or delete.
 - The six literal `<span>/</span>` separators and the "Changes apply live" caption in
   `src/components/ChatInput/settings/DesktopChatInputSettings.tsx`.
-- The idle `+ Set goal` button in `src/components/GoalBar.tsx` (keep the active-goal card).
+- The idle `Set goal` chip in `src/components/goal/index.tsx` (keep the active-goal card).
 
 **Effort:** S. **Lost:** discoverability of the clickable slug (mitigated by its tooltip and the
 new palette entry) and of the goal feature (mitigated by `/goal`, which already works, plus the

@@ -49,6 +49,8 @@ export interface ChatInputSettingsProps {
   onPermissionModeChange?: (mode: PermissionMode) => void
   /** Additional mobile-only controls rendered inside the settings sheet. */
   mobileExtra?: ReactNode
+  /** Additional desktop-only controls appended to the settings row. */
+  trailingExtra?: ReactNode
   /** Renders the compact mobile trigger and bottom sheet. */
   mobile?: boolean
 }
@@ -78,6 +80,7 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   permissionMode,
   onPermissionModeChange,
   mobileExtra,
+  trailingExtra,
   mobile = false,
 }: ChatInputSettingsProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -166,5 +169,5 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     )
   }
 
-  return <DesktopChatInputSettings {...commonSettingsProps} />
+  return <DesktopChatInputSettings {...commonSettingsProps} trailingExtra={trailingExtra} />
 })

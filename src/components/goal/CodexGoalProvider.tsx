@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { Check, Flag, Pause, Pencil, Play, Plus, Trash2, X } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { Check, Flag, Pause, Pencil, Play, Trash2, X } from "lucide-react"
 import { authFetch } from "@/lib/auth"
 import { formatTokenCount } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
@@ -8,6 +8,8 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
+import { GoalContext, type GoalControls } from "./context"
+import { GOAL_EDITOR_CLASS, GOAL_PANEL_CLASS } from "./styles"
 
 interface CodexGoal {
   threadId: string
@@ -35,7 +37,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
   return "default"
 }
 
-export function CodexGoalBar({ threadId }: { threadId: string }) {
+export function CodexGoalProvider({ threadId, children }: { threadId: string; children: ReactNode }) {
   const [goal, setGoal] = useState<CodexGoal | null>(null)
   const [available, setAvailable] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -44,6 +46,9 @@ export function CodexGoalBar({ threadId }: { threadId: string }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A refresh failure is not worth surfacing: the goal panel keeps showing the
+  // last value it had and the next poll retries. `error` is reserved for the
+  // edit form, which is the only place it renders.
   const refresh = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await authFetch(`/api/codex/goals/${encodeURIComponent(threadId)}`, { signal })
@@ -55,29 +60,29 @@ export function CodexGoalBar({ threadId }: { threadId: string }) {
       const data = await res.json() as GoalResponse
       setGoal(data.goal)
       setAvailable(true)
-    } catch (fetchError) {
-      if (!(fetchError instanceof Error && fetchError.name === "AbortError")) {
-        setError("Could not refresh this goal")
-      }
+    } catch {
+      // Aborted on unmount, or the server is briefly unreachable.
     }
   }, [threadId])
 
   useEffect(() => {
     const controller = new AbortController()
     void refresh(controller.signal)
-    const interval = setInterval(() => void refresh(), 10_000)
+    // A 404/501 means this build of Codex has no goals endpoint, so polling it
+    // again never starts working. Stop instead of retrying forever.
+    const interval = available ? setInterval(() => void refresh(), 10_000) : undefined
     return () => {
       controller.abort()
-      clearInterval(interval)
+      if (interval !== undefined) clearInterval(interval)
     }
-  }, [refresh])
+  }, [refresh, available])
 
-  const beginEditing = () => {
+  const beginEditing = useCallback(() => {
     setObjective(goal?.objective ?? "")
     setTokenBudget(goal?.tokenBudget?.toString() ?? "")
     setError(null)
     setEditing(true)
-  }
+  }, [goal])
 
   const saveGoal = async () => {
     const trimmed = objective.trim()
@@ -138,24 +143,28 @@ export function CodexGoalBar({ threadId }: { threadId: string }) {
     }
   }
 
-  if (!available) return null
+  const percent = goal?.tokenBudget
+    ? Math.min(100, (goal.tokensUsed / goal.tokenBudget) * 100)
+    : null
 
-  if (editing) {
-    return (
+  let section: ReactNode = null
+
+  if (available && editing) {
+    section = (
       <form
-        className="mb-2 border-y border-border bg-muted/20 px-4 py-3"
+        className={GOAL_EDITOR_CLASS}
         onSubmit={(event) => {
           event.preventDefault()
           void saveGoal()
         }}
       >
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
-          <Flag className="size-4" data-icon="inline-start" />
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <Flag className="size-3.5" data-icon="inline-start" />
           {goal ? "Edit long-running goal" : "Set a long-running goal"}
         </div>
-        <FieldGroup className="gap-3">
+        <FieldGroup className="gap-2">
           <Field>
-            <FieldLabel htmlFor="codex-goal-objective">Goal objective</FieldLabel>
+            <FieldLabel className="sr-only" htmlFor="codex-goal-objective">Goal objective</FieldLabel>
             <Textarea
               id="codex-goal-objective"
               value={objective}
@@ -166,7 +175,7 @@ export function CodexGoalBar({ threadId }: { threadId: string }) {
             />
           </Field>
           <Field orientation="horizontal" data-invalid={Boolean(error)}>
-            <FieldLabel htmlFor="codex-goal-budget">Token budget</FieldLabel>
+            <FieldLabel className="text-xs text-muted-foreground" htmlFor="codex-goal-budget">Token budget</FieldLabel>
             <Input
               id="codex-goal-budget"
               type="number"
@@ -175,70 +184,105 @@ export function CodexGoalBar({ threadId }: { threadId: string }) {
               value={tokenBudget}
               onChange={(event) => setTokenBudget(event.target.value)}
               placeholder="Optional"
-              className="ml-auto w-32"
+              className="ml-auto h-8 w-28"
               aria-invalid={Boolean(error)}
             />
           </Field>
         </FieldGroup>
-        <FieldError className="mt-2">{error}</FieldError>
-        <div className="mt-3 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
+        <FieldError className="mt-1.5">{error}</FieldError>
+        <div className="mt-2 flex items-center justify-end gap-1">
+          <Button type="button" variant="ghost" size="xs" onClick={() => setEditing(false)}>
             <X data-icon="inline-start" />
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={saving || !objective.trim()}>
+          <Button type="submit" size="xs" disabled={saving || !objective.trim()}>
             <Check data-icon="inline-start" />
             Save goal
           </Button>
         </div>
       </form>
     )
-  }
-
-  if (!goal) {
-    return (
-      <div className="mx-3 mb-1 flex justify-end">
-        <Button type="button" variant="ghost" size="sm" onClick={beginEditing}>
-          <Plus data-icon="inline-start" />
-          Set goal
-        </Button>
-      </div>
+  } else if (available && goal) {
+    const isPaused = goal.status === "paused"
+    const isComplete = goal.status === "complete"
+    section = (
+      <section className={GOAL_PANEL_CLASS} aria-label="Codex goal">
+        <div className="flex items-center gap-2">
+          <Flag className="size-3.5 shrink-0 text-muted-foreground" data-icon="inline-start" />
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={goal.objective}>
+            {goal.objective}
+          </span>
+          <Badge variant={statusVariant(goal.status)}>{statusLabel(goal.status)}</Badge>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {formatTokenCount(goal.tokensUsed)}
+            {goal.tokenBudget ? ` / ${formatTokenCount(goal.tokenBudget)}` : ""}
+            {" · "}
+            {Math.max(0, Math.round(goal.timeUsedSeconds / 60))}m
+          </span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {isPaused && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => void updateStatus("active")}
+                disabled={saving}
+                aria-label="Resume goal"
+              >
+                <Play data-icon="icon" />
+              </Button>
+            )}
+            {!isPaused && !isComplete && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => void updateStatus("paused")}
+                disabled={saving}
+                aria-label="Pause goal"
+              >
+                <Pause data-icon="icon" />
+              </Button>
+            )}
+            {!isComplete && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={() => void updateStatus("complete")}
+                disabled={saving}
+                aria-label="Mark goal complete"
+              >
+                <Check data-icon="icon" />
+              </Button>
+            )}
+            <Button type="button" variant="ghost" size="icon-xs" onClick={beginEditing} aria-label="Edit goal">
+              <Pencil data-icon="icon" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => void clearGoal()}
+              disabled={saving}
+              className="text-destructive"
+              aria-label="Clear goal"
+            >
+              <Trash2 data-icon="icon" />
+            </Button>
+          </div>
+        </div>
+        {percent !== null && (
+          <Progress className="mt-1 mb-0.5" value={percent} aria-label={`${percent.toFixed(0)}% of goal token budget used`} />
+        )}
+      </section>
     )
   }
 
-  const percent = goal.tokenBudget
-    ? Math.min(100, (goal.tokensUsed / goal.tokenBudget) * 100)
-    : null
-
-  return (
-    <section className="mb-2 border-y border-border bg-muted/20 px-4 py-2.5" aria-label="Codex goal">
-      <div className="flex items-start gap-2">
-        <Flag className="mt-0.5 size-4 shrink-0 text-muted-foreground" data-icon="inline-start" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-foreground" title={goal.objective}>{goal.objective}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant={statusVariant(goal.status)}>{statusLabel(goal.status)}</Badge>
-            <span>{formatTokenCount(goal.tokensUsed)} tokens</span>
-            {goal.tokenBudget && <span>of {formatTokenCount(goal.tokenBudget)}</span>}
-            <span>{Math.max(0, Math.round(goal.timeUsedSeconds / 60))}m</span>
-          </div>
-          {percent !== null && (
-            <Progress className="mt-2" value={percent} aria-label={`${percent.toFixed(0)}% of goal token budget used`} />
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          {goal.status === "paused" ? (
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => void updateStatus("active")} disabled={saving} aria-label="Resume goal"><Play data-icon="inline-start" /></Button>
-          ) : goal.status !== "complete" ? (
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => void updateStatus("paused")} disabled={saving} aria-label="Pause goal"><Pause data-icon="inline-start" /></Button>
-          ) : null}
-          {goal.status !== "complete" && (
-            <Button type="button" variant="ghost" size="icon-sm" onClick={() => void updateStatus("complete")} disabled={saving} aria-label="Mark goal complete"><Check data-icon="inline-start" /></Button>
-          )}
-          <Button type="button" variant="ghost" size="icon-sm" onClick={beginEditing} aria-label="Edit goal"><Pencil data-icon="inline-start" /></Button>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={() => void clearGoal()} disabled={saving} className="text-destructive" aria-label="Clear goal"><Trash2 data-icon="inline-start" /></Button>
-        </div>
-      </div>
-    </section>
+  const controls = useMemo<GoalControls>(
+    () => ({ section, canCreate: available && !goal && !editing, beginEditing }),
+    [section, available, goal, editing, beginEditing],
   )
+
+  return <GoalContext.Provider value={controls}>{children}</GoalContext.Provider>
 }
