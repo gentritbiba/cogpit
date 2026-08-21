@@ -27,8 +27,17 @@ vi.mock("@/components/HoverRevealPanel", () => ({
 }))
 
 vi.mock("@/components/session-browser", () => ({
-  SessionBrowser: ({ activeSessionKey }: { activeSessionKey: string | null }) => (
-    <div data-testid="session-browser">{activeSessionKey ?? "no-session"}</div>
+  SessionBrowser: ({ activeSessionKey, header }: { activeSessionKey: string | null; header?: ReactNode }) => (
+    <div data-testid="session-browser">
+      {header}
+      {activeSessionKey ?? "no-session"}
+    </div>
+  ),
+}))
+
+vi.mock("@/components/FloatingChrome", () => ({
+  FloatingChrome: ({ showSidebar }: { showSidebar: boolean }) => (
+    <div data-testid="floating-chrome">{showSidebar ? "sidebar-on" : "sidebar-off"}</div>
   ),
 }))
 
@@ -126,6 +135,7 @@ function setContexts({
       mobileTab: "sessions",
       dashboardProject: null,
     },
+    config: { openConfigDialog: vi.fn() },
   } as unknown as ReturnType<typeof useAppContext>)
 
   contextMocks.useSessionContext.mockReturnValue({
@@ -140,8 +150,8 @@ function setContexts({
 }
 
 function makeProps(
-  overrides: Partial<Pick<DesktopAppShellProps, "navigation" | "sessionView" | "project">> = {},
-): Pick<DesktopAppShellProps, "navigation" | "sessionView" | "project"> {
+  overrides: Partial<DesktopAppShellProps> = {},
+): DesktopAppShellProps {
   return {
     navigation: {
       panels: {
@@ -222,6 +232,24 @@ function makeProps(
       onCloseRightWorkspace: vi.fn(),
       onPostProjectAction: vi.fn(),
     },
+    chrome: {
+      backgroundServers: null,
+      processPanel: null,
+      workflowsPanel: null,
+      undoDialog: null,
+      branchModal: null,
+      killing: false,
+      onKillAll: vi.fn(),
+      commandPaletteOpen: false,
+      onCommandPaletteOpenChange: vi.fn(),
+      onOpenCommandPalette: vi.fn(),
+      onFocusComposer: vi.fn(),
+      onExpandAll: vi.fn(),
+      onExpandToolPayloads: vi.fn(),
+      onCollapseAll: vi.fn(),
+      keyboardShortcutsOpen: false,
+      onKeyboardShortcutsOpenChange: vi.fn(),
+    },
     ...overrides,
   }
 }
@@ -268,6 +296,27 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...makeProps()} />)
 
     expect(screen.getByTestId("dashboard")).toBeInTheDocument()
+  })
+
+  it("floats the chrome over the main pane and puts the header row in the sidebar", () => {
+    setContexts({ session: makeSession() })
+
+    render(<DesktopWorkspace {...makeProps()} />)
+
+    expect(screen.getByTestId("floating-chrome")).toHaveTextContent("sidebar-on")
+    expect(screen.getByRole("button", { name: "Home" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Hide sidebar/ })).toBeInTheDocument()
+  })
+
+  it("tells the chrome when the sidebar is hidden", () => {
+    setContexts()
+    const props = makeProps()
+    props.navigation.panels.showSidebar = false
+
+    render(<DesktopWorkspace {...props} />)
+
+    expect(screen.getByTestId("floating-chrome")).toHaveTextContent("sidebar-off")
+    expect(screen.queryByRole("button", { name: "Home" })).not.toBeInTheDocument()
   })
 
   it("removes the permanent session rail when the sidebar is disabled", () => {
