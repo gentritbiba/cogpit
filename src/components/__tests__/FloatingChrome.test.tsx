@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { DesktopHeader } from "@/components/DesktopHeader"
+import { FloatingChrome } from "@/components/FloatingChrome"
 import { getResumeCommand } from "@/lib/sessionSource"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import type { ParsedSession, Turn } from "@/lib/types"
@@ -17,8 +17,10 @@ const mocks = vi.hoisted(() => ({
   } | null,
   isLive: false,
   copy: vi.fn(),
+  copyToClipboard: vi.fn(),
   dispatch: vi.fn(),
   authFetch: vi.fn(),
+  toastSuccess: vi.fn(),
   inventorySessions: [] as ActiveSessionInfo[],
 }))
 
@@ -38,21 +40,30 @@ vi.mock("@/contexts/SessionInventoryContext", () => ({
 vi.mock("@/hooks/useCopyWithFeedback", () => ({
   useCopyWithFeedback: () => [false, mocks.copy],
 }))
+vi.mock("@/hooks/useCapability", () => ({ useCapability: () => true }))
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
+vi.mock("@/lib/utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/utils")>()),
+  copyToClipboard: mocks.copyToClipboard,
+}))
+vi.mock("sonner", () => ({ toast: { success: mocks.toastSuccess } }))
 vi.mock("@/components/TokenUsageWidget", () => ({ TokenUsageIndicator: () => null }))
 vi.mock("@/components/LeakIndicator", () => ({ LeakIndicator: () => null }))
-vi.mock("@/components/PowerMonitor", () => ({ PowerMonitor: () => null }))
 vi.mock("@/components/DeviceSwitcher", () => ({ DeviceSwitcher: () => null }))
-vi.mock("@/components/MissionControl/MissionControlButton", () => ({
-  MissionControlButton: () => null,
+vi.mock("@/components/NotificationsBell", () => ({ NotificationsBell: () => null }))
+vi.mock("@/components/PowerMonitor", () => ({
+  PowerMonitor: ({ open }: { open: boolean }) => (open ? <div data-testid="power-monitor" /> : null),
+}))
+vi.mock("@/components/UsageCostDialog", () => ({
+  UsageCostDialog: ({ open }: { open: boolean }) => (open ? <div data-testid="usage-dialog" /> : null),
 }))
 
 const PROPS = {
   showSidebar: true,
+  sidebarShortcut: "\u2318B",
   showStats: false,
   killing: false,
   creatingSession: false,
-  onGoHome: vi.fn(),
   onNewSession: vi.fn(),
   onDuplicateSession: vi.fn(),
   onOpenTerminal: vi.fn(),
@@ -63,8 +74,6 @@ const PROPS = {
   onToggleStats: vi.fn(),
   onKillAll: vi.fn(),
   onOpenSettings: vi.fn(),
-  onOpenCommandPalette: vi.fn(),
-  commandPaletteShortcut: "⌘K",
 }
 
 function prTurn(id: string, command: string, result: string): Turn {
@@ -127,11 +136,22 @@ function withScannedSession(sessionId: string, pullRequests: ActiveSessionInfo["
   }]
 }
 
-function renderHeader(): ReturnType<typeof render> {
-  return render(<DesktopHeader {...PROPS} />)
+function renderChrome(overrides: Partial<typeof PROPS> = {}): ReturnType<typeof render> {
+  return render(<FloatingChrome {...PROPS} {...overrides} />)
 }
 
-describe("DesktopHeader", () => {
+function sessionPill(): HTMLElement {
+  return screen.getByRole("button", { name: /my-session/ })
+}
+
+async function openSessionDetails(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLElement> {
+  await user.hover(sessionPill())
+  return screen.findByRole("tooltip")
+}
+
+describe("FloatingChrome", () => {
   beforeEach(() => {
     mocks.config = { networkUrl: null, defaultAgentKind: "claude" }
     mocks.session = makeSession()
@@ -153,7 +173,7 @@ describe("DesktopHeader", () => {
   })
 
   it("copies the resume command from the project/session breadcrumb", () => {
-    renderHeader()
+    renderChrome()
 
     fireEvent.click(screen.getByRole("button", { name: /my-session/ }))
 
@@ -165,7 +185,7 @@ describe("DesktopHeader", () => {
   })
 
   it("opens all six session operations from the breadcrumb context menu", async () => {
-    renderHeader()
+    renderChrome()
 
     fireEvent.contextMenu(screen.getByRole("button", { name: /my-session/ }))
 
@@ -178,7 +198,7 @@ describe("DesktopHeader", () => {
   })
 
   it("preserves project action request and project-session navigation semantics", async () => {
-    renderHeader()
+    renderChrome()
     const breadcrumb = screen.getByRole("button", { name: /my-session/ })
 
     fireEvent.contextMenu(breadcrumb)
@@ -200,7 +220,8 @@ describe("DesktopHeader", () => {
     })
   })
 
-  it("shows the session state that used to occupy the two lower bars", () => {
+  it("shows the session state that used to occupy the two lower bars", async () => {
+    const user = userEvent.setup()
     const thinkingTurn = prTurn("thinking", "echo ok", "ok")
     thinkingTurn.thinking = [{ type: "thinking", thinking: "Working", signature: "sig" }]
     mocks.session = makeSession({
@@ -223,18 +244,24 @@ describe("DesktopHeader", () => {
     })
     mocks.isLive = true
 
-    render(<DesktopHeader {...PROPS} workflowCount={2} />)
+    renderChrome({ workflowCount: 2 })
 
     expect(screen.getByText("opus")).toBeInTheDocument()
-    expect(screen.getByText("thinking")).toBeInTheDocument()
-    expect(screen.getByText("feat/clean-header")).toBeInTheDocument()
-    expect(screen.getByText("Duplicated")).toBeInTheDocument()
     expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
     expect(screen.getByText(/93%/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Workflows/ })).toHaveTextContent("2")
+    expect(screen.queryByText("feat/clean-header")).not.toBeInTheDocument()
+
+    const details = await openSessionDetails(user)
+    expect(details).toHaveTextContent("thinking")
+    expect(details).toHaveTextContent("feat/clean-header")
+    expect(details).toHaveTextContent("Duplicated from")
+    expect(details).toHaveTextContent("parent-s at turn 3")
+    expect(details).toHaveTextContent(/left before compact/)
   })
 
-  it("preserves sub-agent navigation and identity", () => {
+  it("preserves sub-agent navigation and identity", async () => {
+    const user = userEvent.setup()
     mocks.sessionSource = {
       dirName: "-tmp-project",
       fileName: "parent/subagents/agent-a1b2c3d4e5.jsonl",
@@ -242,31 +269,52 @@ describe("DesktopHeader", () => {
       agentKind: "claude",
     }
 
-    renderHeader()
+    renderChrome()
 
     fireEvent.click(screen.getByRole("button", { name: "Main" }))
     expect(PROPS.onBackToMain).toHaveBeenCalledOnce()
-    expect(screen.getByText("Agent a1b2c3d4")).toBeInTheDocument()
+
+    const details = await openSessionDetails(user)
+    expect(details).toHaveTextContent("Agent")
+    expect(details).toHaveTextContent("a1b2c3d4")
   })
 
-  it("renders no network readout while network access is off", () => {
-    renderHeader()
+  it("offers the sidebar toggle only while the sidebar is hidden", () => {
+    const { unmount } = renderChrome()
+    expect(screen.queryByRole("button", { name: "Show sidebar (\u2318B)" })).not.toBeInTheDocument()
+    unmount()
 
-    expect(screen.queryByText("Network off")).not.toBeInTheDocument()
+    renderChrome({ showSidebar: false })
+    fireEvent.click(screen.getByRole("button", { name: "Show sidebar (\u2318B)" }))
+    expect(PROPS.onToggleSidebar).toHaveBeenCalledOnce()
   })
 
-  it("shows the connection URL while the machine is reachable on the network", () => {
+  it("renders no network readout while network access is off", async () => {
+    const user = userEvent.setup()
+    renderChrome()
+
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await screen.findByRole("menuitem", { name: "Settings" })
+
+    expect(screen.queryByRole("menuitem", { name: /Copy network URL/ })).not.toBeInTheDocument()
+  })
+
+  it("copies the connection URL from the overflow menu while reachable on the network", async () => {
+    const user = userEvent.setup()
     mocks.config = { networkUrl: "http://10.0.0.4:19384", defaultAgentKind: "claude" }
-    renderHeader()
+    mocks.copyToClipboard.mockResolvedValue(true)
+    renderChrome()
 
-    fireEvent.click(screen.getByRole("button", { name: /10\.0\.0\.4/ }))
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: /10\.0\.0\.4/ }))
 
-    expect(mocks.copy).toHaveBeenCalledWith("http://10.0.0.4:19384")
+    expect(mocks.copyToClipboard).toHaveBeenCalledWith("http://10.0.0.4:19384")
+    await vi.waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalledWith("Copied network URL"))
   })
 
   it("keeps secondary workspace actions in the overflow menu", async () => {
     const user = userEvent.setup()
-    render(<DesktopHeader {...PROPS} />)
+    renderChrome()
 
     expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument()
 
@@ -275,9 +323,22 @@ describe("DesktopHeader", () => {
 
     expect(PROPS.onOpenSettings).toHaveBeenCalledOnce()
   })
+
+  it("opens usage and the server monitor from the overflow menu", async () => {
+    const user = userEvent.setup()
+    renderChrome()
+
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Usage & cost\u2026" }))
+    expect(screen.getByTestId("usage-dialog")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "More actions" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Server monitor\u2026" }))
+    expect(screen.getByTestId("power-monitor")).toBeInTheDocument()
+  })
 })
 
-describe("DesktopHeader pull requests", () => {
+describe("FloatingChrome pull requests", () => {
   const scanned = {
     url: "https://github.com/o/r/pull/777",
     number: 777,
@@ -306,12 +367,14 @@ describe("DesktopHeader pull requests", () => {
     vi.clearAllMocks()
   })
 
-  it("renders pull requests extracted from loaded turns", () => {
+  it("renders pull requests extracted from loaded turns", async () => {
+    const user = userEvent.setup()
     mocks.session = makeSession({
       turns: [prTurn("1", 'gh pr create --title "Team Edition"', "https://github.com/o/r/pull/13")],
     })
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     const link = screen.getByRole("link", { name: "Pull request #13" })
     expect(link).toHaveAttribute("href", "https://github.com/o/r/pull/13")
@@ -320,36 +383,43 @@ describe("DesktopHeader pull requests", () => {
     expect(link).toHaveAttribute("title", expect.stringContaining("Team Edition"))
   })
 
-  it("collapses older pull requests into a +N chip", () => {
+  it("collapses older pull requests into a +N chip", async () => {
+    const user = userEvent.setup()
     mocks.session = makeSession({
       turns: [1, 2, 3, 4, 5].map((number) =>
         prTurn(String(number), "gh pr create --fill", `https://github.com/o/r/pull/${number}`)),
     })
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     expect(screen.getByText("+2")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Pull request #5" })).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Pull request #1" })).toBeNull()
   })
 
-  it("shows a pull request created before the loaded turns", () => {
+  it("shows a pull request created before the loaded turns", async () => {
+    const user = userEvent.setup()
     withScannedSession("test-session-id", [scanned])
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     expect(screen.getByRole("link", { name: "Pull request #777" })).toBeInTheDocument()
   })
 
-  it("ignores scan results belonging to a different session", () => {
+  it("ignores scan results belonging to a different session", async () => {
+    const user = userEvent.setup()
     withScannedSession("some-other-session", [scanned])
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     expect(screen.queryByRole("link", { name: "Pull request #777" })).toBeNull()
   })
 
-  it("does not double up a pull request found by the scan and loaded turns", () => {
+  it("does not double up a pull request found by the scan and loaded turns", async () => {
+    const user = userEvent.setup()
     withScannedSession("test-session-id", [{
       ...scanned,
       number: 13,
@@ -359,18 +429,21 @@ describe("DesktopHeader pull requests", () => {
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/13")],
     })
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     expect(screen.getAllByRole("link", { name: "Pull request #13" })).toHaveLength(1)
   })
 
-  it("combines a scanned older pull request with a freshly created one", () => {
+  it("combines a scanned older pull request with a freshly created one", async () => {
+    const user = userEvent.setup()
     withScannedSession("test-session-id", [scanned])
     mocks.session = makeSession({
       turns: [prTurn("1", "gh pr create --fill", "https://github.com/o/r/pull/778")],
     })
 
-    renderHeader()
+    renderChrome()
+    await openSessionDetails(user)
 
     expect(screen.getByRole("link", { name: "Pull request #777" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Pull request #778" })).toBeInTheDocument()

@@ -112,7 +112,7 @@ export const SessionPill = memo(function SessionPill({
         )}
         <ContextBadge rawMessages={rawMessages} />
       </TooltipTrigger>
-      <TooltipContent side="bottom" align="start" sideOffset={6} className="p-3">
+      <TooltipContent role="tooltip" side="bottom" align="start" sideOffset={6} className="p-3">
         <SessionDetails
           session={session}
           thinkingEnabled={thinkingEnabled}
