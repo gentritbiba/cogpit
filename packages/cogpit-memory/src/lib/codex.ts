@@ -370,9 +370,20 @@ function parseMcpEventResult(value: unknown): { text: string; isError: boolean }
   }
 }
 
+/**
+ * Codex reuses one `turn_id` across every `turn_context` record it writes for
+ * a thread, so a post-compaction segment carries the same id as the segment
+ * that preceded it. Qualifying the id with the turn's opening timestamp keeps
+ * it unique per segment and stable across full and paged parses — timeline
+ * paging deduplicates by turn id, and a collision there silently discards the
+ * older page's turn along with its prompt.
+ *
+ * A turn Codex never labelled falls back to a random id, which is stable
+ * within one parse but not across them.
+ */
 function createTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
   return {
-    id: turnId || randomTurnId("codex-turn"),
+    id: turnId ? `${turnId}@${timestamp}` : randomTurnId("codex-turn"),
     userMessage: null,
     contentBlocks: [],
     thinking: [],
@@ -394,6 +405,29 @@ function extractPromptFromRecord(record: CodexRecord): string {
     return normalizePromptText(extractMessageText(record.payload, "input_text"))
   }
   return ""
+}
+
+/**
+ * Whether a record may open a turn when none is active.
+ *
+ * Session metadata and instruction records carry no turn content, but every
+ * paged read prepends the file header, so letting them open a turn would stamp
+ * each page's leading turn with the session-start timestamp and inflate its
+ * duration. Records that only ever attach to an existing turn are unaffected:
+ * this is consulted only when no turn is open.
+ */
+function recordOpensTurn(record: CodexRecord, payload: Record<string, unknown> | undefined): boolean {
+  if (record.type === "session_meta") return false
+  if (record.type === "event_msg" && payload?.type === "task_started") return false
+  if (record.type === "response_item" && payload?.type === "message") {
+    if (payload.role === "developer" || payload.role === "system") return false
+    if (payload.role === "user") {
+      return extractPromptFromRecord(record) !== ""
+        || extractResponseMessageImages(payload).length > 0
+        || extractResponseMessageAudio(payload).length > 0
+    }
+  }
+  return true
 }
 
 function extractMetadataFromRecords(records: CodexRecord[]): CodexMetadata {
@@ -616,9 +650,14 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
   let currentModel: string | null = metadata.model || null
   let lastTurnTimestamp = ""
   let pendingCompaction: string | null = null
+  // False until this window has seen a record that starts a turn. Only the
+  // first turn of a window can therefore be a fragment; every later one opens
+  // after a `turn_context` or a user message.
+  let sawTurnStart = false
 
   function createActiveTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
     const turn = createTurn(turnId, timestamp, model)
+    if (!sawTurnStart) turn.isFragment = true
     if (pendingCompaction) {
       turn.compactionSummary = pendingCompaction
       pendingCompaction = null
@@ -672,6 +711,7 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       currentTurnId = typeof payload?.turn_id === "string" ? payload.turn_id : null
       currentModel = typeof payload?.model === "string" ? payload.model : currentModel
       lastTurnTimestamp = timestamp
+      sawTurnStart = true
       continue
     }
 
@@ -679,6 +719,7 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       if (current && (current.assistantText.length > 0 || current.toolCalls.length > 0 || current.thinking.length > 0)) {
         current = finalizeTurn(turns, current, lastTurnTimestamp)
       }
+      sawTurnStart = true
       current ??= createActiveTurn(currentTurnId, timestamp, currentModel)
       const localImages = (Array.isArray(payload.local_images) ? payload.local_images : []).filter(
         (p): p is string => typeof p === "string" && p.length > 0,
@@ -693,11 +734,13 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
         localImages,
         localAudio,
       )
+      current.isFragment = false
       current.timestamp = current.timestamp || timestamp
       lastTurnTimestamp = timestamp
       continue
     }
 
+    if (!current && !recordOpensTurn(record, payload)) continue
     current ??= createActiveTurn(currentTurnId, timestamp, currentModel)
     if (!current.model && currentModel) current.model = currentModel
     if (!current.timestamp) current.timestamp = timestamp
@@ -820,6 +863,8 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
       const audio = extractResponseMessageAudio(payload)
       if (text || images.length > 0 || audio.length > 0) {
         current.userMessage = buildCodexUserContent(text, images, audio)
+        current.isFragment = false
+        sawTurnStart = true
       }
       continue
     }

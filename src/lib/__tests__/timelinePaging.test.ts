@@ -131,6 +131,17 @@ describe("prependTurns", () => {
     expect(stitched.model).toBe("opus")
   })
 
+  it("spans the stitched turn's duration across both fragments", () => {
+    const newer = makeTurn("n", {
+      userMessage: null,
+      timestamp: "2026-07-23T10:05:00.000Z",
+      durationMs: 30_000,
+    })
+    const older = makeTurn("o", { timestamp: "2026-07-23T10:00:00.000Z", durationMs: 60_000 })
+    const [stitched] = prependTurns([newer], [older], "claude")
+    expect(stitched.durationMs).toBe(330_000)
+  })
+
   it("keeps the newer fragment's compaction summary only when the older has none", () => {
     const newer = makeTurn("n", { userMessage: null, compactionSummary: "newer" })
     const older = makeTurn("o", { compactionSummary: "older" })
@@ -142,11 +153,20 @@ describe("prependTurns", () => {
     expect(stitched2.compactionSummary).toBe("newer")
   })
 
-  it("never stitches Codex turns (null userMessage is normal there)", () => {
+  it("leaves a whole Codex turn alone (null userMessage is normal there)", () => {
     const existing = [makeTurn("b", { userMessage: null })]
     const result = prependTurns(existing, [makeTurn("a", { userMessage: null })], "codex")
     expect(result.map((t) => t.id)).toEqual(["a", "b"])
     expect(result[1]).toBe(existing[0])
+  })
+
+  it("stitches a Codex turn the parser flagged as a cut fragment", () => {
+    const head = makeTurn("frag", { userMessage: null, isFragment: true, assistantText: ["end"] })
+    const older = makeTurn("a", { assistantText: ["start"] })
+    const result = prependTurns([head], [older], "codex")
+    expect(result).toHaveLength(1)
+    expect(result[0].userMessage).toBe(older.userMessage)
+    expect(result[0].assistantText).toEqual(["start", "end"])
   })
 
   it("chain-stitches when both fragments lack a user message", () => {

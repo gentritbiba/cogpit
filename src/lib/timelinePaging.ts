@@ -45,16 +45,24 @@ export function isPrepend(prev: TimelineSnapshot | null, keys: readonly string[]
 }
 
 /**
+ * Whether the newest list's first turn is the tail half of a turn some
+ * byte-boundary read cut in two, and so belongs to the last older turn.
+ *
+ * Claude turns always open with a user message, so a null-userMessage head is
+ * reliably a cut point. Codex turns legitimately have no user message, so its
+ * parser marks the halves it could not see the start of instead.
+ */
+function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
+  if (agentKind === "codex") return head.isFragment === true
+  return head.userMessage === null
+}
+
+/**
  * Prepends older turns onto the existing list, deduplicating by turn id and
  * stitching a turn that a byte-boundary read cut in half.
  *
- * A tail (or older page) that starts mid-turn parses its first fragment with
- * `userMessage: null` and a synthetic id. For Claude sessions a full parse
- * never produces such a turn mid-file (assistant records always attach to the
- * current turn), so a null-userMessage head is reliably a cut point: merge it
- * into the last older turn, which restores the turn id a full parse would
- * have produced. Codex turns legitimately have null userMessage, so they are
- * never stitched.
+ * Merging collapses the two halves into one row instead of leaving a promptless
+ * fragment stranded at the top of the page.
  */
 export function prependTurns(
   existing: Turn[],
@@ -69,10 +77,24 @@ export function prependTurns(
 
   const head = existing[0]
   const lastOlder = unique[unique.length - 1]
-  if (agentKind !== "codex" && head && head.userMessage === null && lastOlder) {
+  if (head && lastOlder && isCutFragment(head, agentKind)) {
     return [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
   }
   return [...unique, ...existing]
+}
+
+/**
+ * Spans the merged turn from where the older fragment started to where the
+ * newer one ended. Each fragment only timed its own slice, so taking either
+ * one's duration reports a fraction of the turn.
+ */
+function mergedDuration(older: Turn, newer: Turn): number | null {
+  const start = Date.parse(older.timestamp)
+  const end = Date.parse(newer.timestamp) + (newer.durationMs ?? 0)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return newer.durationMs ?? older.durationMs
+  }
+  return end - start
 }
 
 /**
@@ -90,7 +112,7 @@ function mergeTurnFragments(older: Turn, newer: Turn): Turn {
     assistantText: [...older.assistantText, ...newer.assistantText],
     toolCalls: [...older.toolCalls, ...newer.toolCalls],
     subAgentActivity: [...older.subAgentActivity, ...newer.subAgentActivity],
-    durationMs: newer.durationMs ?? older.durationMs,
+    durationMs: mergedDuration(older, newer),
     tokenUsage: newer.tokenUsage ?? older.tokenUsage,
     model: newer.model ?? older.model,
     compactionSummary: older.compactionSummary ?? newer.compactionSummary,

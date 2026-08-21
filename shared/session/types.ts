@@ -365,6 +365,12 @@ export interface Turn {
   model: string | null
   /** Set when a compaction happened before this turn */
   compactionSummary?: string
+  /**
+   * Set when this turn was opened without its start record — the parse window
+   * began mid-turn. Such a turn is the newer half of a byte-boundary cut and
+   * must be stitched onto the previous turn once the older page arrives.
+   */
+  isFragment?: boolean
 }
 
 export interface SessionStats {

@@ -8,6 +8,7 @@ import {
   parseCodexToolPatches,
 } from "@/lib/codex"
 import { parseCodexSession as parseCanonicalCodexSession } from "../../../shared/session/codex"
+import { prependTurns } from "@/lib/timelinePaging"
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -1667,5 +1668,88 @@ describe("extractApplyPatchInputs", () => {
   it("ignores patch-looking strings that are not passed to apply_patch", () => {
     const patch = "*** Begin Patch\n*** Add File: ignored.ts\n+x\n*** End Patch"
     expect(extractApplyPatchInputs(`const example = ${JSON.stringify(patch)};\ntext(example);`)).toEqual([])
+  })
+})
+
+describe("parseCodexSession paged windows", () => {
+  const HEADER = [
+    sessionMeta(),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2024-01-01T00:00:00.000Z",
+      payload: { type: "task_started", turn_id: "turn-1" },
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2024-01-01T00:00:00.500Z",
+      payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<skills_instructions>x" }] },
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2024-01-01T00:00:00.600Z",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "<recommended_plugins>\nnone" }] },
+    }),
+  ]
+
+  it("does not open a turn on the header records every page repeats", () => {
+    // A page that starts mid-turn carries the file header. Without the guard
+    // the header opened a turn stamped with the session-start timestamp.
+    const { turns } = parseCanonicalCodexSession([
+      ...HEADER,
+      assistantMessage("tail of an earlier turn", "2024-01-01T00:05:00.000Z"),
+    ].join("\n"))
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0].timestamp).toBe("2024-01-01T00:05:00.000Z")
+    expect(turns[0].isFragment).toBe(true)
+  })
+
+  it("does not mark a turn that opens with its own prompt as a fragment", () => {
+    const { turns } = parseCanonicalCodexSession([
+      ...HEADER,
+      turnContext(),
+      userMessage("Hello"),
+      assistantMessage("Hi there!"),
+    ].join("\n"))
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0].isFragment).toBeFalsy()
+    expect(turns[0].userMessage).toBe("Hello")
+  })
+
+  it("gives segments that share one turn_id distinct ids", () => {
+    // Codex reuses turn_id across turn_context records (a compaction writes a
+    // second one), and timeline paging deduplicates by turn id.
+    const { turns } = parseCanonicalCodexSession([
+      sessionMeta(),
+      turnContext({ turn_id: "turn-1" }),
+      userMessage("First", "2024-01-01T00:00:02.000Z"),
+      assistantMessage("done", "2024-01-01T00:00:03.000Z"),
+      JSON.stringify({ type: "compacted", timestamp: "2024-01-01T00:00:04.000Z", payload: { message: "" } }),
+      turnContext({ turn_id: "turn-1", timestamp: "2024-01-01T00:00:05.000Z" }),
+      assistantMessage("continued", "2024-01-01T00:00:06.000Z"),
+    ].join("\n"))
+
+    expect(turns).toHaveLength(2)
+    expect(turns[0].id).not.toBe(turns[1].id)
+    expect(new Set(turns.map((t) => t.id)).size).toBe(2)
+  })
+
+  it("reassembles a turn split across pages without losing its prompt", () => {
+    const older = [
+      ...HEADER,
+      turnContext(),
+      userMessage("Add view transitions"),
+      assistantMessage("Starting.", "2024-01-01T00:00:03.000Z"),
+    ]
+    const newer = [...HEADER, assistantMessage("Finished.", "2024-01-01T00:05:00.000Z")]
+
+    const olderTurns = parseCanonicalCodexSession(older.join("\n")).turns
+    const newerTurns = parseCanonicalCodexSession(newer.join("\n")).turns
+    const joined = prependTurns(newerTurns, olderTurns, "codex")
+
+    expect(joined).toHaveLength(1)
+    expect(joined[0].userMessage).toBe("Add view transitions")
+    expect(joined[0].assistantText).toEqual(["Starting.", "Finished."])
   })
 })
