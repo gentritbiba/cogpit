@@ -8,8 +8,8 @@ import { EditDiffView } from "../timeline/EditDiffView"
 import { cn } from "@/lib/utils"
 import { fileExtension } from "@/lib/fileTypeColors"
 import { ChangeBar } from "@/components/shared/ChangeCounts"
+import { openFile } from "@/lib/fileOpener"
 import { OpIndicator, SubAgentIndicator } from "./file-change-indicators"
-import { openInEditor } from "./open-in-editor"
 import type { GroupedFile, IndividualEdit } from "./useFileChangesData"
 
 export type DiffMode = "net" | "per-edit"
@@ -121,7 +121,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => openInEditor(file.filePath, "file")}
+                  onClick={() => openFile(file.filePath)}
                   aria-label="Open file in editor"
                 />}>
                   <Code2 data-icon="inline-start" />
@@ -133,7 +133,7 @@ export const GroupedFileCard = memo(function GroupedFileCard({ file, defaultOpen
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  onClick={() => openInEditor(file.filePath, "diff")}
+                  onClick={() => openFile(file.filePath, { mode: "diff" })}
                   aria-label="View git diff"
                 />}>
                   <GitCompareArrows data-icon="inline-start" />

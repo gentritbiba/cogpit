@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { authFetch } from "@/lib/auth"
+import type { BuiltInEditorRequest } from "@/lib/fileOpener"
 import { fileTypeIcon } from "@/lib/fileTypeColors"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
@@ -51,6 +52,8 @@ interface ProjectFilesPanelProps {
   cwd: string
   onClose: () => void
   onAddToPrompt?: (context: ProjectPromptContext) => void
+  /** An "open this file" instruction routed here by {@link openFile}. */
+  openRequest?: BuiltInEditorRequest | null
 }
 
 export interface ProjectPromptContext {
@@ -93,8 +96,16 @@ interface GitStatusData {
   files: GitStatusFile[]
 }
 
+/** A file to show in the right pane, and how to show it. */
+interface OpenTarget {
+  path: string
+  mode: "edit" | "diff"
+  /** 1-based line to place the caret on once the file loads. */
+  line?: number
+}
+
 type PendingDiscard =
-  | { type: "file"; path: string; mode: "edit" | "diff" }
+  | { type: "file"; target: OpenTarget }
   | { type: "close" }
 
 const MIN_WIDTH = 520
@@ -144,7 +155,18 @@ function displayBytes(value: number): string {
   return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
 }
 
-export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesPanelProps) {
+/** Character offset of the start of `line` (1-based) within `text`. */
+function offsetOfLine(text: string, line: number): number {
+  let offset = 0
+  for (let current = 1; current < line; current += 1) {
+    const next = text.indexOf("\n", offset)
+    if (next < 0) return offset
+    offset = next + 1
+  }
+  return offset
+}
+
+export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: ProjectFilesPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
@@ -267,7 +289,26 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     return () => window.removeEventListener("beforeunload", warn)
   }, [dirty])
 
-  const loadFile = useCallback(async (path: string) => {
+  /**
+   * Focus the editor, optionally placing the caret on `line`. The selection is
+   * set while the textarea is blurred because browsers only scroll a caret into
+   * view when focus lands on an existing selection — and the editor soft-wraps,
+   * so line height arithmetic would land on the wrong row.
+   */
+  const focusEditorAt = useCallback((text: string, line?: number) => {
+    const editor = editorRef.current
+    if (!editor) return
+    if (!line || line < 1) {
+      editor.focus()
+      return
+    }
+    const offset = offsetOfLine(text, line)
+    editor.blur()
+    editor.setSelectionRange(offset, offset)
+    editor.focus()
+  }, [])
+
+  const loadFile = useCallback(async (path: string, line?: number) => {
     setFileLoading(true)
     setFileError(null)
     setSavedNotice(false)
@@ -282,7 +323,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       setSavedContent(data.content)
       setMtimeMs(data.mtimeMs)
       setSize(data.size)
-      requestAnimationFrame(() => editorRef.current?.focus())
+      requestAnimationFrame(() => focusEditorAt(data.content, line))
     } catch (error) {
       setContent("")
       setSavedContent("")
@@ -291,7 +332,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     } finally {
       setFileLoading(false)
     }
-  }, [cwd])
+  }, [cwd, focusEditorAt])
 
   const loadDiff = useCallback(async (path: string, originalPath?: string) => {
     setDiffLoading(true)
@@ -311,11 +352,11 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     }
   }, [cwd])
 
-  const openFile = useCallback((path: string, mode: "edit" | "diff") => {
+  const openFile = useCallback(({ path, mode, line }: OpenTarget) => {
     setSelectedPath(path)
     setViewMode(mode)
     if (mode === "edit") {
-      void loadFile(path)
+      void loadFile(path, line)
       return
     }
     // The editor is loaded lazily on the first switch to edit, so clear whatever
@@ -329,15 +370,30 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     void loadDiff(path, changedFiles.get(path)?.originalPath)
   }, [changedFiles, loadDiff, loadFile])
 
+  /** Route a file through the unsaved-changes guard before opening it. */
+  const requestOpen = useCallback((target: OpenTarget) => {
+    if (dirty) {
+      setPendingDiscard({ type: "file", target })
+      return
+    }
+    openFile(target)
+  }, [dirty, openFile])
+
   const selectFile = useCallback((path: string) => {
     if (path === selectedPath) return
     const mode = fileScope === "changes" && changedFiles.has(path) ? "diff" : "edit"
-    if (dirty) {
-      setPendingDiscard({ type: "file", path, mode })
-      return
-    }
-    openFile(path, mode)
-  }, [changedFiles, dirty, fileScope, openFile, selectedPath])
+    requestOpen({ path, mode })
+  }, [changedFiles, fileScope, requestOpen, selectedPath])
+
+  // An open request routed here from elsewhere in the app (a file-change card,
+  // a markdown link, the git diff button). The token guards against re-applying
+  // the same request when unrelated state changes.
+  const appliedRequestRef = useRef(0)
+  useEffect(() => {
+    if (!openRequest || openRequest.token === appliedRequestRef.current) return
+    appliedRequestRef.current = openRequest.token
+    requestOpen({ path: openRequest.file, mode: openRequest.mode, line: openRequest.line })
+  }, [openRequest, requestOpen])
 
   const showDiff = useCallback(() => {
     if (!selectedPath || viewMode === "diff") return
@@ -420,7 +476,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     const action = pendingDiscard
     setPendingDiscard(null)
     if (action.type === "file") {
-      openFile(action.path, action.mode)
+      openFile(action.target)
       return
     }
     onClose()
@@ -485,7 +541,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
     () => (diff && !diff.binary && !diff.tooLarge ? diffLineCount(diff.original ?? "", diff.current ?? "") : null),
     [diff],
   )
-  const displayedFiles = useMemo(() => {
+  const matchedFiles = useMemo(() => {
     if (fileScope === "all") return files
     const normalizedQuery = query.trim().toLowerCase()
     return (gitStatus?.files ?? [])
@@ -494,6 +550,14 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
       .filter((path) => !normalizedQuery || path.toLowerCase().includes(normalizedQuery))
       .sort((a, b) => a.localeCompare(b))
   }, [fileScope, files, gitStatus?.files, query])
+  // The open file is always listed, even when the active filter or the capped
+  // first page of results would otherwise leave it out.
+  const displayedFiles = useMemo(
+    () => (selectedPath && !matchedFiles.includes(selectedPath)
+      ? [selectedPath, ...matchedFiles]
+      : matchedFiles),
+    [matchedFiles, selectedPath],
+  )
   const listLoading = fileScope === "changes" ? gitLoading : filesLoading
   const listError = fileScope === "changes" ? gitError : filesError
   // Git status is only fetched on mount, refresh, and save — never while typing —
@@ -647,10 +711,10 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                     </Button>
                   )
                 })}
-                {fileScope === "all" && (totalMatches > displayedFiles.length || scanLimited) && (
+                {fileScope === "all" && (totalMatches > matchedFiles.length || scanLimited) && (
                   <p className="px-3 py-2 text-xs text-muted-foreground">
-                    {totalMatches > displayedFiles.length
-                      && `Showing ${displayedFiles.length} of ${totalMatches} matches. Type to narrow the list. `}
+                    {totalMatches > matchedFiles.length
+                      && `Showing ${matchedFiles.length} of ${totalMatches} matches. Type to narrow the list. `}
                     {scanLimited && "This project is too large to scan completely."}
                   </p>
                 )}
@@ -669,7 +733,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
                   <p className="truncate text-xs font-medium" title={selectedPath}>{selectedName}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{selectedPath}</p>
                 </div>
-                {selectedGitFile && (
+                {(selectedGitFile || viewMode === "diff") && (
                   <ToggleGroup
                     aria-label="File view"
                     value={[viewMode]}
@@ -884,7 +948,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt }: ProjectFilesP
             <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDiscard?.type === "file"
-                ? `Your edits to ${selectedName ?? "this file"} will be lost when you open ${pendingDiscard.path}.`
+                ? `Your edits to ${selectedName ?? "this file"} will be lost when you open ${pendingDiscard.target.path}.`
                 : `Your edits to ${selectedName ?? "this file"} will be lost when you close the file workspace.`}
             </AlertDialogDescription>
           </AlertDialogHeader>

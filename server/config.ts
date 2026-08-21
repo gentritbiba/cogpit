@@ -55,6 +55,8 @@ export interface AppConfig {
   networkPassword?: string
   terminalApp?: string
   editorApp?: string
+  /** Route "open in editor" affordances to Cogpit's own file workspace. */
+  useBuiltInEditor?: boolean
 }
 
 let cachedConfig: AppConfig | null = null
@@ -196,6 +198,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
         networkPassword,
         terminalApp: parsed.terminalApp || undefined,
         editorApp: parsed.editorApp || undefined,
+        useBuiltInEditor: !!parsed.useBuiltInEditor,
       }
       return cachedConfig
     }

@@ -11,8 +11,8 @@ import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
 import { useIsMobile } from "@/hooks/useIsMobile"
 import { EditDiffView } from "./EditDiffView"
-import { authFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
+import { isBuiltInEditorEnabled, openFile } from "@/lib/fileOpener"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
@@ -368,6 +368,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   const skillMeta = toolCall.name === "Skill" && skillMetadata
     ? skillMetadata.get(summary) ?? null
     : null
+  const skillFilePath = skillMeta?.filePath
   const hasEditDiff =
     toolCall.name === "Edit" &&
     typeof toolCall.input.old_string === "string" &&
@@ -486,21 +487,17 @@ export const ToolCallCard = memo(function ToolCallCard({
       {skillMeta && !isCompactMobile && (
         <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">
           <span>source: {skillMeta.source}</span>
-          {skillMeta.filePath && !isRemoteDeviceActive() && (
+          {skillFilePath && (!isRemoteDeviceActive() || isBuiltInEditorEnabled()) && (
             <Button
               type="button"
               variant="link"
               size="xs"
               onClick={(e) => {
                 e.stopPropagation()
-                authFetch("/api/open-in-editor", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ path: skillMeta.filePath }),
-                })
+                openFile(skillFilePath)
               }}
               className="h-auto px-0 text-muted-foreground"
-              title={skillMeta.filePath}
+              title={skillFilePath}
             >
               <ExternalLink data-icon="inline-start" />
               Open SKILL.md

@@ -27,9 +27,9 @@ import { ContextBadge, FLOATING_PILL, LiveIndicator } from "@/components/header-
 import { formatAgentLabel } from "@/components/timeline/agent-utils"
 import { useAppContext } from "@/contexts/AppContext"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
+import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import {
   formatTokenCount,
   getContextUsage,
@@ -214,13 +214,10 @@ function SessionBreadcrumb({
   const sessionLabel = session.slug || session.sessionId.slice(0, 8)
   const breadcrumb = session.cwd ? `${projectName(session.cwd)} / ${sessionLabel}` : sessionLabel
 
-  function postAction(endpoint: "/api/open-in-editor" | "/api/reveal-in-folder"): void {
-    authFetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: session.cwd || undefined, dirName: sessionSource.dirName }),
-    })
-  }
+  const project = { path: session.cwd, dirName: sessionSource.dirName }
+  // The built-in workspace reads files over the device proxy, so it stays
+  // available even when the session runs on another machine.
+  const canOpenEditor = !isRemote || isBuiltInEditorEnabled()
 
   function handleViewProjectSessions(): void {
     startTransition(() => {
@@ -267,17 +264,21 @@ function SessionBreadcrumb({
             Duplicate this session
           </ContextMenuItem>
         )}
-        {hasProject && !isRemote && (
+        {hasProject && (canOpenEditor || !isRemote) && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => postAction("/api/open-in-editor")}>
-              <Code2 className="size-3.5" />
-              Open project in editor
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => postAction("/api/reveal-in-folder")}>
-              <FolderSearch className="size-3.5" />
-              Reveal in file manager
-            </ContextMenuItem>
+            {canOpenEditor && (
+              <ContextMenuItem onClick={() => openProject(project)}>
+                <Code2 className="size-3.5" />
+                Open project in editor
+              </ContextMenuItem>
+            )}
+            {!isRemote && (
+              <ContextMenuItem onClick={() => revealInFolder(project)}>
+                <FolderSearch className="size-3.5" />
+                Reveal in file manager
+              </ContextMenuItem>
+            )}
           </>
         )}
         {onOpenTerminal && !isRemote && can("terminal") && (

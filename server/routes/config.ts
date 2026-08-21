@@ -369,6 +369,7 @@ export function registerConfigRoutes(use: UseFn) {
         networkPassword: config.networkPassword ? "set" : null,
         terminalApp: config.terminalApp || null,
         editorApp: config.editorApp || null,
+        useBuiltInEditor: config.useBuiltInEditor || false,
       } : null))
       return
     }
@@ -443,6 +444,7 @@ export function registerConfigRoutes(use: UseFn) {
             networkPassword: finalPassword,
             terminalApp: parsed.terminalApp || undefined,
             editorApp: parsed.editorApp || undefined,
+            useBuiltInEditor: !!parsed.useBuiltInEditor,
           })
           refreshDirs()
 

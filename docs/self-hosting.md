@@ -295,7 +295,9 @@ reachable, needs a password, has network access disabled, or is running an older
 
 `⌘⇧1` to `⌘⇧9` jump between devices, `⌘⇧0` cycles. Actions that only make sense on the
 machine you are physically at, like open-in-editor and reveal-in-folder, are hidden while a
-remote device is selected.
+remote device is selected. The exception is open-in-editor with **Configuration → Open files
+in Cogpit** enabled: files then open in Cogpit's own file workspace, which reads them through
+the hub proxy.
 
 ---
 

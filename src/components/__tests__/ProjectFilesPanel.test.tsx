@@ -251,4 +251,69 @@ describe("ProjectFilesPanel", () => {
       comment: "Use a clearer name",
     })
   })
+
+  describe("routed open requests", () => {
+    it("opens the requested file with the caret on the requested line", async () => {
+      mocks.authFetch.mockImplementation((url: string) => {
+        if (url.startsWith("/api/git-status")) return Promise.resolve(jsonResponse({ isRepository: false, files: [] }))
+        if (url.startsWith("/api/project-files")) return Promise.resolve(jsonResponse({ files: ["src/App.tsx"] }))
+        if (url.startsWith("/api/project-file?")) {
+          return Promise.resolve(jsonResponse({ content: "one\ntwo\nthree\n", mtimeMs: 10, size: 14 }))
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      })
+      render(
+        <ProjectFilesPanel
+          cwd="/workspace/cogpit"
+          onClose={vi.fn()}
+          openRequest={{ file: "src/App.tsx", mode: "edit", line: 3, token: 1 }}
+        />,
+      )
+
+      const editor = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Editing src/App.tsx" })
+      await waitFor(() => expect(editor.selectionStart).toBe("one\ntwo\n".length))
+    })
+
+    it("opens the requested file straight into its diff", async () => {
+      render(
+        <ProjectFilesPanel
+          cwd="/workspace/cogpit"
+          onClose={vi.fn()}
+          openRequest={{ file: "src/App.tsx", mode: "diff", token: 1 }}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(mocks.authFetch.mock.calls.some((call) => String(call[0]).startsWith("/api/git-diff"))).toBe(true)
+      })
+      expect(screen.queryByRole("textbox", { name: "Editing src/App.tsx" })).toBeNull()
+    })
+
+    it("guards a routed open behind unsaved changes", async () => {
+      const user = userEvent.setup()
+      const { rerender } = render(
+        <ProjectFilesPanel
+          cwd="/workspace/cogpit"
+          onClose={vi.fn()}
+          openRequest={{ file: "src/App.tsx", mode: "edit", token: 1 }}
+        />,
+      )
+
+      const editor = await screen.findByRole("textbox", { name: "Editing src/App.tsx" })
+      fireEvent.change(editor, { target: { value: "const value = 2\n" } })
+      expect(screen.getByText("Unsaved")).toBeInTheDocument()
+
+      rerender(
+        <ProjectFilesPanel
+          cwd="/workspace/cogpit"
+          onClose={vi.fn()}
+          openRequest={{ file: "README.md", mode: "edit", token: 2 }}
+        />,
+      )
+
+      expect(await screen.findByText("Discard unsaved changes?")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Discard changes" }))
+      expect(await screen.findByRole("textbox", { name: "Editing README.md" })).toBeInTheDocument()
+    })
+  })
 })

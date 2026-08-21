@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react"
-import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare, Code2 } from "lucide-react"
+import { FolderOpen, CheckCircle, XCircle, Loader2, TerminalSquare, Code2, PanelsTopLeft } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -9,9 +9,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
@@ -85,6 +87,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [editorApp, setEditorApp] = useState("")
   const [initialEditorApp, setInitialEditorApp] = useState("")
 
+  // Route "open in editor" to Cogpit's own file workspace instead
+  const [useBuiltInEditor, setUseBuiltInEditor] = useState(false)
+  const [initialUseBuiltInEditor, setInitialUseBuiltInEditor] = useState(false)
+
   // Track whether network settings changed (to enable save without path change)
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
@@ -112,6 +118,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           const editor = data?.editorApp || ""
           setEditorApp(editor)
           setInitialEditorApp(editor)
+          const builtIn = data?.useBuiltInEditor === true
+          setUseBuiltInEditor(builtIn)
+          setInitialUseBuiltInEditor(builtIn)
           // Fetch connected devices if network is active
           if (access && data?.networkPassword && !remoteDevice) {
             authFetch("/api/connected-devices")
@@ -145,12 +154,13 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       networkPassword: !remoteDevice && networkAccess && networkPassword.length > 0 ? networkPassword : undefined,
       terminalApp: terminalApp.trim() || undefined,
       editorApp: editorApp.trim() || undefined,
+      useBuiltInEditor,
     })
     if (result.success && result.claudeDir) {
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, terminalApp, editorApp, save, onSaved, remoteDevice, initialNetworkAccess])
+  }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, save, onSaved, remoteDevice, initialNetworkAccess])
 
   const MIN_PASSWORD_LENGTH = 16
 
@@ -163,6 +173,7 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     const networkChanged = !remoteDevice && (networkAccess !== initialNetworkAccess || (networkAccess && networkPassword.length > 0))
     const terminalChanged = terminalApp !== initialTerminalApp
     const editorChanged = editorApp !== initialEditorApp
+      || useBuiltInEditor !== initialUseBuiltInEditor
     if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged) return false
 
     // Validate password requirements when network is enabled
@@ -226,18 +237,41 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
             />
           </Field>
 
+          <Field orientation="horizontal">
+            <Checkbox
+              id="use-built-in-editor"
+              checked={useBuiltInEditor}
+              onCheckedChange={(checked) => setUseBuiltInEditor(checked === true)}
+              disabled={!canWriteConfig}
+            />
+            <FieldContent>
+              <FieldLabel htmlFor="use-built-in-editor">
+                <PanelsTopLeft data-icon="inline-start" className="size-4 text-muted-foreground" />
+                Open files in Cogpit
+              </FieldLabel>
+              <FieldDescription>
+                Files and diffs open in Cogpit&rsquo;s file workspace instead of launching an
+                external editor.
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+
           <Field>
             <FieldLabel htmlFor="editor-application">
               <Code2 data-icon="inline-start" className="size-4 text-muted-foreground" />
               Editor application
             </FieldLabel>
-            <FieldDescription>Leave blank to use $VISUAL or automatic detection.</FieldDescription>
+            <FieldDescription>
+              {useBuiltInEditor
+                ? "Not used while files open in Cogpit."
+                : "Leave blank to use $VISUAL or automatic detection."}
+            </FieldDescription>
             <Input
               id="editor-application"
               value={editorApp}
               onChange={(e) => setEditorApp(e.target.value)}
               placeholder="cursor, code, zed, or /path/to/binary"
-              disabled={!canWriteConfig}
+              disabled={!canWriteConfig || useBuiltInEditor}
             />
           </Field>
 

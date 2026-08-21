@@ -502,6 +502,20 @@ describe("config routes", () => {
       expect(response.networkPassword).toBe("set")
       expect(response.terminalApp).toBe("Ghostty")
       expect(response.editorApp).toBe("Visual Studio Code")
+      expect(response.useBuiltInEditor).toBe(false)
+    })
+
+    it("reports the built-in editor preference", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        useBuiltInEditor: true,
+      })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).useBuiltInEditor).toBe(true)
     })
 
     it("returns null networkPassword when not set", async () => {
@@ -627,6 +641,24 @@ describe("config routes", () => {
         codexOnly: true,
         terminalApp: "Ghostty",
         editorApp: "Visual Studio Code",
+      }))
+    })
+
+    it("persists the built-in editor preference", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const body = JSON.stringify({ claudeDir: "/home/.claude", useBuiltInEditor: true })
+      const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+      mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
+      mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+      await handler(req, res, next)
+      sendBody()
+
+      await vi.waitFor(() => {
+        expect(res.end).toHaveBeenCalled()
+      })
+      expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
+        useBuiltInEditor: true,
       }))
     })
 

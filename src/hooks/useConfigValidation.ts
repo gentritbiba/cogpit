@@ -3,6 +3,15 @@ import { authFetch } from "@/lib/auth"
 
 type ValidationStatus = "idle" | "validating" | "valid" | "invalid"
 
+/** Everything POST /api/config accepts alongside the Claude directory. */
+export interface ConfigSettingsPayload {
+  networkAccess?: boolean
+  networkPassword?: string
+  terminalApp?: string
+  editorApp?: string
+  useBuiltInEditor?: boolean
+}
+
 export function useConfigValidation() {
   const [status, setStatus] = useState<ValidationStatus>("idle")
   const [error, setError] = useState<string | null>(null)
@@ -43,12 +52,15 @@ export function useConfigValidation() {
     clearTimeout(timerRef.current)
   }, [])
 
-  const save = useCallback(async (path: string, networkOpts?: { networkAccess?: boolean; networkPassword?: string; terminalApp?: string; editorApp?: string }): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
+  const save = useCallback(async (
+    path: string,
+    settings?: ConfigSettingsPayload,
+  ): Promise<{ success: boolean; claudeDir?: string; error?: string }> => {
     try {
       const res = await authFetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeDir: path, ...networkOpts }),
+        body: JSON.stringify({ claudeDir: path, ...settings }),
       })
       const data = await res.json()
       if (res.ok && data.success) {

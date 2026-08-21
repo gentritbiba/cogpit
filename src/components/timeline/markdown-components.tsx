@@ -3,7 +3,7 @@ import { Maximize2 } from "lucide-react"
 import type { Components, Options } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { authUrl } from "@/lib/auth"
-import { openInEditor } from "@/components/FileChangesPanel/open-in-editor"
+import { openFile } from "@/lib/fileOpener"
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 import { useOptionalImageGallery } from "./SessionImageGallery"
@@ -121,7 +121,7 @@ function ExternalLink({
 
     e.preventDefault()
     if (fileTarget) {
-      openInEditor(fileTarget.path, "file", {
+      openFile(fileTarget.path, {
         line: fileTarget.line,
         column: fileTarget.column,
       })

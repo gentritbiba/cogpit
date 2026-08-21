@@ -196,8 +196,10 @@ export default function App() {
     currentCwd,
     showPreview,
     showProjectFiles,
+    projectFilesRoot,
+    projectFilesRequest,
     launchTerminalRequest,
-    postProjectAction,
+    pendingProject,
     handleOpenTerminal,
     handleMcpAuth,
     handleToggleIntegratedTerminal,
@@ -212,6 +214,9 @@ export default function App() {
     sessionDirName: state.sessionSource?.dirName,
     pendingDirName: state.pendingDirName,
     dashboardProject: state.dashboardProject,
+    // Only the desktop shell mounts the file workspace; mobile open requests
+    // fall through to the host editor.
+    supportsFileWorkspace: !isMobile && hostFilesEnabled,
   })
 
   // TODO progress from session's TodoWrite tool calls
@@ -1231,12 +1236,14 @@ export default function App() {
             currentCwd,
             showPreview,
             showProjectFiles: hostFilesEnabled && showProjectFiles,
+            projectFilesRoot,
+            projectFilesRequest,
             launchTerminalRequest,
+            pendingProject,
             onOpenTerminal: handleOpenTerminal,
             onTogglePreview: handleTogglePreview,
             onToggleProjectFiles: handleToggleProjectFiles,
             onCloseRightWorkspace: closeRightWorkspace,
-            onPostProjectAction: postProjectAction,
           }}
           chrome={{
             backgroundServers,

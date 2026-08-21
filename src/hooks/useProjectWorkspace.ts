@@ -1,8 +1,14 @@
-import { startTransition, useCallback, useState } from "react"
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { useProcessPanel } from "@/hooks/useProcessPanel"
-import { can } from "@/lib/capabilities"
+import {
+  registerBuiltInFileOpener,
+  resolveBuiltInEditorTarget,
+  type BuiltInEditorRequest,
+  type FileOpenTarget,
+  type ProjectRef,
+} from "@/lib/fileOpener"
 
 interface UseProjectWorkspaceOptions {
   sessionId: string | null | undefined
@@ -11,14 +17,23 @@ interface UseProjectWorkspaceOptions {
   sessionDirName: string | null | undefined
   pendingDirName: string | null
   dashboardProject: string | null
+  /**
+   * Whether this shell renders the file workspace. Layouts without it (mobile)
+   * decline built-in open requests so they fall through to the host editor.
+   */
+  supportsFileWorkspace: boolean
 }
 
-type RightWorkspace = {
-  kind: "preview" | "project-files"
-  cwd: string
-}
-
-type PendingProjectActionEndpoint = "/api/open-in-editor" | "/api/reveal-in-folder"
+type RightWorkspace =
+  | { kind: "preview"; cwd: string }
+  | {
+      kind: "project-files"
+      /** Directory the panel browses — usually, but not always, the project. */
+      root: string
+      /** Project the panel belongs to; it hides while another one is active. */
+      anchorCwd: string | null
+      request: BuiltInEditorRequest | null
+    }
 
 /**
  * Coordinates the project-scoped surfaces and native actions around the chat:
@@ -31,28 +46,29 @@ export function useProjectWorkspace({
   sessionDirName,
   pendingDirName,
   dashboardProject,
+  supportsFileWorkspace,
 }: UseProjectWorkspaceOptions) {
   const processPanel = useProcessPanel(sessionId)
   const [rightWorkspace, setRightWorkspace] = useState<RightWorkspace | null>(null)
   const [launchTerminalRequest, setLaunchTerminalRequest] = useState(0)
+  const requestTokenRef = useRef(0)
 
   const currentCwd = sessionCwd ?? pendingPath ?? undefined
   const showPreview = Boolean(
     currentCwd && rightWorkspace?.kind === "preview" && rightWorkspace.cwd === currentCwd,
   )
-  const showProjectFiles = Boolean(
-    currentCwd && rightWorkspace?.kind === "project-files" && rightWorkspace.cwd === currentCwd,
-  )
+  // The panel stays mounted for the project it was opened from, so switching
+  // sessions hides it rather than repointing it at unrelated files.
+  const projectFiles = rightWorkspace?.kind === "project-files"
+    && rightWorkspace.anchorCwd === (currentCwd ?? null)
+    ? rightWorkspace
+    : null
 
-  /** Fire-and-forget POST for actions exposed on a pending project. */
-  const postProjectAction = useCallback((endpoint: PendingProjectActionEndpoint) => {
-    if (!can("hostFiles")) return
-    authFetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: pendingPath || undefined, dirName: pendingDirName || undefined }),
-    }).catch(() => {})
-  }, [pendingPath, pendingDirName])
+  /** The project a pending (not yet started) session would run in. */
+  const pendingProject = useMemo<ProjectRef>(
+    () => ({ path: pendingPath, dirName: pendingDirName }),
+    [pendingPath, pendingDirName],
+  )
 
   const handleOpenTerminal = useCallback(() => {
     // Native terminal windows can only be opened on the local device.
@@ -113,9 +129,34 @@ export function useProjectWorkspace({
   const handleToggleProjectFiles = useCallback(() => {
     if (!currentCwd) return
     startTransition(() => {
-      setRightWorkspace(showProjectFiles ? null : { kind: "project-files", cwd: currentCwd })
+      setRightWorkspace(projectFiles ? null : {
+        kind: "project-files",
+        root: currentCwd,
+        anchorCwd: currentCwd,
+        request: null,
+      })
     })
-  }, [currentCwd, showProjectFiles])
+  }, [currentCwd, projectFiles])
+
+  /** Serve an "open in editor" request from the built-in file workspace. */
+  const openInFileWorkspace = useCallback((target: FileOpenTarget): boolean => {
+    if (!supportsFileWorkspace) return false
+    const resolved = resolveBuiltInEditorTarget(target, currentCwd)
+    if (!resolved) return false
+    requestTokenRef.current += 1
+    const token = requestTokenRef.current
+    startTransition(() => setRightWorkspace({
+      kind: "project-files",
+      root: resolved.root,
+      anchorCwd: currentCwd ?? null,
+      request: resolved.file
+        ? { file: resolved.file, mode: resolved.mode, line: resolved.line, token }
+        : null,
+    }))
+    return true
+  }, [currentCwd, supportsFileWorkspace])
+
+  useEffect(() => registerBuiltInFileOpener(openInFileWorkspace), [openInFileWorkspace])
 
   const closeRightWorkspace = useCallback(() => {
     startTransition(() => setRightWorkspace(null))
@@ -125,9 +166,11 @@ export function useProjectWorkspace({
     processPanel,
     currentCwd,
     showPreview,
-    showProjectFiles,
+    showProjectFiles: projectFiles !== null,
+    projectFilesRoot: projectFiles?.root,
+    projectFilesRequest: projectFiles?.request ?? null,
     launchTerminalRequest,
-    postProjectAction,
+    pendingProject,
     handleOpenTerminal,
     handleMcpAuth,
     handleToggleIntegratedTerminal,

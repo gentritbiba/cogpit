@@ -254,7 +254,7 @@ describe("ToolCallCard Skill rendering", () => {
       "/api/open-in-editor",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ path: filePath }),
+        body: JSON.stringify({ path: filePath, mode: "file" }),
       }),
     )
   })

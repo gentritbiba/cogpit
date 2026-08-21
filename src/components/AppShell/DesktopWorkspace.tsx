@@ -19,6 +19,7 @@ import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
+import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import { dirNameToPath } from "@/lib/format"
 import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
@@ -162,6 +163,9 @@ function DesktopMainView({
     const hostActionReason = isRemoteDeviceActive()
       ? "Only on the machine running this session"
       : undefined
+    // The built-in workspace reads the remote device's files over the proxy, so
+    // it is the one host action that still works from another machine.
+    const editorActionReason = isBuiltInEditorEnabled() ? undefined : hostActionReason
     return (
       <div
         className={cn(
@@ -198,12 +202,12 @@ function DesktopMainView({
             )}
             {can("hostFiles") && (
               <>
-                <DisabledHint reason={hostActionReason}>
+                <DisabledHint reason={editorActionReason}>
                   <Button
                     variant="outline"
                     size="xs"
-                    disabled={Boolean(hostActionReason)}
-                    onClick={() => project.onPostProjectAction("/api/open-in-editor")}
+                    disabled={Boolean(editorActionReason)}
+                    onClick={() => openProject(project.pendingProject)}
                   >
                     <Code2 data-icon="inline-start" />
                     Open in editor
@@ -214,7 +218,7 @@ function DesktopMainView({
                     variant="outline"
                     size="xs"
                     disabled={Boolean(hostActionReason)}
-                    onClick={() => project.onPostProjectAction("/api/reveal-in-folder")}
+                    onClick={() => revealInFolder(project.pendingProject)}
                   >
                     <FolderSearch data-icon="inline-start" />
                     Reveal in files
@@ -350,12 +354,13 @@ export function DesktopWorkspace({
         </Suspense>
       )}
 
-      {project.showProjectFiles && project.currentCwd && (
+      {project.showProjectFiles && project.projectFilesRoot && (
         <Suspense fallback={null}>
           <ProjectFilesPanel
-            cwd={project.currentCwd}
+            cwd={project.projectFilesRoot}
             onClose={project.onCloseRightWorkspace}
             onAddToPrompt={addProjectContext}
+            openRequest={project.projectFilesRequest}
           />
         </Suspense>
       )}

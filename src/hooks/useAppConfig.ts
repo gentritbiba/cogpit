@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { authFetch, hubFetch } from "@/lib/auth"
+import { setBuiltInEditorEnabled } from "@/lib/fileOpener"
 import type { AppConfig } from "@/contexts/AppContext"
 import type { AgentKind } from "@/lib/sessionSource"
 
@@ -31,16 +32,23 @@ async function fetchNetworkInfo(signal?: AbortSignal): Promise<NetworkState> {
 interface ConfigSnapshot {
   claudeDir: string | null
   defaultAgentKind: AgentKind
+  /** Route "open in editor" affordances to Cogpit's own file workspace. */
+  useBuiltInEditor: boolean
 }
 
 /** Fetch the config endpoint and return its provider-aware snapshot or throw. */
 async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
   const res = await authFetch("/api/config", { signal })
   if (!res.ok) throw new Error(`Config request failed (${res.status})`)
-  const data = (await res.json()) as { claudeDir?: string; mode?: string } | null
+  const data = (await res.json()) as {
+    claudeDir?: string
+    mode?: string
+    useBuiltInEditor?: boolean
+  } | null
   return {
     claudeDir: data?.claudeDir ?? null,
     defaultAgentKind: data?.mode === "codex" ? "codex" : "claude",
+    useBuiltInEditor: data?.useBuiltInEditor === true,
   }
 }
 
@@ -56,6 +64,13 @@ export function useAppConfig(): AppConfig {
   const [fetchKey, setFetchKey] = useState(0)
   const networkRequestRef = useRef<AbortController | null>(null)
   const retryRequestRef = useRef<AbortController | null>(null)
+
+  /** Publish a resolved snapshot to local state and the file-open router. */
+  const applySnapshot = useCallback((snapshot: ConfigSnapshot) => {
+    setClaudeDir(snapshot.claudeDir)
+    setDefaultAgentKind(snapshot.defaultAgentKind)
+    setBuiltInEditorEnabled(snapshot.useBuiltInEditor)
+  }, [])
 
   const refreshNetwork = useCallback(async () => {
     networkRequestRef.current?.abort()
@@ -77,10 +92,7 @@ export function useAppConfig(): AppConfig {
     setConfigLoading(true)
     setConfigError(null)
     fetchConfig(controller.signal)
-      .then((snapshot) => {
-        setClaudeDir(snapshot.claudeDir)
-        setDefaultAgentKind(snapshot.defaultAgentKind)
-      })
+      .then(applySnapshot)
       .catch((err) => {
         if (err instanceof Error && err.name === "AbortError") return
         setClaudeDir(null)
@@ -90,7 +102,7 @@ export function useAppConfig(): AppConfig {
         if (!controller.signal.aborted) setConfigLoading(false)
       })
     return () => controller.abort()
-  }, [fetchKey])
+  }, [applySnapshot, fetchKey])
 
   // Re-fetch config when auth state changes (e.g. after login on remote client)
   useEffect(() => {
@@ -109,9 +121,12 @@ export function useAppConfig(): AppConfig {
     if (newPath !== claudeDir) {
       setClaudeDir(newPath)
       window.location.reload()
-    } else {
-      refreshNetwork()
+      return
     }
+    // Re-read the config so preference changes (editor routing, provider mode)
+    // take effect without a reload.
+    setFetchKey((key) => key + 1)
+    refreshNetwork()
   }, [claudeDir, refreshNetwork])
 
   const openConfigDialog = useCallback(() => setShowConfigDialog(true), [])
@@ -125,8 +140,7 @@ export function useAppConfig(): AppConfig {
     fetchConfig(controller.signal)
       .then((snapshot) => {
         if (controller.signal.aborted || retryRequestRef.current !== controller) return
-        setClaudeDir(snapshot.claudeDir)
-        setDefaultAgentKind(snapshot.defaultAgentKind)
+        applySnapshot(snapshot)
       })
       .catch((err) => {
         if (controller.signal.aborted || retryRequestRef.current !== controller) return
@@ -137,7 +151,7 @@ export function useAppConfig(): AppConfig {
         if (controller.signal.aborted || retryRequestRef.current !== controller) return
         setConfigLoading(false)
       })
-  }, [])
+  }, [applySnapshot])
 
   return {
     configLoading,

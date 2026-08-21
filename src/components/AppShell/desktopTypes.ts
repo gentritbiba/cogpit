@@ -14,6 +14,7 @@ import type { useProcessPanel } from "@/hooks/useProcessPanel"
 import type { useSessionActions } from "@/hooks/useSessionActions"
 import type { TodoProgress } from "@/hooks/useTodoProgress"
 import type { useWorktrees } from "@/hooks/useWorktrees"
+import type { BuiltInEditorRequest, ProjectRef } from "@/lib/fileOpener"
 
 export type DesktopPanels = Pick<
   ReturnType<typeof usePanelState>,
@@ -108,14 +109,16 @@ export interface DesktopProject {
   currentCwd: string | undefined
   showPreview: boolean
   showProjectFiles: boolean
+  /** Directory the file workspace browses; absent when it is closed. */
+  projectFilesRoot: string | undefined
+  projectFilesRequest: BuiltInEditorRequest | null
   launchTerminalRequest: number
+  /** Project a pending (not yet started) session would run in. */
+  pendingProject: ProjectRef
   onOpenTerminal: () => void
   onTogglePreview: () => void
   onToggleProjectFiles: () => void
   onCloseRightWorkspace: () => void
-  onPostProjectAction: (
-    endpoint: "/api/open-in-editor" | "/api/reveal-in-folder",
-  ) => void
 }
 
 export interface DesktopChrome {

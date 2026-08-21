@@ -126,6 +126,8 @@ On desktop, open terminals and discovered project scripts from one bottom proces
 ### Project File Editor & Previews
 Edit project files securely: read and write to any file in your project with optimistic concurrency control (mtime-based conflict detection prevents lost writes). Preview viewport with zoom controls for rendered content. File suggestions with `@-mention` autocomplete in the chat input.
 
+Enable **Configuration → Open files in Cogpit** to route every "open in editor" action — file-change cards, git diff buttons, file links in agent output, project context menus — into this panel instead of launching an external editor. It works over the network too, so files on a remote device open in place rather than copying a path to the clipboard.
+
 ### Network Access
 Access Cogpit from your phone or tablet on the same LAN. Password-protected with rate-limited auth and full feature parity with the local client.
 
@@ -145,7 +147,7 @@ do not meet the current minimum must be reset from the local app.
 ### Multi-Device Hub
 Register other machines and control them from one Cogpit window. A device switcher in the header (and at the top of the mobile UI) lets you jump between "This machine" and any registered remote — with `⌘⇧1–9` / `Ctrl+Shift+1–9` to jump and `⌘⇧0` to cycle. You always see one machine at a time; switching restores exactly where you left off on that device. Your browser never leaves the hub, which reverse-proxies traffic to each device so there's nothing to configure per-origin.
 
-A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` (or `https://host:port` for TLS-terminating proxies) and credentials: a network password for personal edition, or a username and password for team edition. A live probe reports reachability, required authentication, incomplete team bootstrap, disabled network access, and version skew. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active.
+A device is addable if it runs either the full Cogpit app with Network Access enabled, or the headless `cogpit-server`. Add one from **Devices → Add device** by entering its `host:port` (or `https://host:port` for TLS-terminating proxies) and credentials: a network password for personal edition, or a username and password for team edition. A live probe reports reachability, required authentication, incomplete team bootstrap, disabled network access, and version skew. Actions that only make sense on the machine you're sitting at (open-in-editor, reveal-in-folder, open-terminal) are hidden when a remote device is active — except open-in-editor when **Open files in Cogpit** is enabled, which reads the remote device's files through the hub proxy.
 
 Headless boxes become addable with one command:
 ```bash

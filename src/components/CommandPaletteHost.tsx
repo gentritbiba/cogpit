@@ -9,6 +9,7 @@ import { usePty } from "@/contexts/PtyContext"
 import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
+import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileOpener"
 import { copyToClipboard } from "@/lib/utils"
 import type { ProcessEntry } from "@/hooks/useProcessPanel"
 
@@ -96,25 +97,19 @@ export function CommandPaletteHost({
     handleOpenIntegratedTerminal()
   }, [handleOpenIntegratedTerminal, launchTerminalRequest, pty.status, terminalCwd])
 
-  const postProjectAction = useCallback((endpoint: string) => {
-    if (!terminalCwd && !currentProjectDirName) return
-    void authFetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: terminalCwd ?? undefined,
-        dirName: currentProjectDirName ?? undefined,
-      }),
-    })
-  }, [currentProjectDirName, terminalCwd])
+  const project = useMemo(
+    () => ({ path: terminalCwd, dirName: currentProjectDirName }),
+    [currentProjectDirName, terminalCwd],
+  )
 
-  const handleOpenProjectInEditor = useCallback(() => {
-    postProjectAction("/api/open-in-editor")
-  }, [postProjectAction])
+  const handleOpenProjectInEditor = useCallback(() => openProject(project), [project])
 
-  const handleRevealProject = useCallback(() => {
-    postProjectAction("/api/reveal-in-folder")
-  }, [postProjectAction])
+  const handleRevealProject = useCallback(() => revealInFolder(project), [project])
+
+  const canRevealProject = !isRemoteDeviceActive() && can("hostFiles")
+  // The built-in workspace reads files over the device proxy, so it stays
+  // available even when the project lives on another machine.
+  const canOpenEditor = can("hostFiles") && (!isRemoteDeviceActive() || isBuiltInEditorEnabled())
 
   const handleCopyProjectPath = useCallback(() => {
     if (terminalCwd) void copyToClipboard(terminalCwd)
@@ -132,8 +127,8 @@ export function CommandPaletteHost({
           ? handleOpenIntegratedTerminal
           : undefined
       }
-      onOpenProjectInEditor={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleOpenProjectInEditor : undefined}
-      onRevealProject={terminalCwd && !isRemoteDeviceActive() && can("hostFiles") ? handleRevealProject : undefined}
+      onOpenProjectInEditor={terminalCwd && canOpenEditor ? handleOpenProjectInEditor : undefined}
+      onRevealProject={terminalCwd && canRevealProject ? handleRevealProject : undefined}
       onCopyProjectPath={terminalCwd ? handleCopyProjectPath : undefined}
     />
   )
