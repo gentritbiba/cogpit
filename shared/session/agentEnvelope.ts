@@ -7,15 +7,40 @@
 //
 //   <agent-message from="worker-name"> ...markdown body... </agent-message>
 //   <teammate-message teammate_id="team-lead"> ...markdown body... </teammate-message>
+//
+// Known limitation: a nested or quoted envelope leaks the inner raw tags into
+// the body, because the lazy body group stops at the first closing tag —
+// `<agent-message from="a">outer <agent-message from="b">inner</agent-message>`
+// unwraps at the inner closing tag and leaves the trailing `</agent-message>`
+// behind. Neither Claude Code nor the queue writes nested envelopes today.
 
 const ENVELOPE_RE = /<(agent-message|teammate-message)([^>]*)>([\s\S]*?)<\/\1>/g
-const SENDER_RE = /(?:\bfrom|\bteammate_id)="([^"]*)"/
+
+// Tried in order, because an envelope can carry both attributes and
+// `teammate_id` is the more specific one. A single alternation cannot express
+// that preference: the engine returns the leftmost match, so `from="x"` would
+// win purely on attribute order.
+const SENDER_PATTERNS = [
+  /\bteammate_id=(?:"([^"]*)"|'([^']*)')/,
+  /\bfrom=(?:"([^"]*)"|'([^']*)')/,
+]
 
 export interface ParsedAgentEnvelope {
-  /** Sender named by the first envelope, or null when there is none. */
+  /** Sender named by the first envelope that names one, or null when none does. */
   sender: string | null
+  /** True when at least one envelope was unwrapped, even if it named no sender. */
+  matched: boolean
   /** Text with every envelope unwrapped. Unchanged when no envelope matched. */
   body: string
+}
+
+function readSender(attrs: string): string | null {
+  for (const pattern of SENDER_PATTERNS) {
+    const m = attrs.match(pattern)
+    const value = m?.[1] ?? m?.[2]
+    if (value) return value
+  }
+  return null
 }
 
 export function parseAgentEnvelope(text: string): ParsedAgentEnvelope {
@@ -24,31 +49,35 @@ export function parseAgentEnvelope(text: string): ParsedAgentEnvelope {
 
   const unwrapped = text.replace(ENVELOPE_RE, (_full, _tag: string, attrs: string, inner: string) => {
     matched = true
-    if (sender === null) {
-      const m = attrs.match(SENDER_RE)
-      if (m?.[1]) sender = m[1]
-    }
+    if (sender === null) sender = readSender(attrs)
     return inner.trim()
   })
 
-  return matched ? { sender, body: unwrapped.trim() } : { sender: null, body: text }
+  return { sender, matched, body: matched ? unwrapped.trim() : text }
 }
 
-/** Phrases that announce a question up front, checked against the opening. */
-const ASK_PHRASES = [
-  "blocking question",
-  "before i touch",
-  "should i",
-  "tell me one of",
-  "let me know",
-  "your call",
-  "who owns",
-  "confirm whether",
+/**
+ * Phrases that announce a question up front, checked against the opening.
+ *
+ * Derived from a two-message sample and never tuned against real traffic —
+ * treat the list as a starting guess, not a validated signal. Word boundaries
+ * matter: an unanchored `should i` also fires on `should include`,
+ * `should identify`, and `should ignore`, all of which open status reports.
+ */
+const ASK_PATTERNS = [
+  /\bblocking question\b/,
+  /\bbefore i touch\b/,
+  /\bshould i\b/,
+  /\btell me one of\b/,
+  /\byour call\b/,
+  /\bwho owns\b/,
+  /\bconfirm whether\b/,
 ]
 
 const LEAD_CHARS = 200
-/** Questions land at the end of a report; only the tail counts for "?". */
-const TAIL_FRACTION = 0.75
+/** Questions land at the end of a report, so only its closing line counts. */
+const TAIL_CHARS = 200
+const URL_RE = /\bhttps?:\/\/\S+/g
 
 /**
  * Whether a message reads as asking the reader for something.
@@ -61,8 +90,9 @@ export function looksLikeQuestion(body: string): boolean {
   const trimmed = body.trim()
   if (!trimmed) return false
 
-  const lower = trimmed.toLowerCase()
-  if (ASK_PHRASES.some((phrase) => lower.slice(0, LEAD_CHARS).includes(phrase))) return true
+  const lead = trimmed.slice(0, LEAD_CHARS).toLowerCase()
+  if (ASK_PATTERNS.some((pattern) => pattern.test(lead))) return true
 
-  return trimmed.slice(Math.floor(trimmed.length * TAIL_FRACTION)).includes("?")
+  const lastLine = trimmed.slice(trimmed.lastIndexOf("\n") + 1)
+  return lastLine.slice(-TAIL_CHARS).replace(URL_RE, "").includes("?")
 }
