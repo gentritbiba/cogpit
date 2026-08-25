@@ -2,6 +2,7 @@ import { memo, useRef, useLayoutEffect, useMemo, useState } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
+import { AgentMessageCard } from "./AgentMessageCard"
 import { AssistantText } from "./AssistantText"
 import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
@@ -528,6 +529,20 @@ function ContentBlocks({
           <Badge variant="outline" className="mb-2">Queued while working</Badge>
           <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact={isMobile} />
         </div>
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "agent_message") {
+      elements.push(
+        <AgentMessageCard
+          key={keyFor(block, i)}
+          sender={block.sender}
+          body={block.body}
+          reply={block.reply}
+          timestamp={block.timestamp}
+        />
       )
       i++
       continue

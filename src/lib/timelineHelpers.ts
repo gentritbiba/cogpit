@@ -21,6 +21,12 @@ export function matchesSearch(turn: Turn, query: string): boolean {
     if (block.kind === "queued_prompt" && block.content.toLowerCase().includes(q)) {
       return true
     }
+    if (
+      block.kind === "agent_message" &&
+      (block.sender.toLowerCase().includes(q) || block.body.toLowerCase().includes(q))
+    ) {
+      return true
+    }
   }
 
   for (const tb of turn.thinking) {

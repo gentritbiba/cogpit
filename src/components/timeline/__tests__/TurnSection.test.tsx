@@ -88,6 +88,23 @@ const blockedTurn: Turn = {
   assistantText: ["Which is my one question for now:"],
 }
 
+/** A completed turn whose work would fold, carrying a peer agent's message. */
+const mailTurn: Turn = {
+  ...turn,
+  id: "turn-mail",
+  contentBlocks: [
+    { kind: "tool_calls", toolCalls: [question] },
+    {
+      kind: "agent_message",
+      sender: "csp-and-proxy",
+      body: "One blocking question on finding #1.",
+      timestamp: "2026-08-19T12:00:02.000Z",
+    },
+    { kind: "text", text: ["Final response"] },
+  ],
+  assistantText: ["Final response"],
+}
+
 function makeSession(): ParsedSession {
   return {
     sessionId: "session-1",
@@ -151,5 +168,16 @@ describe("TurnSection work disclosure", () => {
     expect(screen.queryByText("Streaming response")).not.toBeInTheDocument()
     expect(screen.queryByText("AskUserQuestion")).not.toBeInTheDocument()
     expect(screen.getByText("Final response")).toBeInTheDocument()
+  })
+})
+
+describe("TurnSection agent messages", () => {
+  it("renders a peer message as a card naming its sender", () => {
+    mocks.status = "completed"
+
+    render(<TurnSection turn={mailTurn} index={0} />)
+
+    expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
+    expect(screen.getByText("One blocking question on finding #1.")).toBeInTheDocument()
   })
 })
