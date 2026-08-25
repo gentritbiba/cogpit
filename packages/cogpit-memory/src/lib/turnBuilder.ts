@@ -300,6 +300,48 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
 // ── Build Turns State Machine ────────────────────────────────────────────────
 
 /**
+ * Attach each peer message to the `SendMessage` that answered it.
+ *
+ * Walks blocks in chronological order holding the still-unanswered messages per
+ * sender, so a reply claims the oldest outstanding message from that sender and
+ * pairing only ever runs forward in time. A `SendMessage` sent *before* any
+ * inbound message from that sender is an instruction, not a reply.
+ *
+ * The join is on the sender name, which is the only key available: the block
+ * carries no task id, because `origin.senderTaskId` names the sending agent's
+ * task rather than the message. `SendMessage.input.to` uses the same names that
+ * arrive in `origin.from`, so the join holds.
+ */
+function pairAgentMessageReplies(turns: Turn[]): void {
+  const unanswered = new Map<string, Array<Extract<TurnContentBlock, { kind: "agent_message" }>>>()
+
+  for (const turn of turns) {
+    for (const block of turn.contentBlocks) {
+      if (block.kind === "agent_message") {
+        const waiting = unanswered.get(block.sender)
+        if (waiting) waiting.push(block)
+        else unanswered.set(block.sender, [block])
+        continue
+      }
+      if (block.kind !== "tool_calls") continue
+
+      for (const call of block.toolCalls) {
+        if (call.name !== "SendMessage") continue
+        const to = call.input.to
+        if (typeof to !== "string" || !to) continue
+        const target = unanswered.get(to)?.shift()
+        if (!target) continue
+        const summary = call.input.summary
+        target.reply = {
+          summary: typeof summary === "string" ? summary : "",
+          timestamp: call.timestamp || block.timestamp || "",
+        }
+      }
+    }
+  }
+}
+
+/**
  * Raw-message index where each turn `buildTurns` would produce begins, so
  * `starts[i]` is the index that produces `turns[i]`.
  *
@@ -960,6 +1002,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   // Finalize the last turn
   flushPendingQueuedPrompts()
   finalizeTurn()
+
+  pairAgentMessageReplies(turns)
 
   return turns
 }

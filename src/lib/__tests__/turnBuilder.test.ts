@@ -22,7 +22,7 @@ import {
   turnDurationMsg,
   toJsonl,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, SystemMessage } from "@/lib/types"
+import type { ProgressMessage, SystemMessage, TurnContentBlock } from "@/lib/types"
 
 beforeEach(() => {
   resetFixtureCounter()
@@ -1108,5 +1108,113 @@ describe("agent mail", () => {
     expect(blocks).toHaveLength(2)
     expect(blocks.map((b) => (b.kind === "agent_message" ? b.body : null)))
       .toEqual(["one blocking question", "batch-2 done"])
+  })
+
+  /**
+   * A reply is a `SendMessage` tool_use carrying `{ to, summary, message }`.
+   * `to` uses the same agent name that arrives in `origin.from` — verified in
+   * `…honest-cms/ddb6fc34….jsonl` for `certified-status-fix` and
+   * `vehicle-batch` — so the sender name is the join key. It is also the only
+   * one available: the block deliberately carries no task id, because that id
+   * names the sending agent's task rather than the message.
+   */
+  const sendMessage = (to: string, summary: string, id: string) =>
+    toolUseAssistant("SendMessage", { to, summary, message: "..." }, id)
+
+  const agentMessages = (blocks: TurnContentBlock[]) =>
+    blocks.filter(
+      (b): b is Extract<TurnContentBlock, { kind: "agent_message" }> => b.kind === "agent_message"
+    )
+
+  it("attaches the SendMessage that answered a peer message", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "one blocking question"),
+      sendMessage("csp-and-proxy", "Answered your question", "sm-1"),
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.reply?.summary).toBe("Answered your question")
+    expect(block.reply?.timestamp).toBe("2025-01-15T10:00:01Z")
+  })
+
+  it("leaves a message unanswered when the SendMessage targets another sender", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "one blocking question"),
+      sendMessage("someone-else", "unrelated", "sm-1"),
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.reply).toBeUndefined()
+  })
+
+  // Sending an agent instructions and then hearing back from it is the normal
+  // flow. Pairing backwards would label the instruction a reply and mark every
+  // inbound message answered before it arrived.
+  it("does not pair a SendMessage that preceded the message", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      sendMessage("csp-and-proxy", "go do batch 2", "sm-1"),
+      peerAttachment("csp-and-proxy", "one blocking question"),
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.reply).toBeUndefined()
+  })
+
+  it("pairs two messages from one sender to their two replies oldest-first", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("w", "first"),
+      peerAttachment("w", "second"),
+      sendMessage("w", "re first", "sm-1"),
+      sendMessage("w", "re second", "sm-2"),
+      textAssistant("done"),
+    ]))
+
+    const blocks = agentMessages(session.turns[0].contentBlocks)
+    expect(blocks.map((b) => b.body)).toEqual(["first", "second"])
+    expect(blocks.map((b) => b.reply?.summary)).toEqual(["re first", "re second"])
+  })
+
+  // The queue per sender has to drain, not latch. Holding "this sender was
+  // answered" instead of "these messages are outstanding" marks every later
+  // message from a sender you once replied to as answered.
+  it("does not carry a reply over to the same sender's next message", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("vehicle-batch", "first question"),
+      sendMessage("vehicle-batch", "re first", "sm-1"),
+      peerAttachment("vehicle-batch", "second question"),
+      textAssistant("done"),
+    ]))
+
+    const blocks = agentMessages(session.turns[0].contentBlocks)
+    expect(blocks.map((b) => b.body)).toEqual(["first question", "second question"])
+    expect(blocks.map((b) => b.reply?.summary)).toEqual(["re first", undefined])
+  })
+
+  it("pairs a reply that lands in a later turn", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("vehicle-batch", "half-blocked on a decision"),
+      textAssistant("done"),
+      userMsg("next"),
+      sendMessage("vehicle-batch", "unblocked you", "sm-1"),
+      textAssistant("done again"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.reply?.summary).toBe("unblocked you")
   })
 })
