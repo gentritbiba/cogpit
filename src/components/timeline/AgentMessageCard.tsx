@@ -2,9 +2,11 @@ import { memo, useMemo, useState, type CSSProperties } from "react"
 import { ArrowDownLeft, ChevronDown, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { formatDuration } from "@/lib/format"
+import { looksLikeQuestion } from "../../../shared/session/agentEnvelope"
 
 /**
  * Hues spread around the wheel so two agents in the same session rarely land on
@@ -117,6 +119,12 @@ export const AgentMessageCard = memo(function AgentMessageCard({
   const time = formatTime(timestamp)
   const accent = "text-[oklch(0.52_0.16_var(--agent-hue))] dark:text-[oklch(0.74_0.14_var(--agent-hue))]"
 
+  // The one guessed signal on this card, so it is gated on the message also
+  // being unanswered: a false positive erases itself the moment you reply, and
+  // can never sit on screen going stale.
+  const isQuestion = useMemo(() => looksLikeQuestion(body), [body])
+  const needsYou = isQuestion && !reply
+
   const askedAt = parseTime(timestamp)
   const replyDelay = reply ? elapsedBetween(askedAt, parseTime(reply.timestamp)) : null
   const awaiting = !reply && isLive === true
@@ -136,6 +144,14 @@ export const AgentMessageCard = memo(function AgentMessageCard({
           <span className={`truncate font-mono text-xs font-medium ${accent}`}>{sender}</span>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {needsYou && (
+            <Badge
+              variant="outline"
+              className="h-4 border-warning/30 bg-warning/10 px-1.5 text-[10px] tracking-wide text-warning uppercase"
+            >
+              Needs you
+            </Badge>
+          )}
           {time && <span className="text-xs text-muted-foreground">{time}</span>}
         </div>
       </div>

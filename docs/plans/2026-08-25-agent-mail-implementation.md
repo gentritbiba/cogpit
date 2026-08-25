@@ -1275,6 +1275,21 @@ git commit -m "feat: show reply state on agent messages"
 
 ## Task 11: The NEEDS YOU chip
 
+> **DONE.** All three plan tests pass as written, plus 3 more (6 new; 4124 ->
+> 4130). Task 10's liveness scope was corrected first, in its own commit.
+>
+> - **The chip is not gated on liveness**, only on `looksLikeQuestion(body) &&
+>   !reply`, per the design doc's two conditions. So a historical session's
+>   never-answered question still carries it — the footer is what separates
+>   `Awaiting your reply` from `Never answered`; the chip answers the different
+>   question of whether anyone was ever asked for anything. A test pins this.
+> - **The two real subject lines from the motivating session are now test
+>   cases.** They are the heuristic's only calibration, so a change that flips
+>   either one fails the suite rather than quietly degrading the signal.
+> - The chip sits in the header slot Task 8 reserved, ahead of the timestamp,
+>   using the repo's existing `border-warning/30 bg-warning/10 text-warning`
+>   idiom at badge scale.
+
 **Files:**
 - Modify: `src/components/timeline/AgentMessageCard.tsx`
 - Modify: `src/components/timeline/__tests__/AgentMessageCard.test.tsx`

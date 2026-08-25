@@ -213,6 +213,58 @@ describe("AgentMessageCard", () => {
       expect(stateLine()).toBe('You replied 22s later \u00b7 "done"')
     })
   })
+
+  describe("needs-you chip", () => {
+    const QUESTION = "payload-batch-2 - one blocking question on finding #1.\nDetail follows."
+    const chip = () => screen.queryByText(/needs you/i)
+
+    it("flags an unanswered question", () => {
+      render(<AgentMessageCard sender="w" body={QUESTION} timestamp="" />)
+      expect(chip()).toBeInTheDocument()
+    })
+
+    it("drops the flag once the question was answered", () => {
+      render(
+        <AgentMessageCard
+          sender="w"
+          body={QUESTION}
+          timestamp=""
+          reply={{ summary: "answered", timestamp: "" }}
+        />,
+      )
+      expect(chip()).not.toBeInTheDocument()
+    })
+
+    it("does not flag a done report", () => {
+      render(<AgentMessageCard sender="w" body="batch-2 done, verify is PASS." timestamp="" />)
+      expect(chip()).not.toBeInTheDocument()
+    })
+
+    // The two strings below are real subject lines from the session that
+    // motivated this feature. They are the only calibration the heuristic has,
+    // so a change that flips either one has broken the signal.
+    it("flags the real message that announced a blocking question", () => {
+      const real =
+        "payload-batch-2 (CSP + lenderdesk hardening) — one blocking question on finding #1."
+      render(<AgentMessageCard sender="w" body={real} timestamp="" />)
+      expect(chip()).toBeInTheDocument()
+    })
+
+    it("leaves the real done report unflagged", () => {
+      const real =
+        "payload-batch-2 done, except the one hunk in src/middleware.ts. bun run verify is PASS."
+      render(<AgentMessageCard sender="w" body={real} timestamp="" />)
+      expect(chip()).not.toBeInTheDocument()
+    })
+
+    it("still flags a question a historical session never answered", () => {
+      // Liveness is deliberately not a condition. The footer already separates
+      // "Awaiting your reply" from "Never answered"; the chip answers a
+      // different question — whether anyone was ever asked for something.
+      render(<AgentMessageCard sender="w" body={QUESTION} timestamp="" isLive={false} />)
+      expect(chip()).toBeInTheDocument()
+    })
+  })
 })
 
 describe("agentAccentHue", () => {
