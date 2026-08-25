@@ -156,10 +156,23 @@ function normalizedDownstreamPath(downstreamPath: string): string | null {
   }
 }
 
-/** Device auth/session routes must never receive the hub's service token. */
+function isDeviceAuthPath(path: string): boolean {
+  return path === "/api/auth" || path.startsWith("/api/auth/")
+}
+
+/**
+ * Device auth/session routes must never receive the hub's service token.
+ *
+ * The path is judged as sent as well as normalized, because the device's
+ * router normalizes nothing: it answers `/api/auth/session/../..` from the
+ * auth mount while URL parsing resolves that same target to `/api`. Either
+ * spelling naming device auth is enough to refuse, and a path that cannot be
+ * normalized at all is refused too.
+ */
 export function isForbiddenHubDownstreamPath(downstreamPath: string): boolean {
+  if (isDeviceAuthPath(downstreamPath.split("?")[0].toLowerCase())) return true
   const path = normalizedDownstreamPath(downstreamPath)
-  return path === "/api/auth" || path?.startsWith("/api/auth/") === true
+  return path === null || isDeviceAuthPath(path)
 }
 
 /**

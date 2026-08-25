@@ -142,6 +142,50 @@ export function sendJson(res: ServerResponse, status: number, data: unknown): vo
 }
 
 /**
+ * The path of an HTTP request target, or null when it is not one this server
+ * routes as a path.
+ *
+ * Node hands `req.url` through exactly as the client wrote it, and HTTP/1.1
+ * allows more shapes than the origin-form (`/api/me`) every browser sends: a
+ * proxy-style absolute-form target (`GET http://host/api/me HTTP/1.1`) makes
+ * `req.url` an absolute URI, which the routers below still dispatch on its
+ * pathname. Anything that tests `req.url` for a `/api/`-style prefix must
+ * reduce it here first, or the prefix silently stops matching while the
+ * request still reaches the handler.
+ *
+ * The path is returned exactly as sent. Nothing is decoded and no dot segment
+ * is resolved, because the routers resolve nothing either: Express dispatches
+ * `/api/me/../../..` to the `/api/me` handler, so a caller that resolved it to
+ * `/` before testing would call a live endpoint public. Same reasoning as
+ * share/allowlist.ts — never make a target look tamer than the router treats
+ * it. Callers that must widen a match may decode the result themselves.
+ *
+ * Returns null for protocol-relative (`//host/api/me`), authority-form, `*`,
+ * and unparseable targets: none of them is a path this server serves, and
+ * every caller treats null as the protected case.
+ */
+export function requestTargetPath(rawTarget: string): string | null {
+  const target = rawTarget.split("?")[0]
+  if (target.startsWith("/")) return target.startsWith("//") ? null : target
+
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(target)
+  if (!scheme || !parsesAsUrl(target)) return null
+  const pathStart = target.indexOf("/", scheme[0].length)
+  if (pathStart === -1) return "/"
+  const path = target.slice(pathStart)
+  return path.startsWith("//") ? null : path
+}
+
+function parsesAsUrl(value: string): boolean {
+  try {
+    void new URL(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * A prefix only matches at a path-segment boundary: the path equals it, the
  * prefix already ends in "/", or the next character starts a subpath ("/") or
  * query ("?"). Keeps /api/messages from riding an /api/me rule.

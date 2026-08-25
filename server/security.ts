@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Duplex } from "node:stream"
 import { timingSafeEqual, randomBytes } from "node:crypto"
 import { getConfig } from "./config"
-import { sendJson, MAX_REQUEST_BODY_BYTES, type NextFn } from "./http"
+import { requestTargetPath, sendJson, MAX_REQUEST_BODY_BYTES, type NextFn } from "./http"
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TTL_MS,
@@ -294,15 +294,21 @@ export function onSessionRevoked(listener: SessionRevocationListener): () => voi
 
 const HTTP_STREAM_AUTHORIZATION_RECHECK_MS = 5_000
 
+/**
+ * The API path a stream request names, with the `/hub/:deviceId` prefix of a
+ * proxied one removed.
+ *
+ * Read from the path exactly as sent, for the same reason isPublicPath is:
+ * resolving `/api/watch/a/../../..` to "/" would classify a request the router
+ * still dispatches to the watch handler as "not a stream", and it would then
+ * outlive the revocation of the token that opened it.
+ */
 function authenticatedStreamApiPath(rawUrl: string): string | null {
-  try {
-    const decoded = decodeURIComponent(new URL(rawUrl, "http://cogpit.invalid").pathname)
-    const normalized = new URL(decoded, "http://cogpit.invalid").pathname.toLowerCase()
-    const hub = /^\/hub\/[^/]+(\/api(?:\/.*)?)$/.exec(normalized)
-    return hub?.[1] ?? normalized
-  } catch {
-    return null
-  }
+  const target = requestTargetPath(rawUrl)
+  if (target === null) return null
+  const path = target.toLowerCase()
+  const hub = /^\/hub\/[^/]+(\/api(?:\/.*)?)$/.exec(path)
+  return hub?.[1] ?? path
 }
 
 /** Only endpoints whose successful GET response is intentionally long-lived. */
@@ -792,8 +798,7 @@ function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
   if (requestUsesHttps(req)) {
     res.setHeader("Strict-Transport-Security", "max-age=63072000")
   }
-  const path = (req.url || "/").split("?")[0].toLowerCase()
-  if (path.startsWith("/api/") || path.startsWith("/hub/") || path.startsWith("/__pty")) {
+  if (isProtectedTransportRequest(req)) {
     res.setHeader("Cache-Control", "no-store")
   }
 }
@@ -804,11 +809,7 @@ export function securityHeaders(req: IncomingMessage, res: ServerResponse, next:
 }
 
 export function devSecurityHeaders(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
-  const path = (req.url || "/").split("?")[0].toLowerCase()
-  const isProtectedTransport = path.startsWith("/api/")
-    || path.startsWith("/hub/")
-    || path.startsWith("/__pty")
-  if (isProtectedTransport) setSecurityHeaders(req, res)
+  if (isProtectedTransportRequest(req)) setSecurityHeaders(req, res)
   next()
 }
 
@@ -855,17 +856,49 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
 // guest could never log back in.
 const PUBLIC_PATHS = new Set(["/api/auth/verify", "/api/hello", "/api/share/verify"])
 
-function isPublicPath(url: string): boolean {
-  const path = url.split("?")[0]
-  if (PUBLIC_PATHS.has(path)) return true
+// /hub/* is the multi-device reverse proxy — protected exactly like /api/*.
+const PROTECTED_TRANSPORT_PREFIXES = ["/api/", "/__pty", "/hub/"] as const
+
+function startsWithProtectedPrefix(path: string): boolean {
   // Express routes case-insensitively, so a case-variant prefix (/HUB, /API,
   // /__PTY) would still reach the protected handlers while a case-sensitive
   // prefix check treated it as public — an unauthenticated remote shell for
   // every registered device. Lowercase before comparing so it can't slip past.
-  // /hub/* is the multi-device reverse proxy — protected exactly like /api/*.
   const lower = path.toLowerCase()
-  if (!lower.startsWith("/api/") && !lower.startsWith("/__pty") && !lower.startsWith("/hub/")) return true
-  return false
+  return PROTECTED_TRANSPORT_PREFIXES.some((prefix) => lower.startsWith(prefix))
+}
+
+/**
+ * True when `path` names the API, the hub proxy, or the PTY — the transports
+ * that require authentication and must never be cached.
+ *
+ * Both the path as sent and its single percent-decode are tested, and either
+ * hit protects the request. Decoding here can only ever widen what is
+ * protected: the routers dispatch on the undecoded path, so `/%61pi/me`
+ * reaches no handler and answering 401 to it costs nothing. Re-normalizing a
+ * decoded path would be the opposite kind of change and is deliberately absent
+ * — see requestTargetPath.
+ */
+function isProtectedTransportPath(path: string): boolean {
+  if (startsWithProtectedPrefix(path)) return true
+  try {
+    return startsWithProtectedPrefix(decodeURIComponent(path))
+  } catch {
+    // An undecodable target is one nobody can reason about. Protect it.
+    return true
+  }
+}
+
+/** A request target that cannot be reduced to a path is never public. */
+function isProtectedTransportRequest(req: IncomingMessage): boolean {
+  const path = requestTargetPath(req.url || "/")
+  return path === null || isProtectedTransportPath(path)
+}
+
+function isPublicPath(url: string): boolean {
+  const path = requestTargetPath(url)
+  if (path === null) return false
+  return PUBLIC_PATHS.has(path) || !isProtectedTransportPath(path)
 }
 
 /** The presented main-session token, or null when there is no valid one. */
@@ -1003,7 +1036,7 @@ function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: Nex
     return sendJson(res, 403, { error: "Untrusted local host" })
   }
 
-  const path = url.split("?")[0]
+  const path = requestTargetPath(url)
   const bootstrapCarveOut =
     path === "/api/team/bootstrap" && isUsersStoreInitialized() && userCount() === 0
   if (bootstrapCarveOut) {

@@ -28,6 +28,11 @@ describe("hub downstream trust boundary", () => {
     "/api/%61uth/logout",
     "/api/projects%2f..%2fauth%2flogout",
     "/api/projects%5c..%5cauth%5clogout",
+    // Normalization resolves these back out of /api/auth, but the device's
+    // router resolves nothing and still dispatches them to the auth mount.
+    "/api/auth/logout/../..",
+    "/api/auth/session/..",
+    "/API/AUTH/verify/../../..",
   ])("rejects normalized device authentication path %s", (path) => {
     expect(isForbiddenHubDownstreamPath(path)).toBe(true)
   })

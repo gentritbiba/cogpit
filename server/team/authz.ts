@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
-import { sendJson, type NextFn } from "../http"
+import { requestTargetPath, sendJson, type NextFn } from "../http"
 import { isTeamEdition } from "./edition"
 import { getRequestPrincipal } from "./requestPrincipal"
 import { requirementFor } from "./policy"
@@ -17,7 +17,16 @@ export function teamAuthzMiddleware(
   next: NextFn,
 ): void {
   if (!isTeamEdition()) return next()
-  const path = (req.url || "/").split("?")[0].toLowerCase()
+  const target = requestTargetPath(req.url || "/")
+  if (target === null) {
+    // A target with no path — protocol-relative, "*", unparseable — is one no
+    // rule in the table can be matched against, and authMiddleware has already
+    // refused it. Deny rather than wave it through to whatever the router
+    // decides the path was.
+    sendJson(res, 403, { error: "Admin access required", code: "FORBIDDEN" })
+    return
+  }
+  const path = target.toLowerCase()
   if (!path.startsWith("/api/") && !path.startsWith("/hub/")) return next()
   const requirement = requirementFor(path, (req.method || "GET").toUpperCase())
   if (requirement === "public") return next()

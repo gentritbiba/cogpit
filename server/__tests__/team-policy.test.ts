@@ -355,6 +355,47 @@ describe("teamAuthzMiddleware (team edition)", () => {
   })
 })
 
+describe("teamAuthzMiddleware non-origin-form targets (team edition)", () => {
+  beforeEach(enterTeamEdition)
+
+  // The prefix test that decides whether a request is policed at all ran
+  // against the raw request target, so an absolute-form target skipped the
+  // whole role table: a member could reach every admin-only route by asking
+  // for it as `GET http://host/api/team/users HTTP/1.1`.
+
+  it("polices an absolute-form target against the role table", () => {
+    const r = run("http://cogpit.local:19384/api/team/users", { principal: MEMBER })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+  })
+
+  it("polices an absolute-form hub target", () => {
+    // /hub/ itself is "authed"; the downstream path is the hub proxy's own
+    // check. What matters here is that the request is policed at all rather
+    // than skipping the table because its target did not start with "/hub/".
+    const anonymous = run("http://cogpit.local:19384/hub/dev_1/api/projects")
+    expect(anonymous.next).not.toHaveBeenCalled()
+    expect(anonymous.statusCode).toBe(403)
+    expect(run("http://cogpit.local:19384/hub/dev_1/api/projects", { principal: MEMBER }).next)
+      .toHaveBeenCalledOnce()
+  })
+
+  it("still admits an absolute-form target the member is allowed to reach", () => {
+    expect(run("http://cogpit.local:19384/api/projects", { principal: MEMBER }).next)
+      .toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384/index.html", { principal: MEMBER }).next)
+      .toHaveBeenCalledOnce()
+  })
+
+  it("fails closed on a target it cannot reduce to a path", () => {
+    for (const url of ["//evil.example/api/team/users", "*", "http://[::1"]) {
+      const r = run(url, { principal: MEMBER })
+      expect(r.next).not.toHaveBeenCalled()
+      expect(r.statusCode).toBe(403)
+    }
+  })
+})
+
 describe("teamAuthzMiddleware (personal edition)", () => {
   it("no-ops even for garbage paths without a principal", () => {
     expect(run("/api/never-registered").next).toHaveBeenCalledOnce()

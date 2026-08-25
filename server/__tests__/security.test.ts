@@ -31,6 +31,17 @@ describe("authenticated HTTP stream classification", () => {
     expect(isAuthenticatedHttpStreamRequest(request("/api/projects"))).toBe(false)
     expect(isAuthenticatedHttpStreamRequest(request("/api/watch/a/b", "POST"))).toBe(false)
   })
+
+  it("still classifies a stream whose target dodges normalization", () => {
+    // A stream that escapes classification is a stream that keeps flowing
+    // after its token is revoked, so every target the watch mount still
+    // dispatches has to be recognized: absolute-form, dot segments, and case.
+    const request = (url: string) => ({ url, method: "GET" }) as IncomingMessage
+    expect(isAuthenticatedHttpStreamRequest(request("/api/watch/a/../../.."))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("http://cogpit.local/api/watch/a/b"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("/API/Watch/a/b"))).toBe(true)
+    expect(isAuthenticatedHttpStreamRequest(request("//evil.example/api/watch/a/b"))).toBe(false)
+  })
 })
 
 describe("hashPassword", () => {
@@ -453,6 +464,80 @@ describe("authMiddleware path protection", () => {
     expect(run("/index.html").next).toHaveBeenCalledOnce()
     expect(run("/assets/app.js").next).toHaveBeenCalledOnce()
     expect(run("/d/dev_abc123/some-session").next).toHaveBeenCalledOnce()
+  })
+
+  // ── non-origin-form request targets ──
+  //
+  // Node hands `req.url` through verbatim, so a client sending the absolute-form
+  // target HTTP/1.1 allows (`GET http://host/api/me HTTP/1.1`) makes req.url an
+  // absolute URI. The routers still dispatch it on its pathname, so a prefix
+  // test against the raw target classified every protected endpoint as public
+  // and called next() with no credentials and no CSRF check.
+
+  it("rejects an absolute-form target for a protected API path", () => {
+    const r = run("http://cogpit.local:19384/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("rejects absolute-form targets for /hub/* and /__pty", () => {
+    expect(run("http://cogpit.local:19384/hub/dev_abc123/api/projects").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/hub/dev_abc123/__pty").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/__pty").statusCode).toBe(401)
+  })
+
+  it("rejects an absolute-form target whose path is a case variant", () => {
+    expect(run("HTTP://cogpit.local:19384/API/config").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/HUB/dev_abc123/api/projects").statusCode).toBe(401)
+    expect(run("https://cogpit.local/__PTY").statusCode).toBe(401)
+  })
+
+  it("rejects a protocol-relative request target", () => {
+    const r = run("//evil.example/api/projects")
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(401)
+  })
+
+  it("treats a target it cannot reduce to a path as protected", () => {
+    expect(run("*").statusCode).toBe(401)
+    expect(run("cogpit.local:19384").statusCode).toBe(401)
+    expect(run("http://[::1").statusCode).toBe(401)
+  })
+
+  it("does not resolve dot segments out of a protected prefix", () => {
+    // The routers dispatch on the raw path: a live server answers
+    // /api/me/../../.. with the /api/me payload, while URL parsing resolves
+    // that target to "/". Resolving it here would hand the /api mount an
+    // unauthenticated request that this function had called public.
+    expect(run("/api/me/../../..").statusCode).toBe(401)
+    expect(run("/api/../index.html").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/api/me/../../..").statusCode).toBe(401)
+    expect(run("http://cogpit.local:19384/api/file-content/../../asset.js").statusCode).toBe(401)
+  })
+
+  it("treats a percent-encoded protected prefix as protected", () => {
+    expect(run("/%61pi/projects").statusCode).toBe(401)
+    expect(run("/%5f%5fpty").statusCode).toBe(401)
+    expect(run("/%2561pi/projects").next).toHaveBeenCalledOnce()
+  })
+
+  it("treats an undecodable target as protected", () => {
+    expect(run("/assets/%ZZ.js").statusCode).toBe(401)
+  })
+
+  it("still resolves public paths and static assets in absolute form", () => {
+    expect(run("http://cogpit.local:19384/api/hello").next).toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384/api/auth/verify").next).toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384/api/hello?probe=1").next).toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384/assets/app.js").next).toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384/").next).toHaveBeenCalledOnce()
+    expect(run("http://cogpit.local:19384").next).toHaveBeenCalledOnce()
+  })
+
+  it("admits an absolute-form request that carries a valid token", () => {
+    const token = createSessionToken(REMOTE_IP)
+    const r = run("http://cogpit.local:19384/api/projects", { authHeader: `Bearer ${token}` })
+    expect(r.next).toHaveBeenCalledOnce()
   })
 })
 
