@@ -21,8 +21,12 @@ import type {
   MissionControlCurrentTool,
   MissionControlSummary,
 } from "../../../shared/contracts/missionControl"
+import type { ElicitationAnswer } from "@/lib/agentPromptsApi"
+import type { UserDialogChoice } from "../../../shared/contracts/agentPrompts"
+import { ElicitationPrompt } from "./ElicitationPrompt"
 import { PermissionPrompt } from "./PermissionPrompt"
 import { QuestionPrompt } from "./QuestionPrompt"
+import { UserDialogPrompt } from "./UserDialogPrompt"
 import { contextPercentColor, type MissionCard, type MissionCardState } from "./missionControlView"
 
 interface StateStyle {
@@ -39,6 +43,12 @@ const STATE_STYLES: Record<MissionCardState, StateStyle> = {
     label: "Waiting for approval",
     text: "text-warning",
     shell: "border-warning/40 bg-warning/5",
+    icon: MessageCircleQuestion,
+  },
+  awaiting_prompt: {
+    label: "Waiting for your input",
+    text: "text-info",
+    shell: "border-info/40 bg-info/5",
     icon: MessageCircleQuestion,
   },
   awaiting_question: {
@@ -76,6 +86,8 @@ interface SessionCardProps {
   onOpen: () => void
   onRespond: (sessionId: string, requestId: string, behavior: PermissionDecision) => void
   onAnswerQuestion: (sessionId: string, toolUseId: string, answers: UserQuestionAnswerMap) => void
+  onAnswerElicitation: (sessionId: string, requestId: string, answer: ElicitationAnswer) => void
+  onChooseDialog: (sessionId: string, requestId: string, choice: UserDialogChoice) => void
 }
 
 export const SessionCard = memo(function SessionCard({
@@ -88,12 +100,16 @@ export const SessionCard = memo(function SessionCard({
   onOpen,
   onRespond,
   onAnswerQuestion,
+  onAnswerElicitation,
+  onChooseDialog,
 }: SessionCardProps) {
-  const { session, state, summary, permissions, questions } = card
+  const { session, state, summary, permissions, questions, elicitations, dialogs } = card
   const style = STATE_STYLES[state]
   const request = permissions[0]
   const question = questions[0]
-  const blocked = Boolean(request || question)
+  const elicitation = elicitations[0]
+  const dialog = dialogs[0]
+  const blocked = Boolean(request || question || elicitation || dialog)
   const title = sessionTitle(session, customName)
 
   return (
@@ -148,8 +164,26 @@ export const SessionCard = memo(function SessionCard({
         />
       )}
 
-      {/* A pending permission outranks a question when a session has both. */}
-      {!request && question && (
+      {/* A pending permission outranks every other prompt on the session. */}
+      {!request && dialog && (
+        <UserDialogPrompt
+          key={dialog.requestId}
+          request={dialog}
+          responding={responding.has(dialog.requestId)}
+          onChoose={(requestId, choice) => onChooseDialog(session.sessionId, requestId, choice)}
+        />
+      )}
+
+      {!request && !dialog && elicitation && (
+        <ElicitationPrompt
+          key={elicitation.requestId}
+          request={elicitation}
+          responding={responding.has(elicitation.requestId)}
+          onAnswer={(requestId, answer) => onAnswerElicitation(session.sessionId, requestId, answer)}
+        />
+      )}
+
+      {!request && !dialog && !elicitation && question && (
         <QuestionPrompt
           key={question.toolUseId}
           request={question}

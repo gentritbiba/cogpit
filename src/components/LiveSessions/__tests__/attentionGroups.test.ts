@@ -50,6 +50,17 @@ describe("classifyAttention", () => {
     expect(working).toEqual([])
   })
 
+  it("puts a session parked on an MCP prompt or CLI dialog in needsYou", () => {
+    // Same blind spot as a question: the CLI is parked on a callback, so the
+    // session keeps reporting tool_use while nothing moves.
+    const s = makeSession({ sessionId: "mcp", agentStatus: "tool_use" })
+    const { needsYou, working } = classifyAttention(
+      [s], procs("mcp"), new Set(), undefined, undefined, new Set(["mcp"]),
+    )
+    expect(needsYou).toEqual([{ session: s, reason: "prompt" }])
+    expect(working).toEqual([])
+  })
+
   it("prefers the permission reason when a session somehow has both", () => {
     const s = makeSession({ sessionId: "both", agentStatus: "tool_use" })
     const { needsYou } = classifyAttention(

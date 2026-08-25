@@ -1,6 +1,7 @@
 import { compressionMiddleware } from "./compression"
 import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
+import { registerAgentPromptRoutes } from "./routes/agent-prompts"
 import { registerAskUserRoutes } from "./routes/ask-user"
 import { registerClaudeManageRoutes } from "./routes/claude-manage"
 import { registerClaudeNewRoutes } from "./routes/claude-new"
@@ -116,6 +117,7 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("permissions", registerPermissionRoutes),
   apiRoute("mission-control", registerMissionControlRoutes),
   apiRoute("ask-user", registerAskUserRoutes),
+  apiRoute("agent-prompts", registerAgentPromptRoutes),
   apiRoute("models", registerModelRoutes),
   apiRoute("codex-runtime", registerCodexRuntimeRoutes),
   apiRoute("claude-runtime", registerClaudeRuntimeRoutes),

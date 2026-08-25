@@ -826,7 +826,7 @@ git commit -m "fix(timeline): classify agent-spawning and message-sending tools 
 
 ## Phase 4 — Adopt the new SDK options
 
-### Task 14: Handle MCP elicitation
+### Task 14: Handle MCP elicitation — DONE
 
 **Why:** The SDK is explicit: *"If not provided, elicitation requests that aren't handled by hooks
 will be declined automatically."* Cogpit does not pass `onElicitation`, so any MCP server that asks
@@ -884,6 +884,17 @@ MCP prompt appears where the user already looks. `mode: "url"` needs an open-lin
 render, answer `{action: "decline"}` explicitly with a visible reason rather than parking forever —
 a silent park is what this task exists to remove.
 
+**Landed as:** `onElicitation` parks on `state.pendingElicitations` keyed by `options.requestId`,
+mirroring `pendingUserQuestions`. Answers go through `GET /api/agent-prompts` +
+`POST /api/elicitation-answer` in a new `server/routes/agent-prompts.ts` (one GET for elicitations
+AND dialogs so the dashboard keeps a single poll tick), surfaced by `PendingHumanInputContext` and
+`MissionControl/ElicitationPrompt.tsx`. Renders flat `object` schemas of string / number / integer /
+boolean / string-enum properties, plus `mode:"url"` (open-link + accept) and a bare confirm with no
+schema. Anything else — arrays, nested objects, non-string enums, non-object schemas — is declined
+at park time with a `streamBus.publishError` line naming the server and the offending property, so
+the decline is visible instead of silent. Abort resolves `{action:"decline"}`; session teardown
+resolves `{action:"cancel"}` (nobody declined; the user never got to answer).
+
 **Step 5: Verify, commit**
 
 ```bash
@@ -892,7 +903,7 @@ git commit -m "feat(mcp): answer elicitation requests instead of letting the SDK
 
 ---
 
-### Task 15: Declare renderable dialog kinds
+### Task 15: Declare renderable dialog kinds — DONE
 
 **Why:** The CLI fails closed on `supportedDialogKinds`: a kind not declared is never emitted, and
 the flow behind it degrades to its no-dialog behaviour. For `refusal_fallback_prompt` that means the
@@ -918,6 +929,14 @@ CLI apply the dialog's default.
 Declare only kinds the UI genuinely renders. Start with `refusal_fallback_prompt`; adding a kind
 Cogpit cannot display is worse than omitting it, because the CLI will then route real dialogs to a
 surface that drops them.
+
+**Landed as:** `supportedDialogKinds: ["refusal_fallback_prompt"]` with `onUserDialog` parking on
+`state.pendingUserDialogs`. Payload/result shapes were read out of the CLI binary rather than
+guessed: payload `{originalModel, fallbackModel, apiRefusalCategory?, guidanceText?,
+retractedMessageUuids?}`, result `"retry_fallback" | "edit_prompt" | "cancelled"`, default
+`cancelled`. Unrecognised kinds (and malformed refusal payloads) resolve `{behavior:"cancelled"}`
+without parking, per the `onUserDialog` doc comment. Rendered by
+`MissionControl/UserDialogPrompt.tsx`, answered via `POST /api/user-dialog-answer`.
 
 **Step 3: Commit**
 

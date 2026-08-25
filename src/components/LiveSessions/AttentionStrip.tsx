@@ -35,6 +35,7 @@ const REASON_CHIP: Record<AttentionItem["reason"], { label: string; className: s
   permission: { label: "Permission", className: "border-warning/30 bg-warning/10 text-warning" },
   deferred: { label: "Deferred", className: "border-warning/30 bg-warning/10 text-warning" },
   question: { label: "Question", className: "border-warning/30 bg-warning/10 text-warning" },
+  prompt: { label: "Input needed", className: "border-warning/30 bg-warning/10 text-warning" },
   waiting: { label: "Waiting", className: "border-warning/30 bg-warning/10 text-warning" },
   done: { label: "Done", className: "border-success/30 bg-success/10 text-success" },
 }
@@ -45,6 +46,7 @@ const REASON_DOT: Record<AttentionItem["reason"], string> = {
   deferred: STATUS_DOT.attention,
   waiting: STATUS_DOT.attention,
   question: "bg-warning",
+  prompt: "bg-warning",
   done: "bg-success",
 }
 

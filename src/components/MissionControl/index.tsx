@@ -67,9 +67,13 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
   const {
     permissionsBySession,
     questionsBySession,
+    elicitationsBySession,
+    dialogsBySession,
     responding,
     respond,
     answerQuestion,
+    answerElicitation,
+    answerDialog,
     refresh: refreshHumanInput,
   } = usePendingHumanInput()
   // Tool-use ids the server has forgotten, so the card can say so instead of
@@ -90,9 +94,14 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
       summaries,
       permissionsBySession,
       questionsBySession,
+      elicitationsBySession,
+      dialogsBySession,
       newlyCompleted,
     }),
-    [sessions, procBySession, summaries, permissionsBySession, questionsBySession, newlyCompleted],
+    [
+      sessions, procBySession, summaries, permissionsBySession, questionsBySession,
+      elicitationsBySession, dialogsBySession, newlyCompleted,
+    ],
   )
 
   const counts = useMemo(() => countMissionCards(cards), [cards])
@@ -252,6 +261,8 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
                 onOpen={() => onSelectSession(card.session.dirName, card.session.fileName)}
                 onRespond={respond}
                 onAnswerQuestion={handleAnswerQuestion}
+                onAnswerElicitation={answerElicitation}
+                onChooseDialog={answerDialog}
               />
             ))}
           </div>

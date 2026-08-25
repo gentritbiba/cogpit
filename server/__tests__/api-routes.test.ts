@@ -54,6 +54,7 @@ const CANONICAL_ROUTE_IDS = [
   "permissions",
   "mission-control",
   "ask-user",
+  "agent-prompts",
   "models",
   "codex-runtime",
   "claude-runtime",

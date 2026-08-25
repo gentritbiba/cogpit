@@ -10,7 +10,13 @@ import type { ActiveSessionInfo, RunningProcess } from "./types"
  * one is cleared by resuming the session. Offering "Resume" for a live request
  * would spawn a second CLI against a session that is alive and merely waiting.
  */
-export type AttentionReason = "permission" | "deferred" | "question" | "waiting" | "done"
+export type AttentionReason =
+  | "permission"
+  | "deferred"
+  | "question"
+  | "prompt"
+  | "waiting"
+  | "done"
 
 export interface AttentionItem {
   session: ActiveSessionInfo
@@ -42,6 +48,10 @@ function isTeammate(s: ActiveSessionInfo): boolean {
  * `tool_use` — and a blocked agent is stopped dead, so both outrank every other
  * signal.
  *
+ * `sessionsAwaitingPrompt` carries the same blind spot one level further out:
+ * an MCP elicitation or a CLI dialog parks the CLI on a callback that never
+ * reaches the transcript at all.
+ *
  * They stay separate reasons because the remedies differ: a deferred permission
  * is cleared by resuming the session, a question by answering it.
  */
@@ -51,6 +61,7 @@ export function classifyAttention(
   newlyCompleted: Set<string>,
   sessionsAwaitingPermission?: ReadonlySet<string>,
   sessionsAwaitingQuestion?: ReadonlySet<string>,
+  sessionsAwaitingPrompt?: ReadonlySet<string>,
 ): AttentionGroups {
   const needsYou: AttentionItem[] = []
   const working: ActiveSessionInfo[] = []
@@ -62,6 +73,10 @@ export function classifyAttention(
     }
     if (sessionsAwaitingQuestion?.has(s.sessionId)) {
       needsYou.push({ session: s, reason: "question" })
+      continue
+    }
+    if (sessionsAwaitingPrompt?.has(s.sessionId)) {
+      needsYou.push({ session: s, reason: "prompt" })
       continue
     }
     if (s.agentStatus === "deferred") {

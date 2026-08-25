@@ -29,6 +29,15 @@ interface CapturedCall {
       input: Record<string, unknown>,
       options: { toolUseID: string; signal?: AbortSignal },
     ) => Promise<unknown>
+    onElicitation?: (
+      request: Record<string, unknown>,
+      options: { signal: AbortSignal; requestId: string },
+    ) => Promise<unknown>
+    onUserDialog?: (
+      request: { dialogKind: string; payload: Record<string, unknown>; toolUseID?: string },
+      options: { signal: AbortSignal; requestId: string },
+    ) => Promise<unknown>
+    supportedDialogKinds?: string[]
   }
   // Resolves once the session finishes its turn (emits a `result` msg
   // and closes the iterator). Used to wait between turns in tests.
@@ -1292,6 +1301,311 @@ describe("sdk-session mid-turn permission mode change", () => {
 
     expect(bashResolve).not.toHaveBeenCalled()
     expect(state.pendingPermissions.size).toBe(1)
+    releaseHeldQuery?.()
+  })
+})
+
+describe("sdk-session MCP elicitation handling", () => {
+  /** Start a live session whose query is held open, and return its onElicitation. */
+  async function startSession(sessionId: string) {
+    const mod = await loadModule()
+    holdQueryOpen = true
+    mod.createSDKSession({ sessionId, cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+    return { mod, options: captured[0].options }
+  }
+
+  it("parks a form elicitation until the UI answers it", async () => {
+    const { mod, options } = await startSession("elicit-form")
+    const controller = new AbortController()
+
+    const pending = options.onElicitation!({
+      serverName: "github",
+      message: "Enter your access token",
+      mode: "form",
+      title: "GitHub",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          token: { type: "string", title: "Token", description: "A classic PAT" },
+          scope: { type: "string", enum: ["repo", "gist"] },
+          remember: { type: "boolean", default: true },
+        },
+        required: ["token"],
+      },
+    }, { signal: controller.signal, requestId: "req-form-1" })
+
+    expect(mod.sdkSessions.get("elicit-form")?.pendingElicitations.size).toBe(1)
+    expect(mod.listAgentPromptSessionIds()).toContain("elicit-form")
+    const [parked] = mod.getSDKElicitations("elicit-form")
+    expect(parked.requestId).toBe("req-form-1")
+    expect(parked.serverName).toBe("github")
+    expect(parked.mode).toBe("form")
+    expect(parked.askedAt).toBeGreaterThan(0)
+    expect(parked.fields).toEqual([
+      { name: "token", label: "Token", type: "string", required: true, description: "A classic PAT" },
+      {
+        name: "scope",
+        label: "scope",
+        type: "enum",
+        required: false,
+        options: [{ value: "repo", label: "repo" }, { value: "gist", label: "gist" }],
+      },
+      { name: "remember", label: "remember", type: "boolean", required: false, defaultValue: true },
+    ])
+
+    expect(mod.resolveElicitation("elicit-form", "req-form-1", {
+      action: "accept",
+      content: { token: "ghp_x", scope: "repo", remember: false },
+    })).toEqual({ found: true })
+    await expect(pending).resolves.toEqual({
+      action: "accept",
+      content: { token: "ghp_x", scope: "repo", remember: false },
+    })
+    expect(mod.sdkSessions.get("elicit-form")?.pendingElicitations.size).toBe(0)
+    releaseHeldQuery?.()
+  })
+
+  it("parks a url elicitation with the link to open", async () => {
+    const { mod, options } = await startSession("elicit-url")
+    const controller = new AbortController()
+
+    const pending = options.onElicitation!({
+      serverName: "linear",
+      message: "Authorize Cogpit in your browser",
+      mode: "url",
+      url: "https://linear.app/oauth/authorize?x=1",
+      elicitationId: "elic-9",
+    }, { signal: controller.signal, requestId: "req-url-1" })
+
+    const [parked] = mod.getSDKElicitations("elicit-url")
+    expect(parked).toMatchObject({
+      requestId: "req-url-1",
+      mode: "url",
+      url: "https://linear.app/oauth/authorize?x=1",
+      fields: [],
+    })
+
+    expect(mod.resolveElicitation("elicit-url", "req-url-1", { action: "accept" }))
+      .toEqual({ found: true })
+    await expect(pending).resolves.toEqual({ action: "accept" })
+    releaseHeldQuery?.()
+  })
+
+  it("declines a parked elicitation when the request aborts", async () => {
+    const { mod, options } = await startSession("elicit-abort")
+    const controller = new AbortController()
+
+    const pending = options.onElicitation!(
+      { serverName: "github", message: "Token?" },
+      { signal: controller.signal, requestId: "req-abort-1" },
+    )
+    expect(mod.sdkSessions.get("elicit-abort")?.pendingElicitations.size).toBe(1)
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ action: "decline" })
+    expect(mod.sdkSessions.get("elicit-abort")?.pendingElicitations.size).toBe(0)
+    releaseHeldQuery?.()
+  })
+
+  it("declines a schema it cannot render instead of parking it forever", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { mod, options } = await startSession("elicit-rich")
+    const controller = new AbortController()
+
+    const pending = options.onElicitation!({
+      serverName: "jira",
+      message: "Configure the board",
+      mode: "form",
+      requestedSchema: {
+        type: "object",
+        properties: { filters: { type: "array", items: { type: "string" } } },
+      },
+    }, { signal: controller.signal, requestId: "req-rich-1" })
+
+    await expect(pending).resolves.toEqual({ action: "decline" })
+    expect(mod.sdkSessions.get("elicit-rich")?.pendingElicitations.size).toBe(0)
+    // A silent decline is the bug this handler exists to remove: say why.
+    expect(streamBus.publishError).toHaveBeenCalledWith(
+      "elicit-rich",
+      expect.stringContaining("jira"),
+    )
+    expect(vi.mocked(streamBus.publishError).mock.calls[0][1]).toContain("filters")
+    releaseHeldQuery?.()
+  })
+
+  it("refuses an answer whose content is not primitive form values", async () => {
+    const { mod, options } = await startSession("elicit-bad")
+    const controller = new AbortController()
+
+    void options.onElicitation!(
+      { serverName: "github", message: "Token?" },
+      { signal: controller.signal, requestId: "req-bad-1" },
+    )
+
+    expect(mod.resolveElicitation("elicit-bad", "req-bad-1", {
+      action: "accept",
+      content: { nested: { deep: true } } as never,
+    })).toEqual({ found: false })
+    expect(mod.sdkSessions.get("elicit-bad")?.pendingElicitations.size).toBe(1)
+    releaseHeldQuery?.()
+  })
+
+  it("reports nothing pending for an unknown session or request", async () => {
+    const { mod } = await startSession("elicit-none")
+    expect(mod.getSDKElicitations("nope")).toEqual([])
+    expect(mod.resolveElicitation("nope", "req-x", { action: "decline" })).toEqual({ found: false })
+    expect(mod.resolveElicitation("elicit-none", "req-x", { action: "decline" }))
+      .toEqual({ found: false })
+    releaseHeldQuery?.()
+  })
+
+  it("cancels parked elicitations when the session is stopped", async () => {
+    const { mod, options } = await startSession("elicit-stop")
+    const controller = new AbortController()
+
+    const pending = options.onElicitation!(
+      { serverName: "github", message: "Token?" },
+      { signal: controller.signal, requestId: "req-stop-1" },
+    )
+
+    mod.stopSDKSession("elicit-stop")
+
+    await expect(pending).resolves.toEqual({ action: "cancel" })
+    releaseHeldQuery?.()
+  })
+})
+
+describe("sdk-session user dialogs", () => {
+  async function startSession(sessionId: string) {
+    const mod = await loadModule()
+    holdQueryOpen = true
+    mod.createSDKSession({ sessionId, cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+    return { mod, options: captured[0].options }
+  }
+
+  it("declares only the dialog kinds the UI renders, alongside the callback", async () => {
+    const { options } = await startSession("dialog-opts")
+    // A non-empty list without onUserDialog throws at option intake, and a kind
+    // Cogpit cannot render would be routed to a surface that drops it.
+    expect(options.supportedDialogKinds).toEqual(["refusal_fallback_prompt"])
+    expect(options.onUserDialog).toBeDefined()
+    releaseHeldQuery?.()
+  })
+
+  it("parks a refusal fallback dialog until the user chooses", async () => {
+    const { mod, options } = await startSession("dialog-refusal")
+    const controller = new AbortController()
+
+    const pending = options.onUserDialog!({
+      dialogKind: "refusal_fallback_prompt",
+      payload: {
+        originalModel: "claude-opus-5",
+        fallbackModel: "claude-opus-4-8",
+        guidanceText: "Try a narrower request",
+        retractedMessageUuids: ["uuid-1"],
+      },
+    }, { signal: controller.signal, requestId: "dlg-1" })
+
+    expect(mod.listAgentPromptSessionIds()).toContain("dialog-refusal")
+    expect(mod.getSDKUserDialogs("dialog-refusal")).toEqual([{
+      sessionId: "dialog-refusal",
+      requestId: "dlg-1",
+      dialogKind: "refusal_fallback_prompt",
+      askedAt: expect.any(Number),
+      originalModel: "claude-opus-5",
+      fallbackModel: "claude-opus-4-8",
+      guidanceText: "Try a narrower request",
+    }])
+
+    expect(mod.resolveUserDialog("dialog-refusal", "dlg-1", "retry_fallback"))
+      .toEqual({ found: true })
+    await expect(pending).resolves.toEqual({
+      behavior: "completed",
+      result: "retry_fallback",
+    })
+    expect(mod.getSDKUserDialogs("dialog-refusal")).toEqual([])
+    releaseHeldQuery?.()
+  })
+
+  it("answers a dismissed dialog with cancelled so the CLI applies its default", async () => {
+    const { mod, options } = await startSession("dialog-dismiss")
+    const controller = new AbortController()
+
+    const pending = options.onUserDialog!({
+      dialogKind: "refusal_fallback_prompt",
+      payload: { originalModel: "a", fallbackModel: "b" },
+    }, { signal: controller.signal, requestId: "dlg-2" })
+
+    expect(mod.resolveUserDialog("dialog-dismiss", "dlg-2", "cancelled")).toEqual({ found: true })
+    await expect(pending).resolves.toEqual({ behavior: "cancelled" })
+    releaseHeldQuery?.()
+  })
+
+  it("rejects a choice the dialog kind does not define", async () => {
+    const { mod, options } = await startSession("dialog-bad-choice")
+    const controller = new AbortController()
+
+    void options.onUserDialog!({
+      dialogKind: "refusal_fallback_prompt",
+      payload: { originalModel: "a", fallbackModel: "b" },
+    }, { signal: controller.signal, requestId: "dlg-3" })
+
+    expect(mod.resolveUserDialog("dialog-bad-choice", "dlg-3", "explode" as never))
+      .toEqual({ found: false })
+    expect(mod.getSDKUserDialogs("dialog-bad-choice")).toHaveLength(1)
+    releaseHeldQuery?.()
+  })
+
+  it("leaves an undeclared dialog kind unanswered instead of settling it", async () => {
+    // On a multi-client session the request reaches every attached client, so
+    // answering "cancelled" here would dismiss a dialog another client declared
+    // and is rendering. Returning null sends no answer; the CLI cancels it at
+    // its own deadline. (sdk.d.ts, SDKControlRequestUserDialogRequest.dialog_kind)
+    const { mod, options } = await startSession("dialog-unknown")
+    const controller = new AbortController()
+
+    const pending = options.onUserDialog!({
+      dialogKind: "some_future_prompt",
+      payload: { anything: true },
+    }, { signal: controller.signal, requestId: "dlg-4" })
+
+    await expect(pending).resolves.toBeNull()
+    expect(mod.getSDKUserDialogs("dialog-unknown")).toEqual([])
+    releaseHeldQuery?.()
+  })
+
+  it("cancels a declared dialog kind whose payload it cannot read", async () => {
+    // This kind IS declared, so Cogpit owns it: settling as cancelled makes the
+    // CLI apply the dialog's default rather than wait out the park deadline.
+    const { mod, options } = await startSession("dialog-malformed")
+    const controller = new AbortController()
+
+    const pending = options.onUserDialog!({
+      dialogKind: "refusal_fallback_prompt",
+      payload: { originalModel: 42 },
+    }, { signal: controller.signal, requestId: "dlg-6" })
+
+    await expect(pending).resolves.toEqual({ behavior: "cancelled" })
+    expect(mod.getSDKUserDialogs("dialog-malformed")).toEqual([])
+    releaseHeldQuery?.()
+  })
+
+  it("cancels a parked dialog when the request aborts", async () => {
+    const { mod, options } = await startSession("dialog-abort")
+    const controller = new AbortController()
+
+    const pending = options.onUserDialog!({
+      dialogKind: "refusal_fallback_prompt",
+      payload: { originalModel: "a", fallbackModel: "b" },
+    }, { signal: controller.signal, requestId: "dlg-5" })
+
+    controller.abort()
+
+    await expect(pending).resolves.toEqual({ behavior: "cancelled" })
+    expect(mod.getSDKUserDialogs("dialog-abort")).toEqual([])
     releaseHeldQuery?.()
   })
 })

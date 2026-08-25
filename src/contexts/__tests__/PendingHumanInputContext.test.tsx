@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),
   respondToPermission: vi.fn(),
   submitUserQuestionAnswers: vi.fn(),
+  submitElicitationAnswer: vi.fn(),
+  submitUserDialogChoice: vi.fn(),
 }))
 
 vi.mock("@/lib/auth", () => ({ authFetch: mocks.authFetch }))
@@ -16,6 +18,10 @@ vi.mock("@/lib/permissionApi", () => ({
 vi.mock("@/lib/askUserApi", () => ({
   submitUserQuestionAnswers: mocks.submitUserQuestionAnswers,
   joinMultiSelect: (labels: Iterable<string>) => [...labels].join(", "),
+}))
+vi.mock("@/lib/agentPromptsApi", () => ({
+  submitElicitationAnswer: mocks.submitElicitationAnswer,
+  submitUserDialogChoice: mocks.submitUserDialogChoice,
 }))
 
 import {
@@ -31,11 +37,38 @@ function textResponse(body: unknown): Response {
   } as unknown as Response
 }
 
-/** Route each endpoint independently so one can change while the other is stable. */
-function routeFetch(perms: unknown, questions: unknown) {
-  mocks.authFetch.mockImplementation((url: string) =>
-    Promise.resolve(textResponse(url.includes("user-questions") ? questions : perms)),
-  )
+const NO_PROMPTS = { elicitationsBySession: {}, dialogsBySession: {} }
+
+/** Route each endpoint independently so one can change while the others are stable. */
+function routeFetch(perms: unknown, questions: unknown, prompts: unknown = NO_PROMPTS) {
+  mocks.authFetch.mockImplementation((url: string) => {
+    if (url.includes("agent-prompts")) return Promise.resolve(textResponse(prompts))
+    return Promise.resolve(textResponse(url.includes("user-questions") ? questions : perms))
+  })
+}
+
+const ONE_ELICITATION = {
+  elicitationsBySession: {
+    "sess-e": [{
+      sessionId: "sess-e",
+      requestId: "req-1",
+      serverName: "github",
+      message: "Enter your access token",
+      mode: "form",
+      askedAt: 1,
+      fields: [{ name: "token", label: "Token", type: "string", required: true }],
+    }],
+  },
+  dialogsBySession: {
+    "sess-d": [{
+      sessionId: "sess-d",
+      requestId: "dlg-1",
+      dialogKind: "refusal_fallback_prompt",
+      askedAt: 2,
+      originalModel: "claude-opus-5",
+      fallbackModel: "claude-opus-4-8",
+    }],
+  },
 }
 
 const ONE_QUESTION = {
@@ -57,9 +90,12 @@ const ONE_QUESTION = {
 function Probe() {
   const {
     permissionsBySession, questionsBySession, awaitingPermission, awaitingQuestion,
-    answerQuestion, refresh,
+    elicitationsBySession, dialogsBySession, awaitingElicitation, awaitingDialog,
+    answerQuestion, answerElicitation, answerDialog, refresh,
   } = usePendingHumanInput()
   const question = [...questionsBySession.values()][0]?.[0]
+  const elicitation = [...elicitationsBySession.values()][0]?.[0]
+  const dialog = [...dialogsBySession.values()][0]?.[0]
   return (
     <div>
       <span data-testid="perms">{[...awaitingPermission].sort().join(",")}</span>
@@ -76,6 +112,26 @@ function Probe() {
       >
         answer
       </button>
+      <span data-testid="elicitations">{[...awaitingElicitation].sort().join(",")}</span>
+      <span data-testid="dialogs">{[...awaitingDialog].sort().join(",")}</span>
+      <span data-testid="etext">{elicitation?.message ?? ""}</span>
+      <span data-testid="dmodel">{dialog?.fallbackModel ?? ""}</span>
+      <button
+        type="button"
+        onClick={() => elicitation && answerElicitation(
+          elicitation.sessionId,
+          elicitation.requestId,
+          { action: "accept", content: { token: "ghp_x" } },
+        )}
+      >
+        accept elicitation
+      </button>
+      <button
+        type="button"
+        onClick={() => dialog && answerDialog(dialog.sessionId, dialog.requestId, "retry_fallback")}
+      >
+        retry fallback
+      </button>
       <button type="button" onClick={refresh}>refresh</button>
     </div>
   )
@@ -90,6 +146,8 @@ beforeEach(() => {
   routeFetch({ bySession: {} }, { bySession: {} })
   mocks.respondToPermission.mockResolvedValue(true)
   mocks.submitUserQuestionAnswers.mockResolvedValue({ ok: true, gone: false })
+  mocks.submitElicitationAnswer.mockResolvedValue({ ok: true, gone: false })
+  mocks.submitUserDialogChoice.mockResolvedValue({ ok: true, gone: false })
 })
 
 afterEach(cleanup)
@@ -165,6 +223,56 @@ describe("PendingHumanInputProvider", () => {
     await act(async () => { await Promise.resolve() })
 
     expect(screen.getByTestId("questions").textContent).toBe("sess-q")
+  })
+
+  it("exposes elicitations and dialogs parked on the agent-prompts endpoint", async () => {
+    routeFetch({ bySession: {} }, { bySession: {} }, ONE_ELICITATION)
+
+    renderProbe()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("elicitations").textContent).toBe("sess-e")
+    })
+    expect(screen.getByTestId("dialogs").textContent).toBe("sess-d")
+    expect(screen.getByTestId("etext").textContent).toBe("Enter your access token")
+    expect(screen.getByTestId("dmodel").textContent).toBe("claude-opus-4-8")
+  })
+
+  it("drops an elicitation locally as soon as it is answered", async () => {
+    routeFetch({ bySession: {} }, { bySession: {} }, ONE_ELICITATION)
+    renderProbe()
+    await waitFor(() => expect(screen.getByTestId("elicitations").textContent).toBe("sess-e"))
+
+    routeFetch({ bySession: {} }, { bySession: {} })
+    await act(async () => { screen.getByRole("button", { name: "accept elicitation" }).click() })
+
+    await waitFor(() => expect(screen.getByTestId("elicitations").textContent).toBe(""))
+    expect(mocks.submitElicitationAnswer).toHaveBeenCalledWith(
+      "sess-e", "req-1", { action: "accept", content: { token: "ghp_x" } },
+    )
+  })
+
+  it("keeps the elicitation when the server refuses the answer", async () => {
+    routeFetch({ bySession: {} }, { bySession: {} }, ONE_ELICITATION)
+    mocks.submitElicitationAnswer.mockResolvedValue({ ok: false, gone: true })
+    renderProbe()
+    await waitFor(() => expect(screen.getByTestId("elicitations").textContent).toBe("sess-e"))
+
+    await act(async () => { screen.getByRole("button", { name: "accept elicitation" }).click() })
+
+    expect(screen.getByTestId("elicitations").textContent).toBe("sess-e")
+  })
+
+  it("sends a dialog choice and drops the dialog", async () => {
+    routeFetch({ bySession: {} }, { bySession: {} }, ONE_ELICITATION)
+    renderProbe()
+    await waitFor(() => expect(screen.getByTestId("dialogs").textContent).toBe("sess-d"))
+
+    routeFetch({ bySession: {} }, { bySession: {} })
+    await act(async () => { screen.getByRole("button", { name: "retry fallback" }).click() })
+
+    await waitFor(() => expect(screen.getByTestId("dialogs").textContent).toBe(""))
+    expect(mocks.submitUserDialogChoice).toHaveBeenCalledWith("sess-d", "dlg-1", "retry_fallback")
   })
 
   it("throws a clear error when used outside the provider", () => {

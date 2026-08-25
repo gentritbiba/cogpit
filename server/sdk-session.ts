@@ -5,10 +5,16 @@ import type {
   SDKUserMessage,
   CanUseTool,
   EffortLevel,
+  ElicitationRequest,
+  ElicitationResult,
+  OnElicitation,
+  OnUserDialog,
   PermissionResult,
   PermissionMode,
   PermissionUpdate,
   Query,
+  UserDialogRequest,
+  UserDialogResult,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
 import { execFileSync } from "node:child_process"
@@ -20,6 +26,14 @@ import type {
   MissionControlQuestion,
   MissionControlQuestionItem,
 } from "../shared/contracts/missionControl"
+import type {
+  ElicitationAction,
+  ElicitationContent,
+  MissionControlElicitation,
+  MissionControlElicitationField,
+  MissionControlUserDialog,
+  UserDialogChoice,
+} from "../shared/contracts/agentPrompts"
 
 const CLI_BIN_NAME = nativeBinaryName("claude")
 
@@ -156,6 +170,19 @@ interface PendingUserQuestion {
   resolve: (result: PermissionResult) => void
 }
 
+interface PendingElicitation {
+  request: ElicitationRequest
+  /** Rendered form fields, projected once at park time. */
+  fields: MissionControlElicitationField[]
+  askedAt: number
+  resolve: (result: ElicitationResult) => void
+}
+
+interface PendingUserDialog {
+  dialog: Omit<MissionControlUserDialog, "sessionId">
+  resolve: (result: UserDialogResult) => void
+}
+
 export type PermissionDecision = "allow" | "allow_always" | "deny"
 
 export type ImageAttachment = { data: string; mediaType: string }
@@ -167,6 +194,10 @@ export interface SDKSessionState {
   pendingPermissions: Map<string, PendingPermission>
   /** AskUserQuestion requests awaiting an answers object from the dashboard. */
   pendingUserQuestions: Map<string, PendingUserQuestion>
+  /** MCP elicitations awaiting an answer, keyed by control-request id. */
+  pendingElicitations: Map<string, PendingElicitation>
+  /** CLI dialogs awaiting a choice, keyed by control-request id. */
+  pendingUserDialogs: Map<string, PendingUserDialog>
   /** Tools the user approved "always for this session" — canUseTool auto-allows these */
   sessionAllowedTools: Set<string>
   running: boolean
@@ -285,6 +316,198 @@ function makeCanUseTool(state: SDKSessionState): CanUseTool {
   }
 }
 
+// ── onElicitation: MCP servers asking the user for input ─────────────
+
+/**
+ * What Cogpit can render for `mode: "form"`, or why it cannot.
+ *
+ * Declining a schema outright beats parking it: a parked prompt the UI can
+ * never draw blocks the MCP server until its own timeout with nothing on
+ * screen, which is the exact failure this handler exists to remove.
+ */
+type ElicitationSchemaProjection =
+  | { fields: MissionControlElicitationField[] }
+  | { unsupported: string }
+
+function describeSchemaType(type: unknown): string {
+  if (type === undefined) return "is an untyped field"
+  if (type === "array") return "is an array"
+  if (type === "object") return "is a nested object"
+  return `is a ${String(type)}`
+}
+
+function elicitationDefault(prop: Record<string, unknown>): { defaultValue?: string | number | boolean } {
+  const value = prop.default
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? { defaultValue: value }
+    : {}
+}
+
+/** A field, or a sentence tail explaining why it cannot be drawn. */
+function projectElicitationField(
+  name: string,
+  prop: Record<string, unknown>,
+  required: boolean,
+): MissionControlElicitationField | string {
+  const base = {
+    name,
+    label: typeof prop.title === "string" && prop.title ? prop.title : name,
+    required,
+    ...(typeof prop.description === "string" && prop.description
+      ? { description: prop.description }
+      : {}),
+  }
+
+  if (Array.isArray(prop.enum)) {
+    if (!prop.enum.every((value) => typeof value === "string")) {
+      return "is an enum of non-string values"
+    }
+    const names = Array.isArray(prop.enumNames) ? prop.enumNames : []
+    return {
+      ...base,
+      type: "enum",
+      options: prop.enum.map((value, index) => ({
+        value: value as string,
+        label: typeof names[index] === "string" ? (names[index] as string) : (value as string),
+      })),
+      ...elicitationDefault(prop),
+    }
+  }
+
+  const type = prop.type
+  if (type === "string" || type === "number" || type === "integer" || type === "boolean") {
+    return { ...base, type, ...elicitationDefault(prop) }
+  }
+  return `${describeSchemaType(type)}, which Cogpit cannot render`
+}
+
+function projectElicitationSchema(schema: Record<string, unknown> | undefined): ElicitationSchemaProjection {
+  if (!schema) return { fields: [] }
+  if (schema.type !== undefined && schema.type !== "object") {
+    return { unsupported: `the request ${describeSchemaType(schema.type)}` }
+  }
+  const properties = asRecord(schema.properties)
+  const required = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter((entry): entry is string => typeof entry === "string")
+      : [],
+  )
+  const fields: MissionControlElicitationField[] = []
+  for (const [name, raw] of Object.entries(properties)) {
+    const field = projectElicitationField(name, asRecord(raw), required.has(name))
+    if (typeof field === "string") return { unsupported: `"${name}" ${field}` }
+    fields.push(field)
+  }
+  for (const name of required) {
+    if (!(name in properties)) return { unsupported: `required field "${name}" has no schema` }
+  }
+  return { fields }
+}
+
+function makeOnElicitation(state: SDKSessionState): OnElicitation {
+  return (request, options) => {
+    // URL mode carries a link rather than a schema; anything else is a form.
+    const projection = request.mode === "url"
+      ? { fields: [] as MissionControlElicitationField[] }
+      : projectElicitationSchema(
+        request.requestedSchema ? asRecord(request.requestedSchema) : undefined,
+      )
+
+    if ("unsupported" in projection) {
+      streamBus.publishError(
+        state.sessionId,
+        `Declined an input request from MCP server "${request.serverName}": Cogpit `
+        + `renders text, number, checkbox and choice fields only, and `
+        + `${projection.unsupported}.`,
+      )
+      return Promise.resolve<ElicitationResult>({ action: "decline" })
+    }
+
+    return new Promise<ElicitationResult>((resolve) => {
+      const requestId = options.requestId
+      state.pendingElicitations.set(requestId, {
+        request,
+        fields: projection.fields,
+        askedAt: Date.now(),
+        resolve,
+      })
+
+      const onAbort = () => {
+        if (state.pendingElicitations.delete(requestId)) resolve({ action: "decline" })
+      }
+      options.signal?.addEventListener("abort", onAbort, { once: true })
+    })
+  }
+}
+
+// ── onUserDialog: blocking dialogs the CLI asks the host to render ────
+
+const REFUSAL_FALLBACK_DIALOG = "refusal_fallback_prompt"
+
+/**
+ * Dialog kinds Cogpit declares, with the choices each one accepts.
+ *
+ * The CLI fails closed: a kind that is not declared here is never emitted and
+ * its flow degrades to the no-dialog behaviour (for the refusal fallback, the
+ * classic refusal error ends the turn). Declaring a kind Cogpit cannot draw is
+ * worse than omitting it — real dialogs would then be routed to a surface that
+ * drops them.
+ */
+const DIALOG_CHOICES: Record<string, ReadonlySet<string>> = {
+  [REFUSAL_FALLBACK_DIALOG]: new Set(["retry_fallback", "edit_prompt", "cancelled"]),
+}
+
+export const SUPPORTED_DIALOG_KINDS = [REFUSAL_FALLBACK_DIALOG] as const
+
+function projectUserDialog(
+  request: UserDialogRequest,
+): Omit<MissionControlUserDialog, "sessionId" | "requestId" | "askedAt"> | null {
+  if (request.dialogKind !== REFUSAL_FALLBACK_DIALOG) return null
+  const payload = asRecord(request.payload)
+  const originalModel = payload.originalModel
+  const fallbackModel = payload.fallbackModel
+  if (typeof originalModel !== "string" || typeof fallbackModel !== "string") return null
+  return {
+    dialogKind: REFUSAL_FALLBACK_DIALOG,
+    originalModel,
+    fallbackModel,
+    ...(typeof payload.guidanceText === "string" && payload.guidanceText
+      ? { guidanceText: payload.guidanceText }
+      : {}),
+  }
+}
+
+function makeOnUserDialog(state: SDKSessionState): OnUserDialog {
+  return (request, options) => {
+    // A kind Cogpit never declared is not Cogpit's to settle: on a multi-client
+    // session the request reaches every attached client, and "cancelled" is a
+    // real settlement the CLI reads as the user dismissing the dialog — it
+    // would dismiss the dialog out from under whichever client does render it.
+    // Sending no answer leaves it for that client; the CLI cancels it at its
+    // own deadline if nobody answers.
+    if (!(request.dialogKind in DIALOG_CHOICES)) return Promise.resolve(null)
+
+    // A declared kind Cogpit cannot read IS Cogpit's to settle: cancelling
+    // makes the CLI apply that dialog's default instead of parking until the
+    // deadline.
+    const projected = projectUserDialog(request)
+    if (!projected) return Promise.resolve<UserDialogResult>({ behavior: "cancelled" })
+
+    return new Promise<UserDialogResult>((resolve) => {
+      const requestId = options.requestId
+      state.pendingUserDialogs.set(requestId, {
+        dialog: { ...projected, requestId, askedAt: Date.now() },
+        resolve,
+      })
+
+      const onAbort = () => {
+        if (state.pendingUserDialogs.delete(requestId)) resolve({ behavior: "cancelled" })
+      }
+      options.signal?.addEventListener("abort", onAbort, { once: true })
+    })
+  }
+}
+
 // ── Build SDK query options ──────────────────────────────────────────
 
 function buildQueryOptions(state: SDKSessionState, opts: {
@@ -312,6 +535,11 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     // question bar that swallows input. Regular tools still auto-allow in
     // bypass mode (see makeCanUseTool).
     canUseTool: makeCanUseTool(state),
+    // Without this the SDK declines every MCP elicitation automatically, so a
+    // server asking for a token or a browser login fails with no trace.
+    onElicitation: makeOnElicitation(state),
+    onUserDialog: makeOnUserDialog(state),
+    supportedDialogKinds: [...SUPPORTED_DIALOG_KINDS],
     effort: effort as Options["effort"],
     enableFileCheckpointing: true,
     persistSession: true,
@@ -632,6 +860,16 @@ function rejectAllPending(state: SDKSessionState, reason: string): void {
     pending.resolve({ behavior: "deny", message: reason, interrupt: true })
   }
   state.pendingUserQuestions.clear()
+  // The MCP server and the CLI both distinguish "the user said no" from "the
+  // user never got to answer"; a torn-down session is the latter.
+  for (const pending of state.pendingElicitations.values()) {
+    pending.resolve({ action: "cancel" })
+  }
+  state.pendingElicitations.clear()
+  for (const pending of state.pendingUserDialogs.values()) {
+    pending.resolve({ behavior: "cancelled" })
+  }
+  state.pendingUserDialogs.clear()
 }
 
 // ── Helper: build an SDKUserMessage from text + optional images ──────
@@ -691,6 +929,8 @@ function initSDKSessionState(opts: SDKSessionInitOpts): SDKSessionState {
     cwd: opts.cwd,
     pendingPermissions: new Map(),
     pendingUserQuestions: new Map(),
+    pendingElicitations: new Map(),
+    pendingUserDialogs: new Map(),
     sessionAllowedTools: new Set(),
     running: false,
     abort: null,
@@ -1079,6 +1319,111 @@ export function resolveUserQuestion(
     updatedInput: { ...pending.input, answers: normalized },
   })
   return { found: true }
+}
+
+// ── Resolve a parked MCP elicitation / CLI dialog ────────────────────
+
+/** ElicitResult content is flat: strings, numbers, booleans and string lists. */
+function normalizeElicitationContent(content: unknown): ElicitationContent | null {
+  if (content === undefined) return null
+  if (typeof content !== "object" || content === null || Array.isArray(content)) return null
+  const normalized: ElicitationContent = {}
+  for (const [key, value] of Object.entries(content)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      normalized[key] = value
+    } else if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      normalized[key] = value as string[]
+    } else {
+      return null
+    }
+  }
+  return normalized
+}
+
+export function resolveElicitation(
+  sessionId: string,
+  requestId: string,
+  response: { action: ElicitationAction; content?: ElicitationContent },
+): { found: boolean } {
+  const state = sdkSessions.get(sessionId)
+  const pending = state?.pendingElicitations.get(requestId)
+  if (!state || !pending) return { found: false }
+  if (response.action !== "accept" && response.action !== "decline" && response.action !== "cancel") {
+    return { found: false }
+  }
+
+  let content: ElicitationContent | undefined
+  if (response.action === "accept" && response.content !== undefined) {
+    const normalized = normalizeElicitationContent(response.content)
+    // Leave it parked: a rejected answer is a client bug, and dropping the
+    // request here would strand the MCP server with no response at all.
+    if (!normalized) return { found: false }
+    content = normalized
+  }
+
+  state.pendingElicitations.delete(requestId)
+  pending.resolve(content ? { action: response.action, content } : { action: response.action })
+  return { found: true }
+}
+
+export function resolveUserDialog(
+  sessionId: string,
+  requestId: string,
+  choice: UserDialogChoice,
+): { found: boolean } {
+  const state = sdkSessions.get(sessionId)
+  const pending = state?.pendingUserDialogs.get(requestId)
+  if (!state || !pending) return { found: false }
+  if (!DIALOG_CHOICES[pending.dialog.dialogKind]?.has(choice)) return { found: false }
+
+  state.pendingUserDialogs.delete(requestId)
+  pending.resolve(
+    choice === "cancelled" ? { behavior: "cancelled" } : { behavior: "completed", result: choice },
+  )
+  return { found: true }
+}
+
+/** Elicitations blocking a session, as the dashboard renders them. */
+export function getSDKElicitations(sessionId: string): MissionControlElicitation[] {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return []
+  return Array.from(state.pendingElicitations, ([requestId, pending]) => {
+    const { request } = pending
+    return {
+      sessionId,
+      requestId,
+      serverName: request.serverName,
+      message: request.message,
+      mode: request.mode === "url" ? "url" as const : "form" as const,
+      ...(request.url ? { url: request.url } : {}),
+      ...(request.title ? { title: request.title } : {}),
+      ...(request.displayName ? { displayName: request.displayName } : {}),
+      ...(request.description ? { description: request.description } : {}),
+      askedAt: pending.askedAt,
+      fields: pending.fields,
+    }
+  })
+}
+
+/** Dialogs blocking a session, as the dashboard renders them. */
+export function getSDKUserDialogs(sessionId: string): MissionControlUserDialog[] {
+  const state = sdkSessions.get(sessionId)
+  if (!state) return []
+  return Array.from(state.pendingUserDialogs.values(), (pending) => ({
+    sessionId,
+    ...pending.dialog,
+  }))
+}
+
+/** Sessions parked on an elicitation or a dialog. */
+export function listAgentPromptSessionIds(): string[] {
+  const ids: string[] = []
+  for (const [sessionId, state] of sdkSessions) {
+    if (state.pendingElicitations.size > 0 || state.pendingUserDialogs.size > 0) {
+      ids.push(sessionId)
+    }
+  }
+  return ids
 }
 
 // ── Resolve all pending permission requests ──────────────────────────

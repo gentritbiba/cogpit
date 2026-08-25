@@ -1,12 +1,14 @@
 /**
  * Everything blocking a session on a human: permission requests
- * (`GET /api/permissions`) and AskUserQuestion calls (`GET /api/user-questions`,
- * which strand a session even under bypassPermissions).
+ * (`GET /api/permissions`), AskUserQuestion calls (`GET /api/user-questions`,
+ * which strand a session even under bypassPermissions), and the prompts that
+ * never reach a transcript at all — MCP elicitations and CLI user dialogs
+ * (`GET /api/agent-prompts`).
  *
- * One context rather than two so the sidebar strip, the header badge and the
- * Mission Control grid cannot drift by each unioning the two sets by hand. Both
- * endpoints read in-memory registries only (no filesystem, no `ps`), so polling
- * them on one tick is cheap and both lists come from the same instant.
+ * One context rather than four so the sidebar strip, the header badge and the
+ * Mission Control grid cannot drift by each unioning the sets by hand. Every
+ * endpoint reads in-memory registries only (no filesystem, no `ps`), so polling
+ * them on one tick is cheap and all lists come from the same instant.
  */
 
 import {
@@ -27,21 +29,38 @@ import {
   type AnswerResult,
   type UserQuestionAnswerMap,
 } from "@/lib/askUserApi"
+import {
+  submitElicitationAnswer,
+  submitUserDialogChoice,
+  type ElicitationAnswer,
+} from "@/lib/agentPromptsApi"
 import type {
   MissionControlPermission,
   MissionControlQuestion,
   UserQuestionsResponse,
 } from "../../shared/contracts/missionControl"
+import type {
+  AgentPromptsResponse,
+  MissionControlElicitation,
+  MissionControlUserDialog,
+  UserDialogChoice,
+} from "../../shared/contracts/agentPrompts"
 
 const POLL_INTERVAL = 3_000
 
 export interface PendingHumanInput {
   permissionsBySession: Map<string, MissionControlPermission[]>
   questionsBySession: Map<string, MissionControlQuestion[]>
+  elicitationsBySession: Map<string, MissionControlElicitation[]>
+  dialogsBySession: Map<string, MissionControlUserDialog[]>
   /** Sessions blocked on a permission. */
   awaitingPermission: Set<string>
   /** Sessions blocked on a question. */
   awaitingQuestion: Set<string>
+  /** Sessions blocked on an MCP elicitation. */
+  awaitingElicitation: Set<string>
+  /** Sessions blocked on a CLI dialog. */
+  awaitingDialog: Set<string>
   /** Request ids and tool-use ids currently being answered. */
   responding: Set<string>
   respond: (
@@ -53,6 +72,16 @@ export interface PendingHumanInput {
     sessionId: string,
     toolUseId: string,
     answers: UserQuestionAnswerMap,
+  ) => Promise<AnswerResult>
+  answerElicitation: (
+    sessionId: string,
+    requestId: string,
+    answer: ElicitationAnswer,
+  ) => Promise<AnswerResult>
+  answerDialog: (
+    sessionId: string,
+    requestId: string,
+    choice: UserDialogChoice,
   ) => Promise<AnswerResult>
   refresh: () => void
 }
@@ -79,22 +108,11 @@ async function readIfChanged<T>(url: string, seen: RefObject<string>): Promise<T
   }
 }
 
-function toPermissionMap(
-  bySession: Record<string, MissionControlPermission[]>,
-): Map<string, MissionControlPermission[]> {
-  const map = new Map<string, MissionControlPermission[]>()
-  for (const [sessionId, requests] of Object.entries(bySession)) {
-    if (Array.isArray(requests) && requests.length > 0) map.set(sessionId, requests)
-  }
-  return map
-}
-
-function toQuestionMap(
-  bySession: Record<string, MissionControlQuestion[]>,
-): Map<string, MissionControlQuestion[]> {
-  const map = new Map<string, MissionControlQuestion[]>()
-  for (const [sessionId, questions] of Object.entries(bySession)) {
-    if (Array.isArray(questions) && questions.length > 0) map.set(sessionId, questions)
+/** Drop empty and malformed session entries so `.keys()` is the blocked set. */
+function toMap<T>(bySession: Record<string, T[]> | undefined): Map<string, T[]> {
+  const map = new Map<string, T[]>()
+  for (const [sessionId, items] of Object.entries(bySession ?? {})) {
+    if (Array.isArray(items) && items.length > 0) map.set(sessionId, items)
   }
   return map
 }
@@ -117,20 +135,30 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
     useState<Map<string, MissionControlPermission[]>>(new Map())
   const [questionsBySession, setQuestionsBySession] =
     useState<Map<string, MissionControlQuestion[]>>(new Map())
+  const [elicitationsBySession, setElicitationsBySession] =
+    useState<Map<string, MissionControlElicitation[]>>(new Map())
+  const [dialogsBySession, setDialogsBySession] =
+    useState<Map<string, MissionControlUserDialog[]>>(new Map())
   const [responding, setResponding] = useState<Set<string>>(new Set())
   const lastPermissionsRef = useRef("")
   const lastQuestionsRef = useRef("")
+  const lastPromptsRef = useRef("")
 
   const fetchNow = useCallback(async () => {
-    const [permissions, questions] = await Promise.all([
+    const [permissions, questions, prompts] = await Promise.all([
       readIfChanged<{ bySession?: Record<string, MissionControlPermission[]> }>(
         "/api/permissions",
         lastPermissionsRef,
       ),
       readIfChanged<Partial<UserQuestionsResponse>>("/api/user-questions", lastQuestionsRef),
+      readIfChanged<Partial<AgentPromptsResponse>>("/api/agent-prompts", lastPromptsRef),
     ])
-    if (permissions) setPermissionsBySession(toPermissionMap(permissions.bySession ?? {}))
-    if (questions) setQuestionsBySession(toQuestionMap(questions.bySession ?? {}))
+    if (permissions) setPermissionsBySession(toMap(permissions.bySession))
+    if (questions) setQuestionsBySession(toMap(questions.bySession))
+    if (prompts) {
+      setElicitationsBySession(toMap(prompts.elicitationsBySession))
+      setDialogsBySession(toMap(prompts.dialogsBySession))
+    }
   }, [])
 
   useEffect(() => {
@@ -147,7 +175,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
   }, [fetchNow])
 
   /**
-   * Both answers share a shape: flag the id as in flight, run the call, then
+   * Every answer shares a shape: flag the id as in flight, run the call, then
    * always unflag and re-poll so the server's view replaces the optimistic edit.
    */
   const withResponding = useCallback(async <T,>(
@@ -195,6 +223,32 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
     return result
   }), [withResponding])
 
+  const answerElicitation = useCallback((
+    sessionId: string,
+    requestId: string,
+    answer: ElicitationAnswer,
+  ): Promise<AnswerResult> => withResponding(requestId, async () => {
+    const result = await submitElicitationAnswer(sessionId, requestId, answer)
+    if (result.ok) {
+      setElicitationsBySession((prev) => drop(prev, sessionId, (e) => e.requestId === requestId))
+      lastPromptsRef.current = ""
+    }
+    return result
+  }), [withResponding])
+
+  const answerDialog = useCallback((
+    sessionId: string,
+    requestId: string,
+    choice: UserDialogChoice,
+  ): Promise<AnswerResult> => withResponding(requestId, async () => {
+    const result = await submitUserDialogChoice(sessionId, requestId, choice)
+    if (result.ok) {
+      setDialogsBySession((prev) => drop(prev, sessionId, (d) => d.requestId === requestId))
+      lastPromptsRef.current = ""
+    }
+    return result
+  }), [withResponding])
+
   const awaitingPermission = useMemo(
     () => new Set(permissionsBySession.keys()),
     [permissionsBySession],
@@ -203,20 +257,35 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
     () => new Set(questionsBySession.keys()),
     [questionsBySession],
   )
+  const awaitingElicitation = useMemo(
+    () => new Set(elicitationsBySession.keys()),
+    [elicitationsBySession],
+  )
+  const awaitingDialog = useMemo(
+    () => new Set(dialogsBySession.keys()),
+    [dialogsBySession],
+  )
   const refresh = useCallback(() => { void fetchNow() }, [fetchNow])
 
   const value = useMemo<PendingHumanInput>(() => ({
     permissionsBySession,
     questionsBySession,
+    elicitationsBySession,
+    dialogsBySession,
     awaitingPermission,
     awaitingQuestion,
+    awaitingElicitation,
+    awaitingDialog,
     responding,
     respond,
     answerQuestion,
+    answerElicitation,
+    answerDialog,
     refresh,
   }), [
-    permissionsBySession, questionsBySession, awaitingPermission, awaitingQuestion,
-    responding, respond, answerQuestion, refresh,
+    permissionsBySession, questionsBySession, elicitationsBySession, dialogsBySession,
+    awaitingPermission, awaitingQuestion, awaitingElicitation, awaitingDialog,
+    responding, respond, answerQuestion, answerElicitation, answerDialog, refresh,
   ])
 
   return (

@@ -11,15 +11,21 @@ import type {
   MissionControlQuestion,
   MissionControlSummary,
 } from "../../../shared/contracts/missionControl"
+import type {
+  MissionControlElicitation,
+  MissionControlUserDialog,
+} from "../../../shared/contracts/agentPrompts"
 
 /**
- * `awaiting_approval` (a live permission request) and `awaiting_question` (a
- * blocked AskUserQuestion) are answerable from the grid itself;
- * `awaiting_answer` — idle at the prompt, or paused by a deferred hook — is
- * only resolved by opening the session.
+ * `awaiting_approval` (a live permission request), `awaiting_prompt` (an MCP
+ * elicitation or a CLI dialog) and `awaiting_question` (a blocked
+ * AskUserQuestion) are answerable from the grid itself; `awaiting_answer` —
+ * idle at the prompt, or paused by a deferred hook — is only resolved by
+ * opening the session.
  */
 export type MissionCardState =
   | "awaiting_approval"
+  | "awaiting_prompt"
   | "awaiting_question"
   | "awaiting_answer"
   | "running"
@@ -36,11 +42,16 @@ export interface MissionCard {
   permissions: MissionControlPermission[]
   /** Blocked AskUserQuestion calls; non-empty only for awaiting_question. */
   questions: MissionControlQuestion[]
+  /** Parked MCP elicitations; non-empty only for awaiting_prompt. */
+  elicitations: MissionControlElicitation[]
+  /** Parked CLI dialogs; non-empty only for awaiting_prompt. */
+  dialogs: MissionControlUserDialog[]
 }
 
 /** True when the card is blocked on the user. */
 export function needsYou(state: MissionCardState): boolean {
   return state === "awaiting_approval"
+    || state === "awaiting_prompt"
     || state === "awaiting_question"
     || state === "awaiting_answer"
 }
@@ -56,20 +67,25 @@ export function isFinished(state: MissionCardState): boolean {
  */
 const STATE_RANK: Record<MissionCardState, number> = {
   awaiting_approval: 0,
-  awaiting_question: 1,
-  awaiting_answer: 2,
-  running: 3,
-  failed: 4,
-  done: 5,
+  awaiting_prompt: 1,
+  awaiting_question: 2,
+  awaiting_answer: 3,
+  running: 4,
+  failed: 5,
+  done: 6,
 }
 
 function resolveState(
   session: ActiveSessionInfo,
   active: boolean,
   hasPermission: boolean,
+  hasPrompt: boolean,
   hasQuestion: boolean,
 ): MissionCardState {
   if (hasPermission) return "awaiting_approval"
+  // Same reasoning as the question branch below: the CLI is parked on a
+  // callback, so the session looks busy and then stale while it waits.
+  if (hasPrompt) return "awaiting_prompt"
   // Must precede every agentStatus branch. A question-blocked session still
   // reports `tool_use`, and a blocked agent stops writing to its JSONL, so
   // ordering it later would render it "Running" until the file went stale and
@@ -94,6 +110,8 @@ export interface BuildCardsOptions {
   summaries: Map<string, MissionControlSummary>
   permissionsBySession: Map<string, MissionControlPermission[]>
   questionsBySession: Map<string, MissionControlQuestion[]>
+  elicitationsBySession: Map<string, MissionControlElicitation[]>
+  dialogsBySession: Map<string, MissionControlUserDialog[]>
   /** Sessions that finished during this browser session, kept visible. */
   newlyCompleted: ReadonlySet<string>
   /** Finished sessions to keep after the recently-finished ones. */
@@ -111,6 +129,8 @@ export function buildMissionCards({
   summaries,
   permissionsBySession,
   questionsBySession,
+  elicitationsBySession,
+  dialogsBySession,
   newlyCompleted,
   finishedLimit = DEFAULT_FINISHED_LIMIT,
   now = Date.now(),
@@ -120,10 +140,13 @@ export function buildMissionCards({
   for (const session of sortSessionsByRecency(sessions)) {
     const permissions = permissionsBySession.get(session.sessionId) ?? []
     const questions = questionsBySession.get(session.sessionId) ?? []
+    const elicitations = elicitationsBySession.get(session.sessionId) ?? []
+    const dialogs = dialogsBySession.get(session.sessionId) ?? []
+    const blockers = permissions.length + questions.length + elicitations.length + dialogs.length
     // A teammate's own session is represented by its lead, unless it is the one
     // actually blocked on the user.
     const isTeammate = Boolean(session.teamName && session.agentName)
-    if (isTeammate && permissions.length === 0 && questions.length === 0) continue
+    if (isTeammate && blockers === 0) continue
 
     cards.push({
       session,
@@ -131,11 +154,14 @@ export function buildMissionCards({
         session,
         isSessionActive(session, procBySession, now),
         permissions.length > 0,
+        elicitations.length > 0 || dialogs.length > 0,
         questions.length > 0,
       ),
       summary: summaries.get(session.sessionId) ?? null,
       permissions,
       questions,
+      elicitations,
+      dialogs,
     })
   }
 

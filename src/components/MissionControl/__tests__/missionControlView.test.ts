@@ -5,6 +5,10 @@ import type {
   MissionControlQuestion,
   MissionControlSummary,
 } from "../../../../shared/contracts/missionControl"
+import type {
+  MissionControlElicitation,
+  MissionControlUserDialog,
+} from "../../../../shared/contracts/agentPrompts"
 import {
   buildMissionCards,
   countMissionCards,
@@ -36,6 +40,29 @@ function permission(sessionId: string, requestId = "req-1"): MissionControlPermi
     toolName: "Bash",
     summary: "rm -rf dist/",
     timestamp: NOW,
+  }
+}
+
+function elicitation(sessionId: string, requestId = "req-1"): MissionControlElicitation {
+  return {
+    sessionId,
+    requestId,
+    serverName: "github",
+    message: "Enter your access token",
+    mode: "form",
+    askedAt: NOW,
+    fields: [{ name: "token", label: "Token", type: "string", required: true }],
+  }
+}
+
+function dialog(sessionId: string, requestId = "dlg-1"): MissionControlUserDialog {
+  return {
+    sessionId,
+    requestId,
+    dialogKind: "refusal_fallback_prompt",
+    askedAt: NOW,
+    originalModel: "claude-opus-5",
+    fallbackModel: "claude-opus-4-8",
   }
 }
 
@@ -83,6 +110,8 @@ function build(
     summaries: NO_SUMMARIES,
     permissionsBySession,
     questionsBySession,
+    elicitationsBySession: new Map(),
+    dialogsBySession: new Map(),
     newlyCompleted: new Set(),
     now: NOW,
     ...extra,
@@ -114,6 +143,8 @@ describe("buildMissionCards — state resolution", () => {
       summaries: NO_SUMMARIES,
       permissionsBySession: new Map(),
       questionsBySession: new Map(),
+      elicitationsBySession: new Map(),
+      dialogsBySession: new Map(),
       newlyCompleted: new Set(),
       now: NOW,
     })
@@ -173,6 +204,46 @@ describe("buildMissionCards — state resolution", () => {
       [], {}, [question("t")],
     )
     expect(cards.map((c) => c.session.sessionId)).toEqual(["t"])
+  })
+
+  it("reports a parked MCP elicitation as awaiting_prompt", () => {
+    // Like a question, an elicitation leaves the session reporting tool_use
+    // while its JSONL stops growing — it must not decay to running or done.
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use", lastModified: STALE })],
+      [], { elicitationsBySession: new Map([["a", [elicitation("a")]]]) },
+    )
+    expect(cards[0].state).toBe("awaiting_prompt")
+    expect(cards[0].elicitations).toHaveLength(1)
+  })
+
+  it("reports a parked refusal dialog as awaiting_prompt", () => {
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use" })],
+      [], { dialogsBySession: new Map([["a", [dialog("a")]]]) },
+    )
+    expect(cards[0].state).toBe("awaiting_prompt")
+    expect(cards[0].dialogs).toHaveLength(1)
+  })
+
+  it("lets a permission outrank a parked elicitation", () => {
+    const cards = build(
+      [session({ sessionId: "a", agentStatus: "tool_use" })],
+      [permission("a")], { elicitationsBySession: new Map([["a", [elicitation("a")]]]) },
+    )
+    expect(cards[0].state).toBe("awaiting_approval")
+  })
+
+  it("keeps a teammate session that is blocked on an elicitation", () => {
+    const cards = build(
+      [session({ sessionId: "t", agentStatus: "tool_use", teamName: "x", agentName: "m" })],
+      [], { elicitationsBySession: new Map([["t", [elicitation("t")]]]) },
+    )
+    expect(cards.map((c) => c.session.sessionId)).toEqual(["t"])
+  })
+
+  it("counts a parked prompt as needing the user", () => {
+    expect(needsYou("awaiting_prompt")).toBe(true)
   })
 
   it("maps a deferred hook to awaiting_answer, not awaiting_approval", () => {

@@ -142,6 +142,11 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   permissions: authed("/api/permissions"),
   "mission-control": authed("/api/mission-control"),
   "ask-user": authed("/api/user-questions", "/api/ask-user-answer"),
+  "agent-prompts": authed(
+    "/api/agent-prompts",
+    "/api/elicitation-answer",
+    "/api/user-dialog-answer",
+  ),
   models: authed("/api/models"),
   "codex-runtime": [
     ...admin("/api/codex/runtime"),

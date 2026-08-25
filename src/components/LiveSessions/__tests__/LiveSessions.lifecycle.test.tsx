@@ -43,11 +43,17 @@ vi.mock("@/contexts/PendingHumanInputContext", () => ({
   usePendingHumanInput: () => ({
     permissionsBySession: new Map(),
     questionsBySession: new Map(),
+    elicitationsBySession: new Map(),
+    dialogsBySession: new Map(),
     awaitingPermission: new Set(),
     awaitingQuestion: new Set(),
+    awaitingElicitation: new Set(),
+    awaitingDialog: new Set(),
     responding: new Set(),
     respond: vi.fn(),
     answerQuestion: vi.fn(),
+    answerElicitation: vi.fn(),
+    answerDialog: vi.fn(),
     refresh: vi.fn(),
   }),
 }))
