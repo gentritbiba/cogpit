@@ -115,6 +115,11 @@ export interface TokenUsage {
   cache_read_input_tokens?: number
   /** "fast" when the turn ran in fast mode (billed at a higher tier on Opus 4.6/4.7) */
   speed?: string
+  /**
+   * Claude Code 2.1.19x+ reports the thinking slice of `output_tokens`
+   * exactly. Already counted inside output_tokens — never add it to a cost sum.
+   */
+  output_tokens_details?: { thinking_tokens?: number }
 }
 
 export interface AssistantMessage extends BaseMessage {

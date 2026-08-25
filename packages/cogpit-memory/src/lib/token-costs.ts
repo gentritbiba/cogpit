@@ -3,11 +3,14 @@
  * Token display estimation and cost formatting.
  *
  * Pricing lives in shared/usageCost/pricing.ts, driven by LiteLLM's live rate
- * table — nothing here carries hardcoded rates. What remains is content-based
- * estimation for display only: Claude Code's JSONL records the message_start
- * placeholder usage, so thinking tokens are absent and output is undercounted;
- * the chart's thinking/visible split is reconstructed from content at
- * ≈4 chars/token.
+ * table — nothing here carries hardcoded rates. What remains is display-only
+ * accounting of the thinking/visible output split.
+ *
+ * Claude Code 2.1.19x+ reports thinking tokens directly on the assistant
+ * record, so that half of the split is now exact. Older transcripts recorded
+ * only the message_start placeholder usage, so they still fall back to a
+ * content estimate at ≈4 chars/token — as does the visible-output half, which
+ * the CLI does not break out.
  */
 
 import type { Turn } from "./types"
@@ -34,8 +37,16 @@ function totalToolInputLength(toolCalls: readonly { input: Record<string, unknow
   return n
 }
 
-/** Estimate thinking tokens from a turn's thinking blocks. */
+/**
+ * Thinking tokens for a turn: the count the model reported when it is
+ * available, falling back to a character estimate for older transcripts.
+ *
+ * A reported 0 is a fact — a turn that did no thinking — so presence is tested
+ * rather than truthiness.
+ */
 export function estimateThinkingTokens(turn: Turn): number {
+  const reported = turn.tokenUsage?.output_tokens_details?.thinking_tokens
+  if (typeof reported === "number") return reported
   return charsToTokens(totalLength(turn.thinking.map((b) => b.thinking)))
 }
 

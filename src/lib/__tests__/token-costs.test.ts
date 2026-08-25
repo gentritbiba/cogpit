@@ -40,6 +40,40 @@ describe("estimateThinkingTokens", () => {
     })
     expect(estimateThinkingTokens(turn)).toBe(400 / CHARS_PER_TOKEN)
   })
+
+  it("prefers the reported thinking token count over the estimate", () => {
+    // CC 2.1.19x+ reports the thinking slice of output_tokens exactly.
+    const turn = makeTurn({
+      thinking: [{ type: "thinking", thinking: "x".repeat(400), signature: "" }],
+      tokenUsage: {
+        input_tokens: 10,
+        output_tokens: 500,
+        output_tokens_details: { thinking_tokens: 320 },
+      },
+    })
+    expect(estimateThinkingTokens(turn)).toBe(320)
+  })
+
+  it("reports zero thinking tokens when the model reported exactly zero", () => {
+    // A reported 0 is a fact, not a missing value — it must not fall back.
+    const turn = makeTurn({
+      thinking: [{ type: "thinking", thinking: "x".repeat(400), signature: "" }],
+      tokenUsage: {
+        input_tokens: 10,
+        output_tokens: 500,
+        output_tokens_details: { thinking_tokens: 0 },
+      },
+    })
+    expect(estimateThinkingTokens(turn)).toBe(0)
+  })
+
+  it("falls back to the estimate when the details field is absent", () => {
+    const turn = makeTurn({
+      thinking: [{ type: "thinking", thinking: "x".repeat(400), signature: "" }],
+      tokenUsage: { input_tokens: 10, output_tokens: 500 },
+    })
+    expect(estimateThinkingTokens(turn)).toBe(400 / CHARS_PER_TOKEN)
+  })
 })
 
 describe("estimateVisibleOutputTokens", () => {
