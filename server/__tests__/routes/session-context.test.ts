@@ -553,6 +553,52 @@ describe("registerSessionContextRoutes", () => {
       expect(data.contentBlocks[2].toolCalls[0].resultTruncated).toBe(false)
     })
 
+    // The exhaustiveness guard catches a deleted case, not a mistyped one:
+    // `body: block.sender` would ship silently, and this serializer has a
+    // hand-maintained twin in packages/cogpit-memory/src/commands/context.ts.
+    it("serializes an agent_message with its own fields", async () => {
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({
+          contentBlocks: [
+            {
+              kind: "agent_message",
+              sender: "csp-and-proxy",
+              body: "one blocking question on finding #1.",
+              reply: { summary: "Answered your question", timestamp: "2026-03-02T10:00:22Z" },
+              timestamp: "2026-03-02T10:00:00Z",
+            },
+            {
+              kind: "agent_message",
+              sender: "vehicle-batch",
+              body: "half-blocked on a decision",
+            },
+          ],
+        })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
+      await handler(req as never, res as never, next)
+
+      expect(JSON.parse(res._getData()).contentBlocks).toEqual([
+        {
+          kind: "agent_message",
+          sender: "csp-and-proxy",
+          body: "one blocking question on finding #1.",
+          reply: { summary: "Answered your question", timestamp: "2026-03-02T10:00:22Z" },
+          timestamp: "2026-03-02T10:00:00Z",
+        },
+        {
+          kind: "agent_message",
+          sender: "vehicle-batch",
+          body: "half-blocked on a decision",
+          reply: null,
+          timestamp: null,
+        },
+      ])
+    })
+
     it("truncates tool call results over 10K chars", async () => {
       const longResult = "x".repeat(15000)
       mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")

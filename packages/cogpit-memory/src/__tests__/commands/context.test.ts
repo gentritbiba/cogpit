@@ -222,6 +222,69 @@ describe("context command", () => {
       }
     })
 
+    // This serializer is a hand-maintained twin of the one in
+    // server/routes/session-context.ts, and the exhaustiveness guard only
+    // catches a deleted case — `body: block.sender` would ship silently.
+    it("serializes an agent_message with its sender, body and reply", async () => {
+      const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
+      mkdirSync(projDir, { recursive: true })
+
+      const body = "one blocking question on finding #1."
+      const lines = [
+        { type: "system", sessionId: "agent-mail", cwd: "/test/project", gitBranch: "main" },
+        {
+          type: "user",
+          timestamp: "2026-08-21T19:26:20Z",
+          message: { role: "user", content: "start" },
+        },
+        {
+          type: "attachment",
+          timestamp: "2026-08-21T19:26:25Z",
+          attachment: {
+            type: "queued_command",
+            commandMode: "prompt",
+            prompt: `<agent-message from="csp-and-proxy">\n${body}\n</agent-message>`,
+            timestamp: "2026-08-21T19:26:25Z",
+            origin: { kind: "peer", from: "csp-and-proxy", name: "csp-and-proxy", body },
+          },
+        },
+        {
+          type: "assistant",
+          timestamp: "2026-08-21T19:26:47Z",
+          message: {
+            role: "assistant",
+            model: "claude-opus-4-6",
+            id: "reply-message",
+            content: [{
+              type: "tool_use",
+              id: "sm-1",
+              name: "SendMessage",
+              input: { to: "csp-and-proxy", summary: "Answered your question", message: "..." },
+            }],
+            stop_reason: "tool_use",
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        },
+        {
+          type: "user",
+          timestamp: "2026-08-21T19:26:48Z",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "sm-1", content: "sent" }] },
+        },
+      ].map((line) => JSON.stringify(line)).join("\n")
+      writeSession(projDir, "agent-mail.jsonl", lines)
+
+      const detail = await getTurnDetail("agent-mail", 0) as any
+      const block = detail.contentBlocks.find((b: { kind: string }) => b.kind === "agent_message")
+      expect(block).toEqual({
+        kind: "agent_message",
+        sender: "csp-and-proxy",
+        body,
+        reply: { summary: "Answered your question", timestamp: "2026-08-21T19:26:47Z" },
+        timestamp: "2026-08-21T19:26:25Z",
+      })
+      expect(block.body).not.toContain("<agent-message")
+    })
+
     it("serializes current attachment and presentation block shapes without null entries", async () => {
       const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
       mkdirSync(projDir, { recursive: true })
