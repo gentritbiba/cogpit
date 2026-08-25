@@ -1439,6 +1439,29 @@ Summarize what landed, what the screenshots show, and anything the design got wr
 
 ## Task 14: Fix the paging path (found by Task 13 verification)
 
+> **DONE — landed in `58d364d`.** Both defects were real and both are fixed,
+> with tests that parse two chunks separately and stitch them (7 new; 4141 ->
+> 4148 on a clean tree).
+>
+> - **A third instance of 14a lives on the live-append path.**
+>   `parseSessionAppend` rebuilds only the last turn, so its pairing pass cannot
+>   see a peer message two or more turns above the rebuild cut — the reply a
+>   running session just sent disappears from the card it answered on the very
+>   next line. Proven with a failing test before the fix. `parseSessionAppend`
+>   now re-runs the same pure pass over the joined list.
+> - **Dedup is keyed on `(sender, body)`** and lives in `prependTurns`, so the
+>   Task 4 regression test (two messages sharing a sender task id) stays green,
+>   and a paged version of it was added.
+> - **Verified on `ddb6fc34` by replicating the client's paging** (`?tail=30`
+>   then `?before=&count=30`, five pages, each parsed on its own, reconstructing
+>   the file gaplessly). Before: `certified-status-fix` "Never answered" and the
+>   `csp-and-proxy` blocking question twice. After: the reply reads "Fixed the
+>   type error you flagged", the blocking question appears once, and both
+>   distinct `csp-and-proxy` messages survive.
+> - **`useSessionPaging.test.ts` fixtures were lying.** Its `Turn` casts had no
+>   `contentBlocks`; anything reading blocks in `prependTurns` crashed on them.
+>   Filled in, not worked around.
+
 Every agent-mail test parses one blob in one go. The app does not: `useSessionPaging`
 fetches `?before=&count=30`, parses each page **independently**, and stitches with
 `prependTurns` (`src/lib/timelinePaging.ts`). Two defects live in that gap, and all
