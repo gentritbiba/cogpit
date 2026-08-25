@@ -131,6 +131,8 @@ vi.mock("../lib/streamBus", () => ({
   publishCompleteMessage: vi.fn(),
   completeMessage: vi.fn(),
   publishError: vi.fn(),
+  publishAgentProgress: vi.fn(),
+  publishPromptSuggestion: vi.fn(),
   clear: vi.fn(),
   getSnapshot: vi.fn(() => null),
   subscribe: vi.fn(() => () => {}),
@@ -583,6 +585,88 @@ describe("sdk-session silent turn failures", () => {
     await waitUntil(() => delivered !== null)
     expect(delivered!.is_error).toBe(true)
     expect(streamBus.publishError).not.toHaveBeenCalled()
+  })
+})
+
+describe("sdk-session progress summaries and prompt suggestions", () => {
+  it("asks the CLI for subagent progress summaries and prompt suggestions", async () => {
+    const { createSDKSession } = await loadModule()
+    createSDKSession({ sessionId: "opts", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => captured.length === 1)
+
+    const options = captured[0].options as Record<string, unknown>
+    expect(options.agentProgressSummaries).toBe(true)
+    expect(options.promptSuggestions).toBe(true)
+  })
+
+  it("publishes a subagent progress summary keyed by its tool_use id", async () => {
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task_1",
+        tool_use_id: "toolu_7",
+        description: "Explore the auth module",
+        usage: { total_tokens: 10, tool_uses: 1, duration_ms: 30_000 },
+        summary: "Analyzing authentication module",
+      },
+      { type: "result", is_error: false },
+    ]
+
+    createSDKSession({ sessionId: "progress", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishAgentProgress).mock.calls.length > 0)
+    expect(vi.mocked(streamBus.publishAgentProgress).mock.calls[0]).toEqual([
+      "progress",
+      "toolu_7",
+      "Analyzing authentication module",
+    ])
+  })
+
+  it("ignores a task_progress event with no summary yet", async () => {
+    // The first ~30s of a subagent run emit progress with no summary; there is
+    // nothing to show, and publishing an empty one would blank a good summary.
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task_1",
+        tool_use_id: "toolu_7",
+        description: "Explore the auth module",
+        usage: { total_tokens: 10, tool_uses: 1, duration_ms: 1_000 },
+      },
+      { type: "result", is_error: false },
+    ]
+
+    createSDKSession({ sessionId: "progress-empty", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => captured.length === 1)
+    await captured[0].completed
+    expect(streamBus.publishAgentProgress).not.toHaveBeenCalled()
+  })
+
+  it("publishes a prompt suggestion that arrives after the result message", async () => {
+    // The suggestion is emitted after `result`, at which point processSDKEvent
+    // has already cleared the bus for this session. Iteration must continue
+    // past `result` and the publish must still reach a live subscriber.
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    scriptedMessages = [
+      { type: "result", is_error: false },
+      { type: "prompt_suggestion", suggestion: "Run the tests", uuid: "u1", session_id: "suggest" },
+    ]
+
+    createSDKSession({ sessionId: "suggest", cwd: "/tmp", message: "hi" })
+
+    await waitUntil(() => vi.mocked(streamBus.publishPromptSuggestion).mock.calls.length > 0)
+    expect(vi.mocked(streamBus.publishPromptSuggestion).mock.calls[0]).toEqual([
+      "suggest",
+      "Run the tests",
+    ])
   })
 })
 

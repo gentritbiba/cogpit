@@ -927,7 +927,7 @@ git commit -m "feat(sessions): render refusal fallback dialogs instead of failin
 
 ---
 
-### Task 16: Subagent progress summaries
+### Task 16: Subagent progress summaries — DONE
 
 **Why:** `agentProgressSummaries` forks a running subagent's conversation every ~30s to produce a
 short present-tense description ("Analyzing authentication module"), delivered on `task_progress`
@@ -940,6 +940,13 @@ panel currently shows a tool name or nothing while an agent runs.
 - Modify: `src/components/stats/AgentCard.tsx` (render it)
 - Test: `server/__tests__/sdk-session.test.ts`, `src/components/stats/__tests__/AgentCard.test.tsx`
 
+**Landed as:** rendered in `src/components/timeline/LiveSubagentTranscript.tsx` (the summary replaces
+its "Live" label) rather than `AgentCard.tsx` — the transcript is the surface that already renders a
+*running* subagent keyed by `tool_use_id`, which is what `task_progress` carries. Plumbed through a
+sibling `AgentProgressContext` in `StreamingOverlayContext.tsx`, whose audience and lifecycle it
+shares. `SDKTaskStartedMessage` (`depth`, `is_backgrounded`) was NOT free — it needs its own bus
+event and UI — so it is deferred.
+
 **Step 1: Write the failing tests** — a `task_progress` event carrying `summary` reaches the client;
 `AgentCard` shows the summary when present and falls back to current behaviour when absent.
 
@@ -951,7 +958,7 @@ git commit -m "feat(agents): show live progress summaries for running subagents"
 
 ---
 
-### Task 17: Prompt suggestions
+### Task 17: Prompt suggestions — DONE
 
 **Why:** `promptSuggestions` emits one `prompt_suggestion` message per turn with a predicted next
 prompt, piggybacking on the parent's prompt cache — "nearly free" per the SDK docs.
@@ -968,6 +975,13 @@ prompt, piggybacking on the parent's prompt cache — "nearly free" per the SDK 
 - Modify: `server/sdk-session.ts`
 - Modify: `src/components/ChatInput/` (render as a dismissible affordance above the composer)
 - Test: `server/__tests__/sdk-session.test.ts`
+
+**Landed as:** the stream loop already survived `result` — `runQuery`'s `for await (const msg of q)`
+has no break, and the persistent input stream keeps the CLI process alive across turns, so no loop
+change was needed. `processSDKEvent` does call `streamBus.clear()` on `result`, but `clear()` only
+drops the bus session when nothing is subscribed, so a post-`result` publish still reaches a watching
+client; that is now pinned by a test in `server/__tests__/lib/streamBus.test.ts`. UI is
+`src/components/ChatInput/PromptSuggestionBar.tsx`.
 
 **Step 1: Verify the stream loop survives `result`**
 

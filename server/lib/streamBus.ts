@@ -54,6 +54,8 @@ export type StreamBusEvent =
   | { type: "stream_delta"; events: StreamDelta[] }
   | { type: "stream_clear" }
   | { type: "turn_error"; message: string }
+  | { type: "agent_progress"; toolUseId: string; summary: string }
+  | { type: "prompt_suggestion"; suggestion: string }
 
 /**
  * Minimal structural type for the Anthropic raw stream events we consume —
@@ -417,6 +419,34 @@ export function publishError(sessionId: string, message: string): void {
   const state = sessions.get(sessionId)
   if (!state) return
   emit(state, { type: "turn_error", message })
+}
+
+/**
+ * Latest AI-generated progress line for a running subagent, keyed by the
+ * Task/Agent tool_use id its transcript renders under.
+ *
+ * Transient like publishError: a summary is superseded every ~30s, so storing
+ * it to replay into `getSnapshot` would only ever serve a stale line and would
+ * need its own entry in `maybeGc`'s liveness test. A client that reconnects
+ * mid-run simply shows no summary until the next fork lands.
+ */
+export function publishAgentProgress(sessionId: string, toolUseId: string, summary: string): void {
+  const state = sessions.get(sessionId)
+  if (!state) return
+  emit(state, { type: "agent_progress", toolUseId, summary })
+}
+
+/**
+ * Predicted next user prompt for the composer.
+ *
+ * Emitted after the turn's `result`, which means after sdk-session has already
+ * called `clear()` for this session. `clear()` only drops the session entry
+ * when nothing is subscribed, so a watching client still receives this.
+ */
+export function publishPromptSuggestion(sessionId: string, suggestion: string): void {
+  const state = sessions.get(sessionId)
+  if (!state) return
+  emit(state, { type: "prompt_suggestion", suggestion })
 }
 
 /** Current in-flight messages for a late subscriber (mid-turn page load). */

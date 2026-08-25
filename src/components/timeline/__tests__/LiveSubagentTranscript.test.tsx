@@ -22,16 +22,16 @@ function overlayWith(text: string, parentToolUseId: string | null = TOOL_ID): St
   ]
 }
 
-function tree(overlay: StreamingOverlay) {
+function tree(overlay: StreamingOverlay, agentProgress: Record<string, string> = {}) {
   return (
-    <StreamingOverlayProvider value={overlay}>
+    <StreamingOverlayProvider value={overlay} agentProgress={agentProgress}>
       <LiveSubagentTranscript toolUseId={TOOL_ID} />
     </StreamingOverlayProvider>
   )
 }
 
-function renderTranscript(overlay: StreamingOverlay) {
-  return render(tree(overlay))
+function renderTranscript(overlay: StreamingOverlay, agentProgress?: Record<string, string>) {
+  return render(tree(overlay, agentProgress))
 }
 
 /** jsdom reports 0 for every scroll metric; the pane's follow logic needs real ones. */
@@ -142,5 +142,45 @@ describe("LiveSubagentTranscript", () => {
     scroller.scrollTop = BOTTOM - 10
     fireEvent.scroll(scroller)
     expect(scroller.scrollTop).toBe(BOTTOM)
+  })
+
+  describe("progress summary", () => {
+    it("reserves no space when the subagent has not produced a summary yet", () => {
+      // Nothing is emitted for the first ~30s of a run, and most runs end
+      // before a second fork — an empty slot would flicker on every card.
+      renderTranscript(overlayWith("some output"))
+      expect(screen.queryByTestId("live-subagent-summary")).toBeNull()
+    })
+
+    it("shows the summary for its own tool alongside the streamed output", () => {
+      renderTranscript(overlayWith("some output"), {
+        [TOOL_ID]: "Analyzing authentication module",
+        toolu_other: "Writing the migration",
+      })
+
+      const summary = screen.getByTestId("live-subagent-summary")
+      expect(summary.textContent).toBe("Analyzing authentication module")
+      expect(screen.getByTestId("live-subagent-transcript").textContent).toContain("some output")
+    })
+
+    it("ignores a summary belonging to a different subagent", () => {
+      renderTranscript(overlayWith("some output"), { toolu_other: "Writing the migration" })
+      expect(screen.queryByTestId("live-subagent-summary")).toBeNull()
+    })
+
+    it("shows a summary that lands before any output has streamed", () => {
+      // The fork can win the race against the subagent's first token; hiding
+      // the pane then would drop the only signal the card has.
+      renderTranscript(overlayWith(""), { [TOOL_ID]: "Analyzing authentication module" })
+
+      expect(screen.getByTestId("live-subagent-summary").textContent)
+        .toBe("Analyzing authentication module")
+      expect(screen.queryByTestId("live-subagent-scroll")).toBeNull()
+    })
+
+    it("still renders nothing when there is neither output nor a summary", () => {
+      renderTranscript(overlayWith("", "some_other_tool"))
+      expect(screen.queryByTestId("live-subagent-transcript")).toBeNull()
+    })
   })
 })

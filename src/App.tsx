@@ -315,7 +315,9 @@ export default function App() {
   // duplicate worker parse on every source change (the session was already
   // parsed by useSessionActions / useNewSession before dispatch).
   const reconnectHandlerRef = useRef<(() => void) | null>(null)
-  const { isLive, sseState, isCompacting, streamingOverlay, turnError } = useLiveSession(
+  const {
+    isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion,
+  } = useLiveSession(
     state.sessionSource,
     (updated) => {
       startTransition(() => {
@@ -774,6 +776,7 @@ export default function App() {
     sseState,
     isCompacting,
     turnError,
+    promptSuggestion,
     undoRedo,
     pendingInteraction,
     permissionRequests: permReqs.requests,
@@ -795,7 +798,7 @@ export default function App() {
     },
   }), [
     state.session, state.sessionSource,
-    isLive, sseState, isCompacting, turnError,
+    isLive, sseState, isCompacting, turnError, promptSuggestion,
     undoRedo, pendingInteraction, isSubAgentView,
     permReqs.requests, permReqs.responding, permReqs.respond, permReqs.respondAll,
     slashSuggestions.suggestions, slashSuggestions.loading,
@@ -1110,7 +1113,7 @@ export default function App() {
       <AppProvider value={appContextValue}>
       <PtyProvider>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
-      <StreamingOverlayProvider value={streamingOverlay}>
+      <StreamingOverlayProvider value={streamingOverlay} agentProgress={agentProgress}>
         <PreviewAppShell
           sessionId={previewSessionId}
           loadError={previewLoadError}
@@ -1134,7 +1137,7 @@ export default function App() {
       <AppProvider value={appContextValue}>
       <PtyProvider enabled={terminalEnabled}>
       <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
-      <StreamingOverlayProvider value={streamingOverlay}>
+      <StreamingOverlayProvider value={streamingOverlay} agentProgress={agentProgress}>
         <MobileAppShell
           navigation={{
             actions,
@@ -1193,7 +1196,7 @@ export default function App() {
     <AppProvider value={appContextValue}>
     <PtyProvider enabled={terminalEnabled}>
     <SessionProvider value={sessionContextValue} chatValue={sessionChatValue}>
-      <StreamingOverlayProvider value={streamingOverlay}>
+      <StreamingOverlayProvider value={streamingOverlay} agentProgress={agentProgress}>
         <DesktopAppShell
           navigation={{
             panels,

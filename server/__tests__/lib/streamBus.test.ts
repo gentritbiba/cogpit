@@ -6,6 +6,8 @@ import {
   completeMessage,
   clear,
   publishError,
+  publishAgentProgress,
+  publishPromptSuggestion,
   getSnapshot,
   subscribe,
   _resetForTests,
@@ -283,6 +285,40 @@ describe("streamBus", () => {
 
   it("drops a turn_error when nobody is watching the session", () => {
     expect(() => publishError("nobody-home", "boom")).not.toThrow()
+  })
+
+
+  it("delivers an agent progress summary to subscribers", () => {
+    const events: StreamBusEvent[] = []
+    const unsubscribe = subscribe(SID, (ev) => events.push(ev))
+
+    publishAgentProgress(SID, "toolu_7", "Analyzing authentication module")
+
+    expect(events).toContainEqual({
+      type: "agent_progress",
+      toolUseId: "toolu_7",
+      summary: "Analyzing authentication module",
+    })
+    unsubscribe()
+  })
+
+  it("delivers a prompt suggestion published after the turn was cleared", () => {
+    // promptSuggestions arrive after the `result` message, and sdk-session
+    // clears the stream on `result`. A subscribed session must survive that
+    // clear or the suggestion is dropped for the one client waiting on it.
+    const events: StreamBusEvent[] = []
+    const unsubscribe = subscribe(SID, (ev) => events.push(ev))
+
+    clear(SID)
+    publishPromptSuggestion(SID, "Run the tests")
+
+    expect(events).toContainEqual({ type: "prompt_suggestion", suggestion: "Run the tests" })
+    unsubscribe()
+  })
+
+  it("drops progress and suggestions when nobody is watching the session", () => {
+    expect(() => publishAgentProgress("nobody-home", "toolu_1", "x")).not.toThrow()
+    expect(() => publishPromptSuggestion("nobody-home", "x")).not.toThrow()
   })
 
 })

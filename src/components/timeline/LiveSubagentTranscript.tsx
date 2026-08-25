@@ -1,5 +1,5 @@
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react"
-import { useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
+import { useAgentProgress, useStreamingOverlay } from "@/contexts/StreamingOverlayContext"
 import { messagesForToolUse } from "@/lib/streamingOverlay"
 import { StreamingMarkdown } from "./StreamingMarkdown"
 
@@ -8,6 +8,11 @@ import { StreamingMarkdown } from "./StreamingMarkdown"
  * Task/Agent ToolCallCard while the tool has no result yet. The pane scrolls
  * and sticks to the newest output, so the subagent's progress is visible as it
  * happens instead of only after it finishes.
+ *
+ * When `agentProgressSummaries` is on, the CLI also forks the subagent every
+ * ~30s for a one-line "what am I doing now". That line is shown in place of
+ * the "Live" label. It is absent for the first ~30s of every run and for runs
+ * that finish inside one window, so it is never given reserved space.
  */
 
 /** Caps the DOM: the pane re-renders on every overlay flush (~13 Hz). */
@@ -22,6 +27,7 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
   toolUseId: string
 }) {
   const overlay = useStreamingOverlay()
+  const summary = useAgentProgress(toolUseId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
 
@@ -54,26 +60,35 @@ export const LiveSubagentTranscript = memo(function LiveSubagentTranscript({
     if (el.scrollTop !== bottom) el.scrollTop = bottom
   }, [markdownText, following])
 
-  if (!text) return null
+  // A summary can land before the subagent's first token — showing it alone is
+  // better than showing nothing, so the pane only bails when it has neither.
+  if (!text && !summary) return null
 
   return (
     <div
       className="mt-2 rounded-md border bg-muted/30 px-3 py-2"
       data-testid="live-subagent-transcript"
     >
-      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Live</div>
       <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        data-testid="live-subagent-scroll"
-        role="region"
-        aria-label="Live sub-agent output"
-        tabIndex={0}
-        className="text-xs break-words max-h-64 overflow-y-auto overscroll-contain pr-1"
+        data-testid={summary ? "live-subagent-summary" : undefined}
+        className="mb-1 text-xs font-medium text-muted-foreground"
       >
-        {isTrimmed && <div className="text-muted-foreground/50">…</div>}
-        <StreamingMarkdown text={markdownText} compactHeadings />
+        {summary ?? <span className="uppercase tracking-wide">Live</span>}
       </div>
+      {text && (
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          data-testid="live-subagent-scroll"
+          role="region"
+          aria-label="Live sub-agent output"
+          tabIndex={0}
+          className="text-xs break-words max-h-64 overflow-y-auto overscroll-contain pr-1"
+        >
+          {isTrimmed && <div className="text-muted-foreground/50">…</div>}
+          <StreamingMarkdown text={markdownText} compactHeadings />
+        </div>
+      )}
     </div>
   )
 })

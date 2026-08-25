@@ -235,6 +235,83 @@ describe("useLiveSession", () => {
     expect(result.current.turnError).toBeNull()
   })
 
+  it("collects subagent progress summaries by tool_use id and drops them when the turn clears", () => {
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    expect(result.current.agentProgress).toEqual({})
+
+    act(() => {
+      getLastEventSource().simulateMessage({
+        type: "agent_progress",
+        toolUseId: "toolu_7",
+        summary: "Analyzing authentication module",
+      })
+      getLastEventSource().simulateMessage({
+        type: "agent_progress",
+        toolUseId: "toolu_8",
+        summary: "Writing the migration",
+      })
+    })
+    expect(result.current.agentProgress).toEqual({
+      toolu_7: "Analyzing authentication module",
+      toolu_8: "Writing the migration",
+    })
+
+    act(() => {
+      getLastEventSource().simulateMessage({
+        type: "agent_progress",
+        toolUseId: "toolu_7",
+        summary: "Checking the token refresh path",
+      })
+    })
+    expect(result.current.agentProgress.toolu_7).toBe("Checking the token refresh path")
+
+    // The cards these decorate go away with the overlay.
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "stream_clear" })
+    })
+    expect(result.current.agentProgress).toEqual({})
+  })
+
+  it("surfaces a prompt suggestion and drops it once the next turn produces tokens", () => {
+    // The suggestion arrives after `result`, i.e. after stream_clear, so a
+    // clear must not wipe it — only a new turn's tokens supersede it.
+    const source: SessionSource = { dirName: "dir", fileName: "file.jsonl", rawText: "{}" }
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    expect(result.current.promptSuggestion).toBeNull()
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "stream_clear" })
+      getLastEventSource().simulateMessage({ type: "prompt_suggestion", suggestion: "Run the tests" })
+    })
+    expect(result.current.promptSuggestion).toBe("Run the tests")
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "stream_delta", events: [] })
+    })
+    expect(result.current.promptSuggestion).toBeNull()
+  })
+
+  it("does not carry a suggestion across a session switch", () => {
+    // The prediction is for the turn that produced it; showing it in the next
+    // session would put an unrelated prompt in that composer.
+    const source: SessionSource = { dirName: "dir", fileName: "a.jsonl", rawText: "{}" }
+    const { result, rerender } = renderHook(
+      ({ src }) => useLiveSession(src, onUpdate, workerParse, workerAppend),
+      { initialProps: { src: source } },
+    )
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "prompt_suggestion", suggestion: "Run the tests" })
+    })
+    expect(result.current.promptSuggestion).toBe("Run the tests")
+
+    rerender({ src: { dirName: "dir", fileName: "b.jsonl", rawText: "{}" } })
+    expect(result.current.promptSuggestion).toBeNull()
+  })
+
   it("clears the compacting flag when the stream goes stale", () => {
     // The server announces the start of a compaction but never its end, so an
     // interrupted or failed compaction left "Compressing context…" pinned on

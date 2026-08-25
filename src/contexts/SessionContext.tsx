@@ -52,6 +52,8 @@ export interface SessionContextValue {
   isCompacting: boolean
   /** A turn that failed with no HTTP response waiting on it (null when none) */
   turnError: string | null
+  /** Predicted next prompt from the last turn (null when the CLI sent none) */
+  promptSuggestion: string | null
   /** Undo/redo system */
   undoRedo: UseUndoRedoResult
   /** Pending interaction detected in the session */

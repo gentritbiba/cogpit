@@ -322,6 +322,13 @@ function buildQueryOptions(state: SDKSessionState, opts: {
     // Forward the full subagent conversation (tagged with parent_tool_use_id)
     // so live subagent transcripts can render under their tool card.
     forwardSubagentText: true,
+    // Fork a running subagent every ~30s for a one-line "what am I doing now",
+    // delivered on task_progress. Reuses the subagent's model and prompt cache.
+    agentProgressSummaries: true,
+    // One predicted next prompt per turn, delivered after `result`. The query
+    // iterator below keeps running past `result`, which is what makes it
+    // reachable at all.
+    promptSuggestions: true,
   }
 
   if (isBypass) {
@@ -393,6 +400,26 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
       // answers 200 immediately), so push the failure to the client instead of
       // letting the turn stop with no explanation.
       streamBus.publishError(state.sessionId, describeErrorResult(result))
+    }
+  }
+
+  if (msg.type === "prompt_suggestion") {
+    // Arrives after `result`, so the bus session was cleared just above. The
+    // clear only tears the session down when nothing is subscribed, so a
+    // watching client still gets this; an unwatched one drops it, correctly.
+    const suggestion = (msg as unknown as { suggestion?: unknown }).suggestion
+    if (typeof suggestion === "string" && suggestion.trim()) {
+      streamBus.publishPromptSuggestion(state.sessionId, suggestion)
+    }
+  }
+
+  if (msg.type === "system" && msg.subtype === "task_progress") {
+    // `summary` is absent until the first ~30s fork completes, and the UI keys
+    // on the tool_use id of the card it decorates — without either there is
+    // nothing to render.
+    const progress = msg as unknown as { tool_use_id?: string; summary?: string }
+    if (progress.tool_use_id && progress.summary) {
+      streamBus.publishAgentProgress(state.sessionId, progress.tool_use_id, progress.summary)
     }
   }
 

@@ -23,6 +23,9 @@ export interface SessionSource {
 
 export type SseConnectionState = "connecting" | "connected" | "disconnected"
 
+/** Shared empty map so an unchanged "no progress" state never re-renders consumers. */
+const EMPTY_AGENT_PROGRESS: Record<string, string> = {}
+
 export function useLiveSession(
   source: SessionSource | null,
   onUpdate: (session: ParsedSession) => void,
@@ -44,6 +47,13 @@ export function useLiveSession(
   // A turn that failed with no HTTP response waiting on it (see
   // streamBus.publishError). Cleared as soon as a new turn produces tokens.
   const [turnError, setTurnError] = useState<string | null>(null)
+  // Latest AI-generated progress line per running subagent, keyed by the
+  // Task/Agent tool_use id whose card it decorates. Absent until the first
+  // ~30s fork lands, and empty for a session that spawns no subagents.
+  const [agentProgress, setAgentProgress] = useState<Record<string, string>>(EMPTY_AGENT_PROGRESS)
+  // Predicted next prompt for the composer. The CLI suppresses these on the
+  // first turn, in plan mode, and after an error, so null is the normal case.
+  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null)
   // Ephemeral token-streaming overlay (SDK-driven sessions only). Never
   // touches the worker/ParsedSession pipeline — see src/lib/streamingOverlay.
   const [streamingOverlay, setStreamingOverlay] = useState<StreamingOverlay>(EMPTY_OVERLAY)
@@ -94,6 +104,9 @@ export function useLiveSession(
   // SSE reconnects when rawText changes (e.g. after JSONL truncation from undo).
   // rawText only changes on explicit session load/reload, not during SSE streaming.
   useEffect(() => {
+    // A prediction belongs to the turn that produced it — never to whatever
+    // session is loaded next.
+    setPromptSuggestion(null)
     if (!dirName || !fileName) {
       setIsLive(false)
       setSseState("disconnected")
@@ -190,7 +203,12 @@ export function useLiveSession(
       }
     }
 
-    const clearOverlay = () => setOverlay(EMPTY_OVERLAY)
+    // Progress summaries decorate the very transcripts the overlay feeds, so
+    // they go whenever it does — a compaction, a turn end, or a dropped stream.
+    const clearOverlay = () => {
+      setOverlay(EMPTY_OVERLAY)
+      setAgentProgress(EMPTY_AGENT_PROGRESS)
+    }
 
     const flushToWorker = () => {
       if (closed || workerBusy || !pendingText) return
@@ -275,9 +293,19 @@ export function useLiveSession(
         } else if (data.type === "stream_delta") {
           setIsLive(true)
           resetStaleTimer()
-          // Tokens are flowing again — whatever failed before is now history.
+          // Tokens are flowing again — whatever failed before is now history,
+          // and so is a suggestion predicting the prompt that just went out.
           setTurnError(null)
+          setPromptSuggestion(null)
           setOverlay(applyDeltas(overlayRef.current, data.events ?? []))
+        } else if (data.type === "agent_progress") {
+          setIsLive(true)
+          resetStaleTimer()
+          setAgentProgress((prev) => ({ ...prev, [data.toolUseId]: data.summary }))
+        } else if (data.type === "prompt_suggestion") {
+          // Emitted after the turn's result, so it deliberately outlives the
+          // stream_clear that immediately precedes it.
+          setPromptSuggestion(typeof data.suggestion === "string" ? data.suggestion : null)
         } else if (data.type === "turn_error") {
           setTurnError(typeof data.message === "string" ? data.message : "The turn failed")
         } else if (data.type === "stream_clear") {
@@ -329,5 +357,5 @@ export function useLiveSession(
     }
   }, [dirName, fileName, rawText, watchOffset])
 
-  return { isLive, sseState, isCompacting, streamingOverlay, turnError }
+  return { isLive, sseState, isCompacting, streamingOverlay, turnError, agentProgress, promptSuggestion }
 }

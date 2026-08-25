@@ -11,6 +11,7 @@ import { PermissionRequestBar } from "./PermissionRequestBar"
 import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
+import { PromptSuggestionBar } from "./PromptSuggestionBar"
 import type { AgentKind } from "@/lib/sessionSource"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
@@ -109,6 +110,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     slashSuggestions,
     slashSuggestionsLoading,
     turnError,
+    promptSuggestion,
   } = useSessionContext()
   const { chat: { status, error, isConnected, sendMessage: onSend, interrupt: onInterrupt } } = useSessionChatContext()
   const canInterrupt = isConnected || isLive
@@ -177,6 +179,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
     setText(`/${suggestion.name} `)
     setSlashSelectedIndex(0)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
+    })
+  }, [updateMultiline])
+
+  // Fills the composer and leaves the caret at the end: the prediction is a
+  // draft to edit, so it deliberately does not send.
+  const applySuggestion = useCallback((suggestion: string) => {
+    setText(suggestion)
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
@@ -298,6 +310,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
       <div>
           {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
+
+        {/* Sits above the composer it fills. Renders nothing when the CLI sent
+            no suggestion, which is most turns. */}
+        <PromptSuggestionBar suggestion={promptSuggestion} onAccept={applySuggestion} />
 
         {images.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
