@@ -1433,3 +1433,93 @@ Both must return nothing. Per `CLAUDE.md`, superseded code gets deleted, not lef
 **Step 4: Report**
 
 Summarize what landed, what the screenshots show, and anything the design got wrong on contact with the code. Do **not** push or open a PR without asking.
+
+
+---
+
+## Task 14: Fix the paging path (found by Task 13 verification)
+
+Every agent-mail test parses one blob in one go. The app does not: `useSessionPaging`
+fetches `?before=&count=30`, parses each page **independently**, and stitches with
+`prependTurns` (`src/lib/timelinePaging.ts`). Two defects live in that gap, and all
+five gates were green throughout because nothing exercised it.
+
+### 14a. Replies do not pair across pages — REGRESSION, ours
+
+`pairAgentMessageReplies` is called once inside `buildTurns` (`shared/session/turnBuilder.ts:1000`),
+so it only ever sees one chunk. `prependTurns` concatenates `Turn[]` and never re-runs it.
+
+Observed on `ddb6fc34` with `count=30`: the `certified-status-fix` message lands in page 3
+and the `SendMessage` answering it in page 2, so the card renders **"Never answered"** for a
+message answered 22 seconds later. `vehicle-batch` only works because both fall in page 0.
+
+Two consequences, both worse than a wrong label:
+- On a live session this renders `Awaiting your reply · 3d 4h` on a message you already
+  answered — exactly the "counter ticking up from three weeks ago" the design doc rejects.
+- It **un-gates the `NEEDS YOU` chip**, whose entire safety argument is that a false positive
+  disappears the moment you reply. On this path it does not.
+
+**Fix:** re-pair after stitching. Export the pairing pass and run it over the merged array in
+`prependTurns`. Make it a pure recompute — clear every existing `reply` first, then pair over
+the whole set — so it is idempotent and cannot depend on how the pages happened to split.
+
+### 14b. One message renders twice — PRE-EXISTING, but the card amplifies it
+
+A peer message is persisted as both a `queue-operation` enqueue and an `attachment`. The
+reconciliation ledger (`enqueueSourcedPrompts`) is scoped per `buildTurns` call, so when the
+two copies land in different pages both survive, and `prependTurns` dedupes by **turn id**,
+not by block.
+
+Confirmed pre-existing: the merge-base renders 3 "Queued while working" cards for 2 messages.
+But severity changed — it is now two identical `NEEDS YOU` cards, reading as two separate
+unanswered questions from one agent.
+
+**Note for the record:** Task 4 cut a dedup pass on the grounds that no duplicates were
+observed. That measurement was taken on a full-file parse. The paged path — the one the app
+actually uses — does duplicate. The evidence was real; it was gathered from the wrong path.
+
+**Fix:** dedupe `agent_message` blocks on `(sender, body)` when stitching. Do NOT key on
+`senderTaskId` — Task 4 established it identifies the sender's *task*, and two different
+`csp-and-proxy` messages share one. The Task 4 regression test must stay green.
+
+### Required tests
+
+Both fixes need a test that **parses two chunks separately and stitches them**, mirroring
+`useSessionPaging`. A single-blob test cannot fail on either defect. Split the fixture so the
+message is in one chunk and its reply in the other, and assert across the stitch.
+
+### Verify
+
+Five gates, plus a real-session check on `ddb6fc34` confirming `certified-status-fix` shows
+its reply and the blocking question appears **once**.
+
+---
+
+## Task 15: Test and heuristic cleanup (found by Task 13 verification)
+
+**Vacuous tests — each passes regardless of whether the code works:**
+
+- `AgentMessageCard.test.tsx` "never renders the raw envelope" — `BODY` contains no envelope,
+  so the assertion cannot fail. This nominally guards the headline defect and guards nothing.
+  Feed it a body that still holds an envelope.
+- "sits beside the sender name" — `queryByTestId` returns `null` and `nextElementSibling` is
+  also `null`, so it asserts `null === null`. Deleting the entire liveness JSX leaves it green.
+- `agentAccentHue("x") === agentAccentHue("x")` — `f(x) === f(x)` on a pure function. Passes
+  for `() => 0`.
+- The `line-clamp-2`-in-className assertion is a "did someone type this string" test.
+- `turnBuilder.test.ts:1002` and `:1087` use `if (...) return` where `:1037` uses `throw`.
+  Currently shielded by a preceding assertion, but make them consistent.
+
+**Heuristic recall is 50% on real data.** `vehicle-batch` genuinely asks the reader to choose
+("If you add that step, tell me and I'll chain it… If you'd rather not, say so") and
+`looksLikeQuestion` returns `false`. The code also disagrees with the design doc: the doc says
+"a `?` in the last quarter of the body", the code checks the last line capped at 200 chars.
+Reconcile them, and add the `vehicle-batch` string as a calibration case.
+
+**"Never answered" on messages that asked nothing.** The `csp-and-proxy` done-report is a status
+update; labelling it "Never answered" reads as a reproach for a message that wanted no reply.
+Suppress the footer state when `!looksLikeQuestion(body) && !reply`.
+
+**Also:** no runtime test asserts either serializer emits `agent_message` correctly. The
+exhaustiveness guard catches a *deleted* case but not a *wrong field mapping* (`body: block.sender`
+would ship silently), and the two serializers are hand-maintained twins outside the sync check.
