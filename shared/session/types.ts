@@ -281,6 +281,19 @@ export interface AttachmentMessage extends BaseMessage {
     prompt?: string | ContentBlock[] | null
     commandMode?: string
     timestamp?: string
+    /**
+     * Who queued this prompt. `"human"` is the reader typing mid-turn;
+     * `"peer"` is another agent sending this session a message. `body` is the
+     * message with its envelope already stripped, so it beats re-parsing
+     * `prompt`. Absent on records written before Claude Code added the field.
+     */
+    origin?: {
+      kind?: string
+      from?: string
+      name?: string
+      senderTaskId?: string
+      body?: string
+    } | null
   } | null
 }
 
@@ -337,6 +350,19 @@ export type TurnContentBlock =
   | { kind: "text"; text: string[]; timestamp?: string }
   | { kind: "tool_calls"; toolCalls: ToolCall[]; timestamp?: string }
   | { kind: "queued_prompt"; content: string; timestamp?: string }
+  /**
+   * A message another agent sent this session mid-turn. Distinct from
+   * `queued_prompt`, which is the reader's own text. `reply` is filled by the
+   * pairing pass when a later SendMessage answered this sender.
+   */
+  | {
+      kind: "agent_message"
+      sender: string
+      senderTaskId: string | null
+      body: string
+      timestamp?: string
+      reply?: { summary: string; timestamp: string }
+    }
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }
