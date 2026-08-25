@@ -1,6 +1,38 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent } from "@testing-library/react"
+import type { ReactElement } from "react"
 import { AgentMessageCard, agentAccentHue, flattenToPlainText } from "../AgentMessageCard"
+import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
+import type { SessionStatus } from "@/lib/sessionStatus"
+
+const mocks = vi.hoisted(() => ({
+  inventory: null as { sessions: ActiveSessionInfo[] } | null,
+}))
+vi.mock("@/contexts/SessionInventoryContext", () => ({
+  useSessionInventoryOptional: () => mocks.inventory,
+}))
+
+beforeEach(() => {
+  mocks.inventory = null
+})
+
+function liveSession(fields: Partial<ActiveSessionInfo>): ActiveSessionInfo {
+  return {
+    dirName: "-Users-x-proj",
+    projectShortName: "proj",
+    fileName: "session.jsonl",
+    sessionId: "session",
+    lastModified: "2026-08-25T10:00:00.000Z",
+    size: 1,
+    ...fields,
+  }
+}
+
+/** Renders the card under an inventory holding exactly these sessions. */
+function renderWithInventory(sessions: Array<Partial<ActiveSessionInfo>>, ui: ReactElement) {
+  mocks.inventory = { sessions: sessions.map(liveSession) }
+  return render(ui)
+}
 
 const BODY = [
   "payload-batch-2 done, except the one hunk in `src/middleware.ts` I said I'd hand you.",
@@ -116,10 +148,103 @@ describe("AgentMessageCard", () => {
     expect(bad.textContent).not.toContain("Invalid Date")
   })
 
-  it("accepts the liveStatus prop reserved for the liveness dot", () => {
-    expect(() =>
-      render(<AgentMessageCard sender="w" body="x" timestamp="" liveStatus="running" />),
-    ).not.toThrow()
+  describe("liveness dot", () => {
+    const dot = () => screen.queryByTestId("agent-liveness")
+
+    it("stays silent when no inventory is mounted", () => {
+      render(<AgentMessageCard sender="w" body="b" timestamp="" />)
+      expect(dot()).not.toBeInTheDocument()
+    })
+
+    it("stays silent when the sender resolves to nothing", () => {
+      renderWithInventory(
+        [{ agentName: "someone-else", teamName: "t", agentStatus: "tool_use" }],
+        <AgentMessageCard sender="ghost" body="b" timestamp="" />,
+      )
+      expect(dot()).not.toBeInTheDocument()
+    })
+
+    it("shows a dot when exactly one live session matches the sender", () => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus: "tool_use" }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()).toBeInTheDocument()
+    })
+
+    // Agent names are unique inside a team, not across them. Pointing at one of
+    // two candidates would be a coin flip dressed up as a fact.
+    it("stays silent when two sessions share the sender name", () => {
+      renderWithInventory(
+        [
+          { agentName: "w", teamName: "t1", agentStatus: "tool_use" },
+          { agentName: "w", teamName: "t2", agentStatus: "idle" },
+        ],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()).not.toBeInTheDocument()
+    })
+
+    it("stays silent when the one match has no status to report", () => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t" }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()).not.toBeInTheDocument()
+    })
+
+    it("never matches an unnamed session against an empty sender", () => {
+      renderWithInventory(
+        [{ agentStatus: "tool_use" }],
+        <AgentMessageCard sender="" body="b" timestamp="" />,
+      )
+      expect(dot()).not.toBeInTheDocument()
+    })
+
+    const WORKING: SessionStatus[] = ["thinking", "tool_use", "processing", "compacting", "awaiting_agents"]
+    const AT_REST: SessionStatus[] = ["idle", "completed", "deferred"]
+
+    it.each(WORKING)("reads %s as still working", (agentStatus) => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()?.dataset.live).toBe("working")
+    })
+
+    it.each(AT_REST)("reads %s as at rest", (agentStatus) => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()?.dataset.live).toBe("idle")
+    })
+
+    it("pulses amber while the sender is working", () => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus: "tool_use" }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()?.className).toContain("animate-pulse")
+      expect(dot()?.className).toContain("bg-warning")
+    })
+
+    it("sits steady and green while the sender is idle", () => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus: "idle" }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(dot()?.className).not.toContain("animate-pulse")
+      expect(dot()?.className).toContain("bg-success")
+    })
+
+    it("sits beside the sender name", () => {
+      renderWithInventory(
+        [{ agentName: "w", teamName: "t", agentStatus: "idle" }],
+        <AgentMessageCard sender="w" body="b" timestamp="" />,
+      )
+      expect(screen.getByText("w").nextElementSibling).toBe(dot())
+    })
   })
 
   describe("reply state", () => {

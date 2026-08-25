@@ -1330,6 +1330,27 @@ git commit -m "feat: flag unanswered agent questions"
 
 ## Task 12: Liveness dot
 
+> **DONE.** All three plan tests pass as written, plus 14 more (16 new; 4130 ->
+> 4146).
+>
+> - **`agentStatus: "working"` in the plan's tests is not a real status.**
+>   `SessionStatus` is `idle | thinking | tool_use | processing | completed |
+>   compacting | deferred | awaiting_agents`. The tests now drive every one of
+>   the eight members through `it.each`, and the running/idle split reuses the
+>   already-exported `WORKING_STATUSES` (`src/lib/sessionActivity.ts`) rather
+>   than a second copy of the same list. `deferred` — awaiting permission review
+>   — is the one arguable member; it reads as idle, matching how the rest of the
+>   app already classifies it.
+> - **No `Map<agentName, ActiveSessionInfo[]>`.** The map only pays for itself
+>   when built once and shared, and this `useMemo` is per-card, so a map would
+>   be a strictly more expensive way to run the same scan. A `filter` on the
+>   sessions array with an exactly-one check does it in one line.
+> - **The `liveStatus` prop Task 8 reserved is gone.** The card resolves its own
+>   liveness from the hook, so nothing ever passed the prop and nothing would.
+> - A missing `agentStatus` on the single match also renders **no dot**: the
+>   vocabulary stays two-valued rather than growing a third "unknown" state.
+> - An empty `sender` never matches a session with no `agentName`.
+
 **Files:**
 - Modify: `src/components/timeline/AgentMessageCard.tsx`
 - Modify: `src/components/timeline/__tests__/AgentMessageCard.test.tsx`

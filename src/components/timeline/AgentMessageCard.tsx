@@ -4,8 +4,10 @@ import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { formatDuration } from "@/lib/format"
+import { WORKING_STATUSES } from "@/lib/sessionActivity"
 import { looksLikeQuestion } from "../../../shared/session/agentEnvelope"
 
 /**
@@ -91,6 +93,29 @@ function formatTime(timestamp: string | undefined): string | null {
   return ms === null ? null : new Date(ms).toLocaleTimeString()
 }
 
+/**
+ * Whether the sender is working right now, when — and only when — the name
+ * resolves to exactly one live session.
+ *
+ * Agent names are unique inside a team but not across them, and no inventory is
+ * mounted at all outside a device root. Every one of those cases returns null,
+ * because a dot that might be pointing at the wrong session is worse than no
+ * dot: an indicator that is usually meaningless trains you to ignore the one
+ * time it matters.
+ */
+function useSenderLiveness(sender: string): "working" | "idle" | null {
+  const sessions = useSessionInventoryOptional()?.sessions
+
+  return useMemo(() => {
+    if (!sender || !sessions) return null
+    const matches = sessions.filter((session) => session.agentName === sender)
+    if (matches.length !== 1) return null
+    const status = matches[0].agentStatus
+    if (!status) return null
+    return WORKING_STATUSES.has(status) ? "working" : "idle"
+  }, [sender, sessions])
+}
+
 interface Props {
   sender: string
   body: string
@@ -99,8 +124,6 @@ interface Props {
   reply?: { summary: string; timestamp: string }
   /** Whether this session is still live, so an unanswered message is still waiting. */
   isLive?: boolean
-  /** The sender's `agentStatus` when it is live. */
-  liveStatus?: string
 }
 
 /**
@@ -117,6 +140,7 @@ export const AgentMessageCard = memo(function AgentMessageCard({
   const [expanded, setExpanded] = useState(false)
   const { subject, preview } = useMemo(() => splitSubjectAndPreview(body), [body])
   const time = formatTime(timestamp)
+  const liveness = useSenderLiveness(sender)
   const accent = "text-[oklch(0.52_0.16_var(--agent-hue))] dark:text-[oklch(0.74_0.14_var(--agent-hue))]"
 
   // The one guessed signal on this card, so it is gated on the message also
@@ -142,6 +166,16 @@ export const AgentMessageCard = memo(function AgentMessageCard({
         <div className="flex min-w-0 items-center gap-1.5">
           <ArrowDownLeft className={`size-3.5 shrink-0 ${accent}`} data-icon="inline-start" />
           <span className={`truncate font-mono text-xs font-medium ${accent}`}>{sender}</span>
+          {liveness && (
+            <span
+              data-testid="agent-liveness"
+              data-live={liveness}
+              title={liveness === "working" ? `${sender} is working now` : `${sender} is idle`}
+              className={`inline-flex size-1.5 shrink-0 rounded-full ${
+                liveness === "working" ? "animate-pulse bg-warning" : "bg-success"
+              }`}
+            />
+          )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {needsYou && (
