@@ -277,7 +277,22 @@ git commit -m "feat: add agent_message block kind and attachment origin type"
 - Modify: `shared/session/turnBuilder.ts:346-352` (`pendingQueuedPrompts` declaration)
 - Modify: `shared/session/turnBuilder.ts:377-386` (`flushPendingQueuedPrompts`)
 - Modify: `shared/session/turnBuilder.ts:481-510` (the two push sites)
+- Modify: `scripts/sync-cogpit-memory.ts` (the `FILES` array)
 - Test: `src/lib/__tests__/turnBuilder.test.ts`
+
+**Read this before you start.** `scripts/sync-cogpit-memory.ts` runs a
+dependency-closure check *before* the drift check: it scans every file in its
+`FILES` array for `from "./..."` imports and hard-fails if a resolved local
+dependency is not itself in `FILES`. The moment `turnBuilder.ts` imports
+`./agentEnvelope`, that check fails with:
+
+```
+The cogpit-memory shared-module dependency closure is incomplete:
+  - turnBuilder.ts -> agentEnvelope.ts
+```
+
+Add `"agentEnvelope.ts"` to the `FILES` array. `packages/cogpit-memory/src/lib/agentEnvelope.ts`
+then becomes a generated mirror file, and your commit must include it.
 
 **Step 1: Write the failing tests**
 
@@ -494,7 +509,8 @@ Expected: PASS. If any pre-existing turnBuilder test now fails, read it before c
 **Step 5: Commit**
 
 ```bash
-git add shared/session/turnBuilder.ts packages/cogpit-memory/src/lib/ src/lib/__tests__/turnBuilder.test.ts
+git add shared/session/turnBuilder.ts scripts/sync-cogpit-memory.ts \
+        packages/cogpit-memory/src/lib/ src/lib/__tests__/turnBuilder.test.ts
 git commit -m "feat: emit agent_message blocks for peer-origin queued prompts"
 ```
 
@@ -785,6 +801,17 @@ git commit -m "feat: serialize agent_message blocks in session context APIs"
 **Step 1: Port any uncovered cases**
 
 Read `src/lib/__tests__/teammateMessage.test.ts`. For each assertion not already covered in `agentEnvelope.test.ts`, add an equivalent. Only then delete the old file.
+
+Two cases are known to be uncovered. Both already behave correctly in
+`parseAgentEnvelope`, but neither is currently asserted, so port them:
+
+- An envelope with **no** sender attribute: `<teammate-message>hello</teammate-message>`
+  must give `sender: null` with the body still unwrapped.
+- `teammate_id` appearing **after** another attribute:
+  `<teammate-message from="x" teammate_id="team-lead">` must resolve to
+  `team-lead`, not `x`. This is why `SENDER_RE` uses word-boundary-anchored
+  alternation — a naive `from|teammate_id` regex silently picks the wrong
+  sender here, and nothing else in the suite would catch it.
 
 **Step 2: Repoint the two consumers**
 
