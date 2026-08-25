@@ -866,10 +866,12 @@ Add a parallel `describe` running the same escalation cases through `teamAuthMid
 
 ```ts
 const shareToken = getRequestShareToken(req)
-if (shareToken && !getRequestSessionToken(req)) {
+if (shareToken && !validSessionToken(req)) {
   return handleShareRequest(req, res, next, shareToken)
 }
 ```
+
+**Do NOT use `getRequestSessionToken` here.** It returns the *presented* token without validating it, so `Authorization: Bearer garbage` makes it truthy, skips the share branch, and drops the guest onto the `isTrustedDirectLocalRequest` shortcut — full app access on loopback. Gate on a token that actually validates.
 
 And add a module-private `handleShareRequest`:
 
