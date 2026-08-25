@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest"
-import { parseAgentEnvelope, looksLikeQuestion } from "../../../shared/session/agentEnvelope"
+import {
+  parseAgentEnvelope,
+  looksLikeQuestion,
+  stripEnvelopeFraming,
+} from "../../../shared/session/agentEnvelope"
 
 describe("parseAgentEnvelope", () => {
   it("unwraps an <agent-message> envelope and returns the sender", () => {
@@ -38,6 +42,25 @@ describe("parseAgentEnvelope", () => {
     const r = parseAgentEnvelope(`<agent-message from="x">no closing tag`)
     expect(r.sender).toBeNull()
     expect(r.body).toBe(`<agent-message from="x">no closing tag`)
+  })
+})
+
+describe("stripEnvelopeFraming", () => {
+  it("removes an envelope that wraps the whole body", () => {
+    expect(stripEnvelopeFraming(`<agent-message from="w">\nbody text\n</agent-message>`)).toBe("body text")
+  })
+
+  it("removes the trailing tag a nested envelope leaves behind", () => {
+    expect(stripEnvelopeFraming("outer inner</agent-message>")).toBe("outer inner")
+  })
+
+  it("keeps a tag the body is talking about", () => {
+    const body = 'Peers send <agent-message from="x"> framing. Strip it before display.'
+    expect(stripEnvelopeFraming(body)).toBe(body)
+  })
+
+  it("leaves an already-unwrapped body untouched", () => {
+    expect(stripEnvelopeFraming("body text")).toBe("body text")
   })
 })
 

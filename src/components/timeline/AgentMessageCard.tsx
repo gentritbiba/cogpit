@@ -8,7 +8,7 @@ import { useSessionInventoryOptional } from "@/contexts/SessionInventoryContext"
 import { useElapsedTimer } from "@/hooks/useElapsedTimer"
 import { formatDuration } from "@/lib/format"
 import { WORKING_STATUSES } from "@/lib/sessionActivity"
-import { looksLikeQuestion } from "../../../shared/session/agentEnvelope"
+import { looksLikeQuestion, stripEnvelopeFraming } from "../../../shared/session/agentEnvelope"
 
 /**
  * Hues spread around the wheel so two agents in the same session rarely land on
@@ -132,12 +132,15 @@ interface Props {
  */
 export const AgentMessageCard = memo(function AgentMessageCard({
   sender,
-  body,
+  body: rawBody,
   timestamp,
   reply,
   isLive,
 }: Props) {
   const [expanded, setExpanded] = useState(false)
+  // turnBuilder already unwraps the envelope; this is the last thing between a
+  // body that escaped it and the reader.
+  const body = useMemo(() => stripEnvelopeFraming(rawBody), [rawBody])
   const { subject, preview } = useMemo(() => splitSubjectAndPreview(body), [body])
   const time = formatTime(timestamp)
   const liveness = useSenderLiveness(sender)

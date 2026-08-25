@@ -46,11 +46,22 @@ describe("AgentMessageCard", () => {
     expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
   })
 
+  // The body handed to the card is normally already unwrapped. This feeds it one
+  // that is not, because a card that only ever sees clean bodies proves nothing
+  // about the defect this feature exists to fix.
   it("never renders the raw envelope", () => {
+    const wrapped = `<agent-message from="csp-and-proxy">\n${BODY}\n</agent-message>`
     const { container } = render(
-      <AgentMessageCard sender="csp-and-proxy" body={BODY} timestamp="" />,
+      <AgentMessageCard sender="csp-and-proxy" body={wrapped} timestamp="" />,
     )
     expect(container.textContent).not.toContain("<agent-message")
+    expect(container.textContent).not.toContain("</agent-message")
+    expect(screen.getByTestId("agent-message-subject").textContent).toContain("payload-batch-2 done")
+  })
+
+  it("keeps an envelope tag the body only talks about", () => {
+    render(<AgentMessageCard sender="w" body={'Peers send <agent-message from="x"> framing.'} timestamp="" />)
+    expect(screen.getByTestId("agent-message-subject").textContent).toContain('<agent-message from="x">')
   })
 
   it("splits the first line into a subject and the rest into a preview", () => {
@@ -90,8 +101,10 @@ describe("AgentMessageCard", () => {
     const preview = screen.getByTestId("agent-message-preview")
     expect(subject.textContent).toBe(longLine)
     expect(preview.textContent).toBe(longLine)
-    expect(subject.className).toContain("line-clamp-2")
-    expect(preview.className).toContain("line-clamp-2")
+    // Whole class token, not a substring: `toContain` also matches
+    // `line-clamp-2x`, a utility Tailwind never emits and that clamps nothing.
+    expect(subject).toHaveClass("line-clamp-2")
+    expect(preview).toHaveClass("line-clamp-2")
   })
 
   it("keeps the subject out of the preview", () => {
@@ -243,6 +256,9 @@ describe("AgentMessageCard", () => {
         [{ agentName: "w", teamName: "t", agentStatus: "idle" }],
         <AgentMessageCard sender="w" body="b" timestamp="" />,
       )
+      // Without the presence check both sides are null once the dot is gone,
+      // and the assertion passes on a card that never renders one.
+      expect(dot()).toBeInTheDocument()
       expect(screen.getByText("w").nextElementSibling).toBe(dot())
     })
   })
@@ -393,8 +409,13 @@ describe("AgentMessageCard", () => {
 })
 
 describe("agentAccentHue", () => {
-  it("is stable for the same sender", () => {
-    expect(agentAccentHue("csp-and-proxy")).toBe(agentAccentHue("csp-and-proxy"))
+  // Pinned, not compared against itself: the hue is stored nowhere, so the hash
+  // is the whole contract. Two windows, two sessions and two app versions have
+  // to agree on a sender's colour, and `f(x) === f(x)` holds for `() => 0`.
+  it("gives a sender the same hue every time it is computed", () => {
+    expect(agentAccentHue("csp-and-proxy")).toBe(260)
+    expect(agentAccentHue("payload-batch-2")).toBe(110)
+    expect(agentAccentHue("vehicle-batch")).toBe(80)
   })
 
   it("spreads different senders across the wheel", () => {

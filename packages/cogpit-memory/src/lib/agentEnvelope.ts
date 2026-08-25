@@ -43,6 +43,18 @@ function readSender(attrs: string): string | null {
   return null
 }
 
+/**
+ * Removes envelope framing that wraps a body — an envelope no reader unwrapped,
+ * or the trailing tag the nested case above leaves behind. Only the wrapper
+ * goes: a tag quoted inside the body is content, and stays.
+ */
+export function stripEnvelopeFraming(body: string): string {
+  return body
+    .replace(/^\s*<(?:agent-message|teammate-message)\b[^>]*>/, "")
+    .replace(/<\/(?:agent-message|teammate-message)>\s*$/, "")
+    .trim()
+}
+
 export function parseAgentEnvelope(text: string): ParsedAgentEnvelope {
   let sender: string | null = null
   let matched = false

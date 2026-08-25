@@ -955,7 +955,7 @@ describe("agent mail", () => {
 
     const block = session.turns[0].contentBlocks.find((b) => b.kind === "agent_message")
     expect(block).toBeDefined()
-    if (block?.kind !== "agent_message") return
+    if (block?.kind !== "agent_message") throw new Error("expected agent_message")
     expect(block.sender).toBe("csp-and-proxy")
     expect(block.body).toBe("one blocking question on finding #1.")
     expect(block.body).not.toContain("<agent-message")
@@ -1034,7 +1034,7 @@ describe("agent mail", () => {
     expect(session.turns[0].contentBlocks.filter((b) => b.kind === "queued_prompt")).toHaveLength(0)
 
     const block = agentMessages[0]
-    if (block.kind !== "agent_message") return
+    if (block.kind !== "agent_message") throw new Error("expected agent_message")
     expect(block.sender).toBe(sender)
     expect(block.body).toBe(body)
     expect(block.body).not.toContain("<agent-message")
