@@ -1091,13 +1091,15 @@ describe("sdk-session stream bus wiring", () => {
     expect(streamBus.completeMessage).not.toHaveBeenCalledWith("st6", "msg_sub")
   })
 
-  it("does not register subagent Task calls in pendingTaskCalls (forwardSubagentText)", async () => {
+  it("registers nested subagent Task calls so agents deeper than one level resolve", async () => {
+    // Claude Code 2.1.219 raised the default spawn depth from 1 to 3. A depth-2
+    // agent's opening prompt matches a Task call made INSIDE another subagent,
+    // so that call has to be a candidate or the nested agent can never bind to
+    // a parent and its transcript is dropped.
     const taskBlock = { type: "tool_use", name: "Task", id: "toolu_main", input: { prompt: "main task" } }
     const subagentTaskBlock = { type: "tool_use", name: "Task", id: "toolu_nested", input: { prompt: "nested task" } }
     scriptedMessages = [
-      // Main-thread assistant message — registers
       { type: "assistant", message: { id: "msg_1", content: [taskBlock] } },
-      // Subagent's own assistant message — must NOT register
       { type: "assistant", message: { id: "msg_2", content: [subagentTaskBlock] }, parent_tool_use_id: "toolu_main" },
       { type: "result", is_error: false },
     ]
@@ -1106,10 +1108,34 @@ describe("sdk-session stream bus wiring", () => {
     const state = createSDKSession({ sessionId: "st5", cwd: "/tmp", message: "hi" })
     await waitUntil(() => captured.length === 1)
     await captured[0].completed
-    await waitUntil(() => state.pendingTaskCalls.size >= 1)
+    await waitUntil(() => state.pendingTaskCalls.size >= 2)
 
-    expect(state.pendingTaskCalls.has("toolu_main")).toBe(true)
-    expect(state.pendingTaskCalls.has("toolu_nested")).toBe(false)
+    expect(state.pendingTaskCalls.get("toolu_main")).toBe("main task")
+    expect(state.pendingTaskCalls.get("toolu_nested")).toBe("nested task")
+  })
+
+  it("still publishes subagent text to the bus while registering its nested Task calls", async () => {
+    // Registering must not cost the live-transcript publish, nor start treating
+    // a subagent message as a main-thread completion.
+    const nested = { type: "tool_use", name: "Agent", id: "toolu_nested2", input: { prompt: "deep task" } }
+    const text = { type: "text", text: "spawning a helper" }
+    scriptedMessages = [
+      { type: "assistant", message: { id: "msg_s", content: [text, nested] }, parent_tool_use_id: "toolu_p" },
+      { type: "result", is_error: false },
+    ]
+
+    const streamBus = await import("../lib/streamBus")
+    const { createSDKSession } = await loadModule()
+    const state = createSDKSession({ sessionId: "st7", cwd: "/tmp", message: "hi" })
+    await waitUntil(() => vi.mocked(streamBus.publishCompleteMessage).mock.calls.length >= 1)
+
+    expect(streamBus.publishCompleteMessage).toHaveBeenCalledWith("st7", {
+      messageId: "msg_s",
+      parentToolUseId: "toolu_p",
+      blocks: [{ blockType: "text", text: "spawning a helper" }],
+    })
+    expect(streamBus.completeMessage).not.toHaveBeenCalledWith("st7", "msg_s")
+    await waitUntil(() => state.pendingTaskCalls.has("toolu_nested2"))
   })
 })
 

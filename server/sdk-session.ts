@@ -411,10 +411,13 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
 
     // With forwardSubagentText enabled, subagents' own COMPLETE messages flow
     // through here (the SDK emits no token-level stream events for subagents).
-    // Publish them to the bus for the live transcript, and keep them out of
-    // pendingTaskCalls — a subagent's nested Task call would corrupt the
-    // subagentWatcher's prompt matching.
+    // Publish them to the bus for the live transcript, and register any Task
+    // call they make: since CC 2.1.219 agents spawn up to three levels deep, so
+    // a nested call is the only candidate a depth-2 agent's prompt can match.
+    // The watcher's exact-match-first resolution and its proven/provisional
+    // claim system are what keep the extra candidates from mis-binding.
     if (parentToolUseId !== null) {
+      registerTaskCalls(state, message?.content)
       const content = message?.content as Array<{ type: string; text?: string; thinking?: string }> | undefined
       if (message?.id && Array.isArray(content)) {
         const textBlocks: Array<{ blockType: "text" | "thinking"; text: string }> = []
@@ -442,13 +445,27 @@ function processSDKEvent(state: SDKSessionState, msg: SDKMessage): void {
       streamBus.completeMessage(state.sessionId, message.id)
     }
 
-    const blocks = message?.content as Array<{ type: string; name?: string; id?: string; input?: { prompt?: string } }> | undefined
-    if (!Array.isArray(blocks)) return
-    for (const block of blocks) {
-      if (block.type === "tool_use" && (block.name === "Task" || block.name === "Agent")) {
-        state.pendingTaskCalls.set(block.id!, block.input?.prompt ?? "")
-      }
-    }
+    registerTaskCalls(state, message?.content)
+  }
+}
+
+/**
+ * Records every Task/Agent tool call in an assistant message as a candidate
+ * parent for a subagent transcript, keyed by tool_use id.
+ *
+ * Called for main-thread and subagent messages alike — see the depth note at
+ * the subagent branch above.
+ */
+function registerTaskCalls(state: SDKSessionState, content: unknown): void {
+  const blocks = content as
+    | Array<{ type: string; name?: string; id?: string; input?: { prompt?: string } }>
+    | undefined
+  if (!Array.isArray(blocks)) return
+  for (const block of blocks) {
+    if (block.type !== "tool_use") continue
+    if (block.name !== "Task" && block.name !== "Agent") continue
+    if (!block.id) continue
+    state.pendingTaskCalls.set(block.id, block.input?.prompt ?? "")
   }
 }
 
