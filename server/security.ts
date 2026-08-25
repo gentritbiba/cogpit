@@ -530,6 +530,151 @@ setInterval(() => {
   }
 }, 60_000).unref()
 
+// ── Share token system ───────────────────────────────────────────────
+//
+// A share token grants full participation in exactly ONE session. It is kept
+// in its own map rather than `activeSessions` because a share principal is not
+// a team principal: it must never satisfy the main auth path, never persist to
+// the team session store, and never appear in getConnectedDevices().
+
+const SHARE_COOKIE = "__Host-cogpit_share"
+
+interface ShareTokenInfo {
+  sessionId: string
+  createdAt: number
+  ip: string
+  userAgent: string
+  lastActivity: number
+}
+
+const shareTokens = new Map<string, ShareTokenInfo>()
+type ShareRevocationListener = (token: string | null) => void
+const shareRevocationListeners = new Set<ShareRevocationListener>()
+
+function notifyShareRevoked(token: string | null): void {
+  for (const listener of shareRevocationListeners) {
+    try {
+      listener(token)
+    } catch (error) {
+      console.error("[share] Revocation listener failed:", error)
+    }
+  }
+}
+
+/** Subscribe guest transports that must close when their share is revoked. */
+export function onShareRevoked(listener: ShareRevocationListener): () => void {
+  shareRevocationListeners.add(listener)
+  return () => shareRevocationListeners.delete(listener)
+}
+
+function discardShareToken(token: string): void {
+  if (shareTokens.delete(token)) notifyShareRevoked(token)
+}
+
+export function createShareToken(sessionId: string, ip: string, userAgent?: string): string {
+  const token = randomBytes(32).toString("hex")
+  const now = Date.now()
+  shareTokens.set(token, {
+    sessionId,
+    createdAt: now,
+    ip,
+    userAgent: userAgent || "",
+    lastActivity: now,
+  })
+  return token
+}
+
+/** The live share for a token, or null once expired (expiry discards it). */
+function getLiveShare(token: string): ShareTokenInfo | null {
+  const share = shareTokens.get(token)
+  if (!share) return null
+  const now = Date.now()
+  if (
+    now - share.createdAt > SESSION_ABSOLUTE_TTL_MS
+    || now - share.lastActivity > SESSION_IDLE_TTL_MS
+  ) {
+    discardShareToken(token)
+    return null
+  }
+  return share
+}
+
+/** The session a share token admits its holder to, or null if it is not valid. */
+export function validateShareToken(token: string, userAgent?: string): string | null {
+  const share = getLiveShare(token)
+  if (!share) return null
+  if (userAgent !== undefined && share.userAgent !== userAgent) {
+    discardShareToken(token)
+    return null
+  }
+  share.lastActivity = Date.now()
+  return share.sessionId
+}
+
+/** Validity check for long-lived transports that must not refresh idle time. */
+export function isShareTokenActive(token: string): boolean {
+  return getLiveShare(token) !== null
+}
+
+export function revokeShareToken(token: string): void {
+  discardShareToken(token)
+}
+
+export function revokeShareTokensForSession(sessionId: string): void {
+  for (const [token, share] of shareTokens) {
+    if (share.sessionId !== sessionId) continue
+    shareTokens.delete(token)
+    notifyShareRevoked(token)
+  }
+}
+
+export function revokeAllShareTokens(): void {
+  shareTokens.clear()
+  notifyShareRevoked(null)
+}
+
+/** Guests currently holding an unexpired token for a session. */
+export function countShareGuests(sessionId: string): number {
+  let count = 0
+  for (const token of [...shareTokens.keys()]) {
+    if (getLiveShare(token)?.sessionId === sessionId) count++
+  }
+  return count
+}
+
+export function setShareCookie(res: ServerResponse, token: string): void {
+  res.setHeader(
+    "Set-Cookie",
+    `${SHARE_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.floor(SESSION_ABSOLUTE_TTL_MS / 1000)}`,
+  )
+}
+
+export function clearShareCookie(res: ServerResponse): void {
+  res.setHeader(
+    "Set-Cookie",
+    `${SHARE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`,
+  )
+}
+
+/**
+ * Cookie only, deliberately. `Authorization: Bearer` is the machine-client path
+ * to unrestricted access; letting a share token ride it would hand a guest the
+ * full-access branch of every middleware that reads a bearer header.
+ */
+export function getRequestShareToken(req: IncomingMessage): string | null {
+  return cookieValue(req, SHARE_COOKIE)
+}
+
+/** Clears only the in-memory share map — the tokens are never persisted. */
+export function __resetShareTokensForTest(): void {
+  shareTokens.clear()
+}
+
+// Clean up expired share tokens periodically (unref so build process can exit)
+setInterval(() => {
+  for (const token of [...shareTokens.keys()]) getLiveShare(token)
+}, 60_000).unref()
+
 // ── Password hashing ────────────────────────────────────────────────
 
 export {
