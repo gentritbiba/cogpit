@@ -715,9 +715,21 @@ git commit -m "feat: pair peer messages with the SendMessage that answered them"
 ## Task 6: Serialization and mirror sync
 
 **Files:**
-- Modify: `server/routes/session-context.ts:182` (add a case beside `queued_prompt`)
-- Modify: `packages/cogpit-memory/src/commands/context.ts:185` (same case)
-- Modify: any other file the Task 2 typecheck named
+- Modify: `server/routes/session-context.ts:157` (`mapContentBlock`)
+- Modify: `packages/cogpit-memory/src/commands/context.ts:161` (`mapContentBlock`)
+
+**Read this first — this task is NOT compiler-discoverable.**
+
+Task 2 predicted that adding a union member would break exhaustive switches and
+name these files. It did not. Both `mapContentBlock` functions have **no declared
+return type and no `default` case**, and the repo has no `assertNever`, no
+`satisfies never`, and no switch-exhaustiveness lint rule. TypeScript therefore
+widens the inferred return to include `undefined` rather than erroring.
+
+The consequence: once Task 3 emits `agent_message`, both serializers silently
+return `undefined` for those blocks and the session-context APIs drop them —
+with typecheck, lint, tests, and the sync check all still green. Nothing will
+tell you. That is why Step 2 below adds the guard.
 
 **Step 1: Add the case to both serializers**
 
@@ -735,12 +747,32 @@ git commit -m "feat: pair peer messages with the SendMessage that answered them"
 
 `packages/cogpit-memory/src/commands/context.ts` is **not** generated — edit it by hand. Only `packages/cogpit-memory/src/lib/` is a mirror.
 
-**Step 2: Verify**
+**Step 2: Close the hole for good**
+
+Add a `default` to BOTH switches so the next person adding a block kind gets a
+compile error instead of a silent data loss:
+
+```ts
+    default: {
+      // Compile-time exhaustiveness. A new TurnContentBlock kind fails typecheck
+      // here rather than silently serializing as undefined and vanishing from
+      // the API response.
+      const exhaustive: never = block
+      return exhaustive
+    }
+```
+
+Verify the guard actually works before moving on: temporarily comment out the
+`agent_message` case and confirm `bun run typecheck` FAILS with a "not assignable
+to type 'never'" error naming `block`. Restore the case, confirm green. A guard
+you did not watch fire is a guard you have not tested.
+
+**Step 3: Verify**
 
 Run: `bun run typecheck && bun run check:cogpit-memory-sync && bun run test`
 Expected: PASS on all three.
 
-**Step 3: Commit**
+**Step 4: Commit**
 
 ```bash
 git add server/routes/session-context.ts packages/cogpit-memory/src/commands/context.ts
