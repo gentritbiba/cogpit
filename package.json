@@ -20,6 +20,7 @@
     "check:audit": "bun scripts/check-audit.ts",
     "check:cogpit-memory-sync": "bun scripts/sync-cogpit-memory.ts --check",
     "check:duplicates": "bun scripts/check-duplicates.ts",
+    "generate:icons": "bun scripts/generate-icons.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

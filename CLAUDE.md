@@ -17,6 +17,21 @@ Define the route module under `server/routes/` and register it once in
 `server/api-routes.ts`. Vite, Electron, and standalone composition consume that
 canonical ordered registry.
 
+## App Icon
+
+`public/cogpit.svg` is the only source of truth for the app mark. Never hand-edit
+the raster icons — change the SVG, then run `bun run generate:icons`, which
+re-renders all of them:
+
+- `build/icon.png` / `.icns` / `.ico` — picked up by electron-builder via `directories.buildResources`
+- `public/apple-touch-icon.png` — iOS "Add to Home Screen"
+- `ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png` — native iOS app icon
+
+The generator needs librsvg (`brew install librsvg`); `.icns` also needs macOS.
+The SVG's `<rect id="bg" … rx="…">` is load-bearing: the script strips `rx` to
+produce the full-bleed, alpha-free variants that Apple requires, since iOS
+applies its own squircle mask.
+
 ## External Session API (cogpit-sessions skill)
 
 Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. The packaged app binds an ephemeral port unless network access pins 19384, so resolve the port from `$COGPIT_PORT`, then `~/.cogpit/port` (written on start, removed on exit), then `19384`. Key endpoints:
