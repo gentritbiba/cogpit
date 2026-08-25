@@ -181,6 +181,14 @@ function mapContentBlock(block: TurnContentBlock) {
       }
     case "queued_prompt":
       return { kind: "queued_prompt" as const, content: block.content, timestamp: block.timestamp ?? null }
+    case "agent_message":
+      return {
+        kind: "agent_message" as const,
+        sender: block.sender,
+        body: block.body,
+        reply: block.reply ?? null,
+        timestamp: block.timestamp ?? null,
+      }
     case "hook_event":
       return { kind: "hook_event" as const, events: block.events, timestamp: block.timestamp ?? null }
     case "plan_mode":
@@ -194,6 +202,12 @@ function mapContentBlock(block: TurnContentBlock) {
       }
     case "recap":
       return { kind: "recap" as const, content: block.content, timestamp: block.timestamp ?? null }
+    default: {
+      // Exhaustiveness guard: a new TurnContentBlock kind must fail typecheck here
+      // rather than silently serializing as undefined and vanishing from the response.
+      const exhaustive: never = block
+      return exhaustive
+    }
   }
 }
 
