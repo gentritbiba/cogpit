@@ -231,6 +231,39 @@ git commit -m "feat: add agent_message block kind and attachment origin type"
 
 ## Task 3: turnBuilder emits agent_message
 
+> **DONE — landed in `8979325`.** The implementation went in as written. Three
+> corrections to the steps below, and one finding that changes Task 4.
+>
+> - **Fixture style.** `buildSession` / `withBase` / `queueEnqueue` do not exist.
+>   This repo's tests use `parseSession(toJsonl([...]))` with the helpers from
+>   `@/__tests__/fixtures`. The Task 3/4/5 snippets were rewritten to match.
+> - **`as never` is not needed, but a return type is.** `origin.kind` is plain
+>   `string`, so the cast is gone. However, an unannotated `peerAttachment`
+>   infers `origin` as *required*, and `typecheck:tests` then rejects both
+>   `origin = { kind: "human" }` and `delete …origin`. The helper now carries an
+>   explicit return type with `origin` optional — no casts anywhere.
+> - **`typecheck` does not cover tests.** The prod tsconfigs exclude them. Run
+>   `bun run typecheck:tests` too; it is the only gate that reads the fixtures.
+>
+> **Finding that matters for Task 4: `senderTaskId` is always `null` in real
+> data.** The enqueue copy is pushed first and the richer attachment copy is
+> then dropped by the ledger, so the block keeps the enqueue's metadata — and a
+> `queue-operation` record carries no `origin`. Verified across three real
+> sessions: every `agent_message` has `senderTaskId: null`.
+>
+> Task 4's dedupe key `senderTaskId ?? \`${sender} ${body}\`` therefore always
+> takes the body fallback in production, and Task 5 cannot join on task id
+> either. Task 4's own tests will not surface this — their fixtures have no
+> enqueue record. Either accept the body fallback as the real key, or have the
+> attachment push site upgrade the pending enqueue entry with `origin` metadata
+> instead of discarding it. That is a design decision, left to the plan owner.
+>
+> Real-data check (`…honest-cms/ddb6fc34….jsonl`): 4 `agent_message`, 0
+> `queued_prompt`, 0 bodies leaking a raw envelope, each message rendered once.
+> Note the file holds **four** distinct peer messages, not the eight this plan
+> claims in Tasks 9 and 13 — there are 8 `queue-operation` records referencing
+> them (4 `enqueue` + 4 `remove`), plus 4 attachments.
+
 **Files:**
 - Modify: `shared/session/turnBuilder.ts:62-72` (`queuedCommandPromptText`)
 - Modify: `shared/session/turnBuilder.ts:346-352` (`pendingQueuedPrompts` declaration)
