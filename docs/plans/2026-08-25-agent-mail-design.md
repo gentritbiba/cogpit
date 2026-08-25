@@ -41,7 +41,7 @@ A peer message is persisted as an `attachment` record:
       "kind": "peer",
       "from": "certified-status-fix",
       "name": "certified-status-fix",
-      "senderTaskId": "abc37dcb5cc01cf1c",
+      "senderTaskId": "abc37dcb5cc01cf1c",   // the SENDER's task, not the message
       "body": "Heads-up from the CPO/model-page status-expansion fix …"
     }
   }
@@ -53,8 +53,15 @@ Key facts:
 - `origin.kind` is `"human"` or `"peer"` — the split we need is an explicit
   field, not something to infer.
 - `origin.body` is the body with the envelope **already stripped**.
-- `origin.senderTaskId` is a stable id: a better join key than the name,
-  since names can collide across teams.
+- `origin.senderTaskId` identifies the **sending agent's task, not the
+  message** — an earlier revision of this doc got that backwards. Verified: the
+  two different `csp-and-proxy` messages (23:34 "one blocking question" and
+  23:48 "batch-2 done") carry the *same* `senderTaskId=ada0f1591dbec7898`. It is
+  useless as a per-message key and destructive as a dedup key. It is also `null`
+  on every rendered block in practice, because the `queue-operation` enqueue
+  arrives first and carries no `origin`, and the richer `attachment` copy is
+  then dropped by the reconciliation ledger. The field is not carried on the
+  block.
 - Outbound replies are `SendMessage` tool_use calls carrying `to`, `summary`,
   and `message`. One sample file has 13 replies against 8 inbound messages, so
   reply pairing is derivable rather than guessed.
@@ -72,11 +79,12 @@ those as a fallback only.
 
 - Widen `AttachmentMessage.attachment` with
   `origin?: { kind?: string; from?: string; name?: string; senderTaskId?: string; body?: string } | null`.
+  (`senderTaskId` is typed because the record carries it; it is deliberately not
+  propagated onto the block — see above.)
 - Add a block kind:
 
 ```ts
-| { kind: "agent_message"; sender: string; senderTaskId: string | null
-    body: string; timestamp?: string
+| { kind: "agent_message"; sender: string; body: string; timestamp?: string
     reply?: { summary: string; timestamp: string } }
 ```
 
@@ -89,9 +97,12 @@ those as a fallback only.
 - Branch: `origin.kind === "peer"` → `agent_message` (using `origin.body`);
   `"human"` → `queued_prompt`; no `origin` → fall back to the envelope regex,
   then to `queued_prompt`.
-- Dedupe `agent_message` on `(senderTaskId, body)` within a turn. The existing
-  count-don't-set behaviour stays for `queued_prompt`, where typing the same
-  thing twice is meaningful.
+- **No dedup pass.** An earlier revision of this doc claimed the sample data
+  showed the same peer message enqueued twice, 3-6s apart. That was a misreading:
+  those records are `enqueue` -> `attachment` -> `remove` lifecycle triples for a
+  *single* message. The existing enqueue ledger already reconciles the two copies,
+  and that behaviour is covered by a mutation-tested regression case. Verified
+  end-to-end across three real sessions: every peer message renders exactly once.
 - Reply pass: walk turns in order holding `Map<sender, unanswered[]>`. Each
   `SendMessage` tool_use pops the oldest unanswered message from `input.to` and
   attaches `{summary, timestamp}`. Pairing only ever runs forward in time.
@@ -176,7 +187,8 @@ updated as part of the change.
 - **turnBuilder:** `peer` origin yields `agent_message`; `human` yields
   `queued_prompt`; absent origin with an envelope falls back to `agent_message`;
   absent origin with plain text yields `queued_prompt`; dedupe by
-  `senderTaskId`; pairing is forward-only; an unpaired message stays awaiting.
+  the enqueue/attachment pair rendering once; pairing is forward-only; an
+  unpaired message stays awaiting.
 - **`agentEnvelope.test.ts`:** absorbs the existing `teammateMessage.test.ts`
   cases, covers both tag forms, malformed and unclosed tags, and
   `looksLikeQuestion` positives and negatives.

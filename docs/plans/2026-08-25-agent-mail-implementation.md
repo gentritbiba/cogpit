@@ -508,108 +508,87 @@ git commit -m "feat: emit agent_message blocks for peer-origin queued prompts"
 
 ---
 
-## Task 4: Dedupe repeated agent messages
+## Task 4: Remove `senderTaskId` (supersedes the dedup task)
 
-**Context:** the sample data contains the identical body enqueued twice 3s apart, and a full replay of two messages hours later. `senderTaskId` makes this exact.
+**This task replaced a dedup pass. Read why before doing anything.**
+
+The original Task 4 deduped `agent_message` blocks on `(senderTaskId, body)`.
+Both halves of that premise turned out to be wrong when checked against real
+session data:
+
+1. **There were no duplicates.** The "identical body enqueued twice, 3-6s apart"
+   that motivated dedup is actually an `enqueue` -> `attachment` -> `remove`
+   lifecycle triple for a *single* message. The enqueue ledger already reconciles
+   the enqueue and attachment copies, and Task 3 landed a mutation-tested
+   regression case proving it. Verified end-to-end across three real sessions:
+   every peer message renders exactly once.
+
+2. **`senderTaskId` is the sender's task id, not the message id.** The two
+   different `csp-and-proxy` messages in the sample session — "one blocking
+   question" at 23:34 and "batch-2 done" at 23:48 — carry the *identical*
+   `senderTaskId=ada0f1591dbec7898`. Deduping on it would have silently deleted
+   the second message. It is also `null` on every rendered block in practice,
+   since the enqueue arrives first with no `origin` and the richer attachment
+   copy is dropped by the ledger.
+
+A field that is null in the common path and destructive in the uncommon one does
+not belong on the block. Remove it.
 
 **Files:**
-- Modify: `shared/session/turnBuilder.ts` (`flushPendingQueuedPrompts`)
-- Test: `src/lib/__tests__/turnBuilder.test.ts`
+- Modify: `shared/session/types.ts` (drop `senderTaskId` from the `agent_message` member)
+- Modify: `shared/session/turnBuilder.ts` (`QueuedPromptSource`, `pendingQueuedPrompts`, both push sites, `flushPendingQueuedPrompts`)
+- Modify: `src/lib/__tests__/turnBuilder.test.ts` (drop the `senderTaskId` assertions and fixture arg)
+- Regenerate: `packages/cogpit-memory/src/lib/` via `bun run sync-cogpit-memory`
 
-**Step 1: Failing tests**
+Keep `senderTaskId?: string` on the `AttachmentMessage.attachment.origin` type —
+the record really does carry it, and typing it accurately costs nothing. Just
+stop propagating it onto the block.
+
+**Step 1: Add a regression test that would have caught the data loss**
+
+Before removing anything, prove the two-messages-one-task-id case renders both.
+This test must stay green forever, and it is the reason this task exists:
 
 ```ts
-  it("renders a repeated peer message once per turn", () => {
-    const session = buildSession(withBase([
-      userMsg("start"), textAssistant("working"),
-      peerAttachment("certified-status-fix", "heads-up", "task-9"),
-      peerAttachment("certified-status-fix", "heads-up", "task-9"),
-      textAssistant("done"),
+  it("keeps two different messages that share a sender task id", () => {
+    // Real shape: csp-and-proxy sent a question at 23:34 and a done-report at
+    // 23:48; both attachments carried senderTaskId ada0f1591dbec7898. Any dedup
+    // keyed on that id drops the second message.
+    const session = parseSession(toJsonl([
+      /* ...existing fixture style... */
+      peerAttachment("csp-and-proxy", "one blocking question", "ada0f1591dbec7898"),
+      peerAttachment("csp-and-proxy", "batch-2 done", "ada0f1591dbec7898"),
     ]))
-    expect(session.turns[0].contentBlocks.filter((b) => b.kind === "agent_message")).toHaveLength(1)
-  })
-
-  it("keeps two distinct messages from the same sender", () => {
-    const session = buildSession(withBase([
-      userMsg("start"), textAssistant("working"),
-      peerAttachment("csp-and-proxy", "one blocking question", "task-1"),
-      peerAttachment("csp-and-proxy", "batch-2 done", "task-2"),
-      textAssistant("done"),
-    ]))
-    expect(session.turns[0].contentBlocks.filter((b) => b.kind === "agent_message")).toHaveLength(2)
-  })
-
-  it("still renders the same human prompt twice when queued twice", () => {
-    // Guards the existing count-don't-set behaviour in the enqueue ledger.
-    const session = buildSession(withBase([
-      userMsg("start"), textAssistant("working"),
-      queueEnqueue("ping"), queueEnqueue("ping"),
-      textAssistant("done"),
-    ]))
-    expect(session.turns[0].contentBlocks.filter((b) => b.kind === "queued_prompt")).toHaveLength(2)
+    const blocks = session.turns[0].contentBlocks.filter((b) => b.kind === "agent_message")
+    expect(blocks).toHaveLength(2)
+    expect(blocks.map((b) => (b.kind === "agent_message" ? b.body : null)))
+      .toEqual(["one blocking question", "batch-2 done"])
   })
 ```
 
-**Step 2: Run, confirm the first fails**
+**Step 2: Run it.** It should PASS against Task 3's code, since no dedup exists
+yet. That is the point — you are locking in correct behaviour before refactoring,
+so the removal cannot regress it.
 
-Run: `bun run test -- turnBuilder`
+**Step 3: Remove `senderTaskId` from the block**
 
-**Step 3: Implement**
+Drop it from the type, from `QueuedPromptSource`, from the `pendingQueuedPrompts`
+entry, from both push sites, and from the two `contentBlocks.push` calls. Keep
+the `origin` type field.
 
-In `flushPendingQueuedPrompts`, track what the turn has already received:
+**Step 4: Verify**
 
-```ts
-  function flushPendingQueuedPrompts() {
-    // A replayed queue writes the same peer message again, sometimes seconds
-    // later and sometimes hours later on resume. senderTaskId identifies it
-    // exactly; the body is the fallback for pre-`origin` records.
-    const seenAgentMessages = new Map<Turn, Set<string>>()
+Run: `bun run test && bun run typecheck && bun run typecheck:tests && bun run lint && bun run check:cogpit-memory-sync`
 
-    for (const prompt of pendingQueuedPrompts) {
-      if (prompt.sender) {
-        let seen = seenAgentMessages.get(prompt.turn)
-        if (!seen) {
-          seen = new Set(
-            prompt.turn.contentBlocks
-              .filter((b) => b.kind === "agent_message")
-              .map((b) => (b.kind === "agent_message" ? (b.senderTaskId ?? `${b.sender} ${b.body}`) : "")),
-          )
-          seenAgentMessages.set(prompt.turn, seen)
-        }
-        const key = prompt.senderTaskId ?? `${prompt.sender} ${prompt.body}`
-        if (seen.has(key)) continue
-        seen.add(key)
-
-        prompt.turn.contentBlocks.push({
-          kind: "agent_message",
-          sender: prompt.sender,
-          senderTaskId: prompt.senderTaskId,
-          body: prompt.body,
-          timestamp: prompt.timestamp,
-        })
-        continue
-      }
-
-      prompt.turn.contentBlocks.push({
-        kind: "queued_prompt",
-        content: prompt.content,
-        timestamp: prompt.timestamp,
-      })
-    }
-    pendingQueuedPrompts.length = 0
-  }
-```
-
-**Step 4: Run**
-
-Run: `bun run test -- turnBuilder && bun run sync-cogpit-memory`
-Expected: PASS, including the human-prompt-twice guard.
+All five. Note `typecheck` does NOT cover test files — the prod tsconfigs exclude
+them — so `typecheck:tests` is a separate and necessary gate.
 
 **Step 5: Commit**
 
 ```bash
-git add shared/session/turnBuilder.ts packages/cogpit-memory/src/lib/ src/lib/__tests__/turnBuilder.test.ts
-git commit -m "feat: dedupe replayed peer messages by senderTaskId"
+git add shared/session/types.ts shared/session/turnBuilder.ts \
+        packages/cogpit-memory/src/lib/ src/lib/__tests__/turnBuilder.test.ts
+git commit -m "refactor: drop senderTaskId from agent_message blocks"
 ```
 
 ---
@@ -1069,7 +1048,7 @@ const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
 
 **Step 4: Verify in the real app**
 
-Run `bun run test && bun run typecheck`, then start the app and open a session containing peer messages — `~/.claude/projects/-Users-gentritbiba-Insync-.../honest-cms/ddb6fc34-dc05-4ab5-87f3-9587bf961357.jsonl` has eight, from `csp-and-proxy`, `vehicle-batch`, and `certified-status-fix`. Confirm no `<agent-message` text appears anywhere and each card names its sender.
+Run `bun run test && bun run typecheck`, then start the app and open a session containing peer messages — `~/.claude/projects/-Users-gentritbiba-Insync-.../honest-cms/ddb6fc34-dc05-4ab5-87f3-9587bf961357.jsonl` has four, from `csp-and-proxy` (x2), `vehicle-batch`, and `certified-status-fix`. Confirm no `<agent-message` text appears anywhere and each card names its sender.
 
 Use the `run` skill to launch the app, then agent-browser for the screenshot. Close the browser when done.
 
@@ -1210,19 +1189,21 @@ git commit -am "feat: show sender liveness on agent messages"
 ```bash
 bun run lint
 bun run typecheck
+bun run typecheck:tests
 bun run test
 bun run check:cogpit-memory-sync
 ```
 
-All four must pass. Fix anything red before continuing — per `CLAUDE.md`, fixing tests is part of the change, not a follow-up.
+All five must pass. `typecheck` does NOT cover test files — the prod tsconfigs
+exclude them — so `typecheck:tests` is a separate and necessary gate. Fix anything red before continuing — per `CLAUDE.md`, fixing tests is part of the change, not a follow-up.
 
 **Step 2: Real-session check**
 
-Open the honest-cms session with eight peer messages and confirm, on screen:
+Open the honest-cms session with four peer messages and confirm, on screen:
 
 - No `<agent-message` text anywhere.
 - Each card names its sender, colored consistently across the session.
-- The two `csp-and-proxy` messages render once each, not twice — this also confirms whether the empty timestamp-only card in the original report was the replay bug.
+- The two `csp-and-proxy` messages render once each, and BOTH are present — they share a `senderTaskId`, so this is the visual check for the data-loss bug Task 4 removed.
 - The blocking-question message shows `NEEDS YOU` if it was never answered, and a reply summary if it was.
 - Nothing is cut mid-word.
 
