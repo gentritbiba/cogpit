@@ -15,6 +15,8 @@ import type {
   AgentToolUseResult,
   ParsedHookEvent,
   HookProgressData,
+  AssistantMessage,
+  MessageAttribution,
 } from "./types"
 import {
   isUserMessage,
@@ -79,6 +81,34 @@ function queuedCommandPromptText(msg: RawMessage): string | null {
   if (prompt == null) return null
   const text = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
   return isVisibleQueuedPrompt(text) ? text : null
+}
+
+/** Maps the flat `attribution*` record fields onto their MessageAttribution keys. */
+const ATTRIBUTION_FIELDS = [
+  ["attributionAgent", "agent"],
+  ["attributionSkill", "skill"],
+  ["attributionPlugin", "plugin"],
+  ["attributionMcpServer", "mcpServer"],
+  ["attributionMcpTool", "mcpTool"],
+] as const
+
+/**
+ * Folds one assistant record's attribution into the turn's.
+ *
+ * Later messages win per field, and a turn with nothing attributed keeps
+ * `undefined` rather than an empty object, so callers can branch on presence.
+ */
+function mergeAttribution(
+  current: MessageAttribution | undefined,
+  msg: AssistantMessage,
+): MessageAttribution | undefined {
+  let merged = current
+  for (const [field, key] of ATTRIBUTION_FIELDS) {
+    const value = msg[field]
+    if (typeof value !== "string" || !value) continue
+    merged = { ...merged, [key]: value }
+  }
+  return merged
 }
 
 // ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
@@ -660,6 +690,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       current.model = msg.message.model
       // Effort can be changed mid-session, so the turn reflects what it ended on.
       if (msg.effort) current.effort = msg.effort
+      current.attribution = mergeAttribution(current.attribution, msg)
       // Only merge usage once per unique message ID (deduplication)
       const msgId = msg.message.id
       if (!seenMessageIds.has(msgId)) {

@@ -1035,3 +1035,63 @@ describe("reasoning effort", () => {
     expect(session.turns[0].effort).toBe("max")
   })
 })
+
+// ── response attribution ──────────────────────────────────────────────────
+
+describe("attribution", () => {
+  beforeEach(() => {
+    resetFixtureCounter()
+  })
+
+  it("carries skill attribution onto the turn", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Commit this"),
+      textAssistant("Done.", { attributionSkill: "commit" }),
+    ]))
+    expect(session.turns[0].attribution).toEqual({ skill: "commit" })
+  })
+
+  it("carries agent, plugin and MCP attribution", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Search"),
+      textAssistant("Done.", {
+        attributionAgent: "Explore",
+        attributionPlugin: "superpowers",
+        attributionMcpServer: "clickup",
+        attributionMcpTool: "clickup_get_task",
+      }),
+    ]))
+    expect(session.turns[0].attribution).toEqual({
+      agent: "Explore",
+      plugin: "superpowers",
+      mcpServer: "clickup",
+      mcpTool: "clickup_get_task",
+    })
+  })
+
+  it("leaves attribution undefined when the record carries none", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Hi"),
+      textAssistant("Done."),
+    ]))
+    expect(session.turns[0].attribution).toBeUndefined()
+  })
+
+  it("merges attribution across the assistant messages of one turn", () => {
+    // A turn can start under a skill and later call an MCP tool.
+    const session = parseSession(toJsonl([
+      userMsg("Do it"),
+      textAssistant("Working.", { attributionSkill: "commit" }),
+      textAssistant("Done.", { attributionMcpServer: "clickup" }),
+    ]))
+    expect(session.turns[0].attribution).toEqual({ skill: "commit", mcpServer: "clickup" })
+  })
+
+  it("ignores non-string attribution values", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Hi"),
+      textAssistant("Done.", { attributionSkill: 42 as unknown as string }),
+    ]))
+    expect(session.turns[0].attribution).toBeUndefined()
+  })
+})

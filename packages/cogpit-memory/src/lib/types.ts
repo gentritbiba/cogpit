@@ -122,6 +122,19 @@ export interface TokenUsage {
   output_tokens_details?: { thinking_tokens?: number }
 }
 
+/**
+ * What drove a response, when Claude Code could attribute it (CC 2.1.17x+).
+ * Written as flat `attribution*` fields on the assistant record.
+ */
+export interface MessageAttribution {
+  /** Subagent type, e.g. "Explore", "implementer", "workflow-subagent". */
+  agent?: string
+  skill?: string
+  plugin?: string
+  mcpServer?: string
+  mcpTool?: string
+}
+
 export interface AssistantMessage extends BaseMessage {
   type: "assistant"
   message: {
@@ -139,6 +152,11 @@ export interface AssistantMessage extends BaseMessage {
    * this stays a plain string rather than a union.
    */
   effort?: string
+  attributionAgent?: string
+  attributionSkill?: string
+  attributionPlugin?: string
+  attributionMcpServer?: string
+  attributionMcpTool?: string
 }
 
 /**
@@ -382,6 +400,12 @@ export interface Turn {
    * effort can be changed mid-session.
    */
   effort?: string
+  /**
+   * What drove this turn — skill, plugin, MCP server, subagent type. Merged
+   * across the turn's assistant messages, since a turn can start under a skill
+   * and later reach for an MCP tool. Undefined when nothing was attributed.
+   */
+  attribution?: MessageAttribution
   /**
    * Set when this turn was opened without its start record — the parse window
    * began mid-turn. Such a turn is the newer half of a byte-boundary cut and
