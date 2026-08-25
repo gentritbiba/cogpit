@@ -29,3 +29,11 @@ export function sharedSessionId(pathname: string): string | null {
 export function isSharedPath(pathname: string): boolean {
   return sharedSessionId(pathname) !== null
 }
+
+/**
+ * The path a guest opens for `sessionId`, the inverse of `sharedSessionId`.
+ * Relative, because only the browser knows the origin to put in front of it.
+ */
+export function sharePathFor(sessionId: string): string {
+  return `/shared/${encodeURIComponent(sessionId)}`
+}

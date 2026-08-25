@@ -28,11 +28,6 @@ export interface ShareApi {
   revokeAll: () => Promise<void>
 }
 
-/** The path a guest opens. Relative, because only the browser knows the origin. */
-export function sharePathFor(sessionId: string): string {
-  return `/shared/${encodeURIComponent(sessionId)}`
-}
-
 const GENERIC_ERROR = "Could not reach the server"
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isSharedPath, sharedSessionId } from "@/lib/sharePath"
+import { isSharedPath, sharePathFor, sharedSessionId } from "@/lib/sharePath"
 
 describe("isSharedPath", () => {
   it("matches the guest route", () => {
@@ -55,5 +55,22 @@ describe("sharedSessionId", () => {
 
   it("returns null for a non-share path", () => {
     expect(sharedSessionId("/")).toBeNull()
+  })
+})
+
+describe("sharePathFor", () => {
+  it("builds the guest route", () => {
+    expect(sharePathFor("8f3c-1d")).toBe("/shared/8f3c-1d")
+  })
+
+  it("round-trips every id sharedSessionId would accept", () => {
+    for (const id of ["8f3c-1d", "a b", "a/b", "a%b", "?#", "\u00e9"]) {
+      expect(sharedSessionId(sharePathFor(id))).toBe(id)
+    }
+  })
+
+  it("encodes separators so a crafted id cannot escape the route", () => {
+    expect(sharePathFor("../../api/projects")).toBe("/shared/..%2F..%2Fapi%2Fprojects")
+    expect(isSharedPath(sharePathFor("../../api/projects"))).toBe(true)
   })
 })

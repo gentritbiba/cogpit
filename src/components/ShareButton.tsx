@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useAppContext } from "@/contexts/AppContext"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
-import { sharePathFor, useShares } from "@/hooks/useShare"
+import { useShares } from "@/hooks/useShare"
+import { sharePathFor } from "@/lib/sharePath"
 import { cn } from "@/lib/utils"
 
 /** How often the open popover re-reads the guest count. */

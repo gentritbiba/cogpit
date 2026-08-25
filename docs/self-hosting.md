@@ -116,6 +116,56 @@ traffic. Do not open it as a browser login URL.
 
 ---
 
+## Session sharing
+
+Sharing hands one session to one other person. The guest opens `/shared/<sessionId>`, types a
+passphrase, and gets that session and nothing else: the live transcript, sending messages,
+answering the agent's questions, approving or denying its tool permission requests, and
+stopping or interrupting a turn. No project list, no other sessions, no configuration, no file
+browser, no terminal, none of the open-in-editor or reveal-in-folder handoffs. Every guest
+request is matched against an allowlist that denies by default, so a route added to Cogpit
+later is closed to guests until someone deliberately opens it.
+
+**The passphrase is equivalent to a shell on the host.** A guest can approve tool permission
+requests, and approving one runs whatever the agent asked to run. Treat it exactly as you
+treat the network password — narrower in scope, not smaller in consequence. Give it to someone
+you would let type into that session over your shoulder, and send it through a different
+channel than the link.
+
+Turn sharing on from the share button above the session. Cogpit generates a four-word
+passphrase and shows it once; after that the popover masks it, because only a scrypt hash is
+kept, in `shares.local.json` beside your config at mode 0600. Lose it and you regenerate rather
+than look it up. Every shared session has its own passphrase, and it is unrelated to the
+network password: a guest cannot log in at `/` with it, and someone holding two share links
+reaches two sessions and no more.
+
+Network access has to be on before a session can be shared, and the guest needs the same HTTPS
+origin you do. Share login sets a `Secure` cookie, so a plain `http://192.168.x.x:19384` link
+answers `426 Upgrade Required` and says to use the tunnel. Send guests the HTTPS URL from your
+reverse proxy or tunnel, not the LAN address Cogpit prints. Login attempts are rate limited,
+and a wrong passphrase and a session that was never shared return the same 401, so the endpoint
+cannot be used to discover which sessions are shared.
+
+To revoke, reopen the share button on that session and press **Stop sharing**, or open
+**Configuration → Network**, where every shared session is listed with when it was shared, when
+it was last opened, and how many guests are connected — revoke one row, or revoke all. Either
+way the guest's live stream closes immediately rather than at their next click.
+**Regenerate** rotates the passphrase and disconnects everyone currently connected. Shares also
+end on their own when the session is deleted or when you point Cogpit at a different projects
+directory, and turning network access off disconnects every guest while keeping the records, so
+turning it back on does not silently re-admit anyone.
+
+What sharing does not do yet: Codex sessions cannot be shared and are refused with a message,
+because a Codex rollout's nested file path does not fit the guest path rules; shares are not
+proxied through the multi-device hub, so a guest connects to the machine directly; a guest sees
+the main transcript but not sub-agent transcripts, and the panel says so rather than sitting
+empty; and in team edition sharing is admin-only, on the grounds that handing out a share is
+handing out host code execution. At most eight guests can hold one session at a time, and a
+guest login expires on the same schedule as any other browser session — 30 minutes idle, 8
+hours absolute — and does not survive a server restart, though the share record does.
+
+---
+
 ## Team edition
 
 One Cogpit on a shared box, a login for each person using it. Personal edition — everything
@@ -324,6 +374,9 @@ What is actually there:
 - Browser sessions expire after 30 minutes idle or 8 hours absolute, whichever comes first.
 - Changing the password or disabling network access revokes every existing session.
 - Password never written to disk when supplied by environment or credential file.
+- [Session shares](#session-sharing) are per-session credentials, hashed the same way, and a
+  guest reaches one session and nothing else — but a guest can approve tool calls, so a share
+  passphrase is host code execution.
 - No analytics, no account, no telemetry. It talks to localhost, to your CLIs, and to your
   ntfy topic if you configured one.
 
