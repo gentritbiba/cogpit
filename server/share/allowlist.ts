@@ -103,7 +103,10 @@ export function shareRequestAllowed(method: string, rawUrl: string, share: Share
     return identity.length === 1 && identity[0] === share.sessionId
   }
 
-  if ((verb === "GET" || verb === "PUT") && route === "session-config") {
+  // Read-only. session-config shallow-merges whatever JSON it is handed, and
+  // that file carries the session's permission mode and MCP selection — a
+  // guest who could write it could switch the session to bypassPermissions.
+  if (verb === "GET" && route === "session-config") {
     return identity.length === 1 && identity[0] === share.fileName
   }
 

@@ -71,9 +71,12 @@ function mountedPaths(): string[] {
  * The complete set of mount prefixes a share guest may reach. Adding a path
  * here widens what a guest can do to the host machine — justify it in review.
  *
- * The guest namespace `/api/share` belongs here too, but only once it is
- * mounted; until then listing it would leave a stale entry behind, which the
- * "actually mounted" test exists to prevent.
+ * The six `/api/share/*` mounts are the guest's own namespace: each one takes
+ * its sessionId from the share token, never from the request, so there is
+ * nothing in the path for the allowlist to check and no way to aim one at
+ * another session. `/api/shares` (the host API) and `/api/share/verify` (the
+ * public login) are deliberately absent — a guest holding a token has no
+ * business at either.
  */
 const SHARE_REACHABLE = new Set([
   "/api/hello",
@@ -82,6 +85,15 @@ const SHARE_REACHABLE = new Set([
   "/api/session-status/",
   "/api/session-file-changes/",
   "/api/session-config/",
+  // Read the shared session's identity: dirName, fileName, title, provider.
+  "/api/share/session",
+  // Participate in the session: send a turn, stop it, interrupt it, and answer
+  // the two things that block it — a permission request and an AskUserQuestion.
+  "/api/share/send-message",
+  "/api/share/stop",
+  "/api/share/interrupt",
+  "/api/share/permission",
+  "/api/share/answer",
 ])
 
 /**
@@ -94,8 +106,10 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
   mount: string
   url: string
   methods: readonly string[]
+  /** The path names no session, so every guest may reach it. */
+  tokenScoped?: true
 }> = [
-  { mount: "/api/hello", url: "/api/hello", methods: ["GET"] },
+  { mount: "/api/hello", url: "/api/hello", methods: ["GET"], tokenScoped: true },
   {
     mount: "/api/sessions/",
     url: `/api/sessions/${SHARE.dirName}/${SHARE.fileName}`,
@@ -119,8 +133,35 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
   {
     mount: "/api/session-config/",
     url: `/api/session-config/${SHARE.fileName}`,
-    methods: ["GET", "PUT"],
+    // Read-only: writing it would let a guest change the permission mode.
+    methods: ["GET"],
   },
+  {
+    mount: "/api/share/session",
+    url: "/api/share/session",
+    methods: ["GET"],
+    tokenScoped: true,
+  },
+  {
+    mount: "/api/share/send-message",
+    url: "/api/share/send-message",
+    methods: ["POST"],
+    tokenScoped: true,
+  },
+  { mount: "/api/share/stop", url: "/api/share/stop", methods: ["POST"], tokenScoped: true },
+  {
+    mount: "/api/share/interrupt",
+    url: "/api/share/interrupt",
+    methods: ["POST"],
+    tokenScoped: true,
+  },
+  {
+    mount: "/api/share/permission",
+    url: "/api/share/permission",
+    methods: ["POST"],
+    tokenScoped: true,
+  },
+  { mount: "/api/share/answer", url: "/api/share/answer", methods: ["POST"], tokenScoped: true },
 ]
 
 /**
@@ -220,9 +261,12 @@ describe("share allowlist completeness", () => {
   })
 
   it("denies the reachable mounts to a share that does not own the session", () => {
-    for (const { mount, url, methods } of REACHABLE_SAMPLES) {
-      // /api/hello carries no identity, so it is reachable by any guest.
-      if (mount === "/api/hello") continue
+    for (const { url, methods, tokenScoped } of REACHABLE_SAMPLES) {
+      // A token-scoped path names no session: /api/hello has no identity at
+      // all, and the guest namespace takes its session from the token, which
+      // the route re-validates. There is nothing here for the allowlist to
+      // compare, so reaching it is not reaching another session.
+      if (tokenScoped) continue
       for (const method of methods) {
         expect(
           shareRequestAllowed(method, url, OTHER_SHARE),

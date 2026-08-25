@@ -12,7 +12,6 @@ describe("share allowlist — permitted", () => {
     ["GET", "/api/session-status/sess-1"],
     ["GET", "/api/session-file-changes/sess-1"],
     ["GET", "/api/session-config/sess-1.jsonl"],
-    ["PUT", "/api/session-config/sess-1.jsonl"],
     ["GET", "/api/share/session"],
     ["POST", "/api/share/send-message"],
     ["POST", "/api/share/stop"],
@@ -32,7 +31,7 @@ describe("share allowlist — permitted", () => {
 
   it("uppercases the method before matching", () => {
     expect(allow("get", "/api/hello")).toBe(true)
-    expect(allow("put", "/api/session-config/sess-1.jsonl")).toBe(true)
+    expect(allow("post", "/api/share/stop")).toBe(true)
   })
 
   it("accepts percent-encoded identity segments, as the handlers decode them too", () => {
@@ -284,6 +283,8 @@ describe("share allowlist — method scoping", () => {
     ["PUT", "/api/session-file-changes/sess-1"],
     ["POST", "/api/session-config/sess-1.jsonl"],
     ["PATCH", "/api/session-config/sess-1.jsonl"],
+    // Writing session config would let a guest set the permission mode.
+    ["PUT", "/api/session-config/sess-1.jsonl"],
     ["GET", "/api/share/send-message"],
     ["GET", "/api/share/stop"],
     ["PUT", "/api/share/session"],
