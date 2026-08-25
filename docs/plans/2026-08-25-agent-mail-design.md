@@ -1,7 +1,7 @@
 # Agent mail: rendering inbound messages from peer agents
 
-Status: design agreed, not implemented
-Date: 2026-08-25
+Status: implemented
+Date: 2026-08-25 (design), 2026-08-26 (last revised)
 
 ## Problem
 
@@ -97,12 +97,42 @@ those as a fallback only.
 - Branch: `origin.kind === "peer"` → `agent_message` (using `origin.body`);
   `"human"` → `queued_prompt`; no `origin` → fall back to the envelope regex,
   then to `queued_prompt`.
-- **No dedup pass.** An earlier revision of this doc claimed the sample data
-  showed the same peer message enqueued twice, 3-6s apart. That was a misreading:
-  those records are `enqueue` -> `attachment` -> `remove` lifecycle triples for a
-  *single* message. The existing enqueue ledger already reconciles the two copies,
-  and that behaviour is covered by a mutation-tested regression case. Verified
-  end-to-end across three real sessions: every peer message renders exactly once.
+- **Dedup within one parse: none needed.** An earlier revision of this doc
+  claimed the sample data showed the same peer message enqueued twice, 3-6s
+  apart. That was a misreading: those records are `enqueue` -> `attachment` ->
+  `remove` lifecycle triples for a *single* message, and the existing enqueue
+  ledger (`enqueueSourcedPrompts`) already reconciles the two copies. Across
+  three real sessions, a whole-file parse renders every peer message exactly
+  once.
+- **Dedup across pages: one narrow pass**, added by Task 14b after the claim
+  above was found to have been measured on the wrong load path. That ledger is
+  scoped to a single `buildTurns` call, so a page boundary falling between the
+  enqueue and the attachment leaves both copies standing, and `prependTurns`
+  dedupes by turn id, which cannot see two blocks in two different turns.
+  `dedupeAgentMessages` in `src/lib/timelinePaging.ts` therefore drops a second
+  `agent_message` that matches an earlier one on **(sender, body) and lands
+  within 1s of it**. Both halves of that key are load-bearing:
+  - Not `senderTaskId`: it names the sending agent's *task*, not the message,
+    so an agent's question and its later done-report share one id and keying on
+    it would silently drop the second (see above, and the Task 4 regression
+    test).
+  - Not (sender, body) alone: that is a whole-transcript key, so an agent that
+    genuinely reported the same thing twice collapsed into one card however far
+    apart the two were. The attachment inherits the enqueue's timestamp — 4 of
+    the 6 enqueue/attachment pairs on disk agree to the millisecond, the other 2
+    drift by 1ms — while the closest pair of genuinely distinct messages from
+    one sender is 14m40s apart (`csp-and-proxy` in
+    `…honest-cms/ddb6fc34….jsonl`). A block with no parseable timestamp is kept,
+    since it cannot be shown to be a duplicate.
+  - Not adjacency across the join either: the copies are not adjacent. In that
+    same file the two halves of one message are 306 records apart, with the
+    *next* message's enqueue sitting between them. File position drifts; the
+    timestamps stay tied to the message.
+
+  The requirement this pass answers is that the paged reader render a session
+  identically to a whole-file `parseSession` — the same turns
+  `/api/session-context` and the `cogpit-memory` CLI serve. That equivalence is
+  asserted directly in `src/lib/__tests__/timelinePaging.test.ts`.
 - Reply pass: walk turns in order holding `Map<sender, unanswered[]>`. Each
   `SendMessage` tool_use pops the oldest unanswered message from `input.to` and
   attaches `{summary, timestamp}`. Pairing only ever runs forward in time.

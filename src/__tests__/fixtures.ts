@@ -235,16 +235,17 @@ export type QueuedAttachmentRecord = {
 export function peerAttachment(
   sender: string,
   body: string,
-  senderTaskId = "task-1"
+  senderTaskId = "task-1",
+  timestamp = "2026-08-21T19:26:25.853Z"
 ): QueuedAttachmentRecord {
   return {
     type: "attachment",
-    timestamp: "2026-08-21T19:26:25.853Z",
+    timestamp,
     attachment: {
       type: "queued_command",
       commandMode: "prompt",
       prompt: agentEnvelope(sender, body),
-      timestamp: "2026-08-21T19:26:25.853Z",
+      timestamp,
       origin: { kind: "peer", from: sender, name: sender, senderTaskId, body },
     },
   }

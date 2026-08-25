@@ -782,6 +782,48 @@ describe("plan_mode grouping", () => {
     expect(queuedBlocks[0].content).toBe("Please include regression tests")
   })
 
+  it("does not break plan grouping when a peer message appears between Enter and Exit", () => {
+    // A peer message is the same record a human steer used to be — it just
+    // renders as `agent_message` now. Leaving it out of the scanner's
+    // passthrough list aborts the scan, so the plan never sees its Exit.
+    const enterId = "enter_agent_message"
+    const readId = "read_agent_message"
+    const exitId = "exit_agent_message"
+
+    const jsonl = toJsonl([
+      userMsg("Plan with a peer steer"),
+      toolUseAssistant("EnterPlanMode", { plan: "peer message plan" }, enterId),
+      toolResultMsg(enterId, "ok"),
+      peerEnqueueMsg("csp-and-proxy", "one blocking question on finding #1."),
+      toolUseAssistant("Read", { file_path: "src/plan.ts" }, readId),
+      toolResultMsg(readId, "file content"),
+      toolUseAssistant("ExitPlanMode", { path: "/tmp/plan.md" }, exitId),
+      toolResultMsg(exitId, "plan approved"),
+      textAssistant("Done."),
+    ])
+
+    const blocks = parseSession(jsonl).turns[0].contentBlocks
+
+    const planBlocks = blocks.filter((block) => block.kind === "plan_mode")
+    expect(planBlocks).toHaveLength(1)
+    if (planBlocks[0].kind !== "plan_mode") return
+    expect(planBlocks[0].status).toBe("approved")
+    expect(planBlocks[0].toolCalls.map((tool) => tool.name)).toEqual(["Read"])
+
+    // Neither the absorbed Read nor a bare ExitPlanMode may leak into the timeline.
+    const looseTools = blocks.flatMap((block) =>
+      block.kind === "tool_calls" ? block.toolCalls.map((tool) => tool.name) : []
+    )
+    expect(looseTools).not.toContain("ExitPlanMode")
+    expect(looseTools).not.toContain("Read")
+
+    const agentBlocks = blocks.filter((block) => block.kind === "agent_message")
+    expect(agentBlocks).toHaveLength(1)
+    if (agentBlocks[0].kind !== "agent_message") return
+    expect(agentBlocks[0].sender).toBe("csp-and-proxy")
+    expect(agentBlocks[0].body).toBe("one blocking question on finding #1.")
+  })
+
   it("produces plan_mode block plus trailing tool calls when a Read follows ExitPlanMode in the same logical block", () => {
     const enterId = "enter_trailing"
     const exitId = "exit_trailing"

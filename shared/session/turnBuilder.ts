@@ -255,7 +255,7 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 // Tools after ExitPlanMode in this block
                 const tail = next.toolCalls.slice(exitIdx + 1)
                 result.push({ kind: "plan_mode", plan, planFilePath, status, toolCalls: embedded, timestamp })
-                // Re-emit passthrough blocks (hook_event, text) that appeared mid-scan
+                // Re-emit passthrough blocks that appeared mid-scan
                 result.push(...passthroughBlocks)
                 // Push tail of exit block back for further processing
                 if (tail.length > 0) {
@@ -268,7 +268,12 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 embedded.push(...next.toolCalls)
                 j++
               }
-            } else if (next.kind === "hook_event" || next.kind === "text" || next.kind === "queued_prompt") {
+            } else if (
+              next.kind === "hook_event"
+              || next.kind === "text"
+              || next.kind === "queued_prompt"
+              || next.kind === "agent_message"
+            ) {
               // Passthrough presentation blocks don't break the scan.
               // Collect them for re-emission in chronological position after the plan block.
               passthroughBlocks.push(next)

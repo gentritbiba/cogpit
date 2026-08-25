@@ -325,6 +325,61 @@ describe("prependTurns — agent mail across pages", () => {
     expect(blocks[0].body).toBe(body)
   })
 
+  // Timestamps taken from `…honest-cms/ddb6fc34….jsonl`, where csp-and-proxy
+  // asked a blocking question at 23:34:09.700 and reported done at 23:48:49.449.
+  const FIRST_AT = "2026-08-21T23:34:09.700Z"
+  const LATER_AT = "2026-08-21T23:48:49.449Z"
+
+  it("keeps two identical messages from one sender that arrived minutes apart", () => {
+    // The two persisted copies of one message land at the same instant, so
+    // (sender, body) alone cannot tell them apart from an agent that genuinely
+    // said the same thing twice. Fourteen minutes is not a duplicate.
+    const body = "payload-batch-2 done"
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", FIRST_AT),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", LATER_AT),
+      textAssistant("done"),
+    ])).turns
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged).map((b) => b.timestamp)).toEqual([FIRST_AT, LATER_AT])
+  })
+
+  it("renders the same cards however the records were paged in", () => {
+    // The three load paths — a whole-file `parseSession`, `/api/session-context`,
+    // and the paged reader — must agree. Anything the stitch drops that a full
+    // parse keeps is data the paged reader alone loses.
+    const body = "payload-batch-2 done"
+    const olderPage = [
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", FIRST_AT),
+      textAssistant("done"),
+    ]
+    const newerPage = [
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", LATER_AT),
+      textAssistant("done"),
+    ]
+
+    const whole = parseSession(toJsonl([...olderPage, ...newerPage])).turns
+    const paged = prependTurns(
+      parseSession(toJsonl(newerPage)).turns,
+      parseSession(toJsonl(olderPage)).turns,
+      "claude",
+    )
+
+    expect(paged).toEqual(whole)
+  })
+
   it("keeps two different messages from one sender that split across pages", () => {
     // Same sender, same sender task id, different messages: the dedup key is
     // (sender, body), never the task id.

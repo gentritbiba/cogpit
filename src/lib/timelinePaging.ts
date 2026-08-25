@@ -59,6 +59,16 @@ function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
 }
 
 /**
+ * How far apart the two copies of one message can be stamped. Across every peer
+ * message on disk, 4 of the 6 enqueue/attachment pairs agree to the millisecond
+ * and the other 2 drift by 1ms — the attachment inherits the enqueue's
+ * timestamp. A second leaves three orders of magnitude of headroom and is still
+ * 880x under the closest pair of genuinely distinct messages one agent has sent
+ * (14m40s, `csp-and-proxy` in `…honest-cms/ddb6fc34…`).
+ */
+const DUPLICATE_WINDOW_MS = 1000
+
+/**
  * Drops the second copy of a peer message.
  *
  * Claude Code persists each one twice — a `queue-operation` enqueue carrying
@@ -67,19 +77,31 @@ function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
  * a page boundary between the two copies leaves both standing, and dedup by
  * turn id cannot see it because they sit in different turns.
  *
- * The key is (sender, body). Not the sender's task id: that names the sending
- * agent's task, so one agent's question and its later done-report share it, and
- * keying on it would drop the second message.
+ * The key is (sender, body) *and* proximity in time. Not the sender's task id:
+ * that names the sending agent's task, so one agent's question and its later
+ * done-report share it. Not (sender, body) alone: that spans the whole
+ * transcript, so an agent that genuinely said the same thing twice collapsed to
+ * one card, and the session then rendered differently depending on how it was
+ * paged in. And not adjacency across the join, because the copies are not
+ * adjacent: in `…ddb6fc34…` the two halves of one message are 306 records apart
+ * with an unrelated message's enqueue sitting between them. Only the timestamps
+ * stay tied to the message.
+ *
+ * A block with no parseable timestamp cannot be shown to be a duplicate, so it
+ * is kept — dropping is the destructive direction.
  */
 function dedupeAgentMessages(turns: readonly Turn[]): Turn[] {
-  const seen = new Set<string>()
+  const lastKeptAt = new Map<string, number>()
   return turns.map((turn) => {
     if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
     const kept = turn.contentBlocks.filter((block) => {
       if (block.kind !== "agent_message") return true
+      const at = Date.parse(block.timestamp ?? "")
+      if (Number.isNaN(at)) return true
       const key = `${block.sender}\u0000${block.body}`
-      if (seen.has(key)) return false
-      seen.add(key)
+      const previous = lastKeptAt.get(key)
+      if (previous !== undefined && Math.abs(at - previous) <= DUPLICATE_WINDOW_MS) return false
+      lastKeptAt.set(key, at)
       return true
     })
     return kept.length === turn.contentBlocks.length ? turn : { ...turn, contentBlocks: kept }
