@@ -58,9 +58,10 @@ Key facts:
 - Outbound replies are `SendMessage` tool_use calls carrying `to`, `summary`,
   and `message`. One sample file has 13 replies against 8 inbound messages, so
   reply pairing is derivable rather than guessed.
-- `sessionMetadata.ts:272` already reads `teamName`/`agentName` per session;
-  `sessionActivityMonitor.ts:192` collapses them to a boolean `isTeammate` and
-  discards the names.
+- `ActiveSessionInfo` (`src/components/LiveSessions/types.ts`) already carries
+  `teamName`, `agentName`, and `agentStatus`, and the client already holds the
+  whole list via `useSessionInventoryOptional()`. Liveness needs **no server
+  change** — it is a client-side lookup by name.
 
 Older records carry the envelope with no `origin`. The regex parser handles
 those as a fallback only.
@@ -138,11 +139,12 @@ session ticks `Awaiting your reply · 14m`; unanswered in a *historical* session
 shows a flat `Never answered`. A counter ticking up from three weeks ago is
 noise pretending to be urgency.
 
-**Liveness — fact, best-effort.** Forward `agentName` into `SessionSnapshot`
-instead of collapsing it to `isTeammate`. The client already receives these
-snapshots, so it is a `Map<agentName, status>` lookup. Amber pulse for running,
-green for idle. No match, or an ambiguous match across two teams, means **no
-dot** — silence beats a grey "unknown" on every card.
+**Liveness — fact, best-effort.** `useSessionInventoryOptional()` returns
+`ActiveSessionInfo[]`, each already carrying `agentName` and `agentStatus`.
+Build `Map<agentName, agentStatus>` and look up `sender`. Amber pulse for a
+running status, green for idle. No provider, no match, or an ambiguous match
+across two teams means **no dot** — silence beats a grey "unknown" on every
+card. No server work.
 
 **Intent — the only guess, and gated.** `looksLikeQuestion(body)` fires on a `?`
 in the last quarter of the body, or a lead-line phrase (`blocking question`,
