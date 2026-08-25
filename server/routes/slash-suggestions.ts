@@ -62,40 +62,43 @@ const BUILTIN_PUBLISHERS = new Set([
   "claude-plugins-official",
 ])
 
+function builtin(
+  name: string,
+  type: "command" | "skill",
+  description: string,
+): SlashSuggestion {
+  return { name, description, type, source: "built-in", filePath: "" }
+}
+
 /**
- * Skills bundled into the Claude Code binary itself.
+ * Skills and commands bundled into the Claude Code binary itself.
  * These aren't discoverable from the filesystem — they're hardcoded in the CLI.
- * Source: https://code.claude.com/docs/en/skills#bundled-skills
+ * Descriptions are the CLI's own command-menu wording.
+ *
+ * Verified against CLI 2.1.245: the roster is the intersection of the bundled
+ * skills at https://code.claude.com/docs/en/commands and the `slash_commands`
+ * the SDK advertises in its init message. Commands the CLI reports in
+ * `terminal_slash_commands` (`/doctor`, `/color`) are left out — their UX is
+ * bound to the terminal, so they can't work from this UI.
  */
-const BUILTIN_SKILLS: SlashSuggestion[] = [
-  {
-    name: "simplify",
-    description: "Review changed code for reuse, quality, and efficiency, then fix any issues found",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "batch",
-    description: "Orchestrate large-scale changes across a codebase in parallel using isolated worktrees",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "debug",
-    description: "Troubleshoot your current Claude Code session by reading the session debug log",
-    type: "skill",
-    source: "built-in",
-    filePath: "",
-  },
-  {
-    name: "compact",
-    description: "Compact conversation history to free up context window space",
-    type: "command",
-    source: "built-in",
-    filePath: "",
-  },
+export const BUILTIN_SKILLS: SlashSuggestion[] = [
+  builtin("batch", "skill", "Plan a large change; background agents each open a PR"),
+  builtin("claude-api", "skill", "Build and debug apps that use the Claude API"),
+  builtin("code-review", "skill", "Review the current diff or a PR for bugs and cleanups"),
+  builtin("dataviz", "skill", "Chart and dashboard design guidance"),
+  builtin("debug", "skill", "Turn on debug logging and investigate problems"),
+  builtin("design-sync", "skill", "Push your design system components to claude.ai/design"),
+  builtin("fewer-permission-prompts", "skill", "Pre-approve safe read-only commands based on your usage"),
+  builtin("loop", "skill", "Repeat a prompt or command on an interval (e.g. /loop 5m /foo)"),
+  builtin("run", "skill", "Launch this project's app to see your change working"),
+  builtin("run-skill-generator", "skill", "Create a skill that knows how to run this project's app"),
+  builtin("simplify", "skill", "Clean up the changed code without changing behavior"),
+  builtin("verify", "skill", "Build and run your app to confirm a code change does what it should"),
+  builtin("compact", "command", "Free up context by summarizing the conversation so far"),
+  builtin("init", "command", "Initialize a new CLAUDE.md file with codebase documentation"),
+  builtin("schedule", "command", "Create and manage scheduled remote Claude Code agents"),
+  builtin("security-review", "command", "Complete a security review of the pending changes on the current branch"),
+  builtin("update-config", "command", "Change settings: hooks, permissions, environment variables"),
 ]
 
 /**
@@ -159,6 +162,9 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
     const source = BUILTIN_PUBLISHERS.has(publisher) ? "built-in" : pluginDisplayName
     const nameFromFm = (fm: Record<string, string>, file: string) =>
       fm.name || file.replace(/\.md$/, "")
+    // Both skills and commands are invoked as "plugin:name", so two plugins
+    // shipping the same name stay distinguishable.
+    const qualify = (name: string) => `${pluginDisplayName}:${name}`
 
     // Skills: each subdirectory contains a SKILL.md
     const skillsDir = join(installPath, "skills")
@@ -170,7 +176,7 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
           const content = await readFile(skillMdPath, "utf-8")
           const fm = parseFrontmatter(content)
           results.push({
-            name: fm.name || skillDir,
+            name: qualify(fm.name || skillDir),
             description: fm.description || "",
             type: "skill",
             source,
@@ -192,10 +198,9 @@ async function scanPluginSkills(): Promise<SlashSuggestion[]> {
       results.push(...agentSuggestions)
     }
 
-    // Commands: namespaced as "plugin:command"
     const cmdSuggestions = await scanMdFiles(
       join(installPath, "commands"), "command", source,
-      (fm, file) => `${pluginDisplayName}:${fm.name || file.replace(/\.md$/, "")}`,
+      (fm, file) => qualify(nameFromFm(fm, file)),
     )
     results.push(...cmdSuggestions)
   }

@@ -1,10 +1,28 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { join } from "node:path"
-import { mkdtemp, writeFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
-import { parseFrontmatter, expandCommand, isAllowedCommandPath } from "../../routes/slash-suggestions"
+// The factory only reads `fakeHome` when homedir() is called, which is after this module evaluates.
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  homedir: () => fakeHome,
+}))
+
+/** Home directory the route scans; the plugin and user fixtures are built underneath it. */
+const fakeHome = join(tmpdir(), "slash-suggestions-home")
+
+import type { Middleware } from "../../helpers"
+import { asIncomingMessage, asServerResponse, getRouteHandler } from "../http-fixtures"
+import type { SlashSuggestion } from "../../routes/slash-suggestions"
+import {
+  BUILTIN_SKILLS,
+  parseFrontmatter,
+  expandCommand,
+  isAllowedCommandPath,
+  registerSlashSuggestionRoutes,
+} from "../../routes/slash-suggestions"
 
 describe("parseFrontmatter", () => {
   it("parses simple frontmatter with description", () => {
@@ -142,5 +160,144 @@ describe("expandCommand", () => {
     await writeFile(filePath, `---\ndescription: X\n---\n\n  Trimmed  \n\n`)
     const result = await expandCommand(filePath, "")
     expect(result).toBe("Trimmed")
+  })
+})
+
+describe("BUILTIN_SKILLS", () => {
+  it("gives every entry a name, a description, and a valid type", () => {
+    expect(BUILTIN_SKILLS.length).toBeGreaterThan(0)
+    for (const entry of BUILTIN_SKILLS) {
+      expect(entry.name, JSON.stringify(entry)).toMatch(/^[a-z][a-z0-9-]*$/)
+      expect(entry.description.length, entry.name).toBeGreaterThan(0)
+      expect(["command", "skill"], entry.name).toContain(entry.type)
+      expect(entry.source, entry.name).toBe("built-in")
+    }
+  })
+
+  it("has no duplicate names", () => {
+    const names = BUILTIN_SKILLS.map((s) => s.name)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it("keeps the stable, high-traffic entries", () => {
+    const names = BUILTIN_SKILLS.map((s) => s.name)
+    expect(names).toContain("simplify")
+    expect(names).toContain("compact")
+  })
+
+  it("leaves out commands whose UX is bound to the terminal", () => {
+    const names = BUILTIN_SKILLS.map((s) => s.name)
+    expect(names).not.toContain("doctor")
+    expect(names).not.toContain("color")
+  })
+})
+
+describe("GET /api/slash-suggestions", () => {
+  let handlers: Map<string, Middleware>
+
+  const call = async (cwd = "") => {
+    const handler = getRouteHandler(handlers, "/api/slash-suggestions")
+    let payload = ""
+    const req = asIncomingMessage({
+      method: "GET",
+      url: `/api/slash-suggestions?cwd=${encodeURIComponent(cwd)}`,
+      headers: {},
+    })
+    const res = asServerResponse({
+      setHeader: () => {},
+      end: (data?: string) => { payload = data || "" },
+    })
+    await handler(req, res, () => {})
+    return JSON.parse(payload).suggestions as SlashSuggestion[]
+  }
+
+  beforeEach(async () => {
+    await rm(fakeHome, { recursive: true, force: true })
+    handlers = new Map()
+    registerSlashSuggestionRoutes((path: string, handler: Middleware) => {
+      handlers.set(path, handler)
+    })
+  })
+
+  afterEach(async () => {
+    await rm(fakeHome, { recursive: true, force: true })
+  })
+
+  const writeSkill = async (dir: string, name: string, description: string) => {
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\nBody`)
+  }
+
+  const installPlugin = async (pluginKey: string) => {
+    const installPath = join(fakeHome, "plugin-installs", pluginKey)
+    await mkdir(join(fakeHome, ".claude", "plugins"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({ plugins: { [pluginKey]: [{ installPath }] } }),
+    )
+    return installPath
+  }
+
+  it("namespaces a plugin skill by its plugin", async () => {
+    const installPath = await installPlugin("superpowers@superpowers-dev")
+    await writeSkill(join(installPath, "skills", "brainstorming"), "brainstorming", "Refine ideas")
+
+    const suggestions = await call()
+    const skill = suggestions.find((s) => s.name.endsWith("brainstorming"))
+    expect(skill?.name).toBe("superpowers:brainstorming")
+  })
+
+  it("namespaces a plugin skill by directory when frontmatter has no name", async () => {
+    const installPath = await installPlugin("superpowers@superpowers-dev")
+    await mkdir(join(installPath, "skills", "unnamed"), { recursive: true })
+    await writeFile(
+      join(installPath, "skills", "unnamed", "SKILL.md"),
+      `---\ndescription: No name field\n---\n\nBody`,
+    )
+
+    const suggestions = await call()
+    expect(suggestions.map((s) => s.name)).toContain("superpowers:unnamed")
+  })
+
+  it("namespaces plugin skills and plugin commands the same way", async () => {
+    const installPath = await installPlugin("superpowers@superpowers-dev")
+    await writeSkill(join(installPath, "skills", "shared"), "shared", "A skill")
+    await mkdir(join(installPath, "commands"), { recursive: true })
+    await writeFile(join(installPath, "commands", "shared.md"), `---\ndescription: A command\n---\n\nBody`)
+
+    const suggestions = await call()
+    const names = suggestions.filter((s) => s.name.endsWith("shared")).map((s) => s.name)
+    expect(names).toEqual(["superpowers:shared", "superpowers:shared"])
+  })
+
+  it("keeps a same-named skill from two plugins distinguishable", async () => {
+    const aPath = join(fakeHome, "plugin-installs", "alpha")
+    const bPath = join(fakeHome, "plugin-installs", "beta")
+    await mkdir(join(fakeHome, ".claude", "plugins"), { recursive: true })
+    await writeFile(
+      join(fakeHome, ".claude", "plugins", "installed_plugins.json"),
+      JSON.stringify({
+        plugins: {
+          "alpha@vendor": [{ installPath: aPath }],
+          "beta@vendor": [{ installPath: bPath }],
+        },
+      }),
+    )
+    await writeSkill(join(aPath, "skills", "review"), "review", "Alpha review")
+    await writeSkill(join(bPath, "skills", "review"), "review", "Beta review")
+
+    const suggestions = await call()
+    const names = suggestions.map((s) => s.name)
+    expect(names).toContain("alpha:review")
+    expect(names).toContain("beta:review")
+  })
+
+  it("leaves a user skill unqualified", async () => {
+    await writeSkill(join(fakeHome, ".claude", "skills", "qa"), "qa", "Test the change")
+
+    const suggestions = await call()
+    const skill = suggestions.find((s) => s.name === "qa")
+    expect(skill).toBeDefined()
+    expect(skill?.source).toBe("user")
   })
 })
