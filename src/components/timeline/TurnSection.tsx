@@ -243,6 +243,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                 <ContentBlocks
                   blocks={leadingBlocks}
                   model={turn.model}
+                  effort={turn.effort}
                   expandAll={expandAll}
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
@@ -267,6 +268,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                 <ContentBlocks
                   blocks={trailingBlocks}
                   model={turn.model}
+                  effort={turn.effort}
                   expandAll={expandAll}
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
@@ -280,6 +282,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
             <ContentBlocks
               blocks={turn.contentBlocks}
               model={turn.model}
+              effort={turn.effort}
               expandAll={expandAll}
               expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
@@ -417,6 +420,7 @@ function blockIdentity(block: TurnContentBlock): string | null {
 function ContentBlocks({
   blocks,
   model,
+  effort,
   expandAll,
   expandToolPayloads,
   activeToolCallId,
@@ -426,6 +430,7 @@ function ContentBlocks({
 }: {
   blocks: TurnContentBlock[]
   model: string | null
+  effort?: string
   expandAll: boolean
   expandToolPayloads: boolean
   activeToolCallId: string | null
@@ -490,6 +495,7 @@ function ContentBlocks({
                 key={ti}
                 text={text}
                 model={model}
+                effort={effort}
                 timestamp={block.timestamp}
                 compact={isMobile}
               />

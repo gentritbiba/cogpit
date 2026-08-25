@@ -658,6 +658,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       }
 
       current.model = msg.message.model
+      // Effort can be changed mid-session, so the turn reflects what it ended on.
+      if (msg.effort) current.effort = msg.effort
       // Only merge usage once per unique message ID (deduplication)
       const msgId = msg.message.id
       if (!seenMessageIds.has(msgId)) {

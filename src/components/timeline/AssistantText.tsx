@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils"
 interface AssistantTextProps {
   text: string
   model: string | null
+  /** Reasoning effort the turn ran at, when the transcript recorded one. */
+  effort?: string
   timestamp?: string
   compact?: boolean
 }
@@ -19,6 +21,7 @@ interface AssistantTextProps {
 export const AssistantText = memo(function AssistantText({
   text,
   model,
+  effort,
   timestamp,
   compact = false,
 }: AssistantTextProps) {
@@ -35,7 +38,12 @@ export const AssistantText = memo(function AssistantText({
             {shortenModel(model)}
           </span>
         )}
-        {model && timestamp && <span className="text-xs text-muted-foreground">·</span>}
+        {effort && (
+          <span className="text-xs text-muted-foreground" title={`Reasoning effort: ${effort}`}>
+            {effort}
+          </span>
+        )}
+        {(model || effort) && timestamp && <span className="text-xs text-muted-foreground">·</span>}
         {timestamp && (
           <span className="text-xs text-muted-foreground">
             {new Date(timestamp).toLocaleTimeString()}

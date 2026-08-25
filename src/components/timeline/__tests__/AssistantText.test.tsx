@@ -21,4 +21,30 @@ describe("AssistantText", () => {
     expect(mocks.copyToClipboard).toHaveBeenCalledWith("**Useful** response")
     expect(await screen.findByRole("button", { name: "Response copied" })).toBeInTheDocument()
   })
+
+  it("shows the reasoning effort next to the model", () => {
+    render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" />)
+
+    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.getByText("xhigh")).toBeInTheDocument()
+  })
+
+  it("omits the effort label when the turn recorded none", () => {
+    render(<AssistantText text="hi" model="claude-opus-5" />)
+
+    expect(screen.getByText("opus")).toBeInTheDocument()
+    expect(screen.queryByText("xhigh")).not.toBeInTheDocument()
+  })
+
+  it("shows effort even when the model is unknown", () => {
+    render(<AssistantText text="hi" model={null} effort="max" />)
+
+    expect(screen.getByText("max")).toBeInTheDocument()
+  })
+
+  it("hides the whole header row in compact mode", () => {
+    render(<AssistantText text="hi" model="claude-opus-5" effort="xhigh" compact />)
+
+    expect(screen.queryByText("xhigh")).not.toBeInTheDocument()
+  })
 })

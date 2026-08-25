@@ -1001,3 +1001,37 @@ describe("queued prompt visibility", () => {
     expect(blocks).toHaveLength(1)
   })
 })
+
+// ── per-message reasoning effort ──────────────────────────────────────────
+
+describe("reasoning effort", () => {
+  beforeEach(() => {
+    resetFixtureCounter()
+  })
+
+  it("carries the effort recorded on the assistant message onto the turn", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Think hard"),
+      textAssistant("Done.", { effort: "xhigh" }),
+    ]))
+    expect(session.turns[0].effort).toBe("xhigh")
+  })
+
+  it("leaves effort undefined when the record carries none", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Think hard"),
+      textAssistant("Done."),
+    ]))
+    expect(session.turns[0].effort).toBeUndefined()
+  })
+
+  it("keeps the last effort when a turn spans several assistant messages", () => {
+    // Effort can be changed mid-session; the turn reflects what it ended on.
+    const session = parseSession(toJsonl([
+      userMsg("Think hard"),
+      textAssistant("Working.", { effort: "medium" }),
+      textAssistant("Done.", { effort: "max" }),
+    ]))
+    expect(session.turns[0].effort).toBe("max")
+  })
+})

@@ -133,6 +133,12 @@ export interface AssistantMessage extends BaseMessage {
     usage: TokenUsage
   }
   requestId?: string
+  /**
+   * Reasoning effort this response ran at (CC 2.1.212+): low | medium | high |
+   * xhigh | max. Codex spells its own levels differently (e.g. "trivial"), so
+   * this stays a plain string rather than a union.
+   */
+  effort?: string
 }
 
 /**
@@ -370,6 +376,12 @@ export interface Turn {
   model: string | null
   /** Set when a compaction happened before this turn */
   compactionSummary?: string
+  /**
+   * Reasoning effort the turn ran at, when the transcript recorded one.
+   * A turn spanning several assistant messages reports the last one, since
+   * effort can be changed mid-session.
+   */
+  effort?: string
   /**
    * Set when this turn was opened without its start record — the parse window
    * began mid-turn. Such a turn is the newer half of a byte-boundary cut and
