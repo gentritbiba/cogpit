@@ -11,13 +11,13 @@ import {
   setBrowserSessionCookie,
   clearBrowserSessionCookie,
   revokeSessionToken,
-  verifyPasswordAsync,
   needsPasswordRehash,
   hashPassword,
   validatePasswordStrength,
   revokeAllSessions,
   getConnectedDevices,
 } from "../helpers"
+import { verifyRemotePassword, getDummyHash } from "../password-verify"
 import type { SessionPrincipal } from "../security"
 import { isTeamEdition } from "../team/edition"
 import { getUserByUsername, withVerifiedUser } from "../team/users"
@@ -25,33 +25,6 @@ import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } f
 import { flushSessionPersistence } from "../team/sessionPersistence"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
-
-const MAX_CONCURRENT_PASSWORD_VERIFICATIONS = 2
-let activePasswordVerifications = 0
-
-async function verifyRemotePassword(
-  password: string,
-  stored: string,
-): Promise<"valid" | "invalid" | "busy"> {
-  if (activePasswordVerifications >= MAX_CONCURRENT_PASSWORD_VERIFICATIONS) return "busy"
-  activePasswordVerifications += 1
-  try {
-    return await verifyPasswordAsync(password, stored) ? "valid" : "invalid"
-  } finally {
-    activePasswordVerifications -= 1
-  }
-}
-
-// Logins for unknown users verify against this hash so both outcomes cost one
-// scrypt derivation and response timing cannot enumerate usernames. Computed on
-// first use: hashing at import time would tax every boot, including personal
-// edition, which never reaches this path.
-let dummyHash: string | null = null
-
-function getDummyHash(): string {
-  dummyHash ??= hashPassword("cogpit-dummy-timing-pad")
-  return dummyHash
-}
 
 /**
  * Session issuance shared by password login and the first-admin bootstrap.
