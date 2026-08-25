@@ -1209,11 +1209,14 @@ git commit -m "feat: render agent messages in the timeline"
 >   calls it for the tick and measures `Date.now() - askedAt` itself. Two
 >   fake-timer tests pin this: the live one advances 5s and expects 30s -> 35s,
 >   and the historical one advances 60s and expects "Never answered" both times.
-> - **`isLive={isAgentActive}`**, per the plan. Note what that actually means:
+> - **~~`isLive={isAgentActive}`, per the plan.~~ Corrected during Task 11.**
 >   `isAgentActive` is `isLive && index === turns.length - 1`, so an unanswered
->   message in an *earlier* turn of a live session reads "Never answered". That
->   is the source the plan named, and it is arguably right — the turn that
->   message arrived in has already ended.
+>   message in an *earlier* turn of a live session read "Never answered" — a
+>   claim of finality about a question you can still answer, on exactly the
+>   message this feature exists to surface. `TurnSection` now derives
+>   `isSessionLive` (`isLive && session !== null`) alongside `isAgentActive` and
+>   threads it to the card through `ContentBlocks`. `isAgentActive` keeps its
+>   last-turn meaning; the tool-call cards depend on it.
 > - **The stale Task 8 test was narrowed, not kept.** "accepts the reply and
 >   liveness props reserved for later tasks" now covers only `liveStatus`, the
 >   one prop still unrendered until Task 12.
