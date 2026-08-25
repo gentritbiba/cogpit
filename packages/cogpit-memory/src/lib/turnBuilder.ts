@@ -299,6 +299,19 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
 
 // ── Build Turns State Machine ────────────────────────────────────────────────
 
+/** Drops the pairing a previous run left on this turn, without touching the original. */
+function clearAgentMessageReplies(turn: Turn): Turn {
+  if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
+  return {
+    ...turn,
+    contentBlocks: turn.contentBlocks.map((block) => {
+      if (block.kind !== "agent_message") return block
+      const { reply: _paired, ...unpaired } = block
+      return unpaired
+    }),
+  }
+}
+
 /**
  * Attach each peer message to the `SendMessage` that answered it.
  *
@@ -311,11 +324,19 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
  * carries no task id, because `origin.senderTaskId` names the sending agent's
  * task rather than the message. `SendMessage.input.to` uses the same names that
  * arrive in `origin.from`, so the join holds.
+ *
+ * A pure recompute: every existing pairing is cleared before the walk, so the
+ * answer depends only on the list handed in. Callers that assemble a transcript
+ * from several `buildTurns` calls — the page stitcher and the incremental
+ * append — re-run it over the joined list and get what a single parse of that
+ * list would have produced. Turns holding no peer message come back by
+ * reference, so a re-run costs nothing for the rest of the transcript.
  */
-function pairAgentMessageReplies(turns: Turn[]): void {
+export function pairAgentMessageReplies(turns: readonly Turn[]): Turn[] {
+  const repaired = turns.map(clearAgentMessageReplies)
   const unanswered = new Map<string, Array<Extract<TurnContentBlock, { kind: "agent_message" }>>>()
 
-  for (const turn of turns) {
+  for (const turn of repaired) {
     for (const block of turn.contentBlocks) {
       if (block.kind === "agent_message") {
         const waiting = unanswered.get(block.sender)
@@ -339,6 +360,8 @@ function pairAgentMessageReplies(turns: Turn[]): void {
       }
     }
   }
+
+  return repaired
 }
 
 /**
@@ -1003,7 +1026,5 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   flushPendingQueuedPrompts()
   finalizeTurn()
 
-  pairAgentMessageReplies(turns)
-
-  return turns
+  return pairAgentMessageReplies(turns)
 }

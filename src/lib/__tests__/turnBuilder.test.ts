@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest"
-import { parseSession } from "@/lib/parser"
+import { parseSession, parseSessionAppend } from "@/lib/parser"
 import {
   resetFixtureCounter,
   userMsg,
@@ -21,6 +21,8 @@ import {
   toolResultMsg,
   turnDurationMsg,
   toJsonl,
+  peerAttachment,
+  peerEnqueueMsg,
 } from "@/__tests__/fixtures"
 import type { ProgressMessage, SystemMessage, TurnContentBlock } from "@/lib/types"
 
@@ -942,52 +944,6 @@ describe("recap / away_summary parsing", () => {
 
 // ── Agent mail ───────────────────────────────────────────────────────────────
 
-/** The envelope Claude Code wraps a peer message in, on the wire. */
-function agentEnvelope(sender: string, body: string): string {
-  return `<agent-message from="${sender}">\n${body}\n</agent-message>`
-}
-
-/**
- * `origin` is optional so a test can drop it to model a pre-`origin` record, or
- * replace it with a bare `{ kind: "human" }` the way Claude Code writes one.
- */
-type QueuedAttachmentRecord = {
-  type: string
-  timestamp: string
-  attachment: {
-    type: string
-    commandMode: string
-    prompt: string
-    timestamp: string
-    origin?: {
-      kind: string
-      from?: string
-      name?: string
-      senderTaskId?: string
-      body?: string
-    }
-  }
-}
-
-/**
- * The `attachment` copy of a peer message, matching the shape observed in
- * `~/.claude/projects/…honest-cms/*.jsonl`: the raw envelope in `prompt`, and
- * the same text pre-stripped in `origin.body`.
- */
-function peerAttachment(sender: string, body: string, senderTaskId = "task-1"): QueuedAttachmentRecord {
-  return {
-    type: "attachment",
-    timestamp: "2026-08-21T19:26:25.853Z",
-    attachment: {
-      type: "queued_command",
-      commandMode: "prompt",
-      prompt: agentEnvelope(sender, body),
-      timestamp: "2026-08-21T19:26:25.853Z",
-      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body },
-    },
-  }
-}
-
 describe("agent mail", () => {
   it("emits agent_message for a peer origin, with the envelope stripped", () => {
     const session = parseSession(toJsonl([
@@ -1064,17 +1020,11 @@ describe("agent mail", () => {
   it("renders a peer message once when both the enqueue and the attachment carry it", () => {
     const sender = "csp-and-proxy"
     const body = "one blocking question on finding #1."
-    const raw = agentEnvelope(sender, body)
 
     const session = parseSession(toJsonl([
       userMsg("start"),
       textAssistant("working"),
-      {
-        type: "queue-operation",
-        operation: "enqueue",
-        content: raw,
-        timestamp: "2026-08-21T19:26:25.853Z",
-      },
+      peerEnqueueMsg(sender, body),
       peerAttachment(sender, body),
       textAssistant("done"),
     ]))
@@ -1201,6 +1151,29 @@ describe("agent mail", () => {
     const blocks = agentMessages(session.turns[0].contentBlocks)
     expect(blocks.map((b) => b.body)).toEqual(["first question", "second question"])
     expect(blocks.map((b) => b.reply?.summary)).toEqual(["re first", undefined])
+  })
+
+  // The live path rebuilds only the last turn on each appended line, so the
+  // pairing pass inside that rebuild cannot see a message two turns above it.
+  // Without a recompute over the joined list, the reply a running session just
+  // sent would vanish from the card it answered.
+  it("keeps a pairing alive when a later line rebuilds the tail", () => {
+    const existing = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("certified-status-fix", "one blocking question"),
+      textAssistant("done"),
+      userMsg("unrelated"),
+      textAssistant("still working"),
+    ]))
+    expect(agentMessages(existing.turns[0].contentBlocks)[0].reply).toBeUndefined()
+
+    const updated = parseSessionAppend(existing, toJsonl([
+      sendMessage("certified-status-fix", "Fixed the type error you flagged", "sm-1"),
+    ]))
+
+    const [block] = agentMessages(updated.turns[0].contentBlocks)
+    expect(block.reply?.summary).toBe("Fixed the type error you flagged")
   })
 
   it("pairs a reply that lands in a later turn", () => {

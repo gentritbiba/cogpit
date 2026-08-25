@@ -28,7 +28,7 @@ function beforeResponse(overrides: Record<string, unknown> = {}) {
   )
 }
 
-const olderTurns = [{ id: "old-1", userMessage: "old" }] as unknown as Turn[]
+const olderTurns = [{ id: "old-1", userMessage: "old", contentBlocks: [] }] as unknown as Turn[]
 const parsed = { turns: olderTurns } as unknown as ParsedSession
 
 function cachedEntry(overrides: Record<string, unknown> = {}) {
@@ -249,7 +249,7 @@ describe("useSessionPaging", () => {
   })
 
   it("accumulates each page onto the history already banked", async () => {
-    const previous = [{ id: "old-0", userMessage: "older" }] as unknown as Turn[]
+    const previous = [{ id: "old-0", userMessage: "older", contentBlocks: [] }] as unknown as Turn[]
     mockGet.mockReturnValue(cachedEntry({ olderTurns: previous }))
     mockAuthFetch.mockResolvedValue(beforeResponse())
     const { result, onOlderTurns } = setup()

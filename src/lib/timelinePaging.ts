@@ -1,3 +1,4 @@
+import { pairAgentMessageReplies } from "@/lib/turnBuilder"
 import type { Turn } from "@/lib/types"
 
 /**
@@ -58,11 +59,45 @@ function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
 }
 
 /**
+ * Drops the second copy of a peer message.
+ *
+ * Claude Code persists each one twice — a `queue-operation` enqueue carrying
+ * the raw envelope, then an `attachment` carrying the same text pre-stripped.
+ * `buildTurns` reconciles the pair through a ledger scoped to its own call, so
+ * a page boundary between the two copies leaves both standing, and dedup by
+ * turn id cannot see it because they sit in different turns.
+ *
+ * The key is (sender, body). Not the sender's task id: that names the sending
+ * agent's task, so one agent's question and its later done-report share it, and
+ * keying on it would drop the second message.
+ */
+function dedupeAgentMessages(turns: readonly Turn[]): Turn[] {
+  const seen = new Set<string>()
+  return turns.map((turn) => {
+    if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
+    const kept = turn.contentBlocks.filter((block) => {
+      if (block.kind !== "agent_message") return true
+      const key = `${block.sender}\u0000${block.body}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    return kept.length === turn.contentBlocks.length ? turn : { ...turn, contentBlocks: kept }
+  })
+}
+
+/**
  * Prepends older turns onto the existing list, deduplicating by turn id and
  * stitching a turn that a byte-boundary read cut in half.
  *
  * Merging collapses the two halves into one row instead of leaving a promptless
  * fragment stranded at the top of the page.
+ *
+ * Each page arrives from its own `parseSession` call, so whatever `buildTurns`
+ * reconciles within one page has to be re-run over the join: the duplicate copy
+ * of a peer message, and the pairing between a message and the `SendMessage`
+ * that answered it. Without that, a message answered seconds later reads
+ * "Never answered" purely because the pages happened to split between them.
  */
 export function prependTurns(
   existing: Turn[],
@@ -77,10 +112,11 @@ export function prependTurns(
 
   const head = existing[0]
   const lastOlder = unique[unique.length - 1]
-  if (head && lastOlder && isCutFragment(head, agentKind)) {
-    return [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
-  }
-  return [...unique, ...existing]
+  const merged = head && lastOlder && isCutFragment(head, agentKind)
+    ? [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
+    : [...unique, ...existing]
+
+  return pairAgentMessageReplies(dedupeAgentMessages(merged))
 }
 
 /**

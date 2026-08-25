@@ -198,6 +198,71 @@ export function agentProgressMsg(
   }
 }
 
+// ── Agent mail ──────────────────────────────────────────────────────────────
+
+/** The envelope Claude Code wraps a peer message in, on the wire. */
+export function agentEnvelope(sender: string, body: string): string {
+  return `<agent-message from="${sender}">\n${body}\n</agent-message>`
+}
+
+/**
+ * `origin` is optional so a test can drop it to model a pre-`origin` record, or
+ * replace it with a bare `{ kind: "human" }` the way Claude Code writes one.
+ */
+export type QueuedAttachmentRecord = {
+  type: string
+  timestamp: string
+  attachment: {
+    type: string
+    commandMode: string
+    prompt: string
+    timestamp: string
+    origin?: {
+      kind: string
+      from?: string
+      name?: string
+      senderTaskId?: string
+      body?: string
+    }
+  }
+}
+
+/**
+ * The `attachment` copy of a peer message, matching the shape observed in
+ * `~/.claude/projects/…honest-cms/*.jsonl`: the raw envelope in `prompt`, and
+ * the same text pre-stripped in `origin.body`.
+ */
+export function peerAttachment(
+  sender: string,
+  body: string,
+  senderTaskId = "task-1"
+): QueuedAttachmentRecord {
+  return {
+    type: "attachment",
+    timestamp: "2026-08-21T19:26:25.853Z",
+    attachment: {
+      type: "queued_command",
+      commandMode: "prompt",
+      prompt: agentEnvelope(sender, body),
+      timestamp: "2026-08-21T19:26:25.853Z",
+      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body },
+    },
+  }
+}
+
+/**
+ * The queue-operation copy Claude Code writes the moment a peer message is
+ * enqueued, carrying the raw envelope and no `origin` metadata.
+ */
+export function peerEnqueueMsg(sender: string, body: string): Record<string, unknown> {
+  return {
+    type: "queue-operation",
+    operation: "enqueue",
+    content: agentEnvelope(sender, body),
+    timestamp: "2026-08-21T19:26:25.853Z",
+  }
+}
+
 // ── JSONL Builders ──────────────────────────────────────────────────────────
 
 export function toJsonl(messages: Array<Record<string, unknown>>): string {
