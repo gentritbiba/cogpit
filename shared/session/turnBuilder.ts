@@ -47,11 +47,21 @@ function extractToolResultText(content: string | ContentBlock[] | undefined | nu
     .join("\n")
 }
 
-/** Queue entries also carry internal task notifications; only user-authored prompts belong in the timeline. */
+/**
+ * Queue entries also carry internal task notifications; only user-authored
+ * prompts belong in the timeline.
+ *
+ * Claude Code 2.1.234+ wraps background-task notifications in a
+ * <system-reminder> envelope, so the task-notification marker is matched
+ * anywhere in the content rather than only at the very start. The leading-"<"
+ * guard keeps prose that merely mentions one of these tags visible.
+ */
 function isVisibleQueuedPrompt(content: string | null | undefined): content is string {
   if (!content?.trim()) return false
   const trimmed = content.trimStart()
-  return !trimmed.startsWith("<task-notification>")
+  if (!trimmed.startsWith("<")) return true
+  return !trimmed.includes("<task-notification>")
+    && !trimmed.startsWith("<system-reminder>")
     && !trimmed.startsWith("<local-command-")
 }
 

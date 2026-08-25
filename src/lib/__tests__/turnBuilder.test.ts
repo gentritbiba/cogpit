@@ -939,3 +939,65 @@ describe("recap / away_summary parsing", () => {
     expect(recapIndex).toBe(0)
   })
 })
+
+// ── queued prompt visibility ──────────────────────────────────────────────
+
+describe("queued prompt visibility", () => {
+  beforeEach(() => {
+    resetFixtureCounter()
+  })
+
+  function queuedSession(content: string) {
+    return parseSession(toJsonl([
+      userMsg("Do the thing"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content,
+        timestamp: "2025-01-15T10:00:01.500Z",
+      },
+      textAssistant("Done."),
+    ]))
+  }
+
+  function queuedBlocks(content: string) {
+    return queuedSession(content).turns[0].contentBlocks.filter((b) => b.kind === "queued_prompt")
+  }
+
+  it("hides a bare task notification", () => {
+    expect(queuedBlocks("<task-notification>\n<task-id>abc</task-id>\n</task-notification>"))
+      .toHaveLength(0)
+  })
+
+  it("hides a task notification wrapped in a system-reminder envelope", () => {
+    // Claude Code 2.1.234+ wraps background-task notifications this way.
+    const wrapped = "<system-reminder>\n<task-notification>\n<task-id>abc</task-id>\n"
+      + "</task-notification>\n</system-reminder>"
+    expect(queuedBlocks(wrapped)).toHaveLength(0)
+  })
+
+  it("hides a bare system-reminder envelope", () => {
+    expect(queuedBlocks("<system-reminder>Background note</system-reminder>")).toHaveLength(0)
+  })
+
+  it("hides a local command envelope", () => {
+    expect(queuedBlocks("<local-command-stdout>ok</local-command-stdout>")).toHaveLength(0)
+  })
+
+  it("shows a real queued prompt", () => {
+    const blocks = queuedBlocks("Please include regression tests")
+    expect(blocks).toHaveLength(1)
+    if (blocks[0].kind !== "queued_prompt") return
+    expect(blocks[0].content).toBe("Please include regression tests")
+  })
+
+  it("shows a prompt that merely mentions a system reminder", () => {
+    const blocks = queuedBlocks("why did a system-reminder show up?")
+    expect(blocks).toHaveLength(1)
+  })
+
+  it("shows a prompt that opens with an unrelated angle bracket", () => {
+    const blocks = queuedBlocks("<Button> renders twice — why?")
+    expect(blocks).toHaveLength(1)
+  })
+})
