@@ -1087,6 +1087,21 @@ git commit -m "feat: add AgentMessageCard with sender identity and subject previ
 
 ## Task 9: Wire the card into the timeline
 
+> **DONE — landed in `3023f3f`.** All three integration points went in as
+> written; both plan tests pass. Notes:
+> - **No `compact` prop passed.** Task 8's card takes no `compact` — passing the
+>   plan's `compact={isMobile}` would not typecheck. `timestamp` is passed
+>   through as-is rather than `?? ""`, since the prop is already optional.
+> - **Added a third test** (`TurnSection.test.tsx`) rendering an `agent_message`
+>   inside a foldable completed turn. The two plan tests cover pinning and
+>   search but neither would have caught the missing render branch.
+> - **Verified in the real app** against the honest-cms session: all four peer
+>   messages render as cards (`certified-status-fix`, `vehicle-batch`,
+>   `csp-and-proxy` x2), zero raw envelopes anywhere in the parsed session, and
+>   Cmd+F on a sender name matches. The empty leading user bubble visible in the
+>   paged view is a pre-existing tail-loader artifact — a tail slice yields
+>   `turn0.userMessage === null` identically at this branch's merge-base.
+
 **Files:**
 - Modify: `src/components/timeline/TurnSection.tsx:519-533` (add a branch beside `queued_prompt`)
 - Modify: `src/lib/turnFold.ts:21-25` (`PINNED_KINDS`)
