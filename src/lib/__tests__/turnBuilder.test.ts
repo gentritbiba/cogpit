@@ -939,3 +939,156 @@ describe("recap / away_summary parsing", () => {
     expect(recapIndex).toBe(0)
   })
 })
+
+// ── Agent mail ───────────────────────────────────────────────────────────────
+
+/** The envelope Claude Code wraps a peer message in, on the wire. */
+function agentEnvelope(sender: string, body: string): string {
+  return `<agent-message from="${sender}">\n${body}\n</agent-message>`
+}
+
+/**
+ * `origin` is optional so a test can drop it to model a pre-`origin` record, or
+ * replace it with a bare `{ kind: "human" }` the way Claude Code writes one.
+ */
+type QueuedAttachmentRecord = {
+  type: string
+  timestamp: string
+  attachment: {
+    type: string
+    commandMode: string
+    prompt: string
+    timestamp: string
+    origin?: {
+      kind: string
+      from?: string
+      name?: string
+      senderTaskId?: string
+      body?: string
+    }
+  }
+}
+
+/**
+ * The `attachment` copy of a peer message, matching the shape observed in
+ * `~/.claude/projects/…honest-cms/*.jsonl`: the raw envelope in `prompt`, and
+ * the same text pre-stripped in `origin.body`.
+ */
+function peerAttachment(sender: string, body: string, senderTaskId = "task-1"): QueuedAttachmentRecord {
+  return {
+    type: "attachment",
+    timestamp: "2026-08-21T19:26:25.853Z",
+    attachment: {
+      type: "queued_command",
+      commandMode: "prompt",
+      prompt: agentEnvelope(sender, body),
+      timestamp: "2026-08-21T19:26:25.853Z",
+      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body },
+    },
+  }
+}
+
+describe("agent mail", () => {
+  it("emits agent_message for a peer origin, with the envelope stripped", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "one blocking question on finding #1."),
+      textAssistant("done"),
+    ]))
+
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "agent_message")
+    expect(block).toBeDefined()
+    if (block?.kind !== "agent_message") return
+    expect(block.sender).toBe("csp-and-proxy")
+    expect(block.senderTaskId).toBe("task-1")
+    expect(block.body).toBe("one blocking question on finding #1.")
+    expect(block.body).not.toContain("<agent-message")
+  })
+
+  it("keeps a human origin as queued_prompt", () => {
+    const attachment = peerAttachment("x", "check the tests too")
+    attachment.attachment.origin = { kind: "human" }
+    attachment.attachment.prompt = "check the tests too"
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const kinds = session.turns[0].contentBlocks.map((b) => b.kind)
+    expect(kinds).toContain("queued_prompt")
+    expect(kinds).not.toContain("agent_message")
+  })
+
+  it("falls back to the envelope when origin is absent", () => {
+    const attachment = peerAttachment("vehicle-batch", "half-blocked on a decision")
+    delete attachment.attachment.origin
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "agent_message")
+    if (block?.kind !== "agent_message") throw new Error("expected agent_message")
+    expect(block.sender).toBe("vehicle-batch")
+    expect(block.senderTaskId).toBeNull()
+    expect(block.body).toBe("half-blocked on a decision")
+  })
+
+  it("leaves a plain queued prompt with no origin as queued_prompt", () => {
+    const attachment = peerAttachment("x", "y")
+    delete attachment.attachment.origin
+    attachment.attachment.prompt = "also check the tests"
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    expect(session.turns[0].contentBlocks.map((b) => b.kind)).toContain("queued_prompt")
+  })
+
+  // Claude Code writes each peer message twice: once as a queue-operation
+  // enqueue carrying the raw envelope, then again as an attachment whose
+  // `prompt` is that same raw string. Verified against all four peer messages
+  // in the honest-cms sample — `prompt` matches the enqueue's `content`
+  // exactly, while `origin.body` never does. The enqueue ledger keys on the
+  // raw text for that reason; keying it on the stripped body would make both
+  // copies render.
+  it("renders a peer message once when both the enqueue and the attachment carry it", () => {
+    const sender = "csp-and-proxy"
+    const body = "one blocking question on finding #1."
+    const raw = agentEnvelope(sender, body)
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      {
+        type: "queue-operation",
+        operation: "enqueue",
+        content: raw,
+        timestamp: "2026-08-21T19:26:25.853Z",
+      },
+      peerAttachment(sender, body),
+      textAssistant("done"),
+    ]))
+
+    const agentMessages = session.turns[0].contentBlocks.filter((b) => b.kind === "agent_message")
+    expect(agentMessages).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.filter((b) => b.kind === "queued_prompt")).toHaveLength(0)
+
+    const block = agentMessages[0]
+    if (block.kind !== "agent_message") return
+    expect(block.sender).toBe(sender)
+    expect(block.body).toBe(body)
+    expect(block.body).not.toContain("<agent-message")
+  })
+})

@@ -26,6 +26,7 @@ import {
   isQueueOperationMessage,
   isAttachmentMessage,
 } from "./messageTypeGuards"
+import { parseAgentEnvelope } from "./agentEnvelope"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
@@ -55,20 +56,54 @@ function isVisibleQueuedPrompt(content: string | null | undefined): content is s
     && !trimmed.startsWith("<local-command-")
 }
 
+interface QueuedPromptSource {
+  /**
+   * The prompt exactly as written. This is the enqueue ledger's key — the
+   * queue-operation copy and this attachment copy only reconcile on an exact
+   * raw match, so never substitute the stripped body here.
+   */
+  raw: string
+  /** Peer sender, or null when the reader typed this. */
+  sender: string | null
+  senderTaskId: string | null
+  /** Envelope-free body. Equals `raw` when there was no envelope. */
+  body: string
+}
+
 /**
- * Text of a prompt the user typed mid-turn, or null for anything else.
+ * A prompt queued mid-turn, or null for anything else.
  * Claude Code leaves `content` empty on the queue-operation record and writes
  * the prompt here instead, so this is the only copy for most queued prompts.
  */
-function queuedCommandPromptText(msg: RawMessage): string | null {
+function queuedCommandPrompt(msg: RawMessage): QueuedPromptSource | null {
   if (!isAttachmentMessage(msg)) return null
   const attachment = msg.attachment
   if (!attachment || attachment.type !== "queued_command") return null
   if (attachment.commandMode !== "prompt") return null
   const prompt = attachment.prompt
   if (prompt == null) return null
-  const text = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
-  return isVisibleQueuedPrompt(text) ? text : null
+  const raw = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
+  if (!isVisibleQueuedPrompt(raw)) return null
+
+  const origin = attachment.origin
+  if (origin?.kind === "peer") {
+    const sender = origin.name ?? origin.from ?? null
+    if (sender) {
+      return {
+        raw,
+        sender,
+        senderTaskId: origin.senderTaskId ?? null,
+        body: origin.body ?? parseAgentEnvelope(raw).body,
+      }
+    }
+  }
+  if (origin?.kind === "human") {
+    return { raw, sender: null, senderTaskId: null, body: raw }
+  }
+
+  // Pre-`origin` records: the envelope in the text is all we have.
+  const parsed = parseAgentEnvelope(raw)
+  return { raw, sender: parsed.sender, senderTaskId: null, body: parsed.body }
 }
 
 // ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
@@ -345,8 +380,12 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   // the latter shape can be reconciled without rendering the prompt twice.
   const pendingQueuedPrompts: Array<{
     turn: Turn
+    /** Ledger key and `queued_prompt` content. Always the raw prompt text. */
     content: string
     timestamp?: string
+    sender: string | null
+    senderTaskId: string | null
+    body: string
   }> = []
 
   // Prompt text already recorded from a queue-operation enqueue, counted per
@@ -376,11 +415,21 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
 
   function flushPendingQueuedPrompts() {
     for (const prompt of pendingQueuedPrompts) {
-      prompt.turn.contentBlocks.push({
-        kind: "queued_prompt",
-        content: prompt.content,
-        timestamp: prompt.timestamp,
-      })
+      prompt.turn.contentBlocks.push(
+        prompt.sender
+          ? {
+              kind: "agent_message",
+              sender: prompt.sender,
+              senderTaskId: prompt.senderTaskId,
+              body: prompt.body,
+              timestamp: prompt.timestamp,
+            }
+          : {
+              kind: "queued_prompt",
+              content: prompt.content,
+              timestamp: prompt.timestamp,
+            },
+      )
     }
     pendingQueuedPrompts.length = 0
   }
@@ -485,10 +534,15 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       // duplicate the prompt. Enqueues during an active turn remain useful as
       // chronological steer/queued-prompt blocks.
       if (current && msg.operation === "enqueue" && isVisibleQueuedPrompt(msg.content)) {
+        // This record carries no `origin`, so the envelope is the only signal.
+        const parsed = parseAgentEnvelope(msg.content)
         pendingQueuedPrompts.push({
           turn: current,
           content: msg.content,
           timestamp: msg.timestamp,
+          sender: parsed.sender,
+          senderTaskId: null,
+          body: parsed.body,
         })
         noteEnqueueSourced(current, msg.content)
       }
@@ -499,12 +553,15 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // prompts so the shared flush can drop it if an ordinary user record for
     // the same text follows.
     if (isAttachmentMessage(msg)) {
-      const queuedText = queuedCommandPromptText(msg)
-      if (current && queuedText !== null && !consumeEnqueueSourced(current, queuedText)) {
+      const queued = queuedCommandPrompt(msg)
+      if (current && queued !== null && !consumeEnqueueSourced(current, queued.raw)) {
         pendingQueuedPrompts.push({
           turn: current,
-          content: queuedText,
+          content: queued.raw,
           timestamp: msg.attachment?.timestamp ?? msg.timestamp,
+          sender: queued.sender,
+          senderTaskId: queued.senderTaskId,
+          body: queued.body,
         })
       }
       continue

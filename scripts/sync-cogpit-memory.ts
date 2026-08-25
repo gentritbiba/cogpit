@@ -19,6 +19,7 @@ const FILES = [
   "codex-exec.ts",
   "codex-tool-normalization.ts",
   "turnBuilder.ts",
+  "agentEnvelope.ts",
   "types.ts",
   "messageTypeGuards.ts",
   "sessionStats.ts",
