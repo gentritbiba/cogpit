@@ -1520,6 +1520,33 @@ its reply and the blocking question appears **once**.
 
 ## Task 15: Test and heuristic cleanup (found by Task 13 verification)
 
+> **DONE — landed in `0f2a985`, `4b36355`, `03c7201`, `d5b23e5`.** 4153 -> 4167
+> on the dirty tree; five gates green.
+>
+> - **All four assertions were confirmed vacuous by breaking the code first**
+>   and watching them stay green: the card gutted to render nothing (envelope),
+>   the liveness JSX deleted (sibling), `agentAccentHue` replaced with
+>   `() => 0` (stability), and `line-clamp-2` typo'd to `line-clamp-2x`, which
+>   `toContain` still matches (clamp). Each break now fails its test.
+> - **The envelope guard needed a production change to have anything to
+>   guard.** `stripEnvelopeFraming` — wrapper tags only, so a tag the body is
+>   *talking about* survives — now runs in the card, which is the last thing
+>   between a body that escaped turnBuilder and the reader.
+> - **The design doc was wrong about the heuristic, not the code.** "A `?` in
+>   the last quarter" fires on the quoted-and-answered question in the existing
+>   negative case; the closing-line rule does not. Doc updated to match the code.
+> - **Recall fixed by adding request patterns** (`, tell me` / `, say so`,
+>   imperative position only) to the closing line. Real-data recall 1/2 -> 2/2
+>   with the same 0 false positives; every existing negative stays negative.
+> - **The footer state is gone on a message that asked nothing and got no
+>   reply,** so a done report no longer reads "Never answered". The per-second
+>   timer no longer runs for those cards either.
+> - **Both serializers now have a runtime test** proving the field mapping, each
+>   verified to fail on `body: block.sender`.
+> - **Pre-existing, not mine:** `bun test` in `packages/cogpit-memory`
+>   segfaults at teardown in the three sqlite-backed files (all tests pass
+>   first). Reproduced unchanged at `14409c3` in a throwaway worktree.
+
 **Vacuous tests — each passes regardless of whether the code works:**
 
 - `AgentMessageCard.test.tsx` "never renders the raw envelope" — `BODY` contains no envelope,
