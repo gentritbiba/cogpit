@@ -19,6 +19,8 @@ import {
   touchSession,
 } from "./team/sessionPersistence"
 import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
+import { shareRequestAllowed } from "./share/allowlist"
+import { getShareWithHash, touchShare } from "./share/registry"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -315,15 +317,23 @@ export function isAuthenticatedHttpStreamRequest(req: IncomingMessage): boolean 
     || path?.startsWith("/api/workflow-watch/") === true
 }
 
+interface StreamTokenBinding {
+  onRevoked: (listener: (revokedToken: string | null) => void) => () => void
+  /** Must not refresh idle time — a recheck may not keep its own stream alive. */
+  isActive: (token: string) => boolean
+}
+
 /**
- * Bind an authenticated long-lived HTTP response to the session that admitted
- * it. Normal responses unregister on finish; SSE responses are destroyed on
- * logout, disable/demotion/password reset, global revocation, or expiry.
+ * Bind a long-lived HTTP response to the token that admitted it. Normal
+ * responses unregister on finish; SSE responses are destroyed when that token
+ * is revoked (logout, disable/demotion/password reset, share turned off,
+ * global revocation) or stops being active.
  */
-function trackAuthenticatedHttpStream(
+function trackRevocableHttpStream(
   req: IncomingMessage,
   res: ServerResponse,
   token: string,
+  binding: StreamTokenBinding,
 ): void {
   if (!isAuthenticatedHttpStreamRequest(req)) return
 
@@ -340,15 +350,37 @@ function trackAuthenticatedHttpStream(
     cleanup()
     if (!res.writableEnded) res.destroy()
   }
-  unsubscribe = onSessionRevoked((revokedToken) => {
+  unsubscribe = binding.onRevoked((revokedToken) => {
     if (revokedToken === null || revokedToken === token) terminate()
   })
   timer = setInterval(() => {
-    if (!isSessionTokenActive(token)) terminate()
+    if (!binding.isActive(token)) terminate()
   }, HTTP_STREAM_AUTHORIZATION_RECHECK_MS)
   timer.unref?.()
   res.once("finish", cleanup)
   res.once("close", cleanup)
+}
+
+function trackAuthenticatedHttpStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+): void {
+  trackRevocableHttpStream(req, res, token, {
+    onRevoked: onSessionRevoked,
+    isActive: isSessionTokenActive,
+  })
+}
+
+function trackShareHttpStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+): void {
+  trackRevocableHttpStream(req, res, token, {
+    onRevoked: onShareRevoked,
+    isActive: isShareTokenActive,
+  })
 }
 
 function discardSession(token: string): Promise<void> {
@@ -768,7 +800,10 @@ export function bodySizeLimit(req: IncomingMessage, res: ServerResponse, next: N
 
 // ── Auth middleware ──────────────────────────────────────────────────
 
-const PUBLIC_PATHS = new Set(["/api/auth/verify", "/api/hello"])
+// /api/share/verify is public on purpose: it is where a guest whose token has
+// expired gets a new one. Behind the share branch it would answer 403 and the
+// guest could never log back in.
+const PUBLIC_PATHS = new Set(["/api/auth/verify", "/api/hello", "/api/share/verify"])
 
 function isPublicPath(url: string): boolean {
   const path = url.split("?")[0]
@@ -783,6 +818,53 @@ function isPublicPath(url: string): boolean {
   return false
 }
 
+/** The presented main-session token, or null when there is no valid one. */
+function validSessionToken(req: IncomingMessage): string | null {
+  const bearer = bearerToken(req)
+  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
+  const token = bearer ?? browserCookie
+  if (!token) return null
+  // A bearer token is a machine client, which has no user agent to pin against.
+  const userAgent = browserCookie && !bearer ? req.headers["user-agent"] : undefined
+  return validateSessionToken(token, userAgent) ? token : null
+}
+
+/**
+ * A share guest's entire request surface. This function always responds or
+ * calls next() — it never falls through to the full-access paths that follow
+ * it, so a share cookie arriving on loopback (a tunnel terminating locally, a
+ * browser on the host) cannot be upgraded by the local-trust shortcut.
+ */
+function handleShareRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: NextFn,
+  token: string,
+): void {
+  const sessionId = validateShareToken(token, req.headers["user-agent"])
+  if (!sessionId) return sendJson(res, 401, { error: "Share authentication required" })
+
+  const share = getShareWithHash(sessionId)
+  if (!share) {
+    // The share was turned off while the token was still live.
+    revokeShareToken(token)
+    return sendJson(res, 401, { error: "Share authentication required" })
+  }
+
+  const method = (req.method || "GET").toUpperCase()
+  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    return sendJson(res, 403, { error: "Untrusted request source" })
+  }
+
+  if (!shareRequestAllowed(method, req.url || "/", share)) {
+    return sendJson(res, 403, { error: "Not available on a shared session" })
+  }
+
+  touchShare(sessionId)
+  trackShareHttpStream(req, res, token)
+  next()
+}
+
 export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: NextFn): void {
   if (isTeamEdition()) return teamAuthMiddleware(req, res, next)
 
@@ -790,57 +872,42 @@ export function authMiddleware(req: IncomingMessage, res: ServerResponse, next: 
   const publicPath = isPublicPath(url)
 
   if (!publicPath && isUnforwardedUntrustedLoopback(req)) {
-    res.statusCode = 403
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({ error: "Untrusted local host" }))
-    return
-  }
-
-  if (isTrustedDirectLocalRequest(req)) {
-    const method = (req.method || "GET").toUpperCase()
-    if (!publicPath && !SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
-      res.statusCode = 403
-      res.setHeader("Content-Type", "application/json")
-      res.end(JSON.stringify({ error: "Untrusted request source" }))
-      return
-    }
-    return next()
+    return sendJson(res, 403, { error: "Untrusted local host" })
   }
 
   if (publicPath) return next()
 
-  const config = getConfig()
-  if (!config?.networkAccess || !config?.networkPassword) {
-    res.statusCode = 403
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({ error: "Network access is disabled" }))
-    return
-  }
-
-  const bearer = bearerToken(req)
-  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
-  const token = bearer ?? browserCookie
-  const valid = token && validateSessionToken(
-    token,
-    browserCookie && !bearer ? req.headers["user-agent"] : undefined,
-  )
-
-  if (!valid) {
-    res.statusCode = 401
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({ error: "Authentication required" }))
-    return
+  // A valid main session wins; anything less enters the guest branch, which
+  // never comes back to the full-access paths below.
+  const shareToken = getRequestShareToken(req)
+  if (shareToken && !validSessionToken(req)) {
+    return handleShareRequest(req, res, next, shareToken)
   }
 
   const method = (req.method || "GET").toUpperCase()
-  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
-    res.statusCode = 403
-    res.setHeader("Content-Type", "application/json")
-    res.end(JSON.stringify({ error: "Untrusted request source" }))
-    return
+
+  if (isTrustedDirectLocalRequest(req)) {
+    if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+      return sendJson(res, 403, { error: "Untrusted request source" })
+    }
+    return next()
   }
 
-  trackAuthenticatedHttpStream(req, res, token)
+  const config = getConfig()
+  if (!config?.networkAccess || !config?.networkPassword) {
+    return sendJson(res, 403, { error: "Network access is disabled" })
+  }
+
+  const sessionToken = validSessionToken(req)
+  if (!sessionToken) {
+    return sendJson(res, 401, { error: "Authentication required" })
+  }
+
+  if (!SAFE_METHODS.has(method) && !hasTrustedMutationSource(req)) {
+    return sendJson(res, 403, { error: "Untrusted request source" })
+  }
+
+  trackAuthenticatedHttpStream(req, res, sessionToken)
   next()
 }
 
@@ -875,13 +942,14 @@ function teamAuthMiddleware(req: IncomingMessage, res: ServerResponse, next: Nex
 
   if (publicPath) return next()
 
-  const bearer = bearerToken(req)
-  const browserCookie = cookieValue(req, BROWSER_SESSION_COOKIE)
-  const token = bearer ?? browserCookie
-  if (!token || !validateSessionToken(
-    token,
-    browserCookie && !bearer ? req.headers["user-agent"] : undefined,
-  )) {
+  // Identical precedence to the personal middleware: the guest branch owns the
+  // request from here, so neither edition can hand a share cookie more than the
+  // allowlist grants.
+  const token = validSessionToken(req)
+  const shareToken = getRequestShareToken(req)
+  if (shareToken && !token) return handleShareRequest(req, res, next, shareToken)
+
+  if (!token) {
     return sendJson(res, 401, { error: "Authentication required" })
   }
 
