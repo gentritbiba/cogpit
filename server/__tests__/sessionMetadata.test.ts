@@ -137,6 +137,103 @@ describe("getSessionMeta agent-team tags", () => {
   })
 })
 
+describe("getSessionMeta worktree and agent-setting records", () => {
+  function worktreeState(overrides: Record<string, unknown> = {}) {
+    return {
+      type: "worktree-state",
+      sessionId: "s1",
+      worktreeSession: {
+        originalCwd: "/tmp/proj",
+        preEnterOriginalCwd: "/tmp/proj",
+        worktreePath: "/tmp/proj/.claude/worktrees/mission-control",
+        worktreeName: "mission-control",
+        worktreeBranch: "worktree-mission-control",
+        originalBranch: "master",
+        originalHeadCommit: "0be44047b9c9b48400c9952c996225ec69002e2e",
+        sessionId: "s1",
+        ...overrides,
+      },
+    }
+  }
+
+  it("extracts worktree identity from a worktree-state record", async () => {
+    const filePath = await writeSession([
+      worktreeState(),
+      userLine("work on the mission control panel"),
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.worktreeName).toBe("mission-control")
+    expect(meta.worktreeBranch).toBe("worktree-mission-control")
+    expect(meta.originalBranch).toBe("master")
+  })
+
+  it("uses the most recent worktree-state when the session moved worktrees", async () => {
+    const filePath = await writeSession([
+      worktreeState(),
+      userLine("first task"),
+      worktreeState({ worktreeName: "cc-catchup", worktreeBranch: "worktree-cc-catchup" }),
+      userLine("second task"),
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.worktreeName).toBe("cc-catchup")
+    expect(meta.worktreeBranch).toBe("worktree-cc-catchup")
+  })
+
+  it("extracts the launch agent type from an agent-setting record", async () => {
+    const filePath = await writeSession([
+      { type: "agent-setting", agentSetting: "general-purpose", sessionId: "s1" },
+      userLine("go research the parser"),
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.agentSetting).toBe("general-purpose")
+  })
+
+  it("keeps the first agent-setting when the record repeats", async () => {
+    const filePath = await writeSession([
+      { type: "agent-setting", agentSetting: "general-purpose", sessionId: "s1" },
+      userLine("go research the parser"),
+      { type: "agent-setting", agentSetting: "explore", sessionId: "s1" },
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.agentSetting).toBe("general-purpose")
+  })
+
+  it("leaves both undefined for sessions without either record", async () => {
+    const filePath = await writeSession([userLine("hello there friend")])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.worktreeName).toBeUndefined()
+    expect(meta.worktreeBranch).toBeUndefined()
+    expect(meta.originalBranch).toBeUndefined()
+    expect(meta.agentSetting).toBeUndefined()
+  })
+
+  it("survives partial and malformed sidecar records", async () => {
+    const filePath = await writeSession([
+      { type: "worktree-state", sessionId: "s1" },
+      { type: "worktree-state", sessionId: "s1", worktreeSession: null },
+      { type: "worktree-state", sessionId: "s1", worktreeSession: "not-an-object" },
+      { type: "agent-setting", sessionId: "s1" },
+      userLine("still parses the rest of the session"),
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.worktreeName).toBeUndefined()
+    expect(meta.agentSetting).toBeUndefined()
+    expect(meta.firstUserMessage).toBe("still parses the rest of the session")
+  })
+
+  it("clears worktree identity once the session leaves the worktree", async () => {
+    const filePath = await writeSession([
+      worktreeState(),
+      userLine("work in the worktree"),
+      { type: "worktree-state", sessionId: "s1", worktreeSession: null },
+      userLine("back on master"),
+    ])
+    const meta = await getSessionMeta(filePath)
+    expect(meta.worktreeName).toBeUndefined()
+    expect(meta.originalBranch).toBeUndefined()
+  })
+})
+
 describe("getSessionStatus background agents", () => {
   const endTurn = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [] } }
 

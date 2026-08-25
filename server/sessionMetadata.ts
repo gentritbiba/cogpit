@@ -1,6 +1,7 @@
 import { readFile, stat, open } from "node:fs/promises"
 import { deriveSessionStatus, type SessionStatusInfo } from "../shared/session/sessionStatus"
 import { extractCodexMetadataFromLines } from "../shared/session/codex"
+import type { AgentSettingMessage, WorktreeStateMessage } from "../shared/session/types"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -264,6 +265,12 @@ export async function getSessionMeta(filePath: string) {
   // with the team they belong to and their member name within it
   let teamName = ""
   let agentName = ""
+  // Worktree checkout the session is operating in, when it entered one
+  let worktreeName: string | undefined
+  let worktreeBranch: string | undefined
+  let originalBranch: string | undefined
+  // The agent type the session was launched as, e.g. "general-purpose"
+  let agentSetting: string | undefined
 
   for (const line of lines) {
     try {
@@ -276,6 +283,19 @@ export async function getSessionMeta(filePath: string) {
       // The CLI's own title, seeded from the opening prompt — a label for
       // sessions that never got an ai-title and whose prompts sit past the head read
       if (obj.type === "custom-title" && obj.customTitle) customTitle = obj.customTitle
+      // worktree-state records the session's current checkout, so the last
+      // one wins and one without a worktreeSession means the session left
+      if (obj.type === "worktree-state") {
+        const worktree = (obj as WorktreeStateMessage).worktreeSession
+        const session = isRecord(worktree) ? worktree : null
+        worktreeName = session?.worktreeName
+        worktreeBranch = session?.worktreeBranch
+        originalBranch = session?.originalBranch
+      }
+      // The launch agent type never changes mid-session and repeats verbatim, so first wins
+      if (obj.type === "agent-setting" && !agentSetting) {
+        agentSetting = (obj as AgentSettingMessage).agentSetting || undefined
+      }
       if (obj.version && !version) version = obj.version
       if (obj.gitBranch && !gitBranch) gitBranch = obj.gitBranch
       if (obj.slug && !slug) slug = obj.slug
@@ -396,6 +416,10 @@ export async function getSessionMeta(filePath: string) {
     branchedFrom,
     teamName,
     agentName,
+    worktreeName,
+    worktreeBranch,
+    originalBranch,
+    agentSetting,
     isSubagent: false,
     parentSessionId: null,
   }

@@ -313,6 +313,37 @@ export interface AttachmentMessage extends BaseMessage {
   } | null
 }
 
+/**
+ * Written when a session enters or leaves a `.claude/worktrees/*` checkout.
+ * The record is the session's current worktree state, so a later one supersedes
+ * an earlier one, and a null `worktreeSession` means the session left.
+ */
+export interface WorktreeStateMessage extends BaseMessage {
+  type: "worktree-state"
+  worktreeSession?: {
+    originalCwd?: string
+    preEnterOriginalCwd?: string
+    worktreePath?: string
+    worktreeName?: string
+    worktreeBranch?: string
+    originalBranch?: string
+    originalHeadCommit?: string
+    sessionId?: string
+  } | null
+}
+
+/** The agent type a session was launched as, e.g. "general-purpose". */
+export interface AgentSettingMessage extends BaseMessage {
+  type: "agent-setting"
+  agentSetting?: string
+}
+
+/*
+ * Known-ignored sidecar records, deliberately untyped:
+ * - "last-prompt": duplicates the prompt Cogpit already derives from the transcript.
+ * - "atis-latch": its `atis` payload is an empty string in every observed transcript.
+ */
+
 export type RawMessage =
   | UserMessage
   | AssistantMessage
