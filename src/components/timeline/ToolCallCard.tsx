@@ -74,6 +74,14 @@ const TOOL_TIERS: Record<string, ToolTier> = {
   PushNotification: "mutating",
   EnterWorktree: "mutating",
   ExitWorktree: "mutating",
+  Agent: "mutating",
+  SendMessage: "mutating",
+  EndConversation: "mutating",
+  TaskCreate: "mutating",
+  TaskUpdate: "mutating",
+  TaskStop: "mutating",
+  // A workflow run spawns a whole fleet of agents that edit the repo.
+  Workflow: "mutating",
   // Read-only — inspects the world without changing it.
   Read: "readOnly",
   Grep: "readOnly",
@@ -86,15 +94,26 @@ const TOOL_TIERS: Record<string, ToolTier> = {
   Mcp: "readOnly",
   EnterPlanMode: "readOnly",
   ExitPlanMode: "readOnly",
+  ListAgents: "readOnly",
+  TaskList: "readOnly",
+  TaskOutput: "readOnly",
+  LSP: "readOnly",
+  StructuredOutput: "readOnly",
+  ReportFindings: "readOnly",
 }
 
 /** Unknown tools stay quiet rather than claim attention they may not deserve. */
 const DEFAULT_TOOL_TIER: ToolTier = "readOnly"
 
+/** What a call does, which is what its colour encodes. */
+export function getToolTier(name: string): ToolTier {
+  return TOOL_TIERS[name] ?? DEFAULT_TOOL_TIER
+}
+
 /** Tool name color. Bare text — no pill, no background, no border. */
 export function getToolTextStyle(name: string, isError = false): string {
   if (isError) return FAILED_TOOL_TEXT_STYLE
-  return TOOL_TIER_STYLES[TOOL_TIERS[name] ?? DEFAULT_TOOL_TIER]
+  return TOOL_TIER_STYLES[getToolTier(name)]
 }
 
 // ── Reusable toggle button for expand/collapse sections ──────────────────

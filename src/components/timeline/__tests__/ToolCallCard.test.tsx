@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { getToolSummary, getToolTextStyle, ToolCallCard } from "../ToolCallCard"
+import { getToolSummary, getToolTextStyle, getToolTier, ToolCallCard } from "../ToolCallCard"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
 import type { ToolCall } from "@/lib/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
@@ -124,6 +124,25 @@ describe("getToolSummary", () => {
 
   it("ToolSearch: returns query", () => {
     expect(getToolSummary(makeToolCall("ToolSearch", { query: "select:Read", max_results: 5 }))).toBe("select:Read")
+  })
+})
+
+describe("getToolTier", () => {
+  it("counts spawning, steering and messaging agents as changing the world", () => {
+    for (const name of ["Agent", "TaskCreate", "TaskUpdate", "TaskStop", "SendMessage", "EndConversation"]) {
+      expect(getToolTier(name)).toBe("mutating")
+    }
+  })
+
+  it("counts launching a workflow as changing the world", () => {
+    // A workflow run spawns a fleet of agents that edit the repo.
+    expect(getToolTier("Workflow")).toBe("mutating")
+  })
+
+  it("counts inspecting and reporting on that work as read-only", () => {
+    for (const name of ["ListAgents", "TaskList", "TaskOutput", "LSP", "StructuredOutput", "ReportFindings"]) {
+      expect(getToolTier(name)).toBe("readOnly")
+    }
   })
 })
 

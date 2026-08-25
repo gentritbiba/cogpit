@@ -429,6 +429,42 @@ function nativeWebPresentation(input: Record<string, unknown>): ToolPresentation
   }
 }
 
+/** Payload keys that schema-free tools use for a human-facing gist. */
+const SCHEMA_FREE_GIST_KEYS = ["summary", "headline", "verdict", "title"] as const
+
+/**
+ * Some tools carry a caller-defined payload with no fixed fields. Lead with a
+ * gist the payload names itself; failing that, count whatever it collected.
+ */
+function schemaFreeSummary(input: Record<string, unknown>): string {
+  const gist = firstString(...SCHEMA_FREE_GIST_KEYS.map((key) => input[key]))
+  if (gist) return truncate(gist)
+  for (const [key, value] of Object.entries(input)) {
+    if (!Array.isArray(value)) continue
+    const noun = value.length === 1 && key.endsWith("s") ? key.slice(0, -1) : key
+    return `${value.length} ${noun}`
+  }
+  return ""
+}
+
+/** Workflow calls carry a script, not a name; the run's name lives in its meta. */
+function workflowSummary(input: Record<string, unknown>): string {
+  const description = firstString(input.description)
+  if (description) return truncate(description)
+  const script = firstString(input.script)
+  const metaName = script ? extractJsStringPropertyValues(script, "name")[0] ?? "" : ""
+  return metaName || firstString(input.scriptPath)
+}
+
+/** Last resort for an unrecognised tool: the first string its input carries. */
+function firstStringValue(input: Record<string, unknown>): string {
+  const keys = Object.keys(input)
+  if (keys.length === 0) return ""
+  const first = input[keys[0]]
+  if (typeof first !== "string") return ""
+  return first.length > 80 ? first.slice(0, 80) + "..." : first
+}
+
 function defaultToolSummary(tc: SummarizableToolCall): string {
   const input = tc.input
   switch (tc.name) {
@@ -496,6 +532,36 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return String(input.skill ?? input.name ?? "")
     case "ToolSearch":
       return String(input.query ?? "")
+    case "SendMessage": {
+      const recipient = firstString(input.to, input.recipient)
+      const gist = truncate(firstString(input.summary, input.message, input.content))
+      return [recipient, gist].filter(Boolean).join(" · ")
+    }
+    case "ListAgents":
+    case "TaskList":
+      return ""
+    case "TaskCreate":
+      return truncate(firstString(input.subject, input.description))
+    case "TaskUpdate": {
+      const taskId = String(input.taskId ?? "")
+      const blockers = Array.isArray(input.addBlockedBy)
+        ? input.addBlockedBy.filter((id): id is string => typeof id === "string")
+        : []
+      const change = firstString(input.status)
+        || (blockers.length > 0 ? `blocked by ${blockers.join(", ")}` : "")
+      return change ? `${taskId} → ${change}` : taskId
+    }
+    case "TaskOutput":
+    case "TaskStop":
+      return String(input.task_id ?? "")
+    case "Workflow":
+      return workflowSummary(input)
+    case "StructuredOutput":
+    case "ReportFindings":
+    case "DesignSync":
+    case "Artifact":
+    case "LSP":
+      return schemaFreeSummary(input) || firstStringValue(input)
     case "spawn_agent":
       return String(input.task_name ?? input.message ?? "")
     case "wait_agent": {
@@ -522,13 +588,8 @@ function defaultToolSummary(tc: SummarizableToolCall): string {
       return String(input.status ?? "")
     case "view_image":
       return String(input.path ?? "")
-    default: {
-      const keys = Object.keys(input)
-      if (keys.length === 0) return ""
-      const first = input[keys[0]]
-      if (typeof first !== "string") return ""
-      return first.length > 80 ? first.slice(0, 80) + "..." : first
-    }
+    default:
+      return firstStringValue(input)
   }
 }
 
