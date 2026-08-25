@@ -90,9 +90,9 @@ import { randomInt } from "node:crypto"
  * collisions are excluded because a share passphrase is routinely read aloud
  * over a call.
  */
-export const PASSPHRASE_WORDS = [
+export const PASSPHRASE_WORDS: readonly string[] = [
   // At least 1832 entries: the test floor is N^4 * 100 > 2^50.
-] as const
+]
 
 export function generatePassphrase(): string {
   const words = Array.from(
