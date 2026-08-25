@@ -155,9 +155,13 @@ export const AgentMessageCard = memo(function AgentMessageCard({
   const askedAt = parseTime(timestamp)
   const replyDelay = reply ? elapsedBetween(askedAt, parseTime(reply.timestamp)) : null
   const awaiting = !reply && isLive === true
+  // A done report asked for nothing, so it is neither awaiting a reply nor
+  // unanswered. "Never answered" on one reads as a reproach for a message that
+  // wanted no reply.
+  const showState = Boolean(reply) || isQuestion
   // Only pumps a re-render each second; the wait itself is measured from the
   // message, so it survives a card that mounted long after the message arrived.
-  useElapsedTimer(awaiting)
+  useElapsedTimer(awaiting && showState)
 
   return (
     <div
@@ -222,23 +226,25 @@ export const AgentMessageCard = memo(function AgentMessageCard({
       )}
 
       <div className="mt-1.5 flex items-center justify-end gap-2">
-        <p
-          data-testid="agent-message-state"
-          className={`min-w-0 flex-1 truncate text-xs ${awaiting ? "text-warning" : "text-muted-foreground"}`}
-        >
-          {reply ? (
-            <>
-              {replyDelay === null ? "You replied" : `You replied ${formatDuration(replyDelay)} later`}
-              {reply.summary && ` \u00b7 "${reply.summary}"`}
-            </>
-          ) : awaiting ? (
-            askedAt === null
-              ? "Awaiting your reply"
-              : `Awaiting your reply \u00b7 ${formatDuration(Math.max(0, Date.now() - askedAt))}`
-          ) : (
-            "Never answered"
-          )}
-        </p>
+        {showState && (
+          <p
+            data-testid="agent-message-state"
+            className={`min-w-0 flex-1 truncate text-xs ${awaiting ? "text-warning" : "text-muted-foreground"}`}
+          >
+            {reply ? (
+              <>
+                {replyDelay === null ? "You replied" : `You replied ${formatDuration(replyDelay)} later`}
+                {reply.summary && ` \u00b7 "${reply.summary}"`}
+              </>
+            ) : awaiting ? (
+              askedAt === null
+                ? "Awaiting your reply"
+                : `Awaiting your reply \u00b7 ${formatDuration(Math.max(0, Date.now() - askedAt))}`
+            ) : (
+              "Never answered"
+            )}
+          </p>
+        )}
         <Button
           type="button"
           variant="ghost"

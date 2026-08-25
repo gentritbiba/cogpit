@@ -145,10 +145,16 @@ In the sample data every first line is already a real subject
 ## The three signals
 
 **Reply state — fact.** From the turnBuilder pairing pass. Renders as
-`You replied 22s later · "<the SendMessage summary>"`. Unanswered in a *live*
-session ticks `Awaiting your reply · 14m`; unanswered in a *historical* session
+`You replied 22s later · "<the SendMessage summary>"`. An unanswered *question*
+in a live session ticks `Awaiting your reply · 14m`; in a historical session it
 shows a flat `Never answered`. A counter ticking up from three weeks ago is
 noise pretending to be urgency.
+
+A message that asked nothing and got no reply shows **no state line at all** —
+`!looksLikeQuestion(body) && !reply`. Most agent mail is a done report; nobody
+was asked for anything, so `Never answered` reads as a reproach and
+`Awaiting your reply` names a wait nobody is in. The expand affordance and the
+body-size label stay. A report you replied to anyway still shows the reply.
 
 **Liveness — fact, best-effort.** `useSessionInventoryOptional()` returns
 `ActiveSessionInfo[]`, each already carrying `agentName` and `agentStatus`.
@@ -202,9 +208,10 @@ updated as part of the change.
 - **`agentEnvelope.test.ts`:** absorbs the existing `teammateMessage.test.ts`
   cases, covers both tag forms, malformed and unclosed tags, and
   `looksLikeQuestion` positives and negatives.
-- **`AgentMessageCard.test.tsx`:** no raw tag in rendered output; subject and
-  preview split correctly; awaiting vs replied footer; chip appears only when
-  question *and* unanswered.
+- **`AgentMessageCard.test.tsx`:** no raw tag in rendered output — fed a body
+  that still holds an envelope, so the assertion can fail; subject and preview
+  split correctly; awaiting vs replied vs no footer state; chip appears only
+  when question *and* unanswered.
 - `src/lib/__tests__/parser.test.ts:140` is a human prompt with no envelope, so
   it stays green unchanged.
 - `bun run check:cogpit-memory-sync` after touching `shared/session/`.

@@ -266,6 +266,10 @@ describe("AgentMessageCard", () => {
   describe("reply state", () => {
     const ASKED = "2026-08-21T19:26:25.000Z"
     const ANSWERED = "2026-08-21T19:26:47.000Z"
+    // The wait and the never-answered state are about a message that asked for
+    // something, so the bodies below have to be one.
+    const ASKING = "Ship it?"
+    const REPORT = "batch-2 done, verify is PASS."
     const stateLine = () => screen.getByTestId("agent-message-state").textContent
 
     it("shows the reply summary when the message was answered", () => {
@@ -301,7 +305,7 @@ describe("AgentMessageCard", () => {
     })
 
     it("shows a ticking wait only while the session is live", () => {
-      render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} isLive />)
+      render(<AgentMessageCard sender="w" body={ASKING} timestamp={ASKED} isLive />)
       expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
     })
 
@@ -309,7 +313,7 @@ describe("AgentMessageCard", () => {
       vi.useFakeTimers()
       try {
         vi.setSystemTime(new Date("2026-08-21T19:26:55.000Z"))
-        render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} isLive />)
+        render(<AgentMessageCard sender="w" body={ASKING} timestamp={ASKED} isLive />)
         expect(stateLine()).toBe("Awaiting your reply \u00b7 30s")
 
         act(() => { vi.advanceTimersByTime(5000) })
@@ -320,7 +324,7 @@ describe("AgentMessageCard", () => {
     })
 
     it("shows a flat never-answered state for a historical session", () => {
-      render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} />)
+      render(<AgentMessageCard sender="w" body={ASKING} timestamp={ASKED} />)
       expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
       expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
     })
@@ -330,7 +334,7 @@ describe("AgentMessageCard", () => {
       try {
         // Weeks after the fact: a rising counter here would be noise, not urgency.
         vi.setSystemTime(new Date("2026-09-11T19:26:55.000Z"))
-        render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} />)
+        render(<AgentMessageCard sender="w" body={ASKING} timestamp={ASKED} />)
         expect(stateLine()).toBe("Never answered")
 
         act(() => { vi.advanceTimersByTime(60_000) })
@@ -352,6 +356,40 @@ describe("AgentMessageCard", () => {
       )
       expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
       expect(stateLine()).toBe('You replied 22s later \u00b7 "done"')
+    })
+
+    // A done report wanted no reply. "Never answered" on one reads as a
+    // reproach, and "Awaiting your reply" is a wait nobody is in.
+    it("says nothing about a reply on a report that asked for none", () => {
+      render(<AgentMessageCard sender="w" body={REPORT} timestamp={ASKED} />)
+      expect(screen.queryByTestId("agent-message-state")).not.toBeInTheDocument()
+      expect(screen.queryByText(/Never answered/i)).not.toBeInTheDocument()
+    })
+
+    it("stays quiet on a report in a live session too", () => {
+      render(<AgentMessageCard sender="w" body={REPORT} timestamp={ASKED} isLive />)
+      expect(screen.queryByTestId("agent-message-state")).not.toBeInTheDocument()
+      expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
+    })
+
+    it("still shows the reply to a report you answered anyway", () => {
+      render(
+        <AgentMessageCard
+          sender="w"
+          body={REPORT}
+          timestamp={ASKED}
+          reply={{ summary: "nice", timestamp: ANSWERED }}
+        />,
+      )
+      expect(stateLine()).toBe('You replied 22s later \u00b7 "nice"')
+    })
+
+    it("keeps the expand affordance when the state line is gone", () => {
+      render(<AgentMessageCard sender="w" body={REPORT} timestamp={ASKED} />)
+      const expand = screen.getByRole("button", { name: /expand/i })
+      expect(expand.textContent).toContain(String(REPORT.length))
+      fireEvent.click(expand)
+      expect(screen.getByTestId("agent-message-body")).toBeInTheDocument()
     })
   })
 
