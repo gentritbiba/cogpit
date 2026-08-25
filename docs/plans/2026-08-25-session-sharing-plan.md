@@ -8,6 +8,12 @@
 
 **Tech Stack:** TypeScript, Node HTTP (Connect-style `UseFn` mounting, no Express Router), React 19, Vitest, bun.
 
+> **Note (2026-08-26):** this plan is kept as the historical task list. The
+> companion code-reference doc it cites as `[ref §N]` was deleted after
+> implementation — it was a verbatim snapshot of module signatures, useful only
+> while the work was in flight, and misleading once the code moved on.
+> `docs/plans/2026-08-25-session-sharing-design.md` describes the built system.
+
 **Companion documents:**
 - `docs/plans/2026-08-25-session-sharing-design.md` — the approved design and its rationale
 - `docs/plans/2026-08-25-session-sharing-code-reference.md` — verbatim current signatures for every module touched here. **Read the relevant section before each task.** Section numbers are cited per task as `[ref §N]`.
