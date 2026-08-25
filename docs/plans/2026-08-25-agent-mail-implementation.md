@@ -774,6 +774,29 @@ git commit -m "feat: pair peer messages with the SendMessage that answered them"
 
 ## Task 6: Serialization and mirror sync
 
+> **DONE — landed in `757f44b`.** Both serializers now handle `agent_message`
+> and both switches end in an exhaustiveness `default`.
+>
+> **The guard was watched firing.** With the `agent_message` case commented out,
+> `bun run typecheck` failed in each project separately:
+> `server/routes/session-context.ts(218,13): error TS2322: Type '{ kind: "agent_message"; sender: string; body: string; timestamp?: string | undefined; reply?: { summary: string; timestamp: string; } | undefined; }' is not assignable to type 'never'.`
+> and the same error at `packages/cogpit-memory/src/commands/context.ts(221,13)`.
+> Restoring the case returned all five gates to green.
+>
+> **Two corrections to this task as written.**
+> 1. The Step 1 snippet is correct as-is — it already omits `senderTaskId`, which
+>    Task 4 removed. Nothing to strip.
+> 2. The Step 4 `git add` is unsafe as written and was not used. Both files held
+>    unrelated in-flight work (the compaction-marker effort had hunks in *both*,
+>    not just `session-context.ts`), so a wholesale `git add` would have swept it
+>    in. The two hunks per file were staged selectively via `git apply --cached`
+>    and the staged diff read line by line: 28 insertions, 0 deletions, nothing
+>    but this task's code.
+>
+> Verified in isolation on a detached worktree built from the staged tree alone:
+> lint, typecheck, test (4091), check:cogpit-memory-sync all green. The full dirty
+> working tree also passes (4096 tests, typecheck:tests included).
+
 **Files:**
 - Modify: `server/routes/session-context.ts:157` (`mapContentBlock`)
 - Modify: `packages/cogpit-memory/src/commands/context.ts:161` (`mapContentBlock`)
