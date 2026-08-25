@@ -1,7 +1,7 @@
 import { readFile, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
-import { hashPassword } from "../password-utils"
+import { hashPassword, isPasswordHashed } from "../password-utils"
 import { generatePassphrase } from "./passphrase"
 
 /**
@@ -31,7 +31,15 @@ export interface ShareRecord {
 }
 
 /** Share shape safe to serialize to the host UI: no hash, no passphrase. */
-export type PublicShare = Omit<ShareRecord, "passwordHash">
+export interface PublicShare {
+  sessionId: string
+  dirName: string
+  fileName: string
+  createdAt: number
+  lastAccessAt: number
+  /** Makes handing a full `ShareRecord` to a public consumer a type error. */
+  passwordHash?: never
+}
 
 export interface CreateShareInput {
   sessionId: string
@@ -61,14 +69,18 @@ function normalizeShare(entry: unknown): ShareRecord | null {
     || typeof e.dirName !== "string"
     || typeof e.fileName !== "string"
     || typeof e.passwordHash !== "string"
+    // Unlike device passwords, share passphrases are only ever stored hashed.
+    // A plaintext or empty value here would authenticate whoever guesses it.
+    || !isPasswordHashed(e.passwordHash)
   ) return null
   return {
     sessionId: e.sessionId,
     dirName: e.dirName,
     fileName: e.fileName,
     passwordHash: e.passwordHash,
-    createdAt: typeof e.createdAt === "number" ? e.createdAt : 0,
-    lastAccessAt: typeof e.lastAccessAt === "number" ? e.lastAccessAt : 0,
+    createdAt: typeof e.createdAt === "number" && Number.isFinite(e.createdAt) ? e.createdAt : 0,
+    lastAccessAt:
+      typeof e.lastAccessAt === "number" && Number.isFinite(e.lastAccessAt) ? e.lastAccessAt : 0,
   }
 }
 
@@ -92,7 +104,9 @@ async function persist(
   filePath: string | null,
   snapshot: readonly ShareRecord[],
 ): Promise<void> {
-  if (!filePath) return
+  // Silently skipping the write would hand out a passphrase for a share that
+  // the first initShareRegistry then discards.
+  if (!filePath) throw new Error("Share registry mutated before initShareRegistry")
   await writeOwnerOnlyJson(filePath, snapshot)
 }
 
@@ -105,17 +119,14 @@ function commitShareMutation<T>(
   mutate: (draft: Map<string, ShareRecord>) => ShareMutation<T>,
 ): Promise<T> {
   return enqueueRegistryOperation(async () => {
-    // Clone records as well as the map so an existing share reference cannot
-    // change the candidate while its atomic write is in flight.
-    const draft = new Map(
-      [...shares].map(([sessionId, share]) => [sessionId, { ...share }]),
-    )
+    const draft = new Map(shares)
     const mutation = mutate(draft)
     if (!mutation.changed) return mutation.value
 
-    // The durable snapshot is created inside the serialized queue turn. Live
-    // state changes only after persistence succeeds, so rejection implicitly
-    // rolls the mutation back by discarding this draft.
+    // The durable snapshot is created inside the serialized queue turn, and
+    // clones each record so a concurrent touchShare cannot alter what is being
+    // written. Live state changes only after persistence succeeds, so rejection
+    // implicitly rolls the mutation back by discarding this draft.
     const snapshot = [...draft.values()].map((share) => ({ ...share }))
     await persist(registryPath, snapshot)
     replaceShares(draft)
@@ -165,14 +176,18 @@ export async function initShareRegistry(dir: string): Promise<void> {
 // ── Reads ────────────────────────────────────────────────────────────
 
 function toPublicShare(share: ShareRecord): PublicShare {
-  // Explicitly destructure the hash out so it can never leak.
-  const { passwordHash: _passwordHash, ...safe } = share
-  void _passwordHash
-  return safe
+  // Built field by field: a future secret on ShareRecord stays out by default.
+  return {
+    sessionId: share.sessionId,
+    dirName: share.dirName,
+    fileName: share.fileName,
+    createdAt: share.createdAt,
+    lastAccessAt: share.lastAccessAt,
+  }
 }
 
 /** Full share record including the hash — for internal (server-side) use only. */
-export function getShare(sessionId: string): ShareRecord | undefined {
+export function getShareWithHash(sessionId: string): ShareRecord | undefined {
   return shares.get(sessionId)
 }
 
@@ -188,20 +203,22 @@ export function listShares(): PublicShare[] {
 
 /**
  * Share a session, replacing any existing share for it. The previous
- * passphrase stops working the moment this resolves.
+ * passphrase stops working the moment this resolves. Re-sharing keeps the
+ * original `createdAt` so the host list still surfaces long-forgotten shares.
  */
 export async function createShare(input: CreateShareInput): Promise<IssuedShare> {
   const passphrase = generatePassphrase()
   const passwordHash = hashPassword(passphrase)
   const share = await commitShareMutation((draft) => {
-    const now = Date.now()
+    const existing = draft.get(input.sessionId)
     const record: ShareRecord = {
       sessionId: input.sessionId,
       dirName: input.dirName,
       fileName: input.fileName,
       passwordHash,
-      createdAt: now,
-      lastAccessAt: now,
+      createdAt: existing?.createdAt ?? Date.now(),
+      // No guest has ever used this passphrase; the UI renders 0 as "never".
+      lastAccessAt: 0,
     }
     draft.set(record.sessionId, record)
     return { changed: true, value: toPublicShare(record) }

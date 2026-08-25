@@ -22,7 +22,7 @@ vi.mock("../../atomicJsonFile", async (importOriginal) => {
 import {
   initShareRegistry,
   createShare,
-  getShare,
+  getShareWithHash,
   listShares,
   removeShare,
   rotateSharePassword,
@@ -54,7 +54,7 @@ describe("share registry", () => {
   it("returns the plaintext passphrase exactly once, at creation", async () => {
     const created = await createShare(INPUT)
     expect(created.passphrase).toMatch(/-\d{2}$/)
-    const stored = getShare("sess-1")
+    const stored = getShareWithHash("sess-1")
     expect(stored).toBeDefined()
     expect(stored).not.toHaveProperty("passphrase")
     expect(verifyPassword(created.passphrase, stored!.passwordHash)).toBe(true)
@@ -75,23 +75,33 @@ describe("share registry", () => {
   it("reloads shares from disk", async () => {
     const created = await createShare(INPUT)
     await initShareRegistry(dir)
-    expect(verifyPassword(created.passphrase, getShare("sess-1")!.passwordHash)).toBe(true)
+    expect(verifyPassword(created.passphrase, getShareWithHash("sess-1")!.passwordHash)).toBe(true)
   })
 
-  it("re-sharing an already shared session replaces the passphrase", async () => {
+  it("re-sharing an already shared session replaces the passphrase but keeps createdAt", async () => {
     const first = await createShare(INPUT)
     const second = await createShare(INPUT)
     expect(second.passphrase).not.toBe(first.passphrase)
     expect(listShares()).toHaveLength(1)
-    expect(verifyPassword(first.passphrase, getShare("sess-1")!.passwordHash)).toBe(false)
+    expect(verifyPassword(first.passphrase, getShareWithHash("sess-1")!.passwordHash)).toBe(false)
+    expect(second.share.createdAt).toBe(first.share.createdAt)
+  })
+
+  it("reports a brand new share as never accessed", async () => {
+    const created = await createShare(INPUT)
+    expect(created.share.lastAccessAt).toBe(0)
+
+    touchShare("sess-1")
+    const reshared = await createShare(INPUT)
+    expect(reshared.share.lastAccessAt).toBe(0)
   })
 
   it("rotates the passphrase in place", async () => {
     const first = await createShare(INPUT)
     const rotated = await rotateSharePassword("sess-1")
     expect(rotated).not.toBeNull()
-    expect(verifyPassword(first.passphrase, getShare("sess-1")!.passwordHash)).toBe(false)
-    expect(verifyPassword(rotated!.passphrase, getShare("sess-1")!.passwordHash)).toBe(true)
+    expect(verifyPassword(first.passphrase, getShareWithHash("sess-1")!.passwordHash)).toBe(false)
+    expect(verifyPassword(rotated!.passphrase, getShareWithHash("sess-1")!.passwordHash)).toBe(true)
   })
 
   it("rotating an unknown share returns null", async () => {
@@ -101,13 +111,37 @@ describe("share registry", () => {
   it("removes shares", async () => {
     await createShare(INPUT)
     expect(await removeShare("sess-1")).toBe(true)
-    expect(getShare("sess-1")).toBeUndefined()
+    expect(getShareWithHash("sess-1")).toBeUndefined()
     expect(await removeShare("sess-1")).toBe(false)
   })
 
   it("listShares never exposes the hash", async () => {
     await createShare(INPUT)
     expect(listShares()[0]).not.toHaveProperty("passwordHash")
+  })
+
+  it("never hands the hash back to the caller that issues a passphrase", async () => {
+    const created = await createShare(INPUT)
+    expect(created.share).not.toHaveProperty("passwordHash")
+
+    const rotated = await rotateSharePassword("sess-1")
+    expect(rotated!.share).not.toHaveProperty("passwordHash")
+  })
+
+  it("drops records whose passwordHash is not a recognised hash", async () => {
+    await writeFile(registryFile(), JSON.stringify([
+      { ...INPUT, sessionId: "empty-hash", passwordHash: "", createdAt: 1, lastAccessAt: 0 },
+      { ...INPUT, sessionId: "plaintext", passwordHash: "hunter2", createdAt: 1, lastAccessAt: 0 },
+    ]))
+    await initShareRegistry(dir)
+    expect(listShares()).toHaveLength(0)
+  })
+
+  it("refuses to mutate a registry that was never pointed at a file", async () => {
+    vi.resetModules()
+    const uninitialised = await import("../../share/registry")
+    await expect(uninitialised.createShare(INPUT)).rejects.toThrow(/initShareRegistry/)
+    expect(uninitialised.listShares()).toHaveLength(0)
   })
 
   it("starts empty on corrupt JSON instead of throwing", async () => {
@@ -128,7 +162,7 @@ describe("share registry", () => {
 
   it("touches lastAccessAt in memory without rewriting the file", async () => {
     await createShare(INPUT)
-    const before = getShare("sess-1")!.lastAccessAt
+    const before = getShareWithHash("sess-1")!.lastAccessAt
     const persistedBefore = await readFile(registryFile(), "utf-8")
 
     const now = vi.spyOn(Date, "now").mockReturnValue(before + 60_000)
@@ -136,8 +170,38 @@ describe("share registry", () => {
     touchShare("never-shared")
     now.mockRestore()
 
-    expect(getShare("sess-1")!.lastAccessAt).toBe(before + 60_000)
+    expect(getShareWithHash("sess-1")!.lastAccessAt).toBe(before + 60_000)
     expect(await readFile(registryFile(), "utf-8")).toBe(persistedBefore)
+  })
+
+  it("keeps a guest touch that lands while another share's write is in flight", async () => {
+    await createShare(INPUT)
+    const touchedAt = 1_770_000_000_000
+
+    let startWrite!: () => void
+    let releaseWrite!: () => void
+    const writeStarted = new Promise<void>((resolve) => {
+      startWrite = resolve
+    })
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    atomicWrite.implementation = async () => {
+      startWrite()
+      await writeGate
+    }
+
+    const pending = createShare({ ...INPUT, sessionId: "sess-2" })
+    await writeStarted
+
+    const now = vi.spyOn(Date, "now").mockReturnValue(touchedAt)
+    touchShare("sess-1")
+    now.mockRestore()
+
+    releaseWrite()
+    await pending
+
+    expect(getShareWithHash("sess-1")!.lastAccessAt).toBe(touchedAt)
   })
 
   it("rolls back a failed persist and keeps the queue usable", async () => {
@@ -148,10 +212,10 @@ describe("share registry", () => {
     }
 
     await expect(rotateSharePassword("sess-1")).rejects.toBe(failure)
-    expect(verifyPassword(created.passphrase, getShare("sess-1")!.passwordHash)).toBe(true)
+    expect(verifyPassword(created.passphrase, getShareWithHash("sess-1")!.passwordHash)).toBe(true)
 
     await expect(removeShare("sess-1")).rejects.toBe(failure)
-    expect(getShare("sess-1")).toBeDefined()
+    expect(getShareWithHash("sess-1")).toBeDefined()
 
     atomicWrite.implementation = undefined
     expect(await removeShare("sess-1")).toBe(true)
