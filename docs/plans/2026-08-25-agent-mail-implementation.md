@@ -1200,6 +1200,36 @@ git commit -m "feat: render agent messages in the timeline"
 
 ## Task 10: Reply state footer
 
+> **DONE — landed in `fc672c9`.** All three plan tests pass as written, plus 5
+> more on the card and 2 on `TurnSection` (10 new tests; 4113 -> 4123).
+>
+> - **`useElapsedTimer` is a re-render pump here, nothing more.** It counts from
+>   when `active` flipped, so its return value is the time since mount, not since
+>   the message — a card opened on a 14-minute-old wait would read "0s". The card
+>   calls it for the tick and measures `Date.now() - askedAt` itself. Two
+>   fake-timer tests pin this: the live one advances 5s and expects 30s -> 35s,
+>   and the historical one advances 60s and expects "Never answered" both times.
+> - **`isLive={isAgentActive}`**, per the plan. Note what that actually means:
+>   `isAgentActive` is `isLive && index === turns.length - 1`, so an unanswered
+>   message in an *earlier* turn of a live session reads "Never answered". That
+>   is the source the plan named, and it is arguably right — the turn that
+>   message arrived in has already ended.
+> - **The stale Task 8 test was narrowed, not kept.** "accepts the reply and
+>   liveness props reserved for later tasks" now covers only `liveStatus`, the
+>   one prop still unrendered until Task 12.
+> - `formatTime` was refactored onto a shared `parseTime`; `elapsedBetween`
+>   returns null for an unreadable or out-of-order pair, so a bad timestamp
+>   renders `You replied \u00b7 "..."` with no bogus duration rather than "NaN"
+>   or a negative.
+> - **Layout:** the state line is `flex-1 min-w-0 truncate` ahead of the expand
+>   affordance. No `shrink-0` was needed on the Button — `ui/button` already
+>   carries it.
+> - `formatDuration` renders 14 minutes as `14m 0s`, not the design doc's `14m`.
+>   The plan named `formatDuration`, so that is what shipped.
+> - No browser screenshot: vite dev is CSP-blocked in a plain browser and a
+>   standalone build was not worth it for a footer line. Task 13's real-session
+>   check is the visual gate.
+
 **Files:**
 - Modify: `src/components/timeline/AgentMessageCard.tsx`
 - Modify: `src/components/timeline/__tests__/AgentMessageCard.test.tsx`
