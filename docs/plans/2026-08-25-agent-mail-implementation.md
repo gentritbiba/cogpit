@@ -976,6 +976,24 @@ git commit -m "refactor: fold teammateMessage into shared agentEnvelope"
 
 ## Task 8: The card — identity, subject, preview
 
+> **DONE — landed in `9fc9d75`.** All six plan tests pass as written, plus 13
+> more (19 total). Deviations, all deliberate:
+> - **Two accent lightnesses, not one.** The card emits `--agent-hue` inline and
+>   picks the colour with Tailwind arbitrary values: `oklch(0.52 0.16 h)` light,
+>   `oklch(0.74 0.14 h)` dark. The plan's single `0.74` is ~10:1 on the OLED
+>   theme but only ~2:1 on the white one, i.e. unreadable there.
+> - **`data-agent-rail` sits on the card itself**, whose 3px left border *is* the
+>   rail. jsdom's CSSOM drops `oklch()` from inline styles, so a colour set
+>   inline on a separate rail div would make the stability test vacuous; the hue
+>   custom property survives and inherits to the sender name.
+> - **Expanding replaces subject+preview** with the full markdown rather than
+>   stacking both — the subject is the body's own first line.
+> - Exported helpers are `agentAccentHue(sender)` and `flattenToPlainText(md)`.
+> - Slots left for later tasks: header is two flex groups (dot after the name in
+>   the left group, chip before the time in the right one); the footer row is
+>   `justify-end` with the expand affordance, so Task 10's state line goes in
+>   ahead of it.
+
 **Files:**
 - Create: `src/components/timeline/AgentMessageCard.tsx`
 - Create: `src/components/timeline/__tests__/AgentMessageCard.test.tsx`
