@@ -23,6 +23,24 @@ Things that are non-obvious about this codebase and will cost you an hour if you
 3. **The enqueue ledger keys on raw text.** `noteEnqueueSourced` / `consumeEnqueueSourced` reconcile a `queue-operation` enqueue against the later `attachment` copy of the *same* prompt by exact string match on the raw prompt text. If you start keying that ledger on the stripped body, every peer message renders twice. Keep `raw` as the ledger key throughout.
 4. **Tests are Vitest, run with `bun run test`.** Per `CLAUDE.md`, a change is not complete until `bun run test` passes and affected tests are updated.
 5. **Commit after every task.** Do not batch.
+6. **The working tree is shared with other, unrelated uncommitted efforts.**
+   As of 2026-08-25 there were three: a chat-width feature, a compaction-marker
+   feature (spanning `shared/session/`, `server/routes/session-context.ts`, AND
+   `packages/cogpit-memory/src/commands/`), and an icon/branding change.
+
+   **Staging protocol — follow it on every task:**
+   - Run `git status --short` before editing. Any file already showing ` M`
+     contains someone else's work.
+   - For those files, never `git add <file>` wholesale. Stage your hunks only
+     (`git add -p`, or `git apply --cached` with a filtered patch).
+   - Before committing, read `git diff --cached` in full and confirm every line
+     is yours. `--numstat` showing zero deletions on a file you only added to is
+     a good second check.
+   - **Never** run `git add -A`, `git add .`, `git commit -a`/`-am`,
+     `git checkout -- .`, `git stash`, `git reset`, or `git restore`. Each of
+     these destroys or steals uncommitted work belonging to someone else.
+   - Verify in a throwaway detached worktree at HEAD if you need a clean test
+     signal, then remove it.
 
 ---
 
@@ -936,9 +954,15 @@ Expected: PASS. Any remaining import of `teammateMessage` is a lint/typecheck er
 **Step 4: Commit**
 
 ```bash
-git add -A
+# NOT `git add -A` — other efforts have uncommitted work in this tree.
+git add src/lib/teammateMessage.ts src/lib/__tests__/teammateMessage.test.ts \
+        src/components/StickyPromptBanner.tsx src/components/timeline/UserMessage.tsx
+# plus any agentEnvelope.test.ts hunks, staged selectively if that file is dirty
+git diff --cached   # read it; confirm every line is yours
 git commit -m "refactor: fold teammateMessage into shared agentEnvelope"
 ```
+
+(`git rm` already stages the two deletions.)
 
 ---
 
@@ -1124,7 +1148,10 @@ Use the `run` skill to launch the app, then agent-browser for the screenshot. Cl
 **Step 5: Commit**
 
 ```bash
-git add src/components/timeline/TurnSection.tsx src/lib/turnFold.ts src/lib/timelineHelpers.ts src/lib/__tests__/
+# Name the test files explicitly — `src/lib/__tests__/` would sweep in
+# parser.test.ts, which another effort is editing.
+git add src/components/timeline/TurnSection.tsx src/lib/turnFold.ts src/lib/timelineHelpers.ts \
+        src/lib/__tests__/turnFold.test.ts src/lib/__tests__/timelineHelpers.test.ts
 git commit -m "feat: render agent messages in the timeline"
 ```
 
@@ -1165,7 +1192,9 @@ it("shows a flat never-answered state for a historical session", () => {
 **Step 5: Commit**
 
 ```bash
-git commit -am "feat: show reply state on agent messages"
+git add src/components/timeline/AgentMessageCard.tsx src/components/timeline/__tests__/AgentMessageCard.test.tsx src/components/timeline/TurnSection.tsx
+git diff --cached   # read it; confirm every line is yours
+git commit -m "feat: show reply state on agent messages"
 ```
 
 ---
@@ -1203,7 +1232,9 @@ it("does not flag a done report", () => {
 **Step 5: Commit**
 
 ```bash
-git commit -am "feat: flag unanswered agent questions"
+git add src/components/timeline/AgentMessageCard.tsx src/components/timeline/__tests__/AgentMessageCard.test.tsx
+git diff --cached   # read it; confirm every line is yours
+git commit -m "feat: flag unanswered agent questions"
 ```
 
 ---
@@ -1246,7 +1277,9 @@ it("shows no dot when two sessions share the sender name", () => {
 **Step 5: Commit**
 
 ```bash
-git commit -am "feat: show sender liveness on agent messages"
+git add src/components/timeline/AgentMessageCard.tsx src/components/timeline/__tests__/AgentMessageCard.test.tsx
+git diff --cached   # read it; confirm every line is yours
+git commit -m "feat: show sender liveness on agent messages"
 ```
 
 ---
