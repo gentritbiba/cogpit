@@ -23,6 +23,11 @@ export interface Capabilities {
   viewAllSessions: boolean
   /** Inspect provider account identity, quota, credit, and usage metadata. */
   viewUsage: boolean
+  /**
+   * Hand a session to a guest over a share link. Admin-only: a guest can
+   * approve tool permission requests, so sharing grants a stranger host code
+   * execution — strictly more reach than the member sharing it has alone.
+   */
   share: boolean
   runFlows: boolean
 }
@@ -51,7 +56,7 @@ export const MEMBER_CAPABILITIES: Capabilities = {
   killAny: false,
   viewAllSessions: false,
   viewUsage: false,
-  share: true,
+  share: false,
   runFlows: true,
 }
 

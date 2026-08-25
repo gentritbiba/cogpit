@@ -1,4 +1,5 @@
 import { Eye, EyeOff, Wifi, WifiOff, Smartphone, Tablet, Monitor } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import {
   Field,
@@ -12,6 +13,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { useShares, type HostShare } from "@/hooks/useShare"
 
 function DeviceIcon({ name }: { name: string }) {
   const n = name.toLowerCase()
@@ -28,6 +30,74 @@ function formatTimeAgo(ts: number): string {
   const hours = Math.floor(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
+}
+
+/** One scannable line per share: how old it is, whether anyone ever opened it. */
+function shareSummary(share: HostShare): string {
+  const parts = [
+    `Shared ${formatTimeAgo(share.createdAt)}`,
+    // lastAccessAt is 0 until a guest arrives, which would date to 1970.
+    share.lastAccessAt > 0 ? `opened ${formatTimeAgo(share.lastAccessAt)}` : "never opened",
+  ]
+  if (share.guests > 0) parts.push(share.guests === 1 ? "1 guest" : `${share.guests} guests`)
+  return parts.join(" · ")
+}
+
+/**
+ * Every session currently reachable by a share link. Nothing else in the app
+ * lists them, so this is the only place a share that was enabled weeks ago and
+ * forgotten becomes visible again — which is the whole reason it exists.
+ */
+function SharedSessionsList() {
+  const { shares, revoke, revokeAll } = useShares()
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex h-6 items-center justify-between">
+        <p className="text-xs text-muted-foreground">Shared sessions</p>
+        {shares.length > 0 && (
+          <Button
+            variant="ghost"
+            size="xs"
+            className="text-destructive hover:text-destructive"
+            onClick={() => void revokeAll()}
+          >
+            Revoke all
+          </Button>
+        )}
+      </div>
+
+      {shares.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No sessions are shared.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {shares.map((share) => {
+            const label = share.title || share.sessionId
+            return (
+              <div
+                key={share.sessionId}
+                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-foreground">{label}</p>
+                  <p className="text-xs text-muted-foreground">{shareSummary(share)}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  aria-label={`Revoke share of ${label}`}
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => void revoke(share.sessionId)}
+                >
+                  Revoke
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface NetworkAccessSectionProps {
@@ -136,6 +206,8 @@ export function NetworkAccessSection({
           </div>
         </div>
       )}
+
+      <SharedSessionsList />
     </div>
   )
 }

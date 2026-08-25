@@ -29,7 +29,7 @@ describe("capabilities", () => {
     expect(can("configWrite")).toBe(false)
     expect(can("manageDevices")).toBe(false)
     expect(can("killAny")).toBe(false)
-    expect(can("share")).toBe(true)
+    expect(can("share")).toBe(false)
     expect(can("runFlows")).toBe(true)
   })
 

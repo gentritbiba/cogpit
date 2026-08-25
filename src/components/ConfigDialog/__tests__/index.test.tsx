@@ -24,6 +24,7 @@ function mockConfig(overrides: Partial<typeof SAVED_CONFIG> = {}) {
     if (url === "/api/config") {
       return Promise.resolve({ ok: true, json: async () => ({ ...SAVED_CONFIG, ...overrides }) })
     }
+    if (url === "/api/shares") return Promise.resolve({ ok: true, json: async () => [] })
     throw new Error(`Unexpected request: ${url}`)
   })
 }
