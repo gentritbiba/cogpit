@@ -1107,6 +1107,7 @@ Model it on `POST /api/auth/verify` (`server/routes/config.ts:205-310`). The beh
 - **Busy.** `verifyRemotePassword` returning `"busy"` → 429 with a distinct message.
 - **HTTPS required for a browser.** When `req.headers["x-cogpit-client"] === "1"` and `canIssueBrowserSession(req)` is false → 426, message naming the tunnel. Mirrors the main login.
 - **CSRF.** `hasTrustedMutationSource(req)` false → 403.
+- **Revocation during the derivation window (REQUIRED — found in Task 2 review).** `getShare()` returns the live record, and `verifyPasswordAsync` takes ~95ms. A share revoked or rotated during that window still authenticates, because the handler is holding a stale reference. Capture `share.passwordHash` before the derivation, then after it re-read `getShare(sessionId)` and confirm the hash is unchanged before minting a token; bail with the same generic 401 otherwise. The hub registry solves the equivalent problem with `connectionRevision` + `sameDeviceConnection` (`server/hub/registry.ts:53`) — mirror that if you prefer an explicit epoch. Write the failing test first: rotate the passphrase mid-derivation and assert no token is issued.
 - **Success** → `createShareToken`, `setShareCookie`, respond `{ valid: true }`. Never return the token in the body — a guest is always a browser, and a body token would be readable by script.
 
 **Commit**
