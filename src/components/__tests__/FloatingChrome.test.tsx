@@ -248,7 +248,8 @@ describe("FloatingChrome", () => {
 
     expect(screen.getByText("opus")).toBeInTheDocument()
     expect(screen.getByLabelText("Session is live")).toBeInTheDocument()
-    expect(screen.getByText(/93%/)).toBeInTheDocument()
+    // opus-4-5 is a 200k model: 65k used of the 167k usable before auto-compact.
+    expect(screen.getByText(/61%/)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Workflows/ })).toHaveTextContent("2")
     expect(screen.queryByText("feat/clean-header")).not.toBeInTheDocument()
 

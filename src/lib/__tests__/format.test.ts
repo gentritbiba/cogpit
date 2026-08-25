@@ -277,29 +277,12 @@ describe("formatCost", () => {
 
 // ── getContextLimit ───────────────────────────────────────────────────────
 
+// Per-model behaviour is owned by src/lib/__tests__/contextWindow.test.ts;
+// format.ts only re-exports the helper, so this pins the re-export itself.
 describe("getContextLimit", () => {
-  it("defaults to 1M for opus models", () => {
-    expect(getContextLimit("claude-opus-4-6")).toBe(1_000_000)
-  })
-
-  it("defaults to 1M for sonnet models", () => {
-    expect(getContextLimit("claude-sonnet-4-5")).toBe(1_000_000)
-  })
-
-  it("defaults to 1M for haiku models", () => {
-    expect(getContextLimit("claude-haiku-4-5")).toBe(1_000_000)
-  })
-
-  it("defaults to 1M for unknown models", () => {
-    expect(getContextLimit("gpt-4")).toBe(1_000_000)
-  })
-
-  it("returns 1M for opus[1m] models", () => {
-    expect(getContextLimit("claude-opus-4-6[1m]")).toBe(1_000_000)
-  })
-
-  it("returns 1M for sonnet[1m] models", () => {
-    expect(getContextLimit("claude-sonnet-4-6[1m]")).toBe(1_000_000)
+  it("re-exports the shared context-limit helper", () => {
+    expect(getContextLimit("claude-opus-5")).toBe(1_000_000)
+    expect(getContextLimit("claude-haiku-4-5")).toBe(200_000)
   })
 })
 

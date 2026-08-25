@@ -8,12 +8,34 @@
 /** Headroom Claude Code reserves before auto-compaction fires. */
 export const AUTO_COMPACT_BUFFER = 33_000
 
-const DEFAULT_CONTEXT_LIMIT = 1_000_000
 const EXTENDED_CONTEXT_LIMIT = 1_000_000
+const STANDARD_CONTEXT_LIMIT = 200_000
+
+/**
+ * Models whose context window is 200k. Everything else is treated as
+ * current-generation (1M), so a model released after this list was written
+ * reports the larger window rather than a stale small one.
+ *
+ * Deliberately not family-based: sonnet-4-5 is 200k while sonnet-4-6 is 1M,
+ * and opus-4-5 is 200k while opus-4-6 and later are 1M. Source: LiteLLM
+ * `max_input_tokens`, the same table the cost code prices against.
+ */
+const STANDARD_CONTEXT_MODELS = [
+  "claude-haiku-4-5",
+  "claude-haiku-4-1",
+  "claude-sonnet-4-5",
+  "claude-opus-4-5",
+  "claude-opus-4-1",
+]
 
 export function getContextLimit(model: string): number {
-  if (model.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
-  return DEFAULT_CONTEXT_LIMIT
+  const normalized = model.trim().toLowerCase()
+  // An explicit [1m] request wins over the model's default window.
+  if (normalized.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
+  // Provider-prefixed ids (`vertex_ai/…`, `bedrock/anthropic.…`) embed the
+  // model name, so a substring match covers every spelling.
+  const isStandard = STANDARD_CONTEXT_MODELS.some((id) => normalized.includes(id))
+  return isStandard ? STANDARD_CONTEXT_LIMIT : EXTENDED_CONTEXT_LIMIT
 }
 
 /** Token counts reported by one assistant response. */
