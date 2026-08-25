@@ -109,6 +109,21 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
   "session-status": authed("/api/session-status"),
+  // Guest login is public because it is where a guest whose token expired gets
+  // a new one; the share registry's own passphrase check is what gates it.
+  // requirementFor resolves longest-prefix-first, so the longer /api/shares
+  // keeps the host API admin-only even though /api/share is public.
+  shares: [
+    { prefix: "/api/share/verify", requires: "public" },
+    { prefix: "/api/shares", requires: "admin" },
+  ],
+  // "public" here is a statement of fact, not a decision: a share guest carries
+  // no SessionPrincipal, and team authz admits principal-less requests without
+  // consulting this table at all. A stricter requirement on /api/share would be
+  // enforced against nobody while reading like protection. What actually scopes
+  // a guest is the share branch of authMiddleware plus the allowlist, and every
+  // handler in the namespace re-validates the share token itself.
+  "share-guest": [{ prefix: "/api/share", requires: "public" }],
   editor: admin("/api/reveal-in-folder", "/api/open-terminal", "/api/open-in-editor"),
   worktrees: [
     { prefix: "/api/worktrees", methods: ["GET"], requires: "authed" },
