@@ -157,11 +157,21 @@ running status, green for idle. No provider, no match, or an ambiguous match
 across two teams means **no dot** — silence beats a grey "unknown" on every
 card. No server work.
 
-**Intent — the only guess, and gated.** `looksLikeQuestion(body)` fires on a `?`
-in the last quarter of the body, or a lead-line phrase (`blocking question`,
-`before I touch`, `should I`, `tell me one of`, `your call`, `who owns`).
-Questions land at the end or get announced up front; both sampled messages do
-exactly this.
+**Intent — the only guess, and gated.** `looksLikeQuestion(body)` fires on a
+lead-phrase in the first 200 chars (`blocking question`, `before I touch`,
+`should I`, `tell me one of`, `your call`, `who owns`, `confirm whether`), or on
+the **closing line** — its last 200 chars, URLs removed — carrying a `?` or a
+request put to the reader in imperative position (`…, tell me`, `…, say so`).
+Questions land at the end or get announced up front.
+
+Scope is the closing *line*, not the last quarter of the body: a quarter of a
+long report reaches back far enough to catch a question the report itself quoted
+and then answered. The imperative-position rule is what separates
+"If you'd rather not, say so" from "the types say so", and what keeps the
+"Let me know if you want…" sign-off — an offer, not a request — unflagged.
+On the four real peer messages in `…honest-cms/ddb6fc34….jsonl` this is 2/2 on
+the messages that ask and 0/2 false positives; without the request patterns it
+was 1/2.
 
 The `NEEDS YOU` chip requires `looksLikeQuestion && !reply`. Both conditions.
 A false positive disappears the moment you reply, so the chip cannot go stale —

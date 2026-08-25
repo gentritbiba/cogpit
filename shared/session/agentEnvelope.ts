@@ -86,13 +86,30 @@ const ASK_PATTERNS = [
   /\bconfirm whether\b/,
 ]
 
+/**
+ * Requests the closing line puts to the reader, for the message that asks you to
+ * choose without ever typing a `?`. Only in imperative position: that is what
+ * separates ", tell me and I'll chain it" from "the logs tell me nothing", and
+ * it is why "let me know if you want X" — an offer, not a request — stays out.
+ */
+const REQUEST_PATTERNS = [
+  /(?:^|[,;:.!?—–-]\s*)tell me\b/,
+  /(?:^|[,;:.!?—–-]\s*)say so\b/,
+]
+
 const LEAD_CHARS = 200
-/** Questions land at the end of a report, so only its closing line counts. */
+/**
+ * Questions land at the end of a report, so only its closing line counts —
+ * scoped to the line, not to the last quarter of the body, because a quarter of
+ * a long report reaches back far enough to catch a question the report itself
+ * quoted and then answered.
+ */
 const TAIL_CHARS = 200
 const URL_RE = /\bhttps?:\/\/\S+/g
 
 /**
- * Whether a message reads as asking the reader for something.
+ * Whether a message reads as asking the reader for something: announced in the
+ * opening, or left on the closing line as a `?` or a request.
  *
  * This is the one guessed signal in agent mail, so callers must gate it on the
  * message also being unanswered — a false positive then disappears as soon as
@@ -106,5 +123,6 @@ export function looksLikeQuestion(body: string): boolean {
   if (ASK_PATTERNS.some((pattern) => pattern.test(lead))) return true
 
   const lastLine = trimmed.slice(trimmed.lastIndexOf("\n") + 1)
-  return lastLine.slice(-TAIL_CHARS).replace(URL_RE, "").includes("?")
+  const closing = lastLine.slice(-TAIL_CHARS).replace(URL_RE, "").toLowerCase()
+  return closing.includes("?") || REQUEST_PATTERNS.some((pattern) => pattern.test(closing))
 }

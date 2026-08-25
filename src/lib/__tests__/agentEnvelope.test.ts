@@ -84,6 +84,28 @@ describe("looksLikeQuestion", () => {
   it("returns false for empty input", () => {
     expect(looksLikeQuestion("   ")).toBe(false)
   })
+
+  // Real `vehicle-batch` message from `…honest-cms/ddb6fc34….jsonl`. It asks the
+  // reader to pick one of two branches and never types a `?`, which is how the
+  // heuristic came to have 50% recall on the traffic it was built for.
+  it("fires when the closing line asks the reader to choose", () => {
+    expect(
+      looksLikeQuestion(
+        "If you add that step, tell me and I'll chain it. If you'd rather not, say so — I'll leave item 10 open.",
+      ),
+    ).toBe(true)
+  })
+
+  it("still fires when the tail cap cuts the first of the two requests", () => {
+    // The closing line as actually written is 305 chars, so `tell me` falls
+    // outside the 200-char window and `say so` is what has to carry it.
+    const closingLine =
+      "If you add that step, tell me and I'll chain `&& bun run typecheck:stress` onto `typecheck` in the same branch. " +
+      "If you'd rather not, say so and I'll leave `typecheck:stress` as a manual-only script and note it in my report. " +
+      "I'm not touching `.github/`, `scripts/`, root config, or any dependency/lockfile."
+    expect(closingLine.slice(-200)).not.toContain("tell me")
+    expect(looksLikeQuestion(`Item 10 is half-blocked on a file you own.\n\n${closingLine}`)).toBe(true)
+  })
 })
 
 describe("parseAgentEnvelope attributes", () => {
@@ -138,6 +160,17 @@ describe("looksLikeQuestion false positives", () => {
     expect(
       looksLikeQuestion("Batch 3 done, all four gates PASS. Let me know if you want the middleware hunk too."),
     ).toBe(false)
+  })
+
+  // The badge this gates demands attention. A false positive on a routine done
+  // report costs more than a missed question, because it teaches you to ignore
+  // the badge — so the request patterns only fire in imperative position.
+  it("stays quiet when 'tell me' is reporting rather than asking", () => {
+    expect(looksLikeQuestion("Batch 3 done, gates PASS. The logs tell me nothing about the flake.")).toBe(false)
+  })
+
+  it("stays quiet when 'say so' has a subject in front of it", () => {
+    expect(looksLikeQuestion("Landed. The types say so and the tests agree.")).toBe(false)
   })
 
   it("ignores a ? that belongs to a URL query string", () => {
