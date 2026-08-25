@@ -883,6 +883,14 @@ git commit -m "feat: serialize agent_message blocks in session context APIs"
 
 ## Task 7: Retire teammateMessage.ts
 
+> **DONE — landed in `d8d505b`.** Both consumers were repointed as written and
+> the module and its test are deleted; `grep -rn teammateMessage src server
+> shared packages` is now empty. One correction to Step 1: the two cases it
+> calls out as uncovered were in fact already covered by the tests Task 1's
+> follow-up added (`parseAgentEnvelope matched` and `parseAgentEnvelope
+> attributes`). The only genuinely uncovered assertion was the old
+> "preserves multiline markdown inside the envelope" case, which is ported.
+
 **Files:**
 - Delete: `src/lib/teammateMessage.ts`
 - Delete: `src/lib/__tests__/teammateMessage.test.ts` (its cases now live in `agentEnvelope.test.ts` — confirm coverage before deleting, and port anything missing)
