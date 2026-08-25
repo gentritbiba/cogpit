@@ -91,7 +91,7 @@ import { randomInt } from "node:crypto"
  * over a call.
  */
 export const PASSPHRASE_WORDS = [
-  // Fill to at least 512 entries. 512^4 * 100 ≈ 2^58.
+  // At least 1832 entries: the test floor is N^4 * 100 > 2^50.
 ] as const
 
 export function generatePassphrase(): string {
@@ -103,7 +103,7 @@ export function generatePassphrase(): string {
 }
 ```
 
-Populate `PASSPHRASE_WORDS` with **at least 512** distinct 3-8 letter lowercase words. Use `randomInt` from `node:crypto`, never `Math.random`. The four-word minimum plus the wordlist floor is what the fourth test pins; if you shrink the list the test fails, which is the point.
+Populate `PASSPHRASE_WORDS` with **at least 1832** distinct 3-8 letter lowercase words (`N^4 * 100 > 2^50` solves to N >= 1832). Use `randomInt` from `node:crypto`, never `Math.random`. The four-word minimum plus the wordlist floor is what the fourth test pins; if you shrink the list the test fails, which is the point.
 
 **Step 4: Run and verify green**
 
