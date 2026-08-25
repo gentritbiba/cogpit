@@ -21,6 +21,12 @@ export interface TodoProgress {
  * Extracts work progress from both the legacy TodoWrite snapshot and Claude's
  * structured TaskCreate/TaskUpdate tools. Structured tasks are reconstructed
  * chronologically because updates carry a task ID instead of the full list.
+ *
+ * Claude Code 2.1.233 removed these tools on Opus 4.8, Sonnet 5, Fable 5,
+ * Mythos 5 and newer unless CLAUDE_CODE_ENABLE_TODO_TOOLS=1 is set, so on a
+ * current model there is nothing to read and this returns null — the progress
+ * panel then does not render at all. Kept for older sessions and for anyone
+ * who opts the tools back in.
  */
 export function useTodoProgress(session: ParsedSession | null): TodoProgress | null {
   return useMemo(() => {
