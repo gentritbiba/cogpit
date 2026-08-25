@@ -354,11 +354,15 @@ export type TurnContentBlock =
    * A message another agent sent this session mid-turn. Distinct from
    * `queued_prompt`, which is the reader's own text. `reply` is filled by the
    * pairing pass when a later SendMessage answered this sender.
+   *
+   * Deliberately carries no sender task id. `origin.senderTaskId` on the record
+   * identifies the sending agent's *task*, not the message — one agent's
+   * question and its later done-report share an id — so it is useless as a
+   * per-message key and destructive as a dedup key.
    */
   | {
       kind: "agent_message"
       sender: string
-      senderTaskId: string | null
       body: string
       timestamp?: string
       reply?: { summary: string; timestamp: string }

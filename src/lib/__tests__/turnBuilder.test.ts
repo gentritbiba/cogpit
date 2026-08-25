@@ -1001,7 +1001,6 @@ describe("agent mail", () => {
     expect(block).toBeDefined()
     if (block?.kind !== "agent_message") return
     expect(block.sender).toBe("csp-and-proxy")
-    expect(block.senderTaskId).toBe("task-1")
     expect(block.body).toBe("one blocking question on finding #1.")
     expect(block.body).not.toContain("<agent-message")
   })
@@ -1037,7 +1036,6 @@ describe("agent mail", () => {
     const block = session.turns[0].contentBlocks.find((b) => b.kind === "agent_message")
     if (block?.kind !== "agent_message") throw new Error("expected agent_message")
     expect(block.sender).toBe("vehicle-batch")
-    expect(block.senderTaskId).toBeNull()
     expect(block.body).toBe("half-blocked on a decision")
   })
 
@@ -1090,5 +1088,25 @@ describe("agent mail", () => {
     expect(block.sender).toBe(sender)
     expect(block.body).toBe(body)
     expect(block.body).not.toContain("<agent-message")
+  })
+
+  // `origin.senderTaskId` names the sending agent's *task*, not the message.
+  // In `…honest-cms/ddb6fc34….jsonl`, csp-and-proxy asked a blocking question at
+  // 23:34:09 and reported done at 23:48:49; both records carry
+  // senderTaskId=ada0f1591dbec7898. Any dedup keyed on that id silently drops
+  // the second message, which is why the block no longer carries the field.
+  it("keeps two different messages that share a sender task id", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "one blocking question", "ada0f1591dbec7898"),
+      peerAttachment("csp-and-proxy", "batch-2 done", "ada0f1591dbec7898"),
+      textAssistant("done"),
+    ]))
+
+    const blocks = session.turns[0].contentBlocks.filter((b) => b.kind === "agent_message")
+    expect(blocks).toHaveLength(2)
+    expect(blocks.map((b) => (b.kind === "agent_message" ? b.body : null)))
+      .toEqual(["one blocking question", "batch-2 done"])
   })
 })

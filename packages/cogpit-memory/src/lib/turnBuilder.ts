@@ -65,7 +65,6 @@ interface QueuedPromptSource {
   raw: string
   /** Peer sender, or null when the reader typed this. */
   sender: string | null
-  senderTaskId: string | null
   /** Envelope-free body. Equals `raw` when there was no envelope. */
   body: string
 }
@@ -92,18 +91,17 @@ function queuedCommandPrompt(msg: RawMessage): QueuedPromptSource | null {
       return {
         raw,
         sender,
-        senderTaskId: origin.senderTaskId ?? null,
         body: origin.body ?? parseAgentEnvelope(raw).body,
       }
     }
   }
   if (origin?.kind === "human") {
-    return { raw, sender: null, senderTaskId: null, body: raw }
+    return { raw, sender: null, body: raw }
   }
 
   // Pre-`origin` records: the envelope in the text is all we have.
   const parsed = parseAgentEnvelope(raw)
-  return { raw, sender: parsed.sender, senderTaskId: null, body: parsed.body }
+  return { raw, sender: parsed.sender, body: parsed.body }
 }
 
 // ── Local mergeTokenUsage (duplicated to avoid circular deps) ────────────────
@@ -384,7 +382,6 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     content: string
     timestamp?: string
     sender: string | null
-    senderTaskId: string | null
     body: string
   }> = []
 
@@ -420,7 +417,6 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           ? {
               kind: "agent_message",
               sender: prompt.sender,
-              senderTaskId: prompt.senderTaskId,
               body: prompt.body,
               timestamp: prompt.timestamp,
             }
@@ -541,7 +537,6 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           content: msg.content,
           timestamp: msg.timestamp,
           sender: parsed.sender,
-          senderTaskId: null,
           body: parsed.body,
         })
         noteEnqueueSourced(current, msg.content)
@@ -560,7 +555,6 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
           content: queued.raw,
           timestamp: msg.attachment?.timestamp ?? msg.timestamp,
           sender: queued.sender,
-          senderTaskId: queued.senderTaskId,
           body: queued.body,
         })
       }
