@@ -13,12 +13,12 @@ describe("share allowlist — permitted", () => {
     ["GET", "/api/session-file-changes/sess-1"],
     ["GET", "/api/session-config/sess-1.jsonl"],
     ["GET", "/api/share/session"],
+    ["GET", "/api/share/pending"],
     ["POST", "/api/share/send-message"],
     ["POST", "/api/share/stop"],
     ["POST", "/api/share/interrupt"],
     ["POST", "/api/share/permission"],
     ["POST", "/api/share/answer"],
-    ["GET", "/api/hello"],
   ])("%s %s", (method, url) => expect(allow(method, url)).toBe(true))
 
   it.each([
@@ -26,11 +26,11 @@ describe("share allowlist — permitted", () => {
     ["GET", "/api/sessions/-Users-me-proj/sess-1.jsonl?tail=30"],
     ["GET", "/api/sessions/-Users-me-proj/sess-1.jsonl?before=1024&count=40"],
     ["GET", "/api/session-file-changes/sess-1?since=12"],
-    ["GET", "/api/hello?t=1"],
+    ["GET", "/api/session-status/sess-1?t=1"],
   ])("%s %s", (method, url) => expect(allow(method, url)).toBe(true))
 
   it("uppercases the method before matching", () => {
-    expect(allow("get", "/api/hello")).toBe(true)
+    expect(allow("get", "/api/session-status/sess-1")).toBe(true)
     expect(allow("post", "/api/share/stop")).toBe(true)
   })
 
@@ -82,6 +82,15 @@ describe("share allowlist — denied surfaces", () => {
     ["GET", "/api/running-processes"],
   ])("denies %s %s", (method, url) => expect(allow(method, url)).toBe(false))
 
+  it("denies /api/hello, which never reaches the guest branch", () => {
+    // It is in PUBLIC_PATHS, so both middlewares answer it before the share
+    // branch runs. An allowlist rule for it would be code nothing calls.
+    for (const method of ["GET", "POST", "HEAD", "OPTIONS"]) {
+      expect(allow(method, "/api/hello")).toBe(false)
+    }
+    expect(allow("GET", "/api/hello?t=1")).toBe(false)
+  })
+
   it("denies the share endpoints it does not name", () => {
     expect(allow("POST", "/api/share/create")).toBe(false)
     expect(allow("POST", "/api/share/revoke")).toBe(false)
@@ -122,6 +131,7 @@ describe("share allowlist — normalization", () => {
     ["PUT", "/api/session-config/sess-1.jsonl/x"],
     ["GET", "/api/hello/world"],
     ["GET", "/api/share/session/x"],
+    ["GET", "/api/share/pending/x"],
     ["POST", "/api/share/send-message/x"],
   ])("denies a trailing segment on %s %s", (method, url) => expect(allow(method, url)).toBe(false))
 
@@ -266,15 +276,15 @@ describe("share allowlist — query and fragment", () => {
   ])("denies %s %s", (method, url) => expect(allow(method, url)).toBe(false))
 
   it("ignores a fragment on an allowed path", () => {
-    expect(allow("GET", "/api/hello#anything")).toBe(true)
+    expect(allow("GET", "/api/session-status/sess-1#anything")).toBe(true)
   })
 })
 
 describe("share allowlist — method scoping", () => {
   it.each([
-    ["POST", "/api/hello"],
-    ["HEAD", "/api/hello"],
-    ["OPTIONS", "/api/hello"],
+    ["POST", "/api/session-status/sess-1"],
+    ["HEAD", "/api/session-status/sess-1"],
+    ["OPTIONS", "/api/session-status/sess-1"],
     ["HEAD", "/api/sessions/-Users-me-proj/sess-1.jsonl"],
     ["PUT", "/api/sessions/-Users-me-proj/sess-1.jsonl"],
     ["DELETE", "/api/sessions/-Users-me-proj/sess-1.jsonl"],
@@ -287,11 +297,65 @@ describe("share allowlist — method scoping", () => {
     ["PUT", "/api/session-config/sess-1.jsonl"],
     ["GET", "/api/share/send-message"],
     ["GET", "/api/share/stop"],
+    ["POST", "/api/share/pending"],
     ["PUT", "/api/share/session"],
     ["POST", "/api/share/session"],
-    ["", "/api/hello"],
-    ["GET\n", "/api/hello"],
+    ["", "/api/session-status/sess-1"],
+    ["GET\n", "/api/session-status/sess-1"],
   ])("denies %s %s", (method, url) => expect(allow(method, url)).toBe(false))
+})
+
+// ── Hardening guards ─────────────────────────────────────────────────
+//
+// parseRequestPath rejects shapes before any identity is compared. Testing
+// those rejections needs a share record whose identity the trick actually
+// reproduces — against the ordinary record every one of them is denied by the
+// comparison anyway, so deleting the guard would change no answer.
+
+describe("share allowlist — hardening guards", () => {
+  it("rejects an encoded separator that decodes to the share's own name", () => {
+    // A nested fileName is exactly the shape a Codex rollout has.
+    const nested = { sessionId: "s", dirName: "-Users-me-proj", fileName: "2026/08/25/r.jsonl" }
+    expect(shareRequestAllowed(
+      "GET",
+      "/api/sessions/-Users-me-proj/2026%2f08%2f25%2fr.jsonl",
+      nested,
+    )).toBe(false)
+
+    const backslashed = { sessionId: "s", dirName: "-Users-me-proj", fileName: "a\\b.jsonl" }
+    expect(shareRequestAllowed(
+      "GET",
+      "/api/sessions/-Users-me-proj/a%5cb.jsonl",
+      backslashed,
+    )).toBe(false)
+
+    // A surviving "%" is a separator again for anything that decodes twice.
+    const percent = { sessionId: "s", dirName: "-Users-me-proj", fileName: "a%b.jsonl" }
+    expect(shareRequestAllowed(
+      "GET",
+      "/api/sessions/-Users-me-proj/a%25b.jsonl",
+      percent,
+    )).toBe(false)
+  })
+
+  it("rejects a dot segment even when the share is named after one", () => {
+    const dotted = { sessionId: ".", dirName: ".", fileName: ".." }
+    expect(shareRequestAllowed("GET", "/api/sessions/./..", dotted)).toBe(false)
+    expect(shareRequestAllowed("GET", "/api/session-status/.", dotted)).toBe(false)
+    expect(shareRequestAllowed("GET", "/api/session-status/%2e", dotted)).toBe(false)
+  })
+
+  it("rejects a raw space even when the share's name contains one", () => {
+    const spaced = { sessionId: "sess 1", dirName: "-Users-me-proj", fileName: "sess 1.jsonl" }
+    expect(shareRequestAllowed(
+      "GET",
+      "/api/sessions/-Users-me-proj/sess 1.jsonl",
+      spaced,
+    )).toBe(false)
+    expect(shareRequestAllowed("GET", "/api/session-status/sess 1", spaced)).toBe(false)
+    // Encoded it is a legitimate name: the guard is about the raw target only.
+    expect(shareRequestAllowed("GET", "/api/session-status/sess%201", spaced)).toBe(true)
+  })
 })
 
 describe("share allowlist — degenerate share records", () => {

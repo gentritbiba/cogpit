@@ -6,6 +6,7 @@ import { requirementFor } from "../team/policy"
 import { teamAuthzMiddleware } from "../team/authz"
 import { initEdition, __resetEditionForTest } from "../team/edition"
 import { setRequestPrincipal } from "../team/requestPrincipal"
+import { markShareGuestRequest } from "../share/requestGuest"
 import type { SessionPrincipal } from "../team/constants"
 
 const ADMIN: SessionPrincipal = { userId: "u-admin", username: "alice", role: "admin" }
@@ -36,6 +37,13 @@ describe("requirementFor", () => {
 
   it("answers admin for unmatched paths (fail-safe default)", () => {
     expect(requirementFor("/api/never-registered", "GET")).toBe("admin")
+  })
+
+  it("keeps the login endpoint public, as PUBLIC_PATHS already makes it", () => {
+    // A team user's first request has no principal by construction. Listing it
+    // as "authed" only worked while authz waved every principal-less request
+    // through, which is exactly what stopped being true.
+    expect(requirementFor("/api/auth/verify", "POST")).toBe("public")
   })
 
   it("lets a method-specific rule beat a method-agnostic one at equal prefix", () => {
@@ -155,13 +163,17 @@ function mockRes(): { res: ServerResponse; body: string; statusCode: number } {
   return { res, get body() { return body }, get statusCode() { return statusCode } }
 }
 
-function run(url: string, opts: { method?: string; principal?: SessionPrincipal } = {}) {
+function run(
+  url: string,
+  opts: { method?: string; principal?: SessionPrincipal; shareGuest?: true } = {},
+) {
   const req = {
     url,
     method: opts.method ?? "GET",
     headers: {},
   } as unknown as IncomingMessage
   if (opts.principal) setRequestPrincipal(req, opts.principal)
+  if (opts.shareGuest) markShareGuestRequest(req)
   const mock = mockRes()
   const next = vi.fn()
   teamAuthzMiddleware(req, mock.res, next)
@@ -285,6 +297,39 @@ describe("teamAuthzMiddleware (team edition)", () => {
     // First-run /api/team/bootstrap arrives without a principal; authz must
     // not lock it out.
     expect(run("/api/team/bootstrap", { method: "POST" }).next).toHaveBeenCalledOnce()
+    // As does the login endpoint, where a user has no principal yet.
+    expect(run("/api/auth/verify", { method: "POST" }).next).toHaveBeenCalledOnce()
+  })
+
+  it("admits a share guest, whose scope is the share allowlist", () => {
+    // A guest holds no SessionPrincipal and never will: the share branch of
+    // authMiddleware plus the allowlist decided what it may reach, and that is
+    // a far narrower list than any rule in this table. It is admitted because
+    // it was marked, not because nothing marked it.
+    for (const url of [
+      "/api/session-status/sess-1",
+      "/api/watch/-Users-me-proj/sess-1.jsonl",
+      "/api/share/send-message",
+    ]) {
+      expect(run(url, { shareGuest: true }).next, url).toHaveBeenCalledOnce()
+    }
+  })
+
+  it("locks out a principal-less request that is neither public nor a guest", () => {
+    // The fail-closed half of the pair above. authMiddleware admits exactly
+    // three kinds of principal-less request — public paths, first-run
+    // bootstrap, and a marked share guest — so anything else arriving here is
+    // a hole in it, and must not be waved through on the way past.
+    for (const [url, method] of [
+      ["/api/projects", "GET"],
+      ["/api/session-status/sess-1", "GET"],
+      ["/api/kill-all", "POST"],
+      ["/api/never-registered", "GET"],
+    ] as const) {
+      const r = run(url, { method })
+      expect(r.next, url).not.toHaveBeenCalled()
+      expect(r.statusCode, url).toBe(403)
+    }
   })
 
   it("matches on the query-stripped, lowercased path", () => {

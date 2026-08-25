@@ -241,6 +241,19 @@ export async function rotateSharePassword(sessionId: string): Promise<IssuedShar
   return share ? { share, passphrase } : null
 }
 
+/**
+ * Forget every share in a single registry write. Looping removeShare over
+ * listShares would serialize one whole-file rewrite per record for a change
+ * with one end state.
+ */
+export async function clearAllShares(): Promise<void> {
+  await commitShareMutation((draft) => {
+    if (draft.size === 0) return { changed: false, value: undefined }
+    draft.clear()
+    return { changed: true, value: undefined }
+  })
+}
+
 export async function removeShare(sessionId: string): Promise<boolean> {
   return commitShareMutation((draft) => {
     if (!draft.delete(sessionId)) return { changed: false, value: false }

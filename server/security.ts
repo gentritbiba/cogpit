@@ -21,6 +21,7 @@ import {
 import { getUserById, isUsersStoreInitialized, userCount } from "./team/users"
 import { shareRequestAllowed } from "./share/allowlist"
 import { getShareWithHash, touchShare } from "./share/registry"
+import { markShareGuestRequest } from "./share/requestGuest"
 
 // ── Network auth helpers ─────────────────────────────────────────────
 
@@ -603,16 +604,49 @@ function discardShareToken(token: string): void {
   if (shareTokens.delete(token)) notifyShareRevoked(token)
 }
 
-export function createShareToken(sessionId: string, ip: string, userAgent?: string): string {
+/**
+ * Live guests one share may hold at once.
+ *
+ * Sharing is a one-to-one or small-group workflow, but each login mints a new
+ * token and the cookie is its only holder: a guest who clears cookies, opens
+ * the link on a second device, or idles past the 30-minute window and logs
+ * back in leaves the old token behind. Uncapped they accumulate for the whole
+ * 8-hour absolute TTL, and the live guest count the host reads before deciding
+ * whether to stop sharing drifts upward with every reconnect.
+ *
+ * Eight is well above what the feature is for — enough that a flaky tunnel
+ * reconnecting a couple of real people never evicts anyone mid-session — and
+ * small enough that the number on screen still means something.
+ */
+export const MAX_SHARE_GUESTS_PER_SESSION = 8
+
+/** Drop the oldest live tokens for `sessionId` until it is inside the cap. */
+function evictOldestShareTokens(sessionId: string): void {
+  // Mints only ever append, so the map's insertion order is age order and the
+  // survivors are the tail.
+  const live = [...shareTokens.keys()].filter(
+    (token) => getLiveShare(token)?.sessionId === sessionId,
+  )
+  const excess = live.length - MAX_SHARE_GUESTS_PER_SESSION
+  for (let i = 0; i < excess; i++) discardShareToken(live[i])
+}
+
+/**
+ * Mint a guest token. `userAgent` is required and "" is a real value: a client
+ * that sends no User-Agent is pinned to the absence of one, so it stays pinned
+ * against a client that sends one.
+ */
+export function createShareToken(sessionId: string, ip: string, userAgent: string): string {
   const token = randomBytes(32).toString("hex")
   const now = Date.now()
   shareTokens.set(token, {
     sessionId,
     createdAt: now,
     ip,
-    userAgent: userAgent || "",
+    userAgent,
     lastActivity: now,
   })
+  evictOldestShareTokens(sessionId)
   return token
 }
 
@@ -631,11 +665,18 @@ function getLiveShare(token: string): ShareTokenInfo | null {
   return share
 }
 
-/** The session a share token admits its holder to, or null if it is not valid. */
-export function validateShareToken(token: string, userAgent?: string): string | null {
+/**
+ * The session a share token admits its holder to, or null if it is not valid.
+ *
+ * The pin is unconditional. Skipping it for a request that carries no
+ * User-Agent would make the pin opt-out for whoever replays a stolen cookie
+ * with curl, which is the case it exists to catch. Callers pass
+ * `req.headers["user-agent"] ?? ""`, matching how the token was minted.
+ */
+export function validateShareToken(token: string, userAgent: string): string | null {
   const share = getLiveShare(token)
   if (!share) return null
-  if (userAgent !== undefined && share.userAgent !== userAgent) {
+  if (share.userAgent !== userAgent) {
     discardShareToken(token)
     return null
   }
@@ -643,9 +684,18 @@ export function validateShareToken(token: string, userAgent?: string): string | 
   return share.sessionId
 }
 
-/** Validity check for long-lived transports that must not refresh idle time. */
+/**
+ * Validity check for long-lived transports that must not refresh idle time.
+ *
+ * The registry is consulted as well as the token map, so an SSE stream closes
+ * on the next recheck when the host stops sharing, whether or not anything
+ * remembered to revoke the token. A guest stream never issues another request,
+ * so this recheck is the only thing standing between "Stop sharing" and a
+ * transcript that keeps streaming.
+ */
 export function isShareTokenActive(token: string): boolean {
-  return getLiveShare(token) !== null
+  const share = getLiveShare(token)
+  return share !== null && getShareWithHash(share.sessionId) !== undefined
 }
 
 export function revokeShareToken(token: string): void {
@@ -825,6 +875,12 @@ function validSessionToken(req: IncomingMessage): string | null {
   const token = bearer ?? browserCookie
   if (!token) return null
   // A bearer token is a machine client, which has no user agent to pin against.
+  //
+  // Deliberately asymmetric with validateShareToken: a cookie request that
+  // sends no User-Agent header skips the pin here. That weakness predates
+  // sharing and is left alone rather than tightened in passing — main sessions
+  // are minted for clients this file does not enumerate, so changing it is its
+  // own change with its own blast radius.
   const userAgent = browserCookie && !bearer ? req.headers["user-agent"] : undefined
   return validateSessionToken(token, userAgent) ? token : null
 }
@@ -841,7 +897,20 @@ function handleShareRequest(
   next: NextFn,
   token: string,
 ): void {
-  const sessionId = validateShareToken(token, req.headers["user-agent"])
+  // A share is remote access, so it lives behind the same switch as every
+  // other remote request. This branch sits above the gate in both middlewares,
+  // so without the check here a guest would be admitted on a request an
+  // ordinary remote user gets 403 on. Team edition replaces the network
+  // password with user credentials, and the host's own loopback browser is
+  // trusted there as everywhere else.
+  if (!isTrustedDirectLocalRequest(req) && !isTeamEdition()) {
+    const config = getConfig()
+    if (!config?.networkAccess || !config?.networkPassword) {
+      return sendJson(res, 403, { error: "Network access is disabled" })
+    }
+  }
+
+  const sessionId = validateShareToken(token, req.headers["user-agent"] ?? "")
   if (!sessionId) return sendJson(res, 401, { error: "Share authentication required" })
 
   const share = getShareWithHash(sessionId)
@@ -862,6 +931,10 @@ function handleShareRequest(
 
   touchShare(sessionId)
   trackShareHttpStream(req, res, token)
+  // Team edition's authz middleware runs next and refuses every request it
+  // cannot account for. A guest carries no SessionPrincipal by design, so it
+  // has to arrive there labelled as a guest rather than as nothing at all.
+  markShareGuestRequest(req)
   next()
 }
 

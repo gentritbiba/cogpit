@@ -2,8 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import { basename, dirname } from "node:path"
 import {
   canIssueBrowserSession,
-  CODEX_SESSIONS_DIR,
-  encodeCodexDirName,
   findJsonlPath,
   getSessionMeta,
   hasTrustedMutationSource,
@@ -60,22 +58,9 @@ function stringField(body: unknown, key: string): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-/**
- * The (dirName, fileName) pair the session routes address this transcript by.
- * Codex rollouts are addressed by an encoded cwd plus a path relative to the
- * rollout root; Claude transcripts by their project directory and file name.
- */
-async function addressOf(
-  filePath: string,
-): Promise<{ dirName: string; fileName: string } | null> {
-  if (!isCodexFilePath(filePath)) {
-    return { dirName: basename(dirname(filePath)), fileName: basename(filePath) }
-  }
-  const meta = await getSessionMeta(filePath).catch(() => null)
-  if (!meta?.cwd) return null
-  const relative = filePath.slice(CODEX_SESSIONS_DIR.length + 1).split(/[\\/]/).join("/")
-  return { dirName: encodeCodexDirName(meta.cwd), fileName: relative }
-}
+type ShareTarget =
+  | { shareable: true; dirName: string; fileName: string }
+  | { shareable: false; reason: "not-found" | "codex" }
 
 /**
  * Resolve what a sessionId may be shared as. The client sends only the
@@ -84,17 +69,21 @@ async function addressOf(
  * file, so the record can only ever name a transcript the session routes would
  * have served anyway.
  */
-async function resolveShareTarget(
-  sessionId: string,
-): Promise<{ dirName: string; fileName: string } | null> {
+async function resolveShareTarget(sessionId: string): Promise<ShareTarget> {
   const filePath = await findJsonlPath(sessionId)
-  if (!filePath) return null
+  if (!filePath) return { shareable: false, reason: "not-found" }
+  // A Codex rollout is addressed by a nested path under the rollout root, and
+  // the guest allowlist compares exactly two identity segments — so a Codex
+  // record would hand out a passphrase for a transcript that 403s on every
+  // read. Refused here rather than fixed by widening the allowlist: this
+  // function shipped a traversal bug once already.
+  if (isCodexFilePath(filePath)) return { shareable: false, reason: "codex" }
 
-  const address = await addressOf(filePath)
-  if (!address) return null
-
-  const resolved = await resolveSessionFilePath(address.dirName, address.fileName)
-  return resolved === filePath ? address : null
+  const dirName = basename(dirname(filePath))
+  const fileName = basename(filePath)
+  const resolved = await resolveSessionFilePath(dirName, fileName)
+  if (resolved !== filePath) return { shareable: false, reason: "not-found" }
+  return { shareable: true, dirName, fileName }
 }
 
 /** Human label for a shared session, empty when the transcript cannot be read. */
@@ -130,12 +119,20 @@ async function handleCreate(req: IncomingMessage, res: ServerResponse): Promise<
     }
 
     const target = await resolveShareTarget(sessionId)
-    if (!target) {
+    if (!target.shareable) {
+      if (target.reason === "codex") {
+        sendJson(res, 400, { error: "Sharing Codex sessions isn't supported yet" })
+        return
+      }
       sendJson(res, 404, { error: "Session not found" })
       return
     }
 
-    const issued = await createShare({ sessionId, ...target })
+    const issued = await createShare({
+      sessionId,
+      dirName: target.dirName,
+      fileName: target.fileName,
+    })
     // The old passphrase is already dead; tokens minted from it must die with
     // it, or re-sharing would leave the previous guest list intact.
     revokeShareTokensForSession(sessionId)
@@ -235,7 +232,7 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse): Promise<v
       createShareToken(
         sessionId,
         req.socket.remoteAddress || "unknown",
-        req.headers["user-agent"],
+        req.headers["user-agent"] ?? "",
       ),
     )
     // Cookie only. A guest is always a browser, and a token in the body would

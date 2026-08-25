@@ -39,9 +39,12 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/config", methods: ["GET"], requires: "authed" },
     { prefix: "/api/config", requires: "admin" },
     ...admin("/api/config/validate"),
+    // Login: a user has no principal until this call succeeds, and
+    // PUBLIC_PATHS already lets it past authMiddleware unauthenticated. The
+    // route itself verifies the credential.
+    { prefix: "/api/auth/verify", requires: "public" },
     ...authed(
       "/api/network-info",
-      "/api/auth/verify",
       "/api/auth/session",
       "/api/auth/logout",
       "/api/connected-devices",
@@ -118,11 +121,11 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/shares", requires: "admin" },
   ],
   // "public" here is a statement of fact, not a decision: a share guest carries
-  // no SessionPrincipal, and team authz admits principal-less requests without
-  // consulting this table at all. A stricter requirement on /api/share would be
-  // enforced against nobody while reading like protection. What actually scopes
-  // a guest is the share branch of authMiddleware plus the allowlist, and every
-  // handler in the namespace re-validates the share token itself.
+  // no SessionPrincipal, so authz admits it on the guest mark rather than on a
+  // role. A stricter requirement would be enforced against nobody while reading
+  // like protection. What actually scopes a guest is the share branch of
+  // authMiddleware plus the allowlist, and every handler in the namespace
+  // re-validates the share token itself.
   "share-guest": [{ prefix: "/api/share", requires: "public" }],
   editor: admin("/api/reveal-in-folder", "/api/open-terminal", "/api/open-in-editor"),
   worktrees: [

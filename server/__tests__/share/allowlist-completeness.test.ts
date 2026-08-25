@@ -71,7 +71,7 @@ function mountedPaths(): string[] {
  * The complete set of mount prefixes a share guest may reach. Adding a path
  * here widens what a guest can do to the host machine — justify it in review.
  *
- * The six `/api/share/*` mounts are the guest's own namespace: each one takes
+ * The seven `/api/share/*` mounts are the guest's own namespace: each one takes
  * its sessionId from the share token, never from the request, so there is
  * nothing in the path for the allowlist to check and no way to aim one at
  * another session. `/api/shares` (the host API) and `/api/share/verify` (the
@@ -79,7 +79,6 @@ function mountedPaths(): string[] {
  * business at either.
  */
 const SHARE_REACHABLE = new Set([
-  "/api/hello",
   "/api/sessions/",
   "/api/watch/",
   "/api/session-status/",
@@ -87,6 +86,9 @@ const SHARE_REACHABLE = new Set([
   "/api/session-config/",
   // Read the shared session's identity: dirName, fileName, title, provider.
   "/api/share/session",
+  // Read what is blocking the session and waiting on a human: the pending
+  // permission requests and AskUserQuestion calls the guest may answer.
+  "/api/share/pending",
   // Participate in the session: send a turn, stop it, interrupt it, and answer
   // the two things that block it — a permission request and an AskUserQuestion.
   "/api/share/send-message",
@@ -109,7 +111,6 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
   /** The path names no session, so every guest may reach it. */
   tokenScoped?: true
 }> = [
-  { mount: "/api/hello", url: "/api/hello", methods: ["GET"], tokenScoped: true },
   {
     mount: "/api/sessions/",
     url: `/api/sessions/${SHARE.dirName}/${SHARE.fileName}`,
@@ -139,6 +140,12 @@ const REACHABLE_SAMPLES: ReadonlyArray<{
   {
     mount: "/api/share/session",
     url: "/api/share/session",
+    methods: ["GET"],
+    tokenScoped: true,
+  },
+  {
+    mount: "/api/share/pending",
+    url: "/api/share/pending",
     methods: ["GET"],
     tokenScoped: true,
   },
@@ -262,10 +269,10 @@ describe("share allowlist completeness", () => {
 
   it("denies the reachable mounts to a share that does not own the session", () => {
     for (const { url, methods, tokenScoped } of REACHABLE_SAMPLES) {
-      // A token-scoped path names no session: /api/hello has no identity at
-      // all, and the guest namespace takes its session from the token, which
-      // the route re-validates. There is nothing here for the allowlist to
-      // compare, so reaching it is not reaching another session.
+      // A token-scoped path names no session: the guest namespace takes its
+      // session from the token, which the route re-validates. There is nothing
+      // here for the allowlist to compare, so reaching it is not reaching
+      // another session.
       if (tokenScoped) continue
       for (const method of methods) {
         expect(

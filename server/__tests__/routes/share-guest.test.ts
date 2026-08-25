@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   interruptSDKTurn: vi.fn(),
   resolvePermission: vi.fn(),
   resolveUserQuestion: vi.fn(),
+  getSDKPermissions: vi.fn(),
+  getSDKUserQuestions: vi.fn(),
   findJsonlPath: vi.fn(),
   getSessionMeta: vi.fn(),
   resolveSessionFilePath: vi.fn(),
@@ -53,6 +55,8 @@ vi.mock("../../sdk-session", async (importOriginal) => ({
   interruptSDKTurn: mocks.interruptSDKTurn,
   resolvePermission: mocks.resolvePermission,
   resolveUserQuestion: mocks.resolveUserQuestion,
+  getSDKPermissions: mocks.getSDKPermissions,
+  getSDKUserQuestions: mocks.getSDKUserQuestions,
 }))
 
 vi.mock("../../codex-app-server", async (importOriginal) => ({
@@ -84,12 +88,16 @@ const UA = "Guest/1"
 
 const MOUNTS = [
   "/api/share/session",
+  "/api/share/pending",
   "/api/share/send-message",
   "/api/share/stop",
   "/api/share/interrupt",
   "/api/share/permission",
   "/api/share/answer",
 ] as const
+
+/** The mounts that read rather than act, and so answer GET. */
+const GET_MOUNTS = new Set<string>(["/api/share/session", "/api/share/pending"])
 
 let registryRoot: string
 
@@ -107,7 +115,8 @@ interface CallOptions {
   body?: unknown
   token?: string | null
   url?: string
-  headers?: Record<string, string>
+  /** An explicit `undefined` removes the header the harness sends by default. */
+  headers?: Record<string, string | undefined>
   /** Runs after the body has been streamed but before the handler sees it. */
   duringBody?: () => void | Promise<void>
   /** False when the delegated handler answers later (or never). */
@@ -125,14 +134,17 @@ async function call(mount: string, options: CallOptions = {}) {
   if (options.token !== null) {
     headers.cookie = `__Host-cogpit_share=${options.token ?? guestToken()}`
   }
-  Object.assign(headers, options.headers)
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (value === undefined) delete headers[name]
+    else headers[name] = value
+  }
   const payload = Buffer.from(JSON.stringify(options.body ?? {}))
   const stream = Readable.from((async function* () {
     yield payload
     await options.duringBody?.()
   })())
   const req = Object.assign(stream, {
-    method: options.method ?? (mount === "/api/share/session" ? "GET" : "POST"),
+    method: options.method ?? (GET_MOUNTS.has(mount) ? "GET" : "POST"),
     url: options.url ?? "/",
     headers,
     socket: { remoteAddress: "203.0.113.5" },
@@ -191,6 +203,8 @@ beforeEach(async () => {
   mocks.interruptSDKTurn.mockResolvedValue(true)
   mocks.resolvePermission.mockReturnValue({ found: true, toolName: "Bash" })
   mocks.resolveUserQuestion.mockReturnValue({ found: true })
+  mocks.getSDKPermissions.mockReturnValue([])
+  mocks.getSDKUserQuestions.mockReturnValue([])
 })
 
 afterEach(async () => {
@@ -226,6 +240,13 @@ describe("guest authentication", () => {
     expect(result.res.statusCode).toBe(401)
   })
 
+  it.each(MOUNTS)("401s %s replayed with no user agent at all", async (mount) => {
+    // A browser-pinned cookie in curl's hands. Treating an absent header as
+    // "nothing to pin against" would make the pin opt-out for the attacker.
+    const result = await call(mount, { headers: { "user-agent": undefined } })
+    expect(result.res.statusCode).toBe(401)
+  })
+
   it("401s once the share itself is gone", async () => {
     const token = guestToken()
     await removeShare(SESSION_A)
@@ -236,7 +257,7 @@ describe("guest authentication", () => {
   })
 
   it.each(MOUNTS)("hands the wrong method on %s back to the router", async (mount) => {
-    const method = mount === "/api/share/session" ? "POST" : "GET"
+    const method = GET_MOUNTS.has(mount) ? "POST" : "GET"
     const result = await call(mount, { method })
     expect(result.next).toHaveBeenCalledOnce()
   })
@@ -271,6 +292,70 @@ describe("GET /api/share/session", () => {
     const result = await call("/api/share/session", { url: `/?sessionId=${SESSION_B}` })
 
     expect(result.json()).toMatchObject({ sessionId: SESSION_A })
+  })
+})
+
+describe("GET /api/share/pending", () => {
+  const PERMISSION_A = {
+    requestId: "req-a",
+    toolName: "Bash",
+    input: { command: "rm -rf /" },
+    toolUseId: "tool-a",
+    title: "Run command",
+    displayName: "Command execution",
+    timestamp: 1,
+  }
+  const QUESTION_A = {
+    sessionId: SESSION_A,
+    toolUseId: "q-a",
+    askedAt: 2,
+    questions: [{ question: "Which one?", multiSelect: false, options: [] }],
+  }
+
+  it("returns the pending permissions and questions the guest may answer", async () => {
+    // A guest can approve a tool call but has no other way to learn one is
+    // waiting: /api/permissions and /api/user-questions are both off the
+    // allowlist, session-status carries no permission data, and the transcript
+    // stream carries only lines.
+    mocks.getSDKPermissions.mockReturnValue([PERMISSION_A])
+    mocks.getSDKUserQuestions.mockReturnValue([QUESTION_A])
+
+    const result = await call("/api/share/pending")
+
+    expect(result.res.statusCode).toBe(200)
+    expect(result.json()).toEqual({ permissions: [PERMISSION_A], questions: [QUESTION_A] })
+  })
+
+  it("returns empty lists when nothing is waiting", async () => {
+    const result = await call("/api/share/pending")
+    expect(result.json()).toEqual({ permissions: [], questions: [] })
+  })
+
+  it("reads the token's session, never a neighbouring share", async () => {
+    await createShare({ sessionId: SESSION_B, dirName: DIR_NAME, fileName: "sess-b.jsonl" })
+    mocks.getSDKPermissions.mockImplementation(
+      (id: string) => (id === SESSION_A ? [PERMISSION_A] : []),
+    )
+    mocks.getSDKUserQuestions.mockImplementation(
+      (id: string) => (id === SESSION_A ? [QUESTION_A] : []),
+    )
+
+    const result = await call("/api/share/pending", { token: guestToken(SESSION_B) })
+
+    expect(mocks.getSDKPermissions).toHaveBeenCalledWith(SESSION_B)
+    expect(mocks.getSDKUserQuestions).toHaveBeenCalledWith(SESSION_B)
+    expect(result.json()).toEqual({ permissions: [], questions: [] })
+  })
+
+  it("ignores a sessionId in the query string", async () => {
+    mocks.getSDKPermissions.mockImplementation(
+      (id: string) => (id === SESSION_A ? [PERMISSION_A] : []),
+    )
+
+    const result = await call("/api/share/pending", { url: `/?sessionId=${SESSION_B}` })
+
+    expect(mocks.getSDKPermissions).toHaveBeenCalledWith(SESSION_A)
+    expect(result.json()).toMatchObject({ permissions: [PERMISSION_A] })
   })
 })
 

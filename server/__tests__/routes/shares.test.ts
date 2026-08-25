@@ -32,6 +32,7 @@ vi.mock("../../helpers", async (importOriginal) => ({
 }))
 
 import type { Middleware, UseFn } from "../../helpers"
+import { CODEX_SESSIONS_DIR } from "../../sessionPaths"
 import { verifyPassword } from "../../password-utils"
 import { registerShareRoutes } from "../../routes/shares"
 import {
@@ -136,6 +137,28 @@ afterEach(async () => {
 })
 
 describe("POST /api/shares", () => {
+  it("refuses a Codex session outright, and stores nothing", async () => {
+    // A Codex rollout is addressed by a nested path
+    // (2026/08/25/rollout-<ts>-<uuid>.jsonl). The share allowlist compares
+    // identity segment by segment and requires exactly two, so a Codex record
+    // would mint a passphrase for a share that 403s on every read. The
+    // allowlist is not widened to fit: this function already shipped a
+    // traversal bug once, and a looser segment rule reopens that surface.
+    mockFindJsonlPath.mockResolvedValue(
+      `${CODEX_SESSIONS_DIR}/2026/08/25/rollout-2026-08-25T10-00-00-codex-uuid.jsonl`,
+    )
+
+    const result = await call("/api/shares", {
+      method: "POST",
+      body: { sessionId: "codex-uuid" },
+    })
+
+    expect(result.res.statusCode).toBe(400)
+    expect(result.json().error).toBe("Sharing Codex sessions isn't supported yet")
+    expect(listShares()).toEqual([])
+    expect(getShareWithHash("codex-uuid")).toBeUndefined()
+  })
+
   it("404s on a session with no transcript, and stores nothing", async () => {
     mockFindJsonlPath.mockResolvedValue(null)
 

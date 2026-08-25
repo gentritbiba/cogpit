@@ -596,14 +596,13 @@ describe("share allowlist — permitted", () => {
     ["GET", "/api/session-status/sess-1"],
     ["GET", "/api/session-file-changes/sess-1"],
     ["GET", "/api/session-config/sess-1.jsonl"],
-    ["PUT", "/api/session-config/sess-1.jsonl"],
     ["GET", "/api/share/session"],
     ["POST", "/api/share/send-message"],
     ["POST", "/api/share/stop"],
     ["POST", "/api/share/interrupt"],
     ["POST", "/api/share/permission"],
     ["POST", "/api/share/answer"],
-    ["GET", "/api/hello"],
+    ["GET", "/api/share/pending"],
   ])("%s %s", (method, url) => expect(allow(method, url)).toBe(true))
 })
 
@@ -728,13 +727,14 @@ export function shareRequestAllowed(method: string, rawUrl: string, share: Share
 
 Rules to implement, in this order, all against the **normalized, case-sensitive** path (compare the method uppercased; do **not** lowercase the path — `dirName` and `fileName` are case-sensitive, so instead reject any path whose `/api` prefix is not exactly lowercase):
 
-1. `GET /api/hello` → allow (the client bootstrap; already public anyway).
-2. Any `[verb, path]` pair in `SHARE_NAMESPACE` → allow.
-3. `GET /api/sessions/<dir>/<file>` → allow iff `dir === share.dirName && file === share.fileName`. Split on `/` and require **exactly** two segments after the prefix, which is what rejects the subagent path.
-4. `GET /api/watch/<dir>/<file>` → same check.
-5. `GET /api/session-status/<id>`, `GET /api/session-file-changes/<id>` → allow iff `id === share.sessionId` and there are no further segments.
-6. `GET|PUT /api/session-config/<key>` → allow iff `key === share.fileName`. A project `dirName` key is denied — that is shared project config, not session config.
-7. Everything else → deny.
+1. Any `[verb, path]` pair in `SHARE_NAMESPACE` → allow. `/api/hello` is **not**
+   one of them: it is in `PUBLIC_PATHS`, so both middlewares answer it before
+   the share branch ever runs, and a rule for it would be code nothing calls.
+2. `GET /api/sessions/<dir>/<file>` → allow iff `dir === share.dirName && file === share.fileName`. Split on `/` and require **exactly** two segments after the prefix, which is what rejects the subagent path.
+3. `GET /api/watch/<dir>/<file>` → same check.
+4. `GET /api/session-status/<id>`, `GET /api/session-file-changes/<id>` → allow iff `id === share.sessionId` and there are no further segments.
+5. `GET /api/session-config/<key>` → allow iff `key === share.fileName`. A project `dirName` key is denied — that is shared project config, not session config. Read-only: the file carries the session's permission mode and MCP selection, so a guest who could `PUT` it could switch the session to bypassPermissions.
+6. Everything else → deny.
 
 **Step 4: Run and verify green.** All cases pass.
 
@@ -1001,7 +1001,6 @@ function mountedPaths(): string[] {
  * here widens what a guest can do to the host machine — justify it in review.
  */
 const SHARE_REACHABLE = new Set([
-  "/api/hello",
   "/api/sessions/",
   "/api/watch/",
   "/api/session-status/",
@@ -1128,16 +1127,26 @@ git commit -m "feat(share): guest login endpoint"
 - Modify: `server/api-routes.ts`, `server/team/policy.ts`, `server/__tests__/api-routes.test.ts`
 - Test: `server/__tests__/routes/share-guest.test.ts`
 
-Six endpoints. Each resolves the sessionId from the share token via `getRequestShareToken` + `validateShareToken`, then delegates to the existing logic. **The request body never carries a sessionId**; if one is present, ignore it rather than trusting it.
+Seven endpoints. Each resolves the sessionId from the share token via `getRequestShareToken` + `validateShareToken`, then delegates to the existing logic. **The request body never carries a sessionId**; if one is present, ignore it rather than trusting it.
 
-| Endpoint | Delegates to |
-|---|---|
-| `GET /api/share/session` | the registry record plus `getSessionMeta` for the title |
-| `POST /api/share/send-message` | the `/api/send-message` handler body (`[ref §10]`) |
-| `POST /api/share/stop` | `/api/stop-session` (`[ref §11]`) |
-| `POST /api/share/interrupt` | `/api/interrupt-session` (`[ref §11]`) |
-| `POST /api/share/permission` | the permission decision path (`[ref §12]`) |
-| `POST /api/share/answer` | the ask-user answer path (`[ref §12]`) |
+| Endpoint | Guest sends | Delegates to |
+|---|---|---|
+| `GET /api/share/session` | — | the registry record plus `getSessionMeta` for the title |
+| `GET /api/share/pending` | — | `collectPendingPermissions` and `getSDKUserQuestions`, the same sources `GET /api/permissions/:sessionId` and `GET /api/user-questions` read |
+| `POST /api/share/send-message` | `{ message, images }` | the `/api/send-message` handler body (`[ref §10]`) |
+| `POST /api/share/stop` | — | `/api/stop-session` (`[ref §11]`) |
+| `POST /api/share/interrupt` | — | `/api/interrupt-session` (`[ref §11]`) |
+| `POST /api/share/permission` | `{ requestId, behavior }` | the permission decision path (`[ref §12]`) |
+| `POST /api/share/answer` | `{ toolUseId, answers }` | the ask-user answer path (`[ref §12]`) |
+
+`GET /api/share/pending` answers `{ permissions, questions }` in the item shapes
+the host endpoints already return, so the guest shell reuses its renderers. It
+exists because a guest may *answer* a permission request but had no way to
+*see* one: `/api/permissions` and `/api/user-questions` are both off the
+allowlist, `/api/session-status` carries no permission data, and the `/api/watch`
+stream carries only transcript lines. Both reads are folded into one endpoint
+because the guest polls them on the same tick, and one round trip over a tunnel
+beats two.
 
 Extract the shared logic out of the existing handlers into functions both can call rather than duplicating it, or have the guest route construct the delegated call. Duplication here means a bug fixed in one path and not the other.
 
@@ -1145,6 +1154,7 @@ Extract the shared logic out of the existing handlers into functions both can ca
 
 - each endpoint with no share cookie → 401
 - each endpoint with a share cookie for session A and `{ sessionId: "B" }` in the body → acts on A, never B
+- `GET /api/share/pending` for a guest of session A never returns session B's pending items
 - `GET /api/share/session` returns only `dirName`, `fileName`, `title`, `provider` — no cwd, no absolute path, no project list
 - `POST /api/share/send-message` reaches the same code path as `/api/send-message` with the token's sessionId
 
@@ -1362,3 +1372,11 @@ Not in scope. Do not build these without asking:
 - Read-only shares
 - Guest access to subagent transcripts
 - Share expiry timers
+- **Sharing a Codex session.** `POST /api/shares` refuses one with 400
+  ("Sharing Codex sessions isn't supported yet"). A Codex rollout is addressed
+  by a nested path (`2026/08/25/rollout-<ts>-<uuid>.jsonl`) while the allowlist
+  compares exactly two identity segments, so a Codex record would mint a
+  passphrase for a share that 403s on every read. Supporting it means teaching
+  the allowlist about nested identities — and that function shipped a traversal
+  bug once already, so it is its own change with its own review, not a widened
+  segment rule.

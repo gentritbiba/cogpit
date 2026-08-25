@@ -8,6 +8,7 @@ import { join } from "node:path"
 import {
   authMiddleware,
   websocketUpgradeRejection,
+  countShareGuests,
   createShareToken,
   createSessionToken,
   __resetShareTokensForTest,
@@ -19,6 +20,8 @@ import {
 import { getConfig } from "../../config"
 import { initShareRegistry, createShare, removeShare } from "../../share/registry"
 import { initEdition, __resetEditionForTest } from "../../team/edition"
+import { getRequestPrincipal } from "../../team/requestPrincipal"
+import { isShareGuestRequest } from "../../share/requestGuest"
 import { __resetForTest as __resetSessionPersistenceForTest } from "../../team/sessionPersistence"
 
 vi.mock("../../config", () => ({ getConfig: vi.fn() }))
@@ -69,6 +72,7 @@ function mockReq(url: string, opts: RequestOptions = {}): IncomingMessage {
 }
 
 function run(url: string, opts: RequestOptions = {}) {
+  const req = mockReq(url, opts)
   let body = ""
   let statusCode = 200
   const res = {
@@ -81,8 +85,8 @@ function run(url: string, opts: RequestOptions = {}) {
     writableEnded: false,
   } as unknown as ServerResponse
   const next = vi.fn()
-  authMiddleware(mockReq(url, opts), res, next)
-  return { next, get statusCode() { return statusCode }, get body() { return body } }
+  authMiddleware(req, res, next)
+  return { req, next, get statusCode() { return statusCode }, get body() { return body } }
 }
 
 /** A guest cookie for the shared session, pinned to the default UA. */
@@ -211,9 +215,10 @@ function describeSharedBranch(edition: "personal" | "team"): void {
       expect(r.next).not.toHaveBeenCalled()
       expect(r.statusCode).toBe(401)
 
-      // The token is dropped too, so the guest cannot keep probing with it.
-      const again = run("/api/session-status/sess-gone", { shareCookie: token, userAgent: UA })
-      expect(again.statusCode).toBe(401)
+      // The token is dropped too, not merely refused: leaving it in the map
+      // would keep the revoked guest in the host's live guest count until the
+      // idle TTL expired it.
+      expect(countShareGuests("sess-gone")).toBe(0)
     })
 
     it("401s a share cookie presented by a different user agent", () => {
@@ -222,6 +227,34 @@ function describeSharedBranch(edition: "personal" | "team"): void {
         shareCookie: token,
         userAgent: "Attacker/9",
       })
+      expect(r.next).not.toHaveBeenCalled()
+      expect(r.statusCode).toBe(401)
+    })
+
+    it("marks an admitted guest for the authz layer, and as no principal", () => {
+      // Team edition's authz middleware runs next and refuses anything it
+      // cannot account for. A guest carries no SessionPrincipal and never
+      // will, so it has to arrive there labelled as what it is.
+      const r = run(`/api/session-status/${SESSION_ID}`, {
+        shareCookie: guestCookie(),
+        userAgent: UA,
+      })
+      expect(r.next).toHaveBeenCalledOnce()
+      expect(isShareGuestRequest(r.req)).toBe(true)
+      expect(getRequestPrincipal(r.req)).toBeNull()
+    })
+
+    it("does not mark a request the guest branch refused", () => {
+      const r = run("/api/projects", { shareCookie: guestCookie(), userAgent: UA })
+      expect(r.statusCode).toBe(403)
+      expect(isShareGuestRequest(r.req)).toBe(false)
+    })
+
+    it("401s a share cookie replayed with no user agent at all", () => {
+      // curl holding a stolen browser cookie. An absent header is a client
+      // that does not match the browser the token was minted for, so it is a
+      // mismatch — not a reason to skip the pin.
+      const r = run(`/api/session-status/${SESSION_ID}`, { shareCookie: guestCookie() })
       expect(r.next).not.toHaveBeenCalled()
       expect(r.statusCode).toBe(401)
     })
@@ -349,6 +382,90 @@ function describeSharedBranch(edition: "personal" | "team"): void {
 
 describeSharedBranch("personal")
 describeSharedBranch("team")
+
+/**
+ * A share is remote access, so it lives behind the same switch every other
+ * remote request does. Without this the guest branch — which sits above the
+ * gate — would admit a guest on a request an ordinary remote user gets 403 on.
+ */
+describe("share branch network access gate", () => {
+  it("403s a guest when network access is turned off", () => {
+    mockedGetConfig.mockReturnValue({ networkAccess: false, networkPassword: "hashed" } as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      shareCookie: guestCookie(),
+      userAgent: UA,
+    })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Network access is disabled")
+  })
+
+  it("403s a guest when no network password is set", () => {
+    mockedGetConfig.mockReturnValue({ networkAccess: true, networkPassword: "" } as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      shareCookie: guestCookie(),
+      userAgent: UA,
+    })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+  })
+
+  it("403s a guest when there is no config at all", () => {
+    mockedGetConfig.mockReturnValue(null as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      shareCookie: guestCookie(),
+      userAgent: UA,
+    })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+  })
+
+  it("gates before the token, so a revoked guest cannot tell shares apart", () => {
+    // The gate must sit above token validation: a 401 here would say "network
+    // is on, your token is stale" to someone the switch already locked out.
+    mockedGetConfig.mockReturnValue({ networkAccess: false, networkPassword: "hashed" } as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      shareCookie: "deadbeef",
+      userAgent: UA,
+    })
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Network access is disabled")
+  })
+
+  it("still admits the host's own loopback browser with network access off", () => {
+    mockedGetConfig.mockReturnValue({ networkAccess: false, networkPassword: "" } as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      ip: "127.0.0.1",
+      host: "localhost",
+      shareCookie: guestCookie("127.0.0.1"),
+      userAgent: UA,
+    })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+
+  it("still 403s a non-allowlisted route for that loopback guest", () => {
+    mockedGetConfig.mockReturnValue({ networkAccess: false, networkPassword: "" } as never)
+    const r = run("/api/projects", {
+      ip: "127.0.0.1",
+      host: "localhost",
+      shareCookie: guestCookie("127.0.0.1"),
+      userAgent: UA,
+    })
+    expect(r.next).not.toHaveBeenCalled()
+    expect(r.statusCode).toBe(403)
+    expect(r.body).toContain("Not available on a shared session")
+  })
+
+  it("ignores the switch in team edition, where user credentials replace it", () => {
+    initEdition({ shell: "standalone", configEdition: "team" })
+    mockedGetConfig.mockReturnValue(null as never)
+    const r = run(`/api/session-status/${SESSION_ID}`, {
+      shareCookie: guestCookie(),
+      userAgent: UA,
+    })
+    expect(r.next).toHaveBeenCalledOnce()
+  })
+})
 
 describe("share branch preconditions", () => {
   it("hands the host the loopback shortcut when no share cookie is present", () => {

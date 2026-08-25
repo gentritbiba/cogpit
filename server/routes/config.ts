@@ -19,7 +19,7 @@ import {
 } from "../helpers"
 import { verifyRemotePassword, getDummyHash } from "../password-verify"
 import { revokeAllShareTokens, type SessionPrincipal } from "../security"
-import { listShares, removeShare } from "../share/registry"
+import { clearAllShares } from "../share/registry"
 import { isTeamEdition } from "../team/edition"
 import { getUserByUsername, withVerifiedUser } from "../team/users"
 import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
@@ -429,7 +429,7 @@ export function registerConfigRoutes(use: UseFn) {
           // root. Under a new root that pair is a different session, or none,
           // so every share and its guests go with the old root.
           if (currentConfig && resolve(resolvedClaudeDir) !== resolve(currentConfig.claudeDir)) {
-            for (const share of listShares()) await removeShare(share.sessionId)
+            await clearAllShares()
             revokeAllShareTokens()
           }
 

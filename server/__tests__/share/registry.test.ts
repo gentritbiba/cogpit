@@ -21,6 +21,7 @@ vi.mock("../../atomicJsonFile", async (importOriginal) => {
 
 import {
   initShareRegistry,
+  clearAllShares,
   createShare,
   getShareWithHash,
   listShares,
@@ -113,6 +114,38 @@ describe("share registry", () => {
     expect(await removeShare("sess-1")).toBe(true)
     expect(getShareWithHash("sess-1")).toBeUndefined()
     expect(await removeShare("sess-1")).toBe(false)
+  })
+
+  it("clears every share in one write", async () => {
+    await createShare(INPUT)
+    await createShare({ ...INPUT, sessionId: "sess-2", fileName: "sess-2.jsonl" })
+    await createShare({ ...INPUT, sessionId: "sess-3", fileName: "sess-3.jsonl" })
+
+    const writes: string[] = []
+    atomicWrite.implementation = async (path, data) => {
+      writes.push(path)
+      await writeFile(path, JSON.stringify(data), { mode: 0o600 })
+    }
+
+    await clearAllShares()
+
+    // One rewrite, not one per record: removing them one at a time serializes
+    // a whole file write per share for a change that has a single end state.
+    expect(writes).toHaveLength(1)
+    expect(listShares()).toEqual([])
+    expect(JSON.parse(await readFile(registryFile(), "utf-8"))).toEqual([])
+  })
+
+  it("does not rewrite the file when there is nothing to clear", async () => {
+    const writes: string[] = []
+    atomicWrite.implementation = async (path, data) => {
+      writes.push(path)
+      await writeFile(path, JSON.stringify(data), { mode: 0o600 })
+    }
+
+    await clearAllShares()
+
+    expect(writes).toEqual([])
   })
 
   it("listShares never exposes the hash", async () => {

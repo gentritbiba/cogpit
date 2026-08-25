@@ -15,7 +15,7 @@ import {
   SESSION_IDLE_TTL_MS,
 } from "../../security"
 import { getConfig } from "../../config"
-import { initShareRegistry, createShare } from "../../share/registry"
+import { initShareRegistry, createShare, removeShare } from "../../share/registry"
 import { __resetEditionForTest } from "../../team/edition"
 
 vi.mock("../../config", () => ({ getConfig: vi.fn() }))
@@ -29,7 +29,12 @@ const HOST = "cogpit.example"
 const SHARES = [
   { sessionId: "sess-1", dirName: "-Users-me-proj", fileName: "sess-1.jsonl" },
   { sessionId: "sess-2", dirName: "-Users-me-proj", fileName: "sess-2.jsonl" },
+  // Removed by the "host stops sharing" test, so it must not be one of the
+  // shares the other cases depend on.
+  { sessionId: "sess-3", dirName: "-Users-me-proj", fileName: "sess-3.jsonl" },
 ] as const
+
+const REVOCABLE = SHARES[2]
 
 let registryRoot: string
 
@@ -166,6 +171,27 @@ describe("share stream revocation", () => {
     vi.advanceTimersByTime(5_000)
     expect(stream.destroy).toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("keeps a still-valid guest stream open across many recheck ticks", () => {
+    vi.useFakeTimers()
+    const stream = openGuestStream(SHARES[0])
+    vi.advanceTimersByTime(15_000)
+    expect(stream.destroy).not.toHaveBeenCalled()
+  })
+
+  it("destroys a guest stream once the host stops sharing the session", async () => {
+    vi.useFakeTimers()
+    const stream = openGuestStream(REVOCABLE)
+    // No lifecycle hook fires here: the registry record simply stops existing,
+    // which is all the recheck may rely on.
+    await removeShare(REVOCABLE.sessionId)
+    expect(stream.destroy).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(5_000)
+    expect(stream.destroy).toHaveBeenCalled()
+
+    await createShare(REVOCABLE)
   })
 
   it("cannot be kept alive past the idle window by its own rechecks", () => {

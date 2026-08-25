@@ -8,7 +8,8 @@ import { sessionTitle } from "./shares"
 import { registerAskUserRoutes } from "./ask-user"
 import { registerClaudeManageRoutes } from "./claude-manage"
 import { registerClaudeRoutes } from "./claude"
-import { registerPermissionRoutes } from "./permissions"
+import { collectPendingPermissions, registerPermissionRoutes } from "./permissions"
+import { getSDKUserQuestions } from "../sdk-session"
 
 /**
  * Everything a share guest can do that changes something.
@@ -79,7 +80,7 @@ function delegate(
  */
 function requireShare(req: IncomingMessage, res: ServerResponse): ShareRecord | null {
   const token = getRequestShareToken(req)
-  const sessionId = token ? validateShareToken(token, req.headers["user-agent"]) : null
+  const sessionId = token ? validateShareToken(token, req.headers["user-agent"] ?? "") : null
   const share = sessionId ? getShareWithHash(sessionId) : undefined
   if (!share) {
     sendJson(res, 401, { error: "Share authentication required" })
@@ -136,6 +137,23 @@ export function registerShareGuestRoutes(use: UseFn) {
       fileName: share.fileName,
       title: await sessionTitle(share.dirName, share.fileName),
       provider: isCodexDirName(share.dirName) ? "codex" : "claude",
+    })
+  })
+
+  // A guest may answer a permission request and an AskUserQuestion, so it has
+  // to be able to see them. Neither host read is on the allowlist, the
+  // transcript stream carries only lines, and session-status carries no
+  // permission data — so both are served here, from the same sources the host
+  // routes read, under the token's session and no other. One endpoint rather
+  // than two mirrored ones: the guest polls both on the same tick, and that is
+  // one round trip over the tunnel instead of two.
+  use("/api/share/pending", (req, res, next) => {
+    if (req.method !== "GET") return next()
+    const share = requireShare(req, res)
+    if (!share) return
+    sendJson(res, 200, {
+      permissions: collectPendingPermissions(share.sessionId),
+      questions: getSDKUserQuestions(share.sessionId),
     })
   })
 

@@ -10,10 +10,10 @@
  * because the router downstream is not. Express dispatches on the raw,
  * undecoded, case-insensitive path and strips only the mount prefix, so a
  * traversal resolved here would still be handed to the route named by its raw
- * prefix: `/api/file-content/..%2f..%2fapi%2fhello` resolves to `/api/hello`
- * but is dispatched to the file reader. So nothing is resolved — dot segments,
- * empty segments, backslashes, control characters and encoded separators are
- * rejected outright.
+ * prefix: `/api/file-content/..%2f..%2fapi%2fsession-status%2fsess-1` resolves
+ * to an allowed path but is dispatched to the file reader. So nothing is
+ * resolved — dot segments, empty segments, backslashes, control characters and
+ * encoded separators are rejected outright.
  *
  * Route segments are compared raw, so only their canonical spelling matches;
  * identity segments are compared after one percent-decode, which is exactly
@@ -29,6 +29,7 @@ export interface ShareScope {
 /** Endpoints under /api/share/ are token-scoped, so the path carries no identity. */
 const SHARE_NAMESPACE: ReadonlyArray<readonly [string, string]> = [
   ["GET", "/api/share/session"],
+  ["GET", "/api/share/pending"],
   ["POST", "/api/share/send-message"],
   ["POST", "/api/share/stop"],
   ["POST", "/api/share/interrupt"],
@@ -86,8 +87,6 @@ export function shareRequestAllowed(method: string, rawUrl: string, share: Share
   const verb = method.toUpperCase()
   const route = path.raw[1]
   const identity = path.decoded.slice(2)
-
-  if (verb === "GET" && route === "hello" && identity.length === 0) return true
 
   const routePath = `/${path.raw.join("/")}`
   if (SHARE_NAMESPACE.some(([allowedVerb, allowedPath]) =>
