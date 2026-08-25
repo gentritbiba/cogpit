@@ -26,6 +26,7 @@
 - **Run `bun run test` before each commit.** Also `bun run lint` and `bun run typecheck` before the commits at the end of each phase.
 - **Delete what you replace.** No dead code, no commented-out old versions.
 - Test files: `server/__tests__/**/*.test.ts` need `// @vitest-environment node` on line 1. Follow the mocking idiom in `[ref §17]` exactly — `vi.hoisted` for mock fns, `vi.mock` of `../../helpers`, `buildHandler()` collecting `use()` calls into a Map.
+- **Any test asserting a file mode must be Windows-guarded.** CI runs `bun run test` on `windows-latest` (`.github/workflows/quality.yml`), where chmod only toggles the read-only bit and a real file can never report 0600. Copy the guard from `server/__tests__/hub/registry.test.ts`: `const POSIX_MODES_UNSUPPORTED = process.platform === "win32"` plus `it.skipIf(POSIX_MODES_UNSUPPORTED)`.
 
 ---
 
