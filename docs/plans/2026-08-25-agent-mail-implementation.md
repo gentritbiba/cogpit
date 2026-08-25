@@ -510,6 +510,24 @@ git commit -m "feat: emit agent_message blocks for peer-origin queued prompts"
 
 ## Task 4: Remove `senderTaskId` (supersedes the dedup task)
 
+> **DONE — landed in `d83df83`.** The evidence was re-verified against the raw
+> JSONL before implementing: the two `csp-and-proxy` records (23:34:09 and
+> 23:48:49) do carry the identical `senderTaskId=ada0f1591dbec7898`.
+>
+> **One deviation.** The Files list said to drop the `senderTaskId` *fixture arg*
+> from `peerAttachment`. It was kept. Step 1's regression test passes that id
+> explicitly to model two messages sharing one task id — without it the fixture
+> stops matching the real record and the test guards nothing. The block field is
+> gone; the record field stays typed, so the fixture stays accurate.
+>
+> Step 1's test was mutation-verified: adding a `senderTaskId` dedup to
+> `flushPendingQueuedPrompts` makes it fail 2 -> 1, i.e. it really does catch the
+> data loss. All five gates green; 4086 tests pass.
+>
+> **Downstream snippets in Tasks 6 and 8-12 were corrected**, since they passed
+> `senderTaskId` to the serializers and to `AgentMessageCard`. Nothing carries it
+> now, so those lines would not have compiled.
+
 **This task replaced a dedup pass. Read why before doing anything.**
 
 The original Task 4 deduped `agent_message` blocks on `(senderTaskId, body)`.
@@ -750,7 +768,6 @@ tell you. That is why Step 2 below adds the guard.
       return {
         kind: "agent_message" as const,
         sender: block.sender,
-        senderTaskId: block.senderTaskId,
         body: block.body,
         reply: block.reply ?? null,
         timestamp: block.timestamp ?? null,
@@ -896,19 +913,19 @@ const BODY = [
 
 describe("AgentMessageCard", () => {
   it("shows the sender", () => {
-    render(<AgentMessageCard sender="csp-and-proxy" senderTaskId="t1" body={BODY} timestamp="" />)
+    render(<AgentMessageCard sender="csp-and-proxy" body={BODY} timestamp="" />)
     expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
   })
 
   it("never renders the raw envelope", () => {
     const { container } = render(
-      <AgentMessageCard sender="csp-and-proxy" senderTaskId="t1" body={BODY} timestamp="" />,
+      <AgentMessageCard sender="csp-and-proxy" body={BODY} timestamp="" />,
     )
     expect(container.textContent).not.toContain("<agent-message")
   })
 
   it("splits the first line into a subject and the rest into a preview", () => {
-    render(<AgentMessageCard sender="w" senderTaskId={null} body={BODY} timestamp="" />)
+    render(<AgentMessageCard sender="w" body={BODY} timestamp="" />)
     expect(screen.getByTestId("agent-message-subject").textContent)
       .toContain("payload-batch-2 done")
     expect(screen.getByTestId("agent-message-preview").textContent)
@@ -916,21 +933,21 @@ describe("AgentMessageCard", () => {
   })
 
   it("reveals the full body on expand", () => {
-    render(<AgentMessageCard sender="w" senderTaskId={null} body={BODY} timestamp="" />)
+    render(<AgentMessageCard sender="w" body={BODY} timestamp="" />)
     expect(screen.queryByTestId("agent-message-body")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /expand/i }))
     expect(screen.getByTestId("agent-message-body")).toBeInTheDocument()
   })
 
   it("gives the same sender the same accent every time", () => {
-    const { container: a } = render(<AgentMessageCard sender="w" senderTaskId={null} body="x" timestamp="" />)
-    const { container: b } = render(<AgentMessageCard sender="w" senderTaskId={null} body="y" timestamp="" />)
+    const { container: a } = render(<AgentMessageCard sender="w" body="x" timestamp="" />)
+    const { container: b } = render(<AgentMessageCard sender="w" body="y" timestamp="" />)
     const railOf = (c: HTMLElement) => c.querySelector("[data-agent-rail]")?.getAttribute("style")
     expect(railOf(a)).toBe(railOf(b))
   })
 
   it("handles a single-line body with no preview", () => {
-    render(<AgentMessageCard sender="w" senderTaskId={null} body="just one line" timestamp="" />)
+    render(<AgentMessageCard sender="w" body="just one line" timestamp="" />)
     expect(screen.getByTestId("agent-message-subject").textContent).toContain("just one line")
     expect(screen.queryByTestId("agent-message-preview")).not.toBeInTheDocument()
   })
@@ -979,7 +996,7 @@ git commit -m "feat: add AgentMessageCard with sender identity and subject previ
 // timelineHelpers.test.ts
 it("matches an agent message by sender and by body", () => {
   const turn = makeTurn({
-    contentBlocks: [{ kind: "agent_message", sender: "csp-and-proxy", senderTaskId: null, body: "lenderdesk hardening" }],
+    contentBlocks: [{ kind: "agent_message", sender: "csp-and-proxy", body: "lenderdesk hardening" }],
   })
   expect(matchesSearch(turn, "csp-and")).toBe(true)
   expect(matchesSearch(turn, "lenderdesk")).toBe(true)
@@ -990,7 +1007,7 @@ it("matches an agent message by sender and by body", () => {
 it("never folds an agent message away", () => {
   const blocks = [
     { kind: "thinking", blocks: [] },
-    { kind: "agent_message", sender: "w", senderTaskId: null, body: "b" },
+    { kind: "agent_message", sender: "w", body: "b" },
     { kind: "tool_calls", toolCalls: [{ name: "Read", input: {} }] },
     { kind: "text", text: ["done"] },
   ] as TurnContentBlock[]
@@ -1034,7 +1051,6 @@ const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
         <AgentMessageCard
           key={keyFor(block, i)}
           sender={block.sender}
-          senderTaskId={block.senderTaskId}
           body={block.body}
           reply={block.reply}
           timestamp={block.timestamp ?? ""}
@@ -1071,19 +1087,19 @@ git commit -m "feat: render agent messages in the timeline"
 
 ```tsx
 it("shows the reply summary when the message was answered", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body="b" timestamp="2026-08-21T19:26:25Z"
+  render(<AgentMessageCard sender="w" body="b" timestamp="2026-08-21T19:26:25Z"
     reply={{ summary: "Fixed the type error you flagged", timestamp: "2026-08-21T19:26:47Z" }} />)
   expect(screen.getByText(/Fixed the type error you flagged/)).toBeInTheDocument()
   expect(screen.getByText(/replied/i)).toBeInTheDocument()
 })
 
 it("shows a ticking wait only while the session is live", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body="b" timestamp="2026-08-21T19:26:25Z" isLive />)
+  render(<AgentMessageCard sender="w" body="b" timestamp="2026-08-21T19:26:25Z" isLive />)
   expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
 })
 
 it("shows a flat never-answered state for a historical session", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body="b" timestamp="2026-08-21T19:26:25Z" />)
+  render(<AgentMessageCard sender="w" body="b" timestamp="2026-08-21T19:26:25Z" />)
   expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
   expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
 })
@@ -1113,18 +1129,18 @@ git commit -am "feat: show reply state on agent messages"
 const QUESTION = "payload-batch-2 - one blocking question on finding #1.\nDetail follows."
 
 it("flags an unanswered question", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body={QUESTION} timestamp="" />)
+  render(<AgentMessageCard sender="w" body={QUESTION} timestamp="" />)
   expect(screen.getByText(/needs you/i)).toBeInTheDocument()
 })
 
 it("drops the flag once the question was answered", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body={QUESTION} timestamp=""
+  render(<AgentMessageCard sender="w" body={QUESTION} timestamp=""
     reply={{ summary: "answered", timestamp: "" }} />)
   expect(screen.queryByText(/needs you/i)).not.toBeInTheDocument()
 })
 
 it("does not flag a done report", () => {
-  render(<AgentMessageCard sender="w" senderTaskId={null} body="batch-2 done, verify is PASS." timestamp="" />)
+  render(<AgentMessageCard sender="w" body="batch-2 done, verify is PASS." timestamp="" />)
   expect(screen.queryByText(/needs you/i)).not.toBeInTheDocument()
 })
 ```
@@ -1151,13 +1167,13 @@ No server work. `useSessionInventoryOptional()` (`src/contexts/SessionInventoryC
 
 ```tsx
 it("shows no dot when the sender resolves to nothing", () => {
-  render(<AgentMessageCard sender="ghost" senderTaskId={null} body="b" timestamp="" />)
+  render(<AgentMessageCard sender="ghost" body="b" timestamp="" />)
   expect(screen.queryByTestId("agent-liveness")).not.toBeInTheDocument()
 })
 
 it("shows a dot when exactly one live session matches the sender", () => {
   renderWithInventory([{ agentName: "w", teamName: "t", agentStatus: "working" }],
-    <AgentMessageCard sender="w" senderTaskId={null} body="b" timestamp="" />)
+    <AgentMessageCard sender="w" body="b" timestamp="" />)
   expect(screen.getByTestId("agent-liveness")).toBeInTheDocument()
 })
 
@@ -1165,7 +1181,7 @@ it("shows no dot when two sessions share the sender name", () => {
   renderWithInventory([
     { agentName: "w", teamName: "t1", agentStatus: "working" },
     { agentName: "w", teamName: "t2", agentStatus: "idle" },
-  ], <AgentMessageCard sender="w" senderTaskId={null} body="b" timestamp="" />)
+  ], <AgentMessageCard sender="w" body="b" timestamp="" />)
   expect(screen.queryByTestId("agent-liveness")).not.toBeInTheDocument()
 })
 ```
