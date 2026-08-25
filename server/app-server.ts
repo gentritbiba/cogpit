@@ -29,6 +29,7 @@ import { flushSessionPersistence, initSessionPersistence } from "./team/sessionP
 import { initUsersStore, userCount } from "./team/users"
 import { initializeBootstrapToken } from "./team/bootstrapToken"
 import { initDeviceRegistry } from "./hub/registry"
+import { initShareRegistry } from "./share/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
 import { PtySessionManager } from "./pty-server"
@@ -76,6 +77,7 @@ export async function createServerComposition(
   }
 
   await initDeviceRegistry(userDataDir)
+  await initShareRegistry(userDataDir)
   refreshDirs()
 
   const app = express()
