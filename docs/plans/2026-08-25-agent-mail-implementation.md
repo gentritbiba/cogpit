@@ -136,6 +136,24 @@ git commit -m "feat: add agent envelope parser and question heuristic"
 
 ## Task 2: Widen the attachment type and add the block kind
 
+> **DONE — landed in `0470fc6`.** Both edits went in exactly as written below.
+>
+> **Step 3's expectation was wrong, and it matters for Task 6.** Adding the union
+> member broke *nothing*: `bun run typecheck` was green before the mirror sync and
+> after it. There is no exhaustiveness assertion anywhere in this repo — no
+> `assertNever`, no `satisfies never`, no `switch` lint rule. Both `mapContentBlock`
+> switches (`server/routes/session-context.ts:158`,
+> `packages/cogpit-memory/src/commands/context.ts:162`) have no `default` **and no
+> declared return type**, so TypeScript silently widens their inferred return to
+> include `undefined` instead of erroring. `blockIdentity`
+> (`src/components/timeline/TurnSection.tsx:404`) has a `default` that already does
+> the right thing for `agent_message`.
+>
+> Consequence: **Task 6 is not compiler-discoverable.** Once Task 3 emits
+> `agent_message`, both serializers will silently return `undefined` for those
+> blocks and the API will drop them, with every gate still green. Task 6 must be
+> done deliberately; nothing will fail to remind you.
+
 **Files:**
 - Modify: `shared/session/types.ts:278-285` (the `AttachmentMessage` interface)
 - Modify: `shared/session/types.ts:335-350` (the `TurnContentBlock` union)
