@@ -3,7 +3,7 @@ import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
-import { parseTeammateMessage } from "@/lib/teammateMessage"
+import { parseAgentEnvelope } from "../../shared/session/agentEnvelope"
 import { extractCommandArgs, extractCommandName, stripSystemTags } from "@/lib/userMessageContent"
 
 interface StickyPromptBannerProps {
@@ -26,7 +26,7 @@ function promptPreview(turn: Turn): string | null {
   if (!turn.userMessage) return null
 
   const raw = getUserMessageText(turn.userMessage)
-  const { text: unwrapped } = parseTeammateMessage(raw)
+  const { body: unwrapped } = parseAgentEnvelope(raw)
   const clean = stripSystemTags(unwrapped)
 
   if (!clean) {

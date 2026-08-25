@@ -14,6 +14,12 @@ describe("parseAgentEnvelope", () => {
     expect(r.body).toBe("hello")
   })
 
+  it("preserves multiline markdown inside the envelope", () => {
+    const r = parseAgentEnvelope(`<teammate-message teammate_id="cc-research">Report:\n1. First\n2. Second</teammate-message>`)
+    expect(r.sender).toBe("cc-research")
+    expect(r.body).toBe("Report:\n1. First\n2. Second")
+  })
+
   it("prefers the first envelope's sender when several are present", () => {
     const r = parseAgentEnvelope(
       `<agent-message from="a">one</agent-message>\n<agent-message from="b">two</agent-message>`,
