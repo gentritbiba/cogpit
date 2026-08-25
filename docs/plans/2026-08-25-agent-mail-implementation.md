@@ -809,9 +809,15 @@ Two cases are known to be uncovered. Both already behave correctly in
   must give `sender: null` with the body still unwrapped.
 - `teammate_id` appearing **after** another attribute:
   `<teammate-message from="x" teammate_id="team-lead">` must resolve to
-  `team-lead`, not `x`. This is why `SENDER_RE` uses word-boundary-anchored
-  alternation — a naive `from|teammate_id` regex silently picks the wrong
-  sender here, and nothing else in the suite would catch it.
+  `team-lead`, not `x`.
+
+  **Correction:** an earlier draft of this plan claimed word-boundary-anchored
+  alternation (`/(?:\bfrom|\bteammate_id)="..."/`) handles this. It does not.
+  Regex alternation has no preference ordering — the engine returns the
+  *leftmost* match, so `from="x"` wins on position regardless of which branch is
+  listed first. `\b` only prevents `sent_from=` from matching. The fix is two
+  separate patterns with `teammate_id` tried first, which Task 1 now implements.
+  This case is covered by a test in Task 1; verify it is still green here.
 
 **Step 2: Repoint the two consumers**
 
@@ -828,9 +834,21 @@ const { body: unwrapped } = parseAgentEnvelope(raw)
 ```ts
 import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
 // ...
-const { sender: teammateId, body: unwrappedText } = useMemo(() => parseAgentEnvelope(rawText), [rawText])
-const isTeammate = teammateId !== null
+const { sender: teammateId, body: unwrappedText, matched: isTeammate } =
+  useMemo(() => parseAgentEnvelope(rawText), [rawText])
 ```
+
+**Do not** derive `isTeammate` as `teammateId !== null`. An envelope can carry no
+sender attribute at all, and two behaviours depend on telling that apart from
+plain text:
+
+- `UserMessage.tsx:276-282` has an explicit `teammateId ? \`From ${teammateId}\` : "Teammate message"`
+  branch that would become dead code.
+- `UserMessage.tsx:224` computes `hasTags` from `isTeammate`. Deriving it from the
+  sender hides the "Show raw" control while still hiding the envelope — the exact
+  regression the comment at `UserMessage.tsx:218-221` exists to prevent.
+
+Use the `matched` flag `parseAgentEnvelope` returns.
 
 Leave the teammate `Badge` in `UserMessage` as-is. It still covers envelopes that arrive as ordinary user records rather than queued attachments.
 
