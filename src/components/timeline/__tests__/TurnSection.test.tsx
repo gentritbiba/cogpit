@@ -180,4 +180,22 @@ describe("TurnSection agent messages", () => {
     expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
     expect(screen.getByText("One blocking question on finding #1.")).toBeInTheDocument()
   })
+
+  it("keeps an unanswered peer message waiting while its turn is the live one", () => {
+    mocks.status = "thinking"
+
+    render(<TurnSection turn={mailTurn} index={0} />)
+
+    expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
+  })
+
+  it("settles an unanswered peer message once its turn is no longer the live one", () => {
+    mocks.status = "thinking"
+
+    // The mocked session holds one turn, so index 1 is a past turn.
+    render(<TurnSection turn={mailTurn} index={1} />)
+
+    expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
+  })
 })

@@ -542,6 +542,7 @@ function ContentBlocks({
           body={block.body}
           reply={block.reply}
           timestamp={block.timestamp}
+          isLive={isAgentActive}
         />
       )
       i++

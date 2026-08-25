@@ -3,6 +3,8 @@ import { ArrowDownLeft, ChevronDown, ChevronRight } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import { Button } from "@/components/ui/button"
+import { useElapsedTimer } from "@/hooks/useElapsedTimer"
+import { formatDuration } from "@/lib/format"
 
 /**
  * Hues spread around the wheel so two agents in the same session rarely land on
@@ -70,10 +72,21 @@ function splitSubjectAndPreview(body: string): { subject: string; preview: strin
   return { subject, preview: flattenToPlainText(lines.slice(first + 1).join("\n")) }
 }
 
-function formatTime(timestamp: string | undefined): string | null {
+function parseTime(timestamp: string | undefined): number | null {
   if (!timestamp) return null
-  const date = new Date(timestamp)
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleTimeString()
+  const ms = new Date(timestamp).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+/** Gap between two records, or null when either end is unusable or out of order. */
+function elapsedBetween(from: number | null, to: number | null): number | null {
+  if (from === null || to === null || to < from) return null
+  return to - from
+}
+
+function formatTime(timestamp: string | undefined): string | null {
+  const ms = parseTime(timestamp)
+  return ms === null ? null : new Date(ms).toLocaleTimeString()
 }
 
 interface Props {
@@ -82,7 +95,7 @@ interface Props {
   timestamp?: string
   /** Filled by the pairing pass; rendered by the reply footer. */
   reply?: { summary: string; timestamp: string }
-  /** Whether the sender is a session currently in the inventory. */
+  /** Whether this session is still live, so an unanswered message is still waiting. */
   isLive?: boolean
   /** The sender's `agentStatus` when it is live. */
   liveStatus?: string
@@ -92,11 +105,24 @@ interface Props {
  * A message another agent sent into this session, rendered as mail: who sent it,
  * what it is about, and a teaser, with the full body one click away.
  */
-export const AgentMessageCard = memo(function AgentMessageCard({ sender, body, timestamp }: Props) {
+export const AgentMessageCard = memo(function AgentMessageCard({
+  sender,
+  body,
+  timestamp,
+  reply,
+  isLive,
+}: Props) {
   const [expanded, setExpanded] = useState(false)
   const { subject, preview } = useMemo(() => splitSubjectAndPreview(body), [body])
   const time = formatTime(timestamp)
   const accent = "text-[oklch(0.52_0.16_var(--agent-hue))] dark:text-[oklch(0.74_0.14_var(--agent-hue))]"
+
+  const askedAt = parseTime(timestamp)
+  const replyDelay = reply ? elapsedBetween(askedAt, parseTime(reply.timestamp)) : null
+  const awaiting = !reply && isLive === true
+  // Only pumps a re-render each second; the wait itself is measured from the
+  // message, so it survives a card that mounted long after the message arrived.
+  useElapsedTimer(awaiting)
 
   return (
     <div
@@ -143,6 +169,23 @@ export const AgentMessageCard = memo(function AgentMessageCard({ sender, body, t
       )}
 
       <div className="mt-1.5 flex items-center justify-end gap-2">
+        <p
+          data-testid="agent-message-state"
+          className={`min-w-0 flex-1 truncate text-xs ${awaiting ? "text-warning" : "text-muted-foreground"}`}
+        >
+          {reply ? (
+            <>
+              {replyDelay === null ? "You replied" : `You replied ${formatDuration(replyDelay)} later`}
+              {reply.summary && ` \u00b7 "${reply.summary}"`}
+            </>
+          ) : awaiting ? (
+            askedAt === null
+              ? "Awaiting your reply"
+              : `Awaiting your reply \u00b7 ${formatDuration(Math.max(0, Date.now() - askedAt))}`
+          ) : (
+            "Never answered"
+          )}
+        </p>
         <Button
           type="button"
           variant="ghost"

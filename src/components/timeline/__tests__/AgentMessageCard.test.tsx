@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi } from "vitest"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { AgentMessageCard, agentAccentHue, flattenToPlainText } from "../AgentMessageCard"
 
 const BODY = [
@@ -116,19 +116,102 @@ describe("AgentMessageCard", () => {
     expect(bad.textContent).not.toContain("Invalid Date")
   })
 
-  it("accepts the reply and liveness props reserved for later tasks", () => {
+  it("accepts the liveStatus prop reserved for the liveness dot", () => {
     expect(() =>
+      render(<AgentMessageCard sender="w" body="x" timestamp="" liveStatus="running" />),
+    ).not.toThrow()
+  })
+
+  describe("reply state", () => {
+    const ASKED = "2026-08-21T19:26:25.000Z"
+    const ANSWERED = "2026-08-21T19:26:47.000Z"
+    const stateLine = () => screen.getByTestId("agent-message-state").textContent
+
+    it("shows the reply summary when the message was answered", () => {
       render(
         <AgentMessageCard
           sender="w"
-          body="x"
-          timestamp=""
-          reply={{ summary: "answered", timestamp: "2026-08-25T10:11:12.000Z" }}
-          isLive
-          liveStatus="running"
+          body="b"
+          timestamp={ASKED}
+          reply={{ summary: "Fixed the type error you flagged", timestamp: ANSWERED }}
         />,
-      ),
-    ).not.toThrow()
+      )
+      expect(screen.getByText(/Fixed the type error you flagged/)).toBeInTheDocument()
+      expect(screen.getByText(/replied/i)).toBeInTheDocument()
+    })
+
+    it("measures the reply against the message it answered", () => {
+      render(
+        <AgentMessageCard
+          sender="w"
+          body="b"
+          timestamp={ASKED}
+          reply={{ summary: "done", timestamp: ANSWERED }}
+        />,
+      )
+      expect(stateLine()).toBe('You replied 22s later \u00b7 "done"')
+    })
+
+    it("omits the delay when a timestamp cannot be read", () => {
+      render(
+        <AgentMessageCard sender="w" body="b" timestamp={ASKED} reply={{ summary: "done", timestamp: "" }} />,
+      )
+      expect(stateLine()).toBe('You replied \u00b7 "done"')
+    })
+
+    it("shows a ticking wait only while the session is live", () => {
+      render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} isLive />)
+      expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
+    })
+
+    it("counts the live wait up from the message, not from mount", () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date("2026-08-21T19:26:55.000Z"))
+        render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} isLive />)
+        expect(stateLine()).toBe("Awaiting your reply \u00b7 30s")
+
+        act(() => { vi.advanceTimersByTime(5000) })
+        expect(stateLine()).toBe("Awaiting your reply \u00b7 35s")
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("shows a flat never-answered state for a historical session", () => {
+      render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} />)
+      expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
+      expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
+    })
+
+    it("never ticks a counter on a historical session", () => {
+      vi.useFakeTimers()
+      try {
+        // Weeks after the fact: a rising counter here would be noise, not urgency.
+        vi.setSystemTime(new Date("2026-09-11T19:26:55.000Z"))
+        render(<AgentMessageCard sender="w" body="b" timestamp={ASKED} />)
+        expect(stateLine()).toBe("Never answered")
+
+        act(() => { vi.advanceTimersByTime(60_000) })
+        expect(stateLine()).toBe("Never answered")
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("stops waiting once the reply lands", () => {
+      render(
+        <AgentMessageCard
+          sender="w"
+          body="b"
+          timestamp={ASKED}
+          isLive
+          reply={{ summary: "done", timestamp: ANSWERED }}
+        />,
+      )
+      expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
+      expect(stateLine()).toBe('You replied 22s later \u00b7 "done"')
+    })
   })
 })
 
