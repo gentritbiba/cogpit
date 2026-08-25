@@ -388,3 +388,78 @@ describe("mergePullRequests", () => {
     expect(mergePullRequests(undefined, undefined)).toEqual([])
   })
 })
+
+// -- Native pr-link records --
+
+function prLink(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    type: "pr-link",
+    sessionId: "s1",
+    prNumber: 100,
+    prUrl: "https://github.com/HonestCMS/cms/pull/100",
+    prRepository: "HonestCMS/cms",
+    timestamp: "2026-07-28T20:37:34.139Z",
+    ...overrides,
+  })
+}
+
+describe("pr-link records", () => {
+  it("records a pull request the transcript names directly", () => {
+    const prs = scanPullRequests(`${prLink()}\n`)
+    expect(prs).toHaveLength(1)
+    expect(prs[0]).toMatchObject({
+      url: "https://github.com/HonestCMS/cms/pull/100",
+      number: 100,
+      repo: "HonestCMS/cms",
+      title: null,
+      isDraft: false,
+      toolCallId: "",
+      timestamp: "2026-07-28T20:37:34.139Z",
+    })
+  })
+
+  it("records a GitLab merge request, which the GitHub url pattern never matches", () => {
+    const prs = scanPullRequests(`${prLink({
+      prNumber: 7,
+      prUrl: "https://gitlab.com/group/proj/-/merge_requests/7",
+      prRepository: "group/proj",
+    })}\n`)
+    expect(prs).toEqual([
+      expect.objectContaining({
+        url: "https://gitlab.com/group/proj/-/merge_requests/7",
+        number: 7,
+        repo: "group/proj",
+      }),
+    ])
+  })
+
+  it("keeps one entry for a pull request found by both the create command and the record", () => {
+    const link = prLink({ prNumber: 11, prUrl: "https://github.com/o/r/pull/11", prRepository: "o/r" })
+    const prs = scanPullRequests(`${CLAUDE_CREATE}\n${CLAUDE_RESULT}\n${link}\n`)
+    expect(prs).toHaveLength(1)
+    expect(prs[0]).toMatchObject({ number: 11, title: "Windows support", toolCallId: "toolu_1" })
+  })
+
+  it("ignores a record with no usable url or number", () => {
+    expect(scanPullRequests(`${prLink({ prUrl: "" })}\n`)).toEqual([])
+    expect(scanPullRequests(`${prLink({ prNumber: null })}\n`)).toEqual([])
+  })
+
+  it("does not mistake a pull request mentioned by some other record type", () => {
+    const mention = JSON.stringify({
+      type: "summary",
+      summary: "opened pr-link https://github.com/o/r/pull/50",
+      prUrl: "https://github.com/o/r/pull/50",
+      prNumber: 50,
+    })
+    expect(scanPullRequests(`${mention}\n`)).toEqual([])
+  })
+
+  it("finds a record delivered in a later chunk", () => {
+    const scanner = createPullRequestScanner()
+    scanner.scan(`${prLink()}`)
+    expect(scanner.pullRequests).toEqual([])
+    scanner.scan("\n")
+    expect(scanner.pullRequests.map((pr) => pr.number)).toEqual([100])
+  })
+})

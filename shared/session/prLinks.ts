@@ -9,7 +9,10 @@ export interface SessionPullRequest {
   /** Title passed to `gh pr create`, when the command carried one */
   title: string | null
   isDraft: boolean
-  /** Tool call that opened the pull request, for jumping back to it */
+  /**
+   * Tool call that opened the pull request, for jumping back to it. Empty for
+   * pull requests the transcript names outright, which belong to no tool call.
+   */
   toolCallId: string
   timestamp: string
 }
@@ -31,9 +34,13 @@ const TITLE_PATTERNS = [
   new RegExp(`${TITLE_FLAG}(\\S+)`),
 ]
 
-/** Cheap pre-filter: a line can only matter if it holds one half of the pair. */
+/**
+ * Cheap pre-filter: a line can only matter if it holds one half of the pair or
+ * is a native `pr-link` record, whose url may be neither GitHub nor a `/pull/`.
+ */
 const CREATE_HINT = "gh pr create"
 const URL_HINT = "/pull/"
+const PR_LINK_HINT = "pr-link"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -71,19 +78,27 @@ interface Collector {
   readonly pullRequests: SessionPullRequest[]
   /** Records the pull request named by a create command's output, once. */
   record(output: string, command: string, toolCallId: string, timestamp: string): void
+  /** Records an already-identified pull request, once. */
+  add(pullRequest: SessionPullRequest): void
 }
 
 function createCollector(): Collector {
   const pullRequests: SessionPullRequest[] = []
   const seen = new Set<string>()
 
+  function add(pullRequest: SessionPullRequest) {
+    if (seen.has(pullRequest.url)) return
+    seen.add(pullRequest.url)
+    pullRequests.push(pullRequest)
+  }
+
   return {
     pullRequests,
+    add,
     record(output, command, toolCallId, timestamp) {
       const match = PR_URL.exec(output)
-      if (!match || seen.has(match[0])) return
-      seen.add(match[0])
-      pullRequests.push({
+      if (!match) return
+      add({
         url: match[0],
         number: Number(match[3]),
         repo: `${match[1]}/${match[2]}`,
@@ -99,7 +114,9 @@ function createCollector(): Collector {
 /**
  * Finds the pull requests a session opened by pairing `gh pr create` commands
  * with the url the command printed. Deliberately strict: a url mentioned
- * anywhere else in the transcript is a reference, not a creation.
+ * anywhere else in the transcript is a reference, not a creation. Native
+ * `pr-link` records carry no message and so never reach a turn; only the raw
+ * scanner below sees them.
  */
 export function extractPullRequests(turns: Turn[]): SessionPullRequest[] {
   const collector = createCollector()
@@ -151,6 +168,27 @@ export function createPullRequestScanner(): PullRequestScanner {
     if (command) openCreates.set(id, { command, timestamp })
   }
 
+  /**
+   * Claude writes a `pr-link` record for every pull request it opens, however it
+   * was opened. The url is authoritative and is used as given — running it
+   * through the GitHub-only `PR_URL` would drop GitLab merge requests.
+   */
+  function recordPrLink(record: Record<string, unknown>, timestamp: string) {
+    const url = record.prUrl
+    const number = record.prNumber
+    if (typeof url !== "string" || !url) return
+    if (typeof number !== "number" || !Number.isInteger(number) || number <= 0) return
+    collector.add({
+      url,
+      number,
+      repo: typeof record.prRepository === "string" ? record.prRepository : "",
+      title: null,
+      isDraft: false,
+      toolCallId: "",
+      timestamp,
+    })
+  }
+
   function recordResult(id: unknown, output: unknown, isError: boolean) {
     if (typeof id !== "string") return
     const create = openCreates.get(id)
@@ -171,7 +209,9 @@ export function createPullRequestScanner(): PullRequestScanner {
   }
 
   function scanLine(line: string) {
-    if (!line.includes(CREATE_HINT) && !line.includes(URL_HINT)) return
+    if (!line.includes(CREATE_HINT) && !line.includes(URL_HINT) && !line.includes(PR_LINK_HINT)) {
+      return
+    }
 
     let record: unknown
     try {
@@ -182,6 +222,11 @@ export function createPullRequestScanner(): PullRequestScanner {
     if (!isRecord(record)) return
 
     const timestamp = typeof record.timestamp === "string" ? record.timestamp : ""
+
+    if (record.type === "pr-link") {
+      recordPrLink(record, timestamp)
+      return
+    }
 
     const payload = record.payload
     if (isRecord(payload)) {
