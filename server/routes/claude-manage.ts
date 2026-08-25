@@ -21,6 +21,8 @@ import {
   type SDKSessionUpdates,
 } from "../sdk-session"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
+import { listShares, removeShare } from "../share/registry"
+import { revokeShareTokensForSession } from "../security"
 import { codexAppServer } from "../codex-app-server"
 import { registerRunningProcessesRoute } from "./claude-manage/processInventory"
 
@@ -46,6 +48,16 @@ function terminatePersistentSession(sessionId: string): boolean {
   }, 3000)
   forceKill.unref()
   return true
+}
+
+/** Matched on the file too: a Codex rollout file name is not the session id. */
+function sharedSessionIdsFor(sessionId: string, dirName: string, fileName: string): string[] {
+  return listShares()
+    .filter((share) => (
+      share.sessionId === sessionId
+      || (share.dirName === dirName && share.fileName === fileName)
+    ))
+    .map((share) => share.sessionId)
 }
 
 export function registerClaudeManageRoutes(use: UseFn) {
@@ -353,6 +365,13 @@ export function registerClaudeManageRoutes(use: UseFn) {
         }
 
         await unlink(filePath)
+
+        // A share left behind would hand its guest whatever session next
+        // claims this id.
+        for (const sharedId of sharedSessionIdsFor(sessionId, dirName, fileName)) {
+          await removeShare(sharedId)
+          revokeShareTokensForSession(sharedId)
+        }
 
         sendJson(res, 200, { success: true })
       } catch (err) {

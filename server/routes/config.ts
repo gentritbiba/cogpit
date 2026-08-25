@@ -18,7 +18,8 @@ import {
   getConnectedDevices,
 } from "../helpers"
 import { verifyRemotePassword, getDummyHash } from "../password-verify"
-import type { SessionPrincipal } from "../security"
+import { revokeAllShareTokens, type SessionPrincipal } from "../security"
+import { listShares, removeShare } from "../share/registry"
 import { isTeamEdition } from "../team/edition"
 import { getUserByUsername, withVerifiedUser } from "../team/users"
 import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
@@ -402,9 +403,12 @@ export function registerConfigRoutes(use: UseFn) {
             return
           }
 
-          // If disabling network access, revoke all sessions
+          // Disabling network access closes the door guests came through, so
+          // their live tokens go too. The share records stay: turning network
+          // access back on must not silently re-admit anyone.
           if (!parsed.networkAccess && currentConfig?.networkAccess) {
             await revokeAllSessions()
+            revokeAllShareTokens()
           }
 
           await saveConfig({
@@ -420,6 +424,14 @@ export function registerConfigRoutes(use: UseFn) {
             useBuiltInEditor: !!parsed.useBuiltInEditor,
           })
           refreshDirs()
+
+          // A share record addresses a dirName/fileName inside one projects
+          // root. Under a new root that pair is a different session, or none,
+          // so every share and its guests go with the old root.
+          if (currentConfig && resolve(resolvedClaudeDir) !== resolve(currentConfig.claudeDir)) {
+            for (const share of listShares()) await removeShare(share.sessionId)
+            revokeAllShareTokens()
+          }
 
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({
