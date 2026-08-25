@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 import { InputOutputChart } from "@/components/stats/InputOutputChart"
 import { ActivityHeatmap } from "@/components/stats/ActivityHeatmap"
 import { ModelDistribution } from "@/components/stats/ModelDistribution"
+import { AttributionPanel } from "@/components/stats/AttributionPanel"
 import { ErrorLog } from "@/components/stats/ErrorLog"
 import { BackgroundServers } from "@/components/stats/BackgroundServers"
 import { AgentsPanel } from "@/components/stats/AgentsPanel"
@@ -136,6 +137,7 @@ export const StatsPanel = memo(function StatsPanel({
           <InputOutputChart turns={turns} />
           <ActivityHeatmap turns={turns} />
           <ModelDistribution turns={turns} />
+          <AttributionPanel turns={turns} />
         </TabsContent>
         <TabsContent value="issues" className="flex flex-col gap-6 pt-3">
           <ErrorLog turns={turns} onJumpToTurn={onJumpToTurn} />
