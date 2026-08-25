@@ -613,6 +613,36 @@ git commit -m "refactor: drop senderTaskId from agent_message blocks"
 
 ## Task 5: Pair replies
 
+> **DONE — landed in `057aa69`.** The pass went in as written, with the
+> corrections below. All five gates green; the change was verified in isolation
+> on a clean `HEAD` worktree (lint, typecheck, typecheck:tests, test 4091,
+> check:cogpit-memory-sync) because unrelated work was in flight in the same
+> file at the time.
+>
+> - **Fixture style again.** Step 1's `buildSession(withBase([...]))` does not
+>   exist — the tests use `parseSession(toJsonl([...]))` and the `peerAttachment`
+>   helper Task 3 added. `toolUseAssistant("SendMessage", { to, summary, message },
+>   id)` from `@/__tests__/fixtures` builds the reply.
+> - **No cast on `call.input`.** It is already `Record<string, unknown>`, so the
+>   snippet's `as { to?: unknown; summary?: unknown } | null` is unnecessary.
+> - **Reply timestamp comes from the call, not the block.** A `tool_calls` block
+>   groups every tool_use in one assistant message, so `block.timestamp` is the
+>   message time; `call.timestamp` is the reply's own. The footer renders
+>   "replied 22s later" off this, so the pass uses
+>   `call.timestamp || block.timestamp || ""`.
+> - **Two tests beyond the plan.** One answers a sender, then has that same
+>   sender send again with no further reply — the only case that catches a
+>   sender-answered latch instead of a draining queue. One puts the reply in a
+>   later turn, pinning the map's lifetime to the whole session rather than one
+>   turn.
+> - **Mutation-verified, four ways.** `.shift()` -> `.pop()` fails oldest-first;
+>   ignoring `to` fails cross-sender; latching a reply for later messages fails
+>   forward-only; a sender-answered `Set` fails the same-sender-again case. Each
+>   broke exactly one test.
+> - **Known gap:** a `SendMessage` issued inside plan mode is absorbed into the
+>   `plan_mode` block's `toolCalls` by `groupPlanModeBlocks` and will not pair.
+>   Not observed in real data; left alone rather than guessed at.
+
 **Files:**
 - Modify: `shared/session/turnBuilder.ts` (new pass, run once after turns are built — find where `buildSession` returns and call it just before)
 - Test: `src/lib/__tests__/turnBuilder.test.ts`
