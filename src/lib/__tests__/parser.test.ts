@@ -19,6 +19,7 @@ import {
   turnDurationMsg,
   summaryMsg,
   compactBoundaryMsg,
+  compactSummaryMsg,
   agentProgressMsg,
   toJsonl,
   simpleSession,
@@ -942,94 +943,59 @@ describe("stats computation", () => {
   })
 })
 
-// ── buildCompactionSummary ──────────────────────────────────────────────
+// ── Compaction ──────────────────────────────────────────────────────────
 
-describe("compaction summary", () => {
-  it("attaches compaction summary to the turn after the summary message", () => {
-    const session = parseSession(compactionSession())
-    // First two turns should NOT have compaction
-    expect(session.turns[0].compactionSummary).toBeUndefined()
-    expect(session.turns[1].compactionSummary).toBeUndefined()
-    // Third turn (after summary) should have compaction
-    const third = session.turns[2]
-    expect(third.compactionSummary).toBeDefined()
-  })
-
-  it("includes turn count in compaction summary", () => {
-    const session = parseSession(compactionSession())
-    const summary = session.turns[2].compactionSummary!
-    expect(summary).toContain("2 turns compacted")
-  })
-
-  it("includes tool usage in compaction summary when tools are used", () => {
-    const toolId = "ct1"
+describe("compaction", () => {
+  it("attaches the model-written summary from the compact-summary message", () => {
     const jsonl = toJsonl([
-      userMsg("Read file"),
-      toolUseAssistant("Read", { file_path: "a.ts" }, toolId),
-      toolResultMsg(toolId, "content"),
-      textAssistant("Done"),
-      turnDurationMsg(1000),
-      summaryMsg("Compacted"),
-      userMsg("Next"),
-      textAssistant("After compaction"),
-    ])
-    const session = parseSession(jsonl)
-    const lastTurn = session.turns[session.turns.length - 1]
-    expect(lastTurn.compactionSummary).toContain("Read x1")
-  })
-
-  it("includes user prompts in compaction summary", () => {
-    const session = parseSession(compactionSession())
-    const summary = session.turns[2].compactionSummary!
-    expect(summary).toContain("Prompts:")
-    expect(summary).toContain("First message")
-  })
-
-  it("returns just title for empty turns before summary", () => {
-    const jsonl = toJsonl([
-      summaryMsg("Empty compaction"),
-      userMsg("After"),
+      userMsg("First message"),
       textAssistant("Response"),
+      turnDurationMsg(1000),
+      compactBoundaryMsg("auto", 167000),
+      compactSummaryMsg("1. **Primary Request**:\n   Ship the thing."),
+      textAssistant("Continuing"),
     ])
     const session = parseSession(jsonl)
-    const turn = session.turns[0]
-    expect(turn.compactionSummary).toBe("Empty compaction")
+    expect(session.turns[0].compactionSummary).toBeUndefined()
+    const compacted = session.turns[1]
+    expect(compacted.compactionSummary).toBe("1. **Primary Request**:\n   Ship the thing.")
   })
 
-  it("truncates long user prompts in compaction summary to 120 chars", () => {
-    const longMsg = "A".repeat(200)
+  it("keeps the resume boilerplate out of the transcript", () => {
     const jsonl = toJsonl([
-      userMsg(longMsg),
-      textAssistant("Short response"),
-      turnDurationMsg(500),
-      summaryMsg("Long prompt test"),
-      userMsg("After"),
-      textAssistant("ok"),
+      userMsg("First message"),
+      textAssistant("Response"),
+      turnDurationMsg(1000),
+      compactBoundaryMsg("auto", 167000),
+      compactSummaryMsg("The summary."),
+      textAssistant("Continuing"),
     ])
     const session = parseSession(jsonl)
-    const summary = session.turns[1].compactionSummary!
-    // Should truncate to 117 chars + "..."
-    expect(summary).toContain("...")
+    const compacted = session.turns[1]
+    expect(compacted.userMessage).toBeNull()
+    expect(compacted.compactionSummary).not.toContain("This session is being continued")
+    expect(compacted.compactionSummary).not.toContain("read the full transcript at")
+    expect(compacted.assistantText).toEqual(["Continuing"])
   })
 
-  it("limits displayed prompts to 6 and notes extras", () => {
-    const messages: Array<Record<string, unknown>> = []
-    for (let i = 0; i < 8; i++) {
-      messages.push(userMsg(`Prompt ${i}`))
-      messages.push(textAssistant(`Response ${i}`))
-      messages.push(turnDurationMsg(100))
-    }
-    messages.push(summaryMsg("Many prompts"))
-    messages.push(userMsg("After"))
-    messages.push(textAssistant("ok"))
-
-    const session = parseSession(toJsonl(messages))
-    const lastTurn = session.turns[session.turns.length - 1]
-    const summary = lastTurn.compactionSummary!
-    expect(summary).toContain("...and 2 more")
+  it("carries trigger and token counts from the boundary", () => {
+    const jsonl = toJsonl([
+      userMsg("First message"),
+      textAssistant("Response"),
+      turnDurationMsg(1000),
+      compactBoundaryMsg("manual", 511676, "Conversation compacted", 188681),
+      compactSummaryMsg("The summary."),
+      textAssistant("Continuing"),
+    ])
+    const session = parseSession(jsonl)
+    expect(session.turns[1].compactionMeta).toEqual({
+      trigger: "manual",
+      preTokens: 511676,
+      postTokens: 188681,
+    })
   })
 
-  it("detects compact_boundary system message as compaction", () => {
+  it("marks the next turn when the boundary has no summary message after it", () => {
     const jsonl = toJsonl([
       userMsg("First message"),
       textAssistant("Response"),
@@ -1039,25 +1005,40 @@ describe("compaction summary", () => {
       textAssistant("After response"),
     ])
     const session = parseSession(jsonl)
-    expect(session.turns[0].compactionSummary).toBeUndefined()
+    expect(session.turns[0].compactionMeta).toBeUndefined()
     const lastTurn = session.turns[session.turns.length - 1]
-    expect(lastTurn.compactionSummary).toBeDefined()
-    expect(lastTurn.compactionSummary).toContain("1 turn")
+    expect(lastTurn.compactionSummary).toBeUndefined()
+    expect(lastTurn.compactionMeta?.trigger).toBe("auto")
   })
 
-  it("detects manual compact_boundary with custom content", () => {
+  it("keeps the marker when the session ends at the compaction summary", () => {
     const jsonl = toJsonl([
-      userMsg("Working on feature"),
-      textAssistant("Done"),
-      turnDurationMsg(500),
-      compactBoundaryMsg("manual", 131000, "Conversation compacted"),
-      userMsg("Continue"),
+      userMsg("First message"),
+      textAssistant("Response"),
+      turnDurationMsg(1000),
+      compactBoundaryMsg("auto", 167000),
+      compactSummaryMsg("The summary."),
+    ])
+    const session = parseSession(jsonl)
+    expect(session.turns).toHaveLength(2)
+    expect(session.turns[1].compactionSummary).toBe("The summary.")
+  })
+
+  it("uses summary text verbatim when it carries no resume boilerplate", () => {
+    const jsonl = toJsonl([
+      compactBoundaryMsg("auto", 167000),
+      userMsg("Bare summary", { isCompactSummary: true }),
       textAssistant("Continuing"),
     ])
     const session = parseSession(jsonl)
-    const lastTurn = session.turns[session.turns.length - 1]
-    expect(lastTurn.compactionSummary).toBeDefined()
-    expect(lastTurn.compactionSummary).toContain("Conversation compacted")
+    expect(session.turns[0].compactionSummary).toBe("Bare summary")
+  })
+
+  it("attaches legacy summary records to the turn after them", () => {
+    const session = parseSession(compactionSession())
+    expect(session.turns[0].compactionSummary).toBeUndefined()
+    expect(session.turns[1].compactionSummary).toBeUndefined()
+    expect(session.turns[2].compactionSummary).toBe("Context compacted after 2 turns")
   })
 })
 

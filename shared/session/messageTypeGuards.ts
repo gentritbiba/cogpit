@@ -46,6 +46,17 @@ export function isAttachmentMessage(msg: RawMessage): msg is AttachmentMessage {
   return msg.type === "attachment"
 }
 
+/**
+ * The synthetic user message Claude Code writes after compacting, carrying the
+ * summary text. Flagged `isVisibleInTranscriptOnly` too — it is transcript
+ * furniture, never something the user typed.
+ */
+export function isCompactSummaryMessage(
+  msg: RawMessage,
+): msg is UserMessage & { isCompactSummary: true } {
+  return msg.type === "user" && (msg as UserMessage).isCompactSummary === true
+}
+
 export function isCompactBoundary(
   msg: RawMessage,
 ): msg is SystemMessage & { subtype: "compact_boundary" } {

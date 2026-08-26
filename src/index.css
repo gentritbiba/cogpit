@@ -56,6 +56,8 @@
 }
 
 :root {
+  /* Overridden at runtime by the chat width preference (src/lib/chatWidth.ts). */
+  --chat-width: 56rem;
   --motion-duration-instant: 80ms;
   --motion-duration-fast: 120ms;
   --motion-duration-base: 180ms;

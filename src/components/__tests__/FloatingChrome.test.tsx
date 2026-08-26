@@ -172,6 +172,22 @@ describe("FloatingChrome", () => {
     vi.clearAllMocks()
   })
 
+  it("owns the window-drag strip and paints it under the pills", () => {
+    const { container } = renderChrome()
+
+    // The strip has to be a sibling of the pill row, and lower: anywhere else
+    // (a resizable panel, say) it lands in its own stacking context and covers
+    // the pills instead of sitting behind them.
+    const strip = container.querySelector(".drag-strip")
+    const pillRow = sessionPill().closest(".pointer-events-auto")?.parentElement
+    expect(strip).toBeInTheDocument()
+    expect(strip).toHaveClass("z-10")
+    expect(pillRow).toHaveClass("z-30")
+    expect(strip?.parentElement).toBe(pillRow?.parentElement)
+    expect(strip?.compareDocumentPosition(pillRow as Node))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
   it("copies the resume command from the project/session breadcrumb", () => {
     renderChrome()
 

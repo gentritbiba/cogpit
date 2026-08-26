@@ -174,5 +174,6 @@ function mergeTurnFragments(older: Turn, newer: Turn): Turn {
     tokenUsage: newer.tokenUsage ?? older.tokenUsage,
     model: newer.model ?? older.model,
     compactionSummary: older.compactionSummary ?? newer.compactionSummary,
+    compactionMeta: older.compactionMeta ?? newer.compactionMeta,
   }
 }

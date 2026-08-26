@@ -31,7 +31,7 @@ export function FileSuggestions({
   }, [selectedIndex])
 
   return (
-    <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-1.5 max-w-4xl">
+    <div className="motion-popover-in absolute bottom-full left-0 right-0 z-50 mx-auto mb-1.5 max-w-[var(--chat-width)]">
       <Command
         id="file-suggestions"
         value={files[selectedIndex]}

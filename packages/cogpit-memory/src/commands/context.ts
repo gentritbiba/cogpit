@@ -19,6 +19,7 @@ import type {
 
 const RESULT_TRUNCATE_LIMIT = 10_000
 const L1_RESPONSE_LIMIT = 150_000
+const COMPACTION_SUMMARY_PREVIEW = 400
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -129,8 +130,16 @@ function mapTurnToSummary(turn: Turn, turnIndex: number) {
     subAgents,
     hasThinking: turn.thinking.length > 0,
     isError: turn.toolCalls.some((tc) => tc.isError),
-    compactionSummary: turn.compactionSummary ?? null,
+    compactionSummary: truncateCompactionSummary(turn.compactionSummary),
   }
+}
+
+/** L1 lists every turn, so the full summary goes out at L2 instead. */
+function truncateCompactionSummary(summary: string | undefined): string | null {
+  if (!summary) return null
+  return summary.length > COMPACTION_SUMMARY_PREVIEW
+    ? summary.slice(0, COMPACTION_SUMMARY_PREVIEW) + "... [truncated, use L2 for full text]"
+    : summary
 }
 
 // -- L2: Turn Detail ----------------------------------------------------------
@@ -144,6 +153,7 @@ function mapTurnToDetail(session: ParsedSession, turnIndex: number) {
     sessionId: session.sessionId,
     turnIndex,
     userMessage: extractUserMessageText(turn.userMessage),
+    compactionSummary: turn.compactionSummary ?? null,
     contentBlocks,
     tokenUsage: turn.tokenUsage
       ? { input: turn.tokenUsage.input_tokens, output: turn.tokenUsage.output_tokens }
