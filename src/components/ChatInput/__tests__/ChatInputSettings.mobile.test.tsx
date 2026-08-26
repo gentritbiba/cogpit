@@ -68,7 +68,9 @@ describe("ChatInputSettings mobile", () => {
     expect(onEffortChange).toHaveBeenCalledWith("high")
     expect(onPermissionModeChange).toHaveBeenCalledWith("plan")
     expect(onFastModeEnabledChange).toHaveBeenCalledWith(true)
-  })
+    // Four sequential Radix select round-trips, each animated. ~1s locally,
+    // ~7s on the Windows runner, which overran the 5s default.
+  }, 20_000)
 
   it("keeps advanced worktree, Ultracode, and MCP actions available", async () => {
     const user = userEvent.setup()
