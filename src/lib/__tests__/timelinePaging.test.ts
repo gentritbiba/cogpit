@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import {
   isNearTop,
   isPrepend,
@@ -6,7 +6,17 @@ import {
   shouldShowEmptyState,
   NEAR_TOP_VIEWPORTS,
 } from "@/lib/timelinePaging"
-import type { Turn } from "@/lib/types"
+import { parseSession } from "@/lib/parser"
+import {
+  peerAttachment,
+  peerEnqueueMsg,
+  resetFixtureCounter,
+  textAssistant,
+  toJsonl,
+  toolUseAssistant,
+  userMsg,
+} from "@/__tests__/fixtures"
+import type { Turn, TurnContentBlock } from "@/lib/types"
 
 function makeTurn(id: string, overrides: Partial<Turn> = {}): Turn {
   return {
@@ -177,5 +187,247 @@ describe("prependTurns", () => {
     expect(stitched.id).toBe("frag2")
     expect(stitched.userMessage).toBeNull()
     expect(stitched.assistantText).toEqual(["middle", "end"])
+  })
+})
+
+// ── Agent mail across a page stitch ──────────────────────────────────────────
+//
+// `useSessionPaging` parses every page with its own `parseSession` call and
+// joins them here, so anything `buildTurns` reconciles within one parse — reply
+// pairing, and the enqueue/attachment ledger — sees only that page. These tests
+// mirror that: two chunks parsed separately, then stitched.
+
+function agentMessages(turns: readonly Turn[]) {
+  return turns.flatMap((turn) =>
+    turn.contentBlocks.filter(
+      (b): b is Extract<TurnContentBlock, { kind: "agent_message" }> => b.kind === "agent_message"
+    )
+  )
+}
+
+const sendMessage = (to: string, summary: string, id: string) =>
+  toolUseAssistant("SendMessage", { to, summary, message: "..." }, id)
+
+describe("prependTurns — agent mail across pages", () => {
+  beforeEach(() => {
+    resetFixtureCounter()
+  })
+
+  it("pairs a message with the reply that landed in a newer page", () => {
+    // Observed on `…honest-cms/ddb6fc34….jsonl` at count=30: the
+    // certified-status-fix message pages in three pages up from the reply sent
+    // 22 seconds later, and the card read "Never answered".
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("certified-status-fix", "one blocking question on the type error"),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      sendMessage("certified-status-fix", "Fixed the type error you flagged", "sm-1"),
+      textAssistant("sent"),
+    ])).turns
+
+    expect(agentMessages(older)[0].reply).toBeUndefined()
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged)[0].reply?.summary).toBe("Fixed the type error you flagged")
+  })
+
+  it("does not pair a SendMessage a page boundary left before its sender's message", () => {
+    // Re-pairing over the merged list must still only run forward in time:
+    // an instruction sent before the agent wrote back is not a reply to it.
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      sendMessage("vehicle-batch", "go do batch 2", "sm-1"),
+      textAssistant("sent"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("vehicle-batch", "half-blocked on a decision"),
+      textAssistant("done"),
+    ])).turns
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged)[0].reply).toBeUndefined()
+  })
+
+  it("keeps a pairing the older page had already made", () => {
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("vehicle-batch", "half-blocked on a decision"),
+      sendMessage("vehicle-batch", "unblocked you", "sm-1"),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("unrelated"),
+    ])).turns
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged)[0].reply?.summary).toBe("unblocked you")
+  })
+
+  // The mirror of the case above, and the reason re-pairing starts by clearing
+  // what a previous run left behind. Within its own page the newer message was
+  // the only one outstanding, so it took the reply. Once the older page arrives
+  // that reply belongs to the older message, and the newer one has to go back
+  // to unanswered — otherwise its card claims "You replied" to an answer that
+  // was never meant for it, and only ever after a scroll-up.
+  it("hands a stolen reply back and returns the newer message to unanswered", () => {
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("w", "first question"),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("w", "second question"),
+      sendMessage("w", "the one reply", "sm-1"),
+      textAssistant("done"),
+    ])).turns
+
+    expect(agentMessages(newer).map((b) => b.reply?.summary)).toEqual(["the one reply"])
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged).map((b) => b.body)).toEqual(["first question", "second question"])
+    expect(agentMessages(merged).map((b) => b.reply?.summary)).toEqual(["the one reply", undefined])
+  })
+
+  it("re-pairs the same way however the pages split", () => {
+    const pageC = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("w", "first"),
+      textAssistant("done"),
+    ])).turns
+    const pageB = parseSession(toJsonl([
+      userMsg("second page"),
+      textAssistant("working"),
+      peerAttachment("w", "second"),
+      sendMessage("w", "re first", "sm-1"),
+      textAssistant("done"),
+    ])).turns
+    const pageA = parseSession(toJsonl([
+      userMsg("newest"),
+      sendMessage("w", "re second", "sm-2"),
+      textAssistant("sent"),
+    ])).turns
+
+    const merged = prependTurns(prependTurns(pageA, pageB, "claude"), pageC, "claude")
+    expect(agentMessages(merged).map((b) => b.body)).toEqual(["first", "second"])
+    expect(agentMessages(merged).map((b) => b.reply?.summary)).toEqual(["re first", "re second"])
+  })
+
+  it("renders one card when the enqueue and the attachment land in different pages", () => {
+    // The two persisted copies of one message reconcile through a ledger scoped
+    // to a single `buildTurns` call, so a page boundary between them leaves both
+    // standing — two identical cards reading as two unanswered questions.
+    const sender = "csp-and-proxy"
+    const body = "one blocking question on finding #1."
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerEnqueueMsg(sender, body),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment(sender, body),
+      textAssistant("done"),
+    ])).turns
+
+    expect(agentMessages(older)).toHaveLength(1)
+    expect(agentMessages(newer)).toHaveLength(1)
+
+    const merged = prependTurns(newer, older, "claude")
+    const blocks = agentMessages(merged)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].sender).toBe(sender)
+    expect(blocks[0].body).toBe(body)
+  })
+
+  // Timestamps taken from `…honest-cms/ddb6fc34….jsonl`, where csp-and-proxy
+  // asked a blocking question at 23:34:09.700 and reported done at 23:48:49.449.
+  const FIRST_AT = "2026-08-21T23:34:09.700Z"
+  const LATER_AT = "2026-08-21T23:48:49.449Z"
+
+  it("keeps two identical messages from one sender that arrived minutes apart", () => {
+    // The two persisted copies of one message land at the same instant, so
+    // (sender, body) alone cannot tell them apart from an agent that genuinely
+    // said the same thing twice. Fourteen minutes is not a duplicate.
+    const body = "payload-batch-2 done"
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", FIRST_AT),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", LATER_AT),
+      textAssistant("done"),
+    ])).turns
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged).map((b) => b.timestamp)).toEqual([FIRST_AT, LATER_AT])
+  })
+
+  it("renders the same cards however the records were paged in", () => {
+    // The three load paths — a whole-file `parseSession`, `/api/session-context`,
+    // and the paged reader — must agree. Anything the stitch drops that a full
+    // parse keeps is data the paged reader alone loses.
+    const body = "payload-batch-2 done"
+    const olderPage = [
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", FIRST_AT),
+      textAssistant("done"),
+    ]
+    const newerPage = [
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", body, "ada0f1591dbec7898", LATER_AT),
+      textAssistant("done"),
+    ]
+
+    const whole = parseSession(toJsonl([...olderPage, ...newerPage])).turns
+    const paged = prependTurns(
+      parseSession(toJsonl(newerPage)).turns,
+      parseSession(toJsonl(olderPage)).turns,
+      "claude",
+    )
+
+    expect(paged).toEqual(whole)
+  })
+
+  it("keeps two different messages from one sender that split across pages", () => {
+    // Same sender, same sender task id, different messages: the dedup key is
+    // (sender, body), never the task id.
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "one blocking question", "ada0f1591dbec7898"),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("csp-and-proxy", "batch-2 done", "ada0f1591dbec7898"),
+      textAssistant("done"),
+    ])).turns
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged).map((b) => b.body)).toEqual([
+      "one blocking question",
+      "batch-2 done",
+    ])
   })
 })

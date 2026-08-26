@@ -81,6 +81,19 @@ describe("planTurnFold", () => {
     expect(plan.foldedIndices).toEqual([0])
   })
 
+  it("never folds an agent message away", () => {
+    const blocks: TurnContentBlock[] = [
+      thoughts("planning"),
+      { kind: "agent_message", sender: "csp-and-proxy", body: "one blocking question" },
+      tools("Read"),
+      text("done"),
+    ]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).not.toContain(1)
+  })
+
   it("folds nested agent transcripts and hook events", () => {
     const blocks: TurnContentBlock[] = [
       { kind: "sub_agent", messages: [] },

@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
 import type { UserContent } from "@/lib/types"
 import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
-import { parseTeammateMessage } from "@/lib/teammateMessage"
+import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
 import {
   extractCommandArgs,
   extractCommandName,
@@ -172,7 +172,10 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   const rawText = useMemo(() => getUserMessageText(content), [content])
   const commandName = useMemo(() => extractCommandName(rawText), [rawText])
   const commandArgs = useMemo(() => extractCommandArgs(rawText), [rawText])
-  const { teammateId, isTeammate, text: unwrappedText } = useMemo(() => parseTeammateMessage(rawText), [rawText])
+  const { sender: teammateId, body: unwrappedText, matched: isTeammate } = useMemo(
+    () => parseAgentEnvelope(rawText),
+    [rawText],
+  )
   const cleanText = useMemo(() => stripSystemTags(unwrappedText), [unwrappedText])
   const { text: textAfterBanner, isSystemNotification } = useMemo(
     () => stripSystemNotificationPreamble(cleanText),
@@ -218,7 +221,7 @@ export const UserMessage = memo(function UserMessage({ content, timestamp, onEdi
   )
   // Ask the parser directly rather than diffing raw against clean: the diff also
   // fires on plain whitespace trimming, offering "Show raw" when nothing is
-  // hidden. The teammate envelope and the notification banner are genuinely
+  // hidden. The agent envelope and the notification banner are genuinely
   // hidden, so they still count.
   const hasTags = useMemo(
     () => hasSystemTags(rawText) || isSystemNotification || isTeammate,

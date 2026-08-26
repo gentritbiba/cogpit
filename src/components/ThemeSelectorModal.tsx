@@ -12,6 +12,7 @@ import {
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
 import { type ThemeId, themes } from "@/hooks/useTheme"
+import { chatWidths, useChatWidth } from "@/lib/chatWidth"
 
 interface ThemeSelectorModalProps {
   open: boolean
@@ -29,6 +30,7 @@ export function ThemeSelectorModal({
   onPreviewTheme,
 }: ThemeSelectorModalProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [chatWidth, setChatWidth] = useChatWidth()
 
   // Reset selection to current theme when modal opens
   useEffect(() => {
@@ -66,9 +68,9 @@ export function ThemeSelectorModal({
         <DialogHeader className="border-b p-4 pr-12">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Palette data-icon="inline-start" className="size-4 text-muted-foreground" />
-            Select theme
+            Appearance
           </DialogTitle>
-          <DialogDescription>Preview and apply a color theme.</DialogDescription>
+          <DialogDescription>Preview a color theme and set the chat width.</DialogDescription>
         </DialogHeader>
 
         <ToggleGroup
@@ -104,6 +106,26 @@ export function ThemeSelectorModal({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+
+        <div className="border-t p-3">
+          <div className="px-1 pb-2 text-xs font-medium text-muted-foreground">Chat width</div>
+          <ToggleGroup
+            aria-label="Chat width"
+            value={[chatWidth]}
+            className="w-full items-stretch gap-1"
+          >
+            {chatWidths.map((width) => (
+              <ToggleGroupItem
+                key={width.id}
+                value={width.id}
+                className="flex-1 text-xs text-muted-foreground data-pressed:bg-accent data-pressed:text-accent-foreground"
+                onClick={() => setChatWidth(width.id)}
+              >
+                {width.name}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
       </DialogContent>
     </Dialog>
   )

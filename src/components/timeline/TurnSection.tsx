@@ -2,6 +2,7 @@ import { memo, useRef, useLayoutEffect, useMemo, useState } from "react"
 import { useNearViewport } from "@/hooks/useNearViewport"
 import { Clock, RotateCcw } from "lucide-react"
 import { UserMessage } from "./UserMessage"
+import { AgentMessageCard } from "./AgentMessageCard"
 import { AssistantText } from "./AssistantText"
 import { SubAgentPanel } from "./SubAgentPanel"
 import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
@@ -58,7 +59,11 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
   } = useAppContext()
   const { session, isLive, isSubAgentView, undoRedo, actions } = useSessionContext()
 
-  const isAgentActive = isLive && session !== null && index === session.turns.length - 1
+  const isSessionLive = isLive && session !== null
+  // Narrower than `isSessionLive`: only the last turn can still be worked on, so
+  // this is what gates in-progress tool state. An unanswered peer message is a
+  // property of the session instead — you can answer one from any turn.
+  const isAgentActive = isSessionLive && index === (session?.turns.length ?? 0) - 1
 
   // For the last active turn, derive completion from raw messages (immediate on end_turn).
   // For all other turns, they're done by definition.
@@ -83,6 +88,7 @@ export function TurnSection({ turn, index, branchCount = 0 }: TurnSectionProps) 
       expandAll={expandAll}
       expandToolPayloads={expandToolPayloads}
       isAgentActive={isAgentActive}
+      isSessionLive={isSessionLive}
       isTurnDone={isTurnDone}
       isMobile={isMobile}
       cwd={cwd}
@@ -106,6 +112,7 @@ interface TurnSectionInnerProps {
   expandAll: boolean
   expandToolPayloads: boolean
   isAgentActive: boolean
+  isSessionLive: boolean
   isTurnDone: boolean
   isMobile: boolean
   cwd: string
@@ -148,6 +155,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
   expandAll,
   expandToolPayloads,
   isAgentActive,
+  isSessionLive,
   isTurnDone,
   isMobile,
   cwd,
@@ -248,6 +256,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
+                  isSessionLive={isSessionLive}
                   isMobile={isMobile}
                   skillMetadata={skillMetadata}
                 />
@@ -273,6 +282,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
                   expandToolPayloads={expandToolPayloads}
                   activeToolCallId={activeToolCallId}
                   isAgentActive={isAgentActive}
+                  isSessionLive={isSessionLive}
                   isMobile={isMobile}
                   skillMetadata={skillMetadata}
                 />
@@ -287,6 +297,7 @@ const TurnSectionInner = memo(function TurnSectionInner({
               expandToolPayloads={expandToolPayloads}
               activeToolCallId={activeToolCallId}
               isAgentActive={isAgentActive}
+              isSessionLive={isSessionLive}
               isMobile={isMobile}
               skillMetadata={skillMetadata}
             />
@@ -425,6 +436,7 @@ function ContentBlocks({
   expandToolPayloads,
   activeToolCallId,
   isAgentActive,
+  isSessionLive,
   isMobile,
   skillMetadata,
 }: {
@@ -435,6 +447,7 @@ function ContentBlocks({
   expandToolPayloads: boolean
   activeToolCallId: string | null
   isAgentActive: boolean
+  isSessionLive: boolean
   isMobile: boolean
   skillMetadata?: Map<string, SkillMeta>
 }) {
@@ -534,6 +547,21 @@ function ContentBlocks({
           <Badge variant="outline" className="mb-2">Queued while working</Badge>
           <UserMessage content={block.content} timestamp={block.timestamp ?? ""} compact={isMobile} />
         </div>
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "agent_message") {
+      elements.push(
+        <AgentMessageCard
+          key={keyFor(block, i)}
+          sender={block.sender}
+          body={block.body}
+          reply={block.reply}
+          timestamp={block.timestamp}
+          isLive={isSessionLive}
+        />
       )
       i++
       continue

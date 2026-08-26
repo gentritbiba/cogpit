@@ -12,8 +12,8 @@ interface SidebarHeaderProps {
 
 /**
  * With no title bar, the sidebar's top row owns the window's top-left corner:
- * traffic-light inset, home on the left, and the two actions that leave the
- * sidebar pinned to its right edge.
+ * the traffic lights get the left inset to themselves and every action sits
+ * together on the sidebar's right edge.
  */
 export const SidebarHeader = memo(function SidebarHeader({
   onToggleSidebar,
@@ -24,8 +24,8 @@ export const SidebarHeader = memo(function SidebarHeader({
 }: SidebarHeaderProps) {
   return (
     <div className="electron-drag window-inset-start flex h-12 shrink-0 items-center gap-1 px-2">
-      <HeaderIconButton icon={Eye} label="Home" onClick={onGoHome} size="default" />
       <div className="flex-1" />
+      <HeaderIconButton icon={Eye} label="Home" onClick={onGoHome} size="default" />
       <HeaderIconButton
         icon={Search}
         label={`Search (${commandPaletteShortcut})`}

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
+import { isSharedPath } from "@/lib/sharePath"
 import type { SubAgentMessage, ToolCall, ContentBlock } from "@/lib/types"
 import { isCodexSessionText, parseCodexSession } from "@/lib/codex"
 
@@ -135,10 +136,17 @@ const subagentCache = new Map<string, SubAgentMessage[]>()
  *
  * Returns the original messages if they already have content,
  * or enriched messages from the subagent JSONL file.
+ *
+ * A share guest cannot load any of it: the subagent URL names four identity
+ * segments and the guest allowlist admits exactly two, which is the same rule
+ * that stops a guest enumerating sessions. So the fetch is skipped rather than
+ * fired at a guaranteed 403, and `unavailable` reports it so the caller can say
+ * so instead of expanding to nothing.
  */
 export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean): {
   enrichedMessages: SubAgentMessage[]
   isLoading: boolean
+  unavailable: boolean
 } {
   const { session, sessionSource, isLive } = useSessionContext()
   const [loaded, setLoaded] = useState<Map<string, SubAgentMessage[]>>(new Map())
@@ -160,8 +168,10 @@ export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean
   const dirName = sessionSource?.dirName
   const sessionId = session?.sessionId
 
+  const sharedSession = isSharedPath(window.location.pathname)
+
   useEffect(() => {
-    if (!enabled || !dirName || !sessionId || agentsToLoad.length === 0) return
+    if (sharedSession || !enabled || !dirName || !sessionId || agentsToLoad.length === 0) return
 
     const toFetch: Array<{ agentId: string; cacheKey: string }> = []
     for (const m of agentsToLoad) {
@@ -216,7 +226,7 @@ export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean
 
     fetchAll()
     return () => { cancelled = true }
-  }, [enabled, dirName, sessionId, agentsToLoad])
+  }, [sharedSession, enabled, dirName, sessionId, agentsToLoad])
 
   const enrichedMessages = useMemo(() => {
     if (loaded.size === 0 && agentsToLoad.length === 0) return messages
@@ -243,5 +253,9 @@ export function useSubagentContent(messages: SubAgentMessage[], enabled: boolean
     return result
   }, [messages, loaded, agentsToLoad])
 
-  return { enrichedMessages, isLoading }
+  return {
+    enrichedMessages,
+    isLoading,
+    unavailable: sharedSession && enabled && agentsToLoad.length > 0,
+  }
 }

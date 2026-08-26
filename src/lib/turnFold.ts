@@ -20,6 +20,7 @@ export interface FoldPlan {
  */
 const PINNED_KINDS: ReadonlySet<TurnContentBlock["kind"]> = new Set([
   "queued_prompt",
+  "agent_message",
   "plan_mode",
   "recap",
 ])

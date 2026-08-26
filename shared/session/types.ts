@@ -102,6 +102,13 @@ export interface UserMessage extends BaseMessage {
     content: UserContent
   }
   isMeta?: boolean
+  /**
+   * Set on the synthetic user message Claude Code writes after a compaction.
+   * Its content is the real compaction summary wrapped in resume boilerplate —
+   * `compact_boundary.content` is only ever the fixed string "Conversation
+   * compacted", so this message is the sole source of the summary text.
+   */
+  isCompactSummary?: boolean
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
   toolUseResult?: AgentToolUseResult
@@ -268,10 +275,13 @@ export interface SystemMessage extends BaseMessage {
   durationMs?: number
   isMeta?: boolean
   content?: string
-  compactMetadata?: {
-    trigger: "auto" | "manual"
-    preTokens: number
-  }
+  compactMetadata?: CompactionMeta
+}
+
+export interface CompactionMeta {
+  trigger: "auto" | "manual"
+  preTokens: number
+  postTokens?: number
 }
 
 export interface FileHistorySnapshotMessage extends BaseMessage {
@@ -310,6 +320,19 @@ export interface AttachmentMessage extends BaseMessage {
     prompt?: string | ContentBlock[] | null
     commandMode?: string
     timestamp?: string
+    /**
+     * Who queued this prompt. `"human"` is the reader typing mid-turn;
+     * `"peer"` is another agent sending this session a message. `body` is the
+     * message with its envelope already stripped, so it beats re-parsing
+     * `prompt`. Absent on records written before Claude Code added the field.
+     */
+    origin?: {
+      kind?: string
+      from?: string
+      name?: string
+      senderTaskId?: string
+      body?: string
+    } | null
   } | null
 }
 
@@ -397,6 +420,23 @@ export type TurnContentBlock =
   | { kind: "text"; text: string[]; timestamp?: string }
   | { kind: "tool_calls"; toolCalls: ToolCall[]; timestamp?: string }
   | { kind: "queued_prompt"; content: string; timestamp?: string }
+  /**
+   * A message another agent sent this session mid-turn. Distinct from
+   * `queued_prompt`, which is the reader's own text. `reply` is filled by the
+   * pairing pass when a later SendMessage answered this sender.
+   *
+   * Deliberately carries no sender task id. `origin.senderTaskId` on the record
+   * identifies the sending agent's *task*, not the message — one agent's
+   * question and its later done-report share an id — so it is useless as a
+   * per-message key and destructive as a dedup key.
+   */
+  | {
+      kind: "agent_message"
+      sender: string
+      body: string
+      timestamp?: string
+      reply?: { summary: string; timestamp: string }
+    }
   | { kind: "sub_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "background_agent"; messages: SubAgentMessage[]; timestamp?: string }
   | { kind: "hook_event"; events: ParsedHookEvent[]; timestamp?: string }
@@ -423,8 +463,14 @@ export interface Turn {
   durationMs: number | null
   tokenUsage: TokenUsage | null
   model: string | null
-  /** Set when a compaction happened before this turn */
+  /**
+   * Summary of the compaction that happened before this turn, as written by
+   * the compacting model. Absent when the transcript records the boundary but
+   * not the summary (e.g. the session ended right after compacting).
+   */
   compactionSummary?: string
+  /** Trigger and token counts of the compaction that happened before this turn */
+  compactionMeta?: CompactionMeta
   /**
    * Reasoning effort the turn ran at, when the transcript recorded one.
    * A turn spanning several assistant messages reports the last one, since

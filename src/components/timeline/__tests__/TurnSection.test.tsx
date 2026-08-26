@@ -5,6 +5,7 @@ import type { ParsedSession, ToolCall, Turn } from "@/lib/types"
 
 const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
+  isLive: true,
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -17,7 +18,7 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: () => ({
     session: makeSession(),
-    isLive: true,
+    isLive: mocks.isLive,
     isSubAgentView: false,
     undoRedo: { enabled: false },
     actions: {},
@@ -88,6 +89,23 @@ const blockedTurn: Turn = {
   assistantText: ["Which is my one question for now:"],
 }
 
+/** A completed turn whose work would fold, carrying a peer agent's message. */
+const mailTurn: Turn = {
+  ...turn,
+  id: "turn-mail",
+  contentBlocks: [
+    { kind: "tool_calls", toolCalls: [question] },
+    {
+      kind: "agent_message",
+      sender: "csp-and-proxy",
+      body: "One blocking question on finding #1.",
+      timestamp: "2026-08-19T12:00:02.000Z",
+    },
+    { kind: "text", text: ["Final response"] },
+  ],
+  assistantText: ["Final response"],
+}
+
 function makeSession(): ParsedSession {
   return {
     sessionId: "session-1",
@@ -151,5 +169,51 @@ describe("TurnSection work disclosure", () => {
     expect(screen.queryByText("Streaming response")).not.toBeInTheDocument()
     expect(screen.queryByText("AskUserQuestion")).not.toBeInTheDocument()
     expect(screen.getByText("Final response")).toBeInTheDocument()
+  })
+})
+
+describe("TurnSection agent messages", () => {
+  beforeEach(() => {
+    mocks.isLive = true
+  })
+
+  it("renders a peer message as a card naming its sender", () => {
+    mocks.status = "completed"
+
+    render(<TurnSection turn={mailTurn} index={0} />)
+
+    expect(screen.getByText("csp-and-proxy")).toBeInTheDocument()
+    expect(screen.getByText("One blocking question on finding #1.")).toBeInTheDocument()
+  })
+
+  it("keeps an unanswered peer message waiting while its turn is the live one", () => {
+    mocks.status = "thinking"
+
+    render(<TurnSection turn={mailTurn} index={0} />)
+
+    expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
+  })
+
+  it("keeps waiting on an unanswered peer message from an earlier turn", () => {
+    mocks.status = "thinking"
+
+    // The mocked session holds one turn, so index 1 sits behind the live one.
+    // The wait is a property of the session, not of the turn the message landed
+    // in: a question you lost track of several turns ago is still answerable,
+    // and is the single most valuable thing this card surfaces.
+    render(<TurnSection turn={mailTurn} index={1} />)
+
+    expect(screen.getByText(/Awaiting your reply/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Never answered/i)).not.toBeInTheDocument()
+  })
+
+  it("settles an unanswered peer message once the session is no longer live", () => {
+    mocks.isLive = false
+    mocks.status = "completed"
+
+    render(<TurnSection turn={mailTurn} index={0} />)
+
+    expect(screen.getByText(/Never answered/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Awaiting your reply/i)).not.toBeInTheDocument()
   })
 })

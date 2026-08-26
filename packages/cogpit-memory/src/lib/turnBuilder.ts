@@ -17,6 +17,8 @@ import type {
   HookProgressData,
   AssistantMessage,
   MessageAttribution,
+  CompactionMeta,
+  UserContent,
 } from "./types"
 import {
   isUserMessage,
@@ -25,9 +27,11 @@ import {
   isSystemMessage,
   isSummaryMessage,
   isCompactBoundary,
+  isCompactSummaryMessage,
   isQueueOperationMessage,
   isAttachmentMessage,
 } from "./messageTypeGuards"
+import { parseAgentEnvelope } from "./agentEnvelope"
 
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content
@@ -67,20 +71,52 @@ function isVisibleQueuedPrompt(content: string | null | undefined): content is s
     && !trimmed.startsWith("<local-command-")
 }
 
+interface QueuedPromptSource {
+  /**
+   * The prompt exactly as written. This is the enqueue ledger's key — the
+   * queue-operation copy and this attachment copy only reconcile on an exact
+   * raw match, so never substitute the stripped body here.
+   */
+  raw: string
+  /** Peer sender, or null when the reader typed this. */
+  sender: string | null
+  /** Envelope-free body. Equals `raw` when there was no envelope. */
+  body: string
+}
+
 /**
- * Text of a prompt the user typed mid-turn, or null for anything else.
+ * A prompt queued mid-turn, or null for anything else.
  * Claude Code leaves `content` empty on the queue-operation record and writes
  * the prompt here instead, so this is the only copy for most queued prompts.
  */
-function queuedCommandPromptText(msg: RawMessage): string | null {
+function queuedCommandPrompt(msg: RawMessage): QueuedPromptSource | null {
   if (!isAttachmentMessage(msg)) return null
   const attachment = msg.attachment
   if (!attachment || attachment.type !== "queued_command") return null
   if (attachment.commandMode !== "prompt") return null
   const prompt = attachment.prompt
   if (prompt == null) return null
-  const text = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
-  return isVisibleQueuedPrompt(text) ? text : null
+  const raw = typeof prompt === "string" ? prompt : extractTextFromContent(prompt)
+  if (!isVisibleQueuedPrompt(raw)) return null
+
+  const origin = attachment.origin
+  if (origin?.kind === "peer") {
+    const sender = origin.name ?? origin.from ?? null
+    if (sender) {
+      return {
+        raw,
+        sender,
+        body: origin.body ?? parseAgentEnvelope(raw).body,
+      }
+    }
+  }
+  if (origin?.kind === "human") {
+    return { raw, sender: null, body: raw }
+  }
+
+  // Pre-`origin` records: the envelope in the text is all we have.
+  const parsed = parseAgentEnvelope(raw)
+  return { raw, sender: parsed.sender, body: parsed.body }
 }
 
 /** Maps the flat `attribution*` record fields onto their MessageAttribution keys. */
@@ -135,45 +171,46 @@ function mergeTokenUsage(
 
 // ── Compaction Summary ───────────────────────────────────────────────────────
 
-function buildCompactionSummary(turns: Turn[], title: string): string {
-  if (turns.length === 0) return title
+/** Boilerplate Claude Code wraps around the summary when it replays it as a user message. */
+const RESUME_PREAMBLE_RE =
+  /^This session is being continued from a previous conversation[\s\S]*?\n\nSummary:\s*\n/
+const RESUME_INSTRUCTIONS_RE =
+  /\n+(?:If you need specific details from before compaction|(?:Please c|C)ontinue the conversation from where it left off)[\s\S]*$/
 
-  const toolCounts: Record<string, number> = {}
-  for (const turn of turns) {
-    for (const tc of turn.toolCalls) {
-      toolCounts[tc.name] = (toolCounts[tc.name] || 0) + 1
-    }
+/**
+ * Pull the model-written summary out of the post-compaction user message.
+ * Text that doesn't carry the boilerplate is returned as-is.
+ */
+function extractCompactionSummary(content: UserContent): string {
+  const text = extractTextFromContent(content).trim()
+  return text.replace(RESUME_PREAMBLE_RE, "").replace(RESUME_INSTRUCTIONS_RE, "").trim()
+}
+
+/** The boundary record also carries preserved-message uuid lists we have no use for. */
+function normalizeCompactionMeta(meta: CompactionMeta | undefined): CompactionMeta | undefined {
+  if (!meta) return undefined
+  return { trigger: meta.trigger, preTokens: meta.preTokens, postTokens: meta.postTokens }
+}
+
+interface PendingCompaction {
+  summary?: string
+  meta?: CompactionMeta
+}
+
+function createTurn(msg: RawMessage, userMessage: UserContent | null): Turn {
+  return {
+    id: msg.uuid ?? crypto.randomUUID(),
+    userMessage,
+    contentBlocks: [],
+    thinking: [],
+    assistantText: [],
+    toolCalls: [],
+    subAgentActivity: [],
+    timestamp: msg.timestamp ?? "",
+    durationMs: null,
+    tokenUsage: null,
+    model: null,
   }
-
-  // Extract user prompts (first line only)
-  const prompts: string[] = []
-  for (const turn of turns) {
-    if (!turn.userMessage) continue
-    const text = extractTextFromContent(
-      typeof turn.userMessage === "string" ? turn.userMessage : turn.userMessage as ContentBlock[]
-    )
-    const firstLine = text.split("\n")[0].trim()
-    if (firstLine.length > 0) {
-      prompts.push(firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine)
-    }
-  }
-
-  const topTools = Object.entries(toolCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name, count]) => `${name} x${count}`)
-    .join(", ")
-
-  const parts = [`**${title}**`, `${turns.length} turns compacted`]
-  if (topTools) parts.push(`Tools: ${topTools}`)
-  if (prompts.length > 0) {
-    parts.push("Prompts:")
-    const shown = prompts.slice(0, 6)
-    for (const p of shown) parts.push(`- ${p}`)
-    if (prompts.length > 6) parts.push(`- ...and ${prompts.length - 6} more`)
-  }
-
-  return parts.join("\n")
 }
 
 // ── Plan Mode grouping ───────────────────────────────────────────────────────
@@ -262,7 +299,7 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 // Tools after ExitPlanMode in this block
                 const tail = next.toolCalls.slice(exitIdx + 1)
                 result.push({ kind: "plan_mode", plan, planFilePath, status, toolCalls: embedded, timestamp })
-                // Re-emit passthrough blocks (hook_event, text) that appeared mid-scan
+                // Re-emit passthrough blocks that appeared mid-scan
                 result.push(...passthroughBlocks)
                 // Push tail of exit block back for further processing
                 if (tail.length > 0) {
@@ -275,7 +312,12 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
                 embedded.push(...next.toolCalls)
                 j++
               }
-            } else if (next.kind === "hook_event" || next.kind === "text" || next.kind === "queued_prompt") {
+            } else if (
+              next.kind === "hook_event"
+              || next.kind === "text"
+              || next.kind === "queued_prompt"
+              || next.kind === "agent_message"
+            ) {
               // Passthrough presentation blocks don't break the scan.
               // Collect them for re-emission in chronological position after the plan block.
               passthroughBlocks.push(next)
@@ -305,6 +347,71 @@ function groupPlanModeBlocks(blocks: TurnContentBlock[]): TurnContentBlock[] {
 }
 
 // ── Build Turns State Machine ────────────────────────────────────────────────
+
+/** Drops the pairing a previous run left on this turn, without touching the original. */
+function clearAgentMessageReplies(turn: Turn): Turn {
+  if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
+  return {
+    ...turn,
+    contentBlocks: turn.contentBlocks.map((block) => {
+      if (block.kind !== "agent_message") return block
+      const { reply: _paired, ...unpaired } = block
+      return unpaired
+    }),
+  }
+}
+
+/**
+ * Attach each peer message to the `SendMessage` that answered it.
+ *
+ * Walks blocks in chronological order holding the still-unanswered messages per
+ * sender, so a reply claims the oldest outstanding message from that sender and
+ * pairing only ever runs forward in time. A `SendMessage` sent *before* any
+ * inbound message from that sender is an instruction, not a reply.
+ *
+ * The join is on the sender name, which is the only key available: the block
+ * carries no task id, because `origin.senderTaskId` names the sending agent's
+ * task rather than the message. `SendMessage.input.to` uses the same names that
+ * arrive in `origin.from`, so the join holds.
+ *
+ * A pure recompute: every existing pairing is cleared before the walk, so the
+ * answer depends only on the list handed in. Callers that assemble a transcript
+ * from several `buildTurns` calls — the page stitcher and the incremental
+ * append — re-run it over the joined list and get what a single parse of that
+ * list would have produced. Turns holding no peer message come back by
+ * reference, so a re-run costs nothing for the rest of the transcript.
+ */
+export function pairAgentMessageReplies(turns: readonly Turn[]): Turn[] {
+  const repaired = turns.map(clearAgentMessageReplies)
+  const unanswered = new Map<string, Array<Extract<TurnContentBlock, { kind: "agent_message" }>>>()
+
+  for (const turn of repaired) {
+    for (const block of turn.contentBlocks) {
+      if (block.kind === "agent_message") {
+        const waiting = unanswered.get(block.sender)
+        if (waiting) waiting.push(block)
+        else unanswered.set(block.sender, [block])
+        continue
+      }
+      if (block.kind !== "tool_calls") continue
+
+      for (const call of block.toolCalls) {
+        if (call.name !== "SendMessage") continue
+        const to = call.input.to
+        if (typeof to !== "string" || !to) continue
+        const target = unanswered.get(to)?.shift()
+        if (!target) continue
+        const summary = call.input.summary
+        target.reply = {
+          summary: typeof summary === "string" ? summary : "",
+          timestamp: call.timestamp || block.timestamp || "",
+        }
+      }
+    }
+  }
+
+  return repaired
+}
 
 /**
  * Raw-message index where each turn `buildTurns` would produce begins, so
@@ -353,8 +460,16 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   const turns: Turn[] = []
   let current: Turn | null = null
 
-  // Track compaction summary to attach to the next turn
-  let pendingCompaction: string | null = null
+  // Track the compaction to attach to the next turn
+  let pendingCompaction: PendingCompaction | null = null
+
+  /** A boundary with no summary message after it still marks the turn it precedes. */
+  function attachPendingCompaction(turn: Turn) {
+    if (!pendingCompaction) return
+    turn.compactionSummary = pendingCompaction.summary
+    turn.compactionMeta = pendingCompaction.meta
+    pendingCompaction = null
+  }
 
   // Track away_summary / recap to prepend as a recap content block on the next turn
   let pendingRecap: { content: string; timestamp?: string } | null = null
@@ -385,8 +500,11 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   // the latter shape can be reconciled without rendering the prompt twice.
   const pendingQueuedPrompts: Array<{
     turn: Turn
+    /** Ledger key and `queued_prompt` content. Always the raw prompt text. */
     content: string
     timestamp?: string
+    sender: string | null
+    body: string
   }> = []
 
   // Prompt text already recorded from a queue-operation enqueue, counted per
@@ -416,11 +534,20 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
 
   function flushPendingQueuedPrompts() {
     for (const prompt of pendingQueuedPrompts) {
-      prompt.turn.contentBlocks.push({
-        kind: "queued_prompt",
-        content: prompt.content,
-        timestamp: prompt.timestamp,
-      })
+      prompt.turn.contentBlocks.push(
+        prompt.sender
+          ? {
+              kind: "agent_message",
+              sender: prompt.sender,
+              body: prompt.body,
+              timestamp: prompt.timestamp,
+            }
+          : {
+              kind: "queued_prompt",
+              content: prompt.content,
+              timestamp: prompt.timestamp,
+            },
+      )
     }
     pendingQueuedPrompts.length = 0
   }
@@ -486,23 +613,31 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   }
 
   for (const msg of messages) {
-    // Capture compaction/summary markers — build a rich summary from preceding turns
+    // Legacy summary record — carries a one-line title, no body
     if (isSummaryMessage(msg)) {
       finalizeTurn()
-      pendingCompaction = buildCompactionSummary(
-        turns,
-        msg.summary ?? "Conversation compacted"
-      )
+      pendingCompaction = { summary: msg.summary }
       continue
     }
 
-    // compact_boundary system message (Claude Code v2.1.34+) — real compaction signal
+    // compact_boundary system message (Claude Code v2.1.34+) — real compaction
+    // signal. Its `content` is a fixed placeholder; the summary arrives with
+    // the isCompactSummary user message that follows.
     if (isCompactBoundary(msg)) {
       finalizeTurn()
-      pendingCompaction = buildCompactionSummary(
-        turns,
-        msg.content ?? "Conversation compacted"
-      )
+      pendingCompaction = { meta: normalizeCompactionMeta(msg.compactMetadata) }
+      continue
+    }
+
+    // The replayed compaction summary is not a user prompt: it opens a turn
+    // that carries the summary instead of rendering the boilerplate as if the
+    // user had typed it.
+    if (isCompactSummaryMessage(msg)) {
+      finalizeTurn()
+      current = createTurn(msg, null)
+      current.compactionSummary = extractCompactionSummary(msg.message.content)
+      current.compactionMeta = pendingCompaction?.meta
+      pendingCompaction = null
       continue
     }
 
@@ -525,10 +660,14 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       // duplicate the prompt. Enqueues during an active turn remain useful as
       // chronological steer/queued-prompt blocks.
       if (current && msg.operation === "enqueue" && isVisibleQueuedPrompt(msg.content)) {
+        // This record carries no `origin`, so the envelope is the only signal.
+        const parsed = parseAgentEnvelope(msg.content)
         pendingQueuedPrompts.push({
           turn: current,
           content: msg.content,
           timestamp: msg.timestamp,
+          sender: parsed.sender,
+          body: parsed.body,
         })
         noteEnqueueSourced(current, msg.content)
       }
@@ -539,12 +678,14 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // prompts so the shared flush can drop it if an ordinary user record for
     // the same text follows.
     if (isAttachmentMessage(msg)) {
-      const queuedText = queuedCommandPromptText(msg)
-      if (current && queuedText !== null && !consumeEnqueueSourced(current, queuedText)) {
+      const queued = queuedCommandPrompt(msg)
+      if (current && queued !== null && !consumeEnqueueSourced(current, queued.raw)) {
         pendingQueuedPrompts.push({
           turn: current,
-          content: queuedText,
+          content: queued.raw,
           timestamp: msg.attachment?.timestamp ?? msg.timestamp,
+          sender: queued.sender,
+          body: queued.body,
         })
       }
       continue
@@ -645,23 +786,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       }
 
       finalizeTurn()
-      current = {
-        id: msg.uuid ?? crypto.randomUUID(),
-        userMessage: msg.message.content,
-        contentBlocks: [],
-        thinking: [],
-        assistantText: [],
-        toolCalls: [],
-        subAgentActivity: [],
-        timestamp: msg.timestamp ?? "",
-        durationMs: null,
-        tokenUsage: null,
-        model: null,
-      }
-      if (pendingCompaction) {
-        current.compactionSummary = pendingCompaction
-        pendingCompaction = null
-      }
+      current = createTurn(msg, msg.message.content)
+      attachPendingCompaction(current)
       if (pendingRecap) {
         current.contentBlocks.push({ kind: "recap", content: pendingRecap.content, timestamp: pendingRecap.timestamp })
         pendingRecap = null
@@ -672,19 +798,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     if (isAssistantMessage(msg)) {
       if (!current) {
         // Assistant message without a preceding user message; create a synthetic turn
-        current = {
-          id: msg.uuid ?? crypto.randomUUID(),
-          userMessage: null,
-          contentBlocks: [],
-          thinking: [],
-          assistantText: [],
-          toolCalls: [],
-          subAgentActivity: [],
-          timestamp: msg.timestamp ?? "",
-          durationMs: null,
-          tokenUsage: null,
-          model: null,
-        }
+        current = createTurn(msg, null)
+        attachPendingCompaction(current)
       }
 
       current.model = msg.message.model
@@ -953,5 +1068,5 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   flushPendingQueuedPrompts()
   finalizeTurn()
 
-  return turns
+  return pairAgentMessageReplies(turns)
 }

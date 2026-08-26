@@ -40,6 +40,7 @@ import { LeakIndicator } from "@/components/LeakIndicator"
 import { NotificationsBell } from "@/components/NotificationsBell"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { SessionPill } from "@/components/SessionPill"
+import { ShareButton } from "@/components/ShareButton"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { UsageCostDialog } from "@/components/UsageCostDialog"
 import { FLOATING_PILL } from "@/components/header-shared"
@@ -158,6 +159,11 @@ export const FloatingChrome = memo(function FloatingChrome({
 
   return (
     <>
+      {/* Stands in for the removed title bar. It ships with the pills so the
+          two always share a stacking context: the session view nests the
+          chrome inside a resizable panel, where a pane-owned strip would paint
+          over the pills and swallow their clicks. */}
+      <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
       {/* Content scrolls under the pills, so it has to fade out rather than
           collide with them. */}
       <div
@@ -239,6 +245,11 @@ export const FloatingChrome = memo(function FloatingChrome({
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             <DeviceSwitcher />
           </div>
+          {session && can("share") && (
+            <div className={cn(FLOATING_PILL, PILL_ROW)}>
+              <ShareButton sessionId={session.sessionId} />
+            </div>
+          )}
 
           <div className={cn(FLOATING_PILL, PILL_ROW)}>
             <DropdownMenu>

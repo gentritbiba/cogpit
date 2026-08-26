@@ -399,6 +399,21 @@ describe("registerSessionContextRoutes", () => {
       expect(data.turns[1].compactionSummary).toBeNull()
     })
 
+    it("truncates long compaction summaries, pointing at L2 for the full text", async () => {
+      const summary = "S".repeat(1000)
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({ compactionSummary: summary })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session")
+      await handler(req as never, res as never, next)
+
+      const data = JSON.parse(res._getData())
+      expect(data.turns[0].compactionSummary).toBe("S".repeat(400) + "... [truncated, use L2 for full text]")
+    })
+
     it("reshapes stats correctly", async () => {
       mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
       mockedReadFile.mockResolvedValueOnce("" as never)
@@ -500,6 +515,20 @@ describe("registerSessionContextRoutes", () => {
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Turn not found" })
     })
 
+    it("returns the full compaction summary", async () => {
+      const summary = "S".repeat(1000)
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({ compactionSummary: summary })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
+      await handler(req as never, res as never, next)
+
+      expect(JSON.parse(res._getData()).compactionSummary).toBe(summary)
+    })
+
     it("returns turn detail with content blocks", async () => {
       mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
       mockedReadFile.mockResolvedValueOnce("" as never)
@@ -551,6 +580,52 @@ describe("registerSessionContextRoutes", () => {
       expect(data.contentBlocks[2].kind).toBe("tool_calls")
       expect(data.contentBlocks[2].toolCalls[0].name).toBe("Edit")
       expect(data.contentBlocks[2].toolCalls[0].resultTruncated).toBe(false)
+    })
+
+    // The exhaustiveness guard catches a deleted case, not a mistyped one:
+    // `body: block.sender` would ship silently, and this serializer has a
+    // hand-maintained twin in packages/cogpit-memory/src/commands/context.ts.
+    it("serializes an agent_message with its own fields", async () => {
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({
+          contentBlocks: [
+            {
+              kind: "agent_message",
+              sender: "csp-and-proxy",
+              body: "one blocking question on finding #1.",
+              reply: { summary: "Answered your question", timestamp: "2026-03-02T10:00:22Z" },
+              timestamp: "2026-03-02T10:00:00Z",
+            },
+            {
+              kind: "agent_message",
+              sender: "vehicle-batch",
+              body: "half-blocked on a decision",
+            },
+          ],
+        })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
+      await handler(req as never, res as never, next)
+
+      expect(JSON.parse(res._getData()).contentBlocks).toEqual([
+        {
+          kind: "agent_message",
+          sender: "csp-and-proxy",
+          body: "one blocking question on finding #1.",
+          reply: { summary: "Answered your question", timestamp: "2026-03-02T10:00:22Z" },
+          timestamp: "2026-03-02T10:00:00Z",
+        },
+        {
+          kind: "agent_message",
+          sender: "vehicle-batch",
+          body: "half-blocked on a decision",
+          reply: null,
+          timestamp: null,
+        },
+      ])
     })
 
     it("truncates tool call results over 10K chars", async () => {

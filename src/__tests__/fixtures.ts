@@ -142,17 +142,34 @@ export function summaryMsg(summary = "Conversation compacted"): SummaryMessage {
 export function compactBoundaryMsg(
   trigger: "auto" | "manual" = "auto",
   preTokens = 167000,
-  content = "Conversation compacted"
+  content = "Conversation compacted",
+  postTokens?: number
 ): SystemMessage {
   return {
     type: "system",
     subtype: "compact_boundary",
     content,
     isMeta: false,
-    compactMetadata: { trigger, preTokens },
+    compactMetadata: { trigger, preTokens, postTokens },
     uuid: nextId(),
     timestamp: "2025-01-15T10:00:03Z",
   }
+}
+
+/**
+ * The summary message Claude Code replays after compacting — the real summary
+ * text wrapped in resume boilerplate, exactly as observed in JSONL.
+ */
+export function compactSummaryMsg(summary: string): UserMessage {
+  return userMsg(
+    "This session is being continued from a previous conversation that ran out of context."
+      + " The summary below covers the earlier portion of the conversation.\n\nSummary:\n"
+      + summary
+      + "\n\nIf you need specific details from before compaction (like exact code snippets),"
+      + " read the full transcript at: /tmp/session.jsonl\n"
+      + "Continue the conversation from where it left off without asking the user any further questions.",
+    { isCompactSummary: true }
+  )
 }
 
 /**
@@ -195,6 +212,82 @@ export function agentProgressMsg(
       },
     } as ProgressMessage["data"],
     ...overrides,
+  }
+}
+
+// ── Agent mail ──────────────────────────────────────────────────────────────
+
+/** The envelope Claude Code wraps a peer message in, on the wire. */
+export function agentEnvelope(sender: string, body: string): string {
+  return `<agent-message from="${sender}">\n${body}\n</agent-message>`
+}
+
+/**
+ * `origin` is optional so a test can drop it to model a pre-`origin` record, or
+ * replace it with a bare `{ kind: "human" }` the way Claude Code writes one.
+ */
+export type QueuedAttachmentRecord = {
+  type: string
+  timestamp: string
+  attachment: {
+    type: string
+    commandMode: string
+    prompt: string
+    timestamp: string
+    origin?: {
+      kind: string
+      from?: string
+      name?: string
+      senderTaskId?: string
+      body?: string
+    }
+  }
+}
+
+export type PeerOriginRecord = NonNullable<QueuedAttachmentRecord["attachment"]["origin"]>
+
+/**
+ * The `attachment` copy of a peer message, matching the shape observed in
+ * `~/.claude/projects/…honest-cms/*.jsonl`: the raw envelope in `prompt`, and
+ * the same text pre-stripped in `origin.body`.
+ *
+ * That real shape ties `from`, `name`, `origin.body` and the envelope in
+ * `prompt` to the same two strings, so a parser reading any one of them looks
+ * identical. `originOverrides` unties them, so a test can say which field was
+ * read. Setting a field to `undefined` drops it: these records go through
+ * `JSON.stringify`, which omits undefined values, so the parser sees a record
+ * that never carried the field at all.
+ */
+export function peerAttachment(
+  sender: string,
+  body: string,
+  senderTaskId = "task-1",
+  timestamp = "2026-08-21T19:26:25.853Z",
+  originOverrides: Partial<PeerOriginRecord> = {}
+): QueuedAttachmentRecord {
+  return {
+    type: "attachment",
+    timestamp,
+    attachment: {
+      type: "queued_command",
+      commandMode: "prompt",
+      prompt: agentEnvelope(sender, body),
+      timestamp,
+      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body, ...originOverrides },
+    },
+  }
+}
+
+/**
+ * The queue-operation copy Claude Code writes the moment a peer message is
+ * enqueued, carrying the raw envelope and no `origin` metadata.
+ */
+export function peerEnqueueMsg(sender: string, body: string): Record<string, unknown> {
+  return {
+    type: "queue-operation",
+    operation: "enqueue",
+    content: agentEnvelope(sender, body),
+    timestamp: "2026-08-21T19:26:25.853Z",
   }
 }
 

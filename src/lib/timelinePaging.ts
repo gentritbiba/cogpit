@@ -1,3 +1,4 @@
+import { pairAgentMessageReplies } from "@/lib/turnBuilder"
 import type { Turn } from "@/lib/types"
 
 /**
@@ -58,11 +59,67 @@ function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
 }
 
 /**
+ * How far apart the two copies of one message can be stamped. Across every peer
+ * message on disk, 4 of the 6 enqueue/attachment pairs agree to the millisecond
+ * and the other 2 drift by 1ms — the attachment inherits the enqueue's
+ * timestamp. A second leaves three orders of magnitude of headroom and is still
+ * 880x under the closest pair of genuinely distinct messages one agent has sent
+ * (14m40s, `csp-and-proxy` in `…honest-cms/ddb6fc34…`).
+ */
+const DUPLICATE_WINDOW_MS = 1000
+
+/**
+ * Drops the second copy of a peer message.
+ *
+ * Claude Code persists each one twice — a `queue-operation` enqueue carrying
+ * the raw envelope, then an `attachment` carrying the same text pre-stripped.
+ * `buildTurns` reconciles the pair through a ledger scoped to its own call, so
+ * a page boundary between the two copies leaves both standing, and dedup by
+ * turn id cannot see it because they sit in different turns.
+ *
+ * The key is (sender, body) *and* proximity in time. Not the sender's task id:
+ * that names the sending agent's task, so one agent's question and its later
+ * done-report share it. Not (sender, body) alone: that spans the whole
+ * transcript, so an agent that genuinely said the same thing twice collapsed to
+ * one card, and the session then rendered differently depending on how it was
+ * paged in. And not adjacency across the join, because the copies are not
+ * adjacent: in `…ddb6fc34…` the two halves of one message are 306 records apart
+ * with an unrelated message's enqueue sitting between them. Only the timestamps
+ * stay tied to the message.
+ *
+ * A block with no parseable timestamp cannot be shown to be a duplicate, so it
+ * is kept — dropping is the destructive direction.
+ */
+function dedupeAgentMessages(turns: readonly Turn[]): Turn[] {
+  const lastKeptAt = new Map<string, number>()
+  return turns.map((turn) => {
+    if (!turn.contentBlocks.some((b) => b.kind === "agent_message")) return turn
+    const kept = turn.contentBlocks.filter((block) => {
+      if (block.kind !== "agent_message") return true
+      const at = Date.parse(block.timestamp ?? "")
+      if (Number.isNaN(at)) return true
+      const key = `${block.sender}\u0000${block.body}`
+      const previous = lastKeptAt.get(key)
+      if (previous !== undefined && Math.abs(at - previous) <= DUPLICATE_WINDOW_MS) return false
+      lastKeptAt.set(key, at)
+      return true
+    })
+    return kept.length === turn.contentBlocks.length ? turn : { ...turn, contentBlocks: kept }
+  })
+}
+
+/**
  * Prepends older turns onto the existing list, deduplicating by turn id and
  * stitching a turn that a byte-boundary read cut in half.
  *
  * Merging collapses the two halves into one row instead of leaving a promptless
  * fragment stranded at the top of the page.
+ *
+ * Each page arrives from its own `parseSession` call, so whatever `buildTurns`
+ * reconciles within one page has to be re-run over the join: the duplicate copy
+ * of a peer message, and the pairing between a message and the `SendMessage`
+ * that answered it. Without that, a message answered seconds later reads
+ * "Never answered" purely because the pages happened to split between them.
  */
 export function prependTurns(
   existing: Turn[],
@@ -77,10 +134,11 @@ export function prependTurns(
 
   const head = existing[0]
   const lastOlder = unique[unique.length - 1]
-  if (head && lastOlder && isCutFragment(head, agentKind)) {
-    return [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
-  }
-  return [...unique, ...existing]
+  const merged = head && lastOlder && isCutFragment(head, agentKind)
+    ? [...unique.slice(0, -1), mergeTurnFragments(lastOlder, head), ...existing.slice(1)]
+    : [...unique, ...existing]
+
+  return pairAgentMessageReplies(dedupeAgentMessages(merged))
 }
 
 /**
@@ -116,5 +174,6 @@ function mergeTurnFragments(older: Turn, newer: Turn): Turn {
     tokenUsage: newer.tokenUsage ?? older.tokenUsage,
     model: newer.model ?? older.model,
     compactionSummary: older.compactionSummary ?? newer.compactionSummary,
+    compactionMeta: older.compactionMeta ?? newer.compactionMeta,
   }
 }

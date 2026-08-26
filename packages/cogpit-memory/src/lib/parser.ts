@@ -7,7 +7,7 @@ import type {
   ParseSessionOptions,
   UserContent,
 } from "./types"
-import { buildTurns, findTurnStartIndices } from "./turnBuilder"
+import { buildTurns, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { isCodexSessionText, parseCodexSession } from "./codex"
 import { isAssistantMessage } from "./messageTypeGuards"
@@ -159,7 +159,10 @@ export function parseSessionAppend(
   const keptTurns = existing.turns.slice(0, historyTurnCount + rebuildFromTurn)
   const tailTurns = buildTurns(allRawMessages.slice(rebuildFrom))
 
-  const allTurns = [...keptTurns, ...tailTurns]
+  // Only the rebuilt tail passed through pairing, and it cannot see the kept
+  // turns above it — so a peer message two or more turns back would lose the
+  // reply it already had the moment the next line lands.
+  const allTurns = pairAgentMessageReplies([...keptTurns, ...tailTurns])
   const stats = computeStats(allTurns)
 
   // Preserve metadata from existing (already extracted)

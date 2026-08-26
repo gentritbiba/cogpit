@@ -13,6 +13,7 @@ import type {
 
 const RESULT_TRUNCATE_LIMIT = 10_000
 const L1_RESPONSE_LIMIT = 150_000
+const COMPACTION_SUMMARY_PREVIEW = 400
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,14 @@ function mapSessionToOverview(session: ParsedSession) {
   return overview
 }
 
+/** L1 lists every turn, so the full summary goes out at L2 instead. */
+function truncateCompactionSummary(summary: string | undefined): string | null {
+  if (!summary) return null
+  return summary.length > COMPACTION_SUMMARY_PREVIEW
+    ? summary.slice(0, COMPACTION_SUMMARY_PREVIEW) + "... [truncated, use L2 for full text]"
+    : summary
+}
+
 function mapTurnToSummary(turn: Turn, turnIndex: number) {
   // Tool summary: count by name
   const toolSummary: Record<string, number> = {}
@@ -125,7 +134,7 @@ function mapTurnToSummary(turn: Turn, turnIndex: number) {
     subAgents,
     hasThinking: turn.thinking.length > 0,
     isError: turn.toolCalls.some((tc) => tc.isError),
-    compactionSummary: turn.compactionSummary ?? null,
+    compactionSummary: truncateCompactionSummary(turn.compactionSummary),
   }
 }
 
@@ -140,6 +149,7 @@ function mapTurnToDetail(session: ParsedSession, turnIndex: number) {
     sessionId: session.sessionId,
     turnIndex,
     userMessage: extractUserMessageText(turn.userMessage),
+    compactionSummary: turn.compactionSummary ?? null,
     contentBlocks,
     tokenUsage: turn.tokenUsage
       ? { input: turn.tokenUsage.input_tokens, output: turn.tokenUsage.output_tokens }
@@ -181,6 +191,14 @@ function mapContentBlock(block: TurnContentBlock) {
       }
     case "queued_prompt":
       return { kind: "queued_prompt" as const, content: block.content, timestamp: block.timestamp ?? null }
+    case "agent_message":
+      return {
+        kind: "agent_message" as const,
+        sender: block.sender,
+        body: block.body,
+        reply: block.reply ?? null,
+        timestamp: block.timestamp ?? null,
+      }
     case "hook_event":
       return { kind: "hook_event" as const, events: block.events, timestamp: block.timestamp ?? null }
     case "plan_mode":
@@ -194,6 +212,12 @@ function mapContentBlock(block: TurnContentBlock) {
       }
     case "recap":
       return { kind: "recap" as const, content: block.content, timestamp: block.timestamp ?? null }
+    default: {
+      // Exhaustiveness guard: a new TurnContentBlock kind must fail typecheck here
+      // rather than silently serializing as undefined and vanishing from the response.
+      const exhaustive: never = block
+      return exhaustive
+    }
   }
 }
 

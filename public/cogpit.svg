@@ -1,62 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <defs>
-    <linearGradient id="gear-fill" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#60a5fa"/>
-      <stop offset="100%" stop-color="#3b82f6"/>
-    </linearGradient>
-    <linearGradient id="brain-glow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#93c5fd"/>
-      <stop offset="100%" stop-color="#60a5fa"/>
-    </linearGradient>
-    <linearGradient id="core-glow" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#dbeafe"/>
-      <stop offset="100%" stop-color="#93c5fd"/>
-    </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="0.6" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
-  </defs>
-
-  <!-- Gear body with 8 teeth -->
-  <path d="M11.48,5.10 L13.43,4.48 L13.86,0.95 L18.14,0.95 L18.57,4.48 L20.52,5.10 L22.32,6.04 L25.13,3.84 L28.16,6.87 L25.96,9.68 L26.90,11.48 L27.52,13.43 L31.05,13.86 L31.05,18.14 L27.52,18.57 L26.90,20.52 L25.96,22.32 L28.16,25.13 L25.13,28.16 L22.32,25.96 L20.52,26.90 L18.57,27.52 L18.14,31.05 L13.86,31.05 L13.43,27.52 L11.48,26.90 L9.68,25.96 L6.87,28.16 L3.84,25.13 L6.04,22.32 L5.10,20.52 L4.48,18.57 L0.95,18.14 L0.95,13.86 L4.48,13.43 L5.10,11.48 L6.04,9.68 L3.84,6.87 L6.87,3.84 L9.68,6.04 L11.48,5.10 Z" fill="url(#gear-fill)"/>
-
-  <!-- Center hole -->
-  <circle cx="16" cy="16" r="7.8" fill="#09090b"/>
-
-  <!-- Neural circuit pattern - nodes and connections -->
-  <g filter="url(#glow)" opacity="0.9">
-    <!-- Central brain node -->
-    <circle cx="16" cy="16" r="2.2" fill="url(#core-glow)"/>
-
-    <!-- Neural connection lines -->
-    <line x1="16" y1="16" x2="12.2" y2="12.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-    <line x1="16" y1="16" x2="19.8" y2="12.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-    <line x1="16" y1="16" x2="12.2" y2="19.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-    <line x1="16" y1="16" x2="19.8" y2="19.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-    <line x1="16" y1="16" x2="16" y2="10.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-    <line x1="16" y1="16" x2="16" y2="21.5" stroke="url(#brain-glow)" stroke-width="0.7" stroke-linecap="round"/>
-
-    <!-- Outer neural nodes -->
-    <circle cx="12.2" cy="12.5" r="1.1" fill="url(#brain-glow)"/>
-    <circle cx="19.8" cy="12.5" r="1.1" fill="url(#brain-glow)"/>
-    <circle cx="12.2" cy="19.5" r="1.1" fill="url(#brain-glow)"/>
-    <circle cx="19.8" cy="19.5" r="1.1" fill="url(#brain-glow)"/>
-    <circle cx="16" cy="10.5" r="0.9" fill="url(#brain-glow)"/>
-    <circle cx="16" cy="21.5" r="0.9" fill="url(#brain-glow)"/>
-
-    <!-- Secondary connections between outer nodes -->
-    <line x1="12.2" y1="12.5" x2="16" y2="10.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
-    <line x1="19.8" y1="12.5" x2="16" y2="10.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
-    <line x1="12.2" y1="19.5" x2="16" y2="21.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
-    <line x1="19.8" y1="19.5" x2="16" y2="21.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.6"/>
-    <line x1="12.2" y1="12.5" x2="12.2" y2="19.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.5"/>
-    <line x1="19.8" y1="12.5" x2="19.8" y2="19.5" stroke="#93c5fd" stroke-width="0.4" stroke-linecap="round" opacity="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Cogpit">
+  <rect id="bg" width="512" height="512" rx="112" fill="#09090b"/>
+  <g fill="#ffffff">
+    <path d="M390.76 395.55A194 194 0 0 1 377.32 407.38L384.43 439.52A224 224 0 0 1 330.83 467.13L308.79 442.68A194 194 0 0 1 273.61 449.2L261.8 479.92A224 224 0 0 1 201.87 473.36L196.99 440.81A194 194 0 0 1 164.05 426.83L137.25 445.93A224 224 0 0 1 90.89 407.38L104.79 377.54A194 194 0 0 1 85.04 347.7L52.14 348.84A224 224 0 0 1 34.77 291.1L62.83 273.89A194 194 0 0 1 62.83 238.11L34.77 220.9A224 224 0 0 1 52.14 163.16L85.04 164.3A194 194 0 0 1 104.79 134.46L90.89 104.62A224 224 0 0 1 137.25 66.07L164.05 85.17A194 194 0 0 1 196.99 71.19L201.87 38.64A224 224 0 0 1 261.8 32.08L273.61 62.8A194 194 0 0 1 308.79 69.32L330.83 44.87A224 224 0 0 1 384.43 72.48L377.32 104.62A194 194 0 0 1 390.76 116.45L365.76 142.34A158 158 0 1 0 365.76 369.66Z"/>
+    <g fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M178 206L246 256L178 306"/>
+      <path d="M266 306L334 306"/>
+    </g>
   </g>
-
-  <!-- Center dot highlight -->
-  <circle cx="15.4" cy="15.2" r="0.7" fill="#ffffff" opacity="0.6"/>
 </svg>
