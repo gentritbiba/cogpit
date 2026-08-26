@@ -1,8 +1,21 @@
 {
   "name": "cogpit",
-  "version": "0.0.0-preview.1",
+  "version": "2.0.0",
   "description": "Run Cogpit's local Claude Code and Codex interface without installing it",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gentritbiba/cogpit.git",
+    "directory": "packages/cogpit-cli"
+  },
+  "homepage": "https://github.com/gentritbiba/cogpit",
+  "bugs": "https://github.com/gentritbiba/cogpit/issues",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "agent",
+    "cogpit"
+  ],
   "type": "module",
   "bin": {
     "cogpit": "dist/cli.js"
