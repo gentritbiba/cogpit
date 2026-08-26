@@ -73,7 +73,8 @@ const indexOnly = api.parseSession(jsonl, { skipStats: true })
 assert.deepEqual(indexOnly.turns, parsed.turns)
 assert.deepEqual(indexOnly.rawMessages, [])
 assert.equal(indexOnly.stats.turnCount, 1)
-assert.equal(indexOnly.stats.totalCostUSD, 0)
+assert.equal(parsed.stats.totalInputTokens, 10)
+assert.equal(indexOnly.stats.totalInputTokens, 0)
 
 const codexJsonl = [
   JSON.stringify({
@@ -108,7 +109,7 @@ const indexOnlyCodex = api.parseSession(codexJsonl, { skipStats: true })
 assert.deepEqual(indexOnlyCodex.turns, parsedCodex.turns)
 assert.deepEqual(indexOnlyCodex.rawMessages, [])
 assert.equal(indexOnlyCodex.stats.turnCount, 1)
-assert.equal(indexOnlyCodex.stats.totalCostUSD, 0)
+assert.equal(indexOnlyCodex.stats.totalInputTokens, 0)
 assert.ok(parsedCodex.rawMessages.length > 0)
 
 const cliPath = join(packageRoot, "dist/cli.js")
