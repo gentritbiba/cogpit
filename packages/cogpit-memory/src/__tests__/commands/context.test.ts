@@ -282,7 +282,6 @@ describe("context command", () => {
         reply: { summary: "Answered your question", timestamp: "2026-08-21T19:26:47Z" },
         timestamp: "2026-08-21T19:26:25Z",
       })
-      expect(block.body).not.toContain("<agent-message")
     })
 
     it("serializes current attachment and presentation block shapes without null entries", async () => {

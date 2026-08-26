@@ -987,6 +987,11 @@ describe("recap / away_summary parsing", () => {
 // ── Agent mail ───────────────────────────────────────────────────────────────
 
 describe("agent mail", () => {
+  const agentMessages = (blocks: TurnContentBlock[]) =>
+    blocks.filter(
+      (b): b is Extract<TurnContentBlock, { kind: "agent_message" }> => b.kind === "agent_message"
+    )
+
   it("emits agent_message for a peer origin, with the envelope stripped", () => {
     const session = parseSession(toJsonl([
       userMsg("start"),
@@ -996,17 +1001,21 @@ describe("agent mail", () => {
     ]))
 
     const block = session.turns[0].contentBlocks.find((b) => b.kind === "agent_message")
-    expect(block).toBeDefined()
     if (block?.kind !== "agent_message") throw new Error("expected agent_message")
     expect(block.sender).toBe("csp-and-proxy")
     expect(block.body).toBe("one blocking question on finding #1.")
-    expect(block.body).not.toContain("<agent-message")
   })
 
-  it("keeps a human origin as queued_prompt", () => {
-    const attachment = peerAttachment("x", "check the tests too")
+  // `origin.kind === "human"` says the reader typed this, whatever the text
+  // happens to contain — quoting an agent's message back, or drafting the
+  // wording for one, is ordinary. Only the pre-`origin` fallback is allowed to
+  // read a sender out of the text, so this prompt must stay the reader's own
+  // rather than become mail from an agent that never sent it.
+  it("keeps a human origin as queued_prompt even when the text carries an envelope", () => {
+    const attachment = peerAttachment("x", "unused")
     attachment.attachment.origin = { kind: "human" }
-    attachment.attachment.prompt = "check the tests too"
+    attachment.attachment.prompt =
+      `<agent-message from="not-really">please review this framing</agent-message>`
 
     const session = parseSession(toJsonl([
       userMsg("start"),
@@ -1018,6 +1027,101 @@ describe("agent mail", () => {
     const kinds = session.turns[0].contentBlocks.map((b) => b.kind)
     expect(kinds).toContain("queued_prompt")
     expect(kinds).not.toContain("agent_message")
+  })
+
+  // `origin` is the record Claude Code wrote; the envelope is text it happened
+  // to also send. On disk the two agree, so nothing noticed which one the
+  // parser read. They can disagree — the envelope is matched with a regex whose
+  // idea of where the body ends is a guess — and when they do, `origin` wins.
+  it("prefers origin.body over the body it could strip from the envelope", () => {
+    const attachment = peerAttachment(
+      "csp-and-proxy",
+      "what the envelope says",
+      "task-1",
+      "2026-08-21T19:26:25.853Z",
+      { body: "what origin says" },
+    )
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.body).toBe("what origin says")
+  })
+
+  it("strips the envelope itself when a peer origin carries no body", () => {
+    const attachment = peerAttachment(
+      "csp-and-proxy",
+      "one blocking question on finding #1.",
+      "task-1",
+      "2026-08-21T19:26:25.853Z",
+      { body: undefined },
+    )
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.body).toBe("one blocking question on finding #1.")
+  })
+
+  // `name` and `from` hold the same string in every record on disk, which is
+  // why reading one for the other went unnoticed. The precedence is still a
+  // choice, so pin which field wins — and note that reply pairing joins this
+  // value against `SendMessage.input.to`, which follows `from`.
+  it("takes the sender from origin.name ahead of origin.from", () => {
+    const attachment = peerAttachment(
+      "docs-sweep",
+      "one blocking question",
+      "task-1",
+      "2026-08-21T19:26:25.853Z",
+      { name: "docs-sweep", from: "docs-sweep@team-alpha" },
+    )
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.sender).toBe("docs-sweep")
+  })
+
+  // The text is not a second chance at the sender: a peer origin naming nobody
+  // in a form `parseAgentEnvelope` recognises still has to render as mail, or
+  // the next envelope Claude Code invents turns every peer message back into a
+  // "Queued while working" card.
+  it("falls back to origin.from when origin.name is absent", () => {
+    const attachment = peerAttachment(
+      "vehicle-batch",
+      "half-blocked on a decision",
+      "task-1",
+      "2026-08-21T19:26:25.853Z",
+      { name: undefined },
+    )
+    attachment.attachment.prompt = "half-blocked on a decision"
+
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      attachment,
+      textAssistant("done"),
+    ]))
+
+    const blocks = agentMessages(session.turns[0].contentBlocks)
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].sender).toBe("vehicle-batch")
+    expect(blocks[0].body).toBe("half-blocked on a decision")
   })
 
   it("falls back to the envelope when origin is absent", () => {
@@ -1079,7 +1183,6 @@ describe("agent mail", () => {
     if (block.kind !== "agent_message") throw new Error("expected agent_message")
     expect(block.sender).toBe(sender)
     expect(block.body).toBe(body)
-    expect(block.body).not.toContain("<agent-message")
   })
 
   // `origin.senderTaskId` names the sending agent's *task*, not the message.
@@ -1113,11 +1216,6 @@ describe("agent mail", () => {
   const sendMessage = (to: string, summary: string, id: string) =>
     toolUseAssistant("SendMessage", { to, summary, message: "..." }, id)
 
-  const agentMessages = (blocks: TurnContentBlock[]) =>
-    blocks.filter(
-      (b): b is Extract<TurnContentBlock, { kind: "agent_message" }> => b.kind === "agent_message"
-    )
-
   it("attaches the SendMessage that answered a peer message", () => {
     const session = parseSession(toJsonl([
       userMsg("start"),
@@ -1130,6 +1228,27 @@ describe("agent mail", () => {
     const [block] = agentMessages(session.turns[0].contentBlocks)
     expect(block.reply?.summary).toBe("Answered your question")
     expect(block.reply?.timestamp).toBe("2025-01-15T10:00:01Z")
+  })
+
+  // `to` is a common enough parameter name that other tools carry it, and agent
+  // names are borrowed from the workstream they own — so a channel, an issue
+  // queue or a branch can share a sender's exact name. Only `SendMessage`
+  // reaches a peer agent, so only `SendMessage` can be a reply.
+  it("does not read another tool's `to` argument as a reply", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("docs-sweep", "one blocking question"),
+      toolUseAssistant(
+        "mcp__slack__slack_send_message",
+        { to: "docs-sweep", summary: "posted the recap", message: "..." },
+        "slack-1",
+      ),
+      textAssistant("done"),
+    ]))
+
+    const [block] = agentMessages(session.turns[0].contentBlocks)
+    expect(block.reply).toBeUndefined()
   })
 
   it("leaves a message unanswered when the SendMessage targets another sender", () => {
@@ -1175,6 +1294,26 @@ describe("agent mail", () => {
     const blocks = agentMessages(session.turns[0].contentBlocks)
     expect(blocks.map((b) => b.body)).toEqual(["first", "second"])
     expect(blocks.map((b) => b.reply?.summary)).toEqual(["re first", "re second"])
+  })
+
+  // Two agents waiting at once is the normal shape of a fan-out, and the
+  // replies rarely come back in the order the questions arrived. The queue is
+  // per sender for that reason: a single global queue would hand beta's answer
+  // to alpha and then find alpha's answer had nothing left to claim.
+  it("answers each sender from its own queue when several are outstanding", () => {
+    const session = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("alpha", "alpha's question"),
+      peerAttachment("beta", "beta's question"),
+      sendMessage("beta", "re beta", "sm-1"),
+      sendMessage("alpha", "re alpha", "sm-2"),
+      textAssistant("done"),
+    ]))
+
+    const blocks = agentMessages(session.turns[0].contentBlocks)
+    expect(blocks.map((b) => b.sender)).toEqual(["alpha", "beta"])
+    expect(blocks.map((b) => b.reply?.summary)).toEqual(["re alpha", "re beta"])
   })
 
   // The queue per sender has to drain, not latch. Holding "this sender was

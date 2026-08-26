@@ -4,12 +4,24 @@
 
 Any code change MUST account for its impact on existing tests. Before considering a change complete:
 
-1. Run `bun run test` and ensure all tests pass
+1. Run **both** suites and ensure all tests pass — the repo has two, and neither
+   command runs the other's tests:
+   - `bun run test` — Vitest, covering `src/`, `server/` and `electron/` only.
+     Test files follow the pattern `src/**/__tests__/*.test.ts`,
+     `server/__tests__/**/*.test.ts` and `electron/__tests__/*.test.ts`.
+   - `cd packages/cogpit-memory && bun test` — the cogpit-memory package's own
+     `bun:test` suite, under `packages/cogpit-memory/src/**/__tests__/`. It has
+     a separate CI step. `bun run test` at the root does **not** include it, so
+     a change to `packages/cogpit-memory/` is unverified until you run this too.
 2. If you changed behavior in a hook or module, check for a corresponding test file in `__tests__/` and update affected tests to match the new behavior
 3. If you added new behavior, add test coverage for it
 4. Never leave tests broken — fixing tests is part of the change, not a separate task
 
-Test files follow the pattern `src/**/__tests__/*.test.ts`, `server/__tests__/**/*.test.ts`, and `electron/__tests__/*.test.ts`.
+`packages/cogpit-memory`'s three sqlite-backed files — `search-index.test.ts`,
+`commands/search.test.ts` and `commands/index-cmd.test.ts` — report every test
+passing and then segfault in `bun:sqlite` at teardown on Bun 1.4.0-canary.1.
+That crash predates any current work and takes down a whole-package `bun test`
+run, so run those three files individually to read their results.
 
 ## Adding New API Routes
 

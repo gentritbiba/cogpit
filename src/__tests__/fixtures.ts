@@ -227,16 +227,26 @@ export type QueuedAttachmentRecord = {
   }
 }
 
+export type PeerOriginRecord = NonNullable<QueuedAttachmentRecord["attachment"]["origin"]>
+
 /**
  * The `attachment` copy of a peer message, matching the shape observed in
  * `~/.claude/projects/…honest-cms/*.jsonl`: the raw envelope in `prompt`, and
  * the same text pre-stripped in `origin.body`.
+ *
+ * That real shape ties `from`, `name`, `origin.body` and the envelope in
+ * `prompt` to the same two strings, so a parser reading any one of them looks
+ * identical. `originOverrides` unties them, so a test can say which field was
+ * read. Setting a field to `undefined` drops it: these records go through
+ * `JSON.stringify`, which omits undefined values, so the parser sees a record
+ * that never carried the field at all.
  */
 export function peerAttachment(
   sender: string,
   body: string,
   senderTaskId = "task-1",
-  timestamp = "2026-08-21T19:26:25.853Z"
+  timestamp = "2026-08-21T19:26:25.853Z",
+  originOverrides: Partial<PeerOriginRecord> = {}
 ): QueuedAttachmentRecord {
   return {
     type: "attachment",
@@ -246,7 +256,7 @@ export function peerAttachment(
       commandMode: "prompt",
       prompt: agentEnvelope(sender, body),
       timestamp,
-      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body },
+      origin: { kind: "peer", from: sender, name: sender, senderTaskId, body, ...originOverrides },
     },
   }
 }

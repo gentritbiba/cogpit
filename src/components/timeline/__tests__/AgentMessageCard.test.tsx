@@ -456,9 +456,15 @@ describe("agentAccentHue", () => {
     expect(agentAccentHue("vehicle-batch")).toBe(80)
   })
 
-  it("spreads different senders across the wheel", () => {
+  // Pinned, not "more than one": a palette that collapsed all five of these
+  // onto two colours would still be "more than one", and telling five agents
+  // apart by colour is the whole job. Four of the five are distinct —
+  // `payload-batch-2` and `docs-sweep` both land on 110. Twelve hues over an
+  // unbounded set of names makes collisions inevitable; this pins how bad it
+  // is for a realistic session, so a change that makes it worse has to say so.
+  it("gives a five-agent session four distinct hues", () => {
     const senders = ["csp-and-proxy", "payload-batch-2", "team-lead", "docs-sweep", "certified-status-fix"]
-    expect(new Set(senders.map(agentAccentHue)).size).toBeGreaterThan(1)
+    expect(new Set(senders.map(agentAccentHue)).size).toBe(4)
   })
 
   it("always returns a hue inside the colour wheel", () => {

@@ -271,6 +271,34 @@ describe("prependTurns — agent mail across pages", () => {
     expect(agentMessages(merged)[0].reply?.summary).toBe("unblocked you")
   })
 
+  // The mirror of the case above, and the reason re-pairing starts by clearing
+  // what a previous run left behind. Within its own page the newer message was
+  // the only one outstanding, so it took the reply. Once the older page arrives
+  // that reply belongs to the older message, and the newer one has to go back
+  // to unanswered — otherwise its card claims "You replied" to an answer that
+  // was never meant for it, and only ever after a scroll-up.
+  it("hands a stolen reply back and returns the newer message to unanswered", () => {
+    const older = parseSession(toJsonl([
+      userMsg("start"),
+      textAssistant("working"),
+      peerAttachment("w", "first question"),
+      textAssistant("done"),
+    ])).turns
+    const newer = parseSession(toJsonl([
+      userMsg("next"),
+      textAssistant("working"),
+      peerAttachment("w", "second question"),
+      sendMessage("w", "the one reply", "sm-1"),
+      textAssistant("done"),
+    ])).turns
+
+    expect(agentMessages(newer).map((b) => b.reply?.summary)).toEqual(["the one reply"])
+
+    const merged = prependTurns(newer, older, "claude")
+    expect(agentMessages(merged).map((b) => b.body)).toEqual(["first question", "second question"])
+    expect(agentMessages(merged).map((b) => b.reply?.summary)).toEqual(["the one reply", undefined])
+  })
+
   it("re-pairs the same way however the pages split", () => {
     const pageC = parseSession(toJsonl([
       userMsg("start"),
