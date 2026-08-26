@@ -169,6 +169,7 @@ function offsetOfLine(text: string, line: number): number {
 export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: ProjectFilesPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
+  const pendingFocusRef = useRef<{ text: string; line?: number } | null>(null)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const [width, setWidth] = useState(loadWidth)
   const widthRef = useRef(width)
@@ -308,6 +309,18 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: 
     editor.focus()
   }, [])
 
+  /**
+   * Apply a queued focus once the editor exists. loadFile cannot do this
+   * itself — it queues before the textarea is rendered at all, since the
+   * element is gated on the setFileLoading(false) that comes after it.
+   */
+  useEffect(() => {
+    const pending = pendingFocusRef.current
+    if (!pending || !editorRef.current) return
+    pendingFocusRef.current = null
+    focusEditorAt(pending.text, pending.line)
+  })
+
   const loadFile = useCallback(async (path: string, line?: number) => {
     setFileLoading(true)
     setFileError(null)
@@ -323,7 +336,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: 
       setSavedContent(data.content)
       setMtimeMs(data.mtimeMs)
       setSize(data.size)
-      requestAnimationFrame(() => focusEditorAt(data.content, line))
+      pendingFocusRef.current = { text: data.content, line }
     } catch (error) {
       setContent("")
       setSavedContent("")
@@ -332,7 +345,7 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: 
     } finally {
       setFileLoading(false)
     }
-  }, [cwd, focusEditorAt])
+  }, [cwd])
 
   const loadDiff = useCallback(async (path: string, originalPath?: string) => {
     setDiffLoading(true)
