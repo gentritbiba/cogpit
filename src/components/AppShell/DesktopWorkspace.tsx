@@ -177,7 +177,7 @@ function DesktopMainView({
       >
         {hasPendingTurns ? (
           <div className="flex-1 overflow-y-auto px-4 pb-6 pt-14">
-            <div className="mx-auto max-w-4xl">
+            <div className="mx-auto w-full max-w-[var(--chat-width)]">
               {sessionView.pendingTurns}
             </div>
           </div>
@@ -320,9 +320,9 @@ export function DesktopWorkspace({
       )}
 
       <main className="app-view-transition relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
         {/* The session view hosts the chrome inside its transcript column so the
-            pills never sit on top of the file-changes panel beside it. */}
+            pills never sit on top of the file-changes panel beside it. The
+            chrome brings its own window-drag strip along. */}
         {view !== "session" && floatingChrome}
         <DesktopMainView
           navigation={navigation}

@@ -159,6 +159,11 @@ export const FloatingChrome = memo(function FloatingChrome({
 
   return (
     <>
+      {/* Stands in for the removed title bar. It ships with the pills so the
+          two always share a stacking context: the session view nests the
+          chrome inside a resizable panel, where a pane-owned strip would paint
+          over the pills and swallow their clicks. */}
+      <div aria-hidden className="drag-strip absolute inset-x-0 top-0 z-10 h-10" />
       {/* Content scrolls under the pills, so it has to fade out rather than
           collide with them. */}
       <div

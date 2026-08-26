@@ -399,6 +399,21 @@ describe("registerSessionContextRoutes", () => {
       expect(data.turns[1].compactionSummary).toBeNull()
     })
 
+    it("truncates long compaction summaries, pointing at L2 for the full text", async () => {
+      const summary = "S".repeat(1000)
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({ compactionSummary: summary })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session")
+      await handler(req as never, res as never, next)
+
+      const data = JSON.parse(res._getData())
+      expect(data.turns[0].compactionSummary).toBe("S".repeat(400) + "... [truncated, use L2 for full text]")
+    })
+
     it("reshapes stats correctly", async () => {
       mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
       mockedReadFile.mockResolvedValueOnce("" as never)
@@ -498,6 +513,20 @@ describe("registerSessionContextRoutes", () => {
       await handler(req as never, res as never, next)
       expect(res._getStatus()).toBe(404)
       expect(JSON.parse(res._getData())).toMatchObject({ error: "Turn not found" })
+    })
+
+    it("returns the full compaction summary", async () => {
+      const summary = "S".repeat(1000)
+      mockedFindJsonlPath.mockResolvedValueOnce("/path/to/session.jsonl")
+      mockedReadFile.mockResolvedValueOnce("" as never)
+      mockedParseSession.mockReturnValueOnce(makeSession({
+        turns: [makeTurn({ compactionSummary: summary })],
+      }))
+
+      const { req, res, next } = createMockReqRes("GET", "/test-session/turn/0")
+      await handler(req as never, res as never, next)
+
+      expect(JSON.parse(res._getData()).compactionSummary).toBe(summary)
     })
 
     it("returns turn detail with content blocks", async () => {

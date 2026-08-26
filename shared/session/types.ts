@@ -102,6 +102,13 @@ export interface UserMessage extends BaseMessage {
     content: UserContent
   }
   isMeta?: boolean
+  /**
+   * Set on the synthetic user message Claude Code writes after a compaction.
+   * Its content is the real compaction summary wrapped in resume boilerplate —
+   * `compact_boundary.content` is only ever the fixed string "Conversation
+   * compacted", so this message is the sole source of the summary text.
+   */
+  isCompactSummary?: boolean
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
   toolUseResult?: AgentToolUseResult
@@ -239,10 +246,13 @@ export interface SystemMessage extends BaseMessage {
   durationMs?: number
   isMeta?: boolean
   content?: string
-  compactMetadata?: {
-    trigger: "auto" | "manual"
-    preTokens: number
-  }
+  compactMetadata?: CompactionMeta
+}
+
+export interface CompactionMeta {
+  trigger: "auto" | "manual"
+  preTokens: number
+  postTokens?: number
 }
 
 export interface FileHistorySnapshotMessage extends BaseMessage {
@@ -393,8 +403,14 @@ export interface Turn {
   durationMs: number | null
   tokenUsage: TokenUsage | null
   model: string | null
-  /** Set when a compaction happened before this turn */
+  /**
+   * Summary of the compaction that happened before this turn, as written by
+   * the compacting model. Absent when the transcript records the boundary but
+   * not the summary (e.g. the session ended right after compacting).
+   */
   compactionSummary?: string
+  /** Trigger and token counts of the compaction that happened before this turn */
+  compactionMeta?: CompactionMeta
   /**
    * Set when this turn was opened without its start record — the parse window
    * began mid-turn. Such a turn is the newer half of a byte-boundary cut and

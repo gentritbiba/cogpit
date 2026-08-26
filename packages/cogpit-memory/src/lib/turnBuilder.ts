@@ -15,6 +15,8 @@ import type {
   AgentToolUseResult,
   ParsedHookEvent,
   HookProgressData,
+  CompactionMeta,
+  UserContent,
 } from "./types"
 import {
   isUserMessage,
@@ -23,6 +25,7 @@ import {
   isSystemMessage,
   isSummaryMessage,
   isCompactBoundary,
+  isCompactSummaryMessage,
   isQueueOperationMessage,
   isAttachmentMessage,
 } from "./messageTypeGuards"
@@ -128,45 +131,46 @@ function mergeTokenUsage(
 
 // ── Compaction Summary ───────────────────────────────────────────────────────
 
-function buildCompactionSummary(turns: Turn[], title: string): string {
-  if (turns.length === 0) return title
+/** Boilerplate Claude Code wraps around the summary when it replays it as a user message. */
+const RESUME_PREAMBLE_RE =
+  /^This session is being continued from a previous conversation[\s\S]*?\n\nSummary:\s*\n/
+const RESUME_INSTRUCTIONS_RE =
+  /\n+(?:If you need specific details from before compaction|(?:Please c|C)ontinue the conversation from where it left off)[\s\S]*$/
 
-  const toolCounts: Record<string, number> = {}
-  for (const turn of turns) {
-    for (const tc of turn.toolCalls) {
-      toolCounts[tc.name] = (toolCounts[tc.name] || 0) + 1
-    }
+/**
+ * Pull the model-written summary out of the post-compaction user message.
+ * Text that doesn't carry the boilerplate is returned as-is.
+ */
+function extractCompactionSummary(content: UserContent): string {
+  const text = extractTextFromContent(content).trim()
+  return text.replace(RESUME_PREAMBLE_RE, "").replace(RESUME_INSTRUCTIONS_RE, "").trim()
+}
+
+/** The boundary record also carries preserved-message uuid lists we have no use for. */
+function normalizeCompactionMeta(meta: CompactionMeta | undefined): CompactionMeta | undefined {
+  if (!meta) return undefined
+  return { trigger: meta.trigger, preTokens: meta.preTokens, postTokens: meta.postTokens }
+}
+
+interface PendingCompaction {
+  summary?: string
+  meta?: CompactionMeta
+}
+
+function createTurn(msg: RawMessage, userMessage: UserContent | null): Turn {
+  return {
+    id: msg.uuid ?? crypto.randomUUID(),
+    userMessage,
+    contentBlocks: [],
+    thinking: [],
+    assistantText: [],
+    toolCalls: [],
+    subAgentActivity: [],
+    timestamp: msg.timestamp ?? "",
+    durationMs: null,
+    tokenUsage: null,
+    model: null,
   }
-
-  // Extract user prompts (first line only)
-  const prompts: string[] = []
-  for (const turn of turns) {
-    if (!turn.userMessage) continue
-    const text = extractTextFromContent(
-      typeof turn.userMessage === "string" ? turn.userMessage : turn.userMessage as ContentBlock[]
-    )
-    const firstLine = text.split("\n")[0].trim()
-    if (firstLine.length > 0) {
-      prompts.push(firstLine.length > 120 ? firstLine.slice(0, 117) + "..." : firstLine)
-    }
-  }
-
-  const topTools = Object.entries(toolCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name, count]) => `${name} x${count}`)
-    .join(", ")
-
-  const parts = [`**${title}**`, `${turns.length} turns compacted`]
-  if (topTools) parts.push(`Tools: ${topTools}`)
-  if (prompts.length > 0) {
-    parts.push("Prompts:")
-    const shown = prompts.slice(0, 6)
-    for (const p of shown) parts.push(`- ${p}`)
-    if (prompts.length > 6) parts.push(`- ...and ${prompts.length - 6} more`)
-  }
-
-  return parts.join("\n")
 }
 
 // ── Plan Mode grouping ───────────────────────────────────────────────────────
@@ -416,8 +420,16 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   const turns: Turn[] = []
   let current: Turn | null = null
 
-  // Track compaction summary to attach to the next turn
-  let pendingCompaction: string | null = null
+  // Track the compaction to attach to the next turn
+  let pendingCompaction: PendingCompaction | null = null
+
+  /** A boundary with no summary message after it still marks the turn it precedes. */
+  function attachPendingCompaction(turn: Turn) {
+    if (!pendingCompaction) return
+    turn.compactionSummary = pendingCompaction.summary
+    turn.compactionMeta = pendingCompaction.meta
+    pendingCompaction = null
+  }
 
   // Track away_summary / recap to prepend as a recap content block on the next turn
   let pendingRecap: { content: string; timestamp?: string } | null = null
@@ -561,23 +573,31 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   }
 
   for (const msg of messages) {
-    // Capture compaction/summary markers — build a rich summary from preceding turns
+    // Legacy summary record — carries a one-line title, no body
     if (isSummaryMessage(msg)) {
       finalizeTurn()
-      pendingCompaction = buildCompactionSummary(
-        turns,
-        msg.summary ?? "Conversation compacted"
-      )
+      pendingCompaction = { summary: msg.summary }
       continue
     }
 
-    // compact_boundary system message (Claude Code v2.1.34+) — real compaction signal
+    // compact_boundary system message (Claude Code v2.1.34+) — real compaction
+    // signal. Its `content` is a fixed placeholder; the summary arrives with
+    // the isCompactSummary user message that follows.
     if (isCompactBoundary(msg)) {
       finalizeTurn()
-      pendingCompaction = buildCompactionSummary(
-        turns,
-        msg.content ?? "Conversation compacted"
-      )
+      pendingCompaction = { meta: normalizeCompactionMeta(msg.compactMetadata) }
+      continue
+    }
+
+    // The replayed compaction summary is not a user prompt: it opens a turn
+    // that carries the summary instead of rendering the boilerplate as if the
+    // user had typed it.
+    if (isCompactSummaryMessage(msg)) {
+      finalizeTurn()
+      current = createTurn(msg, null)
+      current.compactionSummary = extractCompactionSummary(msg.message.content)
+      current.compactionMeta = pendingCompaction?.meta
+      pendingCompaction = null
       continue
     }
 
@@ -726,23 +746,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       }
 
       finalizeTurn()
-      current = {
-        id: msg.uuid ?? crypto.randomUUID(),
-        userMessage: msg.message.content,
-        contentBlocks: [],
-        thinking: [],
-        assistantText: [],
-        toolCalls: [],
-        subAgentActivity: [],
-        timestamp: msg.timestamp ?? "",
-        durationMs: null,
-        tokenUsage: null,
-        model: null,
-      }
-      if (pendingCompaction) {
-        current.compactionSummary = pendingCompaction
-        pendingCompaction = null
-      }
+      current = createTurn(msg, msg.message.content)
+      attachPendingCompaction(current)
       if (pendingRecap) {
         current.contentBlocks.push({ kind: "recap", content: pendingRecap.content, timestamp: pendingRecap.timestamp })
         pendingRecap = null
@@ -753,19 +758,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     if (isAssistantMessage(msg)) {
       if (!current) {
         // Assistant message without a preceding user message; create a synthetic turn
-        current = {
-          id: msg.uuid ?? crypto.randomUUID(),
-          userMessage: null,
-          contentBlocks: [],
-          thinking: [],
-          assistantText: [],
-          toolCalls: [],
-          subAgentActivity: [],
-          timestamp: msg.timestamp ?? "",
-          durationMs: null,
-          tokenUsage: null,
-          model: null,
-        }
+        current = createTurn(msg, null)
+        attachPendingCompaction(current)
       }
 
       current.model = msg.message.model

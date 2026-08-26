@@ -117,6 +117,13 @@ function HistoryStatusSlot({ hasMore, isLoadingOlder }: { hasMore: boolean; isLo
   )
 }
 
+/** A turn the compaction opened and nothing has been added to yet. */
+function isCompactionOnlyTurn(turn: Turn): boolean {
+  return (turn.compactionSummary != null || turn.compactionMeta != null)
+    && turn.userMessage == null
+    && turn.contentBlocks.length === 0
+}
+
 // ── Virtualized timeline ─────────────────────────────────────────────────────
 
 export function VirtualizedTimeline({
@@ -224,14 +231,18 @@ export function VirtualizedTimeline({
             <div key={key} data-turn-index={index}>
               <MaybeContextMenuTurn index={index}>
                 <div>
-                  {turn.compactionSummary && (
-                    <CompactionMarker summary={turn.compactionSummary} />
+                  {(turn.compactionSummary || turn.compactionMeta) && (
+                    <CompactionMarker summary={turn.compactionSummary} meta={turn.compactionMeta} />
                   )}
-                  <TurnSection
-                    turn={turn}
-                    index={index}
-                    branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
-                  />
+                  {/* A compaction opens a turn of its own; suppress the empty
+                      turn chrome until the conversation resumes into it. */}
+                  {!isCompactionOnlyTurn(turn) && (
+                    <TurnSection
+                      turn={turn}
+                      index={index}
+                      branchCount={undoRedo.branchesAtTurn ? undoRedo.branchesAtTurn(index).length : 0}
+                    />
+                  )}
                 </div>
               </MaybeContextMenuTurn>
             </div>

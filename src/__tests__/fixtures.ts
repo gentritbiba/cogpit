@@ -142,17 +142,34 @@ export function summaryMsg(summary = "Conversation compacted"): SummaryMessage {
 export function compactBoundaryMsg(
   trigger: "auto" | "manual" = "auto",
   preTokens = 167000,
-  content = "Conversation compacted"
+  content = "Conversation compacted",
+  postTokens?: number
 ): SystemMessage {
   return {
     type: "system",
     subtype: "compact_boundary",
     content,
     isMeta: false,
-    compactMetadata: { trigger, preTokens },
+    compactMetadata: { trigger, preTokens, postTokens },
     uuid: nextId(),
     timestamp: "2025-01-15T10:00:03Z",
   }
+}
+
+/**
+ * The summary message Claude Code replays after compacting — the real summary
+ * text wrapped in resume boilerplate, exactly as observed in JSONL.
+ */
+export function compactSummaryMsg(summary: string): UserMessage {
+  return userMsg(
+    "This session is being continued from a previous conversation that ran out of context."
+      + " The summary below covers the earlier portion of the conversation.\n\nSummary:\n"
+      + summary
+      + "\n\nIf you need specific details from before compaction (like exact code snippets),"
+      + " read the full transcript at: /tmp/session.jsonl\n"
+      + "Continue the conversation from where it left off without asking the user any further questions.",
+    { isCompactSummary: true }
+  )
 }
 
 /**
