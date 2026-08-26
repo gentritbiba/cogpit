@@ -13,6 +13,8 @@
  */
 
 import { authFetch } from "@/lib/auth"
+import { answerShareQuestion } from "@/lib/shareApi"
+import { isSharedPath } from "@/lib/sharePath"
 
 /** Answers keyed by the exact question text the agent asked. */
 export type UserQuestionAnswerMap = Record<string, string>
@@ -34,6 +36,13 @@ export async function submitUserQuestionAnswers(
   toolUseId: string,
   answers: UserQuestionAnswerMap,
 ): Promise<AnswerResult> {
+  // A share guest reaches the same handler through the token-scoped namespace,
+  // where the session comes from the cookie. Routed here rather than at each
+  // call site because the timeline form and the composer both import this
+  // directly, and a missed one would silently 403 and swallow the answer.
+  if (isSharedPath(window.location.pathname)) {
+    return answerShareQuestion(toolUseId, answers)
+  }
   try {
     const res = await authFetch("/api/ask-user-answer", {
       method: "POST",

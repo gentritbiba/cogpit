@@ -40,6 +40,7 @@ import { LeakIndicator } from "@/components/LeakIndicator"
 import { NotificationsBell } from "@/components/NotificationsBell"
 import { PowerMonitor } from "@/components/PowerMonitor"
 import { SessionPill } from "@/components/SessionPill"
+import { ShareButton } from "@/components/ShareButton"
 import { TokenUsageIndicator } from "@/components/TokenUsageWidget"
 import { UsageCostDialog } from "@/components/UsageCostDialog"
 import { FLOATING_PILL } from "@/components/header-shared"
@@ -239,6 +240,11 @@ export const FloatingChrome = memo(function FloatingChrome({
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             <DeviceSwitcher />
           </div>
+          {session && can("share") && (
+            <div className={cn(FLOATING_PILL, PILL_ROW)}>
+              <ShareButton sessionId={session.sessionId} />
+            </div>
+          )}
 
           <div className={cn(FLOATING_PILL, PILL_ROW)}>
             <DropdownMenu>

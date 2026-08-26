@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 
 // Mock authFetch before importing the hook
@@ -125,6 +125,22 @@ describe("useSkillMetadata", () => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
     })
 
+    expect(result.current.size).toBe(0)
+  })
+})
+
+describe("useSkillMetadata on a shared session", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    history.pushState({}, "", "/shared/sess-1")
+  })
+  afterEach(() => {
+    history.pushState({}, "", "/")
+  })
+
+  it("does not read the host's skill catalogue", () => {
+    const { result } = renderHook(() => useSkillMetadata(`/host/project-${Date.now()}`))
+    expect(mockFetch).not.toHaveBeenCalled()
     expect(result.current.size).toBe(0)
   })
 })

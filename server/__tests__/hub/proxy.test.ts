@@ -331,6 +331,38 @@ describe("createHubProxyHandler — routing guards", () => {
     expect(sawSpaFallback).toBe(false)
   })
 
+  it("never resolves a device from a non-origin-form target after the mount strip", async () => {
+    // Express keeps the `http://host` prefix on req.url when a client sends an
+    // absolute-form target and strips the mount from what follows; Vite's
+    // connect strips four characters off the same absolute URI. Neither shape
+    // may be read as "/:deviceId/rest", so the device id parse must miss.
+    const target = track(await makeTarget((_req, res) => res.end("should not arrive")))
+    const device = await passwordDevice(target.port)
+
+    for (const url of [
+      `http://cogpit.local:19384/${device.id}/api/x`,
+      `://cogpit.local:19384/hub/${device.id}/api/x`,
+      `//cogpit.local/${device.id}/api/x`,
+    ]) {
+      let status = 0
+      let body = ""
+      const req = { url, method: "GET", headers: {}, on: vi.fn() } as unknown as IncomingMessage
+      const res = {
+        get statusCode() { return status },
+        set statusCode(value: number) { status = value },
+        headersSent: false,
+        setHeader: vi.fn(),
+        end: (data?: string) => { body = data || "" },
+      } as unknown as ServerResponse
+
+      handler(req, res, () => { throw new Error("hub paths must not fall through") })
+
+      expect(status).toBe(404)
+      expect(JSON.parse(body)).toMatchObject({ code: "UNKNOWN_DEVICE" })
+    }
+    expect(target.requests).toHaveLength(0)
+  })
+
   it("blocks /hub/x/hub/y recursion via BAD_HUB_PATH", async () => {
     const target = track(await makeTarget((_req, res) => res.end("ok")))
     const device = await passwordDevice(target.port)

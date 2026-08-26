@@ -39,7 +39,8 @@ export const AgentPanel = memo(function AgentPanel({
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
 
-  const { enrichedMessages: displayMessages, isLoading } = useSubagentContent(messages, lazyLoad && isOpen)
+  const { enrichedMessages: displayMessages, isLoading, unavailable } =
+    useSubagentContent(messages, lazyLoad && isOpen)
 
   const { sessionSource, actions } = useSessionContext()
 
@@ -168,7 +169,11 @@ export const AgentPanel = memo(function AgentPanel({
 
       {isOpen && (
         <div className="motion-enter mt-2 flex flex-col gap-2">
-          {isLoading && (
+          {unavailable ? (
+            <div className="py-1 text-xs italic text-muted-foreground">
+              Sub-agent transcripts aren't available in a shared session.
+            </div>
+          ) : isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
               <Loader2 className="size-3 animate-spin" />
               Loading agent output...
@@ -177,7 +182,9 @@ export const AgentPanel = memo(function AgentPanel({
           {agentIds.map((id) => {
             const msg = finalMessageByAgent.get(id)
             const stats = statsByAgent.get(id)
-            const canNavigate = !!sessionSource && !!parentSessionId
+            // Opening a sub-agent chat is a session load, which a guest
+            // cannot perform, so the button would do nothing at all.
+            const canNavigate = !!sessionSource && !!parentSessionId && !unavailable
             return (
               <AgentReturnItem
                 key={id}

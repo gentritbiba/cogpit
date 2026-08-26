@@ -424,6 +424,34 @@ describe("securityHeaders", () => {
   })
 })
 
+describe("securityHeaders on non-origin-form targets", () => {
+  function cacheControlFor(url: string): string | undefined {
+    const headers: Record<string, string> = {}
+    const req = { socket: {}, headers: {}, url } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+    securityHeaders(req, res, vi.fn())
+    return headers["Cache-Control"]
+  }
+
+  it("keeps API responses uncacheable when the target is absolute-form", () => {
+    expect(cacheControlFor("http://cogpit.local:19384/api/projects")).toBe("no-store")
+    expect(cacheControlFor("http://cogpit.local:19384/hub/dev_1/api/projects")).toBe("no-store")
+    expect(cacheControlFor("http://cogpit.local:19384/__pty")).toBe("no-store")
+  })
+
+  it("fails closed on a target it cannot reduce to a path", () => {
+    expect(cacheControlFor("//evil.example/api/projects")).toBe("no-store")
+    expect(cacheControlFor("*")).toBe("no-store")
+  })
+
+  it("leaves genuine static assets cacheable", () => {
+    expect(cacheControlFor("http://cogpit.local:19384/assets/app.js")).toBeUndefined()
+    expect(cacheControlFor("/assets/app.js")).toBeUndefined()
+  })
+})
+
 describe("devSecurityHeaders", () => {
   it("leaves Vite documents free to inject the React refresh preamble", () => {
     const headers: Record<string, string> = {}
@@ -443,6 +471,23 @@ describe("devSecurityHeaders", () => {
   it("keeps the production policy on dev API responses", () => {
     const headers: Record<string, string> = {}
     const req = { socket: {}, headers: {}, url: "/api/projects" } as unknown as IncomingMessage
+    const res = {
+      setHeader: (name: string, value: string) => { headers[name] = value },
+    } as unknown as ServerResponse
+
+    devSecurityHeaders(req, res, vi.fn())
+
+    expect(headers["Content-Security-Policy"]).toContain("script-src 'self'")
+    expect(headers["Cache-Control"]).toBe("no-store")
+  })
+
+  it("keeps that policy on an absolute-form API target", () => {
+    const headers: Record<string, string> = {}
+    const req = {
+      socket: {},
+      headers: {},
+      url: "http://cogpit.local:5173/api/projects",
+    } as unknown as IncomingMessage
     const res = {
       setHeader: (name: string, value: string) => { headers[name] = value },
     } as unknown as ServerResponse

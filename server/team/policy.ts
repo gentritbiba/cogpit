@@ -39,9 +39,12 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/config", methods: ["GET"], requires: "authed" },
     { prefix: "/api/config", requires: "admin" },
     ...admin("/api/config/validate"),
+    // Login: a user has no principal until this call succeeds, and
+    // PUBLIC_PATHS already lets it past authMiddleware unauthenticated. The
+    // route itself verifies the credential.
+    { prefix: "/api/auth/verify", requires: "public" },
     ...authed(
       "/api/network-info",
-      "/api/auth/verify",
       "/api/auth/session",
       "/api/auth/logout",
       "/api/connected-devices",
@@ -105,10 +108,33 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   "files-watch": authed("/api/task-output", "/api/watch"),
   // Returns exact before/after content and absolute host paths parsed from the
   // shared transcript, so it belongs to the same hostFiles boundary as diffs.
+  //
+  // A share guest reaches this route and a non-admin team member does not, and
+  // that inversion is deliberate rather than a gap. A member is bounded by team
+  // governance — an admin gave them an account, not a decision about any one
+  // session. A guest was invited into exactly one session by an admin who chose
+  // that session, and is already reading the tool calls in its transcript,
+  // absolute paths and all. Withholding the diffs would hide nothing that the
+  // transcript does not already show.
   "session-file-changes": admin("/api/session-file-changes"),
   "session-config": authed("/api/session-config"),
   "session-context": authed("/api/session-context"),
   "session-status": authed("/api/session-status"),
+  // Guest login is public because it is where a guest whose token expired gets
+  // a new one; the share registry's own passphrase check is what gates it.
+  // requirementFor resolves longest-prefix-first, so the longer /api/shares
+  // keeps the host API admin-only even though /api/share is public.
+  shares: [
+    { prefix: "/api/share/verify", requires: "public" },
+    { prefix: "/api/shares", requires: "admin" },
+  ],
+  // "public" here is a statement of fact, not a decision: a share guest carries
+  // no SessionPrincipal, so authz admits it on the guest mark rather than on a
+  // role. A stricter requirement would be enforced against nobody while reading
+  // like protection. What actually scopes a guest is the share branch of
+  // authMiddleware plus the allowlist, and every handler in the namespace
+  // re-validates the share token itself.
+  "share-guest": [{ prefix: "/api/share", requires: "public" }],
   editor: admin("/api/reveal-in-folder", "/api/open-terminal", "/api/open-in-editor"),
   worktrees: [
     { prefix: "/api/worktrees", methods: ["GET"], requires: "authed" },

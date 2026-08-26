@@ -2,12 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
+import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
 import { getResumeCommand } from "@/lib/sessionSource"
+import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
 import type { ParsedSession, Turn } from "@/lib/types"
 
 const mocks = vi.hoisted(() => ({
-  config: { networkUrl: null as string | null, defaultAgentKind: "claude" as const },
+  config: {
+    networkUrl: null as string | null,
+    defaultAgentKind: "claude" as const,
+    networkAccessDisabled: false,
+  },
   session: null as ParsedSession | null,
   sessionSource: null as {
     dirName: string
@@ -153,7 +159,7 @@ async function openSessionDetails(
 
 describe("FloatingChrome", () => {
   beforeEach(() => {
-    mocks.config = { networkUrl: null, defaultAgentKind: "claude" }
+    mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
     mocks.session = makeSession()
     mocks.sessionSource = {
       dirName: "-tmp-project",
@@ -163,13 +169,14 @@ describe("FloatingChrome", () => {
     }
     mocks.isLive = false
     mocks.inventorySessions = []
-    mocks.authFetch.mockResolvedValue({ ok: true })
+    mocks.authFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
     window.history.replaceState({}, "", "/")
   })
 
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    __resetCapabilitiesForTest()
   })
 
   it("copies the resume command from the project/session breadcrumb", () => {
@@ -301,7 +308,11 @@ describe("FloatingChrome", () => {
 
   it("copies the connection URL from the overflow menu while reachable on the network", async () => {
     const user = userEvent.setup()
-    mocks.config = { networkUrl: "http://10.0.0.4:19384", defaultAgentKind: "claude" }
+    mocks.config = {
+      networkUrl: "http://10.0.0.4:19384",
+      defaultAgentKind: "claude",
+      networkAccessDisabled: false,
+    }
     mocks.copyToClipboard.mockResolvedValue(true)
     renderChrome()
 
@@ -322,6 +333,49 @@ describe("FloatingChrome", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Settings" }))
 
     expect(PROPS.onOpenSettings).toHaveBeenCalledOnce()
+  })
+
+  it("offers the share control only while a session is open", () => {
+    const { unmount } = renderChrome()
+    expect(screen.getByRole("button", { name: "Share session" })).toBeInTheDocument()
+    unmount()
+
+    mocks.session = null
+    renderChrome()
+    expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+  })
+
+  it("withholds the share control from a member who may not share", () => {
+    setMe({
+      authenticated: true,
+      edition: "team",
+      user: null,
+      capabilities: MEMBER_CAPABILITIES,
+    })
+
+    renderChrome()
+
+    expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+  })
+
+  it("makes an already-shared session visible without opening anything", async () => {
+    mocks.authFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{
+        sessionId: "test-session-id",
+        dirName: "-tmp-project",
+        fileName: "test-session-id.jsonl",
+        title: "my-session",
+        createdAt: Date.now(),
+        lastAccessAt: 0,
+        guests: 1,
+      }],
+    })
+
+    renderChrome()
+
+    expect(await screen.findByRole("button", { name: "Session is shared" })).toBeInTheDocument()
   })
 
   it("opens usage and the server monitor from the overflow menu", async () => {
@@ -350,7 +404,7 @@ describe("FloatingChrome pull requests", () => {
   }
 
   beforeEach(() => {
-    mocks.config = { networkUrl: null, defaultAgentKind: "claude" }
+    mocks.config = { networkUrl: null, defaultAgentKind: "claude", networkAccessDisabled: false }
     mocks.session = makeSession()
     mocks.sessionSource = {
       dirName: "-tmp-project",

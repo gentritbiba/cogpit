@@ -35,6 +35,8 @@ import { registerSessionConfigRoutes } from "./routes/session-config"
 import { registerSessionContextRoutes } from "./routes/session-context"
 import { registerSessionFileChangesRoutes } from "./routes/session-file-changes"
 import { registerSessionStatusRoutes } from "./routes/session-status"
+import { registerShareGuestRoutes } from "./routes/share-guest"
+import { registerShareRoutes } from "./routes/shares"
 import { registerSlashSuggestionRoutes } from "./routes/slash-suggestions"
 import { registerTeamAdminRoutes } from "./routes/team"
 import { registerTeamSessionRoutes } from "./routes/team-session"
@@ -97,6 +99,8 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("session-config", registerSessionConfigRoutes),
   apiRoute("session-context", registerSessionContextRoutes),
   apiRoute("session-status", registerSessionStatusRoutes),
+  apiRoute("shares", registerShareRoutes),
+  apiRoute("share-guest", registerShareGuestRoutes),
   apiRoute("editor", registerEditorRoutes),
   apiRoute("worktrees", registerWorktreeRoutes),
   apiRoute("usage", registerUsageRoutes),

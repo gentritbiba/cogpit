@@ -11,47 +11,21 @@ import {
   setBrowserSessionCookie,
   clearBrowserSessionCookie,
   revokeSessionToken,
-  verifyPasswordAsync,
   needsPasswordRehash,
   hashPassword,
   validatePasswordStrength,
   revokeAllSessions,
   getConnectedDevices,
 } from "../helpers"
-import type { SessionPrincipal } from "../security"
+import { verifyRemotePassword, getDummyHash } from "../password-verify"
+import { revokeAllShareTokens, type SessionPrincipal } from "../security"
+import { clearAllShares } from "../share/registry"
 import { isTeamEdition } from "../team/edition"
 import { getUserByUsername, withVerifiedUser } from "../team/users"
 import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
 import { flushSessionPersistence } from "../team/sessionPersistence"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
-
-const MAX_CONCURRENT_PASSWORD_VERIFICATIONS = 2
-let activePasswordVerifications = 0
-
-async function verifyRemotePassword(
-  password: string,
-  stored: string,
-): Promise<"valid" | "invalid" | "busy"> {
-  if (activePasswordVerifications >= MAX_CONCURRENT_PASSWORD_VERIFICATIONS) return "busy"
-  activePasswordVerifications += 1
-  try {
-    return await verifyPasswordAsync(password, stored) ? "valid" : "invalid"
-  } finally {
-    activePasswordVerifications -= 1
-  }
-}
-
-// Logins for unknown users verify against this hash so both outcomes cost one
-// scrypt derivation and response timing cannot enumerate usernames. Computed on
-// first use: hashing at import time would tax every boot, including personal
-// edition, which never reaches this path.
-let dummyHash: string | null = null
-
-function getDummyHash(): string {
-  dummyHash ??= hashPassword("cogpit-dummy-timing-pad")
-  return dummyHash
-}
 
 /**
  * Session issuance shared by password login and the first-admin bootstrap.
@@ -429,9 +403,12 @@ export function registerConfigRoutes(use: UseFn) {
             return
           }
 
-          // If disabling network access, revoke all sessions
+          // Disabling network access closes the door guests came through, so
+          // their live tokens go too. The share records stay: turning network
+          // access back on must not silently re-admit anyone.
           if (!parsed.networkAccess && currentConfig?.networkAccess) {
             await revokeAllSessions()
+            revokeAllShareTokens()
           }
 
           await saveConfig({
@@ -447,6 +424,14 @@ export function registerConfigRoutes(use: UseFn) {
             useBuiltInEditor: !!parsed.useBuiltInEditor,
           })
           refreshDirs()
+
+          // A share record addresses a dirName/fileName inside one projects
+          // root. Under a new root that pair is a different session, or none,
+          // so every share and its guests go with the old root.
+          if (currentConfig && resolve(resolvedClaudeDir) !== resolve(currentConfig.claudeDir)) {
+            await clearAllShares()
+            revokeAllShareTokens()
+          }
 
           res.setHeader("Content-Type", "application/json")
           res.end(JSON.stringify({

@@ -44,6 +44,7 @@ Claude Code and Codex are powerful, but the terminal gives you a narrow view. Co
 - **Debug faster** — compact tool-call summaries, expandable thinking blocks, line-by-line edit diffs, and complete session history
 - **Follow multi-agent work** — see each agent's task, status, available runtime details, and recorded thread without leaving the parent session
 - **Undo anything** — rewind sessions to any turn with full branching support and file operation reversal
+- **Share one session** — hand a single live session to someone over a passphrase-protected link, without giving them the rest of the machine
 
 ## Features
 

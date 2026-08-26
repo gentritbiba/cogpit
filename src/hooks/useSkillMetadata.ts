@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { authFetch } from "@/lib/auth"
+import { isSharedPath } from "@/lib/sharePath"
 import { deviceScopedKey } from "@/lib/device"
 
 export interface SkillMeta {
@@ -49,7 +50,11 @@ export function useSkillMetadata(cwd: string): Map<string, SkillMeta> {
   const fetchedCwdRef = useRef<string>("")
 
   useEffect(() => {
-    if (!cwd) return
+    // A share guest is looking at a transcript whose cwd is the host's, and
+    // `/api/slash-suggestions` reads the host's own config directories — off
+    // the guest allowlist, and not theirs to see. Skipped rather than left to
+    // 403 on every session a guest opens.
+    if (!cwd || isSharedPath(window.location.pathname)) return
     const scopeKey = deviceScopedKey(cwd)
 
     // Return cached data immediately (no fetch needed)
