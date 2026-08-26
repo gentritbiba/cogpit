@@ -245,3 +245,25 @@ updated as part of the change.
 - `src/lib/__tests__/parser.test.ts:140` is a human prompt with no envelope, so
   it stays green unchanged.
 - `bun run check:cogpit-memory-sync` after touching `shared/session/`.
+
+
+## Latent issues found by mutation testing (not currently reachable)
+
+Neither is pinned by a test, deliberately — pinning would cement one of two answers
+before we know which is right.
+
+**1. The enqueue ledger is keyed per `Turn` object.** `buildTurns` therefore cannot
+reconcile a message's `queue-operation` and `attachment` copies if a turn boundary
+falls between them. Should that happen, the same records render **2 cards on a full
+parse and 1 when paged in** — the exact divergence `dedupeAgentMessages` exists to
+prevent. Not reachable in observed data: in `ddb6fc34` both copies always land in the
+same turn. If a duplicate ever reappears, look here first, and decide which count is
+correct before writing the test.
+
+**2. `origin.name` and `origin.from` are assumed identical.** The block's `sender`
+resolves `name ?? from`, but reply pairing joins that sender against
+`SendMessage.input.to`, which follows `from`. A record where the two differ would
+render under `name` and never pair — the card would claim "Never answered" for a
+message that was answered. Verified identical across all 7 real peer records on disk,
+so this is an assumption worth re-checking if Claude Code changes the envelope, not a
+present defect.
