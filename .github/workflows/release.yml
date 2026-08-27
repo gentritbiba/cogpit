@@ -190,6 +190,27 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # cogpit-memory's own prepublishOnly build needs this package's deps
+      # (esbuild, tsc); the root install does not provide them.
+      - name: Install cogpit-memory dependencies
+        working-directory: packages/cogpit-memory
+        run: bun install --frozen-lockfile
+
+      # cogpit-memory keeps its own 0.x line instead of the app's tag version,
+      # so it ships whatever package.json declares and no-ops on tags where
+      # that version already went out.
+      - name: Publish cogpit-memory to npm
+        working-directory: packages/cogpit-memory
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "cogpit-memory@${version}" version >/dev/null 2>&1; then
+            echo "cogpit-memory@${version} is already on npm - skipping."
+            exit 0
+          fi
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
   update-aur:
     needs: publish
     runs-on: ubuntu-latest

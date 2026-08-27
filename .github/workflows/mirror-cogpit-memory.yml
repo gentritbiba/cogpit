@@ -1,0 +1,70 @@
+name: Mirror cogpit-memory
+
+# packages/cogpit-memory also lives standalone at
+# github.com/gentritbiba/cogpit-memory, which is where
+# `npx skills add gentritbiba/cogpit-memory` reads skill/SKILL.md from.
+# The monorepo is the source of truth; this replays the package directory
+# into that repo on every change so the two cannot drift again.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "packages/cogpit-memory/**"
+      - ".github/workflows/mirror-cogpit-memory.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two mirror runs pushing to the same branch would race; queue them instead.
+concurrency:
+  group: mirror-cogpit-memory
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup SSH for the mirror
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.COGPIT_MEMORY_DEPLOY_KEY }}" > ~/.ssh/mirror
+          chmod 600 ~/.ssh/mirror
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<EOF
+          Host github.com
+            IdentityFile ~/.ssh/mirror
+            IdentitiesOnly yes
+            User git
+          EOF
+
+      - name: Clone the mirror
+        run: git clone git@github.com:gentritbiba/cogpit-memory.git mirror
+
+      # git archive ships only tracked files, so node_modules, dist and any
+      # other runner build output can never leak into the published repo.
+      # Clearing first is what deletes files the monorepo has since dropped.
+      - name: Replay the package directory
+        run: |
+          find mirror -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          git archive HEAD packages/cogpit-memory \
+            | tar -x -C mirror --strip-components=2
+
+      - name: Push
+        working-directory: mirror
+        run: |
+          git config user.name "Gentrit Biba"
+          git config user.email "gentritbiba@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Mirror already matches ${GITHUB_SHA} - nothing to push."
+            exit 0
+          fi
+          git commit -m "Sync from cogpit@${GITHUB_SHA:0:7}"
+          git push

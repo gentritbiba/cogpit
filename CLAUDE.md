@@ -44,6 +44,23 @@ The SVG's `<rect id="bg" … rx="…">` is load-bearing: the script strips `rx` 
 produce the full-bleed, alpha-free variants that Apple requires, since iOS
 applies its own squircle mask.
 
+## cogpit-memory Distribution
+
+`packages/cogpit-memory/` is the source of truth and ships to two places, both
+automatically:
+
+- **npm** (`cogpit-memory`) — `release.yml` publishes it on `v*` tags using the
+  version in its own `package.json`, not the tag, so it keeps a version line
+  independent of the app's. Bump that version when you want a release; the step
+  no-ops on tags where npm already has it.
+- **github.com/gentritbiba/cogpit-memory** — the standalone repo backing
+  `npx skills add gentritbiba/cogpit-memory`. `mirror-cogpit-memory.yml` replays
+  the package directory there on every master push that touches it.
+
+Never commit to the mirror directly — it is cleared and rewritten from this repo,
+so anything landed there is lost on the next sync. The push needs the
+`COGPIT_MEMORY_DEPLOY_KEY` secret, a write-scoped deploy key on that repo.
+
 ## External Session API (cogpit-sessions skill)
 
 Other agents can create and manage Claude Code sessions via the HTTP API on `localhost:19384`. The packaged app binds an ephemeral port unless network access pins 19384, so resolve the port from `$COGPIT_PORT`, then `~/.cogpit/port` (written on start, removed on exit), then `19384`. Key endpoints:

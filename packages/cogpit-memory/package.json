@@ -1,7 +1,23 @@
 {
   "name": "cogpit-memory",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "CLI tool for Claude Code and Codex session introspection",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gentritbiba/cogpit.git",
+    "directory": "packages/cogpit-memory"
+  },
+  "homepage": "https://github.com/gentritbiba/cogpit/tree/master/packages/cogpit-memory",
+  "bugs": "https://github.com/gentritbiba/cogpit/issues",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "session",
+    "memory",
+    "cli",
+    "agent"
+  ],
   "packageManager": "bun@1.3.14",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +29,9 @@
   },
   "files": [
     "dist/",
-    "skill/"
+    "skill/",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "bun test",
