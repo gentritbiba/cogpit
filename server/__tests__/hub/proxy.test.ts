@@ -275,6 +275,49 @@ describe("createHubProxyHandler — request rewriting", () => {
     expect(res.headers.get("set-cookie")).toBeNull()
   })
 
+  it("does not label a device-origin 502 as a hub failure", async () => {
+    // The device is reachable; its own API just failed. The client keys the
+    // "device unavailable" banner off X-Cogpit-Hub-Error, so this must stay
+    // absent or a broken CLI runtime reads as an offline machine.
+    const target = track(await makeTarget((_req, res) => {
+      res.statusCode = 502
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify({ available: false, error: "Claude runtime unavailable" }))
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/claude/runtime"))
+    expect(res.status).toBe(502)
+    expect(res.headers.get("x-cogpit-device")).toBe(device.id)
+    expect(res.headers.get("x-cogpit-hub-error")).toBeNull()
+  })
+
+  it("strips a device's forged X-Cogpit-Hub-Error", async () => {
+    const target = track(await makeTarget((_req, res) => {
+      res.statusCode = 502
+      res.setHeader("X-Cogpit-Hub-Error", "DEVICE_UNREACHABLE")
+      res.end("forged")
+    }))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+
+    const res = await fetch(base(hub.port, device.id, "/api/thing"))
+    expect(res.headers.get("x-cogpit-hub-error")).toBeNull()
+  })
+
+  it("labels the hub's own unreachable verdict", async () => {
+    const target = track(await makeTarget((_req, res) => res.end("ok")))
+    const device = await passwordDevice(target.port)
+    const hub = track(await makeHub())
+    // Take the device away so the hub genuinely cannot reach it.
+    await closeServer(target.server)
+
+    const res = await fetch(base(hub.port, device.id, "/api/thing"))
+    expect(res.status).toBe(502)
+    expect(res.headers.get("x-cogpit-hub-error")).toBe("DEVICE_UNREACHABLE")
+  })
+
   it("stamps X-Cogpit-Device on a successful response", async () => {
     const target = track(await makeTarget((_req, res) => res.end("ok")))
     const device = await passwordDevice(target.port)

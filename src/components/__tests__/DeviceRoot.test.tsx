@@ -60,9 +60,9 @@ vi.mock("@/hooks/useDevices", () => ({
   }),
 }))
 
-function fireUnreachable(deviceId = "dev_1") {
+function fireUnreachable(deviceId = "dev_1", reason = "DEVICE_UNREACHABLE") {
   act(() => {
-    window.dispatchEvent(new CustomEvent("cogpit-device-unreachable", { detail: { deviceId } }))
+    window.dispatchEvent(new CustomEvent("cogpit-device-unreachable", { detail: { deviceId, reason } }))
   })
 }
 
@@ -106,6 +106,19 @@ describe("DeviceRoot offline banner", () => {
       await vi.advanceTimersByTimeAsync(30_000)
     })
     expect(mocks.testDevice.mock.calls.length).toBe(callsAfterFirst)
+  })
+
+  it("names the credential as the problem when the hub says the device rejected it", async () => {
+    render(<DeviceRoot />)
+    fireUnreachable("dev_1", "DEVICE_AUTH_FAILED")
+
+    // A rejected credential cannot self-heal, so the message is immediate and
+    // no retry loop runs at all.
+    expect(screen.getByText(/rejected the stored password/i)).toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+    expect(mocks.testDevice).not.toHaveBeenCalled()
   })
 
   it("clears the banner when a retry reports the device is healthy again", async () => {

@@ -126,11 +126,16 @@ export function DeviceRoot() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [devices])
 
-  // Unreachable banner: authFetch dispatches this on any proxied 502.
+  // Connectivity banner: authFetch dispatches this only for the hub's own
+  // proxy failures, never for an error the device itself reported.
   useEffect(() => {
     const onUnreachable = (event: Event) => {
-      const deviceId = (event as CustomEvent<{ deviceId?: string }>).detail?.deviceId
-      if (deviceId && deviceId === getActiveDeviceId()) setUnreachable(true)
+      const detail = (event as CustomEvent<{ deviceId?: string; reason?: string }>).detail
+      if (!detail?.deviceId || detail.deviceId !== getActiveDeviceId()) return
+      setUnreachable(true)
+      // A rejected credential cannot self-heal, so skip straight to the
+      // credentials message instead of polling until a probe rediscovers it.
+      if (detail.reason === "DEVICE_AUTH_FAILED") setBadPassword(true)
     }
     window.addEventListener("cogpit-device-unreachable", onUnreachable)
     return () => window.removeEventListener("cogpit-device-unreachable", onUnreachable)

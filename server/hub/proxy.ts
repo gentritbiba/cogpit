@@ -37,7 +37,7 @@ import { getRequestPrincipal } from "../team/requestPrincipal"
 // ── Tuning ───────────────────────────────────────────────────────────
 
 /** Give up if the device hasn't accepted the TCP connection / first byte by this. */
-const CONNECT_WATCHDOG_MS = 7000
+export const CONNECT_WATCHDOG_MS = 7000
 
 // ── Hop-by-hop header sets ───────────────────────────────────────────
 
@@ -75,6 +75,9 @@ const RESPONSE_STRIP = new Set([
   // A downstream device must never be able to mint or overwrite the hub's
   // origin-scoped browser session cookie.
   "set-cookie",
+  // Only the hub may claim a failure was the hub's own; otherwise a device
+  // could forge an "unreachable" verdict about itself.
+  "x-cogpit-hub-error",
 ])
 
 // ── Small helpers ────────────────────────────────────────────────────
@@ -88,10 +91,13 @@ function sendJson(res: ServerResponse, status: number, payload: JsonError, devic
   if (res.headersSent) return
   res.statusCode = status
   res.setHeader("Content-Type", "application/json")
-  // The client attributes a 502 to the active remote device via this header
-  // (auth.ts dispatches `cogpit-device-unreachable`), so stamp it on every
-  // response we generate for a resolved device — errors included.
+  // The client attributes a failure to the active remote device via this header
+  // (auth.ts), so stamp it on every response we generate for a resolved device.
   if (deviceId) res.setHeader("X-Cogpit-Device", deviceId)
+  // Marks this as the HUB's own verdict rather than something the device said.
+  // A device that answers 502 from its own API is still perfectly reachable, and
+  // both responses carry X-Cogpit-Device, so status alone cannot tell them apart.
+  res.setHeader("X-Cogpit-Hub-Error", payload.code)
   res.end(JSON.stringify(payload))
 }
 

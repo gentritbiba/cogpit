@@ -21,10 +21,14 @@ import {
   DeviceUnreachableError,
 } from "../hub/device-client"
 import { invalidateDeviceConnections } from "../hub/connection-invalidation"
+import { CONNECT_WATCHDOG_MS } from "../hub/proxy"
 
 const DEFAULT_PORT = 19384
 const DEFAULT_TLS_PORT = 443
-const PROBE_TIMEOUT_MS = 3000
+// The connectivity banner is raised by the proxy's connect watchdog and can only
+// be cleared by this probe, so a stricter budget here would latch the banner on
+// for a device that is slow to answer but perfectly usable.
+const PROBE_TIMEOUT_MS = CONNECT_WATCHDOG_MS
 
 /** Base URL for a device, honoring its http/https scheme. */
 function deviceOrigin(host: string, port: number, tls: boolean): string {

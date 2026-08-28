@@ -345,18 +345,53 @@ describe("auth", () => {
       expect(headers.get("Authorization")).toBeNull()
     })
 
-    it("dispatches device-unreachable for attributed 502 responses", async () => {
-      setLocation("localhost", "/d/dev_x/")
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad gateway", {
-        status: 502,
-        headers: { "X-Cogpit-Device": "dev_x" },
-      }))
-      const handler = vi.fn()
-      window.addEventListener("cogpit-device-unreachable", handler as EventListener)
-
+    async function captureUnreachable(response: Response): Promise<CustomEvent[]> {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(response)
+      const events: CustomEvent[] = []
+      const handler = (event: Event) => void events.push(event as CustomEvent)
+      window.addEventListener("cogpit-device-unreachable", handler)
       await authFetch("/api/data")
-      expect((handler.mock.calls[0][0] as CustomEvent).detail).toEqual({ deviceId: "dev_x" })
-      window.removeEventListener("cogpit-device-unreachable", handler as EventListener)
+      window.removeEventListener("cogpit-device-unreachable", handler)
+      return events
+    }
+
+    it("dispatches device-unreachable when the hub could not reach the device", async () => {
+      setLocation("localhost", "/d/dev_x/")
+      const events = await captureUnreachable(new Response("bad gateway", {
+        status: 502,
+        headers: { "X-Cogpit-Device": "dev_x", "X-Cogpit-Hub-Error": "DEVICE_UNREACHABLE" },
+      }))
+      expect(events[0].detail).toEqual({ deviceId: "dev_x", reason: "DEVICE_UNREACHABLE" })
+    })
+
+    it("reports a rejected hub credential as its own reason", async () => {
+      setLocation("localhost", "/d/dev_x/")
+      const events = await captureUnreachable(new Response("bad gateway", {
+        status: 502,
+        headers: { "X-Cogpit-Device": "dev_x", "X-Cogpit-Hub-Error": "DEVICE_AUTH_FAILED" },
+      }))
+      expect(events[0].detail).toEqual({ deviceId: "dev_x", reason: "DEVICE_AUTH_FAILED" })
+    })
+
+    it("stays quiet when the DEVICE itself answers 502 — it is still reachable", async () => {
+      setLocation("localhost", "/d/dev_x/")
+      // The hub pipes a device-origin error through verbatim and stamps
+      // X-Cogpit-Device on it, so only the absent hub-error header separates
+      // "the CLI runtime is down" from "the box is offline".
+      const events = await captureUnreachable(new Response(
+        JSON.stringify({ available: false, error: "Claude runtime unavailable" }),
+        { status: 502, headers: { "X-Cogpit-Device": "dev_x" } },
+      ))
+      expect(events).toEqual([])
+    })
+
+    it("stays quiet when the hub only reports changed connection settings", async () => {
+      setLocation("localhost", "/d/dev_x/")
+      const events = await captureUnreachable(new Response("changed", {
+        status: 502,
+        headers: { "X-Cogpit-Device": "dev_x", "X-Cogpit-Hub-Error": "DEVICE_CONNECTION_CHANGED" },
+      }))
+      expect(events).toEqual([])
     })
   })
 

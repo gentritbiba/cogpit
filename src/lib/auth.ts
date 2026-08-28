@@ -147,9 +147,10 @@ function failAuthRequired(): Promise<never> {
  * - A local 401 while the edition is still unknown (the boot hello probe
  *   failed) re-probes once — a team server then gates this tab instead of
  *   leaving it permanently on raw errors.
- * - A `502` carrying `X-Cogpit-Device` means the hub could not reach that remote
- *   device; dispatch `cogpit-device-unreachable` (banner signal) and still
- *   return the response.
+ * - `X-Cogpit-Hub-Error` is the hub's verdict on its own proxy attempt, so only
+ *   it raises the connectivity banner. A device that answers 502 from its own
+ *   API (an unavailable CLI runtime, a failed approval) is still reachable, and
+ *   its reply carries `X-Cogpit-Device` too — status alone would conflate them.
  *
  * @param applyBase when true and `input` is a string starting "/api", route it
  *   to the active device via {@link withBase}. `hubFetch` passes false so
@@ -183,10 +184,15 @@ function requestWithAuth(
       }
     }
     if (res.status === 502) {
+      // Both verdicts the banner cares about are gateway failures, so nothing
+      // outside a 502 needs its headers inspected.
+      const hubError = res.headers.get("X-Cogpit-Hub-Error")
       const deviceId = res.headers.get("X-Cogpit-Device")
-      if (deviceId) {
+      if (deviceId && (hubError === "DEVICE_UNREACHABLE" || hubError === "DEVICE_AUTH_FAILED")) {
         window.dispatchEvent(
-          new CustomEvent("cogpit-device-unreachable", { detail: { deviceId } }),
+          new CustomEvent("cogpit-device-unreachable", {
+            detail: { deviceId, reason: hubError },
+          }),
         )
       }
     }
