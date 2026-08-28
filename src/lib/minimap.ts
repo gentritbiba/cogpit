@@ -39,10 +39,10 @@ function collapse(text: string): string {
 /**
  * One line of the prompt that opened a turn, for the rail's hover preview.
  *
- * Turns routinely open with machine envelopes — background-task reports, system
- * reminders, interrupt markers. A rail labelled with those is unreadable, so
- * they come off first and a task-only turn falls back to what the task reported
- * rather than to nothing.
+ * Turns routinely open with machine envelopes — system reminders, interrupt
+ * markers, task reports quoted back at the agent. A rail labelled with those is
+ * unreadable, so they come off first. A turn with no prompt of its own falls
+ * back to what a background task reported rather than to nothing.
  */
 export function turnPreviewText(turn: Turn): string {
   const raw =
@@ -53,14 +53,19 @@ export function turnPreviewText(turn: Turn): string {
         : ""
 
   const { text: withoutPreamble } = stripSystemNotificationPreamble(raw)
-  const { notifications, remainingText } = parseTaskNotifications(withoutPreamble)
+  const { remainingText } = parseTaskNotifications(withoutPreamble)
   const { remainingText: withoutInterrupts } = parseInterrupts(remainingText)
 
   const typed = collapse(stripSystemTags(withoutInterrupts))
   if (typed) return typed
 
-  const reported = notifications.map((n) => n.summary).find(Boolean)
-  if (reported) return collapse(reported)
+  for (const block of turn.contentBlocks) {
+    if (block.kind !== "task_notification") continue
+    const reported = parseTaskNotifications(block.content)
+      .notifications.map((n) => n.summary)
+      .find(Boolean)
+    if (reported) return collapse(reported)
+  }
 
   // Sessions open on meta records (custom title, agent name) that build a turn
   // carrying no prompt at all. What the agent said is a better handle than a

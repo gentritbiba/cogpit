@@ -4,7 +4,12 @@ import { Button } from "@/components/ui/button"
 import type { ParsedSession, Turn } from "@/lib/types"
 import { getUserMessageText } from "@/lib/parser"
 import { parseAgentEnvelope } from "../../shared/session/agentEnvelope"
-import { extractCommandArgs, extractCommandName, stripSystemTags } from "@/lib/userMessageContent"
+import {
+  extractCommandArgs,
+  extractCommandName,
+  parseTaskNotifications,
+  stripSystemTags,
+} from "@/lib/userMessageContent"
 
 interface StickyPromptBannerProps {
   session: ParsedSession
@@ -27,7 +32,10 @@ function promptPreview(turn: Turn): string | null {
 
   const raw = getUserMessageText(turn.userMessage)
   const { body: unwrapped } = parseAgentEnvelope(raw)
-  const clean = stripSystemTags(unwrapped)
+  // A prompt can quote a background task's report back at the agent. Banner
+  // space belongs to what the reader typed, so the report comes off first.
+  const { remainingText } = parseTaskNotifications(unwrapped)
+  const clean = stripSystemTags(remainingText)
 
   if (!clean) {
     const command = extractCommandName(raw)

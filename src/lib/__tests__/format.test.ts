@@ -10,8 +10,9 @@ import {
   getContextLimit,
   getContextUsage,
   parseWorktreePath,
+  getTurnDuration,
 } from "@/lib/format"
-import { assistantMsg, resetFixtureCounter } from "@/__tests__/fixtures"
+import { assistantMsg, makeTurn, makeToolCall, resetFixtureCounter } from "@/__tests__/fixtures"
 import type { RawMessage } from "@/lib/types"
 
 beforeEach(() => {
@@ -470,5 +471,51 @@ describe("parseWorktreePath", () => {
 
   it("returns null for path ending at /.worktrees/ with no name", () => {
     expect(parseWorktreePath("/Users/user/project/.worktrees/")).toBeNull()
+  })
+})
+
+describe("getTurnDuration", () => {
+  it("prefers the duration Claude Code reported", () => {
+    expect(getTurnDuration(makeTurn({ durationMs: 4200 }))).toBe(4200)
+  })
+
+  it("falls back to the span of the turn's own timestamps", () => {
+    const turn = makeTurn({
+      durationMs: null,
+      timestamp: "2025-01-15T10:00:00Z",
+      contentBlocks: [{ kind: "text", text: ["done"], timestamp: "2025-01-15T10:00:30Z" }],
+    })
+    expect(getTurnDuration(turn)).toBe(30_000)
+  })
+
+  it("counts tool calls that outlast their block", () => {
+    const turn = makeTurn({
+      durationMs: null,
+      timestamp: "2025-01-15T10:00:00Z",
+      contentBlocks: [{
+        kind: "tool_calls",
+        timestamp: "2025-01-15T10:00:05Z",
+        toolCalls: [makeToolCall({ timestamp: "2025-01-15T10:00:20Z" })],
+      }],
+    })
+    expect(getTurnDuration(turn)).toBe(20_000)
+  })
+
+  it("bills the stretches a resumed turn worked, not the wait between them", () => {
+    // 10s of work, an hour idle waiting on a background task, then 5s more.
+    const turn = makeTurn({
+      durationMs: null,
+      timestamp: "2025-01-15T10:00:00Z",
+      contentBlocks: [
+        { kind: "text", text: ["waiting on CI"], timestamp: "2025-01-15T10:00:10Z" },
+        { kind: "task_notification", content: "<task-notification></task-notification>", timestamp: "2025-01-15T11:00:10Z" },
+        { kind: "text", text: ["merged"], timestamp: "2025-01-15T11:00:15Z" },
+      ],
+    })
+    expect(getTurnDuration(turn)).toBe(15_000)
+  })
+
+  it("returns null when nothing in the turn is timestamped", () => {
+    expect(getTurnDuration(makeTurn({ durationMs: null, contentBlocks: [] }))).toBeNull()
   })
 })

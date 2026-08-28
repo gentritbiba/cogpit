@@ -77,10 +77,19 @@ export function parseClaudeUsageLine(line: string): UsageCostRecord | null {
   const dedupeKey =
     messageId === null && requestId === null ? null : `${messageId ?? ""}:${requestId ?? ""}`
 
+  const cacheCreationTokens = int(usage.cache_creation_input_tokens)
+  const byTtl = asRecord(usage.cache_creation)
+
   const totals: UsageCostTokenTotals = {
     uncachedInputTokens: int(usage.input_tokens),
     cachedInputTokens: int(usage.cache_read_input_tokens),
-    cacheCreationTokens: int(usage.cache_creation_input_tokens),
+    cacheCreationTokens,
+    // Priced at a premium, so never let a malformed breakdown claim more of
+    // the write than the write itself reports.
+    cacheCreation1hTokens: Math.min(
+      cacheCreationTokens,
+      byTtl ? int(byTtl.ephemeral_1h_input_tokens) : 0,
+    ),
     outputTokens: int(usage.output_tokens),
     // Anthropic folds thinking tokens into output and does not break them out.
     reasoningTokens: 0,
@@ -211,6 +220,8 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
     uncachedInputTokens: Math.max(0, inputTokens - cachedInputTokens - cacheCreationTokens),
     cachedInputTokens,
     cacheCreationTokens,
+    // Codex reports no cache TTL split.
+    cacheCreation1hTokens: 0,
     outputTokens,
     // Reported inside output_tokens, surfaced separately for the token mix.
     reasoningTokens: Math.min(outputTokens, int(last.reasoning_output_tokens)),

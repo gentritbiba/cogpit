@@ -16,6 +16,7 @@ import type {
   ParsedHookEvent,
   HookProgressData,
   AssistantMessage,
+  UserMessage,
   MessageAttribution,
   CompactionMeta,
   UserContent,
@@ -69,6 +70,24 @@ function isVisibleQueuedPrompt(content: string | null | undefined): content is s
   return !trimmed.includes("<task-notification>")
     && !trimmed.startsWith("<system-reminder>")
     && !trimmed.startsWith("<local-command-")
+}
+
+const TASK_NOTIFICATION_BLOCK_RE = /<task-notification>[\s\S]*?<\/task-notification>/g
+const ANY_TAG_RE = /<[^>]*>/g
+
+/**
+ * True when a user record is nothing but background tasks reporting back.
+ *
+ * `origin.kind` is authoritative and present from Claude Code 2.1.220. Older
+ * records are recognised by shape: drop the notification blocks and any
+ * envelope tags around them, and a wake-up has nothing left. A prompt that
+ * quotes a notification keeps its prose and stays a prompt.
+ */
+function isTaskNotificationRecord(msg: UserMessage): boolean {
+  if (msg.origin?.kind === "task-notification") return true
+  const text = extractTextFromContent(msg.message.content)
+  if (!text.includes("<task-notification>")) return false
+  return text.replace(TASK_NOTIFICATION_BLOCK_RE, "").replace(ANY_TAG_RE, "").trim() === ""
 }
 
 interface QueuedPromptSource {
@@ -785,6 +804,28 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
         }
       }
 
+      // A background task reporting back is not a prompt: it resumes the turn
+      // that launched the task, so the work it triggers stays filed under the
+      // request that asked for it instead of opening a turn of its own.
+      if (isTaskNotificationRecord(msg)) {
+        const notification = {
+          kind: "task_notification" as const,
+          content: extractTextFromContent(content),
+          timestamp: msg.timestamp,
+        }
+        if (current) {
+          current.contentBlocks.push(notification)
+          continue
+        }
+        // No turn to resume: a paged window opened past the launching prompt.
+        // A null userMessage marks this as the tail half of a cut turn, so
+        // `prependTurns` stitches it back once the older page arrives.
+        current = createTurn(msg, null)
+        current.contentBlocks.push(notification)
+        attachPendingCompaction(current)
+        continue
+      }
+
       finalizeTurn()
       current = createTurn(msg, msg.message.content)
       attachPendingCompaction(current)
@@ -1059,7 +1100,12 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     }
 
     if (isSystemMessage(msg) && msg.subtype === "turn_duration" && current) {
-      current.durationMs = msg.durationMs ?? null
+      // Claude Code times each stretch of work separately, so a turn a
+      // background task resumed reports one duration per stretch. It worked for
+      // their sum — the idle wait between them is not work.
+      if (msg.durationMs !== undefined && msg.durationMs !== null) {
+        current.durationMs = (current.durationMs ?? 0) + msg.durationMs
+      }
       continue
     }
   }

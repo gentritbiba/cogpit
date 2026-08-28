@@ -215,6 +215,8 @@ function mapContentBlock(block: TurnContentBlock) {
       }
     case "recap":
       return { kind: "recap" as const, content: block.content, timestamp: block.timestamp ?? null }
+    case "task_notification":
+      return { kind: "task_notification" as const, content: block.content, timestamp: block.timestamp ?? null }
     default: {
       // Exhaustiveness guard: a new TurnContentBlock kind must fail typecheck here
       // rather than silently serializing as undefined and vanishing from the response.

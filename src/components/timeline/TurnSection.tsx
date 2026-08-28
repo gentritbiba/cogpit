@@ -9,6 +9,7 @@ import { BackgroundAgentPanel } from "./BackgroundAgentPanel"
 import { HookEventChip } from "./HookEventChip"
 import { PlanModeBlock } from "./PlanModeBlock"
 import { RecapBanner } from "./RecapBanner"
+import { TaskNotificationBlock } from "./TaskNotificationCard"
 import { CollapsibleToolCalls } from "./CollapsibleToolCalls"
 import { TurnWorkFold } from "./TurnWorkFold"
 import { TurnChangedFiles } from "./TurnChangedFiles"
@@ -620,6 +621,14 @@ function ContentBlocks({
           content={block.content}
           timestamp={block.timestamp}
         />
+      )
+      i++
+      continue
+    }
+
+    if (block.kind === "task_notification") {
+      elements.push(
+        <TaskNotificationBlock key={keyFor(block, i)} content={block.content} />
       )
       i++
       continue

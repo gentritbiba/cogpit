@@ -109,16 +109,28 @@ export async function readTranscriptRecords(
   return records
 }
 
-/** Within-file de-duplication, applied before an entry is cached. */
+/**
+ * Within-file de-duplication, applied before an entry is cached.
+ *
+ * Siblings sharing a key repeat one message's usage, so they must collapse to a
+ * single record — but they are not identical. The input and cache counts are
+ * final from the first block, while `output_tokens` is a running total that
+ * only settles on the last one, so the largest output wins.
+ */
 export function dedupeWithinFile(records: UsageCostRecord[]): UsageCostRecord[] {
-  const seen = new Set<string>()
+  const slotByKey = new Map<string, number>()
   const kept: UsageCostRecord[] = []
   for (const record of records) {
-    if (record.dedupeKey !== null) {
-      if (seen.has(record.dedupeKey)) continue
-      seen.add(record.dedupeKey)
+    if (record.dedupeKey === null) {
+      kept.push(record)
+      continue
     }
-    kept.push(record)
+    const slot = slotByKey.get(record.dedupeKey)
+    if (slot === undefined) {
+      slotByKey.set(record.dedupeKey, kept.push(record) - 1)
+      continue
+    }
+    if (record.totals.outputTokens > kept[slot].totals.outputTokens) kept[slot] = record
   }
   return kept
 }

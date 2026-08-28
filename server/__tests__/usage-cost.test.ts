@@ -27,6 +27,7 @@ const RATES = parseRateTable({
     output_cost_per_token: 0.00005,
     cache_read_input_token_cost: 0.000001,
     cache_creation_input_token_cost: 0.0000125,
+    cache_creation_input_token_cost_above_1hr: 0.00002,
   },
   "anthropic/claude-sonnet-4-5": {
     input_cost_per_token: 0.000003,
@@ -71,6 +72,61 @@ describe("pricing", () => {
     expect(lookupRate(RATES, "broken-model")).toBeNull()
   })
 
+  it("keeps the cache-priced entry when aliases collide on one name", () => {
+    // LiteLLM publishes the same model under many provider prefixes, and some
+    // of them (deepinfra's, at the time of writing) omit cache rates. All of
+    // them normalize to one key, so the loser of that collision must not be
+    // the entry that would price cache reads at 10x.
+    const table = parseRateTable({
+      "claude-opus-9": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+        cache_read_input_token_cost: 0.0000005,
+        cache_creation_input_token_cost: 0.00000625,
+      },
+      "deepinfra/anthropic/claude-opus-9": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+      },
+    })
+    expect(lookupRate(table, "claude-opus-9")?.cacheReadCostPerToken).toBe(0.0000005)
+    expect(lookupRate(table, "claude-opus-9")?.cacheCreationCostPerToken).toBe(0.00000625)
+  })
+
+  it("takes cache rates from an alias when the exact entry lacks them", () => {
+    const table = parseRateTable({
+      "anthropic/claude-opus-9": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+        cache_read_input_token_cost: 0.0000005,
+        cache_creation_input_token_cost: 0.00000625,
+      },
+      "claude-opus-9": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+      },
+    })
+    expect(lookupRate(table, "claude-opus-9")?.cacheReadCostPerToken).toBe(0.0000005)
+  })
+
+  it("prefers the unprefixed entry when aliases are equally complete", () => {
+    const table = parseRateTable({
+      "azure/gpt-9": {
+        input_cost_per_token: 0.000005,
+        output_cost_per_token: 0.000025,
+        cache_read_input_token_cost: 0.0000005,
+        cache_creation_input_token_cost: 0.00000625,
+      },
+      "gpt-9": {
+        input_cost_per_token: 0.000004,
+        output_cost_per_token: 0.00002,
+        cache_read_input_token_cost: 0.0000004,
+        cache_creation_input_token_cost: 0.000005,
+      },
+    })
+    expect(lookupRate(table, "gpt-9")?.inputCostPerToken).toBe(0.000004)
+  })
+
   it("never prices synthetic or bare family names", () => {
     expect(lookupRate(RATES, "<synthetic>")).toBeNull()
     expect(lookupRate(RATES, "opus")).toBeNull()
@@ -84,6 +140,7 @@ describe("pricing", () => {
         uncachedInputTokens: 100,
         cachedInputTokens: 1000,
         cacheCreationTokens: 200,
+        cacheCreation1hTokens: 0,
         outputTokens: 50,
         reasoningTokens: 0,
       },
@@ -100,7 +157,14 @@ describe("pricing", () => {
     const priced = priceUsage(
       RATES,
       "claude-opus-4-6",
-      { uncachedInputTokens: 1, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 1, reasoningTokens: 0 },
+      {
+        uncachedInputTokens: 1,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 0,
+      },
       1.23,
     )
     expect(priced).toEqual({ costUsd: 1.23, costSource: "providerReported" })
@@ -111,6 +175,7 @@ describe("pricing", () => {
       uncachedInputTokens: 0,
       cachedInputTokens: 500,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       outputTokens: 0,
       reasoningTokens: 0,
     }
@@ -119,11 +184,57 @@ describe("pricing", () => {
     expect(cacheSavingsUsd(RATES, "claude-sonnet-4-5", totals)).toBe(0)
   })
 
+  it("prices the 1h cache-write subset at the above-1hr rate", () => {
+    // Anthropic sells a 1-hour cache TTL at a premium over the 5-minute one,
+    // and the transcript breaks the write out by TTL. Pricing the whole write
+    // at the 5m rate under-reports every long-lived prompt cache.
+    const { costUsd } = priceUsage(
+      RATES,
+      "claude-opus-4-6",
+      {
+        uncachedInputTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 400,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      null,
+    )
+    expect(costUsd).toBeCloseTo(600 * 0.0000125 + 400 * 0.00002, 12)
+  })
+
+  it("prices cache writes at the 5m rate when no above-1hr rate is published", () => {
+    const table = parseRateTable({
+      "no-1hr-model": {
+        input_cost_per_token: 0.00001,
+        output_cost_per_token: 0.00005,
+        cache_read_input_token_cost: 0.000001,
+        cache_creation_input_token_cost: 0.0000125,
+      },
+    })
+    const { costUsd } = priceUsage(
+      table,
+      "no-1hr-model",
+      {
+        uncachedInputTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 1000,
+        cacheCreation1hTokens: 400,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      null,
+    )
+    expect(costUsd).toBeCloseTo(1000 * 0.0000125, 12)
+  })
+
   it("computes cache savings against the full input rate", () => {
     const totals = {
       uncachedInputTokens: 0,
       cachedInputTokens: 1000,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
       outputTokens: 0,
       reasoningTokens: 0,
     }
@@ -147,9 +258,49 @@ describe("parseClaudeUsageLine", () => {
         uncachedInputTokens: 100,
         cachedInputTokens: 1000,
         cacheCreationTokens: 200,
+        cacheCreation1hTokens: 0,
         outputTokens: 50,
       },
     })
+  })
+
+  it("reads the 1h slice out of the cache_creation breakdown", () => {
+    const record = parseClaudeUsageLine(claudeLine({
+      message: {
+        id: "msg-ttl",
+        model: "claude-opus-4-6",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 500,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 320,
+            ephemeral_1h_input_tokens: 180,
+          },
+        },
+      },
+    }))
+    expect(record?.totals.cacheCreationTokens).toBe(500)
+    expect(record?.totals.cacheCreation1hTokens).toBe(180)
+  })
+
+  it("never counts more 1h cache tokens than the write itself", () => {
+    // The subset is priced at a premium, so a malformed breakdown that exceeds
+    // the parent count must not inflate the bill.
+    const record = parseClaudeUsageLine(claudeLine({
+      message: {
+        id: "msg-ttl-bad",
+        model: "claude-opus-4-6",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_creation_input_tokens: 100,
+          cache_creation: { ephemeral_1h_input_tokens: 900 },
+        },
+      },
+    }))
+    expect(record?.totals.cacheCreation1hTokens).toBe(100)
   })
 
   it("ignores non-assistant lines, malformed JSON, and missing usage", () => {
@@ -289,6 +440,7 @@ describe("aggregation", () => {
         uncachedInputTokens: 100,
         cachedInputTokens: 0,
         cacheCreationTokens: 0,
+        cacheCreation1hTokens: 0,
         outputTokens: 10,
         reasoningTokens: 0,
       },
@@ -369,13 +521,56 @@ describe("aggregation", () => {
 })
 
 describe("dedupeWithinFile", () => {
-  it("keeps the first record per key and all keyless records", () => {
+  it("keeps one record per key and all keyless records", () => {
     const records = [
       parseClaudeUsageLine(claudeLine())!,
       parseClaudeUsageLine(claudeLine())!,
       { ...parseClaudeUsageLine(claudeLine())!, dedupeKey: null },
     ]
     expect(dedupeWithinFile(records)).toHaveLength(2)
+  })
+
+  it("keeps the sibling carrying the settled output count", () => {
+    // Claude Code repeats a message's usage on every content block, but
+    // output_tokens is a running total that only settles on the last one.
+    // Keeping an earlier sibling throws away nearly all of the output.
+    const sibling = (output: number) =>
+      parseClaudeUsageLine(claudeLine({
+        message: {
+          id: "msg-stream",
+          model: "claude-opus-4-6",
+          usage: {
+            input_tokens: 2,
+            output_tokens: output,
+            cache_read_input_tokens: 35363,
+            cache_creation_input_tokens: 0,
+          },
+        },
+      }))!
+
+    const kept = dedupeWithinFile([sibling(1), sibling(1), sibling(359)])
+    expect(kept).toHaveLength(1)
+    expect(kept[0].totals.outputTokens).toBe(359)
+    // The repeated input side must not be summed along the way.
+    expect(kept[0].totals.cachedInputTokens).toBe(35363)
+  })
+
+  it("preserves the order of distinct keys", () => {
+    const at = (id: string, ts: string) =>
+      parseClaudeUsageLine(claudeLine({ timestamp: ts, message: {
+        id, model: "claude-opus-4-6",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      } }))!
+    const kept = dedupeWithinFile([
+      at("msg-a", "2026-08-19T12:00:00.000Z"),
+      at("msg-b", "2026-08-19T12:00:01.000Z"),
+      at("msg-c", "2026-08-19T12:00:02.000Z"),
+    ])
+    expect(kept.map((r) => r.timestampMs)).toEqual([
+      Date.parse("2026-08-19T12:00:00.000Z"),
+      Date.parse("2026-08-19T12:00:01.000Z"),
+      Date.parse("2026-08-19T12:00:02.000Z"),
+    ])
   })
 })
 

@@ -23,12 +23,15 @@ export type UsageCostSource = "providerReported" | "modelPriced" | "unpriced"
 /**
  * Token counts for a bucket. `cachedInputTokens` and `cacheCreationTokens` are
  * disjoint from `uncachedInputTokens`; summing all three gives total input.
- * `reasoningTokens` is a subset of `outputTokens` and must never be added on top.
+ * `reasoningTokens` is a subset of `outputTokens` and `cacheCreation1hTokens` a
+ * subset of `cacheCreationTokens`; neither may be added on top.
  */
 export interface UsageCostTokenTotals {
   uncachedInputTokens: number
   cachedInputTokens: number
   cacheCreationTokens: number
+  /** The slice of the write bought at the 1-hour TTL, billed at a premium. */
+  cacheCreation1hTokens: number
   outputTokens: number
   reasoningTokens: number
 }
@@ -73,6 +76,7 @@ export function emptyUsageCostTotals(): UsageCostTokenTotals {
     uncachedInputTokens: 0,
     cachedInputTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation1hTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
   }
@@ -86,12 +90,14 @@ export function addUsageCostTotals(
     uncachedInputTokens: a.uncachedInputTokens + b.uncachedInputTokens,
     cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
     cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
+    cacheCreation1hTokens: a.cacheCreation1hTokens + b.cacheCreation1hTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
   }
 }
 
-/** Total processed tokens. reasoningTokens is inside outputTokens already. */
+/** Total processed tokens. The two subset fields are already counted inside
+ * their parents and must not be added again. */
 export function totalUsageCostTokens(totals: UsageCostTokenTotals): number {
   return (
     totals.uncachedInputTokens

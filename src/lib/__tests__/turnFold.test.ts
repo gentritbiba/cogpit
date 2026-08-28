@@ -81,6 +81,20 @@ describe("planTurnFold", () => {
     expect(plan.foldedIndices).toEqual([0])
   })
 
+  it("never folds away the task notification that resumed the turn", () => {
+    const blocks: TurnContentBlock[] = [
+      tools("Read"),
+      text("Waiting on CI."),
+      { kind: "task_notification", content: "<task-notification></task-notification>" },
+      tools("Bash"),
+      text("Merged."),
+    ]
+
+    const plan = planTurnFold(blocks)
+
+    expect(plan.foldedIndices).toEqual([0, 1, 3])
+  })
+
   it("never folds an agent message away", () => {
     const blocks: TurnContentBlock[] = [
       thoughts("planning"),

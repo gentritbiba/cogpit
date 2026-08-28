@@ -23,6 +23,10 @@ export function priceTokenUsage(
       uncachedInputTokens: usage.input_tokens,
       cachedInputTokens: usage.cache_read_input_tokens ?? 0,
       cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+      // Per-turn usage carries no cache-TTL split, so the whole write prices at
+      // the 5m rate. The usage dialog reads the transcripts directly and does
+      // charge the 1h premium.
+      cacheCreation1hTokens: 0,
       outputTokens: usage.output_tokens,
       reasoningTokens: 0,
     },

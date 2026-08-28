@@ -145,8 +145,14 @@ export function prependTurns(
  * Spans the merged turn from where the older fragment started to where the
  * newer one ended. Each fragment only timed its own slice, so taking either
  * one's duration reports a fraction of the turn.
+ *
+ * Two timed fragments are the exception: a turn a background task resumed is
+ * cut where it was already idle, so spanning it would bill the wait as work.
  */
 function mergedDuration(older: Turn, newer: Turn): number | null {
+  if (older.durationMs !== null && newer.durationMs !== null) {
+    return older.durationMs + newer.durationMs
+  }
   const start = Date.parse(older.timestamp)
   const end = Date.parse(newer.timestamp) + (newer.durationMs ?? 0)
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {

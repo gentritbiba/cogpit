@@ -114,6 +114,58 @@ describe("getSessionMeta ai-title support", () => {
   })
 })
 
+describe("getSessionMeta turn count", () => {
+  it("counts prompts, not the user records Claude Code writes around them", async () => {
+    const filePath = await writeSession([
+      userLine("first request"),
+      {
+        type: "user",
+        sessionId: "s1",
+        timestamp: "2026-06-10T10:00:01Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }],
+        },
+      },
+      {
+        type: "user",
+        sessionId: "s1",
+        timestamp: "2026-06-10T10:00:02Z",
+        origin: { kind: "task-notification" },
+        message: {
+          role: "user",
+          content: "<task-notification><task-id>abc</task-id></task-notification>",
+        },
+      },
+      userLine("second request", "2026-06-10T10:00:03Z"),
+    ])
+
+    const meta = await getSessionMeta(filePath)
+
+    expect(meta.turnCount).toBe(2)
+  })
+
+  it("never titles a session with a background task's report", async () => {
+    const filePath = await writeSession([
+      userLine("build the importer"),
+      {
+        type: "user",
+        sessionId: "s1",
+        timestamp: "2026-06-10T10:00:02Z",
+        origin: { kind: "task-notification" },
+        message: {
+          role: "user",
+          content: "<task-notification>\n<task-id>abc</task-id>\n</task-notification>",
+        },
+      },
+    ])
+
+    const meta = await getSessionMeta(filePath)
+
+    expect(meta.lastUserMessage).toBe("build the importer")
+  })
+})
+
 describe("getSessionMeta agent-team tags", () => {
   it("extracts teamName and agentName from teammate session lines", async () => {
     const filePath = await writeSession([

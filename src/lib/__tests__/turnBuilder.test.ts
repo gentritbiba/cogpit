@@ -1528,3 +1528,104 @@ describe("agent mail", () => {
     expect(block.reply?.summary).toBe("unblocked you")
   })
 })
+
+// ── task notifications ────────────────────────────────────────────────────
+
+describe("task notification records", () => {
+  beforeEach(() => {
+    resetFixtureCounter()
+  })
+
+  const NOTIFICATION = "<task-notification>\n<task-id>abc</task-id>\n"
+    + "<status>completed</status>\n<summary>Wait for CI completed</summary>\n</task-notification>"
+
+  /** A background task reporting back, as Claude Code 2.1.220+ writes it. */
+  function notificationMsg(content = NOTIFICATION, overrides: Record<string, unknown> = {}) {
+    return userMsg(content, { origin: { kind: "task-notification" }, ...overrides })
+  }
+
+  it("resumes the launching turn instead of opening one of its own", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      textAssistant("Waiting on CI."),
+      notificationMsg(),
+      textAssistant("CI is green, merged."),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].contentBlocks.map((b) => b.kind)).toEqual([
+      "text",
+      "task_notification",
+      "text",
+    ])
+  })
+
+  it("carries the record verbatim so the renderer can parse the notification", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      notificationMsg(),
+    ]))
+
+    const block = session.turns[0].contentBlocks.find((b) => b.kind === "task_notification")
+    expect(block).toBeDefined()
+    if (block?.kind !== "task_notification") return
+    expect(block.content).toBe(NOTIFICATION)
+  })
+
+  it("recognises a pre-2.1.220 record with no origin by its shape", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      userMsg(NOTIFICATION),
+      textAssistant("Merged."),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+  })
+
+  it("recognises a notification wrapped in a system-reminder envelope", () => {
+    // Claude Code 2.1.234+ wraps background-task notifications this way.
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      userMsg(`<system-reminder>\n${NOTIFICATION}\n</system-reminder>`),
+      textAssistant("Merged."),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+  })
+
+  it("still opens a turn for a prompt that quotes a notification", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      userMsg(`why did this fire?\n${NOTIFICATION}`),
+      textAssistant("Because the task finished."),
+    ]))
+
+    expect(session.turns).toHaveLength(2)
+  })
+
+  it("opens a promptless fragment when the window starts past the launching turn", () => {
+    // A paged window can begin mid-conversation; a null userMessage is what
+    // `prependTurns` looks for to stitch the halves back together.
+    const session = parseSession(toJsonl([
+      notificationMsg(),
+      textAssistant("CI is green, merged."),
+    ]))
+
+    expect(session.turns).toHaveLength(1)
+    expect(session.turns[0].userMessage).toBeNull()
+    expect(session.turns[0].contentBlocks[0].kind).toBe("task_notification")
+  })
+
+  it("sums the durations of every stretch the turn worked", () => {
+    const session = parseSession(toJsonl([
+      userMsg("Merge the PR when CI passes"),
+      textAssistant("Waiting on CI."),
+      turnDurationMsg(4000),
+      notificationMsg(),
+      textAssistant("CI is green, merged."),
+      turnDurationMsg(1000),
+    ]))
+
+    expect(session.turns[0].durationMs).toBe(5000)
+  })
+})

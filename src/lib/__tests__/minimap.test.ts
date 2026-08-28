@@ -67,16 +67,28 @@ describe("turnPreviewText", () => {
     expect(turnPreviewText(turn(null))).toBe("Untitled turn")
   })
 
-  it("labels a background-task turn by what the task reported", () => {
-    const text = [
-      "[SYSTEM NOTIFICATION - NOT USER INPUT]",
-      "",
-      "<task-notification><task-id>abc</task-id>",
-      "<summary>Agent \"Docs audit\" finished</summary>",
-      "</task-notification>",
-    ].join("\n")
+  it("labels a promptless background-task fragment by what the task reported", () => {
+    const t = turn(null)
+    t.contentBlocks = [{
+      kind: "task_notification",
+      content: [
+        "<task-notification><task-id>abc</task-id>",
+        "<summary>Agent \"Docs audit\" finished</summary>",
+        "</task-notification>",
+      ].join("\n"),
+    }]
 
-    expect(turnPreviewText(turn(text))).toBe('Agent "Docs audit" finished')
+    expect(turnPreviewText(t)).toBe('Agent "Docs audit" finished')
+  })
+
+  it("prefers the prompt over a task the same turn was resumed by", () => {
+    const t = turn("ship the release")
+    t.contentBlocks = [{
+      kind: "task_notification",
+      content: "<task-notification><summary>agent done</summary></task-notification>",
+    }]
+
+    expect(turnPreviewText(t)).toBe("ship the release")
   })
 
   it("prefers what the user typed over a task envelope in the same turn", () => {

@@ -205,6 +205,26 @@ function extractUserText(obj: { message?: { content?: unknown } }): string {
   return extracted
 }
 
+/**
+ * Whether a user record opens a turn, i.e. is a prompt someone typed.
+ *
+ * Claude Code writes tool results and background-task wake-ups as user records
+ * too. Counting those made this disagree wildly with the timeline's own count
+ * (56 against 5 on a real session), and since the two are reconciled by taking
+ * the larger, the inflated one always won.
+ */
+function isPromptRecord(obj: {
+  origin?: { kind?: string } | null
+  message?: { content?: unknown }
+}): boolean {
+  if (obj.origin?.kind === "task-notification") return false
+  const content = obj.message?.content
+  if (Array.isArray(content)) {
+    return !content.some((block) => block?.type === "tool_result")
+  }
+  return true
+}
+
 export async function getSessionMeta(filePath: string) {
   let lines: string[]
   let isPartialRead = false
@@ -310,12 +330,14 @@ export async function getSessionMeta(filePath: string) {
       }
       if (obj.type === "user" && !obj.isMeta) {
         if (obj.timestamp) lastTimestamp = obj.timestamp
-        const extracted = extractUserText(obj)
-        if (extracted) {
-          if (!firstUserMessage) firstUserMessage = extracted
-          lastUserMessage = extracted
+        if (isPromptRecord(obj)) {
+          turnCount++
+          const extracted = extractUserText(obj)
+          if (extracted) {
+            if (!firstUserMessage) firstUserMessage = extracted
+            lastUserMessage = extracted
+          }
         }
-        turnCount++
       }
     } catch {
       // skip malformed
@@ -378,7 +400,7 @@ export async function getSessionMeta(filePath: string) {
               lastTimestamp = obj.timestamp
               foundTimestamp = true
             }
-            if (!foundMessage) {
+            if (!foundMessage && isPromptRecord(obj)) {
               const extracted = extractUserText(obj)
               if (extracted) {
                 lastUserMessage = extracted

@@ -66,24 +66,45 @@ export function formatAge(seconds: number): string {
 
 /**
  * Get the duration of a turn in ms.
- * Prefers `turn.durationMs` (set by Claude Code's turn_duration system message).
- * Falls back to computing the diff between the turn's first and last timestamps.
+ * Prefers `turn.durationMs` (summed from Claude Code's turn_duration system messages).
+ * Falls back to the span of the turn's own timestamps.
+ *
+ * A background task can resume a turn hours after it went quiet, so the span is
+ * taken per stretch of work and summed: the stretches are what the turn spent
+ * working, the gaps between them are what it spent waiting.
  */
 export function getTurnDuration(turn: Turn): number | null {
   if (turn.durationMs !== null) return turn.durationMs
   if (!turn.timestamp) return null
 
-  let lastTs = ""
-  for (const tc of turn.toolCalls) {
-    if (tc.timestamp && tc.timestamp > lastTs) lastTs = tc.timestamp
-  }
-  for (const block of turn.contentBlocks) {
-    if (block.timestamp && block.timestamp > lastTs) lastTs = block.timestamp
-  }
-  if (!lastTs) return null
+  let total = 0
+  let start = turn.timestamp
+  let end = ""
 
-  const diff = new Date(lastTs).getTime() - new Date(turn.timestamp).getTime()
-  return diff > 0 ? diff : null
+  const extend = (ts: string | undefined) => {
+    if (ts && ts > end) end = ts
+  }
+  const closeStretch = () => {
+    if (!end) return
+    const diff = new Date(end).getTime() - new Date(start).getTime()
+    if (diff > 0) total += diff
+    end = ""
+  }
+
+  for (const block of turn.contentBlocks) {
+    if (block.kind === "task_notification") {
+      closeStretch()
+      if (block.timestamp) start = block.timestamp
+      continue
+    }
+    extend(block.timestamp)
+    if (block.kind === "tool_calls" || block.kind === "plan_mode") {
+      for (const tc of block.toolCalls) extend(tc.timestamp)
+    }
+  }
+  closeStretch()
+
+  return total > 0 ? total : null
 }
 
 export function truncate(s: string, max: number): string {

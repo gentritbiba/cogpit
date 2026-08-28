@@ -137,6 +137,23 @@ describe("StickyPromptBanner", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 340, behavior: "smooth" })
   })
 
+  it("shows what the reader typed, not a task report quoted in the same prompt", () => {
+    const quoted = "<task-notification><summary>Build completed</summary></task-notification>\nnow ship it"
+    render(<Harness session={makeSession("session-a", ["First prompt", quoted])} />)
+
+    const container = screen.getByTestId("scroll-container")
+    setRect(container, 100, 700)
+    setRect(screen.getByTestId("turn-0"), -500, -200)
+    setRect(screen.getByTestId("turn-1"), -100, 600)
+    setRect(screen.getByTestId("prompt-1"), -60, 90)
+
+    flushAnimationFrame()
+
+    expect(screen.getByRole("button", { name: /scroll to turn 2 prompt/i })).toHaveTextContent(
+      "now ship it",
+    )
+  })
+
   it("falls back to the previous meaningful prompt for a promptless turn", () => {
     render(<Harness session={makeSession("session-a", ["Keep this context", null])} />)
 

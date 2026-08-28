@@ -142,14 +142,29 @@ describe("prependTurns", () => {
   })
 
   it("spans the stitched turn's duration across both fragments", () => {
+    // Only the fragment that ends the turn is timed, so the older half's slice
+    // has to come from the clock.
     const newer = makeTurn("n", {
       userMessage: null,
       timestamp: "2026-07-23T10:05:00.000Z",
       durationMs: 30_000,
     })
-    const older = makeTurn("o", { timestamp: "2026-07-23T10:00:00.000Z", durationMs: 60_000 })
+    const older = makeTurn("o", { timestamp: "2026-07-23T10:00:00.000Z", durationMs: null })
     const [stitched] = prependTurns([newer], [older], "claude")
     expect(stitched.durationMs).toBe(330_000)
+  })
+
+  it("sums two timed fragments rather than billing the wait between them", () => {
+    // Both halves timed means the cut fell where a background task had left the
+    // turn idle; spanning it would charge the turn for the hour it slept.
+    const newer = makeTurn("n", {
+      userMessage: null,
+      timestamp: "2026-07-23T11:00:00.000Z",
+      durationMs: 30_000,
+    })
+    const older = makeTurn("o", { timestamp: "2026-07-23T10:00:00.000Z", durationMs: 60_000 })
+    const [stitched] = prependTurns([newer], [older], "claude")
+    expect(stitched.durationMs).toBe(90_000)
   })
 
   it("keeps the newer fragment's compaction summary only when the older has none", () => {

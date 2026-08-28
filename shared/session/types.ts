@@ -109,6 +109,12 @@ export interface UserMessage extends BaseMessage {
    * compacted", so this message is the sole source of the summary text.
    */
   isCompactSummary?: boolean
+  /**
+   * Why Claude Code wrote this record. `"task-notification"` marks a
+   * background task reporting back, not a prompt the reader typed. Absent on
+   * records written before Claude Code added the field (pre-2.1.220).
+   */
+  origin?: { kind?: string } | null
   permissionMode?: string
   thinkingMetadata?: { maxThinkingTokens: number }
   toolUseResult?: AgentToolUseResult
@@ -448,6 +454,14 @@ export type TurnContentBlock =
    * Content is plain text (may be long-form prose, not always markdown).
    */
   | { kind: "recap"; content: string; timestamp?: string }
+  /**
+   * A background task reporting back, which resumes the turn that launched it
+   * rather than opening one of its own. `content` is the raw record text —
+   * one or more `<task-notification>` blocks, possibly inside a
+   * `<system-reminder>` envelope (Claude Code 2.1.234+) — left unparsed here
+   * for the same reason `queued_prompt` is: the renderers own that grammar.
+   */
+  | { kind: "task_notification"; content: string; timestamp?: string }
 
 export interface Turn {
   id: string
