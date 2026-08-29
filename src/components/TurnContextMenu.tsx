@@ -28,7 +28,8 @@ export function TurnContextMenu({
 }: TurnContextMenuProps) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger>{children}</ContextMenuTrigger>
+      {/* Overrides the trigger's default select-none: transcript text must stay copyable. */}
+      <ContextMenuTrigger className="select-text">{children}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-44">
         <ContextMenuGroup>
           <ContextMenuItem onClick={() => onRestoreToHere(turnIndex)}>
