@@ -26,7 +26,7 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /Claude \/ Opus/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Claude \/ Default/i }))
     fireEvent.click(screen.getByRole("menuitemradio", { name: /^Codex$/ }))
 
     expect(onAgentKindChange).toHaveBeenCalledWith("codex")
@@ -56,6 +56,40 @@ describe("ChatInputSettings", () => {
     })
   })
 
+  it("labels Default from the catalog's resolvedModel, never a hardcoded name", async () => {
+    // Regression: an org default of Sonnet used to render as "Opus (default)".
+    setDynamicModelOptions("claude", [
+      {
+        value: "",
+        label: "Default (recommended)",
+        description: "Sonnet 5 · Org default",
+        resolvedModel: "claude-sonnet-5",
+        isDefault: true,
+      },
+      { value: "sonnet", label: "Sonnet", description: "Sonnet 5 · Efficient for routine tasks", resolvedModel: "claude-sonnet-5" },
+      { value: "opus[1m]", label: "Opus (1M context)", resolvedModel: "claude-opus-5[1m]" },
+    ])
+
+    render(
+      <ChatInputSettings
+        agentKind="claude"
+        onAgentKindChange={vi.fn()}
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        isNewSession
+      />
+    )
+
+    // The trigger shows what Default actually resolves to (the Sonnet row's label)
+    fireEvent.click(screen.getByRole("button", { name: /Claude \/ Sonnet/ }))
+    // The menu shows the CLI's own default row verbatim
+    const defaultRow = await screen.findByRole("menuitemradio", { name: /Default \(recommended\)/ })
+    expect(defaultRow).toHaveTextContent("Sonnet 5 · Org default")
+    expect(screen.queryByRole("menuitemradio", { name: /Opus \(default\)/ })).not.toBeInTheDocument()
+  })
+
   it("keeps the model-only dropdown for active sessions", () => {
     render(
       <ChatInputSettings
@@ -68,7 +102,7 @@ describe("ChatInputSettings", () => {
       />
     )
 
-    expect(screen.getByRole("button", { name: /^Opus$/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Default$/ })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Claude$/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /^Codex$/ })).not.toBeInTheDocument()
   })
@@ -220,10 +254,10 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    const trigger = screen.getByRole("button", { name: "Opus" })
+    const trigger = screen.getByRole("button", { name: "Default" })
     fireEvent.click(trigger)
 
-    const selected = await screen.findByRole("menuitemradio", { name: /Opus \(default\)/i })
+    const selected = await screen.findByRole("menuitemradio", { name: /^Default$/i })
     await vi.waitFor(() => expect(selected).toHaveFocus())
 
     await user.keyboard("{ArrowDown}")
@@ -248,7 +282,7 @@ describe("ChatInputSettings", () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Opus" }))
+    fireEvent.click(screen.getByRole("button", { name: "Default" }))
     expect(await screen.findByRole("menu", { name: "Model" })).toBeInTheDocument()
 
     fireEvent.pointerDown(document.body)

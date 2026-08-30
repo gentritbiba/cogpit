@@ -131,7 +131,7 @@ Body:
   "message": "string (required unless images provided)",
   "images": [{ "data": "base64", "mediaType": "image/png" }],
   "permissions": { "mode": "bypassPermissions" },
-  "model": "string (e.g. 'sonnet', 'opus', or a full model id; GET /api/models lists options)",
+  "model": "string (e.g. 'sonnet', '' for provider default, or a full model id; GET /api/models lists options)",
   "effort": "'low' | 'medium' | 'high' | 'xhigh' | 'max'",
   "fastMode": "boolean (fast/priority service tier)",
   "ultracode": "boolean (Claude ultracode; needs xhigh-capable model)",

@@ -8,6 +8,8 @@ export interface ModelOption {
   value: string
   label: string
   description?: string
+  /** Canonical wire model id this option resolves to (e.g. "" → "claude-sonnet-5"). */
+  resolvedModel?: string
   isDefault?: boolean
   defaultReasoningEffort?: string
   supportedReasoningEfforts?: Array<{
@@ -61,14 +63,16 @@ const FETCH_TIMEOUT_MS = 20_000
 const CACHE_TTL_MS = 10 * 60 * 1000
 
 /**
- * Map Claude SDK supportedModels() output to dropdown options.
- * The SDK's "default" pseudo-model maps to "" (no --model flag), which is how
- * the UI has always represented "let the CLI pick".
+ * Map Claude SDK supportedModels() output to dropdown options, verbatim — the
+ * same rows Claude Code's own /model picker renders. The SDK's "default"
+ * pseudo-model maps to "" (no --model flag), keeping its CLI-provided
+ * displayName/description, and every row carries `resolvedModel` (the
+ * canonical wire id it resolves to) so the frontend never has to guess what
+ * "Default" actually is.
  */
 export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
   if (!Array.isArray(models) || models.length === 0) return null
   const options: ModelOption[] = []
-  let defaultAlias: ModelOption | undefined
   for (const m of models) {
     if (!m?.value || !m.displayName) continue
     const capabilities: Partial<ModelOption> = {}
@@ -88,27 +92,15 @@ export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
         { value: "fast", label: "Fast", description: "Lower latency with increased usage" },
       ]
     }
-    if (m.value === "default") {
-      options.push({ value: "", label: "Default", description: m.description, ...capabilities })
-      const family = m.description?.match(/\b(opus|sonnet|haiku|fable)\b/i)?.[1]?.toLowerCase()
-      if (family) {
-        defaultAlias = {
-          value: family,
-          label: family.charAt(0).toUpperCase() + family.slice(1),
-          description: m.description,
-          ...capabilities,
-        }
-      }
-    } else {
-      options.push({ value: m.value, label: m.displayName, description: m.description, ...capabilities })
-    }
-  }
-  // The SDK exposes the recommended model only through its "default" pseudo-model.
-  // Keep the underlying family selectable so an active session can switch back to
-  // it explicitly (for example, Fable -> Opus) without losing live capabilities.
-  if (defaultAlias && !options.some((o) => o.value === defaultAlias.value)) {
-    const defaultIndex = options.findIndex((o) => o.value === "")
-    options.splice(defaultIndex + 1, 0, defaultAlias)
+    const isDefault = m.value === "default"
+    options.push({
+      value: isDefault ? "" : m.value,
+      label: m.displayName,
+      description: m.description,
+      ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}),
+      ...(isDefault ? { isDefault: true } : {}),
+      ...capabilities,
+    })
   }
   // Ensure a "" Default entry always exists and comes first
   if (!options.some((o) => o.value === "")) {
@@ -192,9 +184,8 @@ export function mapCodexModels(models: CodexModel[]): ModelOption[] | null {
       ...providerDefault,
       value: "",
       label: "Default",
-      description: providerDefault
-        ? `Use Codex's recommended model (${providerDefault.label})`
-        : "Use Codex's recommended model",
+      resolvedModel: providerDefault.value,
+      description: `Use Codex's recommended model (${providerDefault.label})`,
     },
     ...mapped,
   ]

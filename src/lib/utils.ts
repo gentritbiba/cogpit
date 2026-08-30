@@ -10,6 +10,8 @@ export type ModelOption = {
   value: string
   label: string
   description?: string
+  /** Canonical wire model id this option resolves to (e.g. "" → "claude-sonnet-5"). */
+  resolvedModel?: string
   isDefault?: boolean
   defaultReasoningEffort?: string
   supportedReasoningEfforts?: EffortOption[]
@@ -72,7 +74,7 @@ const SOL_CAPABILITIES: Partial<ModelOption> = {
 }
 
 export const CODEX_MODEL_OPTIONS: ModelOption[] = [
-  { value: "", label: "Default", description: "Use Codex's recommended model (GPT-5.6 Sol)", ...SOL_CAPABILITIES },
+  { value: "", label: "Default", description: "Use Codex's recommended model (GPT-5.6 Sol)", resolvedModel: "gpt-5.6-sol", ...SOL_CAPABILITIES },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Flagship model for the most ambitious work", ...SOL_CAPABILITIES },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra", description: "Balanced model for everyday work", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_ULTRA_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna", description: "Fastest, most cost-efficient model", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_STANDARD_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
@@ -164,8 +166,9 @@ export function supportsAutoPermissionMode(agentKind: AgentKind, model?: string 
 
 /**
  * Whether a Claude model can run "ultracode" (which requires xhigh effort).
- * Haiku doesn't support high-effort levels; every other Claude alias — including
- * the empty "Default" (Opus) — does. Codex has no ultracode concept.
+ * Haiku is the only Claude alias without high-effort levels, so every other
+ * selection — including the empty "Default" — qualifies. Codex has no
+ * ultracode concept.
  */
 export function isUltracodeCapableModel(agentKind: AgentKind, model?: string | null): boolean {
   if (agentKind !== "claude") return false

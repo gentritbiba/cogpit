@@ -9,7 +9,7 @@ import type { AgentKind } from "@/lib/sessionSource"
 import type { PermissionMode } from "@/lib/permissions"
 import { DesktopChatInputSettings } from "./settings/DesktopChatInputSettings"
 import { MobileChatInputSettings } from "./settings/MobileChatInputSettings"
-import { friendlyModelName } from "./settings/modelOptions"
+import { friendlyModelName, resolveDefaultModelName } from "./settings/modelOptions"
 import type { CommonSettingsControlProps, DropdownOption } from "./settings/types"
 
 export interface ChatInputSettingsProps {
@@ -104,24 +104,23 @@ export const ChatInputSettings = memo(function ChatInputSettings({
   )
 
   // Scope model options to the current agent so a Codex session never shows
-  // a Claude model name (and vice versa).
+  // a Claude model name (and vice versa). Ignore a session model id that
+  // belongs to the other provider.
   const catalogOptions = useModelOptions(agentKind)
-  const providerDefaultLabel = catalogOptions.find((option) => option.value !== "")?.label
-  const resolvedDefaultName = agentKind === "codex"
-    ? (activeModelId?.toLowerCase().startsWith("gpt-")
-        ? friendlyModelName(activeModelId, catalogOptions)
-        : providerDefaultLabel ?? "GPT")
-    : (activeModelId ? friendlyModelName(activeModelId, catalogOptions) : "Opus")
+  const activeModelIsCodex = activeModelId?.toLowerCase().startsWith("gpt-") ?? false
+  const sessionModelId = activeModelId && activeModelIsCodex === (agentKind === "codex")
+    ? activeModelId
+    : undefined
+  // What "Default" means right now: the active session's model when there is
+  // one, otherwise whatever the catalog says its default resolves to. Both
+  // come straight from the provider CLI — never a hardcoded model name.
+  const resolvedDefaultName = sessionModelId
+    ? friendlyModelName(sessionModelId, catalogOptions)
+    : resolveDefaultModelName(catalogOptions)
   const modelOptions: readonly DropdownOption[] = catalogOptions.map((option) => {
     const description = [option.description, option.availabilityMessage].filter(Boolean).join(" · ") || undefined
     return option.value === ""
-      ? {
-          ...option,
-          description,
-          value: "",
-          label: resolvedDefaultName,
-          menuLabel: `${resolvedDefaultName} (default)`,
-        }
+      ? { ...option, description, label: resolvedDefaultName, menuLabel: option.label }
       : { ...option, description }
   })
   const effortOptions = getEffortOptions(agentKind, selectedModel)
