@@ -19,6 +19,7 @@ export interface UndoConfirmState {
   copilot?: {
     eventId: string
     mode: "conversation" | "conversation-and-files"
+    filesAvailable?: boolean
   }
 }
 

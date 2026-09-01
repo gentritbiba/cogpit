@@ -17,13 +17,20 @@ vi.mock("../../helpers", () => ({
 
 type HistoryClient = Pick<
   CopilotRuntime,
-  "isSessionActive" | "resumeSession" | "listRewindPoints" | "previewRewind" | "rewind"
+  "isSessionActive" | "resumeSession" | "destroySession" | "listRewindPoints" | "previewRewind" | "rewind"
 >
 
 function client(active = false): HistoryClient {
+  let sessionActive = active
   return {
-    isSessionActive: vi.fn(() => active),
-    resumeSession: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
+    isSessionActive: vi.fn(() => sessionActive),
+    resumeSession: vi.fn().mockImplementation(async () => {
+      sessionActive = true
+      return { sessionId: "session-1" }
+    }),
+    destroySession: vi.fn().mockImplementation(async () => {
+      sessionActive = false
+    }),
     listRewindPoints: vi.fn().mockResolvedValue({
       fileChangeTrackingEnabled: true,
       points: [],
@@ -102,6 +109,7 @@ describe("Copilot history routes", () => {
     expect(response.statusCode).toBe(200)
     expect(runtime.resumeSession).toHaveBeenCalledWith("session-1")
     expect(runtime.previewRewind).toHaveBeenCalledWith("session-1", "user-event-1")
+    expect(runtime.destroySession).toHaveBeenCalledWith("session-1")
     expect(response.json).toMatchObject({ available: true, fileCount: 1 })
   })
 
@@ -116,6 +124,7 @@ describe("Copilot history routes", () => {
 
     expect(response.statusCode).toBe(200)
     expect(runtime.resumeSession).not.toHaveBeenCalled()
+    expect(runtime.destroySession).not.toHaveBeenCalled()
     expect(runtime.rewind).toHaveBeenCalledWith(
       "session-1",
       "user-event-1",

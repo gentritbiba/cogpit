@@ -74,6 +74,7 @@ describe("parseAgentProcessOutput", () => {
       cpu: 0,
       sessionId: CODEX_SESSION_ID,
       agentKind: "codex",
+      managed: false,
       tty: "??",
       startTime: "",
     }])
@@ -82,6 +83,7 @@ describe("parseAgentProcessOutput", () => {
   it("identifies Copilot CLI processes, including the headless runtime", () => {
     const posix = parseAgentProcessOutput([
       `alice 1003 1.0 0.1 0 1024 ttys003 S+ 10:02 0:00.50 copilot --resume ${COPILOT_SESSION_ID}`,
+      `alice 1006 1.0 0.1 0 1024 ttys006 S+ 10:02 0:00.50 copilot --resume=${COPILOT_SESSION_ID}`,
       "alice 1004 1.0 0.1 0 1024 ttys004 S+ 10:03 0:00.50 /opt/homebrew/bin/copilot --headless --no-auto-update --stdio",
     ].join("\n"), "linux")
     const windows = parseAgentProcessOutput(JSON.stringify({
@@ -95,17 +97,44 @@ describe("parseAgentProcessOutput", () => {
         pid: 1003,
         sessionId: COPILOT_SESSION_ID,
         agentKind: "copilot",
+        managed: false,
+      }),
+      expect.objectContaining({
+        pid: 1006,
+        sessionId: COPILOT_SESSION_ID,
+        agentKind: "copilot",
+        managed: false,
       }),
       expect.objectContaining({
         pid: 1004,
         sessionId: null,
         agentKind: "copilot",
+        managed: false,
       }),
     ])
     expect(windows[0]).toMatchObject({
       sessionId: COPILOT_SESSION_ID,
       agentKind: "copilot",
+      managed: false,
     })
+  })
+
+  it("marks only processes tracked by Cogpit as managed", () => {
+    const stdout = [
+      `alice 1003 1.0 0.1 0 1024 ttys003 S+ 10:02 0:00.50 copilot --resume=${COPILOT_SESSION_ID}`,
+      `alice 1004 1.0 0.1 0 1024 ttys004 S+ 10:03 0:00.50 copilot --resume=${COPILOT_SESSION_ID}`,
+    ].join("\n")
+
+    const processes = parseAgentProcessOutput(
+      stdout,
+      "linux",
+      new Map([[1003, COPILOT_SESSION_ID]]),
+    )
+
+    expect(processes).toEqual([
+      expect.objectContaining({ pid: 1003, managed: true }),
+      expect.objectContaining({ pid: 1004, managed: false }),
+    ])
   })
 
   it("does not expose unrelated processes that mention Copilot in argv", () => {

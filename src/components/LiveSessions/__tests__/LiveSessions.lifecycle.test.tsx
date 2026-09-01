@@ -91,7 +91,7 @@ vi.mock("../SessionRow", () => ({
     session: ActiveSessionInfo
     onDeleteSession?: (session: ActiveSessionInfo) => void
     onKill?: (pid: number, event: MouseEvent<HTMLButtonElement>) => void
-    onResumeSession?: (sessionId: string, cwd?: string) => void
+    onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
   }) => (
     <div>
       <button
@@ -111,7 +111,7 @@ vi.mock("../SessionRow", () => ({
       {onResumeSession && (
         <button
           type="button"
-          onClick={() => onResumeSession(session.sessionId, session.cwd)}
+          onClick={() => onResumeSession(session.sessionId, session.cwd, session.dirName)}
         >
           Resume {session.sessionId}
         </button>
@@ -190,6 +190,30 @@ describe("LiveSessions committed-state synchronization", () => {
     expect(screen.queryByRole("button", { name: "Kill member-session" })).not.toBeInTheDocument()
     expect(mocks.ptySend).not.toHaveBeenCalled()
     expect(mocks.authFetch.mock.calls.some(([url]) => url === "/api/kill-process")).toBe(false)
+  })
+
+  it("resumes a deferred Copilot session with Copilot CLI", () => {
+    window.history.replaceState(null, "", "/")
+    writeCachedList(sessionListCacheKeys.activeSessions, [{
+      ...session("copilot-session"),
+      dirName: "copilot__L3RtcC9wcm9qZWN0",
+      cwd: "/tmp/project",
+      agentStatus: "deferred",
+    }])
+
+    renderLive(
+      <LiveSessions
+        activeSessionKey={null}
+        onSelectSession={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Resume copilot-session" }))
+
+    expect(mocks.ptySend).toHaveBeenCalledWith(expect.objectContaining({
+      command: "copilot",
+      args: ["--resume=copilot-session"],
+      cwd: "/tmp/project",
+    }))
   })
 
   it("keeps consecutive delete events and the cached inventory in lockstep", () => {

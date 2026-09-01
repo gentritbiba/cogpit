@@ -298,6 +298,7 @@ describe("CopilotRuntime", () => {
     harness.handle("session.model.setReasoningEffort", (params) => ({
       reasoningEffort: objectParams(params).reasoningEffort,
     }))
+    harness.handle("session.name.set", () => null)
     harness.handle("session.delete", () => ({ success: true }))
 
     await harness.runtime.createSession({
@@ -336,6 +337,13 @@ describe("CopilotRuntime", () => {
         ({ method }) => method === "session.model.setReasoningEffort",
       )?.params,
     ).toEqual({ sessionId: "resumed", reasoningEffort: "medium" })
+    await expect(
+      harness.runtime.setSessionName("resumed", "Ship Copilot support"),
+    ).resolves.toBeUndefined()
+    expect(harness.calls.find(({ method }) => method === "session.name.set")?.params).toEqual({
+      sessionId: "resumed",
+      name: "Ship Copilot support",
+    })
 
     await harness.runtime.destroySession("created")
     await expect(harness.runtime.deleteSession("resumed")).resolves.toEqual({ success: true })
@@ -355,6 +363,7 @@ describe("CopilotRuntime", () => {
       hooks: false,
       includeSubAgentStreamingEvents: false,
       enableFileChangeTracking: true,
+      enableConfigDiscovery: true,
       envValueMode: "direct",
     })
     expect(harness.calls.find(({ method }) => method === "session.send")?.params).toEqual({

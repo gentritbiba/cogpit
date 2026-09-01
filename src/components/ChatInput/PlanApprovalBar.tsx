@@ -1,4 +1,4 @@
-import { CheckCircle, ChevronDown } from "lucide-react"
+import { CheckCircle, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -21,6 +21,8 @@ interface PlanApprovalBarProps {
   planContent?: string
   actions?: string[]
   recommendedAction?: string
+  responding?: boolean
+  responseError?: string | null
   onApprove: (action?: string) => void
   onReject: () => void
 }
@@ -42,6 +44,8 @@ export function PlanApprovalBar({
   planContent,
   actions = [],
   recommendedAction,
+  responding = false,
+  responseError,
   onApprove,
   onReject,
 }: PlanApprovalBarProps) {
@@ -57,14 +61,16 @@ export function PlanApprovalBar({
       <AlertAction className="flex gap-2">
           <Button
             size="sm"
+            disabled={responding}
             onClick={() => onApprove(primaryAction)}
           >
-            {primaryAction ? actionLabel(primaryAction) : "Approve"}
+            {responding && <Loader2 className="animate-spin" data-icon="inline-start" />}
+            {responding ? "Sending..." : primaryAction ? actionLabel(primaryAction) : "Approve"}
           </Button>
           {alternatives.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger
-                render={<Button type="button" variant="outline" size="icon-sm" aria-label="Other plan actions" />}
+                render={<Button type="button" variant="outline" size="icon-sm" aria-label="Other plan actions" disabled={responding} />}
               >
                 <ChevronDown data-icon="icon" />
               </DropdownMenuTrigger>
@@ -82,11 +88,17 @@ export function PlanApprovalBar({
           <Button
             variant="ghost"
             size="sm"
+            disabled={responding}
             onClick={onReject}
           >
             Reject
           </Button>
       </AlertAction>
+      {responseError && (
+        <div role="alert" className="col-span-full mt-2 text-xs text-destructive">
+          {responseError}
+        </div>
+      )}
       {planContent && (
         <Collapsible className="col-span-full mt-2">
           <CollapsibleTrigger

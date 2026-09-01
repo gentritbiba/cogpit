@@ -26,7 +26,7 @@ export async function indexRebuild(dbPath?: string): Promise<{ status: string; s
   const path = dbPath ?? DEFAULT_DB_PATH
   mkdirSync(dirname(path), { recursive: true })
   const index = new SearchIndex(path)
-  index.buildFull(dirs.PROJECTS_DIR)
+  index.buildFull(dirs.PROJECTS_DIR, dirs.COPILOT_SESSIONS_DIR)
   const stats = index.getStats()
   index.close()
   return { status: "rebuilt", stats }

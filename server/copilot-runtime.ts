@@ -262,6 +262,7 @@ const MUTATING_RPC_METHODS = new Set([
   "session.history.rewind",
   "session.model.setReasoningEffort",
   "session.model.switchTo",
+  "session.name.set",
   "session.permissions.handlePendingPermissionRequest",
   "session.permissions.setAllowAll",
   "session.permissions.setMode",
@@ -280,6 +281,7 @@ const SESSION_DEFAULTS: CopilotJsonObject = {
   hooks: false,
   includeSubAgentStreamingEvents: false,
   enableFileChangeTracking: true,
+  enableConfigDiscovery: true,
   envValueMode: "direct",
 }
 
@@ -793,6 +795,11 @@ export class CopilotRuntime {
       )
     }
     return { reasoningEffort: response.reasoningEffort }
+  }
+
+  async setSessionName(sessionId: string, name: string): Promise<void> {
+    this.assertSessionActive(sessionId)
+    await this.request("session.name.set", { sessionId, name })
   }
 
   async refreshPendingPermissions(sessionId: string): Promise<CopilotPendingPermission[]> {

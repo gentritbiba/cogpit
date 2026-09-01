@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import * as React from "react"
 import { SessionRow } from "../LiveSessions/SessionRow"
-import type { ActiveSessionInfo } from "../LiveSessions/types"
+import type { ActiveSessionInfo, RunningProcess } from "../LiveSessions/types"
 
 // SessionRow uses Tooltip from base-ui — provide simple pass-through components
 // so tests don't need to wire up full portal infrastructure.
@@ -35,6 +35,18 @@ function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionI
     lastUserMessage: "Hello world",
     lastModified: new Date().toISOString(),
     size: 1024,
+    ...overrides,
+  }
+}
+
+function makeProcess(overrides: Partial<RunningProcess> = {}): RunningProcess {
+  return {
+    pid: 4242,
+    memMB: 100,
+    cpu: 1,
+    sessionId: "test-session-id-1234",
+    tty: "ttys001",
+    startTime: "10:00",
     ...overrides,
   }
 }
@@ -101,7 +113,7 @@ describe("SessionRow — deferred state", () => {
     expect(screen.queryByRole("button", { name: /resume to evaluate/i })).toBeNull()
   })
 
-  it("calls onResumeSession with sessionId and cwd when Resume button is clicked", () => {
+  it("calls onResumeSession with the provider directory when Resume is clicked", () => {
     const onResume = vi.fn()
     render(
       <SessionRow
@@ -116,7 +128,11 @@ describe("SessionRow — deferred state", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: /resume to evaluate/i }))
     expect(onResume).toHaveBeenCalledOnce()
-    expect(onResume).toHaveBeenCalledWith("test-session-id-1234", "/home/user/project")
+    expect(onResume).toHaveBeenCalledWith(
+      "test-session-id-1234",
+      "/home/user/project",
+      "test-dir",
+    )
   })
 
   it("does not call onSelectSession when Resume button is clicked (stopPropagation)", () => {
@@ -151,6 +167,43 @@ describe("SessionRow — deferred state", () => {
 
     expect(screen.getByText("Running")).toHaveAttribute("data-session-live-state")
     expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
+  })
+
+  it("presents an externally owned Copilot session without resume or kill controls", () => {
+    render(
+      <SessionRow
+        session={makeSession({
+          dirName: "copilot__L3RtcC9wcm9qZWN0",
+          agentStatus: "deferred",
+        })}
+        isActiveSession={false}
+        proc={makeProcess({ agentKind: "copilot", managed: false })}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+        onResumeSession={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByRole("button", { name: /resume to evaluate/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
+  })
+
+  it("keeps external Claude process controls unchanged", () => {
+    render(
+      <SessionRow
+        session={makeSession({ agentStatus: "deferred" })}
+        isActiveSession={false}
+        proc={makeProcess({ agentKind: "claude", managed: false })}
+        killingPids={new Set()}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+        onResumeSession={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: /resume to evaluate/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /kill process/i })).toBeInTheDocument()
   })
 })
 

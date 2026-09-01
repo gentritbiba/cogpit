@@ -82,10 +82,10 @@ export async function searchSessions(
 
       if (!dbExists) {
         // First run — build the full index
-        index.buildFull(dirs.PROJECTS_DIR)
+        index.buildFull(dirs.PROJECTS_DIR, dirs.COPILOT_SESSIONS_DIR)
       } else {
         // Incremental — only index files newer than the high-water mark
-        index.updateRecent(dirs.PROJECTS_DIR)
+        index.updateRecent(dirs.PROJECTS_DIR, 50, dirs.COPILOT_SESSIONS_DIR)
       }
     } catch { /* DB corrupt or locked — fall through to raw scan */ }
   }

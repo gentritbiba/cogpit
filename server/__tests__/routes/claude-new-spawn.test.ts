@@ -60,6 +60,7 @@ const {
   }
   const mockCopilotRuntime = {
     createSession: vi.fn(),
+    setSessionName: vi.fn(),
     setPermissionMode: vi.fn(),
     send: vi.fn().mockResolvedValue("message-1"),
     isSessionActive: vi.fn().mockReturnValue(true),
@@ -667,6 +668,7 @@ describe("registerCreateAndSendRoute (Copilot)", () => {
       message: "look at this",
       model: "claude-sonnet-4.6",
       effort: "high",
+      name: "  Ship \"Copilot\" support  ",
       permissions: { mode: "plan" },
       images: [{ data: "base64-image", mediaType: "image/png" }],
     })
@@ -682,6 +684,10 @@ describe("registerCreateAndSendRoute (Copilot)", () => {
       model: "claude-sonnet-4.6",
       reasoningEffort: "high",
     })
+    expect(mockCopilotRuntime.setSessionName).toHaveBeenCalledWith(
+      "test-session-uuid",
+      "Ship  Copilot  support",
+    )
     expect(mockCopilotRuntime.setPermissionMode).toHaveBeenCalledWith("test-session-uuid", false)
     expect(mockCopilotRuntime.send).toHaveBeenCalledWith("test-session-uuid", {
       prompt: "look at this",

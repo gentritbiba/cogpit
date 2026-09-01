@@ -20,6 +20,8 @@ interface UsePtyChatOpts {
   ultracode?: boolean
   mcpConfig?: string | null
   onCodexModelRejected?: (model: string) => void
+  /** Prevent all session mutations while another process owns the session. */
+  readOnly?: boolean
   /** Called when there's no session yet (pending). Should create one and return the new sessionId. */
   onCreateSession?: (
     message: string,
@@ -27,7 +29,7 @@ interface UsePtyChatOpts {
   ) => Promise<string | null>
 }
 
-export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, onCreateSession }: UsePtyChatOpts) {
+export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, readOnly = false, onCreateSession }: UsePtyChatOpts) {
   const [status, setStatus] = useState<PtyChatStatus>("idle")
   const [error, setError] = useState<string | undefined>()
   const [pendingMessages, setPendingMessages] = useState<string[]>([])
@@ -81,8 +83,13 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
     }
   }, [])
 
+  useEffect(() => {
+    if (readOnly) resetState()
+  }, [readOnly, resetState])
+
   const sendMessage = useCallback(
     async (text: string, images?: Array<{ data: string; mediaType: string }>) => {
+      if (readOnly) return
       // If there's no sessionId yet, this is a pending session — create it first
       if (!sessionId && onCreateSession) {
         setPendingMessages(prev => [...prev, text])
@@ -175,7 +182,7 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
         }
       }
     },
-    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, onCreateSession]
+    [sessionId, agentKind, cwd, permissions, onPermissionsApplied, model, effort, fastMode, ultracode, mcpConfig, onCodexModelRejected, readOnly, onCreateSession]
   )
 
   /** Abort the in-flight HTTP request without stopping the server-side agent.
@@ -186,13 +193,13 @@ export function usePtyChat({ sessionSource, parsedSessionId, cwd, permissions, o
 
   /** Send a stop request to the server for the current session. */
   const sendStopRequest = useCallback(() => {
-    if (!sessionId) return
+    if (!sessionId || readOnly) return
     authFetch("/api/interrupt-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId }),
     }).catch(() => {})
-  }, [sessionId])
+  }, [sessionId, readOnly])
 
   const interrupt = useCallback(() => {
     activeAbortRef.current?.abort()

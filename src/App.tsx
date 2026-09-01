@@ -76,8 +76,10 @@ import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import type { PanelSize } from "react-resizable-panels"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
+import { isExternalCopilotSession } from "@/lib/sessionControl"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -97,6 +99,7 @@ export default function App() {
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
+  const { procBySession } = useSessionInventory()
   const { parse: workerParse, append: workerAppend } = useParserWorker()
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
@@ -158,6 +161,10 @@ export default function App() {
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const currentAgentKind = state.sessionSource?.agentKind
     ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
+  const currentProcess = state.session?.sessionId
+    ? procBySession.get(state.session.sessionId)
+    : undefined
+  const isExternalCopilot = isExternalCopilotSession(currentAgentKind, currentProcess)
   const supportsWorktrees = currentAgentKind === "claude"
   const supportsMcp = currentAgentKind === "claude"
   const slashSuggestions = useSlashSuggestions(
@@ -348,8 +355,13 @@ export default function App() {
   const permsSetMode = perms.setMode
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
-  const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
-  const pendingInteraction = permReqs.plan ?? transcriptInteraction
+  const permReqs = usePermissionRequests(
+    isExternalCopilot ? null : state.session?.sessionId ?? null,
+    perms.config.mode,
+  )
+  const pendingInteraction = isExternalCopilot
+    ? null
+    : permReqs.plan ?? transcriptInteraction
 
   const {
     selectedModel,
@@ -467,6 +479,7 @@ export default function App() {
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
     onCodexModelRejected: handleCodexModelRejected,
+    readOnly: isExternalCopilot,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
@@ -728,6 +741,18 @@ export default function App() {
       <span className="text-xs text-muted-foreground">Viewing sub-agent session (read-only)</span>
     </div>
   ) : null
+  const externalCopilotReadOnlyNode = isExternalCopilot ? (
+    <div
+      role="status"
+      className="flex shrink-0 items-center justify-center gap-2 border-t bg-card px-4 py-2.5"
+    >
+      <Bot data-icon="inline-start" className="size-3.5 text-muted-foreground" />
+      <span className="text-xs text-muted-foreground">
+        This Copilot session is controlled by another process. Cogpit can only view it.
+      </span>
+    </div>
+  ) : null
+  const activeReadOnlyNode = subAgentReadOnlyNode || externalCopilotReadOnlyNode
 
   // Collect all error messages for toast display — first non-null wins
   const activeError = actions.loadError || createError || null
@@ -1119,7 +1144,7 @@ export default function App() {
           sessionId={previewSessionId}
           loadError={previewLoadError}
           searchInputRef={searchInputRef}
-          activeComposer={subAgentReadOnlyNode || previewChatInputNode}
+          activeComposer={activeReadOnlyNode || previewChatInputNode}
           hasMoreTurns={chunkedSession.hasMore}
           isLoadingOlderTurns={chunkedSession.isLoadingOlder}
           onLoadMoreTurns={chunkedSession.loadMore}
@@ -1153,7 +1178,7 @@ export default function App() {
           sessionView={{
             searchInputRef,
             teamMembersBar,
-            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            activeComposer: activeReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,
             todoProgress: todoProgress && <TodoProgressPanel progress={todoProgress} />,
@@ -1216,7 +1241,7 @@ export default function App() {
             searchInputRef,
             chatInputRef,
             teamMembersBar,
-            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            activeComposer: activeReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,
             todoProgress,

@@ -8,6 +8,8 @@ import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
+import { agentKindFromDirName } from "@/lib/sessionSource"
+import { isExternalCopilotSession } from "@/lib/sessionControl"
 import { SessionPreview } from "./SessionPreview"
 import { getStatusColor, isIdleStatus } from "./sessionStatusPresentation"
 import { sessionTitle } from "./sessionListView"
@@ -41,11 +43,7 @@ interface SessionRowProps {
    * — rows without this prop behave exactly as before.
    */
   onPrefetchSession?: (dirName: string, fileName: string) => void
-  /**
-   * Called when the user clicks "Resume to evaluate" on a deferred session.
-   * The parent should spawn `claude -p --resume <sessionId>` in the session's cwd.
-   */
-  onResumeSession?: (sessionId: string, cwd?: string) => void
+  onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
 }
 
 export function SessionRow({
@@ -72,8 +70,11 @@ export function SessionRow({
   const isLive = hasProcess || isNativeLive
   const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus)
   const isDeferred = s.agentStatus === "deferred"
+  const isExternalCopilot = isExternalCopilotSession(agentKindFromDirName(s.dirName), proc)
   const [resuming, setResuming] = useState(false)
-  const statusLabel = isLive
+  const statusLabel = isExternalCopilot
+    ? "Read-only"
+    : isLive
     ? (isNativeIdle
         ? "Running"
         : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? "Running")
@@ -99,7 +100,7 @@ export function SessionRow({
     e.stopPropagation()
     if (!onResumeSession || resuming) return
     setResuming(true)
-    onResumeSession(s.sessionId, s.cwd)
+    onResumeSession(s.sessionId, s.cwd, s.dirName)
     // Reset after 3 s in case parent doesn't unmount the row immediately
     setTimeout(() => setResuming(false), 3000)
   }
@@ -194,7 +195,7 @@ export function SessionRow({
         </Button>
       )}
 
-      {isDeferred && onResumeSession && (
+      {isDeferred && onResumeSession && !isExternalCopilot && (
         <Button
           type="button"
           variant="outline"
@@ -221,7 +222,7 @@ export function SessionRow({
         {formatRelativeTime(s.lastActivityAt || s.lastModified)}
       </span>
 
-      {hasProcess && onKill && (
+      {hasProcess && onKill && !isExternalCopilot && (
         <Button
           type="button"
           variant="ghost"

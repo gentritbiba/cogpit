@@ -233,12 +233,12 @@ function textFromValue(value: unknown): string {
   if (typeof value === "string") return value
   if (!Array.isArray(value)) return ""
   return value
-    .map((part) => {
-      if (typeof part === "string") return part
-      if (!isObject(part)) return ""
-      return readString(part.text, part.content)
+    .flatMap((part) => {
+      const text = typeof part === "string"
+        ? part
+        : isObject(part) ? readString(part.text, part.content) : ""
+      return text ? [text] : []
     })
-    .filter(Boolean)
     .join("\n")
 }
 
@@ -459,12 +459,12 @@ function extractToolResult(data: Record<string, unknown>): string {
 
   if (Array.isArray(result.contents)) {
     const content = result.contents
-      .map((part) => {
-        if (typeof part === "string") return part
-        if (!isObject(part)) return ""
-        return readString(part.text, part.content, part.output)
+      .flatMap((part) => {
+        const text = typeof part === "string"
+          ? part
+          : isObject(part) ? readString(part.text, part.content, part.output) : ""
+        return text ? [text] : []
       })
-      .filter(Boolean)
       .join("\n")
     if (content) return content
   }

@@ -1,4 +1,5 @@
 import type { SessionStatus } from "@/lib/sessionStatus"
+import type { AgentKind } from "../../../shared/providers/types"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
 
 export interface ActiveSessionInfo {
@@ -40,6 +41,9 @@ export interface RunningProcess {
   memMB: number
   cpu: number
   sessionId: string | null
+  agentKind?: AgentKind
+  /** Whether Cogpit owns the process and can execute lifecycle controls for it. */
+  managed?: boolean
   tty: string
   startTime: string
 }

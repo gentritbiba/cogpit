@@ -3,7 +3,7 @@
 CLI tool that gives any AI assistant memory of past Claude Code, Codex, and
 GitHub Copilot CLI sessions. Browse normalized conversation history, tool
 usage, thinking blocks, and inline sub-agent activity. Cross-session FTS search
-currently indexes Claude Code history.
+indexes Claude Code and GitHub Copilot CLI history.
 
 All output is JSON to stdout — designed for programmatic consumption by AI agents.
 
@@ -36,7 +36,7 @@ cogpit-memory context <sessionId>
 # Drill into a specific turn
 cogpit-memory context <sessionId> --turn 3
 
-# Search indexed Claude Code sessions
+# Search indexed Claude Code and Copilot CLI sessions
 cogpit-memory search "authentication"
 ```
 
@@ -78,13 +78,13 @@ is not available for Copilot sessions.
 
 ### `search` — Full-text search with FTS5
 
-Cross-session search currently uses the Claude Code FTS index. With
+Cross-session search indexes Claude Code and Copilot CLI history. With
 `--session`, Claude Code, Codex, and Copilot CLI sessions are all supported,
 including user and assistant messages, thinking, tool I/O, inline sub-agent
 content, and compaction summaries when the provider records them.
 
 ```bash
-cogpit-memory search "authentication"                        # Cross-session Claude index
+cogpit-memory search "authentication"                        # Cross-session Claude and Copilot index
 cogpit-memory search "auth" --session <sessionId>            # Single session
 cogpit-memory search "bug" --max-age 30d --limit 50          # Custom window
 cogpit-memory search "AuthProvider" --case-sensitive          # Case-sensitive
@@ -142,8 +142,9 @@ Copilot CLI history from `~/.copilot/session-state/`. The shared parser
 normalizes each provider into the same conversation structure for layered
 drill-down.
 
-Cross-session search currently builds its FTS5 trigram index from the Claude
-project tree and stores it at `~/.claude/cogpit-memory/search-index.db`. The
+Cross-session search builds its FTS5 trigram index from the Claude project tree
+and Copilot session-state directory, then stores it at
+`~/.claude/cogpit-memory/search-index.db`. The
 trigram tokenizer enables substring matching (not just whole-word) — searching
 for `"auth"` matches `"authentication"`, `"OAuth"`, and `"AuthProvider"`.
 

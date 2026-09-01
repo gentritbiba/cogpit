@@ -77,11 +77,13 @@ export function registerClaudeRoutes(use: UseFn) {
               )
             }
             const attachments = buildCopilotAttachments(images)
+            const deliveryMode = copilotRuntime.isTurnActive(sessionId) ? "immediate" : undefined
             await copilotRuntime.send(sessionId, {
               prompt: message || COPILOT_IMAGE_ONLY_PROMPT,
               agentMode: permissions?.mode === "plan"
                 ? "plan"
                 : permissions?.mode === "auto" ? "autopilot" : "interactive",
+              ...(deliveryMode ? { mode: deliveryMode } : {}),
               ...(attachments ? { attachments } : {}),
             })
             res.setHeader("Content-Type", "application/json")

@@ -11,6 +11,7 @@ export interface AgentProcessInfo {
   cpu: number
   sessionId: string | null
   agentKind: AgentKind
+  managed: boolean
   tty: string
   startTime: string
 }
@@ -33,8 +34,8 @@ function findSessionId(
   pid: number,
   trackedByPid: ReadonlyMap<number, string>,
 ): string | null {
-  const resumeMatch = command.match(/--resume\s+([0-9a-f-]{36})/)
-  const sessionIdMatch = command.match(/--session-id\s+([0-9a-f-]{36})/)
+  const resumeMatch = command.match(/--resume(?:=|\s+)([0-9a-f-]{36})/)
+  const sessionIdMatch = command.match(/--session-id(?:=|\s+)([0-9a-f-]{36})/)
   const codexResumeMatch = command.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
   return trackedByPid.get(pid)
     ?? resumeMatch?.[1]
@@ -75,6 +76,7 @@ function parseWindowsProcesses(
         agentKind: isCopilot
           ? "copilot"
           : command.includes("codex") ? "codex" : "claude",
+        managed: trackedByPid.has(pid),
         tty: "??",
         startTime: "",
       })
@@ -117,6 +119,7 @@ function parsePosixProcesses(
       agentKind: isCopilot
         ? "copilot"
         : args.includes("codex") ? "codex" : "claude",
+      managed: trackedByPid.has(pid),
       tty: columns[6] || "??",
       startTime: columns[8] || "",
     })

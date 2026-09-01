@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 vi.mock("@/components/ui/alert-dialog", () => ({
@@ -47,5 +47,31 @@ describe("UndoConfirmDialog", () => {
 
     expect(screen.getByTestId("alert-dialog")).toHaveAttribute("data-open", "false")
     expect(screen.getByRole("heading", { name: "Undo turns?" })).toBeInTheDocument()
+  })
+
+  it("lets Copilot users explicitly opt into restoring files", () => {
+    const onConfirm = vi.fn()
+    render(
+      <UndoConfirmDialog
+        state={{
+          ...confirmState,
+          copilot: {
+            eventId: "event-2",
+            mode: "conversation",
+            filesAvailable: true,
+          },
+        }}
+        isApplying={false}
+        applyError={null}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/Files stay unchanged/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Restore captured file changes" }))
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+    expect(onConfirm).toHaveBeenCalledWith(true)
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, Loader2 } from "lucide-react"
 import {
   AlertDialog,
@@ -12,13 +12,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { UndoConfirmState } from "@/hooks/useUndoRedo"
 
 interface UndoConfirmDialogProps {
   state: UndoConfirmState | null
   isApplying: boolean
   applyError: string | null
-  onConfirm: () => void
+  onConfirm: (restoreCopilotFiles?: boolean) => void
   onCancel: () => void
 }
 
@@ -41,20 +42,33 @@ export function UndoConfirmDialog({
   onConfirm,
   onCancel,
 }: UndoConfirmDialogProps) {
-  const [lastState, setLastState] = useState(state)
+  const lastStateRef = useRef(state)
+  const [fileRestoreSelection, setFileRestoreSelection] = useState({
+    key: "",
+    selected: false,
+  })
 
   useEffect(() => {
-    if (state) setLastState(state)
+    if (state) lastStateRef.current = state
   }, [state])
 
-  const renderedState = state ?? lastState
+  const renderedState = state ?? lastStateRef.current
   if (!renderedState) return null
+  const renderedStateKey = renderedState.copilot?.eventId
+    ?? `${renderedState.type}:${renderedState.targetTurnIndex}:${renderedState.branchId ?? ""}`
+  const restoreCopilotFiles = fileRestoreSelection.key === renderedStateKey
+    && fileRestoreSelection.selected
 
   return (
     <AlertDialog
       open={state !== null}
       onOpenChange={(open) => { if (!open) onCancel() }}
-      onOpenChangeComplete={(open) => { if (!open) setLastState(null) }}
+      onOpenChangeComplete={(open) => {
+        if (!open) {
+          lastStateRef.current = null
+          setFileRestoreSelection({ key: "", selected: false })
+        }
+      }}
     >
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -64,7 +78,7 @@ export function UndoConfirmDialog({
           <AlertDialogTitle>{TITLES[renderedState.type]}</AlertDialogTitle>
           <AlertDialogDescription>
             {renderedState.copilot
-              ? renderedState.copilot.mode === "conversation-and-files"
+              ? restoreCopilotFiles
                 ? "This removes the selected turn and everything after it, restoring captured files."
                 : "This removes the selected turn and everything after it. Files stay unchanged."
               : DESCRIPTIONS[renderedState.type]}
@@ -93,6 +107,19 @@ export function UndoConfirmDialog({
               ))}
             </div>
           )}
+          {renderedState.copilot?.filesAvailable && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
+              <Checkbox
+                checked={restoreCopilotFiles}
+                disabled={isApplying}
+                onCheckedChange={(checked) => setFileRestoreSelection({
+                  key: renderedStateKey,
+                  selected: checked === true,
+                })}
+              />
+              Restore captured file changes
+            </label>
+          )}
         </div>
 
         {applyError && (
@@ -106,7 +133,7 @@ export function UndoConfirmDialog({
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
-            onClick={onConfirm}
+            onClick={() => onConfirm(restoreCopilotFiles)}
             disabled={isApplying}
           >
             {isApplying ? (

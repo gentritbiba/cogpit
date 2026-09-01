@@ -46,6 +46,7 @@ const {
   },
   mockCopilotRuntime: {
     isSessionActive: vi.fn(),
+    isTurnActive: vi.fn(),
     resumeSession: vi.fn(),
     setModel: vi.fn(),
     setReasoningEffort: vi.fn(),
@@ -200,6 +201,7 @@ beforeEach(() => {
   mockCodexAppServer.steerTurn.mockResolvedValue({ turnId: "turn-active" })
   mockCodexAppServer.call.mockResolvedValue({})
   mockCopilotRuntime.isSessionActive.mockReturnValue(false)
+  mockCopilotRuntime.isTurnActive.mockReturnValue(false)
   mockCopilotRuntime.send.mockResolvedValue("message-1")
   mockResumeSDKSession.mockReturnValue({
     sessionId: "sess-1",
@@ -294,6 +296,26 @@ describe("/api/send-message Copilot runtime", () => {
       agentMode: "interactive",
     })
     expect(res._getData()).toEqual({ success: true })
+  })
+
+  it("steers an active Copilot turn instead of queueing the follow-up", async () => {
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    mockCopilotRuntime.isTurnActive.mockReturnValue(true)
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({
+      sessionId: "sess-1",
+      message: "focus on the parser first",
+      permissions: { mode: "default" },
+    }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("sess-1", {
+      prompt: "focus on the parser first",
+      agentMode: "interactive",
+      mode: "immediate",
+    })
   })
 
   it("switches a loaded session from Plan back to Ask", async () => {

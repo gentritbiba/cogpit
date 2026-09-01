@@ -291,7 +291,9 @@ export function useNewSession({
           effort: effort || undefined,
           fastMode: fastMode ? true : undefined,
           ultracode: agentKind === "claude" && ultracode ? true : undefined,
-          name: agentKind === "claude" ? (sessionName || undefined) : undefined,
+          name: agentKind === "claude" || agentKind === "copilot"
+            ? (sessionName || undefined)
+            : undefined,
           worktreeName: agentKind === "claude" && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
           mcpConfig: agentKind === "claude" ? (mcpConfig || undefined) : undefined,
         }

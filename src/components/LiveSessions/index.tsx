@@ -18,6 +18,7 @@ import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
+import { agentKindFromDirName } from "@/lib/sessionSource"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -238,18 +239,15 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession(s.sessionId)
   }, [onDeleteSession, removeSession])
 
-  /**
-   * Spawn `claude -p --resume <sessionId>` in a PTY terminal so the user can
-   * re-evaluate a permission that was paused by a PreToolUse hook decision:"defer".
-   */
-  const handleResumeSession = useCallback((sessionId: string, cwd?: string) => {
+  const handleResumeSession = useCallback((sessionId: string, cwd: string | undefined, dirName: string) => {
+    const copilot = agentKindFromDirName(dirName) === "copilot"
     const id = `resume_${crypto.randomUUID().slice(0, 8)}`
     pty.send({
       type: "spawn",
       id,
       name: `Resume ${sessionId.slice(0, 8)}`,
-      command: "claude",
-      args: ["-p", "--resume", sessionId],
+      command: copilot ? "copilot" : "claude",
+      args: copilot ? [`--resume=${sessionId}`] : ["-p", "--resume", sessionId],
       cwd: cwd ?? undefined,
       metadata: { type: "terminal" },
     })

@@ -58,6 +58,18 @@ interface CopilotSessionBody {
   permissions?: PermissionsConfig
   model?: string
   effort?: string
+  name?: string
+}
+
+function normalizeCopilotSessionName(name: string | undefined): string | undefined {
+  const normalized = [...(name ?? "")]
+    .map((character) => {
+      const code = character.charCodeAt(0)
+      return character === '"' || code < 32 || code === 127 ? " " : character
+    })
+    .join("")
+    .trim()
+  return normalized ? normalized.slice(0, 100) : undefined
 }
 
 async function respondWithCopilotSession(
@@ -74,6 +86,10 @@ async function respondWithCopilotSession(
       ...(body.effort ? { reasoningEffort: body.effort } : {}),
     })
     opened = true
+    const sessionName = normalizeCopilotSessionName(body.name)
+    if (sessionName) {
+      await copilotRuntime.setSessionName(sessionId, sessionName)
+    }
     if (body.permissions?.mode) {
       await copilotRuntime.setPermissionMode(
         sessionId,
@@ -309,6 +325,7 @@ export function registerNewSessionRoute(use: UseFn) {
           permissions,
           model,
           effort,
+          name,
         })) return
 
         if (isCodexDirName(dirName)) {
@@ -532,6 +549,7 @@ export function registerCreateAndSendRoute(use: UseFn) {
           permissions,
           model,
           effort,
+          name,
         })) return
 
         if (isCodexDirName(dirName)) {

@@ -6,6 +6,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, dirNameToPath } from "@/lib/format"
 import { getStatusLabel } from "@/lib/sessionStatus"
+import { agentKindFromDirName } from "@/lib/sessionSource"
+import { isExternalCopilotSession } from "@/lib/sessionControl"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
@@ -85,7 +87,11 @@ function StripRow({
   onResume,
   onPrefetch,
 }: StripRowProps) {
-  const statusLabel = getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? chip.label
+  const isExternalCopilot = isExternalCopilotSession(agentKindFromDirName(s.dirName), proc)
+  const statusLabel = isExternalCopilot
+    ? "Read-only"
+    : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? chip.label
+  const canResume = Boolean(onResume) && !isExternalCopilot
   const { onHoverStart, onHoverEnd } = useHoverPrefetch(onPrefetch)
   return (
     <div
@@ -112,7 +118,7 @@ function StripRow({
               onBlur={onHoverEnd}
               className={cn(
                 "w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                onResume && "pr-20",
+                canResume && "pr-20",
               )}
             />
           }
@@ -126,7 +132,7 @@ function StripRow({
               variant="outline"
               className={cn("shrink-0", compact ? "text-muted-foreground" : chip.className)}
             >
-              {chip.label}
+              {isExternalCopilot ? "Read-only" : chip.label}
             </Badge>
             {!compact && <TimeSince iso={s.lastActivityAt || s.lastModified} />}
           </span>
@@ -137,7 +143,7 @@ function StripRow({
         </TooltipContent>
       </Tooltip>
 
-      {onResume && (
+      {canResume && (
         <Button
           type="button"
           variant="outline"
@@ -150,7 +156,7 @@ function StripRow({
           Resume
         </Button>
       )}
-      {proc && onKill && (
+      {proc && onKill && !isExternalCopilot && (
         <Button
           type="button"
           variant="ghost"
@@ -192,7 +198,7 @@ interface AttentionStripProps {
   projectNames: Record<string, string>
   onSelectSession: (dirName: string, fileName: string) => void
   onKill?: (pid: number, e: React.MouseEvent) => void
-  onResumeSession?: (sessionId: string, cwd?: string) => void
+  onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
   onPrefetchSession?: (dirName: string, fileName: string) => void
 }
 
@@ -257,7 +263,7 @@ export function AttentionStrip({
               onKill={onKill}
               onResume={
                 reason === "deferred" && onResumeSession
-                  ? () => onResumeSession(s.sessionId, s.cwd)
+                  ? () => onResumeSession(s.sessionId, s.cwd, s.dirName)
                   : undefined
               }
             />

@@ -48,6 +48,7 @@ export class SearchIndex {
   private db: Database
   private dbPath: string
   projectsDir: string | null = null
+  private copilotSessionsDir: string | null = null
   private _watcherRunning = false
   private _lastFullBuild: string | null = null
   private _lastUpdate: string | null = null
@@ -357,7 +358,8 @@ export class SearchIndex {
   }
 
   /**
-   * Clear all indexed data and re-index every JSONL file under `projectsDir`.
+   * Clear all indexed data and re-index every JSONL file under `projectsDir`
+   * and the optional Copilot session-state directory.
    * Structure: projectsDir/{projectName}/{sessionId}.jsonl
    * Subagents:  projectsDir/{projectName}/{sessionId}/subagents/agent-{id}.jsonl
    *
@@ -365,10 +367,11 @@ export class SearchIndex {
    * SQLite transaction with pre-prepared statements. This avoids the overhead
    * of 3000+ individual transactions (each forcing a disk sync).
    *
-   * Stores `projectsDir` as a class field so `rebuild()` can reuse it.
+   * Stores both discovery roots so `rebuild()` can reuse them.
    */
-  buildFull(projectsDir: string): void {
+  buildFull(projectsDir: string, copilotSessionsDir?: string): void {
     this.projectsDir = projectsDir
+    this.copilotSessionsDir = copilotSessionsDir ?? null
 
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
@@ -393,7 +396,7 @@ export class SearchIndex {
 
     this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
       files.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
-    })
+    }, copilotSessionsDir)
 
     // Prepare statements once, run all inserts in a single transaction
     const insert = this.db.prepare(
@@ -472,8 +475,11 @@ export class SearchIndex {
    * Caps re-indexing to `maxFiles` to prevent blocking on large backlogs
    * (run `index rebuild` for a full catch-up).
    */
-  updateRecent(projectsDir: string, maxFiles: number = 50): void {
+  updateRecent(projectsDir: string, maxFiles: number = 50, copilotSessionsDir?: string): void {
     this.projectsDir = projectsDir
+    if (copilotSessionsDir !== undefined) {
+      this.copilotSessionsDir = copilotSessionsDir
+    }
 
     // Find the high-water mark — newest indexed file mtime
     const row = this.db.prepare(
@@ -494,7 +500,7 @@ export class SearchIndex {
         if (existing && existing.mtime_ms >= mtimeMs) return // already indexed and unchanged
       }
       filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
-    })
+    }, copilotSessionsDir)
 
     // Sort newest first so the most relevant files get indexed within the cap
     filesToIndex.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -522,11 +528,11 @@ export class SearchIndex {
    */
   rebuild(): void {
     if (!this.projectsDir) return
-    this.buildFull(this.projectsDir)
+    this.buildFull(this.projectsDir, this.copilotSessionsDir ?? undefined)
   }
 
   /**
-   * Walk the projects directory tree and invoke `callback` for every JSONL file.
+   * Walk the Claude projects tree and optional Copilot session-state root.
    *
    * Directory structure:
    *   projectsDir/
@@ -534,6 +540,7 @@ export class SearchIndex {
    *       {sessionId}.jsonl              <- session file
    *       {sessionId}/subagents/
    *         agent-{agentId}.jsonl        <- subagent file (recursive)
+   *   copilotSessionsDir/{sessionId}/events.jsonl
    *
    * Skips the "memory" directory.
    */
@@ -545,12 +552,14 @@ export class SearchIndex {
       mtimeMs: number,
       isSubagent: boolean,
       parentSessionId: string | null
-    ) => void
+    ) => void,
+    copilotSessionsDir?: string,
   ): void {
-    let entries: Dirent[]
+    let entries: Dirent[] = []
     try {
-      entries = readdirSync(projectsDir, { withFileTypes: true })    } catch {
-      return
+      entries = readdirSync(projectsDir, { withFileTypes: true })
+    } catch {
+      // Copilot sessions may still exist when the Claude projects directory does not.
     }
 
     for (const entry of entries) {
@@ -576,6 +585,41 @@ export class SearchIndex {
 
         // Discover subagent files recursively
         this.discoverSubagents(filePath, sessionId, callback, 0, 4)
+      }
+    }
+
+    if (copilotSessionsDir) {
+      this.discoverCopilotFiles(copilotSessionsDir, callback)
+    }
+  }
+
+  /** Discover Copilot CLI sessions stored as `{sessionId}/events.jsonl`. */
+  private discoverCopilotFiles(
+    copilotSessionsDir: string,
+    callback: (
+      filePath: string,
+      sessionId: string,
+      mtimeMs: number,
+      isSubagent: boolean,
+      parentSessionId: string | null
+    ) => void,
+  ): void {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(copilotSessionsDir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const filePath = join(copilotSessionsDir, entry.name, "events.jsonl")
+      try {
+        const s = statSync(filePath)
+        if (!s.isFile()) continue
+        callback(filePath, entry.name, s.mtimeMs, false, null)
+      } catch {
+        // Ignore session directories without a readable events file.
       }
     }
   }

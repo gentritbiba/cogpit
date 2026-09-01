@@ -37,7 +37,7 @@ export interface UseUndoRedoResult {
 
   // Confirmation dialog
   confirmState: UndoConfirmState | null
-  confirmApply: () => Promise<void>
+  confirmApply: (restoreCopilotFiles?: boolean) => Promise<void>
   confirmCancel: () => void
 
   // Loading
@@ -56,9 +56,11 @@ export function useUndoRedo(
   const [isApplying, setIsApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const copilotPreviewRequestRef = useRef(0)
 
   // Load undo state when session changes
   useEffect(() => {
+    copilotPreviewRequestRef.current += 1
     if (!enabled || !session) {
       setUndoState(null)
       setConfirmState(null)
@@ -170,6 +172,12 @@ export function useUndoRedo(
     if (session.agentKind === "copilot") {
       const turn = session.turns[targetTurnIndex]
       if (!turn) return
+      const requestedSessionId = session.sessionId
+      const previewRequest = ++copilotPreviewRequestRef.current
+      const isCurrentRequest = () => (
+        copilotPreviewRequestRef.current === previewRequest
+        && sessionIdRef.current === requestedSessionId
+      )
       const eventId = turn.id.includes("@") ? turn.id.slice(turn.id.lastIndexOf("@") + 1) : turn.id
       const turnCount = session.turns.length - targetTurnIndex
       void authFetch(
@@ -180,6 +188,7 @@ export function useUndoRedo(
           body: JSON.stringify({ eventId }),
         },
       ).then(async (response) => {
+        if (!isCurrentRequest()) return
         const preview = response.ok
           ? await response.json() as {
               available?: boolean
@@ -187,6 +196,7 @@ export function useUndoRedo(
               files?: Array<{ path?: string }>
             }
           : null
+        if (!isCurrentRequest()) return
         const filePaths = preview?.files
           ?.map(({ path }) => path)
           .filter((path): path is string => typeof path === "string") ?? []
@@ -202,10 +212,12 @@ export function useUndoRedo(
           targetTurnIndex: effectiveTarget,
           copilot: {
             eventId,
-            mode: preview?.available ? "conversation-and-files" : "conversation",
+            mode: "conversation",
+            filesAvailable: Boolean(preview?.available && fileCount > 0),
           },
         })
       }).catch(() => {
+        if (!isCurrentRequest()) return
         setConfirmState({
           type: "undo",
           summary: { turnCount, fileCount: 0, filePaths: [], operationCount: 0 },
@@ -275,7 +287,7 @@ export function useUndoRedo(
   }, [enabled, session, branches])
 
   // Confirm and apply the pending operation
-  const confirmApply = useCallback(async () => {
+  const confirmApply = useCallback(async (restoreCopilotFiles = false) => {
     if (!enabled || !confirmState || !session || !sessionSource) {
       setConfirmState(null)
       return
@@ -286,12 +298,18 @@ export function useUndoRedo(
 
     try {
       if (confirmState.copilot) {
+        const mode = restoreCopilotFiles && confirmState.copilot.filesAvailable
+          ? "conversation-and-files"
+          : "conversation"
         const response = await authFetch(
           `/api/copilot-history/${encodeURIComponent(session.sessionId)}/rewind`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(confirmState.copilot),
+            body: JSON.stringify({
+              eventId: confirmState.copilot.eventId,
+              mode,
+            }),
           },
         )
         const result = await response.json().catch(() => null) as {
@@ -356,6 +374,7 @@ export function useUndoRedo(
   }, [enabled, confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
 
   const confirmCancel = useCallback(() => {
+    copilotPreviewRequestRef.current += 1
     setConfirmState(null)
     setApplyError(null)
   }, [])

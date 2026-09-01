@@ -38,6 +38,25 @@ describe("usePtyChat", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
+  it("does not send or interrupt a read-only session", async () => {
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: { dirName: "copilot__L3Byb2plY3Q", fileName: "sess/events.jsonl", rawText: "" },
+        parsedSessionId: "sess",
+        readOnly: true,
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+      result.current.interrupt()
+    })
+
+    expect(result.current.pendingMessages).toEqual([])
+    expect(result.current.status).toBe("idle")
+    expect(mockedAuthFetch).not.toHaveBeenCalled()
+  })
+
   it("sends message and transitions through connected->idle on success", async () => {
     mockedAuthFetch.mockResolvedValueOnce({
       ok: true,
