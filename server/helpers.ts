@@ -5,14 +5,17 @@ import { homedir, tmpdir } from "node:os"
 import { spawn } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
 import { dirs } from "./sessionPaths"
-import { decodeClaudeDirName, encodeClaudeDirName } from "../shared/providers/claude"
 import {
   buildClaudePermArgs,
+  decodeClaudeDirName,
+  encodeClaudeDirName,
+} from "../shared/providers/claude"
+import {
   buildCodexPermArgs as _buildCodexPermArgs,
   buildCodexEffortArgs as _buildCodexEffortArgs,
   buildCodexModelArgs as _buildCodexModelArgs,
   buildCodexFastModeArgs as _buildCodexFastModeArgs,
-} from "../shared/providers"
+} from "../shared/providers/codex"
 import type { PermissionsConfig } from "../shared/providers/types"
 export type { AgentKind } from "../shared/providers/types"
 
@@ -322,13 +325,20 @@ export {
   dirs,
   CODEX_HOME_DIR,
   CODEX_SESSIONS_DIR,
+  COPILOT_HOME_DIR,
+  COPILOT_SESSIONS_DIR,
   isCodexDirName,
   encodeCodexDirName,
   decodeCodexDirName,
   isCodexFilePath,
+  isCopilotDirName,
+  encodeCopilotDirName,
+  decodeCopilotDirName,
+  isCopilotFilePath,
   formatCodexRolloutFileName,
   refreshDirs,
   listCodexSessionFiles,
+  listCopilotSessionFiles,
   resolveSessionFilePath,
   getAgentKindFromSessionPath,
   findNewestCodexSessionForCwd,

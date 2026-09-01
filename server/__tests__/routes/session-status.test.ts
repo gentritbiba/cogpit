@@ -8,6 +8,8 @@ const mockActiveProcesses = vi.hoisted(() => new Map<string, unknown>())
 const mockSdkSessions = vi.hoisted(() => new Map<string, { running: boolean }>())
 const mockIsSDKQueryLive = vi.hoisted(() => vi.fn())
 const mockGetActiveTurnId = vi.hoisted(() => vi.fn())
+const mockIsCopilotSessionActive = vi.hoisted(() => vi.fn())
+const mockIsCopilotTurnActive = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
   findJsonlPath: mockFindJsonlPath,
@@ -23,6 +25,13 @@ vi.mock("../../sdk-session", () => ({
 
 vi.mock("../../codex-app-server", () => ({
   codexAppServer: { getActiveTurnId: mockGetActiveTurnId },
+}))
+
+vi.mock("../../copilot-runtime", () => ({
+  copilotRuntime: {
+    isSessionActive: mockIsCopilotSessionActive,
+    isTurnActive: mockIsCopilotTurnActive,
+  },
 }))
 
 import type { UseFn, Middleware } from "../../helpers"
@@ -60,6 +69,8 @@ describe("GET /api/session-status/:sessionId", () => {
     mockGetSessionStatus.mockResolvedValue({ status: "completed" })
     mockIsSDKQueryLive.mockReturnValue(false)
     mockGetActiveTurnId.mockReturnValue(undefined)
+    mockIsCopilotSessionActive.mockReturnValue(false)
+    mockIsCopilotTurnActive.mockReturnValue(false)
   })
 
   it("delegates non-GET requests and nested paths to next()", async () => {
@@ -140,6 +151,25 @@ describe("GET /api/session-status/:sessionId", () => {
   it("reports live=true running=true for an active native Codex turn", async () => {
     mockGetActiveTurnId.mockReturnValue("turn-1")
     expect((await request("GET", "/abc")).json()).toMatchObject({ live: true, running: true })
+  })
+
+  it("reports live=true running=false between turns of an open Copilot session", async () => {
+    mockIsCopilotSessionActive.mockReturnValue(true)
+
+    expect((await request("GET", "/abc")).json()).toMatchObject({
+      live: true,
+      running: false,
+    })
+  })
+
+  it("reports live=true running=true while a Copilot turn is in flight", async () => {
+    mockIsCopilotSessionActive.mockReturnValue(true)
+    mockIsCopilotTurnActive.mockReturnValue(true)
+
+    expect((await request("GET", "/abc")).json()).toMatchObject({
+      live: true,
+      running: true,
+    })
   })
 
   it("returns 500 when the status scan fails", async () => {

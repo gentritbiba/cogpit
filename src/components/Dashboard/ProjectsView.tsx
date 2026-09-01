@@ -16,6 +16,7 @@ import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
+import { agentKindFromDirName } from "@/lib/sessionSource"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
 import { isRecentlyActive } from "./sessionPresentation"
 import type { ProjectInfo } from "./types"
@@ -125,7 +126,7 @@ export function ProjectsView({
                 <EmptyDescription>
                   {searchFilter
                     ? "Try a project name or path."
-                    : "Start Claude Code or Codex and its project will appear here."}
+                    : "Start Claude Code, Codex, or Copilot and its project will appear here."}
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -134,6 +135,10 @@ export function ProjectsView({
               {filteredProjects.map((project, index) => {
                 const activeCount = activeCountByProject[project.dirName] || 0
                 const customName = projectNames[project.dirName]
+                const agentKind = agentKindFromDirName(project.dirName)
+                const providerLabel = agentKind === "claude"
+                  ? null
+                  : agentKind === "codex" ? "Codex" : "Copilot"
 
                 return (
                   <Fragment key={project.dirName}>
@@ -157,8 +162,15 @@ export function ProjectsView({
                             />
                           </span>
                           <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium">
-                              {customName || projectName(project.path)}
+                            <span className="flex items-center gap-2">
+                              <span className="truncate text-sm font-medium">
+                                {customName || projectName(project.path)}
+                              </span>
+                              {providerLabel && (
+                                <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[10px]">
+                                  {providerLabel}
+                                </Badge>
+                              )}
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
                               {shortPath(project.path)}

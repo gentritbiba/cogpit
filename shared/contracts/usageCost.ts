@@ -2,13 +2,14 @@
  * Raw API cost reporting contract.
  *
  * The server scans the provider CLIs' own on-disk transcripts
- * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`) and prices
+ * (`~/.claude/projects/**\/*.jsonl`, `~/.codex/sessions/**\/*.jsonl`, and
+ * `~/.copilot/session-state/<uuid>/events.jsonl`) and prices
  * the tokens against LiteLLM's public rate table, the same approach `ccusage`
  * and T3 Code take. `costUsd` is the raw API-equivalent price of the tokens —
  * not money actually spent; subscription plans bill separately.
  */
 
-export type UsageCostProvider = "claude" | "codex"
+export type UsageCostProvider = "claude" | "codex" | "copilot"
 
 /**
  * Why a bucket's cost is what it is.

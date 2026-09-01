@@ -11,6 +11,8 @@ vi.mock("../../helpers", () => ({
   dirname: vi.fn((path: string) => path.split("/").slice(0, -1).join("/")),
   formatCodexRolloutFileName: vi.fn((sessionId: string) => `2026/03/18/rollout-2026-03-18T10-00-00-${sessionId}.jsonl`),
   isCodexDirName: vi.fn(() => false),
+  isCopilotDirName: vi.fn(() => false),
+  isCopilotFilePath: vi.fn(() => false),
   isWithinDir: vi.fn(),
   mkdir: vi.fn(),
   readFile: vi.fn(),
@@ -31,19 +33,31 @@ vi.mock("../../helpers", () => ({
   stat: vi.fn(),
 }))
 
+vi.mock("../../copilot-runtime", () => ({
+  copilotRuntime: {
+    forkSession: vi.fn(),
+  },
+}))
+
 import {
   formatCodexRolloutFileName,
   isCodexDirName,
+  isCopilotDirName,
+  isCopilotFilePath,
   isWithinDir,
   mkdir,
   readFile,
   resolveSessionFilePath,
   writeFile,
 } from "../../helpers"
+import { copilotRuntime } from "../../copilot-runtime"
 import { registerClaudeNewRoutes } from "../../routes/claude-new"
 
 const mockedFormatCodexRolloutFileName = vi.mocked(formatCodexRolloutFileName)
 const mockedIsCodexDirName = vi.mocked(isCodexDirName)
+const mockedIsCopilotDirName = vi.mocked(isCopilotDirName)
+const mockedIsCopilotFilePath = vi.mocked(isCopilotFilePath)
+const mockedForkCopilotSession = vi.mocked(copilotRuntime.forkSession)
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedMkdir = vi.mocked(mkdir)
 const mockedReadFile = vi.mocked(readFile)
@@ -95,6 +109,9 @@ beforeEach(() => {
       `2026/03/18/rollout-2026-03-18T10-00-00-${sessionId}.jsonl`
   )
   mockedIsCodexDirName.mockReturnValue(false)
+  mockedIsCopilotDirName.mockReturnValue(false)
+  mockedIsCopilotFilePath.mockReturnValue(false)
+  mockedForkCopilotSession.mockResolvedValue({ sessionId: "forked-copilot" })
   mockedResolveSessionFilePath.mockImplementation(
     async (dirName: string, fileName: string) =>
       `/tmp/test-projects/${dirName}/${fileName}`
@@ -451,5 +468,100 @@ describe("POST /api/branch-session", () => {
       "2026/03/18/rollout-2026-03-18T10-00-00-new-uuid-1234.jsonl"
     )
     expect(data.branchedFrom).toBe("original-codex-session")
+  })
+
+  it("forks a complete Copilot session through the native API", async () => {
+    mockedIsCopilotDirName.mockReturnValue(true)
+    mockedIsCopilotFilePath.mockReturnValue(true)
+    mockedResolveSessionFilePath.mockResolvedValue(
+      "/tmp/copilot/session-state/11111111-1111-4111-8111-111111111111/events.jsonl" as never,
+    )
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({
+        type: "session.start",
+        id: "start-event",
+        data: { sessionId: "11111111-1111-4111-8111-111111111111" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-1",
+        data: { turnId: "turn-1", content: "First" },
+      }),
+    ].join("\n") as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "copilot__project",
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+      }),
+    )
+
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(mockedForkCopilotSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      {},
+    )
+    expect(JSON.parse(res.body)).toEqual({
+      dirName: "copilot__project",
+      fileName: "forked-copilot/events.jsonl",
+      sessionId: "forked-copilot",
+      branchedFrom: "11111111-1111-4111-8111-111111111111",
+    })
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("forks Copilot through the selected turn's next durable user event", async () => {
+    mockedIsCopilotDirName.mockReturnValue(true)
+    mockedIsCopilotFilePath.mockReturnValue(true)
+    mockedResolveSessionFilePath.mockResolvedValue(
+      "/tmp/copilot/session-state/11111111-1111-4111-8111-111111111111/events.jsonl" as never,
+    )
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-1",
+        data: { turnId: "turn-1", content: "First" },
+      }),
+      JSON.stringify({
+        type: "assistant.message",
+        id: "assistant-event-1",
+        data: { content: "Done" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-2",
+        data: { turnId: "turn-2", content: "Second" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "nested-user-event",
+        agentId: "subagent-1",
+        data: { turnId: "nested", content: "Nested" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-3",
+        data: { turnId: "turn-3", content: "Third" },
+      }),
+    ].join("\n") as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "copilot__project",
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+        turnIndex: 0,
+        turnUuid: "turn-2@user-event-2",
+      }),
+    )
+
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(mockedForkCopilotSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      { toEventId: "user-event-3" },
+    )
   })
 })

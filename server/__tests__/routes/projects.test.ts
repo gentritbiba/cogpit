@@ -4,6 +4,7 @@ import type { Stats, Dirent } from "node:fs"
 
 const mockGetActiveCodexTurnId = vi.hoisted(() => vi.fn())
 const mockGetCodexSessionInventory = vi.hoisted(() => vi.fn())
+const mockGetCopilotSessionInventory = vi.hoisted(() => vi.fn())
 const mockGetSessionPrSearchSnapshot = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
@@ -11,16 +12,22 @@ vi.mock("../../helpers", () => ({
     PROJECTS_DIR: "/tmp/test-projects",
   },
   CODEX_SESSIONS_DIR: "/tmp/codex-sessions",
+  COPILOT_SESSIONS_DIR: "/tmp/copilot-sessions",
   decodeCodexDirName: vi.fn(() => null),
+  decodeCopilotDirName: vi.fn((dirName: string) => dirName === "copilot__project" ? "/code/copilot" : null),
   encodeCodexDirName: vi.fn((cwd: string) => `codex__${cwd}`),
+  encodeCopilotDirName: vi.fn((cwd: string) => `copilot__${cwd}`),
   findJsonlPath: vi.fn(),
   isCodexDirName: vi.fn((dirName: string) => dirName.startsWith("codex__")),
+  isCopilotDirName: vi.fn((dirName: string) => dirName.startsWith("copilot__")),
+  isCopilotFilePath: vi.fn((filePath: string) => filePath.startsWith("/tmp/copilot-sessions/")),
   isWithinDir: vi.fn(),
   projectDirToReadableName: vi.fn(),
   shortNameFromPath: vi.fn((path: string) => path.replace(/\/+$/, "").split("/").at(-1) || path),
   getSessionMeta: vi.fn(),
   getSessionStatus: vi.fn().mockResolvedValue({ status: "idle" }),
   listCodexSessionFiles: vi.fn().mockResolvedValue([]),
+  listCopilotSessionFiles: vi.fn().mockResolvedValue([]),
   readdir: vi.fn(),
   readFile: vi.fn(),
   resolveSessionFilePath: vi.fn((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`),
@@ -40,12 +47,17 @@ vi.mock("../../lib/codexSessionInventory", () => ({
   getCodexSessionInventory: mockGetCodexSessionInventory,
 }))
 
+vi.mock("../../lib/copilotSessionInventory", () => ({
+  getCopilotSessionInventory: mockGetCopilotSessionInventory,
+}))
+
 vi.mock("../../lib/sessionPrSearchIndex", () => ({
   getSessionPrSearchSnapshot: mockGetSessionPrSearchSnapshot,
 }))
 
 import {
   findJsonlPath,
+  isCopilotFilePath,
   isWithinDir,
   projectDirToReadableName,
   getSessionMeta,
@@ -58,6 +70,7 @@ import {
 } from "../../helpers"
 
 const mockedFindJsonlPath = vi.mocked(findJsonlPath)
+const mockedIsCopilotFilePath = vi.mocked(isCopilotFilePath)
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedProjectDirToReadableName = vi.mocked(projectDirToReadableName)
 const mockedGetSessionMeta = vi.mocked(getSessionMeta)
@@ -77,6 +90,8 @@ import {
   makeSessionMeta,
 } from "../http-fixtures"
 import { registerProjectRoutes } from "../../routes/projects"
+
+const COPILOT_SESSION_ID = "68596e24-db5d-46a4-86fe-9d82425f36d7"
 
 function createMockReqRes(method: string, url: string) {
   let endData = ""
@@ -110,6 +125,7 @@ describe("project routes", () => {
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     mockedListCodexSessionFiles.mockResolvedValue([])
     mockGetCodexSessionInventory.mockResolvedValue([])
+    mockGetCopilotSessionInventory.mockResolvedValue([])
     mockGetSessionPrSearchSnapshot.mockResolvedValue({
       byFile: new Map(),
       pending: 0,
@@ -225,6 +241,34 @@ describe("project routes", () => {
           dirName: "codex__/code/codex-only",
           path: "/code/codex-only",
           shortName: "codex-only (Codex)",
+          sessionCount: 1,
+        }),
+      ])
+    })
+
+    it("groups Copilot sessions by their working directory", async () => {
+      const handler = getRouteHandler(handlers, "/api/projects")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedReaddir.mockResolvedValueOnce([] as unknown as Dirent[])
+      mockGetCopilotSessionInventory.mockResolvedValueOnce([{
+        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+        filePath: `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
+        mtimeMs: 3000,
+        size: 500,
+        sessionId: COPILOT_SESSION_ID,
+        cwd: "/code/copilot",
+        gitBranch: "main",
+        isSubagent: false,
+        parentSessionId: null,
+      }])
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          dirName: "copilot__/code/copilot",
+          path: "/code/copilot",
+          shortName: "copilot (Copilot)",
           sessionCount: 1,
         }),
       ])
@@ -400,6 +444,33 @@ describe("project routes", () => {
       expect(response.sessions[0].sessionId).toBe("bad")
       expect(response.sessions[0].fileName).toBe("bad.jsonl")
     })
+
+    it("keeps Copilot file names nested while returning the UUID as sessionId", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const { req, res, next } = createMockReqRes("GET", "copilot__project")
+      const filePath = `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`
+      mockGetCopilotSessionInventory.mockResolvedValueOnce([{
+        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+        filePath,
+        mtimeMs: 4000,
+        size: 700,
+        sessionId: COPILOT_SESSION_ID,
+        cwd: "/code/copilot",
+        gitBranch: "main",
+        isSubagent: false,
+        parentSessionId: null,
+      }])
+      mockedGetSessionMeta.mockRejectedValueOnce(new Error("incomplete write"))
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).sessions).toEqual([
+        expect.objectContaining({
+          fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+          sessionId: COPILOT_SESSION_ID,
+        }),
+      ])
+    })
   })
 
   // ── GET /api/sessions/:dirName/:fileName (serve file) ────────────────
@@ -452,6 +523,26 @@ describe("project routes", () => {
         "/tmp/codex-sessions/2026/07/15/rollout-sub-1.jsonl",
         "utf-8"
       )
+      expect(res._getStatus()).toBe(200)
+    })
+
+    it("serves a Copilot UUID events path from its provider root", async () => {
+      const handler = getRouteHandler(handlers, "/api/sessions/")
+      const filePath = `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`
+      const { req, res, next } = createMockReqRes(
+        "GET",
+        `copilot__project/${COPILOT_SESSION_ID}/events.jsonl`,
+      )
+      mockedResolveSessionFilePath.mockResolvedValueOnce(filePath)
+      mockedReadFile.mockResolvedValueOnce('{"type":"session.start"}\n' as unknown as Buffer)
+
+      await handler(req, res, next)
+
+      expect(mockedResolveSessionFilePath).toHaveBeenCalledWith(
+        "copilot__project",
+        `${COPILOT_SESSION_ID}/events.jsonl`,
+      )
+      expect(mockedReadFile).toHaveBeenCalledWith(filePath, "utf-8")
       expect(res._getStatus()).toBe(200)
     })
 
@@ -648,6 +739,47 @@ describe("project routes", () => {
       ])
     })
 
+    it("returns Copilot rows with nested file identity and a UUID sessionId", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedReaddir.mockResolvedValueOnce([] as unknown as Dirent[])
+      mockGetCopilotSessionInventory.mockResolvedValueOnce([{
+        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+        filePath: `/tmp/copilot-sessions/${COPILOT_SESSION_ID}/events.jsonl`,
+        mtimeMs: Date.now(),
+        size: 700,
+        sessionId: COPILOT_SESSION_ID,
+        cwd: "/code/copilot",
+        gitBranch: "main",
+        isSubagent: false,
+        parentSessionId: null,
+      }])
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
+        sessionId: "events",
+        version: "1.0.81",
+        gitBranch: "main",
+        model: "gpt-5",
+        slug: "",
+        cwd: "/code/copilot",
+        firstUserMessage: "hello",
+        lastUserMessage: "done",
+        timestamp: "",
+        turnCount: 1,
+        lineCount: 5,
+      }))
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          dirName: "copilot__/code/copilot",
+          fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+          sessionId: COPILOT_SESSION_ID,
+          projectShortName: "copilot (Copilot)",
+        }),
+      ])
+    })
+
     it("returns 500 on non-missing-directory top-level errors", async () => {
       const handler = getRouteHandler(handlers, "/api/active-sessions")
       const { req, res, next } = createMockReqRes("GET", "/")
@@ -705,6 +837,26 @@ describe("project routes", () => {
       const response = JSON.parse(res._getData())
       expect(response.dirName).toBe("proj-b")
       expect(response.fileName).toBe("abc-123.jsonl")
+    })
+
+    it("returns a forward-slash filename for Copilot sessions", async () => {
+      const handler = getRouteHandler(handlers, "/api/find-session/")
+      const { req, res, next } = createMockReqRes("GET", COPILOT_SESSION_ID)
+      mockedFindJsonlPath.mockResolvedValueOnce(
+        `C:\\Users\\tester\\.copilot\\session-state\\${COPILOT_SESSION_ID}\\events.jsonl`,
+      )
+      mockedIsCopilotFilePath.mockReturnValueOnce(true)
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
+        sessionId: COPILOT_SESSION_ID,
+        cwd: "/code/copilot",
+      }))
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual({
+        dirName: "copilot__/code/copilot",
+        fileName: `${COPILOT_SESSION_ID}/events.jsonl`,
+      })
     })
 
     it("returns 404 when session not found", async () => {

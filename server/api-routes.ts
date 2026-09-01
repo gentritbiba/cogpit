@@ -3,6 +3,8 @@ import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
 import { registerAgentPromptRoutes } from "./routes/agent-prompts"
 import { registerAskUserRoutes } from "./routes/ask-user"
+import { registerCopilotHistoryRoutes } from "./routes/copilot-history"
+import { registerCopilotRuntimeRoutes } from "./routes/copilot-runtime"
 import { registerClaudeManageRoutes } from "./routes/claude-manage"
 import { registerClaudeNewRoutes } from "./routes/claude-new"
 import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
@@ -121,10 +123,12 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("permissions", registerPermissionRoutes),
   apiRoute("mission-control", registerMissionControlRoutes),
   apiRoute("ask-user", registerAskUserRoutes),
+  apiRoute("copilot-history", registerCopilotHistoryRoutes),
   apiRoute("agent-prompts", registerAgentPromptRoutes),
   apiRoute("models", registerModelRoutes),
   apiRoute("codex-runtime", registerCodexRuntimeRoutes),
   apiRoute("claude-runtime", registerClaudeRuntimeRoutes),
+  apiRoute("copilot-runtime", registerCopilotRuntimeRoutes),
   apiRoute("provider-updates", registerProviderUpdateRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 

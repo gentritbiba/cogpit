@@ -21,6 +21,7 @@ export function GoalProvider({ agentKind, session, onSendCommand, children }: Go
   if (agentKind === "codex") {
     return <CodexGoalProvider threadId={session.sessionId}>{children}</CodexGoalProvider>
   }
+  if (agentKind === "copilot") return children
   return (
     <ClaudeGoalProvider session={session} onSendCommand={onSendCommand}>
       {children}

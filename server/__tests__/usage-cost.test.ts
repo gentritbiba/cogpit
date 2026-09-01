@@ -8,9 +8,12 @@ import {
 import { dedupeWithinFile } from "../lib/usageCost/reader"
 import {
   initialCodexScanState,
+  initialCopilotScanState,
   mightCarryUsage,
   parseClaudeUsageLine,
   parseCodexUsageLine,
+  parseCopilotUsageLine,
+  parseCopilotUsageMetrics,
   type UsageCostRecord,
 } from "../lib/usageCost/transcripts"
 import {
@@ -426,6 +429,127 @@ describe("parseCodexUsageLine", () => {
         state,
       ),
     ).not.toBeNull()
+  })
+})
+
+describe("parseCopilotUsageLine", () => {
+  function event(type: string, data: Record<string, unknown>, timestamp: string): string {
+    return JSON.stringify({ type, data, timestamp, id: crypto.randomUUID(), parentId: null })
+  }
+
+  function shutdown(
+    timestamp: string,
+    modelMetrics: Record<string, unknown>,
+  ): string {
+    return event("session.shutdown", { shutdownType: "routine", modelMetrics }, timestamp)
+  }
+
+  it("emits complete per-model shutdown usage", () => {
+    const state = initialCopilotScanState()
+    parseCopilotUsageLine(
+      event("session.start", { sessionId: "copilot-session" }, "2026-08-19T10:00:00.000Z"),
+      state,
+    )
+    const records = parseCopilotUsageLine(
+      shutdown("2026-08-19T10:01:00.000Z", {
+        "claude-sonnet-5": {
+          usage: {
+            inputTokens: 71_282,
+            outputTokens: 345,
+            cacheReadTokens: 35_495,
+            cacheWriteTokens: 35_783,
+            reasoningTokens: 31,
+          },
+        },
+        "gpt-5.4": {
+          usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 40 },
+        },
+      }),
+      state,
+    )
+
+    expect(records).toHaveLength(2)
+    expect(records[0]).toMatchObject({
+      provider: "copilot",
+      model: "claude-sonnet-5",
+      sessionId: "copilot-session",
+      totals: {
+        uncachedInputTokens: 4,
+        cachedInputTokens: 35_495,
+        cacheCreationTokens: 35_783,
+        outputTokens: 345,
+        reasoningTokens: 31,
+      },
+    })
+    expect(records[1].totals.uncachedInputTokens).toBe(60)
+  })
+
+  it("counts only growth when a resumed session writes another cumulative snapshot", () => {
+    const state = initialCopilotScanState("copilot-session")
+    const metric = (inputTokens: number, outputTokens: number) => ({
+      "gpt-5.4": { usage: { inputTokens, outputTokens, cacheReadTokens: 50 } },
+    })
+
+    expect(parseCopilotUsageLine(
+      shutdown("2026-08-19T10:01:00.000Z", metric(100, 10)),
+      state,
+    )[0].totals).toMatchObject({ uncachedInputTokens: 50, cachedInputTokens: 50, outputTokens: 10 })
+    expect(parseCopilotUsageLine(
+      shutdown("2026-08-19T10:02:00.000Z", metric(100, 10)),
+      state,
+    )).toEqual([])
+    expect(parseCopilotUsageLine(
+      shutdown("2026-08-20T10:02:00.000Z", metric(160, 25)),
+      state,
+    )[0].totals).toMatchObject({ uncachedInputTokens: 60, cachedInputTokens: 0, outputTokens: 15 })
+  })
+
+  it("uses the same cumulative delta for active runtime metrics", () => {
+    const state = initialCopilotScanState("copilot-session")
+    state.lastUsageByModel.set("gpt-5.4", {
+      uncachedInputTokens: 50,
+      cachedInputTokens: 50,
+      cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
+      outputTokens: 10,
+      reasoningTokens: 2,
+    })
+
+    const [record] = parseCopilotUsageMetrics({
+      modelMetrics: {
+        "gpt-5.4": {
+          usage: {
+            inputTokens: 160,
+            outputTokens: 25,
+            cacheReadTokens: 50,
+            reasoningTokens: 5,
+          },
+        },
+      },
+    }, state, Date.parse("2026-08-19T10:02:00.000Z"))
+
+    expect(record.totals).toMatchObject({
+      uncachedInputTokens: 60,
+      cachedInputTokens: 0,
+      outputTokens: 15,
+      reasoningTokens: 3,
+    })
+  })
+
+  it("ignores malformed, nested, and zero-token shutdown metrics", () => {
+    const state = initialCopilotScanState("copilot-session")
+    expect(parseCopilotUsageLine("not json", state)).toEqual([])
+    expect(parseCopilotUsageLine(JSON.stringify({
+      type: "session.shutdown",
+      agentId: "subagent",
+      timestamp: "2026-08-19T10:00:00.000Z",
+      data: { modelMetrics: { model: { usage: { inputTokens: 10 } } } },
+    }), state)).toEqual([])
+    expect(parseCopilotUsageLine(
+      shutdown("2026-08-19T10:00:00.000Z", { model: { usage: {} } }),
+      state,
+    )).toEqual([])
+    expect(mightCarryUsage(shutdown("2026-08-19T10:00:00.000Z", {}), "copilot")).toBe(true)
   })
 })
 

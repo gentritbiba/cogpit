@@ -3,15 +3,15 @@ import type { UseFn } from "../../http"
 import { sendJson } from "../../http"
 import { activeProcesses, persistentSessions, spawn } from "../../helpers"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
+import type { AgentKind } from "../../../shared/providers/types"
 
 export interface AgentProcessInfo {
   pid: number
   memMB: number
   cpu: number
   sessionId: string | null
-  agentKind: "claude" | "codex"
+  agentKind: AgentKind
   tty: string
-  args: string
   startTime: string
 }
 
@@ -43,6 +43,15 @@ function findSessionId(
     ?? null
 }
 
+function isCopilotProcess(command: string): boolean {
+  const executableMatch = command.trimStart().match(
+    /^(?:"([^"]+)"(?=\s|$)|'([^']+)'(?=\s|$)|(\S+))/,
+  )
+  const executable = executableMatch?.[1] ?? executableMatch?.[2] ?? executableMatch?.[3] ?? ""
+  const fileName = executable.split(/[\\/]/).pop() ?? ""
+  return /^copilot(?:\.exe)?$/i.test(fileName)
+}
+
 function parseWindowsProcesses(
   stdout: string,
   trackedByPid: ReadonlyMap<number, string>,
@@ -54,7 +63,8 @@ function parseWindowsProcesses(
 
     for (const item of items) {
       const command = item?.CommandLine || ""
-      if (!command.includes("claude") && !command.includes("codex")) continue
+      const isCopilot = isCopilotProcess(command)
+      if (!command.includes("claude") && !command.includes("codex") && !isCopilot) continue
 
       const pid = item.ProcessId
       processes.push({
@@ -62,9 +72,10 @@ function parseWindowsProcesses(
         memMB: Math.round((item.WorkingSetSize || 0) / 1024 / 1024),
         cpu: 0,
         sessionId: findSessionId(command, pid, trackedByPid),
-        agentKind: command.includes("codex") ? "codex" : "claude",
+        agentKind: isCopilot
+          ? "copilot"
+          : command.includes("codex") ? "codex" : "claude",
         tty: "??",
-        args: command,
         startTime: "",
       })
     }
@@ -83,8 +94,7 @@ function parsePosixProcesses(
   const processes: AgentProcessInfo[] = []
 
   for (const line of stdout.split("\n")) {
-    if ((!line.includes("claude") && !line.includes("codex"))
-      || line.includes("grep")
+    if (line.includes("grep")
       || line.includes("node ")
       || line.includes("esbuild")
       || line.includes("/bin/zsh")) {
@@ -96,14 +106,18 @@ function parsePosixProcesses(
 
     const pid = Number.parseInt(columns[1], 10)
     const args = columns.slice(10).join(" ")
+    const isCopilot = isCopilotProcess(args)
+    if (!line.includes("claude") && !line.includes("codex") && !isCopilot) continue
+
     processes.push({
       pid,
       memMB: Math.round((Number.parseInt(columns[5], 10) || 0) / 1024),
       cpu: Number.parseFloat(columns[2]) || 0,
       sessionId: findSessionId(args, pid, trackedByPid),
-      agentKind: args.includes("codex") ? "codex" : "claude",
+      agentKind: isCopilot
+        ? "copilot"
+        : args.includes("codex") ? "codex" : "claude",
       tty: columns[6] || "??",
-      args,
       startTime: columns[8] || "",
     })
   }
@@ -134,7 +148,7 @@ export function registerRunningProcessesRoute(use: UseFn): void {
       ? spawn("powershell", [
           "-NoProfile",
           "-Command",
-          "Get-CimInstance Win32_Process -Filter \"name like '%claude%' or name like '%codex%'\" | Select-Object ProcessId, WorkingSetSize, CommandLine | ConvertTo-Json -Compress",
+          "Get-CimInstance Win32_Process -Filter \"name like '%claude%' or name like '%codex%' or name = 'copilot.exe'\" | Select-Object ProcessId, WorkingSetSize, CommandLine | ConvertTo-Json -Compress",
         ])
       : spawn("ps", ["aux"])
     let stdout = ""

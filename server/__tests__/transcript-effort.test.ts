@@ -77,6 +77,21 @@ describe("readTranscriptEffort", () => {
     expect(await readTranscriptEffort(file)).toBe("max")
   })
 
+  it("reads the latest Copilot reasoning effort from a model change", async () => {
+    const file = await writeTranscript("copilot.jsonl", [
+      {
+        type: "session.start",
+        data: { sessionId: "copilot-1", reasoningEffort: "medium" },
+      },
+      {
+        type: "session.model_change",
+        data: { newModel: "gpt-5.4", reasoningEffort: "high" },
+      },
+    ])
+
+    expect(await readTranscriptEffort(file)).toBe("high")
+  })
+
   it("ignores an empty effort string", async () => {
     const file = await writeTranscript("empty-effort.jsonl", [claudeAssistant("")])
 

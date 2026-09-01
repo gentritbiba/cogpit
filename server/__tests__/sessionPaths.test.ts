@@ -7,6 +7,7 @@ import { dirname, join, resolve, sep } from "node:path"
 
 let fixtureRoot: string
 let originalCodexHome: string | undefined
+let originalCopilotHome: string | undefined
 let sessionPaths: typeof import("../sessionPaths")
 let helpers: typeof import("../helpers")
 let pathSafety: typeof import("../pathSafety")
@@ -14,7 +15,9 @@ let pathSafety: typeof import("../pathSafety")
 beforeAll(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "cogpit-session-paths-"))
   originalCodexHome = process.env.CODEX_HOME
+  originalCopilotHome = process.env.COPILOT_HOME
   process.env.CODEX_HOME = join(fixtureRoot, "codex-home")
+  process.env.COPILOT_HOME = join(fixtureRoot, "copilot-home")
   vi.resetModules()
 
   sessionPaths = await import("../sessionPaths")
@@ -28,12 +31,15 @@ beforeAll(async () => {
   await Promise.all([
     mkdir(sessionPaths.dirs.PROJECTS_DIR, { recursive: true }),
     mkdir(sessionPaths.CODEX_SESSIONS_DIR, { recursive: true }),
+    mkdir(sessionPaths.COPILOT_SESSIONS_DIR, { recursive: true }),
   ])
 })
 
 afterAll(async () => {
   if (originalCodexHome === undefined) delete process.env.CODEX_HOME
   else process.env.CODEX_HOME = originalCodexHome
+  if (originalCopilotHome === undefined) delete process.env.COPILOT_HOME
+  else process.env.COPILOT_HOME = originalCopilotHome
   await rm(fixtureRoot, { recursive: true, force: true })
   vi.resetModules()
 })
@@ -42,6 +48,7 @@ describe("sessionPaths", () => {
   it("keeps helpers compatibility exports on the extracted module identities", () => {
     expect(helpers.dirs).toBe(sessionPaths.dirs)
     expect(helpers.listCodexSessionFiles).toBe(sessionPaths.listCodexSessionFiles)
+    expect(helpers.listCopilotSessionFiles).toBe(sessionPaths.listCopilotSessionFiles)
     expect(helpers.resolveSessionFilePath).toBe(sessionPaths.resolveSessionFilePath)
     expect(helpers.findJsonlPath).toBe(sessionPaths.findJsonlPath)
     expect(helpers.isWithinDir).toBe(pathSafety.isWithinDir)
@@ -60,6 +67,18 @@ describe("sessionPaths", () => {
       "thread-123",
       new Date(2026, 2, 18, 10, 11, 12),
     )).toBe("2026/03/18/rollout-2026-03-18T10-11-12-thread-123.jsonl")
+  })
+
+  it("preserves Copilot directory encoding and storage paths", () => {
+    const cwd = "/tmp/a project/ünicode"
+    const encoded = sessionPaths.encodeCopilotDirName(cwd)
+
+    expect(encoded).toMatch(/^copilot__[A-Za-z0-9_-]+$/)
+    expect(sessionPaths.decodeCopilotDirName(encoded)).toBe(cwd)
+    expect(sessionPaths.decodeCopilotDirName("not-copilot")).toBeNull()
+    expect(sessionPaths.COPILOT_HOME_DIR).toBe(resolve(fixtureRoot, "copilot-home"))
+    expect(sessionPaths.COPILOT_SESSIONS_DIR)
+      .toBe(join(sessionPaths.COPILOT_HOME_DIR, "session-state"))
   })
 
   it("resolves Claude and Codex files without allowing traversal outside their roots", async () => {
@@ -84,6 +103,26 @@ describe("sessionPaths", () => {
     await expect(sessionPaths.resolveSessionFilePath("project-a", "../../outside.jsonl"))
       .resolves.toBeNull()
     await expect(sessionPaths.resolveSessionFilePath(codexDirName, "../../outside.jsonl"))
+      .resolves.toBeNull()
+  })
+
+  it("resolves only canonical Copilot UUID event paths", async () => {
+    const sessionId = "68596e24-db5d-46a4-86fe-9d82425f36d7"
+    const dirName = sessionPaths.encodeCopilotDirName("/work/project")
+    const sessionDir = join(sessionPaths.COPILOT_SESSIONS_DIR, sessionId)
+    const filePath = join(sessionDir, "events.jsonl")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(filePath, '{}\n')
+
+    await expect(sessionPaths.resolveSessionFilePath(dirName, `${sessionId}/events.jsonl`))
+      .resolves.toBe(filePath)
+    await expect(sessionPaths.resolveSessionFilePath(dirName, `${sessionId}.jsonl`))
+      .resolves.toBeNull()
+    await expect(sessionPaths.resolveSessionFilePath(dirName, "../../outside/events.jsonl"))
+      .resolves.toBeNull()
+    await expect(sessionPaths.resolveSessionFilePath(dirName, `${sessionId}/../events.jsonl`))
+      .resolves.toBeNull()
+    await expect(sessionPaths.resolveSessionFilePath(dirName, `${sessionId}\\events.jsonl`))
       .resolves.toBeNull()
   })
 
@@ -170,6 +209,47 @@ describe("sessionPaths", () => {
     expect(files.some((file) => file.fileName.endsWith("ignored.txt"))).toBe(false)
   })
 
+  it("discovers only canonical Copilot UUID event files", async () => {
+    const sessionId = "019f85cf-0ac3-7233-84f9-ac45a79d40e9"
+    const sessionDir = join(sessionPaths.COPILOT_SESSIONS_DIR, sessionId)
+    const eventPath = join(sessionDir, "events.jsonl")
+    const invalidDir = join(sessionPaths.COPILOT_SESSIONS_DIR, "not-a-session")
+    await Promise.all([
+      mkdir(sessionDir, { recursive: true }),
+      mkdir(invalidDir, { recursive: true }),
+    ])
+    await Promise.all([
+      writeFile(eventPath, '{"type":"session.start"}\n'),
+      writeFile(join(invalidDir, "events.jsonl"), '{}\n'),
+    ])
+
+    const files = await sessionPaths.listCopilotSessionFiles()
+
+    expect(files).toContainEqual(expect.objectContaining({
+      filePath: eventPath,
+      fileName: `${sessionId}/events.jsonl`,
+    }))
+    expect(files.some((file) => file.fileName.startsWith("not-a-session/"))).toBe(false)
+  })
+
+  it("rejects Copilot event symlinks that escape the session directory", async () => {
+    const sessionId = "9b2a3af0-9728-49a7-8f6f-f3bc66a2de22"
+    const sessionDir = join(sessionPaths.COPILOT_SESSIONS_DIR, sessionId)
+    const outsideFile = join(fixtureRoot, "copilot-outside.jsonl")
+    const eventPath = join(sessionDir, "events.jsonl")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(outsideFile, '{}\n')
+    await symlink(outsideFile, eventPath)
+
+    await expect(sessionPaths.resolveSessionFilePath(
+      sessionPaths.encodeCopilotDirName("/work/project"),
+      `${sessionId}/events.jsonl`,
+    )).resolves.toBeNull()
+    expect((await sessionPaths.listCopilotSessionFiles()).some(
+      (file) => file.fileName === `${sessionId}/events.jsonl`,
+    )).toBe(false)
+  })
+
   it("searches Claude first and falls back to Codex session IDs", async () => {
     const claudeProject = join(sessionPaths.dirs.PROJECTS_DIR, "project-b")
     const claudePath = join(claudeProject, "shared-id.jsonl")
@@ -191,6 +271,19 @@ describe("sessionPaths", () => {
     await expect(sessionPaths.findJsonlPath("shared-id")).resolves.toBe(claudePath)
     await expect(sessionPaths.findJsonlPath("codex-only")).resolves.toBe(codexOnlyPath)
     await expect(sessionPaths.findJsonlPath("missing-id")).resolves.toBeNull()
+  })
+
+  it("falls back to canonical Copilot UUID event files", async () => {
+    const sessionId = "e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3"
+    const sessionDir = join(sessionPaths.COPILOT_SESSIONS_DIR, sessionId)
+    const eventPath = join(sessionDir, "events.jsonl")
+    await mkdir(sessionDir, { recursive: true })
+    await writeFile(eventPath, '{}\n')
+
+    await expect(sessionPaths.findJsonlPath(sessionId)).resolves.toBe(eventPath)
+    await expect(sessionPaths.findJsonlPath("../e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3"))
+      .resolves.toBeNull()
+    await expect(sessionPaths.findJsonlPath("not-a-uuid")).resolves.toBeNull()
   })
 
   it("finds the newest untracked Codex session for the requested working directory", async () => {
@@ -242,5 +335,19 @@ describe("sessionPaths", () => {
     expect(sessionPaths.getAgentKindFromSessionPath(codexPath)).toBe("codex")
     expect(sessionPaths.getAgentKindFromSessionPath(join(fixtureRoot, "claude.jsonl"))).toBe("claude")
     expect(sessionPaths.getAgentKindFromSessionPath(null)).toBe("claude")
+  })
+
+  it("derives provider kind only from paths inside the Copilot sessions root", () => {
+    const sessionPath = join(
+      sessionPaths.COPILOT_SESSIONS_DIR,
+      "68596e24-db5d-46a4-86fe-9d82425f36d7",
+      "events.jsonl",
+    )
+    const siblingPath = join(sessionPaths.COPILOT_HOME_DIR, "other", "events.jsonl")
+
+    expect(sessionPaths.isCopilotFilePath(sessionPath)).toBe(true)
+    expect(sessionPaths.isCopilotFilePath(sessionPaths.COPILOT_SESSIONS_DIR)).toBe(false)
+    expect(sessionPaths.isCopilotFilePath(siblingPath)).toBe(false)
+    expect(sessionPaths.getAgentKindFromSessionPath(sessionPath)).toBe("copilot")
   })
 })

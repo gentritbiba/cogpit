@@ -1,4 +1,5 @@
 import type { PermissionsConfig } from "./types"
+import { decodeBase64DirName, encodeBase64DirName } from "./base64DirName"
 
 export const CODEX_PREFIX = "codex__"
 
@@ -12,23 +13,12 @@ export function isCodexDirName(dirName: string | null | undefined): boolean {
  * Compatible with both browser (btoa) and Node.js 18+ (globalThis.btoa).
  */
 export function encodeCodexDirName(cwd: string): string {
-  const bytes = new TextEncoder().encode(cwd)
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return `${CODEX_PREFIX}${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`
+  return encodeBase64DirName(CODEX_PREFIX, cwd)
 }
 
 /** Decode a Codex dirName back to a filesystem path, or null when invalid. */
 export function decodeCodexDirName(dirName: string): string | null {
-  if (!isCodexDirName(dirName)) return null
-  try {
-    const b64 = dirName.slice(CODEX_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/")
-    const binary = atob(b64)
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return null
-  }
+  return decodeBase64DirName(CODEX_PREFIX, dirName)
 }
 
 export function buildCodexPermArgs(permissions?: PermissionsConfig): string[] {

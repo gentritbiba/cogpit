@@ -39,10 +39,10 @@ export const AgentPanel = memo(function AgentPanel({
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
 
+  const { session, sessionSource, actions } = useSessionContext()
+  const copilotSession = session?.agentKind === "copilot"
   const { enrichedMessages: displayMessages, isLoading, unavailable } =
-    useSubagentContent(messages, lazyLoad && isOpen)
-
-  const { sessionSource, actions } = useSessionContext()
+    useSubagentContent(messages, lazyLoad && isOpen && !copilotSession)
 
   // Parent session id used to construct sub-agent file paths. Mirrors the
   // logic in AgentsPanel (sidebar) so navigation is consistent.
@@ -184,7 +184,7 @@ export const AgentPanel = memo(function AgentPanel({
             const stats = statsByAgent.get(id)
             // Opening a sub-agent chat is a session load, which a guest
             // cannot perform, so the button would do nothing at all.
-            const canNavigate = !!sessionSource && !!parentSessionId && !unavailable
+            const canNavigate = !copilotSession && !!sessionSource && !!parentSessionId && !unavailable
             return (
               <AgentReturnItem
                 key={id}

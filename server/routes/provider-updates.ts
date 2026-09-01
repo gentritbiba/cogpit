@@ -30,7 +30,7 @@ export function registerProviderUpdateRoutes(use: UseFn) {
 
     withJsonBody<{ provider?: unknown }>(req, res, async (body) => {
       if (!isProviderUpdateId(body?.provider)) {
-        sendJson(res, 400, { error: "provider must be \"claude\" or \"codex\"" })
+        sendJson(res, 400, { error: "provider must be \"claude\", \"codex\", or \"copilot\"" })
         return
       }
       try {

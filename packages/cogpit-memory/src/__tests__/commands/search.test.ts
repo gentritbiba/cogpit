@@ -8,7 +8,13 @@ import { SearchIndex } from "../../lib/search-index"
 // Use a mutable object so updates in beforeEach are visible through the
 // captured import reference.
 let tmpDir: string
-const mockDirs = { PROJECTS_DIR: "", TEAMS_DIR: "", TASKS_DIR: "" }
+const mockDirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  CODEX_SESSIONS_DIR: "",
+  COPILOT_SESSIONS_DIR: "",
+}
 const mockDbPath = { value: "" }
 
 mock.module("../../lib/dirs", () => ({
@@ -141,6 +147,30 @@ function writeSessionWithToolCalls(
   return filePath
 }
 
+function writeCopilotSession(
+  sessionId: string,
+  userMessage: string,
+  cwd = "/workspace/copilot",
+): string {
+  const sessionDir = join(mockDirs.COPILOT_SESSIONS_DIR, sessionId)
+  mkdirSync(sessionDir, { recursive: true })
+  const timestamp = new Date().toISOString()
+  const filePath = join(sessionDir, "events.jsonl")
+  writeFileSync(filePath, [
+    JSON.stringify({
+      type: "session.start",
+      data: { sessionId, context: { cwd } },
+      timestamp,
+    }),
+    JSON.stringify({
+      type: "user.message",
+      data: { content: userMessage },
+      timestamp,
+    }),
+  ].join("\n"))
+  return filePath
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("search command", () => {
@@ -151,6 +181,8 @@ describe("search command", () => {
     mockDirs.PROJECTS_DIR = projectsDir
     mockDirs.TEAMS_DIR = join(mockDirs.PROJECTS_DIR, "..", "teams")
     mockDirs.TASKS_DIR = join(mockDirs.PROJECTS_DIR, "..", "tasks")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
     mockDbPath.value = join(mockDirs.PROJECTS_DIR, "..", "nonexistent-search-index.db")
   })
 
@@ -294,6 +326,29 @@ describe("search command", () => {
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(2)
+    })
+
+    it("searches a live Copilot session missing from the index", async () => {
+      const sessionId = "22222222-2222-4222-8222-222222222222"
+      writeCopilotSession(sessionId, "Find the Copilot-specific needle")
+
+      const result = await searchSessions("specific needle", { sessionId })
+      const response = result as { results: Array<{ sessionId: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId }),
+      ])
+    })
+
+    it("discovers Copilot sessions during a global raw scan", async () => {
+      rmSync(mockDirs.PROJECTS_DIR, { recursive: true, force: true })
+      const sessionId = "33333333-3333-4333-8333-333333333333"
+      writeCopilotSession(sessionId, "Global Copilot discovery needle")
+
+      const result = await searchSessions("discovery needle", { maxAge: "1d" }, null)
+      const response = result as { results: Array<{ sessionId: string; cwd: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId, cwd: "/workspace/copilot" }),
+      ])
     })
 
     it("respects the limit parameter", async () => {
@@ -469,6 +524,26 @@ describe("search command", () => {
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(1)
       expect(resp.results[0].sessionId).toBe("target-sess")
+
+      index.close()
+    })
+
+    it("reads Copilot cwd from session.start context", async () => {
+      const dbPath = join(tmpDir, "test-search.db")
+      const index = new SearchIndex(dbPath)
+      const sessionId = "44444444-4444-4444-8444-444444444444"
+      const sessionFile = writeCopilotSession(
+        sessionId,
+        "indexed Copilot context needle",
+        "/workspace/copilot-context",
+      )
+      index.indexFile(sessionFile, sessionId)
+
+      const result = await searchSessions("context needle", {}, index)
+      const response = result as { results: Array<{ sessionId: string; cwd: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId, cwd: "/workspace/copilot-context" }),
+      ])
 
       index.close()
     })

@@ -6,7 +6,7 @@ import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import {
   findClaudeProjectDirNameForCwd,
-  isCodexDirName,
+  inferSessionSourceKind,
   projectDirNameForAgent,
   projectDirNameForNewFolder,
   type AgentKind,
@@ -29,8 +29,8 @@ interface UseProjectSessionLaunchOptions {
 
 /**
  * Owns lazy new-session launch state and provider-aware project resolution.
- * A Codex project remembers its matching Claude directory so the pending
- * composer can switch agents without losing the real cwd.
+ * External-provider projects remember their matching Claude directory so the
+ * pending composer can switch agents without losing the real cwd.
  */
 export function useProjectSessionLaunch({
   permissionsConfig,
@@ -106,14 +106,14 @@ export function useProjectSessionLaunch({
       return
     }
 
-    const startsInCodex = isCodexDirName(dirName)
-    const claudeDirName = startsInCodex
+    const startsInExternalProvider = inferSessionSourceKind(dirName) !== "claude"
+    const claudeDirName = startsInExternalProvider
       ? await resolveClaudeProjectDirName(normalizedCwd)
       : projectDirNameForNewFolder(normalizedCwd, "claude")
 
     setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
     beginNewSession(
-      startsInCodex || !claudeDirName ? dirName : claudeDirName,
+      startsInExternalProvider || !claudeDirName ? dirName : claudeDirName,
       normalizedCwd,
     )
   }, [beginNewSession, resolveClaudeProjectDirName])

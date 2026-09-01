@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Mock } from "vitest"
 import type { Middleware, UseFn } from "../../helpers"
 import type { PendingApproval } from "../../codex-app-server"
+import type { CopilotPendingExitPlan, CopilotPendingPermission } from "../../copilot-runtime"
 
 const {
   mockPersistentSessions,
@@ -41,8 +42,10 @@ vi.mock("../../sdk-session", () => ({
 
 import {
   normalizeCodexApproval,
+  normalizeCopilotPermission,
   registerPermissionRoutes,
   type CodexApprovalClient,
+  type CopilotPermissionClient,
 } from "../../routes/permissions"
 
 interface FakeResponse {
@@ -88,12 +91,53 @@ function makeCodex(pending: PendingApproval[] = []): CodexApprovalClient {
   }
 }
 
-function register(codex: CodexApprovalClient): Middleware {
+function copilotPermission(
+  overrides: Partial<CopilotPendingPermission> = {},
+): CopilotPendingPermission {
+  return {
+    sessionId: "copilot-1",
+    requestId: "permission-1",
+    requestedAt: 456,
+    request: {
+      kind: "commands",
+      fullCommandText: "bun test",
+      intention: "Run the test suite",
+      toolCallId: "tool-1",
+      canOfferSessionApproval: true,
+    },
+    ...overrides,
+  }
+}
+
+function makeCopilot(
+  pending: CopilotPendingPermission[] = [],
+  plans: CopilotPendingExitPlan[] = [],
+): CopilotPermissionClient {
+  return {
+    getPendingPermissions: vi.fn((sessionId?: string) =>
+      sessionId === undefined
+        ? pending
+        : pending.filter((item) => item.sessionId === sessionId),
+    ),
+    respondToPermission: vi.fn().mockResolvedValue(true),
+    getPendingExitPlans: vi.fn((sessionId?: string) =>
+      sessionId === undefined
+        ? plans
+        : plans.filter((item) => item.sessionId === sessionId),
+    ),
+    answerExitPlan: vi.fn(),
+  }
+}
+
+function register(
+  codex: CodexApprovalClient,
+  copilot: CopilotPermissionClient = makeCopilot(),
+): Middleware {
   let handler: Middleware | undefined
   const use: UseFn = (_path, registered) => {
     handler = registered
   }
-  registerPermissionRoutes(use, codex)
+  registerPermissionRoutes(use, codex, copilot)
   if (!handler) throw new Error("Permission route was not registered")
   return handler
 }
@@ -364,7 +408,7 @@ describe("Codex permission fallback", () => {
       method: "GET",
       url: "/thread-1",
     })
-    expect(listed.response.json()).toEqual({ permissions: [sdkRequest] })
+    expect(listed.response.json()).toEqual({ permissions: [sdkRequest], plan: null })
 
     const responded = await invoke(register(codex), {
       method: "POST",
@@ -397,6 +441,261 @@ describe("Codex permission fallback", () => {
   })
 })
 
+describe("Copilot permissions", () => {
+  it("normalizes command and file prompts for the existing UI", () => {
+    expect(normalizeCopilotPermission(copilotPermission())).toMatchObject({
+      requestId: "permission-1",
+      toolName: "Bash",
+      toolUseId: "tool-1",
+      input: { command: "bun test" },
+      title: "Run command",
+      description: "Run the test suite",
+      timestamp: 456,
+      availableDecisions: ["allow", "allow_always", "deny"],
+    })
+    expect(normalizeCopilotPermission(copilotPermission({
+      request: {
+        kind: "write",
+        fileName: "/project/output.ts",
+        intention: "Update output",
+        diff: "+export const done = true",
+        canOfferSessionApproval: false,
+      },
+    }))).toMatchObject({
+      toolName: "Write",
+      input: {
+        file_path: "/project/output.ts",
+        diff: "+export const done = true",
+      },
+      blockedPath: "/project/output.ts",
+      availableDecisions: ["allow", "deny"],
+    })
+  })
+
+  it.each([
+    ["commands with session approval", { kind: "commands", canOfferSessionApproval: true }, true],
+    ["commands without session approval", { kind: "commands", canOfferSessionApproval: false }, false],
+    ["commands without a capability", { kind: "commands" }, false],
+    ["shell with session approval", { kind: "shell", canOfferSessionApproval: true }, true],
+    ["write with session approval", { kind: "write", canOfferSessionApproval: true }, true],
+    ["factory with persistent approval", { kind: "factory", canPersistApproval: true }, true],
+    ["factory without persistent approval", { kind: "factory", canPersistApproval: false }, false],
+    ["MCP with its legacy default", { kind: "mcp" }, true],
+    ["MCP with server-wide approval disabled", { kind: "mcp", canOfferServerWideApproval: false }, false],
+    ["read without an approval capability", { kind: "read" }, false],
+    ["an unrelated kind with a generic capability", { kind: "custom-tool", canOfferSessionApproval: true }, false],
+  ])("gates always-allow for %s", (_label, request, expected) => {
+    const decisions = normalizeCopilotPermission(copilotPermission({ request }))
+      .availableDecisions
+    expect(decisions.includes("allow_always")).toBe(expected)
+  })
+
+  it("does not offer always-allow when managed policy requires approval", () => {
+    const decisions = normalizeCopilotPermission(copilotPermission({
+      request: {
+        kind: "commands",
+        canOfferSessionApproval: true,
+        managedApprovalRequired: true,
+      },
+    })).availableDecisions
+
+    expect(decisions).toEqual(["allow", "deny"])
+  })
+
+  it("makes sandbox-bypass risk explicit", () => {
+    expect(normalizeCopilotPermission(copilotPermission({
+      request: {
+        kind: "read",
+        path: "/outside/project/secrets.txt",
+        intention: "Inspect a file",
+        warning: "This read bypasses the project sandbox",
+        requestSandboxBypass: true,
+        requestSandboxBypassReason: "The path is outside the workspace",
+      },
+    }))).toMatchObject({
+      title: "Read file outside sandbox",
+      description: "This read bypasses the project sandbox",
+      decisionReason: "This read bypasses the project sandbox",
+      blockedPath: "/outside/project/secrets.txt",
+      input: {
+        file_path: "/outside/project/secrets.txt",
+        request_sandbox_bypass: true,
+      },
+    })
+  })
+
+  it("preserves sandbox-bypass risk from the raw shell request", () => {
+    expect(normalizeCopilotPermission(copilotPermission({
+      request: {
+        kind: "commands",
+        fullCommandText: "git status",
+        intention: "Inspect the repository",
+        canOfferSessionApproval: true,
+      },
+      rawRequest: {
+        kind: "shell",
+        fullCommandText: "git status",
+        requestSandboxBypass: true,
+        requestSandboxBypassReason: "Git needs access outside the workspace",
+      },
+    }))).toMatchObject({
+      title: "Run command outside sandbox",
+      description: "Git needs access outside the workspace",
+      decisionReason: "Git needs access outside the workspace",
+      input: {
+        command: "git status",
+        request_sandbox_bypass: true,
+      },
+    })
+  })
+
+  it("lists Copilot prompts before the legacy fallback", async () => {
+    const copilot = makeCopilot([copilotPermission()])
+    mockPersistentSessions.set("copilot-1", {
+      pendingPermissions: new Map([
+        ["legacy", { requestId: "legacy", toolName: "Bash" }],
+      ]),
+    })
+
+    const { response } = await invoke(register(makeCodex(), copilot), {
+      method: "GET",
+      url: "/copilot-1",
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      permissions: [{ requestId: "permission-1", toolName: "Bash" }],
+    })
+  })
+
+  it("responds directly without killing or retrying", async () => {
+    const pending = copilotPermission()
+    const copilot = makeCopilot([pending])
+    const kill = vi.fn()
+    mockPersistentSessions.set("copilot-1", {
+      pendingPermissions: new Map(),
+      proc: { kill },
+      dead: false,
+    })
+
+    const { response } = await invoke(register(makeCodex(), copilot), {
+      method: "POST",
+      url: "/copilot-1/respond",
+      body: { requestId: "permission-1", behavior: "allow" },
+    })
+
+    expect(copilot.respondToPermission).toHaveBeenCalledWith(
+      "copilot-1",
+      "permission-1",
+      { kind: "approve-once", approvedInteractively: true },
+    )
+    expect(response.json()).toEqual({
+      success: true,
+      action: "allowed",
+      toolName: "Bash",
+      shouldRetry: false,
+    })
+    expect(kill).not.toHaveBeenCalled()
+  })
+
+  it("resolves a Copilot batch directly and safely narrows unsupported session grants", async () => {
+    const command = copilotPermission()
+    const write = copilotPermission({
+      requestId: "permission-2",
+      request: {
+        kind: "write",
+        fileName: "/project/a.ts",
+        canOfferSessionApproval: false,
+      },
+    })
+    const copilot = makeCopilot([command, write])
+
+    const { response } = await invoke(register(makeCodex(), copilot), {
+      method: "POST",
+      url: "/copilot-1/respond-all",
+      body: { behavior: "allow_always" },
+    })
+
+    expect(copilot.respondToPermission).toHaveBeenNthCalledWith(
+      1,
+      "copilot-1",
+      "permission-1",
+      { kind: "approve-for-session" },
+    )
+    expect(copilot.respondToPermission).toHaveBeenNthCalledWith(
+      2,
+      "copilot-1",
+      "permission-2",
+      { kind: "approve-once", approvedInteractively: true },
+    )
+    expect(response.json()).toEqual({
+      success: true,
+      action: "allowed",
+      count: 2,
+      toolNames: ["Bash", "Write"],
+      shouldRetry: false,
+    })
+  })
+
+  it("treats sibling requests auto-resolved by a session approval as handled", async () => {
+    const command = copilotPermission()
+    const sibling = copilotPermission({ requestId: "permission-2" })
+    let pending = [command, sibling]
+    const copilot = makeCopilot(pending)
+    vi.mocked(copilot.getPendingPermissions).mockImplementation((sessionId?: string) =>
+      sessionId === undefined ? pending : pending.filter((item) => item.sessionId === sessionId),
+    )
+    vi.mocked(copilot.respondToPermission).mockImplementation(async (_sessionId, requestId) => {
+      if (requestId === command.requestId) pending = []
+      return true
+    })
+
+    const { response } = await invoke(register(makeCodex(), copilot), {
+      method: "POST",
+      url: "/copilot-1/respond-all",
+      body: { behavior: "allow_always" },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(copilot.respondToPermission).toHaveBeenCalledOnce()
+    expect(response.json()).toMatchObject({ success: true, count: 2 })
+  })
+
+  it("lists and resolves Copilot exit-plan requests", async () => {
+    const plan: CopilotPendingExitPlan = {
+      sessionId: "copilot-1",
+      requestId: "plan-1",
+      summary: "Implementation plan",
+      planContent: "1. Update the route",
+      actions: ["interactive", "autopilot"],
+      recommendedAction: "interactive",
+      askedAt: 123,
+    }
+    const copilot = makeCopilot([], [plan])
+    const listed = await invoke(register(makeCodex(), copilot), {
+      method: "GET",
+      url: "/copilot-1",
+    })
+    expect(listed.response.json()).toEqual({ permissions: [], plan })
+
+    const responded = await invoke(register(makeCodex(), copilot), {
+      method: "POST",
+      url: "/copilot-1/plan",
+      body: {
+        requestId: "plan-1",
+        approved: true,
+        selectedAction: "autopilot",
+      },
+    })
+    expect(responded.response.statusCode).toBe(200)
+    expect(copilot.answerExitPlan).toHaveBeenCalledWith(
+      "copilot-1",
+      "plan-1",
+      { approved: true, selectedAction: "autopilot" },
+    )
+  })
+})
+
 describe("GET /api/permissions — cross-session listing", () => {
   beforeEach(() => {
     mockPersistentSessions.clear()
@@ -415,13 +714,19 @@ describe("GET /api/permissions — cross-session listing", () => {
     )
     const codex = makeCodex([approval({ threadId: "codex-thread" })])
 
-    const { response } = await invoke(register(codex), { method: "GET", url: "" })
+    const copilot = makeCopilot([copilotPermission()])
+    const { response } = await invoke(register(codex, copilot), { method: "GET", url: "" })
 
     expect(response.statusCode).toBe(200)
     const body = response.json() as { bySession: Record<string, unknown[]> }
-    expect(Object.keys(body.bySession).sort()).toEqual(["codex-thread", "sdk-session"])
+    expect(Object.keys(body.bySession).sort()).toEqual([
+      "codex-thread",
+      "copilot-1",
+      "sdk-session",
+    ])
     expect(body.bySession["sdk-session"]).toHaveLength(1)
     expect(body.bySession["codex-thread"]).toHaveLength(1)
+    expect(body.bySession["copilot-1"]).toHaveLength(1)
   })
 
   it("includes legacy CLI sessions that have pending permissions", async () => {
@@ -440,7 +745,7 @@ describe("GET /api/permissions — cross-session listing", () => {
 
     const { response } = await invoke(register(makeCodex()), { method: "GET", url: "" })
 
-    expect(response.json()).toEqual({ bySession: {} })
+    expect(response.json()).toEqual({ bySession: {}, plansBySession: {} })
   })
 
   it("answers the bare path even with a query string", async () => {
@@ -486,5 +791,32 @@ describe("GET /api/permissions — payload shape", () => {
       timestamp: 7,
     })
     expect(JSON.stringify(body)).not.toContain(wholeFile)
+  })
+
+  it("omits full plan content from the cross-session poll", async () => {
+    const plan: CopilotPendingExitPlan = {
+      sessionId: "copilot-1",
+      requestId: "plan-1",
+      summary: "Implementation plan",
+      planContent: "A very large private implementation plan",
+      actions: ["interactive", "autopilot"],
+      recommendedAction: "interactive",
+      askedAt: 123,
+    }
+    const { response } = await invoke(register(makeCodex(), makeCopilot([], [plan])), {
+      method: "GET",
+      url: "",
+    })
+
+    expect(response.json()).toEqual({
+      bySession: {},
+      plansBySession: {
+        "copilot-1": [{
+          sessionId: "copilot-1",
+          requestId: "plan-1",
+          summary: "Implementation plan",
+        }],
+      },
+    })
   })
 })

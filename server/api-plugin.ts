@@ -11,6 +11,7 @@ import { describeEditionSuppression, initEdition } from "./team/edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { codexAppServer } from "./codex-app-server"
+import { copilotRuntime } from "./copilot-runtime"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -21,6 +22,7 @@ export function sessionApiPlugin(): Plugin {
         void Promise.all([
           cleanupProcesses(),
           codexAppServer.shutdown(),
+          copilotRuntime.shutdown(),
         ])
       })
 

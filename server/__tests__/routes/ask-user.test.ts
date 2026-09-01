@@ -14,15 +14,52 @@ vi.mock("../../sdk-session", () => ({
   listUserQuestionSessionIds: () => mockListUserQuestionSessionIds(),
 }))
 
-import { registerAskUserRoutes } from "../../routes/ask-user"
+import {
+  normalizeCopilotQuestion,
+  registerAskUserRoutes,
+  type CopilotQuestionClient,
+} from "../../routes/ask-user"
+import type { CopilotPendingUserInput } from "../../copilot-runtime"
 import type { UseFn, Middleware } from "../../helpers"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function buildHandler(path = "/api/ask-user-answer"): Middleware {
+function copilotQuestion(
+  overrides: Partial<CopilotPendingUserInput> = {},
+): CopilotPendingUserInput {
+  return {
+    sessionId: "copilot-1",
+    requestId: "input-1",
+    question: "Which environment?",
+    choices: ["staging", "production"],
+    allowFreeform: true,
+    askedAt: 123,
+    ...overrides,
+  }
+}
+
+function makeCopilot(
+  pending: CopilotPendingUserInput[] = [],
+): CopilotQuestionClient {
+  const active = new Set(pending.map(({ sessionId }) => sessionId))
+  return {
+    getPendingUserInputs: vi.fn((sessionId?: string) =>
+      sessionId === undefined
+        ? pending
+        : pending.filter((item) => item.sessionId === sessionId),
+    ),
+    isSessionActive: vi.fn((sessionId: string) => active.has(sessionId)),
+    answerUserInput: vi.fn(),
+  }
+}
+
+function buildHandler(
+  path = "/api/ask-user-answer",
+  copilot: CopilotQuestionClient = makeCopilot(),
+): Middleware {
   const handlers = new Map<string, Middleware>()
   const use: UseFn = (mounted, h) => { handlers.set(mounted, h) }
-  registerAskUserRoutes(use)
+  registerAskUserRoutes(use, copilot)
   const captured = handlers.get(path)
   if (!captured) throw new Error(`registerAskUserRoutes did not mount ${path}`)
   return captured
@@ -119,6 +156,71 @@ describe("POST /api/ask-user-answer", () => {
     expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-2", { q1: "blue", q2: "fast" })
   })
 
+  it("answers a Copilot choice through the pending JSON-RPC request", async () => {
+    const pending = copilotQuestion()
+    const copilot = makeCopilot([pending])
+    const handler = buildHandler("/api/ask-user-answer", copilot)
+    const body = JSON.stringify({
+      sessionId: "copilot-1",
+      toolUseId: "input-1",
+      answers: { "Which environment?": "staging" },
+    })
+    const { req, res, next, simulate } = makeReqRes(body)
+
+    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
+    await simulate()
+
+    expect(res._getStatus()).toBe(200)
+    expect(res._getData()).toEqual({ ok: true })
+    expect(copilot.answerUserInput).toHaveBeenCalledWith(
+      "copilot-1",
+      "input-1",
+      { answer: "staging", wasFreeform: false },
+    )
+    expect(mockResolveUserQuestion).not.toHaveBeenCalled()
+  })
+
+  it("matches a Copilot timeline tool call to its pending question", async () => {
+    const pending = copilotQuestion({ requestId: "rpc-request-1" })
+    const copilot = makeCopilot([pending])
+    const handler = buildHandler("/api/ask-user-answer", copilot)
+    const body = JSON.stringify({
+      sessionId: "copilot-1",
+      toolUseId: "toolu_ask_user_1",
+      answers: { "Which environment?": "production" },
+    })
+    const { req, res, next, simulate } = makeReqRes(body)
+
+    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
+    await simulate()
+
+    expect(res._getStatus()).toBe(200)
+    expect(copilot.answerUserInput).toHaveBeenCalledWith(
+      "copilot-1",
+      "rpc-request-1",
+      { answer: "production", wasFreeform: false },
+    )
+  })
+
+  it("marks a Copilot typed answer as freeform", async () => {
+    const copilot = makeCopilot([copilotQuestion()])
+    const handler = buildHandler("/api/ask-user-answer", copilot)
+    const { req, res, next, simulate } = makeReqRes(JSON.stringify({
+      sessionId: "copilot-1",
+      toolUseId: "input-1",
+      answers: { "Which environment?": "preview" },
+    }))
+
+    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
+    await simulate()
+
+    expect(copilot.answerUserInput).toHaveBeenCalledWith(
+      "copilot-1",
+      "input-1",
+      { answer: "preview", wasFreeform: true },
+    )
+  })
+
   it("returns 404 when sessionId is not a live SDK session", async () => {
     const handler = buildHandler()
 
@@ -203,8 +305,8 @@ describe("GET /api/user-questions", () => {
     mockListUserQuestionSessionIds.mockReset().mockReturnValue([])
   })
 
-  function invokeGet(): { status: number; body: unknown } {
-    const handler = buildHandler("/api/user-questions")
+  function invokeGet(copilot: CopilotQuestionClient = makeCopilot()): { status: number; body: unknown } {
+    const handler = buildHandler("/api/user-questions", copilot)
     let status = 0
     let payload = ""
     const res = {
@@ -240,6 +342,28 @@ describe("GET /api/user-questions", () => {
     expect(status).toBe(200)
     expect(body).toEqual({
       bySession: { s1: [{ sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }] },
+    })
+  })
+
+  it("normalizes and groups Copilot input requests", () => {
+    const pending = copilotQuestion()
+    expect(normalizeCopilotQuestion(pending)).toEqual({
+      sessionId: "copilot-1",
+      toolUseId: "input-1",
+      askedAt: 123,
+      questions: [{
+        question: "Which environment?",
+        multiSelect: false,
+        options: [
+          { label: "staging", hasPreview: false },
+          { label: "production", hasPreview: false },
+        ],
+      }],
+    })
+    expect(invokeGet(makeCopilot([pending])).body).toEqual({
+      bySession: {
+        "copilot-1": [normalizeCopilotQuestion(pending)],
+      },
     })
   })
 

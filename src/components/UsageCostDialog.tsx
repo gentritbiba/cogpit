@@ -30,6 +30,7 @@ type Metric = "cost" | "tokens"
 const PROVIDERS: { key: UsageCostProvider; label: string; color: string }[] = [
   { key: "claude", label: "Claude Code", color: "var(--chart-1)" },
   { key: "codex", label: "Codex", color: "var(--chart-2)" },
+  { key: "copilot", label: "GitHub Copilot", color: "var(--chart-3)" },
 ]
 
 interface DayTotals {
@@ -67,7 +68,11 @@ function enumerateDays(sinceDay: string, untilDay: string): string[] {
 }
 
 function emptyProviderTotals(): Record<UsageCostProvider, { costUsd: number; tokens: number }> {
-  return { claude: { costUsd: 0, tokens: 0 }, codex: { costUsd: 0, tokens: 0 } }
+  return {
+    claude: { costUsd: 0, tokens: 0 },
+    codex: { costUsd: 0, tokens: 0 },
+    copilot: { costUsd: 0, tokens: 0 },
+  }
 }
 
 function derive(summary: UsageCostSummary): Derived {

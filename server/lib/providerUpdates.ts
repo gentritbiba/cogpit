@@ -1,8 +1,8 @@
 /**
  * Version advisories for the agent CLIs Cogpit drives.
  *
- * Cogpit never vendors `claude` or `codex` — it spawns whatever the user
- * installed. This module answers two questions about those installs: what
+ * Cogpit never vendors agent CLIs — it spawns whatever the user installed.
+ * This module answers two questions about those installs: what
  * version is on this machine, and what version is published. When the two
  * disagree it also works out how the binary was installed, because that is
  * what decides whether `npm install -g`, `brew upgrade`, or `claude update`
@@ -35,7 +35,8 @@ interface ProviderDefinition {
   displayName: string
   binName: string
   packageName: string
-  homebrewFormula: string | null
+  homebrew: { name: string; cask: boolean } | null
+  wingetId: string | null
   /** Self-updater for installs that manage their own binary, if any. */
   native: { args: string[]; matches: (path: string) => boolean } | null
 }
@@ -46,7 +47,8 @@ const PROVIDERS: Record<ProviderUpdateId, ProviderDefinition> = {
     displayName: "Claude Code",
     binName: "claude",
     packageName: "@anthropic-ai/claude-code",
-    homebrewFormula: "claude-code",
+    homebrew: { name: "claude-code", cask: false },
+    wingetId: null,
     native: {
       args: ["update"],
       matches: (path) =>
@@ -60,8 +62,23 @@ const PROVIDERS: Record<ProviderUpdateId, ProviderDefinition> = {
     displayName: "Codex",
     binName: "codex",
     packageName: "@openai/codex",
-    homebrewFormula: "codex",
+    homebrew: { name: "codex", cask: false },
+    wingetId: null,
     native: null,
+  },
+  copilot: {
+    id: "copilot",
+    displayName: "GitHub Copilot CLI",
+    binName: "copilot",
+    packageName: "@github/copilot",
+    homebrew: { name: "copilot-cli", cask: true },
+    wingetId: "GitHub.Copilot",
+    native: {
+      args: ["update"],
+      matches: (path) =>
+        path.endsWith("/.local/bin/copilot") ||
+        path === "/usr/local/bin/copilot",
+    },
   },
 }
 
@@ -96,7 +113,6 @@ export function detectInstallMethod(
   const candidates = paths.filter(Boolean).map(normalizePath)
   if (candidates.length === 0) return "unknown"
 
-  if (native && candidates.some((path) => native.matches(path))) return "native"
   if (candidates.some((path) => path.includes("/.bun/bin/"))) return "bun"
   if (
     candidates.some((path) =>
@@ -120,6 +136,14 @@ export function detectInstallMethod(
   }
   if (
     candidates.some((path) =>
+      path.includes("/microsoft/winget/links/") ||
+      path.includes("/microsoft/winget/packages/github.copilot"),
+    )
+  ) {
+    return "winget"
+  }
+  if (
+    candidates.some((path) =>
       path.includes("/node_modules/.bin/") ||
       path.includes("/lib/node_modules/") ||
       path.includes("/npm/node_modules/") ||
@@ -128,6 +152,7 @@ export function detectInstallMethod(
   ) {
     return "npm"
   }
+  if (native && candidates.some((path) => native.matches(path))) return "native"
   return "unknown"
 }
 
@@ -161,8 +186,16 @@ export function buildUpdateCommand(
         lockKey: "pnpm-global",
       }
     case "homebrew":
-      return definition.homebrewFormula
-        ? { executable: "brew", args: ["upgrade", definition.homebrewFormula], lockKey: "homebrew" }
+      return definition.homebrew
+        ? {
+            executable: "brew",
+            args: [
+              "upgrade",
+              ...(definition.homebrew.cask ? ["--cask"] : []),
+              definition.homebrew.name,
+            ],
+            lockKey: "homebrew",
+          }
         : null
     case "npm":
       return {
@@ -178,6 +211,21 @@ export function buildUpdateCommand(
         ],
         lockKey: "npm-global",
       }
+    case "winget":
+      return definition.wingetId
+        ? {
+            executable: "winget",
+            args: [
+              "upgrade",
+              "--id",
+              definition.wingetId,
+              "--exact",
+              "--accept-source-agreements",
+              "--accept-package-agreements",
+            ],
+            lockKey: "winget",
+          }
+        : null
     default:
       return null
   }

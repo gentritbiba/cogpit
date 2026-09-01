@@ -24,7 +24,7 @@ async function readErrorMessage(
 interface CodexFallbackOpts {
   /** The user-selected model (empty string or undefined means no override). */
   model: string | undefined
-  /** Agent kind derived from the dirName — only "codex" triggers the retry. */
+  /** Agent kind derived from the dirName. */
   agentKind: string | null
   /**
    * Fallback used when the response body has no usable error message.
@@ -53,7 +53,11 @@ export async function fetchWithCodexModelFallback(
   const fallback = (r: Response): string =>
     typeof errorFallback === "function" ? errorFallback(r) : errorFallback
 
-  let res = await sendRequest(model || undefined)
+  // Copilot's catalog represents Default as an empty selection that resolves
+  // to its synthetic `auto` model. Send that resolution explicitly so an
+  // existing session can switch back from a concrete model.
+  const requestedModel = agentKind === "copilot" ? model || "auto" : model || undefined
+  let res = await sendRequest(requestedModel)
   let errorMessage = res.ok
     ? null
     : await readErrorMessage(res, fallback(res))

@@ -338,7 +338,7 @@ export function registerConfigRoutes(use: UseFn) {
       res.setHeader("Content-Type", "application/json")
       res.end(JSON.stringify(config ? {
         claudeDir: config.claudeDir,
-        mode: config.codexOnly ? "codex" : "claude",
+        mode: config.externalOnly ?? "claude",
         networkAccess: config.networkAccess || false,
         networkPassword: config.networkPassword ? "set" : null,
         terminalApp: config.terminalApp || null,
@@ -364,20 +364,20 @@ export function registerConfigRoutes(use: UseFn) {
 
           const currentConfig = getConfig()
           const validation = await validateClaudeDir(claudeDir)
-          // A Codex-only bootstrap deliberately does not require
+          // An external-only bootstrap deliberately does not require
           // ~/.claude/projects. Allow saving unrelated settings while that
           // compatibility path is unchanged; any new Claude path must still
           // pass the normal validation above.
-          const reusingCodexFallback = !!currentConfig?.codexOnly
+          const reusingExternalFallback = currentConfig?.externalOnly !== undefined
             && resolve(claudeDir) === resolve(currentConfig.claudeDir)
-          if (!validation.valid && !reusingCodexFallback) {
+          if (!validation.valid && !reusingExternalFallback) {
             res.statusCode = 400
             res.setHeader("Content-Type", "application/json")
             res.end(JSON.stringify({ error: validation.error }))
             return
           }
           const resolvedClaudeDir = validation.resolved
-            || (reusingCodexFallback ? currentConfig.claudeDir : claudeDir)
+            || (reusingExternalFallback ? currentConfig.claudeDir : claudeDir)
 
           // Handle password: new password provided, or keep existing
           let finalPassword = currentConfig?.networkPassword || undefined
@@ -413,7 +413,7 @@ export function registerConfigRoutes(use: UseFn) {
 
           await saveConfig({
             claudeDir: resolvedClaudeDir,
-            codexOnly: reusingCodexFallback || undefined,
+            externalOnly: reusingExternalFallback ? currentConfig?.externalOnly : undefined,
             // The API cannot set the edition (file/env only) but must not drop it.
             edition: currentConfig?.edition
               ?? (getConfiguredEditionValue() === "team" ? "team" : undefined),

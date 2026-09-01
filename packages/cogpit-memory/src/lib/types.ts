@@ -390,6 +390,8 @@ export interface ToolCall {
   name: string
   input: Record<string, unknown>
   result: string | null
+  /** Binary images returned by a tool, when the provider persists them. */
+  resultImages?: ImageBlock[]
   isError: boolean
   timestamp: string
   /** Set by parser when a PostToolUse hook replaced this tool's output */
@@ -543,7 +545,7 @@ export interface ParsedSession {
    * The provider that produced this session. Set by the parser when the
    * format is known. Consumers can use this instead of inspecting rawMessages.
    */
-  agentKind?: "claude" | "codex"
+  agentKind?: "claude" | "codex" | "copilot"
 }
 
 // ── Undo/Redo & Branching ────────────────────────────────────────────────

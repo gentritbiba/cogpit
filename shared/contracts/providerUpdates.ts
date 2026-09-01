@@ -1,8 +1,8 @@
 /**
  * Contract for CLI provider update advisories.
  *
- * Cogpit drives the `claude` and `codex` CLIs that the user installed
- * themselves, so it can only report on them, not vendor them. The server
+ * Cogpit drives agent CLIs that the user installed themselves, so it can only
+ * report on them, not vendor them. The server
  * probes the installed binary, compares it against the npm registry's
  * `latest`, and — when it can tell how the binary was installed — hands back
  * the exact command that would upgrade it.
@@ -21,6 +21,7 @@ export type ProviderInstallMethod =
   | "bun"
   | "pnpm"
   | "homebrew"
+  | "winget"
   | "native"
   | "unknown"
 

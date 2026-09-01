@@ -2,10 +2,15 @@ import { readdir, realpath, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join, relative, resolve, sep } from "node:path"
 import {
+  decodeCopilotDirName as decodeProviderCopilotDirName,
+  encodeCopilotDirName as encodeProviderCopilotDirName,
+  isCopilotDirName as isProviderCopilotDirName,
+} from "../shared/providers/copilot"
+import {
   decodeCodexDirName as decodeProviderCodexDirName,
   encodeCodexDirName as encodeProviderCodexDirName,
   isCodexDirName as isProviderCodexDirName,
-} from "../shared/providers"
+} from "../shared/providers/codex"
 import type { AgentKind } from "../shared/providers/types"
 import { getConfig, getDirs } from "./config"
 import { isWithinDir } from "./pathSafety"
@@ -22,6 +27,10 @@ export const dirs = {
 
 export const CODEX_HOME_DIR = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
 export const CODEX_SESSIONS_DIR = join(CODEX_HOME_DIR, "sessions")
+export const COPILOT_HOME_DIR = resolve(process.env.COPILOT_HOME || join(homedir(), ".copilot"))
+export const COPILOT_SESSIONS_DIR = join(COPILOT_HOME_DIR, "session-state")
+
+const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Delegates to the shared Codex provider directory convention. */
 export function isCodexDirName(dirName: string): boolean {
@@ -38,9 +47,26 @@ export function decodeCodexDirName(dirName: string): string | null {
   return decodeProviderCodexDirName(dirName)
 }
 
+export function isCopilotDirName(dirName: string): boolean {
+  return isProviderCopilotDirName(dirName)
+}
+
+export function encodeCopilotDirName(cwd: string): string {
+  return encodeProviderCopilotDirName(cwd)
+}
+
+export function decodeCopilotDirName(dirName: string): string | null {
+  return decodeProviderCopilotDirName(dirName)
+}
+
 export function isCodexFilePath(filePath: string): boolean {
   return resolve(filePath) !== resolve(CODEX_SESSIONS_DIR)
     && isWithinDir(CODEX_SESSIONS_DIR, filePath)
+}
+
+export function isCopilotFilePath(filePath: string): boolean {
+  return resolve(filePath) !== resolve(COPILOT_SESSIONS_DIR)
+    && isWithinDir(COPILOT_SESSIONS_DIR, filePath)
 }
 
 export function formatCodexRolloutFileName(sessionId: string, now = new Date()): string {
@@ -111,10 +137,56 @@ export async function listCodexSessionFiles(): Promise<SessionFileInfo[]> {
   return walk(CODEX_SESSIONS_DIR, 0)
 }
 
+export async function listCopilotSessionFiles(): Promise<SessionFileInfo[]> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(COPILOT_SESSIONS_DIR, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const results = await Promise.all(entries.map(async (entry): Promise<SessionFileInfo | null> => {
+    if (!entry.isDirectory() || !SESSION_UUID_RE.test(entry.name)) return null
+    const sessionDir = join(COPILOT_SESSIONS_DIR, entry.name)
+    const filePath = join(COPILOT_SESSIONS_DIR, entry.name, "events.jsonl")
+    try {
+      const resolved = await resolveCanonicalFileWithinRoot(
+        COPILOT_SESSIONS_DIR,
+        sessionDir,
+        filePath,
+      )
+      if (!resolved) return null
+      const fileStat = await stat(resolved)
+      if (!fileStat.isFile()) return null
+      return {
+        filePath: resolved,
+        fileName: `${entry.name}/events.jsonl`,
+        mtimeMs: fileStat.mtimeMs,
+        size: fileStat.size,
+      }
+    } catch {
+      return null
+    }
+  }))
+  return results.flatMap((entry) => entry ? [entry] : [])
+}
+
 export async function resolveSessionFilePath(dirName: string, fileName: string): Promise<string | null> {
   if (isCodexDirName(dirName)) {
     const filePath = join(CODEX_SESSIONS_DIR, fileName)
     return resolveCanonicalFileWithinRoot(CODEX_SESSIONS_DIR, CODEX_SESSIONS_DIR, filePath)
+  }
+
+  if (isCopilotDirName(dirName)) {
+    const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/events\.jsonl$/i
+      .exec(fileName)
+    if (!match) return null
+    const sessionDir = join(COPILOT_SESSIONS_DIR, match[1])
+    return resolveCanonicalFileWithinRoot(
+      COPILOT_SESSIONS_DIR,
+      sessionDir,
+      join(sessionDir, "events.jsonl"),
+    )
   }
 
   if (!isSinglePathSegment(dirName)) return null
@@ -161,7 +233,10 @@ async function resolveCanonicalFileWithinRoot(
 }
 
 export function getAgentKindFromSessionPath(filePath: string | null | undefined): AgentKind {
-  return typeof filePath === "string" && isCodexFilePath(filePath) ? "codex" : "claude"
+  if (typeof filePath !== "string") return "claude"
+  if (isCodexFilePath(filePath)) return "codex"
+  if (isCopilotFilePath(filePath)) return "copilot"
+  return "claude"
 }
 
 export async function findNewestCodexSessionForCwd(
@@ -191,8 +266,9 @@ export async function findNewestCodexSessionForCwd(
   return null
 }
 
-/** Find the JSONL file path for a session across Claude and Codex storage. */
+/** Find the JSONL file path for a session across every provider's storage. */
 export async function findJsonlPath(sessionId: string): Promise<string | null> {
+  if (!isSinglePathSegment(sessionId)) return null
   const targetFile = `${sessionId}.jsonl`
   try {
     const entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
@@ -218,6 +294,16 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
     if (match) return match.filePath
   } catch {
     // Ignore Codex lookup errors.
+  }
+
+  if (SESSION_UUID_RE.test(sessionId)) {
+    const copilotDir = join(COPILOT_SESSIONS_DIR, sessionId)
+    const copilotPath = await resolveCanonicalFileWithinRoot(
+      COPILOT_SESSIONS_DIR,
+      copilotDir,
+      join(copilotDir, "events.jsonl"),
+    )
+    if (copilotPath) return copilotPath
   }
   return null
 }

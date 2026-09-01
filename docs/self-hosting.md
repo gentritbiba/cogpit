@@ -10,12 +10,13 @@ from [Releases](https://github.com/gentritbiba/cogpit/releases) and open it.
 
 ## What you need first
 
-Cogpit drives the Claude Code and Codex CLIs. It does not replace them and it has no models
-of its own.
+Cogpit drives the Claude Code, Codex, and GitHub Copilot CLIs. It does not replace them and
+it has no models of its own.
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or
-  [Codex](https://github.com/openai/codex), installed and logged in on the machine that will
-  run Cogpit.
+- At least one supported CLI installed and logged in on the machine that will run Cogpit:
+  [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+  [Codex](https://github.com/openai/codex), or
+  [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli).
 - [Bun](https://bun.sh) if you are running from source.
 - No API keys. Cogpit uses whatever login those CLIs already have.
 
@@ -155,14 +156,15 @@ end on their own when the session is deleted or when you point Cogpit at a diffe
 directory, and turning network access off disconnects every guest while keeping the records, so
 turning it back on does not silently re-admit anyone.
 
-What sharing does not do yet: Codex sessions cannot be shared and are refused with a message,
-because a Codex rollout's nested file path does not fit the guest path rules; shares are not
+What sharing does not do yet: Codex sessions cannot be shared because a rollout's nested file
+path does not fit the guest path rules, and Cogpit also rejects Copilot sessions. Shares are not
 proxied through the multi-device hub, so a guest connects to the machine directly; a guest sees
 the main transcript but not sub-agent transcripts, and the panel says so rather than sitting
 empty; and in team edition sharing is admin-only, on the grounds that handing out a share is
-handing out host code execution. At most eight guests can hold one session at a time, and a
-guest login expires on the same schedule as any other browser session — 30 minutes idle, 8
-hours absolute — and does not survive a server restart, though the share record does.
+handing out host code execution. At most eight guests can hold one session at a time, and a guest
+login expires on the same schedule as any other browser session — 30 minutes idle, 8 hours
+absolute — and does not
+survive a server restart, though the share record does.
 
 ---
 

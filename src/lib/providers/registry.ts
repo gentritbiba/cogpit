@@ -1,9 +1,11 @@
 import { codexProvider } from "./codex"
+import { copilotProvider } from "./copilot"
 import { claudeProvider } from "./claude"
 import type { AgentKind, SessionProvider } from "./types"
 
 const PROVIDERS = new Map<AgentKind, SessionProvider>([
   ["codex", codexProvider],
+  ["copilot", copilotProvider],
   ["claude", claudeProvider],
 ])
 
@@ -15,7 +17,9 @@ export function getProvider(kind: AgentKind): SessionProvider {
 
 /** Infer the agent kind from a session directory name */
 export function inferAgentKind(dirName: string | null | undefined): AgentKind {
-  return codexProvider.isDirName(dirName) ? "codex" : "claude"
+  if (codexProvider.isDirName(dirName)) return "codex"
+  if (copilotProvider.isDirName(dirName)) return "copilot"
+  return "claude"
 }
 
 /** Get the provider for a given session directory name */
@@ -25,5 +29,7 @@ export function getProviderForDirName(dirName: string | null | undefined): Sessi
 
 /** Get the provider by inspecting the JSONL content of a session file */
 export function getProviderForSessionText(jsonlText: string): SessionProvider {
-  return codexProvider.isSessionText(jsonlText) ? codexProvider : claudeProvider
+  if (codexProvider.isSessionText(jsonlText)) return codexProvider
+  if (copilotProvider.isSessionText(jsonlText)) return copilotProvider
+  return claudeProvider
 }

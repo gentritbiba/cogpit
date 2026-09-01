@@ -8,8 +8,8 @@ npx cogpit@latest
 
 The command starts Cogpit's backend on an available loopback port, opens the
 full local web app, and keeps running until you press `Ctrl+C`. Session data is
-read directly from your existing Claude Code and Codex directories and is never
-uploaded.
+read directly from your existing Claude Code, Codex, and GitHub Copilot CLI
+directories and is never uploaded.
 
 Open one session in the focused chat-only view:
 
@@ -17,8 +17,8 @@ Open one session in the focused chat-only view:
 npx cogpit@latest preview <session-id>
 ```
 
-Both commands require Node.js 20.11 or newer and an authenticated Claude Code
-or Codex CLI when you want to continue a session.
+Both commands require Node.js 20.11 or newer and an authenticated Claude Code,
+Codex, or GitHub Copilot CLI when you want to continue a session.
 
 Options:
 

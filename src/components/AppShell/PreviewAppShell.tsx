@@ -60,7 +60,7 @@ export function PreviewAppShell({
               </EmptyMedia>
               <EmptyTitle>{loadError ? "Unable to open session" : "Opening session"}</EmptyTitle>
               <EmptyDescription>
-                {loadError ?? `Looking for ${sessionId} in your local Claude and Codex history.`}
+                {loadError ?? `Looking for ${sessionId} in your local Claude, Codex, and Copilot history.`}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>

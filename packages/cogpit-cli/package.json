@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "version": "2.0.0",
-  "description": "Run Cogpit's local Claude Code and Codex interface without installing it",
+  "description": "Run Cogpit's local Claude Code, Codex, and GitHub Copilot CLI interface without installing it",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,6 +13,7 @@
   "keywords": [
     "claude-code",
     "codex",
+    "github-copilot",
     "agent",
     "cogpit"
   ],

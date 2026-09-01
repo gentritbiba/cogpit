@@ -6,6 +6,7 @@ import {
   getSessionMeta,
   hasTrustedMutationSource,
   isCodexFilePath,
+  isCopilotFilePath,
   isRateLimited,
   resolveSessionFilePath,
 } from "../helpers"
@@ -60,7 +61,7 @@ function stringField(body: unknown, key: string): string {
 
 type ShareTarget =
   | { shareable: true; dirName: string; fileName: string }
-  | { shareable: false; reason: "not-found" | "codex" }
+  | { shareable: false; reason: "not-found" | "codex" | "copilot" }
 
 /**
  * Resolve what a sessionId may be shared as. The client sends only the
@@ -78,6 +79,7 @@ async function resolveShareTarget(sessionId: string): Promise<ShareTarget> {
   // read. Refused here rather than fixed by widening the allowlist: this
   // function shipped a traversal bug once already.
   if (isCodexFilePath(filePath)) return { shareable: false, reason: "codex" }
+  if (isCopilotFilePath(filePath)) return { shareable: false, reason: "copilot" }
 
   const dirName = basename(dirname(filePath))
   const fileName = basename(filePath)
@@ -122,6 +124,10 @@ async function handleCreate(req: IncomingMessage, res: ServerResponse): Promise<
     if (!target.shareable) {
       if (target.reason === "codex") {
         sendJson(res, 400, { error: "Sharing Codex sessions isn't supported yet" })
+        return
+      }
+      if (target.reason === "copilot") {
+        sendJson(res, 400, { error: "Sharing Copilot sessions isn't supported yet" })
         return
       }
       sendJson(res, 404, { error: "Session not found" })

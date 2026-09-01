@@ -115,7 +115,7 @@ export function LiveSessionsFeedback({
             <EmptyDescription>
               {searching
                 ? "Try #157, honest-cms #157, or paste a PR URL."
-                : "Start Claude Code or Codex to see recent work here."}
+                : "Start Claude Code, Codex, or Copilot to see recent work here."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

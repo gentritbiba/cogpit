@@ -164,14 +164,14 @@ function awaitingAgentsResult(pendingDescriptions: string[], pendingQueue: numbe
  * Derive session status from raw JSONL message objects.
  *
  * **Provider dispatch:** The function auto-detects the session format by
- * inspecting `rawMessages[0].type`. Codex sessions start with one of
- * `session_meta | turn_context | event_msg | response_item` and are routed
- * to `deriveCodexSessionStatus`. All other sessions are treated as Claude Code
- * format. If a third provider is added, add a detection branch here and in
- * `src/lib/providers/registry.ts`.
+ * inspecting `rawMessages[0].type`. Copilot and Codex are routed to their own
+ * derivations; everything else is treated as Claude Code format.
  */
 export function deriveSessionStatus(rawMessages: RawMsg[]): SessionStatusInfo {
   const firstType = rawMessages[0]?.type
+  if (isCopilotEventType(firstType)) {
+    return deriveCopilotSessionStatus(rawMessages)
+  }
   if (firstType === "session_meta" || firstType === "turn_context" || firstType === "event_msg" || firstType === "response_item") {
     return deriveCodexSessionStatus(rawMessages)
   }
@@ -294,6 +294,123 @@ export function deriveSessionStatus(rawMessages: RawMsg[]): SessionStatusInfo {
     // Skip progress, system, etc.
   }
 
+  return { status: "idle" }
+}
+
+function isCopilotEventType(type: unknown): type is string {
+  return typeof type === "string" && (
+    type === "abort"
+    || type === "binary_asset"
+    || type === "user.message"
+    || type.startsWith("assistant.")
+    || type.startsWith("permission.")
+    || type.startsWith("session.")
+    || type.startsWith("subagent.")
+    || type.startsWith("tool.")
+    || type.startsWith("user_input.")
+  )
+}
+
+/** Derive status from Copilot CLI's durable session events. */
+function deriveCopilotSessionStatus(rawMessages: RawMsg[]): SessionStatusInfo {
+  const pendingAgents = new Map<string, string>()
+  for (const event of rawMessages) {
+    const agentId = typeof event.agentId === "string" ? event.agentId : ""
+    if (
+      !agentId
+      && (event.type === "abort" || event.type === "session.shutdown" || event.type === "session.error")
+    ) {
+      pendingAgents.clear()
+      continue
+    }
+    if (!agentId || !event.type.startsWith("subagent.")) continue
+    const data = isObject(event.data) ? event.data : {}
+    if (event.type === "subagent.completed" || event.type === "subagent.failed") {
+      pendingAgents.delete(agentId)
+      continue
+    }
+    if (event.type === "subagent.started" || event.type === "subagent.configured") {
+      const description = [data.agentDisplayName, data.description, data.agentName]
+        .find((value): value is string => typeof value === "string") ?? ""
+      pendingAgents.set(agentId, description || pendingAgents.get(agentId) || "")
+    }
+  }
+  if (pendingAgents.size > 0) {
+    return awaitingAgentsResult([...pendingAgents.values()], 0)
+  }
+
+  let sawUserActivity = false
+  const completedPermissionRequests = new Set<string>()
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const event = rawMessages[i]
+    if (typeof event.agentId === "string" && event.agentId) continue
+    const data = isObject(event.data) ? event.data : {}
+
+    switch (event.type) {
+      case "abort":
+      case "session.shutdown":
+        return { status: "completed" }
+      case "assistant.turn_end": {
+        // session.idle is not durable in every CLI version. Infer whether this
+        // model iteration ended the request or handed work to tools.
+        for (let j = i - 1; j >= 0; j--) {
+          const previous = rawMessages[j]
+          if (typeof previous.agentId === "string" && previous.agentId) continue
+          if (previous.type === "user.message") break
+          if (previous.type === "abort") return { status: "completed" }
+          if (previous.type !== "assistant.message") continue
+          const previousData = isObject(previous.data) ? previous.data : {}
+          return Array.isArray(previousData.toolRequests) && previousData.toolRequests.length > 0
+            ? { status: "processing" }
+            : { status: "completed" }
+        }
+        return { status: "processing" }
+      }
+      case "session.error":
+        return {
+          status: "completed",
+          terminalReason: typeof data.message === "string" ? data.message : "Copilot session error",
+        }
+      case "assistant.idle":
+      case "session.idle":
+        return { status: sawUserActivity ? "completed" : "idle" }
+      case "permission.completed": {
+        const requestId = typeof data.requestId === "string" ? data.requestId : ""
+        if (requestId) completedPermissionRequests.add(requestId)
+        continue
+      }
+      case "permission.requested": {
+        const requestId = typeof data.requestId === "string" ? data.requestId : ""
+        if (requestId && completedPermissionRequests.has(requestId)) continue
+        return { status: "deferred" }
+      }
+      case "user_input.requested":
+        return { status: "tool_use", toolName: "AskUserQuestion" }
+      case "tool.execution_start":
+        if (completedPermissionRequests.size > 0) return { status: "thinking" }
+        return {
+          status: "tool_use",
+          toolName: typeof data.toolName === "string"
+            ? normalizeFunctionName(data.toolName)
+            : typeof data.name === "string" ? normalizeFunctionName(data.name) : undefined,
+        }
+      case "tool.execution_complete":
+        return { status: "thinking" }
+      case "assistant.turn_start":
+        return { status: "processing" }
+      case "assistant.message":
+      case "assistant.message_delta":
+      case "assistant.reasoning":
+      case "assistant.reasoning_delta":
+        return { status: "thinking" }
+      case "user.message":
+        sawUserActivity = true
+        return { status: "processing" }
+      case "session.start":
+      case "session.resume":
+        return { status: sawUserActivity ? "processing" : "idle" }
+    }
+  }
   return { status: "idle" }
 }
 

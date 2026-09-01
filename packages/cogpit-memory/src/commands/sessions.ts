@@ -4,7 +4,7 @@
  */
 
 import { readdir, stat } from "node:fs/promises"
-import { join } from "node:path"
+import { join, sep } from "node:path"
 import { dirs } from "../lib/dirs"
 import { encodeClaudeDirName } from "../lib/helpers"
 import { parseMaxAge } from "../lib/response"
@@ -25,7 +25,7 @@ export interface SessionSummary {
   turnCount: number
   status: string
   mtime: number
-  source?: "claude" | "codex"
+  source?: "claude" | "codex" | "copilot"
 }
 
 export interface SessionsOptions {
@@ -42,6 +42,9 @@ interface SessionFile {
 type SessionMeta = Awaited<ReturnType<typeof getSessionMeta>>
 
 function toSessionSummary(file: SessionFile, meta: SessionMeta, status: string): SessionSummary {
+  const source = file.path.startsWith(dirs.CODEX_SESSIONS_DIR + sep)
+    ? "codex"
+    : file.path.startsWith(dirs.COPILOT_SESSIONS_DIR + sep) ? "copilot" : "claude"
   return {
     sessionId: meta.sessionId,
     filePath: file.path,
@@ -55,7 +58,7 @@ function toSessionSummary(file: SessionFile, meta: SessionMeta, status: string):
     turnCount: meta.turnCount,
     status,
     mtime: file.mtimeMs,
-    source: file.path.startsWith(dirs.CODEX_SESSIONS_DIR + "/") ? "codex" : "claude",
+    source,
   }
 }
 
@@ -90,6 +93,28 @@ async function listCodexSessionFiles(cutoff: number): Promise<SessionFile[]> {
   return walk(dirs.CODEX_SESSIONS_DIR, 0)
 }
 
+async function listCopilotSessionFiles(cutoff: number): Promise<SessionFile[]> {
+  let entries: import("node:fs").Dirent[]
+  try {
+    entries = await readdir(dirs.COPILOT_SESSIONS_DIR, { withFileTypes: true }) as import("node:fs").Dirent[]
+  } catch {
+    return []
+  }
+
+  const results: SessionFile[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const filePath = join(dirs.COPILOT_SESSIONS_DIR, entry.name, "events.jsonl")
+    try {
+      const fileStat = await stat(filePath)
+      if (fileStat.mtimeMs >= cutoff) results.push({ path: filePath, mtimeMs: fileStat.mtimeMs })
+    } catch {
+      continue
+    }
+  }
+  return results
+}
+
 // ── listSessions ─────────────────────────────────────────────────────────────
 
 /**
@@ -110,7 +135,7 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
   try {
     entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true }) as import("node:fs").Dirent[]
   } catch {
-    return []
+    entries = []
   }
 
   const projectDirs = entries
@@ -118,7 +143,7 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
     .map(e => join(dirs.PROJECTS_DIR, e.name))
 
   // 2. Discover all .jsonl files, stat them, filter by maxAge
-  const [nested, codexFiles] = await Promise.all([
+  const [nested, codexFiles, copilotFiles] = await Promise.all([
     Promise.all(
       projectDirs.map(async (projectDir) => {
         try {
@@ -138,10 +163,11 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
       }),
     ),
     listCodexSessionFiles(cutoff),
+    listCopilotSessionFiles(cutoff),
   ])
 
   // 3. Sort by mtime descending
-  const allFiles = [...nested.flat(), ...codexFiles]
+  const allFiles = [...nested.flat(), ...codexFiles, ...copilotFiles]
   allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs)
 
   // 4. For each file, get metadata + status (up to limit)
@@ -185,7 +211,7 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
   }
 
   const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-  const [statResults, codexCandidates] = await Promise.all([
+  const [statResults, codexCandidates, copilotCandidates] = await Promise.all([
     Promise.all(
       jsonlFiles.map(async (f) => {
         const filePath = join(projectDir, f)
@@ -198,12 +224,13 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
       }),
     ),
     listCodexSessionFiles(0),
+    listCopilotSessionFiles(0),
   ])
-  const codexMatches: SessionFile[] = []
-  for (const file of codexCandidates) {
+  const providerMatches: SessionFile[] = []
+  for (const file of [...codexCandidates, ...copilotCandidates]) {
     try {
       const meta = await getSessionMeta(file.path)
-      if (meta.cwd === cwd) codexMatches.push(file)
+      if (meta.cwd === cwd) providerMatches.push(file)
     } catch {
       continue
     }
@@ -211,7 +238,7 @@ export async function currentSession(cwd: string): Promise<SessionSummary | null
 
   const valid = [
     ...statResults.filter((r): r is SessionFile => r !== null),
-    ...codexMatches,
+    ...providerMatches,
   ]
   if (valid.length === 0) return null
   valid.sort((a, b) => b.mtimeMs - a.mtimeMs)

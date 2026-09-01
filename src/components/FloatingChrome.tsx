@@ -245,7 +245,7 @@ export const FloatingChrome = memo(function FloatingChrome({
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             <DeviceSwitcher />
           </div>
-          {session && can("share") && (
+          {session && activeAgentKind !== "copilot" && can("share") && (
             <div className={cn(FLOATING_PILL, PILL_ROW)}>
               <ShareButton sessionId={session.sessionId} />
             </div>

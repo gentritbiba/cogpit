@@ -7,8 +7,14 @@ vi.mock("@/lib/auth", () => ({
 
 import { authFetch } from "@/lib/auth"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
+import type { AgentKind } from "@/lib/sessionSource"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
-import { mapClaudeRuntimeResponse, mapCodexRuntimeResponse, useTokenUsage } from "../useTokenUsage"
+import {
+  mapClaudeRuntimeResponse,
+  mapCodexRuntimeResponse,
+  mapCopilotRuntimeResponse,
+  useTokenUsage,
+} from "../useTokenUsage"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 
@@ -83,6 +89,54 @@ describe("mapClaudeRuntimeResponse", () => {
   })
 })
 
+describe("mapCopilotRuntimeResponse", () => {
+  it("prefers chat quota and maps remaining percentage to utilization", () => {
+    expect(mapCopilotRuntimeResponse({
+      available: true,
+      quota: {
+        quotaSnapshots: {
+          chat: {
+            entitlementRequests: 200,
+            usedRequests: 11,
+            remainingPercentage: 94.5,
+            resetDate: "2026-10-01T00:00:00Z",
+          },
+          premium_interactions: { remainingPercentage: 20 },
+        },
+      },
+    })).toEqual({
+      providerName: "Copilot",
+      fiveHour: {
+        utilization: 5.5,
+        resetsAt: "2026-10-01T00:00:00Z",
+        label: "Chat",
+      },
+    })
+  })
+
+  it("falls back to premium quota and clamps malformed percentages", () => {
+    expect(mapCopilotRuntimeResponse({
+      available: true,
+      quota: {
+        quotaSnapshots: {
+          chat: {},
+          premium_interactions: { remainingPercentage: -20 },
+        },
+      },
+    })?.fiveHour).toEqual({ utilization: 100, resetsAt: undefined, label: "Premium interactions" })
+
+    expect(mapCopilotRuntimeResponse({
+      available: true,
+      quota: { quotaSnapshots: { chat: { remainingPercentage: 140 } } },
+    })?.fiveHour?.utilization).toBe(0)
+  })
+
+  it("returns null when Copilot is unavailable or has no usable quota", () => {
+    expect(mapCopilotRuntimeResponse({ available: false })).toBeNull()
+    expect(mapCopilotRuntimeResponse({ available: true, quota: {} })).toBeNull()
+  })
+})
+
 describe("useTokenUsage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -112,6 +166,33 @@ describe("useTokenUsage", () => {
     expect(result.current).toMatchObject({ usage: null, loading: false, available: false })
   })
 
+  it("fetches and maps Copilot quota from its own runtime endpoint", async () => {
+    mockedAuthFetch.mockResolvedValue(jsonResponse({
+      available: true,
+      quota: {
+        quotaSnapshots: {
+          chat: { remainingPercentage: 94.5 },
+        },
+      },
+    }))
+    const intervalSpy = vi.spyOn(globalThis, "setInterval")
+    const { result } = renderHook(() => useTokenUsage("copilot"))
+
+    await vi.waitFor(() => {
+      expect(result.current.usage).toMatchObject({
+        providerName: "Copilot",
+        fiveHour: { utilization: 5.5, label: "Chat" },
+      })
+    })
+
+    expect(mockedAuthFetch).toHaveBeenCalledWith(
+      "/api/copilot/runtime",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(intervalSpy).toHaveBeenCalled()
+    expect(result.current).toMatchObject({ loading: false, available: true })
+  })
+
   it("ignores a stale provider response after the selected agent changes", async () => {
     const claudeResponse = deferred<Response>()
     const codexResponse = deferred<Response>()
@@ -122,7 +203,7 @@ describe("useTokenUsage", () => {
 
     const { result, rerender } = renderHook(
       ({ agentKind }) => useTokenUsage(agentKind),
-      { initialProps: { agentKind: "claude" as "claude" | "codex" } },
+      { initialProps: { agentKind: "claude" as AgentKind } },
     )
 
     await vi.waitFor(() => {

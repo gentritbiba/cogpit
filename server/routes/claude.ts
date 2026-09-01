@@ -25,6 +25,8 @@ import {
   continueCodexExecution,
   isCodexAppServerUnavailable,
 } from "../lib/codexExecution"
+import { copilotRuntime } from "../copilot-runtime"
+import { buildCopilotAttachments, COPILOT_IMAGE_ONLY_PROMPT } from "../lib/copilotMessage"
 
 export function registerClaudeRoutes(use: UseFn) {
   use("/api/send-message", (req, res, next) => {
@@ -43,9 +45,56 @@ export function registerClaudeRoutes(use: UseFn) {
           return
         }
 
+        const activeCopilot = copilotRuntime.isSessionActive(sessionId)
         const existing = persistentSessions.get(sessionId)
-        const sessionPath = existing?.jsonlPath ?? await findJsonlPath(sessionId)
-        const agentKind = existing?.agentKind ?? getAgentKindFromSessionPath(sessionPath)
+        const sessionPath = activeCopilot
+          ? null
+          : existing?.jsonlPath ?? await findJsonlPath(sessionId)
+        const agentKind = activeCopilot
+          ? "copilot"
+          : existing?.agentKind ?? getAgentKindFromSessionPath(sessionPath)
+
+        if (agentKind === "copilot") {
+          const sessionMeta = sessionPath ? await getSessionMeta(sessionPath).catch(() => null) : null
+          const resolvedCwd = cwd || sessionMeta?.cwd || homedir()
+          try {
+            if (!copilotRuntime.isSessionActive(sessionId)) {
+              await copilotRuntime.resumeSession(sessionId, {
+                workingDirectory: resolvedCwd,
+                ...(model ? { model } : {}),
+                ...(effort ? { reasoningEffort: effort } : {}),
+              })
+            } else if (model) {
+              await copilotRuntime.setModel(sessionId, model, effort)
+            } else if (effort) {
+              await copilotRuntime.setReasoningEffort(sessionId, effort)
+            }
+
+            if (permissions?.mode) {
+              await copilotRuntime.setPermissionMode(
+                sessionId,
+                permissions.mode === "bypassPermissions" || permissions.mode === "auto",
+              )
+            }
+            const attachments = buildCopilotAttachments(images)
+            await copilotRuntime.send(sessionId, {
+              prompt: message || COPILOT_IMAGE_ONLY_PROMPT,
+              agentMode: permissions?.mode === "plan"
+                ? "plan"
+                : permissions?.mode === "auto" ? "autopilot" : "interactive",
+              ...(attachments ? { attachments } : {}),
+            })
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ success: true }))
+          } catch (error) {
+            sendError(res, new RouteError(
+              500,
+              ErrorCodes.INTERNAL_ERROR,
+              error instanceof Error ? error.message : "Copilot failed to accept the message",
+            ))
+          }
+          return
+        }
 
         if (agentKind === "codex") {
           if (existing && !existing.dead) {

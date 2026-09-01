@@ -5,7 +5,7 @@
 <h1 align="center">Cogpit</h1>
 
 <p align="center">
-  <em>A real-time control center for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a> and <a href="https://github.com/openai/codex">Codex</a> sessions.</em>
+  <em>A real-time control center for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>, <a href="https://github.com/openai/codex">Codex</a>, and <a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli">GitHub Copilot CLI</a> sessions.</em>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ---
 
-Cogpit turns Claude Code and Codex into one live, interactive control center. It uses provider-native control APIs for active work and the CLIs' on-disk history for restoration, so you can watch, steer, approve, and debug agents without leaving your workflow.
+Cogpit brings Claude Code, Codex, and GitHub Copilot CLI into one live, interactive control center. It uses provider-native control APIs for active work and the CLIs' on-disk history for restoration, so you can watch, steer, approve, and debug agents without leaving your workflow.
 
 Available as a **desktop app** (macOS, Linux, Windows) or a **browser-based** dev server.
 
@@ -32,27 +32,29 @@ Available as a **desktop app** (macOS, Linux, Windows) or a **browser-based** de
 > unsigned, so SmartScreen shows an "unknown publisher" prompt — choose
 > **More info → Run anyway**. Please file an issue if you hit a problem.
 
-> **Prerequisite:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and/or [Codex](https://github.com/openai/codex) must be installed. Cogpit uses your existing CLIs — no API keys or separate login needed.
+> **Prerequisite:** Install at least one supported CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli). Cogpit uses your existing CLI login — no separate API key is needed.
 
 ## Why Cogpit
 
-Claude Code and Codex are powerful, but the terminal gives you a narrow view. Cogpit gives you the full picture:
+Claude Code, Codex, and Copilot CLI are powerful, but the terminal gives you a narrow view. Cogpit gives you the full picture:
 
 - **See everything at once** — live sessions, token costs, file changes, and agent activity in one screen
-- **Talk to your agents** — send messages, approve plans, answer questions, interrupt or branch at any point
-- **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring
+- **Talk to your agents** — send messages, approve plans, answer questions, interrupt turns, and branch where the provider supports it
+- **Understand usage** — per-turn token/cache breakdowns, published-price estimates, and provider-native plan, credit, and rate-limit monitoring where available
 - **Debug faster** — compact tool-call summaries, expandable thinking blocks, line-by-line edit diffs, and complete session history
-- **Follow multi-agent work** — see each agent's task, status, available runtime details, and recorded thread without leaving the parent session
-- **Undo anything** — rewind sessions to any turn with full branching support and file operation reversal
-- **Share one session** — hand a single live session to someone over a passphrase-protected link, without giving them the rest of the machine
+- **Follow multi-agent work** — inspect recorded subagent activity from providers that expose it
+- **Undo supported sessions** — rewind to an earlier turn with branching and file operation reversal
+- **Share a Claude Code session** — hand one live session to someone over a passphrase-protected link, without giving them the rest of the machine
 
 ## Features
 
 ### Multi-Provider Support
-Start sessions with Claude Code or Codex from the same interface. Model settings come from the installed CLIs, including descriptions, recommended and supported reasoning levels, image support, personality support, and speed tiers. GPT-5.6 Sol, Terra, and Luna are supported, with Ultra and Fast shown only when the selected model and account advertise them. If a Codex model is unavailable, Cogpit visibly reports the fallback and retries with the provider default.
+Start sessions with Claude Code, Codex, or GitHub Copilot CLI from the same interface. Model settings come from the installed CLIs, and provider-specific controls appear only when the selected CLI supports them. Claude and Codex catalogs include descriptions, recommended reasoning levels, image support, personality support, and speed tiers when advertised. If a Codex model is unavailable, Cogpit visibly reports the fallback and retries with the provider default.
+
+Copilot support covers existing-session discovery and new, resumed, and branched chats. It supports model and reasoning-effort selection, image input, Ask/Plan/Autopilot/Full access modes, approvals, questions, interruption, and deletion. Timelines include nested subagent activity, file changes, pull request links, and recorded usage and cost data. Copilot's native rewind can restore conversation and file changes, but the runtime has no redo. Cogpit does not share Copilot sessions or expose Copilot goals, workflows, configuration, or MCP editing. Discovery reads Copilot CLI events from `~/.copilot/session-state`. VS Code Copilot Chat data, including `~/Desktop/chatSessions`, is not imported.
 
 ### Live Session Monitoring
-Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
+Stream active sessions via SSE. Watch Claude, Codex, or Copilot think, call tools, and edit files in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
 
 Search the desktop sidebar or a project's Sessions page for the work behind a pull request. Enter `#157`, `honest-cms #157`, or paste a GitHub pull request URL. Cogpit searches sessions that created or worked on that pull request and labels the exact match.
 
@@ -72,10 +74,10 @@ Structured view of every turn: user messages, thinking blocks, assistant text wi
 Agent work stays open while a turn is live. Completed turns with a final answer fold that work behind a duration row, and each turn's file summary is a separate collapsed disclosure.
 
 ### Sub-Agent Viewer
-When Claude or Codex spawns subagents, Cogpit correlates spawn, lifecycle, messages, waits, and final results into one activity record per agent. The session Stats panel shows each agent's status, task summary, duration, and tool count when available. The parent timeline keeps the work in context, and recorded agent threads remain inspectable.
+When Claude Code, Codex, or Copilot CLI spawns subagents, Cogpit correlates the activity into one record per agent. The session Stats panel shows each agent's status, task summary, duration, and tool count when available. The parent timeline keeps the work in context, and recorded agent threads remain inspectable.
 
 ### Token Analytics & Cost Tracking
-Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
+Per-turn token usage (uncached input, cached input, cache creation, and output), published model pricing, SVG charts, context usage, tool/error/duration breakdowns, and provider-native account limits where available. Cogpit leaves cost unavailable when a GPT model has no published USD price instead of inventing a fallback value.
 
 ### Power & Activity Monitor
 Open the header monitor to inspect Cogpit's CPU, memory, event-loop, file/stream, and API activity. The desktop app also breaks usage down by Electron process, and the monitor polls only while it is open.
@@ -103,10 +105,10 @@ Phone push goes out via [ntfy](https://ntfy.sh) only when nobody is at the deskt
 
 Env overrides let a headless box be configured entirely through systemd. Edits take effect without a restart.
 
-Notifications are raised by Cogpit itself — no agent hooks required. A server-side session activity monitor sweeps recently-modified transcripts (Claude Code and Codex alike, including sessions started in a terminal) and notifies on the working→stopped edge (turn complete) and on entering a permission wait. Every raised notification lands in a persisted inbox (`~/.cogpit/notifications.json`, bell icon in the header, `GET /api/notifications`), where clicking an entry deep-links to its session.
+Notifications are raised by Cogpit itself — no agent hooks required. A server-side session activity monitor sweeps recently modified Claude Code, Codex, and Copilot transcripts, including sessions started in a terminal, and notifies when a turn completes or starts waiting for permission. Every raised notification lands in a persisted inbox (`~/.cogpit/notifications.json`, bell icon in the header, `GET /api/notifications`), where clicking an entry deep-links to its session.
 
-### Undo / Redo with Branching
-Rewind to any previous turn. Create branches, switch between them via an SVG graph modal. File operations (Edit/Write) are reversed on undo and replayed on redo. Ghost turns show archived content with hover-to-redo.
+### Branching and History Controls
+Create branches from earlier turns. Claude Code and Codex sessions use Cogpit's undo/redo graph and file-operation reversal. Copilot uses its native fork and rewind APIs, with optional file restoration, but does not provide redo.
 
 ### File Changes
 Track all modifications across a session. Net-diff view (aggregated) or per-edit view (chronological). Sub-agent attribution. Open files in your editor or view git diffs directly.
@@ -178,7 +180,7 @@ Run the full local web app directly from npm:
 npx cogpit@latest
 ```
 
-Or open one existing Claude Code or Codex session in a focused chat-only view:
+Or open one existing Claude Code, Codex, or Copilot session in a focused chat-only view:
 
 ```bash
 npx cogpit@latest preview <session-id>

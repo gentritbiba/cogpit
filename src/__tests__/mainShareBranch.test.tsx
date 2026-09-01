@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
+import { waitFor } from "@testing-library/react"
 
 vi.mock("@/components/DeviceRoot.tsx", () => ({
   DeviceRoot: () => <div data-testid="device-root" />,
@@ -15,7 +16,7 @@ async function boot(pathname: string): Promise<string> {
   document.body.appendChild(root)
   vi.resetModules()
   await import("../main")
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await waitFor(() => expect(root.innerHTML).not.toBe(""))
   return root.innerHTML
 }
 

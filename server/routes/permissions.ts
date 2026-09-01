@@ -9,10 +9,25 @@ import {
   type CodexAppServer,
   type PendingApproval,
 } from "../codex-app-server"
+import {
+  copilotRuntime,
+  type CopilotExitPlanResponse,
+  type CopilotPendingPermission,
+  type CopilotPermissionDecision,
+  type CopilotRuntime,
+} from "../copilot-runtime"
 
 export type CodexApprovalClient = Pick<
   CodexAppServer,
   "listPendingApprovals" | "respondApproval" | "listApprovalThreadIds"
+>
+
+export type CopilotPermissionClient = Pick<
+  CopilotRuntime,
+  | "getPendingPermissions"
+  | "respondToPermission"
+  | "getPendingExitPlans"
+  | "answerExitPlan"
 >
 
 interface FrontendPermissionRequest {
@@ -99,6 +114,109 @@ export function normalizeCodexApproval(
   }
 }
 
+/** Convert Copilot's prompt variants to the permission bar's existing tool shape. */
+export function normalizeCopilotPermission(
+  pending: CopilotPendingPermission,
+): FrontendPermissionRequest {
+  const request = asRecord(pending.request)
+  const rawRequest = asRecord(pending.rawRequest)
+  const kind = typeof request.kind === "string" ? request.kind : "tool"
+  const requestsSandboxBypass = request.requestSandboxBypass === true
+    || rawRequest.requestSandboxBypass === true
+  const description = firstString(
+    request.warning,
+    rawRequest.warning,
+    request.requestSandboxBypassReason,
+    rawRequest.requestSandboxBypassReason,
+    request.intention,
+    request.toolDescription,
+    request.hookMessage,
+    request.description,
+  )
+  const input: Record<string, unknown> = {}
+  let toolName = firstString(request.toolName) || "Tool"
+  let title = "Allow tool use"
+  let blockedPath: string | undefined
+
+  if (kind === "commands" || kind === "shell") {
+    toolName = "Bash"
+    title = "Run command"
+    if (typeof request.fullCommandText === "string") input.command = request.fullCommandText
+  } else if (kind === "write" || kind === "read") {
+    toolName = kind === "write" ? "Write" : "Read"
+    title = kind === "write" ? "Write file" : "Read file"
+    blockedPath = firstString(request.fileName, request.path) || undefined
+    if (blockedPath) input.file_path = blockedPath
+    if (kind === "write" && typeof request.diff === "string") input.diff = request.diff
+  } else if (kind === "path") {
+    const accessKind = typeof request.accessKind === "string" ? request.accessKind : "read"
+    toolName = accessKind === "write" ? "Write" : accessKind === "shell" ? "Bash" : "Read"
+    title = `${accessKind === "write" ? "Write" : "Access"} path`
+    const paths = Array.isArray(request.paths)
+      ? request.paths.filter((path): path is string => typeof path === "string")
+      : []
+    blockedPath = paths[0]
+    if (blockedPath) input.file_path = blockedPath
+    if (paths.length > 1) input.paths = paths
+  } else if (kind === "url") {
+    toolName = "WebFetch"
+    title = "Allow network access"
+    if (typeof request.url === "string") input.url = request.url
+  } else if (kind === "mcp" || kind === "custom-tool") {
+    title = kind === "mcp" ? "Run MCP tool" : "Run tool"
+    if (request.args !== undefined) input.args = request.args
+    if (typeof request.serverName === "string") input.serverName = request.serverName
+  } else {
+    title = kind === "memory" ? "Update memory" : `Allow ${kind.replaceAll("-", " ")}`
+    Object.assign(input, request)
+  }
+
+  if (requestsSandboxBypass) {
+    title = `${title} outside sandbox`
+    input.request_sandbox_bypass = true
+  }
+
+  const canOfferSessionApproval = canOfferCopilotSessionApproval(kind, request)
+  const availableDecisions: ApprovalDecision[] = canOfferSessionApproval
+    ? ["allow", "allow_always", "deny"]
+    : ["allow", "deny"]
+  return {
+    requestId: pending.requestId,
+    toolName,
+    input,
+    toolUseId: firstString(request.toolCallId) || pending.requestId,
+    title,
+    displayName: title,
+    ...(description ? { description, decisionReason: description } : {}),
+    ...(blockedPath ? { blockedPath } : {}),
+    timestamp: pending.requestedAt,
+    availableDecisions,
+  }
+}
+
+function canOfferCopilotSessionApproval(
+  kind: string,
+  request: Record<string, unknown>,
+): boolean {
+  if (request.managedApprovalRequired === true) return false
+  if (kind === "commands" || kind === "shell" || kind === "write") {
+    return request.canOfferSessionApproval === true
+  }
+  if (kind === "factory") return request.canPersistApproval === true
+  if (kind === "mcp") return request.canOfferServerWideApproval !== false
+  return false
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === "string" && value.length > 0) ?? ""
+}
+
+function copilotDecision(behavior: ApprovalDecision): CopilotPermissionDecision {
+  if (behavior === "allow") return { kind: "approve-once", approvedInteractively: true }
+  if (behavior === "allow_always") return { kind: "approve-for-session" }
+  return { kind: "reject" }
+}
+
 /**
  * Pick a batch decision without silently escalating access. "Always allow"
  * may safely degrade to one-time allow, but one-time allow never broadens to a
@@ -151,6 +269,16 @@ function sendCodexApprovalError(res: Parameters<typeof sendJson>[0], error: unkn
   })
 }
 
+function sendCopilotPermissionError(
+  res: Parameters<typeof sendJson>[0],
+  error: unknown,
+): void {
+  sendJson(res, 502, {
+    error: error instanceof Error ? error.message : "Failed to resolve Copilot permission request",
+    code: "COPILOT_PERMISSION_FAILED",
+  })
+}
+
 /**
  * Pending requests for one session, in provider precedence order.
  *
@@ -160,6 +288,7 @@ function sendCodexApprovalError(res: Parameters<typeof sendJson>[0], error: unkn
 export function collectPendingPermissions(
   sessionId: string,
   codex: CodexApprovalClient = codexAppServer,
+  copilot: CopilotPermissionClient = copilotRuntime,
 ): FrontendPermissionRequest[] | ReturnType<typeof getSDKPermissions> {
   // Check SDK sessions first (real-time canUseTool permissions)
   const sdkPerms = getSDKPermissions(sessionId)
@@ -169,6 +298,11 @@ export function collectPendingPermissions(
   // the turn directly, with no process kill/retry cycle.
   const codexPerms = codex.listPendingApprovals(sessionId).map(normalizeCodexApproval)
   if (codexPerms.length > 0) return codexPerms
+
+  const copilotPerms = copilot
+    .getPendingPermissions(sessionId)
+    .map(normalizeCopilotPermission)
+  if (copilotPerms.length > 0) return copilotPerms
 
   // Fallback: check legacy CLI persistent sessions
   const ps = persistentSessions.get(sessionId)
@@ -180,16 +314,18 @@ export function collectPendingPermissions(
 /**
  * Every session id that could currently hold a pending request.
  *
- * Codex approvals are reachable from their own thread id, so listing SDK,
- * Codex, and legacy registries covers all three providers.
+ * Live approval registries expose their own session IDs, including sessions
+ * that are not currently open in the UI.
  */
 export function listPermissionSessionIds(
   codex: CodexApprovalClient = codexAppServer,
+  copilot: CopilotPermissionClient = copilotRuntime,
 ): string[] {
   const ids = new Set<string>()
   for (const id of sdkSessions.keys()) ids.add(id)
   for (const id of persistentSessions.keys()) ids.add(id)
   for (const id of codex.listApprovalThreadIds()) ids.add(id)
+  for (const pending of copilot.getPendingPermissions()) ids.add(pending.sessionId)
   return [...ids]
 }
 
@@ -231,6 +367,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 export function registerPermissionRoutes(
   use: UseFn,
   codex: CodexApprovalClient = codexAppServer,
+  copilot: CopilotPermissionClient = copilotRuntime,
 ) {
   use("/api/permissions", (req, res, next) => {
     const url = req.url ?? ""
@@ -240,13 +377,21 @@ export function registerPermissionRoutes(
     // are not open.
     if (req.method === "GET" && (url === "" || url === "/" || url.startsWith("?"))) {
       const bySession: Record<string, MissionControlPermission[]> = {}
-      for (const sessionId of listPermissionSessionIds(codex)) {
-        const permissions = collectPendingPermissions(sessionId, codex)
+      for (const sessionId of listPermissionSessionIds(codex, copilot)) {
+        const permissions = collectPendingPermissions(sessionId, codex, copilot)
         if (permissions.length > 0) {
           bySession[sessionId] = permissions.map((r) => summarizeRequest(sessionId, r))
         }
       }
-      sendJson(res, 200, { bySession })
+      const plansBySession: Record<
+        string,
+        Array<{ sessionId: string; requestId: string; summary: string }>
+      > = {}
+      for (const { sessionId, requestId, summary } of copilot.getPendingExitPlans()) {
+        const plans = plansBySession[sessionId] ??= []
+        plans.push({ sessionId, requestId, summary })
+      }
+      sendJson(res, 200, { bySession, plansBySession })
       return
     }
 
@@ -254,7 +399,62 @@ export function registerPermissionRoutes(
     const getMatch = url.match(/^\/([^/?]+)$/)
     if (req.method === "GET" && getMatch) {
       const sessionId = decodeURIComponent(getMatch[1])
-      sendJson(res, 200, { permissions: collectPendingPermissions(sessionId, codex) })
+      sendJson(res, 200, {
+        permissions: collectPendingPermissions(sessionId, codex, copilot),
+        plan: copilot.getPendingExitPlans(sessionId)[0] ?? null,
+      })
+      return
+    }
+
+    const planMatch = url.match(/^\/([^/?]+)\/plan$/)
+    if (req.method === "POST" && planMatch) {
+      const sessionId = decodeURIComponent(planMatch[1])
+      let body = ""
+      req.on("data", (chunk: string) => { body += chunk })
+      req.on("end", () => {
+        try {
+          const { requestId, approved, selectedAction, feedback } = JSON.parse(body)
+          if (typeof requestId !== "string" || !requestId) {
+            sendJson(res, 400, { error: "requestId is required" })
+            return
+          }
+          if (typeof approved !== "boolean") {
+            sendJson(res, 400, { error: "approved must be a boolean" })
+            return
+          }
+          if (selectedAction !== undefined && typeof selectedAction !== "string") {
+            sendJson(res, 400, { error: "selectedAction must be a string" })
+            return
+          }
+          if (feedback !== undefined && typeof feedback !== "string") {
+            sendJson(res, 400, { error: "feedback must be a string" })
+            return
+          }
+          const pending = copilot
+            .getPendingExitPlans(sessionId)
+            .find((plan) => plan.requestId === requestId)
+          if (!pending) {
+            sendJson(res, 404, { error: "Plan request not found or already resolved" })
+            return
+          }
+          const response: CopilotExitPlanResponse = {
+            approved,
+            ...(selectedAction ? { selectedAction } : {}),
+            ...(feedback ? { feedback } : {}),
+          }
+          try {
+            copilot.answerExitPlan(sessionId, requestId, response)
+          } catch (error) {
+            sendJson(res, 400, {
+              error: error instanceof Error ? error.message : "Failed to answer Copilot plan",
+            })
+            return
+          }
+          sendJson(res, 200, { success: true })
+        } catch {
+          sendJson(res, 400, { error: "Invalid JSON body" })
+        }
+      })
       return
     }
 
@@ -306,6 +506,44 @@ export function registerPermissionRoutes(
               return
             }
             const permission = normalizeCodexApproval(codexApproval)
+            sendJson(res, 200, {
+              success: true,
+              action: behavior === "deny" ? "denied" : "allowed",
+              toolName: permission.toolName,
+              shouldRetry: false,
+            })
+            return
+          }
+
+          const copilotPending = copilot
+            .getPendingPermissions(sessionId)
+            .find((pending) => pending.requestId === requestId)
+          if (copilotPending) {
+            const permission = normalizeCopilotPermission(copilotPending)
+            const decision = behavior as ApprovalDecision
+            if (!permission.availableDecisions.includes(decision)) {
+              sendJson(res, 400, {
+                error: `Decision '${decision}' is not available for this permission request`,
+                code: "COPILOT_PERMISSION_DECISION_UNAVAILABLE",
+                requestId,
+                availableDecisions: permission.availableDecisions,
+              })
+              return
+            }
+            try {
+              const handled = await copilot.respondToPermission(
+                sessionId,
+                requestId,
+                copilotDecision(decision),
+              )
+              if (!handled) {
+                sendJson(res, 404, { error: "Permission request not found or already resolved" })
+                return
+              }
+            } catch (error) {
+              sendCopilotPermissionError(res, error)
+              return
+            }
             sendJson(res, 200, {
               success: true,
               action: behavior === "deny" ? "denied" : "allowed",
@@ -427,6 +665,49 @@ export function registerPermissionRoutes(
               action: behavior === "deny" ? "denied" : "allowed",
               count: codexPending.length,
               toolNames,
+              shouldRetry: false,
+            })
+            return
+          }
+
+          const copilotPending = copilot.getPendingPermissions(sessionId)
+          if (copilotPending.length > 0) {
+            const permissions = copilotPending.map(normalizeCopilotPermission)
+            try {
+              for (const [index, pending] of copilotPending.entries()) {
+                const stillPending = copilot
+                  .getPendingPermissions(sessionId)
+                  .some(({ requestId }) => requestId === pending.requestId)
+                if (!stillPending) continue
+
+                const available = permissions[index].availableDecisions
+                const decision = behavior === "allow_always" && !available.includes("allow_always")
+                  ? "allow"
+                  : behavior as ApprovalDecision
+                const handled = await copilot.respondToPermission(
+                  sessionId,
+                  pending.requestId,
+                  copilotDecision(decision),
+                )
+                if (!handled && copilot
+                  .getPendingPermissions(sessionId)
+                  .some(({ requestId }) => requestId === pending.requestId)) {
+                  sendJson(res, 409, {
+                    error: "One or more permission requests were already resolved",
+                    code: "COPILOT_PERMISSION_ALREADY_RESOLVED",
+                  })
+                  return
+                }
+              }
+            } catch (error) {
+              sendCopilotPermissionError(res, error)
+              return
+            }
+            sendJson(res, 200, {
+              success: true,
+              action: behavior === "deny" ? "denied" : "allowed",
+              count: copilotPending.length,
+              toolNames: [...new Set(permissions.map(({ toolName }) => toolName))],
               shouldRetry: false,
             })
             return

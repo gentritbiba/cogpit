@@ -46,6 +46,19 @@ function toolResult(id: string, isError = false, timestamp = "2026-08-01T10:00:0
   })
 }
 
+function copilotEvent(
+  type: string,
+  data: Record<string, unknown>,
+  options: { timestamp?: string; agentId?: string } = {},
+): string {
+  return JSON.stringify({
+    type,
+    data,
+    timestamp: options.timestamp ?? "2026-08-01T10:00:00.000Z",
+    ...(options.agentId ? { agentId: options.agentId } : {}),
+  })
+}
+
 function write(lines: string[]): void {
   writeFileSync(file, lines.join("\n") + "\n")
 }
@@ -186,6 +199,135 @@ describe("summarizeSession", () => {
     ])
     const s = await summarizeSession("s", file)
     expect(s!.tokens.output).toBe(3)
+  })
+
+  it("folds Copilot root and nested activity into a useful card", async () => {
+    write([
+      copilotEvent("session.start", {
+        sessionId: "copilot-session",
+        selectedModel: "claude-sonnet-4.5",
+      }, { timestamp: "2026-08-01T10:00:00.000Z" }),
+      copilotEvent("user.message", { content: "Update the file" }, {
+        timestamp: "2026-08-01T10:00:01.000Z",
+      }),
+      copilotEvent("assistant.message", {
+        model: "claude-sonnet-4.5",
+        content: "I will delegate the edit.",
+        toolRequests: [{
+          toolCallId: "task-1",
+          name: "task",
+          arguments: { description: "Update the implementation" },
+        }],
+      }, { timestamp: "2026-08-01T10:00:02.000Z" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "task-1",
+        toolName: "task",
+        arguments: { description: "Update the implementation" },
+      }),
+      copilotEvent("user.message", { content: "Nested prompt" }, { agentId: "agent-1" }),
+      copilotEvent("assistant.message", {
+        model: "claude-haiku-4.5",
+        content: "Nested progress must not replace the root preview.",
+        toolRequests: [{
+          toolCallId: "edit-1",
+          name: "edit",
+          arguments: { path: "/workspace/a.ts", old_str: "old", new_str: "new\nline" },
+        }],
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "edit-1",
+        toolName: "edit",
+        arguments: { path: "/workspace/a.ts", old_str: "old", new_str: "new\nline" },
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_complete", {
+        toolCallId: "edit-1",
+        success: true,
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_complete", { toolCallId: "task-1", success: true }),
+      copilotEvent("assistant.usage", {
+        model: "claude-sonnet-4.5",
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 30,
+        cacheWriteTokens: 5,
+      }),
+      copilotEvent("assistant.usage", {
+        model: "claude-haiku-4.5",
+        inputTokens: 40,
+        outputTokens: 10,
+        cacheReadTokens: 8,
+        cacheWriteTokens: 2,
+      }, { agentId: "agent-1" }),
+      copilotEvent("session.shutdown", {
+        currentModel: "claude-sonnet-4.5",
+        currentTokens: 12_000,
+        modelMetrics: {
+          "claude-sonnet-4.5": {
+            usage: {
+              inputTokens: 160,
+              outputTokens: 25,
+              cacheReadTokens: 40,
+              cacheWriteTokens: 10,
+            },
+          },
+          "claude-haiku-4.5": {
+            usage: {
+              inputTokens: 70,
+              outputTokens: 15,
+              cacheReadTokens: 20,
+              cacheWriteTokens: 5,
+            },
+          },
+        },
+      }, { timestamp: "2026-08-01T10:00:09.000Z" }),
+    ])
+
+    const s = await summarizeSession("copilot-session", file)
+    expect(s).toMatchObject({
+      model: "claude-sonnet-4.5",
+      turnCount: 1,
+      totalToolCalls: 2,
+      toolTrail: ["Task", "Edit"],
+      currentTool: null,
+      lastAssistantText: "I will delegate the edit.",
+      lastToolErrored: false,
+      tokens: {
+        input: 155,
+        output: 40,
+        cacheRead: 60,
+        cacheCreation: 15,
+        total: 195,
+      },
+      context: { used: 12_000 },
+      elapsedMs: 9_000,
+    })
+    expect(s!.files).toEqual([{ path: "/workspace/a.ts", additions: 2, deletions: 1 }])
+  })
+
+  it("updates a Copilot current tool when its completion is appended", async () => {
+    write([
+      copilotEvent("session.start", { selectedModel: "gpt-5" }),
+      copilotEvent("user.message", { content: "Run it" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "shell-1",
+        toolName: "shell",
+        arguments: { command: "bun test" },
+      }),
+    ])
+
+    const running = await summarizeSession("copilot-session", file)
+    expect(running!.currentTool).toEqual({ name: "Bash", summary: "bun test" })
+
+    appendFileSync(file, copilotEvent("tool.execution_complete", {
+      toolCallId: "shell-1",
+      success: false,
+      error: { message: "failed" },
+    }) + "\n")
+
+    const completed = await summarizeSession("copilot-session", file)
+    expect(completed!.currentTool).toBeNull()
+    expect(completed!.lastToolErrored).toBe(true)
+    expect(completed!.totalToolCalls).toBe(1)
   })
 })
 

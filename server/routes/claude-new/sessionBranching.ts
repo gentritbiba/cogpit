@@ -4,6 +4,8 @@ import {
   dirname,
   formatCodexRolloutFileName,
   isCodexDirName,
+  isCopilotDirName,
+  isCopilotFilePath,
   isWithinDir,
   mkdir,
   readFile,
@@ -13,6 +15,7 @@ import {
   randomUUID,
 } from "../../helpers"
 import { withJsonBody, type UseFn } from "../../http"
+import { copilotRuntime } from "../../copilot-runtime"
 
 /**
  * Find the JSONL line index where the turn AFTER targetTurnIndex starts.
@@ -102,6 +105,42 @@ function isCodexTurnBoundary(obj: Record<string, unknown>): boolean {
   )
 }
 
+function copilotForkBoundary(
+  lines: string[],
+  turnIndex?: number,
+  turnUuid?: string,
+): string | undefined {
+  const turns: Array<{ eventId: string; turnId: string }> = []
+  for (const line of lines) {
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>
+      if (event.type !== "user.message" || typeof event.agentId === "string") continue
+      const data = event.data
+      if (!data || typeof data !== "object" || Array.isArray(data)) continue
+      const eventId = typeof event.id === "string" ? event.id : ""
+      if (!eventId) continue
+      const turnId = typeof (data as Record<string, unknown>).turnId === "string"
+        ? String((data as Record<string, unknown>).turnId)
+        : ""
+      turns.push({ eventId, turnId })
+    } catch {
+      // Ignore partial or malformed events while finding durable turn boundaries.
+    }
+  }
+
+  let targetIndex = -1
+  if (turnUuid) {
+    targetIndex = turns.findIndex(({ eventId, turnId }) => (
+      turnUuid === eventId
+      || turnUuid.endsWith(`@${eventId}`)
+      || (turnId.length > 0 && turnUuid === `${turnId}@${eventId}`)
+    ))
+  }
+  if (targetIndex < 0 && turnIndex !== undefined) targetIndex = turnIndex
+  if (targetIndex < 0 || targetIndex >= turns.length - 1) return undefined
+  return turns[targetIndex + 1].eventId
+}
+
 export function registerBranchSessionRoute(use: UseFn) {
   use("/api/branch-session", (req, res, next) => {
     if (req.method !== "POST") return next()
@@ -121,7 +160,15 @@ export function registerBranchSessionRoute(use: UseFn) {
         }
 
         const sourcePath = await resolveSessionFilePath(dirName, fileName)
-        if (!sourcePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, sourcePath))) {
+        const isCopilot = isCopilotDirName(dirName)
+        if (
+          !sourcePath
+          || (
+            isCopilot
+              ? !isCopilotFilePath(sourcePath)
+              : !isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, sourcePath)
+          )
+        ) {
           res.statusCode = 403
           res.end(JSON.stringify({ error: "Access denied" }))
           return
@@ -133,6 +180,29 @@ export function registerBranchSessionRoute(use: UseFn) {
         if (lines.length === 0) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "Source session is empty" }))
+          return
+        }
+
+        if (isCopilot) {
+          const match = /^([0-9a-f-]{36})\/events\.jsonl$/i.exec(fileName)
+          if (!match) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: "Invalid Copilot session path" }))
+            return
+          }
+          const originalId = match[1]
+          const toEventId = copilotForkBoundary(lines, turnIndex, turnUuid)
+          const forked = await copilotRuntime.forkSession(
+            originalId,
+            toEventId ? { toEventId } : {},
+          )
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({
+            dirName,
+            fileName: `${forked.sessionId}/events.jsonl`,
+            sessionId: forked.sessionId,
+            branchedFrom: originalId,
+          }))
           return
         }
 

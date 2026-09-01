@@ -366,6 +366,24 @@ describe("ToolCallCard hook badge rendering", () => {
 })
 
 describe("ToolCallCard image reads", () => {
+  it("renders persisted tool-result images", () => {
+    const toolCall: ToolCall = {
+      ...makeToolCall("image_tool", {}),
+      result: "",
+      resultImages: [{
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: "cG5n" },
+      }],
+    }
+
+    render(<ToolCallCard toolCall={toolCall} expandAll={false} />)
+
+    expect(screen.getByRole("img", { name: "Tool result image 1" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,cG5n",
+    )
+  })
+
   it("previews an image read inline through the local-file proxy", () => {
     const toolCall: ToolCall = {
       ...makeToolCall("Read", { file_path: "/tmp/qa-09.png" }),

@@ -1,5 +1,6 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 import { computeStats, createEmptySessionStats } from "./sessionStats"
+import { appendAssistantText } from "./turnContent"
 import {
   findFailedNestedPatchCallIds,
   parseCodexToolPatches,
@@ -271,17 +272,6 @@ function parseTokenUsage(value: unknown): TokenUsage | null {
     cache_creation_input_tokens: cacheCreation,
     cache_read_input_tokens: cacheRead,
   }
-}
-
-function appendAssistantText(turn: Turn, text: string, timestamp: string): void {
-  if (!text) return
-  turn.assistantText.push(text)
-  const last = turn.contentBlocks[turn.contentBlocks.length - 1]
-  if (last && last.kind === "text") {
-    last.text.push(text)
-    return
-  }
-  turn.contentBlocks.push({ kind: "text", text: [text], timestamp })
 }
 
 function appendThinking(turn: Turn, text: string, timestamp: string): void {

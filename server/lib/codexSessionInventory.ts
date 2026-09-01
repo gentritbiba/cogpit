@@ -1,5 +1,6 @@
 import { getSessionMeta, listCodexSessionFiles } from "../helpers"
 import { getCodexSessionIdentity, type CodexSessionIdentity } from "../sessionMetadata"
+import { createSessionInventoryCache } from "./sessionInventoryCache"
 
 export interface CodexSessionInventoryEntry extends CodexSessionIdentity {
   filePath: string
@@ -7,11 +8,6 @@ export interface CodexSessionInventoryEntry extends CodexSessionIdentity {
   mtimeMs: number
   size: number
 }
-
-const INVENTORY_TTL_MS = 1000
-
-let cachedInventory: { loadedAt: number; entries: CodexSessionInventoryEntry[] } | null = null
-let inventoryInFlight: Promise<CodexSessionInventoryEntry[]> | null = null
 
 async function loadIdentity(
   file: Awaited<ReturnType<typeof listCodexSessionFiles>>[number],
@@ -45,25 +41,8 @@ async function loadInventory(): Promise<CodexSessionInventoryEntry[]> {
   return entries.flatMap((entry) => entry ? [entry] : [])
 }
 
+const inventory = createSessionInventoryCache(loadInventory)
+
 /** Share the cold filesystem walk and identity reads across concurrent routes. */
-export function getCodexSessionInventory(): Promise<CodexSessionInventoryEntry[]> {
-  if (cachedInventory && Date.now() - cachedInventory.loadedAt <= INVENTORY_TTL_MS) {
-    return Promise.resolve(cachedInventory.entries)
-  }
-  if (inventoryInFlight) return inventoryInFlight
-
-  inventoryInFlight = loadInventory()
-    .then((entries) => {
-      cachedInventory = { loadedAt: Date.now(), entries }
-      return entries
-    })
-    .finally(() => {
-      inventoryInFlight = null
-    })
-  return inventoryInFlight
-}
-
-export function invalidateCodexSessionInventory(): void {
-  cachedInventory = null
-  inventoryInFlight = null
-}
+export const getCodexSessionInventory = inventory.get
+export const invalidateCodexSessionInventory = inventory.invalidate

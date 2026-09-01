@@ -68,6 +68,7 @@ import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
 import {
   agentKindFromDirName,
+  sessionIdFromFileName,
 } from "@/lib/sessionSource"
 import { LoginScreen } from "@/components/LoginScreen"
 import { BootstrapScreen } from "@/components/BootstrapScreen"
@@ -161,7 +162,7 @@ export default function App() {
   const supportsMcp = currentAgentKind === "claude"
   const slashSuggestions = useSlashSuggestions(
     configAdminEnabled ? state.session?.cwd ?? pendingPath ?? undefined : undefined,
-    configAdminEnabled,
+    configAdminEnabled && currentAgentKind === "claude",
   )
 
   const handleEditCommand = useCallback((commandName: string) => {
@@ -246,23 +247,23 @@ export default function App() {
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
   const workflowToolCallCount = useMemo(() => {
-    if (!state.session) return 0
+    if (!state.session || currentAgentKind !== "claude") return 0
     let n = 0
     for (const turn of state.session.turns)
       for (const tc of turn.toolCalls)
         if (tc.name === "Workflow") n++
     return n
-  }, [state.session])
+  }, [state.session, currentAgentKind])
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
   // Workflows live under the top-level session dir; not shown on sub-agent views.
   const workflowSource = useMemo(() => {
     const src = state.sessionSource
-    if (!src || parseSubAgentPath(src.fileName)) {
+    if (!src || currentAgentKind !== "claude" || parseSubAgentPath(src.fileName)) {
       return { dirName: null as string | null, sessionId: null as string | null }
     }
-    return { dirName: src.dirName, sessionId: src.fileName.replace(/\.jsonl$/, "") }
-  }, [state.sessionSource])
+    return { dirName: src.dirName, sessionId: sessionIdFromFileName(src.fileName) }
+  }, [state.sessionSource, currentAgentKind])
 
   const sessionWorkflows = useSessionWorkflows(
     workflowSource.dirName,
@@ -302,8 +303,7 @@ export default function App() {
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
   }, [hostFilesEnabled, setShowFileChanges, isMobile])
 
-  // Detect pending interactive prompts (plan approval, user questions)
-  const pendingInteraction = useMemo(
+  const transcriptInteraction = useMemo(
     () => state.session ? detectPendingInteraction(state.session) : null,
     [state.session],
   )
@@ -349,6 +349,7 @@ export default function App() {
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
   const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
+  const pendingInteraction = permReqs.plan ?? transcriptInteraction
 
   const {
     selectedModel,
@@ -694,17 +695,17 @@ export default function App() {
   useEffect(() => {
     const handler = (e: Event) => {
       const { agentId } = (e as CustomEvent<{ agentId: string }>).detail ?? {}
-      if (!agentId || !state.sessionSource) return
+      if (!agentId || !state.sessionSource || currentAgentKind === "copilot") return
       // Derive the parent session ID: if already viewing a sub-agent, use its parentSessionId;
       // otherwise strip .jsonl from the current fileName.
       const parentId = subAgentInfo
         ? subAgentInfo.parentSessionId
-        : state.sessionSource.fileName.replace(/\.jsonl$/, "")
+        : sessionIdFromFileName(state.sessionSource.fileName)
       navigateToSession(state.sessionSource.dirName, `${parentId}/subagents/agent-${agentId}.jsonl`)
     }
     window.addEventListener(OPEN_SUBAGENT_EVENT, handler)
     return () => window.removeEventListener(OPEN_SUBAGENT_EVENT, handler)
-  }, [state.sessionSource, subAgentInfo, navigateToSession])
+  }, [state.sessionSource, subAgentInfo, navigateToSession, currentAgentKind])
 
   const [retainedBranchModalTurn, setRetainedBranchModalTurn] = useState<number | null>(null)
   const branchModalOpen = handlers.branchModalTurn !== null

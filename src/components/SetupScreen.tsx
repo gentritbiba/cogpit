@@ -64,9 +64,11 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
             </div>
             <CardTitle>Connect your coding agent</CardTitle>
             <CardDescription>
-              Cogpit connects to Codex automatically when{" "}
+              Cogpit detects Codex and GitHub Copilot CLI automatically. Existing histories live in{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.codex</code>{" "}
-              is available. For Claude Code, enter its data directory, usually{" "}
+              and{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.copilot/session-state</code>.{" "}
+              For Claude Code, enter its data directory, usually{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.claude</code>.
             </CardDescription>
           </CardHeader>

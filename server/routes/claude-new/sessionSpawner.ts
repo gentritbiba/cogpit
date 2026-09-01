@@ -3,6 +3,7 @@ import type { ServerResponse } from "node:http"
 import { encodeClaudeDirName } from "../../../shared/providers/claude"
 import {
   CODEX_SESSIONS_DIR,
+  COPILOT_SESSIONS_DIR,
   dirs,
   isWithinDir,
   friendlySpawnError,
@@ -25,7 +26,9 @@ import {
   writeTempImageFiles,
   cleanupTempFiles,
   isCodexDirName,
+  isCopilotDirName,
   decodeCodexDirName,
+  decodeCopilotDirName,
   listCodexSessionFiles,
   findNewestCodexSessionForCwd,
   formatCodexRolloutFileName,
@@ -45,6 +48,95 @@ import {
   startCodexExecution,
   type CodexExecutionOptions,
 } from "../../lib/codexExecution"
+import { copilotRuntime } from "../../copilot-runtime"
+import { buildCopilotAttachments, COPILOT_IMAGE_ONLY_PROMPT } from "../../lib/copilotMessage"
+
+interface CopilotSessionBody {
+  dirName: string
+  message?: string
+  images?: ImageAttachment[]
+  permissions?: PermissionsConfig
+  model?: string
+  effort?: string
+}
+
+async function respondWithCopilotSession(
+  res: ServerResponse,
+  body: CopilotSessionBody & { cwd: string },
+): Promise<void> {
+  const sessionId = randomUUID()
+  let opened = false
+  try {
+    await copilotRuntime.createSession({
+      sessionId,
+      workingDirectory: body.cwd,
+      ...(body.model ? { model: body.model } : {}),
+      ...(body.effort ? { reasoningEffort: body.effort } : {}),
+    })
+    opened = true
+    if (body.permissions?.mode) {
+      await copilotRuntime.setPermissionMode(
+        sessionId,
+        body.permissions.mode === "bypassPermissions" || body.permissions.mode === "auto",
+      )
+    }
+    const attachments = buildCopilotAttachments(body.images)
+    await copilotRuntime.send(sessionId, {
+      prompt: body.message || COPILOT_IMAGE_ONLY_PROMPT,
+      agentMode: body.permissions?.mode === "plan"
+        ? "plan"
+        : body.permissions?.mode === "auto" ? "autopilot" : "interactive",
+      ...(attachments ? { attachments } : {}),
+    })
+
+    const fileName = `${sessionId}/events.jsonl`
+    const filePath = join(COPILOT_SESSIONS_DIR, fileName)
+    let initialContent: string | undefined
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        initialContent = await readFile(filePath, "utf-8")
+        break
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+    }
+    res.setHeader("Content-Type", "application/json")
+    res.end(JSON.stringify({
+      success: true,
+      dirName: body.dirName,
+      fileName,
+      sessionId,
+      initialContent,
+    }))
+  } catch (error) {
+    if (opened) {
+      if (copilotRuntime.isSessionActive(sessionId)) {
+        await copilotRuntime.destroySession(sessionId).catch(() => {})
+      }
+      await copilotRuntime.deleteSession(sessionId).catch(() => {})
+    }
+    sendError(res, new RouteError(
+      500,
+      ErrorCodes.INTERNAL_ERROR,
+      error instanceof Error ? error.message : "Failed to start Copilot session",
+    ))
+  }
+}
+
+async function tryRespondWithCopilotSession(
+  res: ServerResponse,
+  body: CopilotSessionBody,
+): Promise<boolean> {
+  if (!isCopilotDirName(body.dirName)) return false
+  const cwd = decodeCopilotDirName(body.dirName)
+  if (!cwd || cwd.includes("\0") || !isAbsolute(cwd)) {
+    sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid Copilot project"))
+    return true
+  }
+  await respondWithCopilotSession(res, { ...body, cwd })
+  return true
+}
+
 export async function resolveProjectPath(
   projectDir: string,
   dirName: string
@@ -210,6 +302,14 @@ export function registerNewSessionRoute(use: UseFn) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message are required"))
           return
         }
+
+        if (await tryRespondWithCopilotSession(res, {
+          dirName,
+          message,
+          permissions,
+          model,
+          effort,
+        })) return
 
         if (isCodexDirName(dirName)) {
           const cwd = decodeCodexDirName(dirName)
@@ -424,6 +524,15 @@ export function registerCreateAndSendRoute(use: UseFn) {
           sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "dirName and message (or images) are required"))
           return
         }
+
+        if (await tryRespondWithCopilotSession(res, {
+          dirName,
+          message,
+          images,
+          permissions,
+          model,
+          effort,
+        })) return
 
         if (isCodexDirName(dirName)) {
           const cwd = decodeCodexDirName(dirName)

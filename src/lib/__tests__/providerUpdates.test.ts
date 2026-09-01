@@ -18,8 +18,9 @@ describe("pendingProviderUpdates", () => {
       makeProviderUpdateInfo(),
       makeProviderUpdateInfo({ provider: "codex", status: "current" }),
       makeProviderUpdateInfo({ provider: "codex", status: "not-installed", latestVersion: null }),
+      makeProviderUpdateInfo({ provider: "copilot", status: "behind" }),
     ]
-    expect(pendingProviderUpdates(providers, []).map((info) => info.provider)).toEqual(["claude"])
+    expect(pendingProviderUpdates(providers, []).map((info) => info.provider)).toEqual(["claude", "copilot"])
   })
 
   it("hides a version the user dismissed but returns for the next one", () => {
@@ -64,13 +65,13 @@ describe("api calls", () => {
     mockAuthFetch.mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ provider: "codex", status: "succeeded", message: "done", output: null }),
+      json: async () => ({ provider: "copilot", status: "succeeded", message: "done", output: null }),
     })
-    const result = await runProviderUpdate("codex")
+    const result = await runProviderUpdate("copilot")
     expect(result.status).toBe("succeeded")
     expect(mockAuthFetch).toHaveBeenCalledWith(
       "/api/provider-updates/run",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ provider: "codex" }) }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ provider: "copilot" }) }),
     )
   })
 

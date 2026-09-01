@@ -15,6 +15,10 @@ const modelOptions: Record<AgentKind, ModelOption[]> = {
     { value: "", label: "Default" },
     { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
   ],
+  copilot: [
+    { value: "", label: "Default" },
+    { value: "claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
+  ],
 }
 
 vi.mock("@/hooks/useModelOptions", () => ({

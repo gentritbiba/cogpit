@@ -41,6 +41,5 @@ export interface RunningProcess {
   cpu: number
   sessionId: string | null
   tty: string
-  args: string
   startTime: string
 }

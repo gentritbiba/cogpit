@@ -27,9 +27,61 @@ describe("ChatInputSettings", () => {
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Claude \/ Default/i }))
+    expect(screen.getByRole("menuitemradio", { name: /^Copilot$/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("menuitemradio", { name: /^Codex$/ }))
 
     expect(onAgentKindChange).toHaveBeenCalledWith("codex")
+  })
+
+  it("shows Copilot models from its live catalog", () => {
+    setDynamicModelOptions("copilot", [
+      { value: "", label: "Default", resolvedModel: "gpt-5.4", isDefault: true },
+      { value: "gpt-5.4", label: "GPT-5.4" },
+      { value: "claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
+      { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
+    ])
+
+    render(
+      <ChatInputSettings
+        agentKind="copilot"
+        onAgentKindChange={vi.fn()}
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        activeModelId="gpt-5.4"
+        isNewSession
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Copilot \/ GPT-5\.4/i }))
+    expect(screen.getByRole("menuitemradio", { name: /^Claude Sonnet 4\.6/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: /^Gemini 3\.1 Pro Preview/ })).toBeInTheDocument()
+  })
+
+  it("offers only Ask, Plan, and Full access for Copilot", () => {
+    const onPermissionModeChange = vi.fn()
+    render(
+      <ChatInputSettings
+        agentKind="copilot"
+        selectedModel=""
+        onModelChange={vi.fn()}
+        selectedEffort="high"
+        onEffortChange={vi.fn()}
+        permissionMode="default"
+        onPermissionModeChange={onPermissionModeChange}
+        isNewSession
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }))
+    expect(screen.getByRole("menuitemradio", { name: /^Ask/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: /^Plan/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitemradio", { name: /^Full access/ })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitemradio", { name: /^Accept Edits/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }))
+    expect(onPermissionModeChange).toHaveBeenCalledWith("plan")
   })
 
   it("shows codex defaults, selects a model, and closes the dropdown", async () => {

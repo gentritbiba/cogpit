@@ -32,6 +32,7 @@ import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
 import { handleHubUpgrade } from "./hub/proxy"
 import { codexAppServer } from "./codex-app-server"
+import { copilotRuntime } from "./copilot-runtime"
 import { PtySessionManager } from "./pty-server"
 import { PtyAuthorizationController } from "./pty-authorization"
 import type { HubMode } from "./routes/hello"
@@ -213,6 +214,7 @@ export async function createServerComposition(
         new Promise<void>((resolve) => wss.close(() => resolve())),
         cleanupProcesses(),
         codexAppServer.shutdown(),
+        copilotRuntime.shutdown(),
         flushSessionPersistence(),
       ])
     })()

@@ -1,12 +1,15 @@
 import { readFile, stat, open } from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
 import { deriveSessionStatus, type SessionStatusInfo } from "../shared/session/sessionStatus"
 import { extractCodexMetadataFromLines } from "../shared/session/codex"
+import { extractCopilotMetadataFromLines } from "../shared/session/copilot"
 import type { AgentSettingMessage, WorktreeStateMessage } from "../shared/session/types"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
 const SKIP_RE = /^(Tool loaded\.?|Continue|compact)$/i
 const CODEX_IDENTITY_BYTES = 32768
+const COPILOT_IDENTITY_BYTES = 32768
 
 const MODEL_RE = /"model":"([^"]+)"/g
 
@@ -31,8 +34,86 @@ export interface CodexSessionIdentity {
   parentSessionId: string | null
 }
 
+export interface CopilotSessionIdentity {
+  sessionId: string
+  cwd: string
+  gitBranch: string
+  isSubagent: false
+  parentSessionId: null
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function parseSimpleYamlValue(raw: string): string {
+  const value = raw.trim()
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value) as string } catch { return value.slice(1, -1) }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'")
+  }
+  return value
+}
+
+async function readCopilotWorkspace(filePath: string): Promise<{ cwd: string; gitBranch: string }> {
+  try {
+    const workspace = await readFile(join(dirname(filePath), "workspace.yaml"), "utf-8")
+    let cwd = ""
+    let gitBranch = ""
+    for (const line of workspace.split("\n")) {
+      const match = line.match(/^\s*(cwd|working_directory|branch)\s*:\s*(.*?)\s*$/)
+      if (!match || !match[2]) continue
+      const value = parseSimpleYamlValue(match[2])
+      if ((match[1] === "cwd" || match[1] === "working_directory") && !cwd) cwd = value
+      if (match[1] === "branch" && !gitBranch) gitBranch = value
+    }
+    return { cwd, gitBranch }
+  } catch {
+    return { cwd: "", gitBranch: "" }
+  }
+}
+
+/** Read the small durable header used to place a Copilot session in inventory. */
+export async function getCopilotSessionIdentity(filePath: string): Promise<CopilotSessionIdentity | null> {
+  const fh = await open(filePath, "r")
+  let text = ""
+  try {
+    const buf = Buffer.allocUnsafe(COPILOT_IDENTITY_BYTES)
+    const { bytesRead } = await fh.read(buf, 0, COPILOT_IDENTITY_BYTES, 0)
+    text = buf.subarray(0, bytesRead).toString("utf-8")
+    if (bytesRead === COPILOT_IDENTITY_BYTES) {
+      const lastNewline = text.lastIndexOf("\n")
+      if (lastNewline >= 0) text = text.slice(0, lastNewline)
+    }
+  } finally {
+    await fh.close()
+  }
+
+  let sessionId = basename(dirname(filePath))
+  let cwd = ""
+  let gitBranch = ""
+  for (const line of text.split("\n")) {
+    if (!line) continue
+    let record: unknown
+    try { record = JSON.parse(line) } catch { continue }
+    if (!isRecord(record) || (record.type !== "session.start" && record.type !== "session.resume")) continue
+    const data = isRecord(record.data) ? record.data : null
+    if (!data) continue
+    if (typeof data.sessionId === "string" && data.sessionId) sessionId = data.sessionId
+    const context = isRecord(data.context) ? data.context : null
+    if (!cwd && context && typeof context.cwd === "string") cwd = context.cwd
+    if (!gitBranch && context && typeof context.branch === "string") gitBranch = context.branch
+  }
+
+  if (!cwd || !gitBranch) {
+    const workspace = await readCopilotWorkspace(filePath)
+    cwd ||= workspace.cwd
+    gitBranch ||= workspace.gitBranch
+  }
+  if (!sessionId || !cwd) return null
+  return { sessionId, cwd, gitBranch, isSubagent: false, parentSessionId: null }
 }
 
 /**
@@ -121,6 +202,16 @@ function effortFromLine(line: string): string | null {
     if (typeof nested === "string" && nested) return nested
   }
 
+  if (
+    (record.type === "session.start"
+      || record.type === "session.resume"
+      || record.type === "session.model_change")
+    && isRecord(record.data)
+  ) {
+    const effort = record.data.reasoningEffort ?? record.data.effort
+    return typeof effort === "string" && effort ? effort : null
+  }
+
   return null
 }
 
@@ -171,7 +262,7 @@ export async function readTranscriptEffort(filePath: string): Promise<string | n
       const lines = body.toString("utf-8").split("\n")
       for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i]
-        if (!line || !line.includes("effort")) continue
+        if (!line || (!line.includes("effort") && !line.includes("Effort"))) continue
         const effort = effortFromLine(line)
         if (effort) return effort
       }
@@ -264,6 +355,28 @@ export async function getSessionMeta(filePath: string) {
     }
     const meta = extractCodexMetadataFromLines(lines)
     return { ...meta, lineCount: lines.length, teamName: "", agentName: "" }
+  }
+  const isCopilot = typeof firstParsed?.type === "string" && (
+    firstParsed.type === "user.message"
+    || firstParsed.type === "abort"
+    || firstParsed.type.startsWith("assistant.")
+    || firstParsed.type.startsWith("session.")
+    || firstParsed.type.startsWith("tool.")
+  )
+  if (isCopilot) {
+    if (isPartialRead) {
+      const content = await readFile(filePath, "utf-8")
+      lines = content.split("\n").filter(Boolean)
+    }
+    const meta = extractCopilotMetadataFromLines(lines)
+    return {
+      ...meta,
+      aiTitle: "",
+      customTitle: "",
+      lineCount: lines.length,
+      teamName: "",
+      agentName: "",
+    }
   }
 
   let sessionId = ""
@@ -456,10 +569,19 @@ const CLAUDE_TAIL_MARKERS = ["async_launched", "task-notification", '"TaskStop"'
 // function_call_output is included because output lines carry only a call_id —
 // the tracker links them back to the spawn/wait/interrupt call they answer.
 const CODEX_TAIL_MARKERS = ["spawn_agent", "spawnAgent", "wait_agent", "waitAgent", "interrupt_agent", "interruptAgent", "sub_agent_activity", "agent_message", "function_call_output"]
+const COPILOT_TAIL_MARKERS = ['"abort"', '"assistant.message"', '"user.message"', '"subagent.']
+
+function isCopilotSubagentLifecycle(obj: { type: string; [key: string]: unknown }): boolean {
+  return obj.type.startsWith("subagent.")
+    && typeof obj.agentId === "string"
+    && obj.agentId.length > 0
+}
 
 /** Cheap string test that keeps the filtered phase from parsing irrelevant lines. */
-function isTailCandidate(line: string, provider: "claude" | "codex", needUserActivity: boolean): boolean {
-  const markers = provider === "claude" ? CLAUDE_TAIL_MARKERS : CODEX_TAIL_MARKERS
+function isTailCandidate(line: string, provider: "claude" | "codex" | "copilot", needUserActivity: boolean): boolean {
+  const markers = provider === "claude"
+    ? CLAUDE_TAIL_MARKERS
+    : provider === "codex" ? CODEX_TAIL_MARKERS : COPILOT_TAIL_MARKERS
   return markers.some((marker) => line.includes(marker))
     || (needUserActivity && line.includes('"type":"user"'))
 }
@@ -488,7 +610,7 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
       const meaningful: Array<{ type: string; [key: string]: unknown }> = []
       let cursor = fileStat.size
       let leftover = ""
-      let turnEnded: "claude" | "codex" | null = null
+      let turnEnded: "claude" | "codex" | "copilot" | null = null
       let needUserActivity = false
 
       for (let chunk = 0; chunk < MAX_CHUNKS && cursor > 0; chunk++) {
@@ -519,9 +641,28 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
               if (obj.type !== "user" && obj.type !== "assistant" && obj.type !== "queue-operation" && obj.type !== "attachment") continue
               meaningful.unshift(obj)
               if (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta) needUserActivity = false
-            } else if (obj.type === "event_msg" || obj.type === "response_item") {
+            } else if (turnEnded === "codex" && (obj.type === "event_msg" || obj.type === "response_item")) {
               meaningful.unshift(obj)
+            } else if (turnEnded === "copilot") {
+              if (isCopilotSubagentLifecycle(obj)) {
+                meaningful.unshift(obj)
+                continue
+              }
+              if (typeof obj.agentId === "string" && obj.agentId) continue
+              if (
+                obj.type === "abort"
+                || obj.type === "assistant.message"
+                || obj.type === "user.message"
+              ) {
+                meaningful.unshift(obj)
+                return deriveSessionStatus(meaningful)
+              }
             }
+            continue
+          }
+
+          if (isCopilotSubagentLifecycle(obj)) {
+            meaningful.unshift(obj)
             continue
           }
 
@@ -547,6 +688,31 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
               case "token_count":
                 continue
             }
+          }
+
+          if (
+            obj.type === "abort"
+            || obj.type === "user.message"
+            || obj.type.startsWith("assistant.")
+            || obj.type.startsWith("permission.")
+            || obj.type.startsWith("session.")
+            || obj.type.startsWith("tool.")
+            || obj.type.startsWith("user_input.")
+          ) {
+            if (typeof obj.agentId === "string" && obj.agentId) continue
+            if (obj.type === "assistant.turn_end") {
+              meaningful.unshift(obj)
+              turnEnded = "copilot"
+              continue
+            }
+            meaningful.unshift(obj)
+            const status = deriveSessionStatus(meaningful)
+            if (
+              status.status !== "idle"
+              || obj.type === "session.start"
+              || obj.type === "session.resume"
+            ) return status
+            continue
           }
 
           if (obj.type === "response_item") {
@@ -631,6 +797,25 @@ export async function searchSessionMessages(
 
   const lines = content.split("\n")
   for (const line of lines) {
+    if (line.includes('"user.message"')) {
+      try {
+        const obj = JSON.parse(line)
+        if (obj.type === "user.message" && !(typeof obj.agentId === "string" && obj.agentId)) {
+          const text = typeof obj.data?.content === "string" ? obj.data.content.trim() : ""
+          const lower = text.toLowerCase()
+          if (lower.includes(q)) {
+            const idx = lower.indexOf(q)
+            const start = Math.max(0, idx - 30)
+            const end = Math.min(text.length, idx + query.length + 70)
+            const snippet = (start > 0 ? "..." : "") + text.slice(start, end).trim() + (end < text.length ? "..." : "")
+            return snippet.slice(0, 150)
+          }
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+
     if (line.includes('"event_msg"') || line.includes('"response_item"')) {
       try {
         const obj = JSON.parse(line)

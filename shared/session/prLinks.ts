@@ -192,10 +192,20 @@ export interface PullRequestScanner {
 /** Text of a tool result, which may be a plain string or a list of blocks. */
 function resultText(content: unknown): string {
   if (typeof content === "string") return content
-  if (!Array.isArray(content)) return ""
-  return content
-    .map((block) => (isRecord(block) && typeof block.text === "string" ? block.text : ""))
-    .join("\n")
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => (isRecord(block) && typeof block.text === "string" ? block.text : ""))
+      .join("\n")
+  }
+  if (isRecord(content)) {
+    return resultText(
+      content.detailedContent
+      ?? content.content
+      ?? content.contents
+      ?? content.output,
+    )
+  }
+  return ""
 }
 
 export function createPullRequestScanner(): PullRequestScanner {
@@ -297,6 +307,24 @@ export function createPullRequestScanner(): PullRequestScanner {
         recordToolCall(payload.call_id, parseArgs(payload.arguments ?? payload.input), timestamp)
       } else if (type === "function_call_output" || type === "custom_tool_call_output") {
         recordResult(payload.call_id, payload.output, false)
+      }
+      return
+    }
+
+    const data = record.data
+    if (isRecord(data)) {
+      if (record.type === "tool.execution_start") {
+        recordToolCall(
+          data.toolCallId,
+          parseArgs(data.arguments ?? data.input),
+          timestamp,
+        )
+      } else if (record.type === "tool.execution_complete") {
+        recordResult(
+          data.toolCallId,
+          data.result ?? data.output ?? data.error,
+          data.success === false || (data.error !== undefined && data.error !== null),
+        )
       }
       return
     }

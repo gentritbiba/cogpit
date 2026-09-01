@@ -18,3 +18,13 @@ export {
   buildCodexModelArgs,
   buildCodexFastModeArgs,
 } from "./codex"
+
+export {
+  COPILOT_PREFIX,
+  isCopilotDirName,
+  encodeCopilotDirName,
+  decodeCopilotDirName,
+  buildCopilotPermArgs,
+  buildCopilotEffortArgs,
+  buildCopilotModelArgs,
+} from "./copilot"

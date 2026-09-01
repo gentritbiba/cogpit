@@ -54,7 +54,9 @@ export function ActionButtons({
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
   const showAgentControls = isConnected || isLive
   const agentKind = sessionSource?.agentKind ?? agentKindFromDirName(sessionSource?.dirName ?? null)
-  const interruptLabel = agentKind === "codex" ? "Stop active turn" : "Interrupt agent"
+  const interruptLabel = agentKind === "codex"
+    ? "Stop active turn"
+    : agentKind === "copilot" ? "Stop Copilot turn" : "Interrupt agent"
 
   return (
     <div className="flex items-center gap-1">

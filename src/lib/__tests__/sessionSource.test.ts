@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest"
 import {
   agentKindFromDirName,
   encodeCodexDirName,
+  encodeCopilotDirName,
   encodeClaudeDirName,
   findClaudeProjectDirNameForCwd,
   getResumeCommand,
   inferSessionSourceKind,
   isCodexDirName,
+  isCopilotDirName,
   projectDirNameForAgent,
   projectDirNameForNewFolder,
   sessionIdFromFileName,
+  sessionUrlIdFromFileName,
 } from "@/lib/sessionSource"
 import { decodeClaudeDirName } from "../../../shared/providers/claude"
 
@@ -19,8 +22,14 @@ describe("sessionSource", () => {
     expect(isCodexDirName("my-project")).toBe(false)
   })
 
+  it("detects copilot dir names", () => {
+    expect(isCopilotDirName("copilot__L3RtcC9wcm9qZWN0")).toBe(true)
+    expect(isCopilotDirName("my-project")).toBe(false)
+  })
+
   it("infers the agent kind from dirName", () => {
     expect(inferSessionSourceKind("codex__L3RtcC9wcm9qZWN0")).toBe("codex")
+    expect(inferSessionSourceKind("copilot__L3RtcC9wcm9qZWN0")).toBe("copilot")
     expect(agentKindFromDirName("my-project")).toBe("claude")
   })
 
@@ -30,6 +39,9 @@ describe("sessionSource", () => {
     expect(getResumeCommand("codex", "1234", "/tmp/project dir/it's-here")).toBe(
       "codex -C '/tmp/project dir/it'\\''s-here' resume 1234"
     )
+    expect(getResumeCommand("copilot", "1234", "/tmp/project dir/it's-here")).toBe(
+      "copilot -C '/tmp/project dir/it'\\''s-here' --resume 1234"
+    )
   })
 
   it("encodes cwd values into codex dir names", () => {
@@ -37,10 +49,16 @@ describe("sessionSource", () => {
     expect(isCodexDirName(encodeCodexDirName("/tmp/project"))).toBe(true)
   })
 
+  it("encodes cwd values into copilot dir names", () => {
+    expect(encodeCopilotDirName("/tmp/project")).toMatch(/^copilot__/)
+    expect(isCopilotDirName(encodeCopilotDirName("/tmp/project"))).toBe(true)
+  })
+
   it("encodes new folder paths for the selected provider", () => {
     expect(encodeClaudeDirName("/tmp/my-project/")).toBe("-tmp-my-project")
     expect(projectDirNameForNewFolder("/tmp/project", "claude")).toBe("-tmp-project")
     expect(projectDirNameForNewFolder("/tmp/project", "codex")).toBe(encodeCodexDirName("/tmp/project"))
+    expect(projectDirNameForNewFolder("/tmp/project", "copilot")).toBe(encodeCopilotDirName("/tmp/project"))
   })
 
   describe("Claude project dir codec", () => {
@@ -78,12 +96,14 @@ describe("sessionSource", () => {
   it("maps a Claude project dir to the selected agent kind", () => {
     expect(projectDirNameForAgent("my-project", "/tmp/project", "claude")).toBe("my-project")
     expect(projectDirNameForAgent("my-project", "/tmp/project", "codex")).toBe(encodeCodexDirName("/tmp/project"))
+    expect(projectDirNameForAgent("my-project", "/tmp/project", "copilot")).toBe(encodeCopilotDirName("/tmp/project"))
   })
 
   it("finds the Claude project dir for a cwd even when the current dir is codex", () => {
     const cwd = "/tmp/project/"
     const projects = [
       { dirName: encodeCodexDirName("/tmp/project"), path: "/tmp/project" },
+      { dirName: encodeCopilotDirName("/tmp/project"), path: "/tmp/project" },
       { dirName: "tmp-project", path: "/tmp/project" },
     ]
 
@@ -108,8 +128,30 @@ describe("sessionSource", () => {
       )).toBe("019f8682-1c07-7fe2-8c38-26b0cafe7e08")
     })
 
+    it("extracts the UUID from nested Copilot event paths", () => {
+      expect(sessionIdFromFileName(
+        "68596e24-db5d-46a4-86fe-9d82425f36d7/events.jsonl"
+      )).toBe("68596e24-db5d-46a4-86fe-9d82425f36d7")
+    })
+
     it("falls back to stripping .jsonl when no UUID is present", () => {
       expect(sessionIdFromFileName("sess.jsonl")).toBe("sess")
+    })
+  })
+
+  describe("sessionUrlIdFromFileName", () => {
+    it("preserves nested Codex rollout identity for deep links", () => {
+      const fileName = "2026/07/21/rollout-2026-07-21T22-59-57-e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3.jsonl"
+      expect(sessionUrlIdFromFileName(encodeCodexDirName("/tmp/project"), fileName)).toBe(
+        fileName.replace(/\.jsonl$/, ""),
+      )
+    })
+
+    it("uses the canonical UUID for Copilot deep links", () => {
+      expect(sessionUrlIdFromFileName(
+        encodeCopilotDirName("/tmp/project"),
+        "68596e24-db5d-46a4-86fe-9d82425f36d7/events.jsonl",
+      )).toBe("68596e24-db5d-46a4-86fe-9d82425f36d7")
     })
   })
 })

@@ -56,10 +56,12 @@ const CANONICAL_ROUTE_IDS = [
   "permissions",
   "mission-control",
   "ask-user",
+  "copilot-history",
   "agent-prompts",
   "models",
   "codex-runtime",
   "claude-runtime",
+  "copilot-runtime",
   "provider-updates",
 ] as const
 

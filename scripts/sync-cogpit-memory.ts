@@ -15,6 +15,7 @@ const DEST = join(ROOT, "packages/cogpit-memory/src/lib")
 const FILES = [
   "parser.ts",
   "codex.ts",
+  "copilot.ts",
   "codex-patches.ts",
   "codex-exec.ts",
   "codex-tool-normalization.ts",
@@ -23,6 +24,7 @@ const FILES = [
   "types.ts",
   "messageTypeGuards.ts",
   "sessionStats.ts",
+  "turnContent.ts",
   "sessionStatus.ts",
   "token-costs.ts",
   "interactiveState.ts",

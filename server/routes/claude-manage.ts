@@ -3,6 +3,7 @@ import {
   persistentSessions,
   dirs,
   isCodexDirName,
+  isCopilotDirName,
   isWithinDir,
   unlink,
   resolveSessionFilePath,
@@ -25,6 +26,7 @@ import { listShares, removeShare } from "../share/registry"
 import { revokeShareTokensForSession } from "../security"
 import { codexAppServer } from "../codex-app-server"
 import { registerRunningProcessesRoute } from "./claude-manage/processInventory"
+import { copilotRuntime } from "../copilot-runtime"
 
 function collectRequestBody(
   req: IncomingMessage,
@@ -87,9 +89,16 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
         const activeCodexTurnId = codexAppServer.getActiveTurnId(sessionId)
-        const interrupted = activeCodexTurnId
-          ? await codexAppServer.interruptTurn(sessionId, activeCodexTurnId).then(() => true)
-          : await interruptSDKTurn(sessionId)
+        let interrupted: boolean
+        if (activeCodexTurnId) {
+          await codexAppServer.interruptTurn(sessionId, activeCodexTurnId)
+          interrupted = true
+        } else if (copilotRuntime.isTurnActive(sessionId)) {
+          await copilotRuntime.abort(sessionId)
+          interrupted = true
+        } else {
+          interrupted = await interruptSDKTurn(sessionId)
+        }
         sendJson(res, 200, { success: interrupted })
       } catch {
         sendError(res, new RouteError(400, ErrorCodes.INVALID_REQUEST, "Invalid JSON body"))
@@ -167,6 +176,15 @@ export function registerClaudeManageRoutes(use: UseFn) {
           return
         }
 
+        if (copilotRuntime.isSessionActive(sessionId)) {
+          if (copilotRuntime.isTurnActive(sessionId)) {
+            await copilotRuntime.abort(sessionId)
+          }
+          await copilotRuntime.destroySession(sessionId)
+          sendJson(res, 200, { success: true })
+          return
+        }
+
         let stoppedNativeCodex = false
         const activeCodexTurnId = codexAppServer.getActiveTurnId(sessionId)
         if (activeCodexTurnId) {
@@ -211,6 +229,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
     if (req.method !== "POST") return next()
 
     const activeNativeTurns = codexAppServer.listActiveTurns()
+    const activeCopilotSessions = copilotRuntime.getActiveSessionIds()
 
     const finishKillAll = (
       nativeResults: PromiseSettledResult<unknown>[],
@@ -264,7 +283,7 @@ export function registerClaudeManageRoutes(use: UseFn) {
       })
     }
 
-    if (activeNativeTurns.length === 0) {
+    if (activeNativeTurns.length === 0 && activeCopilotSessions.length === 0) {
       finishKillAll([])
       return
     }
@@ -273,9 +292,14 @@ export function registerClaudeManageRoutes(use: UseFn) {
     // process per session. Interrupt every transport-reported turn before
     // cleaning up the legacy process maps.
     void Promise.allSettled(
-      activeNativeTurns.map(({ threadId, turnId }) =>
-        codexAppServer.interruptTurn(threadId, turnId),
-      ),
+      [
+        ...activeNativeTurns.map(({ threadId, turnId }) =>
+          codexAppServer.interruptTurn(threadId, turnId),
+        ),
+        ...activeCopilotSessions.map((sessionId) =>
+          copilotRuntime.destroySession(sessionId),
+        ),
+      ],
     ).then(finishKillAll)
   })
 
@@ -347,12 +371,20 @@ export function registerClaudeManageRoutes(use: UseFn) {
         }
 
         const filePath = await resolveSessionFilePath(dirName, fileName)
-        if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
+        const externalProvider = isCodexDirName(dirName) || isCopilotDirName(dirName)
+        if (!filePath || (!externalProvider && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
           sendError(res, new RouteError(403, ErrorCodes.FORBIDDEN, "Access denied"))
           return
         }
 
-        const sessionId = fileName.replace(".jsonl", "")
+        const sessionId = isCopilotDirName(dirName)
+          ? fileName.split("/")[0]
+          : fileName.replace(".jsonl", "")
+        const isCopilot = isCopilotDirName(dirName)
+        if (isCopilot && copilotRuntime.isSessionActive(sessionId)) {
+          if (copilotRuntime.isTurnActive(sessionId)) await copilotRuntime.abort(sessionId)
+          await copilotRuntime.destroySession(sessionId)
+        }
         terminatePersistentSession(sessionId)
         const child = activeProcesses.get(sessionId)
         if (child) {
@@ -364,7 +396,8 @@ export function registerClaudeManageRoutes(use: UseFn) {
           forceKill.unref()
         }
 
-        await unlink(filePath)
+        if (isCopilot) await copilotRuntime.deleteSession(sessionId)
+        else await unlink(filePath)
 
         // A share left behind would hand its guest whatever session next
         // claims this id.

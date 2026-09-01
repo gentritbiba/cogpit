@@ -45,6 +45,10 @@ interface SessionAccumulator {
   lastAssistantText: string | null
   /** tool_use id → the call, until its tool_result arrives. */
   pendingToolUses: Map<string, MissionControlCurrentTool>
+  /** Copilot announces the same call in assistant.message and tool.execution_start. */
+  copilotToolUses: Set<string>
+  /** Copilot edit inputs must only contribute to the net diff once per call. */
+  copilotFileEdits: Set<string>
   lastToolErrored: boolean
 }
 
@@ -95,6 +99,8 @@ function createAccumulator(): SessionAccumulator {
     files: new Map(),
     lastAssistantText: null,
     pendingToolUses: new Map(),
+    copilotToolUses: new Set(),
+    copilotFileEdits: new Set(),
     lastToolErrored: false,
   }
 }
@@ -118,13 +124,13 @@ function recordEdit(acc: SessionAccumulator, path: string, op: EditOp): void {
 }
 
 /** Fold one Edit/Write/MultiEdit/NotebookEdit call into the file accumulator. */
-function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>): void {
+function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>): boolean {
   const path = str(input.file_path) || str(input.path) || str(input.notebook_path)
-  if (!path) return
+  if (!path) return false
 
   if (name === "Write") {
     recordEdit(acc, path, { oldString: "", newString: str(input.content), isWrite: true })
-    return
+    return true
   }
   // MultiEdit-style batches carry an `edits` array; a single edit carries the
   // old/new pair on the input itself, so treat it as a batch of one.
@@ -137,6 +143,7 @@ function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<strin
       isWrite: false,
     })
   }
+  return true
 }
 
 function foldAssistant(acc: SessionAccumulator, entry: Record<string, unknown>): void {
@@ -213,6 +220,231 @@ function foldUser(acc: SessionAccumulator, entry: Record<string, unknown>): void
   if (!sawToolResult) acc.turnCount += 1
 }
 
+function copilotText(value: unknown): string {
+  if (typeof value === "string") return value
+  if (!Array.isArray(value)) return ""
+  return value
+    .flatMap((part) => {
+      if (typeof part === "string") return part ? [part] : []
+      const record = asRecord(part)
+      const text = str(record.text) || str(record.content)
+      return text ? [text] : []
+    })
+    .join("\n")
+}
+
+function normalizeCopilotToolName(name: string): string {
+  switch (name.toLowerCase().replace(/-/g, "_")) {
+    case "ask_user": return "AskUserQuestion"
+    case "bash":
+    case "powershell":
+    case "shell": return "Bash"
+    case "create": return "Write"
+    case "edit": return "Edit"
+    case "glob": return "Glob"
+    case "grep": return "Grep"
+    case "task": return "Task"
+    case "view": return "Read"
+    case "web_fetch": return "WebFetch"
+    default: return name
+  }
+}
+
+function normalizeCopilotToolInput(
+  name: string,
+  value: unknown,
+): Record<string, unknown> {
+  const input = asRecord(value)
+  if (name === "Edit") {
+    return {
+      ...input,
+      file_path: str(input.file_path) || str(input.path),
+      old_string: str(input.old_string) || str(input.old_str),
+      new_string: str(input.new_string) || str(input.new_str),
+    }
+  }
+  if (name === "Write") {
+    return {
+      ...input,
+      file_path: str(input.file_path) || str(input.path),
+      content: str(input.content) || str(input.file_text),
+    }
+  }
+  if (name === "Bash" && typeof input.command !== "string" && typeof input.cmd === "string") {
+    return { ...input, command: input.cmd }
+  }
+  return input
+}
+
+function foldCopilotToolUse(
+  acc: SessionAccumulator,
+  id: string,
+  rawName: string,
+  rawInput: unknown,
+): void {
+  if (!rawName) return
+  const name = normalizeCopilotToolName(rawName)
+  const input = normalizeCopilotToolInput(name, rawInput)
+  const isNew = !id || !acc.copilotToolUses.has(id)
+
+  if (isNew) {
+    acc.totalToolCalls += 1
+    acc.toolTrail.push(name)
+    if (acc.toolTrail.length > TRAIL_LENGTH) acc.toolTrail.shift()
+    if (id) acc.copilotToolUses.add(id)
+  }
+
+  if (id) {
+    acc.pendingToolUses.set(id, { name, summary: getToolSummary({ name, input }) })
+  }
+
+  if (
+    (name === "Edit" || name === "Write" || name === "MultiEdit" || name === "NotebookEdit")
+    && (!id || !acc.copilotFileEdits.has(id))
+    && foldFileEdit(acc, name, input)
+    && id
+  ) {
+    acc.copilotFileEdits.add(id)
+  }
+}
+
+function foldCopilotUsage(
+  acc: SessionAccumulator,
+  data: Record<string, unknown>,
+  inputIncludesCache: boolean,
+): boolean {
+  const cacheRead = num(data.cacheReadTokens)
+  const cacheCreation = num(data.cacheWriteTokens)
+  const reportedInput = num(data.inputTokens)
+  const input = inputIncludesCache
+    ? Math.max(0, reportedInput - cacheRead - cacheCreation)
+    : reportedInput
+  const output = num(data.outputTokens)
+  if (!input && !output && !cacheRead && !cacheCreation) return false
+
+  acc.tokens.input += input
+  acc.tokens.output += output
+  acc.tokens.cacheRead += cacheRead
+  acc.tokens.cacheCreation += cacheCreation
+  return true
+}
+
+function replaceCopilotShutdownUsage(
+  acc: SessionAccumulator,
+  data: Record<string, unknown>,
+): void {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+  let found = false
+  const modelMetrics = asRecord(data.modelMetrics)
+  for (const value of Object.values(modelMetrics)) {
+    const usage = asRecord(asRecord(value).usage)
+    const cacheRead = num(usage.cacheReadTokens)
+    const cacheCreation = num(usage.cacheWriteTokens)
+    const reportedInput = num(usage.inputTokens)
+    const output = num(usage.outputTokens)
+    if (!reportedInput && !output && !cacheRead && !cacheCreation) continue
+    found = true
+    totals.input += Math.max(0, reportedInput - cacheRead - cacheCreation)
+    totals.output += output
+    totals.cacheRead += cacheRead
+    totals.cacheCreation += cacheCreation
+  }
+
+  if (!found) {
+    const details = asRecord(data.tokenDetails)
+    totals.input = num(asRecord(details.input).tokenCount)
+    totals.output = num(asRecord(details.output).tokenCount)
+    totals.cacheRead = num(asRecord(details.cache_read).tokenCount)
+    totals.cacheCreation = num(asRecord(details.cache_write).tokenCount)
+    found = Object.values(totals).some((value) => value > 0)
+  }
+
+  if (found) acc.tokens = totals
+}
+
+function setCopilotContext(
+  acc: SessionAccumulator,
+  usage: Record<string, unknown>,
+): void {
+  const model = str(usage.model) || acc.model || ""
+  const context = computeContextUsage({
+    input_tokens: num(usage.inputTokens),
+    cache_creation_input_tokens: num(usage.cacheWriteTokens),
+    cache_read_input_tokens: num(usage.cacheReadTokens),
+  }, model)
+  if (!context.used) return
+  acc.context = { used: context.used, limit: context.limit, percent: Math.round(context.percent) }
+}
+
+function foldCopilot(acc: SessionAccumulator, entry: Record<string, unknown>): void {
+  const type = str(entry.type)
+  const data = asRecord(entry.data)
+  const nested = typeof entry.agentId === "string" && entry.agentId.length > 0
+
+  if (!nested) {
+    const model = type === "session.start" || type === "session.resume"
+      ? str(data.selectedModel)
+      : type === "session.auto_mode_resolved"
+        ? str(data.chosenModel)
+        : type === "session.model_change"
+          ? str(data.newModel)
+          : type === "session.shutdown"
+            ? str(data.currentModel)
+            : str(data.model)
+    if (model) acc.model = model
+  }
+
+  if (type === "user.message") {
+    if (!nested) acc.turnCount += 1
+    return
+  }
+
+  if (type === "assistant.message") {
+    if (!nested) {
+      const text = copilotText(data.content).trim()
+      if (text) acc.lastAssistantText = text.slice(0, PREVIEW_LIMIT)
+    }
+    if (Array.isArray(data.toolRequests)) {
+      for (const value of data.toolRequests) {
+        const request = asRecord(value)
+        foldCopilotToolUse(
+          acc,
+          str(request.toolCallId),
+          str(request.name),
+          request.arguments,
+        )
+      }
+    }
+    return
+  }
+
+  if (type === "tool.execution_start") {
+    foldCopilotToolUse(acc, str(data.toolCallId), str(data.toolName), data.arguments)
+    return
+  }
+
+  if (type === "tool.execution_complete") {
+    const id = str(data.toolCallId)
+    if (!acc.copilotToolUses.has(id) && str(data.toolName)) {
+      foldCopilotToolUse(acc, id, str(data.toolName), data.arguments)
+    }
+    if (id) acc.pendingToolUses.delete(id)
+    acc.lastToolErrored = data.success === false || data.error !== undefined
+    return
+  }
+
+  if (type === "assistant.usage") {
+    if (foldCopilotUsage(acc, data, false) && !nested) setCopilotContext(acc, data)
+    return
+  }
+
+  if (type === "session.shutdown" && !nested) {
+    replaceCopilotShutdownUsage(acc, data)
+    const currentTokens = num(data.currentTokens)
+    if (currentTokens) setCopilotContext(acc, { inputTokens: currentTokens, model: acc.model })
+  }
+}
+
 function foldLine(acc: SessionAccumulator, line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -232,6 +464,7 @@ function foldLine(acc: SessionAccumulator, line: string): void {
 
   if (entry.type === "assistant") foldAssistant(acc, entry)
   else if (entry.type === "user") foldUser(acc, entry)
+  else if (typeof entry.type === "string" && entry.type.includes(".")) foldCopilot(acc, entry)
 }
 
 function buildFiles(acc: SessionAccumulator): Pick<MissionControlSummary, "files" | "filesTotal"> {

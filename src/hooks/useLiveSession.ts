@@ -285,6 +285,9 @@ export function useLiveSession(
           // parent stream goes quiet while they run. Keep the session live.
           setIsLive(true)
           resetStaleTimer()
+        } else if (data.type === "copilot_activity") {
+          setIsLive(true)
+          resetStaleTimer()
         } else if (data.type === "stream_snapshot") {
           // Mid-turn connect/reconnect: replace the overlay wholesale.
           setIsLive(true)

@@ -1,5 +1,5 @@
 /**
- * Cross-platform resolution of agent CLIs (`claude`, `codex`) to something
+ * Cross-platform resolution of agent CLIs (`claude`, `codex`, `copilot`) to something
  * `child_process` can actually launch.
  *
  * On Windows these CLIs are usually npm shims — `claude.cmd` — and

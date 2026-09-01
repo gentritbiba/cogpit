@@ -59,8 +59,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession,
     acknowledgeCompleted,
   } = useSessionInventory()
-  const { awaitingPermission, awaitingQuestion, awaitingElicitation, awaitingDialog } =
-    usePendingHumanInput()
+  const {
+    awaitingPermission,
+    awaitingQuestion,
+    awaitingElicitation,
+    awaitingDialog,
+    awaitingPlan,
+  } = usePendingHumanInput()
   const awaitingPrompt = useMemo(
     () => new Set([...awaitingElicitation, ...awaitingDialog]),
     [awaitingElicitation, awaitingDialog],
@@ -137,9 +142,23 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // Cross-project triage for the attention strip (independent of search)
   const attention = useMemo(
     () => classifyAttention(
-      sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion, awaitingPrompt,
+      sessions,
+      procBySession,
+      newlyCompleted,
+      awaitingPermission,
+      awaitingQuestion,
+      awaitingPrompt,
+      awaitingPlan,
     ),
-    [sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion, awaitingPrompt]
+    [
+      sessions,
+      procBySession,
+      newlyCompleted,
+      awaitingPermission,
+      awaitingQuestion,
+      awaitingPrompt,
+      awaitingPlan,
+    ],
   )
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
   const showAttentionStrip = !searchQuery.trim() && hasAttention

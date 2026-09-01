@@ -185,6 +185,56 @@ describe("useUrlSync", () => {
     pushStateSpy.mockRestore()
   })
 
+  it("round-trips a nested Codex rollout path through the URL", async () => {
+    const dirName = "codex__L3RtcC9wcm9qZWN0"
+    const fileName = "2026/07/21/rollout-2026-07-21T22-59-57-e6ab6cc7-cd47-4056-9c5d-52ff33fdabb3.jsonl"
+    const stem = fileName.replace(/\.jsonl$/, "")
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+
+    const { unmount } = renderUrlSync(makeState({
+      sessionSource: { dirName, fileName, rawText: "" },
+    }))
+
+    expect(pushStateSpy).toHaveBeenCalledWith(
+      null,
+      "",
+      `/${dirName}/${encodeURIComponent(stem)}`,
+    )
+    unmount()
+    pushStateSpy.mockRestore()
+
+    window.history.replaceState(null, "", `/${dirName}/${encodeURIComponent(stem)}`)
+    mockedLoadTail.mockResolvedValueOnce(loadedSession(dirName, fileName))
+    renderUrlSync()
+
+    await vi.waitFor(() => {
+      expect(mockedLoadTail).toHaveBeenCalledWith(dirName, fileName, workerParse, "session")
+    })
+  })
+
+  it("uses a canonical UUID URL for Copilot and restores its events file", async () => {
+    const dirName = "copilot__L3RtcC9wcm9qZWN0"
+    const sessionId = "68596e24-db5d-46a4-86fe-9d82425f36d7"
+    const fileName = `${sessionId}/events.jsonl`
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+
+    const { unmount } = renderUrlSync(makeState({
+      sessionSource: { dirName, fileName, rawText: "" },
+    }))
+
+    expect(pushStateSpy).toHaveBeenCalledWith(null, "", `/${dirName}/${sessionId}`)
+    unmount()
+    pushStateSpy.mockRestore()
+
+    window.history.replaceState(null, "", `/${dirName}/${sessionId}`)
+    mockedLoadTail.mockResolvedValueOnce(loadedSession(dirName, fileName))
+    renderUrlSync()
+
+    await vi.waitFor(() => {
+      expect(mockedLoadTail).toHaveBeenCalledWith(dirName, fileName, workerParse, "session")
+    })
+  })
+
   it("pushes project URL for dashboardProject", () => {
     const pushStateSpy = vi.spyOn(window.history, "pushState")
 

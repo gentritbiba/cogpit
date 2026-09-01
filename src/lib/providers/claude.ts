@@ -1,6 +1,8 @@
 import { isCodexSessionText } from "../codex"
+import { isCopilotSessionText } from "../../../shared/session/copilot"
 import type { SessionProvider } from "../../../shared/providers/types"
-import { CODEX_PREFIX } from "../../../shared/providers/codex"
+import { isCodexDirName } from "../../../shared/providers/codex"
+import { isCopilotDirName } from "../../../shared/providers/copilot"
 import {
   buildClaudeEffortArgs,
   buildClaudeModelArgs,
@@ -17,7 +19,7 @@ export {
 // ── Directory name helpers ────────────────────────────────────────────────────
 
 export function isClaudeDirName(dirName: string | null | undefined): boolean {
-  return typeof dirName === "string" && !dirName.startsWith(CODEX_PREFIX)
+  return typeof dirName === "string" && !isCodexDirName(dirName) && !isCopilotDirName(dirName)
 }
 
 // ── Resume command ────────────────────────────────────────────────────────────
@@ -31,7 +33,7 @@ export function getClaudeResumeCommand(sessionId: string, _cwd?: string): string
 export const claudeProvider: SessionProvider = {
   kind: "claude",
   isDirName: isClaudeDirName,
-  isSessionText: (text) => !isCodexSessionText(text),
+  isSessionText: (text) => !isCodexSessionText(text) && !isCopilotSessionText(text),
   resumeCommand: getClaudeResumeCommand,
   buildPermArgs: buildClaudePermArgs,
   buildModelArgs: buildClaudeModelArgs,

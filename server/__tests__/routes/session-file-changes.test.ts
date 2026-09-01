@@ -56,6 +56,16 @@ function makeJsonl(...lines: string[]) {
   return lines.join("\n")
 }
 
+function copilotEvent(type: string, data: Record<string, unknown>, agentId?: string) {
+  return JSON.stringify({
+    type,
+    data,
+    id: `${type}-${String(data.toolCallId ?? "event")}`,
+    timestamp: "2026-08-01T12:00:00.000Z",
+    ...(agentId ? { agentId } : {}),
+  })
+}
+
 // ── parseSessionFileChanges ───────────────────────────────────────────────────
 
 describe("parseSessionFileChanges", () => {
@@ -276,6 +286,120 @@ describe("parseSessionFileChanges", () => {
     )
     const { changes } = await parseSessionFileChanges(jsonl, false)
     expect(changes[0].turnIndex).toBeLessThanOrEqual(changes[1].turnIndex)
+  })
+
+  it("parses Copilot edit and create events", async () => {
+    const jsonl = makeJsonl(
+      copilotEvent("session.start", {
+        sessionId: "copilot-session",
+        context: { cwd: "/workspace/project" },
+      }),
+      copilotEvent("user.message", { content: "Update both files" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "edit-1",
+        toolName: "edit",
+        arguments: { path: "/workspace/project/a.ts", old_str: "old", new_str: "new" },
+      }),
+      copilotEvent("tool.execution_complete", { toolCallId: "edit-1", success: true }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "create-1",
+        toolName: "create",
+        arguments: { path: "/workspace/project/b.ts", file_text: "created" },
+      }),
+      copilotEvent("tool.execution_complete", { toolCallId: "create-1", success: true }),
+    )
+
+    await expect(parseSessionFileChanges(jsonl, true)).resolves.toEqual({
+      cwd: "/workspace/project",
+      changes: [
+        expect.objectContaining({
+          filePath: "/workspace/project/a.ts",
+          type: "edit",
+          toolCallIds: ["edit-1"],
+          isError: false,
+          content: { originalStr: "old", currentStr: "new" },
+        }),
+        expect.objectContaining({
+          filePath: "/workspace/project/b.ts",
+          type: "write",
+          toolCallIds: ["create-1"],
+          isError: false,
+          content: { originalStr: "", currentStr: "created" },
+        }),
+      ],
+    })
+  })
+
+  it("marks failed Copilot edits and includes nested agent changes", async () => {
+    const jsonl = makeJsonl(
+      copilotEvent("session.start", {
+        sessionId: "copilot-session",
+        context: { cwd: "/workspace/project" },
+      }),
+      copilotEvent("user.message", { content: "Edit the file" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "edit-1",
+        toolName: "edit",
+        arguments: { path: "/workspace/project/a.ts", old_str: "old", new_str: "new" },
+      }),
+      copilotEvent("tool.execution_complete", {
+        toolCallId: "edit-1",
+        success: false,
+        error: { message: "No match" },
+      }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "nested-edit",
+        toolName: "edit",
+        arguments: { path: "/workspace/project/nested.ts", old_str: "a", new_str: "b" },
+      }, "subagent-1"),
+    )
+
+    const { changes } = await parseSessionFileChanges(jsonl, false)
+    expect(changes).toEqual([
+      expect.objectContaining({
+        filePath: "/workspace/project/a.ts",
+        isError: true,
+        toolCallIds: ["edit-1"],
+      }),
+      expect.objectContaining({
+        filePath: "/workspace/project/nested.ts",
+        isError: false,
+        toolCallIds: ["nested-edit"],
+      }),
+    ])
+  })
+
+  it("parses Copilot apply_patch events", async () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: src/app.ts",
+      "@@",
+      "-const value = 1",
+      "+const value = 2",
+      "*** End Patch",
+    ].join("\n")
+    const jsonl = makeJsonl(
+      copilotEvent("session.start", {
+        sessionId: "copilot-session",
+        context: { cwd: "/workspace/project" },
+      }),
+      copilotEvent("user.message", { content: "Patch the file" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "patch-1",
+        toolName: "apply_patch",
+        arguments: patch,
+      }),
+      copilotEvent("tool.execution_complete", { toolCallId: "patch-1", success: true }),
+    )
+
+    const { changes } = await parseSessionFileChanges(jsonl, true)
+    expect(changes).toEqual([
+      expect.objectContaining({
+        filePath: "/workspace/project/src/app.ts",
+        type: "edit",
+        content: { originalStr: "const value = 1", currentStr: "const value = 2" },
+      }),
+    ])
   })
 
   // ── Codex format support ──────────────────────────────────────────────────

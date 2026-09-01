@@ -122,6 +122,31 @@ describe("usePtyChat", () => {
     expect(result.current.status).toBe("idle")
   })
 
+  it("resolves Copilot's Default selection back to auto", async () => {
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    } as Response)
+
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: {
+          dirName: "copilot__L3Byb2plY3Q",
+          fileName: "123e4567-e89b-42d3-a456-426614174000/events.jsonl",
+          rawText: "",
+        },
+        model: "",
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.model).toBe("auto")
+  })
+
   it("sends the rollout thread UUID (not the nested file path) for Codex sessions without a parsed id", async () => {
     mockedAuthFetch.mockResolvedValueOnce({
       ok: true,

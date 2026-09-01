@@ -5,7 +5,7 @@
  * never reach a transcript at all — MCP elicitations and CLI user dialogs
  * (`GET /api/agent-prompts`).
  *
- * One context rather than four so the sidebar strip, the header badge and the
+ * One context so the sidebar strip, the header badge and the
  * Mission Control grid cannot drift by each unioning the sets by hand. Every
  * endpoint reads in-memory registries only (no filesystem, no `ps`), so polling
  * them on one tick is cheap and all lists come from the same instant.
@@ -61,6 +61,8 @@ export interface PendingHumanInput {
   awaitingElicitation: Set<string>
   /** Sessions blocked on a CLI dialog. */
   awaitingDialog: Set<string>
+  /** Copilot sessions waiting for their plan to be reviewed in the session. */
+  awaitingPlan: Set<string>
   /** Request ids and tool-use ids currently being answered. */
   responding: Set<string>
   respond: (
@@ -139,6 +141,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
     useState<Map<string, MissionControlElicitation[]>>(new Map())
   const [dialogsBySession, setDialogsBySession] =
     useState<Map<string, MissionControlUserDialog[]>>(new Map())
+  const [awaitingPlan, setAwaitingPlan] = useState<Set<string>>(new Set())
   const [responding, setResponding] = useState<Set<string>>(new Set())
   const lastPermissionsRef = useRef("")
   const lastQuestionsRef = useRef("")
@@ -146,14 +149,20 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
 
   const fetchNow = useCallback(async () => {
     const [permissions, questions, prompts] = await Promise.all([
-      readIfChanged<{ bySession?: Record<string, MissionControlPermission[]> }>(
+      readIfChanged<{
+        bySession?: Record<string, MissionControlPermission[]>
+        plansBySession?: Record<string, unknown[]>
+      }>(
         "/api/permissions",
         lastPermissionsRef,
       ),
       readIfChanged<Partial<UserQuestionsResponse>>("/api/user-questions", lastQuestionsRef),
       readIfChanged<Partial<AgentPromptsResponse>>("/api/agent-prompts", lastPromptsRef),
     ])
-    if (permissions) setPermissionsBySession(toMap(permissions.bySession))
+    if (permissions) {
+      setPermissionsBySession(toMap(permissions.bySession))
+      setAwaitingPlan(new Set(toMap(permissions.plansBySession).keys()))
+    }
     if (questions) setQuestionsBySession(toMap(questions.bySession))
     if (prompts) {
       setElicitationsBySession(toMap(prompts.elicitationsBySession))
@@ -276,6 +285,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
     awaitingQuestion,
     awaitingElicitation,
     awaitingDialog,
+    awaitingPlan,
     responding,
     respond,
     answerQuestion,
@@ -285,7 +295,7 @@ export function PendingHumanInputProvider({ children }: { children: ReactNode })
   }), [
     permissionsBySession, questionsBySession, elicitationsBySession, dialogsBySession,
     awaitingPermission, awaitingQuestion, awaitingElicitation, awaitingDialog,
-    responding, respond, answerQuestion, answerElicitation, answerDialog, refresh,
+    awaitingPlan, responding, respond, answerQuestion, answerElicitation, answerDialog, refresh,
   ])
 
   return (

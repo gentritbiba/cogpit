@@ -317,7 +317,7 @@ export function CommandPalette(props: CommandPaletteProps) {
     props.onCopyResumeCommand && action(
       "copy-resume-command",
       "Copy resume command",
-      "cli claude codex terminal clipboard continue session",
+      "cli claude codex copilot terminal clipboard continue session",
       Copy,
       props.onCopyResumeCommand,
     ),

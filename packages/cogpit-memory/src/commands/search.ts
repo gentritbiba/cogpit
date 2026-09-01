@@ -99,6 +99,11 @@ export async function searchSessions(
         caseSensitive,
       })
 
+      if (opts.sessionId && hits.length === 0) {
+        if (ownedIndex) index.close()
+        return rawScanSearch(query, opts.sessionId, maxAgeMs, limit, caseSensitive, depth)
+      }
+
       // Group by sessionId
       const grouped = new Map<string, { filePath: string; hits: SearchHit[] }>()
       for (const hit of hits) {
@@ -188,6 +193,11 @@ async function cwdFromFilePath(filePath: string): Promise<string> {
             cwdCache.set(filePath, obj.payload.cwd)
             return obj.payload.cwd
           }
+          const copilotCwd = obj.type === "session.start" ? obj.data?.context?.cwd : undefined
+          if (copilotCwd) {
+            cwdCache.set(filePath, copilotCwd)
+            return copilotCwd
+          }
         } catch {
           // Ignore malformed JSONL lines and keep scanning the file header.
         }
@@ -265,16 +275,18 @@ async function discoverSingleSession(sessionId: string): Promise<Array<{ path: s
 async function discoverAllSessions(maxAgeMs: number): Promise<Array<{ path: string; mtimeMs: number }>> {
   const cutoff = Date.now() - maxAgeMs
 
-  let entries: Dirent[]
+  let entries: Dirent[] = []
   try {
     entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
   } catch {
-    return []
+    entries = []
   }
 
   const projectDirs = entries
     .filter(e => e.isDirectory() && e.name !== "memory")
     .map(e => join(dirs.PROJECTS_DIR, e.name))
+
+  const copilotFilesPromise = discoverCopilotSessions(cutoff)
 
   // Read all project directories in parallel
   const nested = await Promise.all(
@@ -297,9 +309,31 @@ async function discoverAllSessions(maxAgeMs: number): Promise<Array<{ path: stri
     }),
   )
 
-  const results = nested.flat()
+  const copilotFiles = await copilotFilesPromise
+  const results = [...nested.flat(), ...copilotFiles]
   results.sort((a, b) => b.mtimeMs - a.mtimeMs)
   return results
+}
+
+async function discoverCopilotSessions(cutoff: number): Promise<Array<{ path: string; mtimeMs: number }>> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(dirs.COPILOT_SESSIONS_DIR, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const files = await Promise.all(entries.map(async (entry) => {
+    if (!entry.isDirectory()) return null
+    const filePath = join(dirs.COPILOT_SESSIONS_DIR, entry.name, "events.jsonl")
+    try {
+      const fileStat = await stat(filePath)
+      return fileStat.mtimeMs >= cutoff ? { path: filePath, mtimeMs: fileStat.mtimeMs } : null
+    } catch {
+      return null
+    }
+  }))
+  return files.filter((file): file is { path: string; mtimeMs: number } => file !== null)
 }
 
 // ── Phase 2: Raw Text Pre-Filter ─────────────────────────────────────────────

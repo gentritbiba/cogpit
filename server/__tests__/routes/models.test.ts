@@ -2,7 +2,12 @@
 import { describe, it, expect } from "vitest"
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk"
 
-import { mapClaudeModels, mapCodexModels, type CodexModel } from "../../routes/models"
+import {
+  mapClaudeModels,
+  mapCodexModels,
+  mapCopilotModels,
+  type CodexModel,
+} from "../../routes/models"
 
 describe("mapClaudeModels", () => {
   const sdkModels: ModelInfo[] = [
@@ -171,5 +176,59 @@ describe("mapCodexModels", () => {
   it("returns null when nothing is visible", () => {
     expect(mapCodexModels([])).toBeNull()
     expect(mapCodexModels([codexModels[2]])).toBeNull()
+  })
+})
+
+describe("mapCopilotModels", () => {
+  it("maps the live multi-provider catalog and its capabilities", () => {
+    const options = mapCopilotModels([
+      {
+        id: "auto",
+        name: "Auto",
+        capabilities: { supports: { vision: true, reasoningEffort: true } },
+        supportedReasoningEfforts: ["low", "high"],
+        defaultReasoningEffort: "high",
+      },
+      {
+        id: "claude-sonnet-4.6",
+        name: "Claude Sonnet 4.6",
+        capabilities: { supports: { vision: false } },
+      },
+    ])!
+
+    expect(options[0]).toMatchObject({
+      value: "",
+      label: "Default",
+      resolvedModel: "auto",
+      isDefault: true,
+      defaultReasoningEffort: "high",
+      inputModalities: ["text", "image"],
+    })
+    expect(options[1]).toMatchObject({
+      value: "auto",
+      supportsEffort: true,
+      supportedReasoningEfforts: [
+        { value: "low", label: "Light" },
+        { value: "high", label: "High" },
+      ],
+    })
+    expect(options[2]).toMatchObject({
+      value: "claude-sonnet-4.6",
+      inputModalities: ["text"],
+    })
+  })
+
+  it("returns null for an empty or malformed catalog", () => {
+    expect(mapCopilotModels([])).toBeNull()
+    expect(mapCopilotModels([{ id: "", name: "broken" }])).toBeNull()
+  })
+
+  it("omits models disabled by Copilot policy", () => {
+    const options = mapCopilotModels([
+      { id: "auto", name: "Auto" },
+      { id: "blocked", name: "Blocked", policy: { state: "disabled" } },
+    ])!
+
+    expect(options.map((option) => option.value)).toEqual(["", "auto"])
   })
 })

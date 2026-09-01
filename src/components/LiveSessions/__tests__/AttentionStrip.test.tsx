@@ -1,5 +1,5 @@
 import * as React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { AttentionStrip } from "../AttentionStrip"
 import type { ActiveSessionInfo } from "../types"
@@ -46,5 +46,25 @@ describe("AttentionStrip working list", () => {
     expect(screen.getByText("gentritbiba/agent-window")).toBeInTheDocument()
     expect(container.querySelector("[data-working-list]")).toBeInTheDocument()
     expect(container.querySelector("[data-relative-time]")).toBeNull()
+  })
+
+  it("opens a session that needs Copilot plan review", () => {
+    const session = makeSession()
+    const onSelectSession = vi.fn()
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [{ session, reason: "plan" }], working: [] }}
+        activeSessionKey={null}
+        procBySession={new Map()}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={onSelectSession}
+      />,
+    )
+
+    const chip = screen.getByText("Review plan")
+    fireEvent.click(chip.closest("button")!)
+    expect(onSelectSession).toHaveBeenCalledWith("agent-window", "session.jsonl")
   })
 })

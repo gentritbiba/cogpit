@@ -23,6 +23,7 @@ const {
   mockGetAgentKind,
   mockSpawn,
   mockCodexAppServer,
+  mockCopilotRuntime,
 } = vi.hoisted(() => ({
   mockActiveProcesses: new Map<string, unknown>(),
   mockPersistentSessions: new Map<string, unknown>(),
@@ -42,6 +43,14 @@ const {
     interruptTurn: vi.fn(),
     getActiveTurnId: vi.fn(),
     call: vi.fn(),
+  },
+  mockCopilotRuntime: {
+    isSessionActive: vi.fn(),
+    resumeSession: vi.fn(),
+    setModel: vi.fn(),
+    setReasoningEffort: vi.fn(),
+    setPermissionMode: vi.fn(),
+    send: vi.fn().mockResolvedValue("message-1"),
   },
 }))
 
@@ -84,6 +93,8 @@ vi.mock("../../codex-app-server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../codex-app-server")>()
   return { ...actual, codexAppServer: mockCodexAppServer }
 })
+
+vi.mock("../../copilot-runtime", () => ({ copilotRuntime: mockCopilotRuntime }))
 
 import type { UseFn, Middleware } from "../../helpers"
 import { registerClaudeRoutes } from "../../routes/claude"
@@ -188,10 +199,121 @@ beforeEach(() => {
   mockCodexAppServer.startTurn.mockResolvedValue({ turn: { id: "turn-new" } })
   mockCodexAppServer.steerTurn.mockResolvedValue({ turnId: "turn-active" })
   mockCodexAppServer.call.mockResolvedValue({})
+  mockCopilotRuntime.isSessionActive.mockReturnValue(false)
+  mockCopilotRuntime.send.mockResolvedValue("message-1")
   mockResumeSDKSession.mockReturnValue({
     sessionId: "sess-1",
     jsonlPath: null,
     onResult: null,
+  })
+})
+
+describe("/api/send-message Copilot runtime", () => {
+  beforeEach(() => {
+    mockGetAgentKind.mockReturnValue("copilot")
+    mockFindJsonlPath.mockResolvedValue(
+      "/Users/me/.copilot/session-state/sess-1/events.jsonl",
+    )
+    mockGetSessionMeta.mockResolvedValue({ cwd: "/Users/me/proj" })
+  })
+
+  it("resumes a durable session and sends plan-mode image input", async () => {
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({
+      sessionId: "sess-1",
+      message: "inspect this",
+      model: "claude-sonnet-4.6",
+      effort: "high",
+      permissions: { mode: "plan" },
+      images: [{ data: "base64-image", mediaType: "image/png" }],
+    }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockCopilotRuntime.resumeSession).toHaveBeenCalledWith("sess-1", {
+      workingDirectory: "/Users/me/proj",
+      model: "claude-sonnet-4.6",
+      reasoningEffort: "high",
+    })
+    expect(mockCopilotRuntime.setPermissionMode).toHaveBeenCalledWith("sess-1", false)
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("sess-1", {
+      prompt: "inspect this",
+      agentMode: "plan",
+      attachments: [{
+        type: "blob",
+        data: "base64-image",
+        mimeType: "image/png",
+        displayName: "image-1",
+      }],
+    })
+    expect(res._getData()).toEqual({ success: true })
+  })
+
+  it("updates a loaded session in place and enables full access", async () => {
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({
+      sessionId: "sess-1",
+      message: "continue",
+      model: "gpt-5.4",
+      effort: "medium",
+      permissions: { mode: "bypassPermissions" },
+    }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockCopilotRuntime.resumeSession).not.toHaveBeenCalled()
+    expect(mockCopilotRuntime.setModel).toHaveBeenCalledWith("sess-1", "gpt-5.4", "medium")
+    expect(mockCopilotRuntime.setPermissionMode).toHaveBeenCalledWith("sess-1", true)
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("sess-1", {
+      prompt: "continue",
+      agentMode: "interactive",
+    })
+  })
+
+  it("routes a newly created live session before its transcript exists", async () => {
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    mockFindJsonlPath.mockResolvedValue(null)
+    mockGetAgentKind.mockReturnValue("claude")
+    const handler = getHandler("/api/send-message")
+    const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify({
+      sessionId: "fresh-session",
+      message: "follow up quickly",
+      permissions: { mode: "default" },
+    }))
+    handler(req as never, res as never, next)
+    sendBody()
+
+    await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    expect(mockFindJsonlPath).not.toHaveBeenCalled()
+    expect(mockResumeSDKSession).not.toHaveBeenCalled()
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("fresh-session", {
+      prompt: "follow up quickly",
+      agentMode: "interactive",
+    })
+    expect(res._getData()).toEqual({ success: true })
+  })
+
+  it("switches a loaded session from Plan back to Ask", async () => {
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    const handler = getHandler("/api/send-message")
+
+    for (const body of [
+      { sessionId: "sess-1", message: "make a plan", permissions: { mode: "plan" } },
+      { sessionId: "sess-1", message: "answer normally", permissions: { mode: "default" } },
+    ]) {
+      const { req, res, next, sendBody } = createMockReqRes("POST", JSON.stringify(body))
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+    }
+
+    expect(mockCopilotRuntime.send.mock.calls).toEqual([
+      ["sess-1", { prompt: "make a plan", agentMode: "plan" }],
+      ["sess-1", { prompt: "answer normally", agentMode: "interactive" }],
+    ])
   })
 })
 

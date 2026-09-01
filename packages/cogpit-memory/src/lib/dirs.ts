@@ -6,6 +6,7 @@ export const dirs = {
   TEAMS_DIR: join(homedir(), ".claude", "teams"),
   TASKS_DIR: join(homedir(), ".claude", "tasks"),
   CODEX_SESSIONS_DIR: join(homedir(), ".codex", "sessions"),
+  COPILOT_SESSIONS_DIR: join(homedir(), ".copilot", "session-state"),
 }
 
 /** Default database path for the FTS5 search index. */

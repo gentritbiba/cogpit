@@ -16,6 +16,10 @@ export interface UndoConfirmState {
   branchTurnIndex?: number
   /** For partial redo: index into the archived turns array (inclusive) */
   redoUpToArchiveIndex?: number
+  copilot?: {
+    eventId: string
+    mode: "conversation" | "conversation-and-files"
+  }
 }
 
 /** Build an OperationSummary, falling back to a turnCount-only summary when ops is empty. */

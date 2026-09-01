@@ -30,7 +30,7 @@ export function cn(...inputs: ClassValue[]) {
 
 // ── Model options ────────────────────────────────────────────────────────────
 // The lists below are STATIC FALLBACKS only. At runtime the app fetches the
-// live model catalogs from the installed claude/codex CLIs via GET /api/models
+// live model catalogs from the installed provider CLIs via GET /api/models
 // (see useModelOptions) and swaps them in, so new models appear without a
 // Cogpit release. Keep the fallbacks roughly current anyway for offline/error
 // paths.
@@ -84,10 +84,28 @@ export const CODEX_MODEL_OPTIONS: ModelOption[] = [
   { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", description: "Ultra-fast text-only coding model", defaultReasoningEffort: "high", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text"], supportsPersonality: true },
 ]
 
+export const COPILOT_MODEL_OPTIONS: ModelOption[] = [
+  { value: "", label: "Default", supportsEffort: false, inputModalities: ["text"] },
+  {
+    value: "auto",
+    label: "Auto",
+    description: "Let Copilot choose the best available model",
+    supportsEffort: false,
+    inputModalities: ["text"],
+  },
+]
+
+const staticModelOptions: Record<AgentKind, readonly ModelOption[]> = {
+  claude: CLAUDE_MODEL_OPTIONS,
+  codex: CODEX_MODEL_OPTIONS,
+  copilot: COPILOT_MODEL_OPTIONS,
+}
+
 // Live catalogs fetched from the CLIs (null = not loaded, use static fallback)
 const dynamicModelOptions: Record<AgentKind, ModelOption[] | null> = {
   claude: null,
   codex: null,
+  copilot: null,
 }
 const modelOptionListeners = new Set<() => void>()
 
@@ -108,6 +126,7 @@ export function subscribeModelOptions(listener: () => void): () => void {
 export function resetDynamicModelOptions() {
   dynamicModelOptions.claude = null
   dynamicModelOptions.codex = null
+  dynamicModelOptions.copilot = null
   modelOptionListeners.forEach((listener) => listener())
 }
 
@@ -123,10 +142,7 @@ const EFFORT_OPTIONS: readonly EffortOption[] = [
 ]
 
 export function getModelOptions(agentKind: AgentKind): readonly ModelOption[] {
-  return (
-    dynamicModelOptions[agentKind] ??
-    (agentKind === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS)
-  )
+  return dynamicModelOptions[agentKind] ?? staticModelOptions[agentKind]
 }
 
 export function getSelectedModelOption(agentKind: AgentKind, model?: string | null): ModelOption | undefined {
@@ -141,7 +157,7 @@ export function getEffortOptions(agentKind: AgentKind, model?: string | null): r
   const selected = getSelectedModelOption(agentKind, model)
   const supported = selected?.supportedReasoningEfforts
   if (supported && supported.length > 0) return supported
-  if (selected?.supportsEffort === false) return []
+  if (selected?.supportsEffort === false || agentKind === "copilot") return []
   return EFFORT_OPTIONS
 }
 
@@ -157,11 +173,13 @@ export function getFastServiceTierOption(agentKind: AgentKind, model?: string | 
 
 export function supportsImageInput(agentKind: AgentKind, model?: string | null): boolean {
   const modalities = getSelectedModelOption(agentKind, model)?.inputModalities
+  if (agentKind === "copilot") return modalities?.includes("image") === true
   return !modalities || modalities.includes("image")
 }
 
 export function supportsAutoPermissionMode(agentKind: AgentKind, model?: string | null): boolean {
-  return agentKind === "claude" && getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
+  return agentKind === "copilot"
+    || agentKind === "claude" && getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
 }
 
 /**

@@ -45,9 +45,10 @@ async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
     mode?: string
     useBuiltInEditor?: boolean
   } | null
+  const mode = data?.mode
   return {
     claudeDir: data?.claudeDir ?? null,
-    defaultAgentKind: data?.mode === "codex" ? "codex" : "claude",
+    defaultAgentKind: mode === "codex" || mode === "copilot" ? mode : "claude",
     useBuiltInEditor: data?.useBuiltInEditor === true,
   }
 }

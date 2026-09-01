@@ -16,6 +16,19 @@ export {
   getCodexResumeCommand,
 } from "./codex"
 
+// GitHub Copilot CLI provider
+export {
+  copilotProvider,
+  COPILOT_PREFIX,
+  isCopilotDirName,
+  encodeCopilotDirName,
+  decodeCopilotDirName,
+  buildCopilotPermArgs,
+  buildCopilotEffortArgs,
+  buildCopilotModelArgs,
+  getCopilotResumeCommand,
+} from "./copilot"
+
 // Claude provider
 export {
   claudeProvider,

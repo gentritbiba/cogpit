@@ -3,11 +3,15 @@ import type { UseFn } from "../../http"
 import {
   dirs,
   CODEX_SESSIONS_DIR,
+  decodeCopilotDirName,
   decodeCodexDirName,
+  encodeCopilotDirName,
   encodeCodexDirName,
   findJsonlPath,
   getSessionMeta,
   getSessionStatus,
+  isCopilotDirName,
+  isCopilotFilePath,
   isCodexDirName,
   isWithinDir,
   join,
@@ -23,6 +27,7 @@ import {
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
 import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
+import { getCopilotSessionInventory } from "../../lib/copilotSessionInventory"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getScannedSessionPullRequests } from "../../lib/sessionPrIndex"
 import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
@@ -294,6 +299,27 @@ export function registerProjectRoutes(use: UseFn) {
         })
       }
 
+      const copilotProjects = new Map<string, { latestTime: number; sessionCount: number }>()
+      for (const file of await getCopilotSessionInventory()) {
+        const existing = copilotProjects.get(file.cwd)
+        if (existing) {
+          existing.latestTime = Math.max(existing.latestTime, file.mtimeMs)
+          existing.sessionCount += 1
+        } else {
+          copilotProjects.set(file.cwd, { latestTime: file.mtimeMs, sessionCount: 1 })
+        }
+      }
+
+      for (const [cwd, info] of copilotProjects) {
+        projects.push({
+          dirName: encodeCopilotDirName(cwd),
+          path: cwd,
+          shortName: `${shortNameFromPath(cwd)} (Copilot)`,
+          sessionCount: info.sessionCount,
+          lastModified: info.latestTime ? new Date(info.latestTime).toISOString() : null,
+        })
+      }
+
       projects.sort((a, b) => {
         if (!a.lastModified) return 1
         if (!b.lastModified) return -1
@@ -318,9 +344,11 @@ export function registerProjectRoutes(use: UseFn) {
     if (parts.length === 1) {
       const dirName = decodeURIComponent(parts[0])
       const codexCwd = decodeCodexDirName(dirName)
+      const copilotCwd = decodeCopilotDirName(dirName)
+      const providerCwd = codexCwd ?? copilotCwd
       const projectDir = join(dirs.PROJECTS_DIR, dirName)
 
-      if (!codexCwd && !isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
+      if (!providerCwd && !isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
         return
@@ -330,27 +358,28 @@ export function registerProjectRoutes(use: UseFn) {
         const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10))
         const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10)), 200)
 
-        type FileStat = { fileName: string; filePath: string; mtime: Date; size: number }
+        type FileStat = {
+          fileName: string
+          filePath: string
+          mtime: Date
+          size: number
+          sessionId?: string
+        }
 
-        const fileStats: FileStat[] = codexCwd
-          ? (await Promise.all(
-            (await listCodexSessionFiles())
-              .map(async (file) => {
-                try {
-                  const meta = await getSessionMeta(file.filePath)
-                  if (meta.cwd !== codexCwd) return null
-                  if (meta.isSubagent) return null
-                  return {
-                    fileName: file.fileName,
-                    filePath: file.filePath,
-                    mtime: new Date(file.mtimeMs),
-                    size: file.size,
-                  }
-                } catch {
-                  return null
-                }
-              })
-          )).filter((file): file is FileStat => file !== null)
+        const providerFiles = codexCwd
+          ? await getCodexSessionInventory()
+          : copilotCwd ? await getCopilotSessionInventory() : null
+        const fileStats: FileStat[] = providerFiles
+          ? providerFiles
+            .flatMap((file) => file.cwd === providerCwd && !file.isSubagent
+              ? [{
+                fileName: file.fileName,
+                filePath: file.filePath,
+                mtime: new Date(file.mtimeMs),
+                size: file.size,
+                sessionId: file.sessionId,
+              }]
+              : [])
           : await Promise.all(
             (await readdir(projectDir))
               .filter((f) => f.endsWith(".jsonl"))
@@ -377,7 +406,7 @@ export function registerProjectRoutes(use: UseFn) {
         const sessions = await Promise.all(paged.map(async (file) => {
           const fromFile = {
             fileName: file.fileName,
-            sessionId: file.fileName.replace(".jsonl", ""),
+            sessionId: file.sessionId || file.fileName.replace(".jsonl", ""),
             size: file.size,
             lastModified: file.mtime.toISOString(),
           }
@@ -401,7 +430,7 @@ export function registerProjectRoutes(use: UseFn) {
             return {
               ...rest,
               ...fromFile,
-              sessionId: meta.sessionId || fromFile.sessionId,
+              sessionId: file.sessionId || meta.sessionId || fromFile.sessionId,
               lastActivityAt: lastTimestamp || fromFile.lastModified,
               agentStatus: status.status,
               agentToolName: status.toolName,
@@ -423,6 +452,11 @@ export function registerProjectRoutes(use: UseFn) {
     } else if (parts.length === 3 && parts[2] === "subagents") {
       // GET /api/sessions/{dirName}/{sessionId}/subagents — list subagent files
       const dirName = decodeURIComponent(parts[0])
+      if (isCopilotDirName(dirName)) {
+        res.setHeader("Content-Type", "application/json")
+        res.end(JSON.stringify([]))
+        return
+      }
       if (isCodexDirName(dirName)) {
         // For Codex sessions, find sub-agent files by checking forked_from_id
         const parentSessionId = decodeURIComponent(parts[1])
@@ -598,6 +632,17 @@ export function registerProjectRoutes(use: UseFn) {
           res.end(JSON.stringify({
             dirName: encodeCodexDirName(meta.cwd || ""),
             fileName: filePath.slice(CODEX_SESSIONS_DIR.length + 1),
+          }))
+          return
+        }
+
+        const isCopilot = isCopilotFilePath(filePath)
+        if (isCopilot) {
+          const meta = await getSessionMeta(filePath)
+          res.setHeader("Content-Type", "application/json")
+          res.end(JSON.stringify({
+            dirName: encodeCopilotDirName(meta.cwd || ""),
+            fileName: `${sessionId}/events.jsonl`,
           }))
           return
         }

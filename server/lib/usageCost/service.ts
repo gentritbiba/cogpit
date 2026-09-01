@@ -11,14 +11,18 @@
  */
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import type {
-  UsageCostPricingStatus,
-  UsageCostProvider,
-  UsageCostSummary,
+import {
+  addUsageCostTotals,
+  emptyUsageCostTotals,
+  type UsageCostPricingStatus,
+  type UsageCostProvider,
+  type UsageCostSummary,
+  type UsageCostTokenTotals,
 } from "../../../shared/contracts/usageCost"
 import { parseRateTable, type RateTable } from "../../../shared/usageCost/pricing"
+import { copilotRuntime } from "../../copilot-runtime"
 import { getDataRoot } from "../../config"
-import { CODEX_SESSIONS_DIR, dirs } from "../../sessionPaths"
+import { CODEX_SESSIONS_DIR, COPILOT_SESSIONS_DIR, dirs } from "../../sessionPaths"
 import { UsageCostAggregator, makeDayFormatter } from "./aggregate"
 import {
   dedupeWithinFile,
@@ -26,7 +30,11 @@ import {
   readTranscriptRecords,
   type TranscriptFile,
 } from "./reader"
-import type { UsageCostRecord } from "./transcripts"
+import {
+  initialCopilotScanState,
+  parseCopilotUsageMetrics,
+  type UsageCostRecord,
+} from "./transcripts"
 
 export const LITELLM_RATES_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
@@ -39,6 +47,7 @@ const RATES_TTL_MS = 24 * 60 * 60 * 1000
  * last write lands just before local midnight on the window's first day.
  */
 const MTIME_SLACK_MS = 36 * 60 * 60 * 1000
+const ACTIVE_COPILOT_USAGE_TIMEOUT_MS = 5_000
 
 interface CachedFile {
   size: number
@@ -53,6 +62,25 @@ let rates: RateTable = new Map()
 let ratesFetchedAtMs: number | null = null
 let ratesStatus: UsageCostPricingStatus = "unavailable"
 let ratesLoad: Promise<void> | null = null
+
+function withActiveUsageTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Copilot usage request timed out")),
+      ACTIVE_COPILOT_USAGE_TIMEOUT_MS,
+    )
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
 
 function ratesCachePath(): string {
   return join(getDataRoot(), "usage-model-rates.json")
@@ -196,8 +224,10 @@ export async function readUsageCostSummary(input: {
   const sources: Array<{ provider: UsageCostProvider; dir: string }> = [
     { provider: "claude", dir: dirs.PROJECTS_DIR },
     { provider: "codex", dir: CODEX_SESSIONS_DIR },
+    { provider: "copilot", dir: COPILOT_SESSIONS_DIR },
   ]
 
+  const durableCopilotTotals = new Map<string, Map<string, UsageCostTokenTotals>>()
   let scannedFiles = 0
   for (const { provider, dir } of sources) {
     if (!dir) continue
@@ -205,9 +235,39 @@ export async function readUsageCostSummary(input: {
     for (const file of files) {
       const records = await readFileRecords(file, provider)
       scannedFiles += 1
-      for (const record of records) aggregator.add(record)
+      for (const record of records) {
+        aggregator.add(record)
+        if (record.provider !== "copilot") continue
+        const byModel = durableCopilotTotals.get(record.sessionId) ?? new Map()
+        byModel.set(
+          record.model,
+          addUsageCostTotals(
+            byModel.get(record.model) ?? emptyUsageCostTotals(),
+            record.totals,
+          ),
+        )
+        durableCopilotTotals.set(record.sessionId, byModel)
+      }
     }
   }
+
+  // Copilot writes detailed token metrics at shutdown. While a Cogpit-owned
+  // session is still open, fold in the runtime's cumulative snapshot after
+  // subtracting every durable snapshot already counted above.
+  await Promise.all(copilotRuntime.getActiveSessionIds().map(async (sessionId) => {
+    try {
+      const metrics = await withActiveUsageTimeout(copilotRuntime.getSessionUsage(sessionId))
+      const state = initialCopilotScanState(sessionId)
+      for (const [model, totals] of durableCopilotTotals.get(sessionId) ?? []) {
+        state.lastUsageByModel.set(model, totals)
+      }
+      for (const record of parseCopilotUsageMetrics(metrics, state, Date.now())) {
+        aggregator.add(record)
+      }
+    } catch {
+      // Live usage is additive; a failed control RPC must not hide durable data.
+    }
+  }))
 
   // Entries whose files aged out of every plausible window stop paying rent.
   const retentionCutoffMs = startedAtMs - 90 * 24 * 60 * 60 * 1000

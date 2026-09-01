@@ -32,7 +32,7 @@ export function AgentModelDropdown({
   options,
   onChange,
 }: AgentModelDropdownProps) {
-  const agentLabel = agentKind === "codex" ? "Codex" : "Claude"
+  const agentLabel = AGENT_OPTIONS.find((option) => option.value === agentKind)?.label ?? agentKind
   const selectedLabel = options.find((option) => option.value === value)?.label ?? fallbackLabel
 
   return (

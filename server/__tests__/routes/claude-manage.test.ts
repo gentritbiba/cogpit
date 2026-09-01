@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // ---------------------------------------------------------------------------
 // Mutable Maps must be hoisted so vi.mock factory can reference them
 // ---------------------------------------------------------------------------
-const { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls } = vi.hoisted(() => {
+const { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls, mockCopilotRuntime } = vi.hoisted(() => {
   const mockActiveProcesses = new Map<string, { pid: number; kill: ReturnType<typeof vi.fn> }>()
   const mockPersistentSessions = new Map<string, {
     dead: boolean
@@ -22,7 +22,15 @@ const { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDK
     stopSDKTask: vi.fn(),
     backgroundSDKTasks: vi.fn(),
   }
-  return { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls }
+  const mockCopilotRuntime = {
+    isSessionActive: vi.fn(),
+    isTurnActive: vi.fn(),
+    getActiveSessionIds: vi.fn(),
+    abort: vi.fn(),
+    destroySession: vi.fn(),
+    deleteSession: vi.fn(),
+  }
+  return { mockActiveProcesses, mockPersistentSessions, mockCodexAppServer, mockSDKControls, mockCopilotRuntime }
 })
 
 vi.mock("../../helpers", () => ({
@@ -30,6 +38,7 @@ vi.mock("../../helpers", () => ({
   persistentSessions: mockPersistentSessions,
   dirs: { PROJECTS_DIR: "/tmp/test-projects" },
   isCodexDirName: vi.fn(() => false),
+  isCopilotDirName: vi.fn(() => false),
   isWithinDir: vi.fn(() => true),
   resolveSessionFilePath: vi.fn(),
   unlink: vi.fn().mockResolvedValue(undefined),
@@ -47,6 +56,9 @@ vi.mock("../../codex-app-server", async (importOriginal) => {
   return { ...actual, codexAppServer: mockCodexAppServer }
 })
 
+vi.mock("../../copilot-runtime", () => ({ copilotRuntime: mockCopilotRuntime }))
+
+import { isCopilotDirName, resolveSessionFilePath, unlink } from "../../helpers"
 import type { UseFn, Middleware } from "../../helpers"
 import { registerClaudeManageRoutes } from "../../routes/claude-manage"
 
@@ -116,6 +128,14 @@ describe("claude-manage routes", () => {
     mockCodexAppServer.getActiveTurnId.mockReturnValue(undefined)
     mockCodexAppServer.listActiveTurns.mockReturnValue([])
     mockCodexAppServer.interruptTurn.mockResolvedValue({})
+    mockCopilotRuntime.isSessionActive.mockReturnValue(false)
+    mockCopilotRuntime.isTurnActive.mockReturnValue(false)
+    mockCopilotRuntime.getActiveSessionIds.mockReturnValue([])
+    mockCopilotRuntime.abort.mockResolvedValue(undefined)
+    mockCopilotRuntime.destroySession.mockResolvedValue(undefined)
+    mockCopilotRuntime.deleteSession.mockResolvedValue({ success: true })
+    vi.mocked(isCopilotDirName).mockReturnValue(false)
+    vi.mocked(resolveSessionFilePath).mockResolvedValue(null)
     mockSDKControls.interruptSDKTurn.mockResolvedValue(true)
     mockSDKControls.updateSDKSession.mockResolvedValue({ found: true, appliedLive: ["model"], staged: [] })
     mockSDKControls.rewindClaudeFiles.mockResolvedValue({ canRewind: true })
@@ -161,6 +181,22 @@ describe("claude-manage routes", () => {
       await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
 
       expect(mockSDKControls.interruptSDKTurn).toHaveBeenCalledWith("claude-session")
+      expect(res._getData()).toEqual({ success: true })
+    })
+
+    it("interrupts an active Copilot turn", async () => {
+      mockCopilotRuntime.isTurnActive.mockReturnValue(true)
+      const handler = handlers.get("/api/interrupt-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/", JSON.stringify({ sessionId: "copilot-session" }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCopilotRuntime.abort).toHaveBeenCalledWith("copilot-session")
+      expect(mockSDKControls.interruptSDKTurn).not.toHaveBeenCalled()
       expect(res._getData()).toEqual({ success: true })
     })
 
@@ -332,6 +368,21 @@ describe("claude-manage routes", () => {
       expect(res._getData()).toEqual({ success: true, killed: 3 })
     })
 
+    it("destroys every loaded Copilot session", async () => {
+      mockCopilotRuntime.getActiveSessionIds.mockReturnValue(["copilot-1", "copilot-2"])
+      const handler = handlers.get("/api/kill-all")!
+      const { req, res, next } = createMockReqRes("POST", "/api/kill-all")
+
+      handler(req as never, res as never, next)
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCopilotRuntime.destroySession.mock.calls).toEqual([
+        ["copilot-1"],
+        ["copilot-2"],
+      ])
+      expect(res._getData()).toEqual({ success: true, killed: 2 })
+    })
+
     it("skips already-dead persistent sessions but still removes them from Map", () => {
       const deadPs = makeMockPersistentSession(1001, true) // dead = true
       const livePs = makeMockPersistentSession(1002, false)
@@ -476,6 +527,23 @@ describe("claude-manage routes", () => {
       expect(res._getData()).toEqual({ success: true })
     })
 
+    it("aborts and destroys a loaded Copilot session", async () => {
+      mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+      mockCopilotRuntime.isTurnActive.mockReturnValue(true)
+      const handler = handlers.get("/api/stop-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST", "/", JSON.stringify({ sessionId: "copilot-session" }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCopilotRuntime.abort).toHaveBeenCalledWith("copilot-session")
+      expect(mockCopilotRuntime.destroySession).toHaveBeenCalledWith("copilot-session")
+      expect(res._getData()).toEqual({ success: true })
+    })
+
     it("tries native interruption before falling back to a legacy process", async () => {
       mockCodexAppServer.getActiveTurnId.mockReturnValue("turn-native")
       mockCodexAppServer.interruptTurn.mockRejectedValue(new Error("transport lost"))
@@ -494,6 +562,36 @@ describe("claude-manage routes", () => {
       expect(ps.proc.kill).toHaveBeenCalledWith("SIGTERM")
       expect(mockCodexAppServer.interruptTurn.mock.invocationCallOrder[0])
         .toBeLessThan(ps.proc.kill.mock.invocationCallOrder[0])
+    })
+  })
+
+  describe("POST /api/delete-session", () => {
+    it("uses Copilot's permanent-delete RPC after disconnecting a loaded session", async () => {
+      vi.mocked(isCopilotDirName).mockReturnValue(true)
+      vi.mocked(resolveSessionFilePath).mockResolvedValue(
+        "/tmp/copilot/session-state/copilot-session/events.jsonl",
+      )
+      mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+      mockCopilotRuntime.isTurnActive.mockReturnValue(true)
+      const handler = handlers.get("/api/delete-session")!
+      const { req, res, next, sendBody } = createMockReqRes(
+        "POST",
+        "/",
+        JSON.stringify({
+          dirName: "copilot__workspace",
+          fileName: "copilot-session/events.jsonl",
+        }),
+      )
+
+      handler(req as never, res as never, next)
+      sendBody()
+      await vi.waitFor(() => expect(res.end).toHaveBeenCalled())
+
+      expect(mockCopilotRuntime.abort).toHaveBeenCalledWith("copilot-session")
+      expect(mockCopilotRuntime.destroySession).toHaveBeenCalledWith("copilot-session")
+      expect(mockCopilotRuntime.deleteSession).toHaveBeenCalledWith("copilot-session")
+      expect(vi.mocked(unlink)).not.toHaveBeenCalled()
+      expect(res._getData()).toEqual({ success: true })
     })
   })
 

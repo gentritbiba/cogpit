@@ -10,6 +10,7 @@ import type {
 import { buildTurns, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { isCodexSessionText, parseCodexSession } from "./codex"
+import { isCopilotSessionText, parseCopilotSession } from "./copilot"
 import { isAssistantMessage } from "./messageTypeGuards"
 
 export type { PendingInteraction } from "./interactiveState"
@@ -85,6 +86,9 @@ export function parseSession(jsonlText: string, options?: ParseSessionOptions): 
   if (isCodexSessionText(jsonlText)) {
     return parseCodexSession(jsonlText, options)
   }
+  if (isCopilotSessionText(jsonlText)) {
+    return parseCopilotSession(jsonlText, options)
+  }
   const rawMessages = parseLines(jsonlText)
   const metadata = extractSessionMetadata(rawMessages)
   const turns = buildTurns(rawMessages)
@@ -111,6 +115,11 @@ export function parseSessionAppend(
   if (isCodexRawMessages(existing.rawMessages) || isCodexSessionText(newJsonlText)) {
     const prefix = serializeRawMessages(existing.rawMessages)
     return parseCodexSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
+  }
+
+  if (existing.agentKind === "copilot" || isCopilotSessionText(newJsonlText)) {
+    const prefix = serializeRawMessages(existing.rawMessages)
+    return parseCopilotSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
   }
 
   const newMessages = parseLines(newJsonlText)

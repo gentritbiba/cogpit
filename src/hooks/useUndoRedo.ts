@@ -69,6 +69,11 @@ export function useUndoRedo(
     if (session.sessionId === sessionIdRef.current) return
     sessionIdRef.current = session.sessionId
 
+    if (session.agentKind === "copilot") {
+      setUndoState(null)
+      return
+    }
+
     // Capture the id so we can check for staleness when the fetch resolves
     const fetchedSessionId = session.sessionId
     const controller = new AbortController()
@@ -162,6 +167,55 @@ export function useUndoRedo(
     const effectiveTarget = targetTurnIndex - 1
     if (effectiveTarget >= session.turns.length - 1 || effectiveTarget < -1) return
 
+    if (session.agentKind === "copilot") {
+      const turn = session.turns[targetTurnIndex]
+      if (!turn) return
+      const eventId = turn.id.includes("@") ? turn.id.slice(turn.id.lastIndexOf("@") + 1) : turn.id
+      const turnCount = session.turns.length - targetTurnIndex
+      void authFetch(
+        `/api/copilot-history/${encodeURIComponent(session.sessionId)}/preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventId }),
+        },
+      ).then(async (response) => {
+        const preview = response.ok
+          ? await response.json() as {
+              available?: boolean
+              fileCount?: number
+              files?: Array<{ path?: string }>
+            }
+          : null
+        const filePaths = preview?.files
+          ?.map(({ path }) => path)
+          .filter((path): path is string => typeof path === "string") ?? []
+        const fileCount = preview?.available ? preview.fileCount ?? filePaths.length : 0
+        setConfirmState({
+          type: "undo",
+          summary: {
+            turnCount,
+            fileCount,
+            filePaths,
+            operationCount: fileCount,
+          },
+          targetTurnIndex: effectiveTarget,
+          copilot: {
+            eventId,
+            mode: preview?.available ? "conversation-and-files" : "conversation",
+          },
+        })
+      }).catch(() => {
+        setConfirmState({
+          type: "undo",
+          summary: { turnCount, fileCount: 0, filePaths: [], operationCount: 0 },
+          targetTurnIndex: effectiveTarget,
+          copilot: { eventId, mode: "conversation" },
+        })
+      })
+      return
+    }
+
     const ops = buildUndoOperations(session.turns, session.turns.length - 1, effectiveTarget)
     setConfirmState({
       type: "undo",
@@ -231,6 +285,28 @@ export function useUndoRedo(
     setApplyError(null)
 
     try {
+      if (confirmState.copilot) {
+        const response = await authFetch(
+          `/api/copilot-history/${encodeURIComponent(session.sessionId)}/rewind`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(confirmState.copilot),
+          },
+        )
+        const result = await response.json().catch(() => null) as {
+          outcome?: string
+          error?: string
+        } | null
+        if (!response.ok || result?.outcome !== "success") {
+          setApplyError(result?.error || `Copilot rewind failed${result?.outcome ? `: ${result.outcome}` : ""}`)
+          return
+        }
+        await onReloadSession()
+        setConfirmState(null)
+        return
+      }
+
       const state = undoState ?? createEmptyUndoState(session.sessionId, session.turns.length)
 
       // Fetch the current JSONL content from disk. sessionSource.rawText may

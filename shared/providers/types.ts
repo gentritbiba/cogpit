@@ -1,6 +1,6 @@
-export type AgentKind = "claude" | "codex"
+export type AgentKind = "claude" | "codex" | "copilot"
 
-export const AGENT_KINDS: readonly AgentKind[] = ["claude", "codex"]
+export const AGENT_KINDS: readonly AgentKind[] = ["claude", "codex", "copilot"]
 
 export interface PermissionsConfig {
   mode?: string

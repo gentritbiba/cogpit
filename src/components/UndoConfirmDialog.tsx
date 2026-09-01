@@ -63,7 +63,11 @@ export function UndoConfirmDialog({
           </AlertDialogMedia>
           <AlertDialogTitle>{TITLES[renderedState.type]}</AlertDialogTitle>
           <AlertDialogDescription>
-            {DESCRIPTIONS[renderedState.type]}
+            {renderedState.copilot
+              ? renderedState.copilot.mode === "conversation-and-files"
+                ? "This removes the selected turn and everything after it, restoring captured files."
+                : "This removes the selected turn and everything after it. Files stay unchanged."
+              : DESCRIPTIONS[renderedState.type]}
           </AlertDialogDescription>
         </AlertDialogHeader>
 

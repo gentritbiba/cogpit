@@ -16,6 +16,7 @@ import type { AgentKind } from "@/lib/sessionSource"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
+import { submitCopilotPlanResponse } from "@/lib/copilotPlanApi"
 import { useCapability } from "@/hooks/useCapability"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -176,24 +177,47 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     if (!result.ok) onSend(answer)
   }, [pendingInteraction, session?.sessionId, onSend])
 
-  const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
-    setText(`/${suggestion.name} `)
-    setSlashSelectedIndex(0)
+  const submitPlanResponse = useCallback(async (
+    approved: boolean,
+    selectedAction?: string,
+    feedback?: string,
+  ) => {
+    const interaction = pendingInteraction
+    if (
+      interaction?.type === "plan"
+      && interaction.provider === "copilot"
+      && interaction.requestId
+      && session?.sessionId
+    ) {
+      await submitCopilotPlanResponse(session.sessionId, interaction.requestId, {
+        approved,
+        ...(selectedAction ? { selectedAction } : {}),
+        ...(feedback ? { feedback } : {}),
+      })
+      return
+    }
+    onSend(approved ? "yes" : feedback || "no")
+  }, [pendingInteraction, session?.sessionId, onSend])
+
+  const focusComposerAtEnd = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
     })
   }, [updateMultiline])
 
+  const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
+    setText(`/${suggestion.name} `)
+    setSlashSelectedIndex(0)
+    focusComposerAtEnd()
+  }, [focusComposerAtEnd])
+
   // Fills the composer and leaves the caret at the end: the prediction is a
   // draft to edit, so it deliberately does not send.
   const applySuggestion = useCallback((suggestion: string) => {
     setText(suggestion)
-    requestAnimationFrame(() => {
-      const el = textareaRef.current
-      if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
-    })
-  }, [updateMultiline])
+    focusComposerAtEnd()
+  }, [focusComposerAtEnd])
 
   const handleFileSelect = useCallback((path: string) => {
     if (!fileMention) return
@@ -223,13 +247,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       return
     }
 
+    if (pendingInteraction?.type === "plan" && pendingInteraction.provider === "copilot") {
+      if (!trimmed) return
+      void submitPlanResponse(false, undefined, trimmed)
+      setText("")
+      updateMultiline(false)
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
+      return
+    }
+
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
     onSend(trimmed, imagePayload)
     setText("")
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion])
+  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showFiles && e.key === "Escape") {
@@ -309,7 +342,17 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       )}
 
       <div>
-          {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
+          {isPlanApproval && (
+            <PlanApprovalBar
+              allowedPrompts={pendingInteraction.allowedPrompts}
+              summary={pendingInteraction.summary}
+              planContent={pendingInteraction.planContent}
+              actions={pendingInteraction.actions}
+              recommendedAction={pendingInteraction.recommendedAction}
+              onApprove={(action) => { void submitPlanResponse(true, action) }}
+              onReject={() => { void submitPlanResponse(false) }}
+            />
+          )}
 
         {/* Sits above the composer it fills. Renders nothing when the CLI sent
             no suggestion, which is most turns. */}

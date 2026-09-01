@@ -7,7 +7,13 @@ import { tmpdir } from "node:os"
 // Use a mutable object so updates in beforeEach are visible through the
 // captured import reference.
 let tmpDir: string
-const mockDirs = { PROJECTS_DIR: "", TEAMS_DIR: "", TASKS_DIR: "" }
+const mockDirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  CODEX_SESSIONS_DIR: "",
+  COPILOT_SESSIONS_DIR: "",
+}
 
 mock.module("../../lib/dirs", () => ({
   dirs: mockDirs,
@@ -91,6 +97,8 @@ describe("context command", () => {
     mockDirs.PROJECTS_DIR = projectsDir
     mockDirs.TEAMS_DIR = join(mockDirs.PROJECTS_DIR, "..", "teams")
     mockDirs.TASKS_DIR = join(mockDirs.PROJECTS_DIR, "..", "tasks")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
   })
 
   afterEach(() => {
@@ -126,6 +134,34 @@ describe("context command", () => {
       expect(result.turns.length).toBe(2)
       expect(result).toHaveProperty("stats")
       expect(result.stats).toHaveProperty("totalTurns", 2)
+    })
+
+    it("returns an overview for a Copilot events.jsonl session", async () => {
+      const sessionId = "11111111-1111-4111-8111-111111111111"
+      const sessionDir = join(mockDirs.COPILOT_SESSIONS_DIR, sessionId)
+      mkdirSync(sessionDir, { recursive: true })
+      const timestamp = "2026-08-01T12:00:00.000Z"
+      writeFileSync(join(sessionDir, "events.jsonl"), [
+        JSON.stringify({
+          type: "session.start",
+          data: {
+            sessionId,
+            selectedModel: "gpt-5.4",
+            context: { cwd: "/workspace/copilot", branch: "main" },
+          },
+          timestamp,
+        }),
+        JSON.stringify({ type: "user.message", data: { content: "Hello Copilot" }, timestamp }),
+        JSON.stringify({ type: "assistant.message", data: { content: "Hello" }, timestamp }),
+      ].join("\n"))
+
+      const result = await getSessionOverview(sessionId) as Record<string, unknown>
+      expect(result).toMatchObject({
+        sessionId,
+        cwd: "/workspace/copilot",
+        model: "gpt-5.4",
+      })
+      expect(result.turns).toHaveLength(1)
     })
 
     it("includes turn summaries with expected shape", async () => {

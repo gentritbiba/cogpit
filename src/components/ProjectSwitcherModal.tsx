@@ -37,6 +37,12 @@ interface ProjectInfo {
   lastModified: string | null
 }
 
+const AGENT_LABELS: Record<AgentKind, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  copilot: "GitHub Copilot",
+}
+
 
 interface ProjectSwitcherModalProps {
   open: boolean
@@ -160,7 +166,7 @@ export function ProjectSwitcherModal({
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">Start in this folder</div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {folderPath} · {defaultAgentKind === "codex" ? "Codex" : "Claude"}
+                      {folderPath} · {AGENT_LABELS[defaultAgentKind]}
                     </div>
                   </div>
                 </CommandItem>

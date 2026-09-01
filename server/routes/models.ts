@@ -2,6 +2,7 @@ import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude
 import type { UseFn } from "../http"
 import { claudeCliPath } from "../sdk-session"
 import { codexAppServer } from "../codex-app-server"
+import { copilotRuntime, type CopilotModel } from "../copilot-runtime"
 
 /** Option shape consumed by the frontend model dropdowns. */
 export interface ModelOption {
@@ -33,6 +34,7 @@ export interface ModelOption {
 export interface ModelCatalog {
   claude: ModelOption[] | null
   codex: ModelOption[] | null
+  copilot: ModelOption[] | null
 }
 
 /** Shape of one entry returned by codex app-server `model/list`. */
@@ -191,6 +193,52 @@ export function mapCodexModels(models: CodexModel[]): ModelOption[] | null {
   ]
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+/** Map Copilot CLI `models.list` output without depending on its bundled SDK. */
+export function mapCopilotModels(models: CopilotModel[]): ModelOption[] | null {
+  if (!Array.isArray(models) || models.length === 0) return null
+  const mapped = models.flatMap((model): ModelOption[] => {
+    if (!model || typeof model.id !== "string" || !model.id) return []
+    const policy = record(model.policy)
+    if (policy?.state === "disabled") return []
+    const capabilities = record(model.capabilities)
+    const supports = record(capabilities?.supports)
+    const efforts = Array.isArray(model.supportedReasoningEfforts)
+      ? model.supportedReasoningEfforts.filter((effort): effort is string => typeof effort === "string")
+      : []
+    return [{
+      value: model.id,
+      label: typeof model.name === "string" && model.name ? model.name : model.id,
+      ...(typeof model.defaultReasoningEffort === "string"
+        ? { defaultReasoningEffort: model.defaultReasoningEffort }
+        : {}),
+      supportedReasoningEfforts: efforts.map((effort) => ({
+        value: effort,
+        label: effortLabel(effort),
+      })),
+      supportsEffort: supports?.reasoningEffort === true || efforts.length > 0,
+      inputModalities: supports?.vision === true ? ["text", "image"] : ["text"],
+    }]
+  })
+  if (mapped.length === 0) return null
+  const providerDefault = mapped.find((model) => model.value === "auto") ?? mapped[0]
+  return [{
+    ...providerDefault,
+    value: "",
+    label: "Default",
+    resolvedModel: providerDefault.value,
+    isDefault: true,
+    description: providerDefault.value === "auto"
+      ? "Let Copilot choose the best available model"
+      : `Use Copilot's default model (${providerDefault.label})`,
+  }, ...mapped]
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolvePromise, reject) => {
     const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
@@ -254,21 +302,41 @@ async function fetchCodexModels(): Promise<ModelOption[] | null> {
   }
 }
 
+async function fetchCopilotModels(): Promise<ModelOption[] | null> {
+  try {
+    return mapCopilotModels(await withTimeout(
+      copilotRuntime.listModels(),
+      FETCH_TIMEOUT_MS,
+      "copilot models.list",
+    ))
+  } catch {
+    return null
+  }
+}
+
 // ── Cache ────────────────────────────────────────────────────────────────────
 
-let lastGood: ModelCatalog = { claude: null, codex: null }
+let lastGood: ModelCatalog = { claude: null, codex: null, copilot: null }
 let fetchedAt = 0
 let inFlight: Promise<ModelCatalog> | null = null
 
 async function getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
   const fresh = Date.now() - fetchedAt < CACHE_TTL_MS
-  if (!forceRefresh && fresh && (lastGood.claude || lastGood.codex)) return lastGood
+  if (!forceRefresh && fresh && (lastGood.claude || lastGood.codex || lastGood.copilot)) return lastGood
   if (inFlight) return inFlight
 
   inFlight = (async () => {
-    const [claude, codex] = await Promise.all([fetchClaudeModels(), fetchCodexModels()])
+    const [claude, codex, copilot] = await Promise.all([
+      fetchClaudeModels(),
+      fetchCodexModels(),
+      fetchCopilotModels(),
+    ])
     // Keep the previous good list for any side that failed this round
-    lastGood = { claude: claude ?? lastGood.claude, codex: codex ?? lastGood.codex }
+    lastGood = {
+      claude: claude ?? lastGood.claude,
+      codex: codex ?? lastGood.codex,
+      copilot: copilot ?? lastGood.copilot,
+    }
     fetchedAt = Date.now()
     return lastGood
   })()
@@ -281,7 +349,7 @@ async function getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
 }
 
 export function registerModelRoutes(use: UseFn) {
-  // GET /api/models — live model lists from the installed claude + codex CLIs.
+  // GET /api/models — live model lists from the installed provider CLIs.
   // Either side may be null (CLI missing/erroring); the frontend falls back to
   // its static lists for that provider.
   use("/api/models", async (req, res, next) => {

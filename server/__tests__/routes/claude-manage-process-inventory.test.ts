@@ -17,6 +17,7 @@ import {
 
 const CLAUDE_SESSION_ID = "11111111-1111-1111-1111-111111111111"
 const CODEX_SESSION_ID = "22222222-2222-2222-2222-222222222222"
+const COPILOT_SESSION_ID = "33333333-3333-3333-3333-333333333333"
 
 describe("parseAgentProcessOutput", () => {
   it("parses and memory-sorts POSIX agent processes", () => {
@@ -74,9 +75,71 @@ describe("parseAgentProcessOutput", () => {
       sessionId: CODEX_SESSION_ID,
       agentKind: "codex",
       tty: "??",
-      args: `codex exec resume ${CODEX_SESSION_ID}`,
       startTime: "",
     }])
+  })
+
+  it("identifies Copilot CLI processes, including the headless runtime", () => {
+    const posix = parseAgentProcessOutput([
+      `alice 1003 1.0 0.1 0 1024 ttys003 S+ 10:02 0:00.50 copilot --resume ${COPILOT_SESSION_ID}`,
+      "alice 1004 1.0 0.1 0 1024 ttys004 S+ 10:03 0:00.50 /opt/homebrew/bin/copilot --headless --no-auto-update --stdio",
+    ].join("\n"), "linux")
+    const windows = parseAgentProcessOutput(JSON.stringify({
+      ProcessId: 2003,
+      WorkingSetSize: 2 * 1024 * 1024,
+      CommandLine: `"C:\\Program Files\\GitHub Copilot\\copilot.exe" --resume ${COPILOT_SESSION_ID}`,
+    }), "win32")
+
+    expect(posix).toEqual([
+      expect.objectContaining({
+        pid: 1003,
+        sessionId: COPILOT_SESSION_ID,
+        agentKind: "copilot",
+      }),
+      expect.objectContaining({
+        pid: 1004,
+        sessionId: null,
+        agentKind: "copilot",
+      }),
+    ])
+    expect(windows[0]).toMatchObject({
+      sessionId: COPILOT_SESSION_ID,
+      agentKind: "copilot",
+    })
+  })
+
+  it("does not expose unrelated processes that mention Copilot in argv", () => {
+    const posix = parseAgentProcessOutput([
+      "alice 1005 1.0 0.1 0 1024 ttys005 S+ 10:04 0:00.50 python audit.py --provider copilot",
+      "alice 1006 1.0 0.1 0 1024 ttys006 S+ 10:05 0:00.50 /usr/local/bin/copilot-backup --stdio",
+    ].join("\n"), "linux")
+    const windows = parseAgentProcessOutput(JSON.stringify([
+      {
+        ProcessId: 2004,
+        WorkingSetSize: 2 * 1024 * 1024,
+        CommandLine: "C:\\Tools\\audit.exe --provider copilot",
+      },
+      {
+        ProcessId: 2005,
+        WorkingSetSize: 2 * 1024 * 1024,
+        CommandLine: "C:\\Tools\\copilot-backup.exe --stdio",
+      },
+    ]), "win32")
+
+    expect(posix).toEqual([])
+    expect(windows).toEqual([])
+  })
+
+  it("keeps Claude and Codex classification when their arguments mention Copilot", () => {
+    const stdout = [
+      `alice 1007 1.0 0.1 0 1024 ttys007 S+ 10:06 0:00.50 claude --resume ${CLAUDE_SESSION_ID} --prompt copilot`,
+      `alice 1008 1.0 0.1 0 1024 ttys008 S+ 10:07 0:00.50 codex exec resume ${CODEX_SESSION_ID} copilot`,
+    ].join("\n")
+
+    expect(parseAgentProcessOutput(stdout, "linux")).toEqual([
+      expect.objectContaining({ pid: 1007, agentKind: "claude" }),
+      expect.objectContaining({ pid: 1008, agentKind: "codex" }),
+    ])
   })
 
   it("treats empty or invalid PowerShell output as an empty inventory", () => {
@@ -159,7 +222,7 @@ describe("registerRunningProcessesRoute", () => {
     expect(spawn).toHaveBeenCalledWith("powershell", [
       "-NoProfile",
       "-Command",
-      expect.stringContaining("Get-CimInstance Win32_Process"),
+      expect.stringContaining("name = 'copilot.exe'"),
     ])
     expect(res.statusCode).toBe(200)
     expect(JSON.parse(res.end.mock.calls[0][0])).toEqual([

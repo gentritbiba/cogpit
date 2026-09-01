@@ -10,7 +10,7 @@ interface UsageBucket {
 }
 
 export interface UsageData {
-  providerName?: "Claude" | "Codex"
+  providerName?: "Claude" | "Codex" | "Copilot"
   /** Client timestamp captured when this snapshot was received. */
   fetchedAt?: number
   fiveHour?: UsageBucket
@@ -158,7 +158,53 @@ export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageDat
   }
 }
 
+function mapCopilotQuotaBucket(
+  raw: Record<string, unknown> | undefined,
+  label: string,
+): UsageBucket | undefined {
+  if (!raw) return undefined
+  let utilization: number | undefined
+  if (typeof raw.remainingPercentage === "number" && Number.isFinite(raw.remainingPercentage)) {
+    utilization = 100 - raw.remainingPercentage
+  } else if (raw.isUnlimitedEntitlement === true || raw.entitlementRequests === -1) {
+    utilization = 0
+  } else if (
+    typeof raw.usedRequests === "number"
+    && Number.isFinite(raw.usedRequests)
+    && typeof raw.entitlementRequests === "number"
+    && Number.isFinite(raw.entitlementRequests)
+    && raw.entitlementRequests > 0
+  ) {
+    utilization = raw.usedRequests / raw.entitlementRequests * 100
+  }
+  if (utilization === undefined) return undefined
+  return {
+    utilization: Math.min(100, Math.max(0, utilization)),
+    resetsAt: typeof raw.resetDate === "string" ? raw.resetDate : undefined,
+    label,
+  }
+}
+
+/** Map Copilot's account quota into the primary shared usage meter. */
+export function mapCopilotRuntimeResponse(data: Record<string, unknown>): UsageData | null {
+  if (data.available !== true) return null
+  const quota = asObject(data.quota)
+  const snapshots = asObject(quota?.quotaSnapshots)
+  const primary = mapCopilotQuotaBucket(asObject(snapshots?.chat), "Chat")
+    ?? mapCopilotQuotaBucket(
+      asObject(snapshots?.premium_interactions),
+      "Premium interactions",
+    )
+  if (!primary) return null
+  return { providerName: "Copilot", fiveHour: primary }
+}
+
 const POLL_INTERVAL = 5 * 60 * 1000
+const RUNTIME_ENDPOINTS: Record<AgentKind, string> = {
+  claude: "/api/claude/runtime",
+  codex: "/api/codex/runtime",
+  copilot: "/api/copilot/runtime",
+}
 
 export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageResult {
   const canViewUsage = useCapability("viewUsage")
@@ -180,10 +226,9 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
 
     setLoading(true)
     try {
-      let res = await authFetch(
-        agentKind === "codex" ? "/api/codex/runtime" : "/api/claude/runtime",
-        { signal: controller.signal },
-      )
+      let res = await authFetch(RUNTIME_ENDPOINTS[agentKind], {
+        signal: controller.signal,
+      })
       // Older Claude runtimes do not expose structured usage through the SDK.
       // Keep the existing macOS OAuth implementation as a compatibility path.
       let usedLegacyClaudeUsage = false
@@ -206,9 +251,14 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
 
       const data = await res.json() as Record<string, unknown>
       if (!isCurrentRequest()) return
-      const mapped = agentKind === "codex"
-        ? mapCodexRuntimeResponse(data)
-        : usedLegacyClaudeUsage ? mapUsageResponse(data) : mapClaudeRuntimeResponse(data)
+      let mapped: UsageData | null
+      if (agentKind === "codex") mapped = mapCodexRuntimeResponse(data)
+      else if (agentKind === "copilot") mapped = mapCopilotRuntimeResponse(data)
+      else {
+        mapped = usedLegacyClaudeUsage
+          ? mapUsageResponse(data)
+          : mapClaudeRuntimeResponse(data)
+      }
       setAvailable(mapped !== null)
       setUsage(mapped ? { ...mapped, fetchedAt: Date.now() } : null)
     } catch {
@@ -239,7 +289,7 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
       activeRequestRef.current?.abort()
       activeRequestRef.current = null
     }
-  }, [canViewUsage, fetchUsage])
+  }, [agentKind, canViewUsage, fetchUsage])
 
   return {
     usage: canViewUsage ? usage : null,

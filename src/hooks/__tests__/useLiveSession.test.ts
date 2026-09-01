@@ -894,6 +894,32 @@ describe("useLiveSession", () => {
     vi.useRealTimers()
   })
 
+  it("keeps an active Copilot turn live when its transcript is quiet", () => {
+    vi.useFakeTimers()
+    const source: SessionSource = {
+      dirName: "copilot__project",
+      fileName: "11111111-2222-3333-4444-555555555555/events.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      vi.advanceTimersByTime(29_000)
+      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      vi.advanceTimersByTime(29_000)
+    })
+    expect(result.current.isLive).toBe(true)
+
+    act(() => {
+      vi.advanceTimersByTime(1_000)
+    })
+    expect(result.current.isLive).toBe(false)
+
+    vi.useRealTimers()
+  })
+
   it("recentlyActive uses 5s confirmation timer — goes false if no lines arrive", () => {
     vi.useFakeTimers()
     const source: SessionSource = {

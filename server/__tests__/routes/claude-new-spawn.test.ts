@@ -34,6 +34,7 @@ const {
   mockListCodexSessionFiles,
   mockFindNewestCodexSession,
   mockCodexAppServer,
+  mockCopilotRuntime,
 } = vi.hoisted(() => {
   const mockActiveProcesses = new Map<string, unknown>()
   const mockPersistentSessions = new Map<string, unknown>()
@@ -57,6 +58,14 @@ const {
     getActiveTurnId: vi.fn(),
     call: vi.fn(),
   }
+  const mockCopilotRuntime = {
+    createSession: vi.fn(),
+    setPermissionMode: vi.fn(),
+    send: vi.fn().mockResolvedValue("message-1"),
+    isSessionActive: vi.fn().mockReturnValue(true),
+    destroySession: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue({ success: true }),
+  }
   return {
     mockActiveProcesses,
     mockPersistentSessions,
@@ -71,6 +80,7 @@ const {
     mockListCodexSessionFiles,
     mockFindNewestCodexSession,
     mockCodexAppServer,
+    mockCopilotRuntime,
   }
 })
 
@@ -83,7 +93,9 @@ vi.mock("../../helpers", () => ({
   dirs: { PROJECTS_DIR: "/tmp/test-projects" },
   isWithinDir: vi.fn(() => true),
   isCodexDirName: vi.fn((d: string) => d.startsWith("codex:")),
+  isCopilotDirName: vi.fn((d: string) => d.startsWith("copilot:")),
   decodeCodexDirName: vi.fn((d: string) => (d.startsWith("codex:") ? d.replace("codex:", "") : null)),
+  decodeCopilotDirName: vi.fn((d: string) => (d.startsWith("copilot:") ? d.replace("copilot:", "") : null)),
   friendlySpawnError: mockFriendlySpawnError,
   spawn: mockSpawn,
   stat: mockStat,
@@ -105,6 +117,7 @@ vi.mock("../../helpers", () => ({
   findJsonlPath: vi.fn().mockResolvedValue(null),
   createInterface: mockCreateInterface,
   CODEX_SESSIONS_DIR: "/tmp/.codex/sessions",
+  COPILOT_SESSIONS_DIR: "/tmp/.copilot/session-state",
 }))
 
 vi.mock("../../sdk-session", () => ({
@@ -123,6 +136,8 @@ vi.mock("../../codex-app-server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../codex-app-server")>()
   return { ...actual, codexAppServer: mockCodexAppServer }
 })
+
+vi.mock("../../copilot-runtime", () => ({ copilotRuntime: mockCopilotRuntime }))
 
 // ---------------------------------------------------------------------------
 // A factory that creates a mock ChildProcess EventEmitter
@@ -626,6 +641,105 @@ describe("registerCreateAndSendRoute (Claude cwd)", () => {
     expect(mockedCreateSDKSession).toHaveBeenCalledWith(
       expect.objectContaining({ images }),
     )
+  })
+})
+
+describe("registerCreateAndSendRoute (Copilot)", () => {
+  let handler: Middleware
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockCopilotRuntime.send.mockResolvedValue("message-1")
+    mockCopilotRuntime.isSessionActive.mockReturnValue(true)
+    mockReadFile.mockResolvedValue([
+      JSON.stringify({
+        type: "session.start",
+        data: { sessionId: "test-session-uuid", context: { cwd: "/tmp/copilot-project" } },
+      }),
+      JSON.stringify({ type: "user.message", data: { content: "look at this" } }),
+    ].join("\n"))
+    handler = getHandler(registerCreateAndSendRoute, "/api/create-and-send")
+  })
+
+  it("creates a headless session with model, effort, plan mode, and blob images", async () => {
+    const body = JSON.stringify({
+      dirName: "copilot:/tmp/copilot-project",
+      message: "look at this",
+      model: "claude-sonnet-4.6",
+      effort: "high",
+      permissions: { mode: "plan" },
+      images: [{ data: "base64-image", mediaType: "image/png" }],
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await drainBodyParse()
+
+    expect(mockCopilotRuntime.createSession).toHaveBeenCalledWith({
+      sessionId: "test-session-uuid",
+      workingDirectory: "/tmp/copilot-project",
+      model: "claude-sonnet-4.6",
+      reasoningEffort: "high",
+    })
+    expect(mockCopilotRuntime.setPermissionMode).toHaveBeenCalledWith("test-session-uuid", false)
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("test-session-uuid", {
+      prompt: "look at this",
+      agentMode: "plan",
+      attachments: [{
+        type: "blob",
+        data: "base64-image",
+        mimeType: "image/png",
+        displayName: "image-1",
+      }],
+    })
+    expect(res._getData()).toMatchObject({
+      success: true,
+      dirName: "copilot:/tmp/copilot-project",
+      fileName: "test-session-uuid/events.jsonl",
+      sessionId: "test-session-uuid",
+    })
+  })
+
+  it("enables Copilot full access before sending", async () => {
+    const body = JSON.stringify({
+      dirName: "copilot:/tmp/copilot-project",
+      message: "ship it",
+      permissions: { mode: "bypassPermissions" },
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await drainBodyParse()
+
+    expect(mockCopilotRuntime.setPermissionMode).toHaveBeenCalledWith("test-session-uuid", true)
+    expect(mockCopilotRuntime.send).toHaveBeenCalledWith("test-session-uuid", {
+      prompt: "ship it",
+      agentMode: "interactive",
+    })
+    expect(mockCopilotRuntime.setPermissionMode.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCopilotRuntime.send.mock.invocationCallOrder[0],
+    )
+    expect(res._getStatus()).toBe(200)
+  })
+
+  it("deletes a new Copilot session when its first send fails", async () => {
+    mockCopilotRuntime.send.mockRejectedValueOnce(new Error("quota exceeded"))
+    const body = JSON.stringify({
+      dirName: "copilot:/tmp/copilot-project",
+      message: "ship it",
+    })
+    const { req, res, next, sendBody } = createMockReqRes("POST", body)
+
+    handler(req as never, res as never, next)
+    await sendBody()
+    await drainBodyParse()
+
+    expect(mockCopilotRuntime.destroySession).toHaveBeenCalledWith("test-session-uuid")
+    expect(mockCopilotRuntime.deleteSession).toHaveBeenCalledWith("test-session-uuid")
+    expect(res._getStatus()).toBe(500)
+    expect(res._getData()).toMatchObject({ error: "quota exceeded" })
   })
 })
 

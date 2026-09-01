@@ -537,12 +537,25 @@ describe("config routes", () => {
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
-        codexOnly: true,
+        externalOnly: "codex",
       })
 
       await handler(req, res, next)
 
       expect(JSON.parse(res._getData()).mode).toBe("codex")
+    })
+
+    it("identifies an auto-bootstrapped Copilot-only configuration", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const { req, res, next } = createMockReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        externalOnly: "copilot",
+      })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData()).mode).toBe("copilot")
     })
 
     it("calls next for non-root GET paths", async () => {
@@ -611,7 +624,7 @@ describe("config routes", () => {
       expect(mockedRefreshDirs).toHaveBeenCalled()
     })
 
-    it("saves unrelated settings for a Codex-only config without requiring Claude history", async () => {
+    it("saves unrelated settings for an external-only config without requiring Claude history", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const body = JSON.stringify({
         claudeDir: "/home/.claude",
@@ -621,7 +634,7 @@ describe("config routes", () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
-        codexOnly: true,
+        externalOnly: "copilot",
       })
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: false,
@@ -638,7 +651,7 @@ describe("config routes", () => {
       expect(res._getStatus()).toBe(200)
       expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
         claudeDir: "/home/.claude",
-        codexOnly: true,
+        externalOnly: "copilot",
         terminalApp: "Ghostty",
         editorApp: "Visual Studio Code",
       }))

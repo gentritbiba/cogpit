@@ -168,6 +168,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   permissions: authed("/api/permissions"),
   "mission-control": authed("/api/mission-control"),
   "ask-user": authed("/api/user-questions", "/api/ask-user-answer"),
+  "copilot-history": admin("/api/copilot-history"),
   "agent-prompts": authed(
     "/api/agent-prompts",
     "/api/elicitation-answer",
@@ -179,6 +180,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     ...authed("/api/codex/goals", "/api/codex/threads"),
   ],
   "claude-runtime": admin("/api/claude/runtime"),
+  "copilot-runtime": admin("/api/copilot/runtime"),
   // Reading CLI versions is harmless; running the upgrade installs software on
   // the host, so that half stays an admin capability.
   "provider-updates": [

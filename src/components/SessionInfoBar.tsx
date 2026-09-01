@@ -12,12 +12,13 @@ export const SessionInfoBar = memo(function SessionInfoBar(props: SessionInfoBar
 
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const claudeRawMessages = (
-    session.agentKind === "codex" ? [] : session.rawMessages
+    session.agentKind === "claude" ? session.rawMessages : []
   ) as readonly RawMessage[]
 
   return (
     <MobileSessionInfoBar
       {...props}
+      onDuplicateSession={props.onDuplicateSession}
       session={session}
       sessionSource={sessionSource}
       isSubAgentView={subAgentInfo !== null}

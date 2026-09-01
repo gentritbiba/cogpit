@@ -251,6 +251,28 @@ const CODEX_RESULT = JSON.stringify({
   payload: { type: "function_call_output", call_id: "call_1", output: "https://github.com/o/r/pull/22" },
 })
 
+const COPILOT_CREATE = JSON.stringify({
+  type: "tool.execution_start",
+  id: "event-1",
+  timestamp: "2026-08-14T12:00:00.000Z",
+  data: {
+    toolCallId: "call-copilot",
+    toolName: "shell",
+    arguments: { command: 'gh pr create --title "From Copilot"' },
+  },
+})
+
+const COPILOT_RESULT = JSON.stringify({
+  type: "tool.execution_complete",
+  id: "event-2",
+  timestamp: "2026-08-14T12:00:05.000Z",
+  data: {
+    toolCallId: "call-copilot",
+    success: true,
+    result: { content: "https://github.com/o/r/pull/33" },
+  },
+})
+
 describe("scanPullRequests", () => {
   it("returns nothing for an empty file", () => {
     expect(scanPullRequests("")).toEqual([])
@@ -272,6 +294,16 @@ describe("scanPullRequests", () => {
     const prs = scanPullRequests(`${CODEX_CREATE}\n${CODEX_RESULT}\n`)
     expect(prs).toHaveLength(1)
     expect(prs[0]).toMatchObject({ number: 22, title: "From Codex", toolCallId: "call_1" })
+  })
+
+  it("pairs Copilot tool events with their output", () => {
+    const prs = scanPullRequests(`${COPILOT_CREATE}\n${COPILOT_RESULT}\n`)
+    expect(prs).toHaveLength(1)
+    expect(prs[0]).toMatchObject({
+      number: 33,
+      title: "From Copilot",
+      toolCallId: "call-copilot",
+    })
   })
 
   it("finds a pull request created midway through a long file", () => {

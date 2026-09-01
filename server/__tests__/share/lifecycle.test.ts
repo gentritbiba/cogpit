@@ -13,6 +13,7 @@ vi.mock("../../helpers", () => ({
   dirs: { PROJECTS_DIR: "/tmp/lifecycle-projects" },
   CODEX_SESSIONS_DIR: "/tmp/lifecycle-codex",
   isCodexDirName: vi.fn(() => false),
+  isCopilotDirName: vi.fn(() => false),
   isWithinDir: vi.fn(() => true),
   resolveSessionFilePath: vi.fn(
     (dirName: string, fileName: string) => `/tmp/lifecycle-projects/${dirName}/${fileName}`,

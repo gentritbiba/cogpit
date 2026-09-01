@@ -59,6 +59,18 @@ describe("ProjectsView", () => {
     expect(props.onRefresh).toHaveBeenCalledOnce()
   })
 
+  it("distinguishes provider projects that share a working directory", () => {
+    renderView({
+      projects: [
+        { ...projects[0], dirName: "codex__L3dvcmtzcGFjZS9jb2dwaXQ" },
+        { ...projects[0], dirName: "copilot__L3dvcmtzcGFjZS9jb2dwaXQ" },
+      ],
+    })
+
+    expect(screen.getByText("Codex")).toBeInTheDocument()
+    expect(screen.getByText("Copilot")).toBeInTheDocument()
+  })
+
   it("uses the standard empty state when a search has no matches", () => {
     renderView({ searchFilter: "missing" })
 

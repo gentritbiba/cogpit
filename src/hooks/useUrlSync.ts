@@ -5,6 +5,7 @@ import { loadSessionTailCached } from "@/lib/sessionLoader"
 import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
+import { isCopilotDirName, sessionUrlIdFromFileName } from "@/lib/sessionSource"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -58,13 +59,8 @@ function stripDevicePrefix(pathname: string): string {
   return match ? match[1] || "/" : pathname
 }
 
-function sessionIdFromFileName(fileName: string): string {
-  // "abc123.jsonl" → "abc123"
-  // "abc123/subagents/xyz.jsonl" → keep as-is for nested paths
-  return fileName.replace(/\.jsonl$/, "")
-}
-
-function fileNameFromSessionId(sessionId: string): string {
+function fileNameFromSessionId(dirName: string, sessionId: string): string {
+  if (isCopilotDirName(dirName)) return `${sessionId}/events.jsonl`
   return sessionId.endsWith(".jsonl") ? sessionId : `${sessionId}.jsonl`
 }
 
@@ -72,7 +68,7 @@ function stateToPath(state: SessionState): string {
   const prefix = devicePathPrefix()
   if (state.sessionSource) {
     const { dirName, fileName } = state.sessionSource
-    const sessionId = sessionIdFromFileName(fileName)
+    const sessionId = sessionUrlIdFromFileName(dirName, fileName)
     return `${prefix}/${encodeURIComponent(dirName)}/${encodeURIComponent(sessionId)}`
   }
   if (state.pendingDirName) {
@@ -179,7 +175,7 @@ export function useUrlSync({
           }
         } else if (parsed.type === "session" && parsed.dirName && parsed.sessionId) {
           setPreviewLoadError(null)
-          const fileName = fileNameFromSessionId(parsed.sessionId)
+          const fileName = fileNameFromSessionId(parsed.dirName, parsed.sessionId)
           let loaded: Awaited<ReturnType<typeof loadSessionTailCached>>
           try {
             // Bottom-first tail load (worker parse + cache) — same pipeline as

@@ -10,6 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import { sendJson, type NextFn, type UseFn } from "../http"
 import { dirs, join, readdir, stat } from "../helpers"
 import { getCodexSessionInventory } from "../lib/codexSessionInventory"
+import { getCopilotSessionInventory } from "../lib/copilotSessionInventory"
 import { readClaudeProjectEntries } from "./projects/claudeProjectEntries"
 import { summarizeSession } from "../lib/missionControlSummary"
 import type { MissionControlResponse } from "../../shared/contracts/missionControl"
@@ -23,7 +24,7 @@ interface Candidate {
   mtimeMs: number
 }
 
-/** Most recently modified session files across Claude projects and Codex. */
+/** Most recently modified session files across all supported providers. */
 async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
@@ -55,6 +56,15 @@ async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
     }
   } catch {
     /* Codex inventory is optional */
+  }
+
+  try {
+    for (const file of await getCopilotSessionInventory()) {
+      if (file.isSubagent) continue
+      candidates.push({ sessionId: file.sessionId, filePath: file.filePath, mtimeMs: file.mtimeMs })
+    }
+  } catch {
+    /* Copilot inventory is optional */
   }
 
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)

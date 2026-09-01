@@ -22,7 +22,6 @@ function process(sessionId: string): RunningProcess {
     cpu: 1,
     sessionId,
     tty: "",
-    args: "codex",
     startTime: "2026-07-12T10:00:00.000Z",
   }
 }

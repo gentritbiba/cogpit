@@ -10,6 +10,12 @@ import type { ParsedSession, Turn } from "./types"
 export interface PlanApprovalState {
   type: "plan"
   allowedPrompts?: Array<{ tool: string; prompt: string }>
+  provider?: "copilot"
+  requestId?: string
+  summary?: string
+  planContent?: string
+  actions?: string[]
+  recommendedAction?: string
 }
 
 export interface UserQuestionState {

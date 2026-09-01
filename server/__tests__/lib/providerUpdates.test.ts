@@ -33,6 +33,22 @@ describe("detectInstallMethod", () => {
     expect(detectInstallMethod("codex", ["/Users/x/.local/bin/codex"])).toBe("unknown")
   })
 
+  it("recognises Copilot native, package-manager, and Homebrew installs", () => {
+    expect(detectInstallMethod("copilot", ["/Users/x/.local/bin/copilot"])).toBe("native")
+    expect(detectInstallMethod("copilot", ["/usr/local/bin/copilot"])).toBe("native")
+    expect(detectInstallMethod("copilot", [
+      "/usr/local/bin/copilot",
+      "/usr/local/lib/node_modules/@github/copilot/index.js",
+    ])).toBe("npm")
+    expect(detectInstallMethod("copilot", [
+      "/opt/homebrew/bin/copilot",
+      "/opt/homebrew/Caskroom/copilot-cli/1.0.0/copilot",
+    ])).toBe("homebrew")
+    expect(detectInstallMethod("copilot", [
+      "C:\\Users\\x\\AppData\\Local\\Microsoft\\WinGet\\Links\\copilot.exe",
+    ])).toBe("winget")
+  })
+
   it("recognises package managers, including through a symlink realpath", () => {
     expect(detectInstallMethod("codex", ["/Users/x/.bun/bin/codex"])).toBe("bun")
     expect(detectInstallMethod("codex", ["/Users/x/Library/pnpm/codex"])).toBe("pnpm")
@@ -63,6 +79,16 @@ describe("buildUpdateCommand", () => {
     expect(formatCommand(buildUpdateCommand("codex", "homebrew")!)).toBe("brew upgrade codex")
     expect(formatCommand(buildUpdateCommand("codex", "bun")!)).toBe("bun i -g @openai/codex@latest")
     expect(formatCommand(buildUpdateCommand("codex", "pnpm")!)).toBe("pnpm add -g @openai/codex@latest")
+    expect(formatCommand(buildUpdateCommand("copilot", "native")!)).toBe("copilot update")
+    expect(formatCommand(buildUpdateCommand("copilot", "homebrew")!)).toBe(
+      "brew upgrade --cask copilot-cli",
+    )
+    expect(formatCommand(buildUpdateCommand("copilot", "bun")!)).toBe(
+      "bun i -g @github/copilot@latest",
+    )
+    expect(formatCommand(buildUpdateCommand("copilot", "winget")!)).toBe(
+      "winget upgrade --id GitHub.Copilot --exact --accept-source-agreements --accept-package-agreements",
+    )
   })
 
   it("keeps install scripts enabled for the npm global path", () => {
@@ -70,6 +96,9 @@ describe("buildUpdateCommand", () => {
     // binary and still exits 0 — a silent broken upgrade.
     expect(formatCommand(buildUpdateCommand("claude", "npm")!)).toBe(
       "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest",
+    )
+    expect(formatCommand(buildUpdateCommand("copilot", "npm")!)).toBe(
+      "npm install -g --allow-scripts=@github/copilot @github/copilot@latest",
     )
   })
 
@@ -92,6 +121,7 @@ describe("isProviderUpdateId", () => {
   it("accepts only known providers", () => {
     expect(isProviderUpdateId("claude")).toBe(true)
     expect(isProviderUpdateId("codex")).toBe(true)
+    expect(isProviderUpdateId("copilot")).toBe(true)
     expect(isProviderUpdateId("cursor")).toBe(false)
     expect(isProviderUpdateId(null)).toBe(false)
   })
@@ -137,6 +167,19 @@ describe("fetchLatestVersion", () => {
     ])
     expect([a, b]).toEqual(["0.149.0", "0.149.0"])
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("queries the official Copilot npm package", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: "1.0.0" }),
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    expect(await fetchLatestVersion("@github/copilot")).toBe("1.0.0")
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "https://registry.npmjs.org/%40github%2Fcopilot/latest",
+    )
   })
 
   it("returns null when the registry is unreachable", async () => {

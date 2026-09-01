@@ -15,6 +15,7 @@ export type AttentionReason =
   | "deferred"
   | "question"
   | "prompt"
+  | "plan"
   | "waiting"
   | "done"
 
@@ -51,6 +52,8 @@ function isTeammate(s: ActiveSessionInfo): boolean {
  * `sessionsAwaitingPrompt` carries the same blind spot one level further out:
  * an MCP elicitation or a CLI dialog parks the CLI on a callback that never
  * reaches the transcript at all.
+ * `sessionsAwaitingPlan` marks Copilot plans that are reviewed by opening the
+ * session.
  *
  * They stay separate reasons because the remedies differ: a deferred permission
  * is cleared by resuming the session, a question by answering it.
@@ -62,6 +65,7 @@ export function classifyAttention(
   sessionsAwaitingPermission?: ReadonlySet<string>,
   sessionsAwaitingQuestion?: ReadonlySet<string>,
   sessionsAwaitingPrompt?: ReadonlySet<string>,
+  sessionsAwaitingPlan?: ReadonlySet<string>,
 ): AttentionGroups {
   const needsYou: AttentionItem[] = []
   const working: ActiveSessionInfo[] = []
@@ -77,6 +81,10 @@ export function classifyAttention(
     }
     if (sessionsAwaitingPrompt?.has(s.sessionId)) {
       needsYou.push({ session: s, reason: "prompt" })
+      continue
+    }
+    if (sessionsAwaitingPlan?.has(s.sessionId)) {
+      needsYou.push({ session: s, reason: "plan" })
       continue
     }
     if (s.agentStatus === "deferred") {

@@ -7,6 +7,7 @@ import {
 import { sendJson, type UseFn } from "../http"
 import { sdkSessions, isSDKQueryLive } from "../sdk-session"
 import { codexAppServer } from "../codex-app-server"
+import { copilotRuntime } from "../copilot-runtime"
 
 /**
  * In-memory session activity. `live`: the server holds an open query/process
@@ -20,9 +21,17 @@ function getSessionActivity(sessionId: string): { live: boolean; running: boolea
   const sdk = sdkSessions.get(sessionId)
   const persistent = persistentSessions.get(sessionId)
   const codexTurnActive = codexAppServer.getActiveTurnId(sessionId) !== undefined
+  const copilotSessionActive = copilotRuntime.isSessionActive(sessionId)
+  const copilotTurnActive = copilotRuntime.isTurnActive(sessionId)
   return {
-    live: isSDKQueryLive(sdk) || Boolean(persistent && !persistent.dead) || codexTurnActive,
-    running: sdk?.running === true || activeProcesses.has(sessionId) || codexTurnActive,
+    live: isSDKQueryLive(sdk)
+      || Boolean(persistent && !persistent.dead)
+      || codexTurnActive
+      || copilotSessionActive,
+    running: sdk?.running === true
+      || activeProcesses.has(sessionId)
+      || codexTurnActive
+      || copilotTurnActive,
   }
 }
 

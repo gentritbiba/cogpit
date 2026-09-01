@@ -75,7 +75,7 @@ export const SessionPill = memo(function SessionPill({
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
   const thinkingEnabled = session.turns.some((turn) => turn.thinking.length > 0)
   const rawMessages = (
-    session.agentKind === "codex" ? [] : session.rawMessages
+    session.agentKind === "claude" ? session.rawMessages : []
   ) as readonly RawMessage[]
 
   return (

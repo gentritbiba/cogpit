@@ -28,7 +28,6 @@ function makeProc(sessionId: string): RunningProcess {
     cpu: 1,
     sessionId,
     tty: "ttys001",
-    args: "claude",
     startTime: "10:00",
   }
 }

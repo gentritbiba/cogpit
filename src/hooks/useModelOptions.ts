@@ -24,7 +24,7 @@ function isModelOptionArray(value: unknown): value is ModelOption[] {
 }
 
 /**
- * Fetch the live model catalogs from the installed claude/codex CLIs
+ * Fetch the live model catalogs from the installed provider CLIs
  * (GET /api/models) and swap them into the shared store. Runs once per page
  * load; any provider that fails keeps its static fallback list.
  */
@@ -37,6 +37,7 @@ export async function loadModelCatalog(): Promise<void> {
     const data = await res.json()
     if (isModelOptionArray(data?.claude)) setDynamicModelOptions("claude", data.claude)
     if (isModelOptionArray(data?.codex)) setDynamicModelOptions("codex", data.codex)
+    if (isModelOptionArray(data?.copilot)) setDynamicModelOptions("copilot", data.copilot)
   } catch {
     // Offline / server error — static fallback lists stay in effect
   }

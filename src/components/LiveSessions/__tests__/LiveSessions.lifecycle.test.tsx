@@ -49,6 +49,7 @@ vi.mock("@/contexts/PendingHumanInputContext", () => ({
     awaitingQuestion: new Set(),
     awaitingElicitation: new Set(),
     awaitingDialog: new Set(),
+    awaitingPlan: new Set(),
     responding: new Set(),
     respond: vi.fn(),
     answerQuestion: vi.fn(),

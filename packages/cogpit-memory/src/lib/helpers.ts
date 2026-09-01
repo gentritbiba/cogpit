@@ -22,7 +22,7 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
     }
   } catch { /* dirs.PROJECTS_DIR might not exist */ }
 
-  const codexRoot = join(homedir(), ".codex", "sessions")
+  const codexRoot = dirs.CODEX_SESSIONS_DIR
   const walk = async (dir: string, depth: number): Promise<string | null> => {
     if (depth > 4) return null
     let entries: import("node:fs").Dirent[]
@@ -46,6 +46,15 @@ export async function findJsonlPath(sessionId: string): Promise<string | null> {
 
   const codexMatch = await walk(codexRoot, 0)
   if (codexMatch) return codexMatch
+
+  if (dirs.COPILOT_SESSIONS_DIR && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sessionId)) {
+    const sessionDir = join(dirs.COPILOT_SESSIONS_DIR, sessionId)
+    try {
+      if ((await readdir(sessionDir)).includes("events.jsonl")) {
+        return join(sessionDir, "events.jsonl")
+      }
+    } catch { /* Copilot session does not exist */ }
+  }
   return null
 }
 

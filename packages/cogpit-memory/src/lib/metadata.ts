@@ -1,6 +1,7 @@
 import { readFile, stat, open } from "node:fs/promises"
 import { deriveSessionStatus, type SessionStatusInfo } from "./sessionStatus"
 import { extractCodexMetadataFromLines } from "./codex"
+import { extractCopilotMetadataFromLines, isCopilotSessionText } from "./copilot"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -54,6 +55,24 @@ export async function getSessionMeta(filePath: string) {
       turnCount: meta.turnCount,
       lineCount: lines.length,
       branchedFrom: meta.branchedFrom,
+    }
+  }
+
+  if (isCopilotSessionText(lines.join("\n"))) {
+    const meta = extractCopilotMetadataFromLines(lines)
+    return {
+      sessionId: meta.sessionId,
+      version: meta.version,
+      gitBranch: meta.gitBranch,
+      model: meta.model,
+      slug: meta.slug,
+      cwd: meta.cwd,
+      firstUserMessage: meta.firstUserMessage,
+      lastUserMessage: meta.lastUserMessage,
+      timestamp: meta.timestamp,
+      turnCount: meta.turnCount,
+      lineCount: isPartialRead ? Math.round(fileStat.size / (32768 / lines.length)) : lines.length,
+      branchedFrom: undefined,
     }
   }
 
@@ -147,6 +166,7 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
       const meaningful: Array<{ type: string; [key: string]: unknown }> = []
       let cursor = fileStat.size
       let leftover = ""
+      let copilotTurnEnded = false
 
       for (let chunk = 0; chunk < MAX_CHUNKS && cursor > 0; chunk++) {
         const readSize = Math.min(CHUNK, cursor)
@@ -166,6 +186,15 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
           if (!line) continue
           let obj: { type: string; [key: string]: unknown }
           try { obj = JSON.parse(line) } catch { continue }
+
+          if (
+            obj.type.startsWith("subagent.")
+            && typeof obj.agentId === "string"
+            && obj.agentId.length > 0
+          ) {
+            meaningful.unshift(obj)
+            continue
+          }
 
           if (obj.type === "event_msg") {
             const payload = obj.payload as { type?: string } | undefined
@@ -191,6 +220,29 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
               if (role === "assistant") return { status: "thinking" }
               if (role === "user") return { status: "processing" }
             }
+          }
+
+          if (
+            obj.type === "abort"
+            || obj.type === "user.message"
+            || obj.type.startsWith("assistant.")
+            || obj.type.startsWith("permission.")
+            || obj.type.startsWith("session.")
+            || obj.type.startsWith("tool.")
+            || obj.type.startsWith("user_input.")
+          ) {
+            if (typeof obj.agentId === "string" && obj.agentId) continue
+            meaningful.unshift(obj)
+            if (obj.type === "assistant.turn_end") {
+              copilotTurnEnded = true
+              continue
+            }
+            if (copilotTurnEnded && obj.type !== "assistant.message" && obj.type !== "user.message") {
+              continue
+            }
+            const status = deriveSessionStatus(meaningful)
+            if (status.status !== "idle") return status
+            continue
           }
 
           if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {

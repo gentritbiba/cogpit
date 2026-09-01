@@ -74,8 +74,8 @@ export interface SessionContextValue {
     handleEditConfig?: (filePath: string) => void
     handleEditCommand?: (commandName: string) => void
     handleExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
-    handleOpenBranches: (turnIndex: number) => void
-    handleBranchFromHere: (turnIndex: number) => void
+    handleOpenBranches?: (turnIndex: number) => void
+    handleBranchFromHere?: (turnIndex: number) => void
     handleToggleExpandAll: () => void
     /** Load a session (or sub-agent session) by dirName + fileName — matches the sidebar behavior. */
     handleLoadSession: (dirName: string, fileName: string) => void

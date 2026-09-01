@@ -1,20 +1,24 @@
 import {
   dirs,
+  encodeCopilotDirName,
   encodeCodexDirName,
   getSessionMeta,
   getSessionStatus,
   join,
   listCodexSessionFiles,
+  listCopilotSessionFiles,
   projectDirToReadableName,
   readdir,
   shortNameFromPath,
   stat,
 } from "../helpers"
+import type { AgentKind } from "../../shared/providers/types"
 import { readClaudeProjectEntries } from "../routes/projects/claudeProjectEntries"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
 import { codexAppServer } from "../codex-app-server"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
+import { copilotRuntime } from "../copilot-runtime"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -48,6 +52,7 @@ const SWEEP_INTERVAL_MS = 4_000
 const RECENT_WINDOW_MS = 30 * 60_000
 
 interface SessionSnapshot extends TrackedSessionSnapshot {
+  agentKind: AgentKind
   dirName: string
   cwd: string | null
   /** Codex thread id — the key codexAppServer tracks active turns by. */
@@ -60,6 +65,7 @@ interface Candidate {
   fileName: string
   filePath: string
   mtimeMs: number
+  agentKind: AgentKind
 }
 
 /**
@@ -130,7 +136,7 @@ async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]>
       try {
         const s = await stat(filePath)
         if (s.mtimeMs < minMtimeMs) continue
-        candidates.push({ dirName: entry.name, fileName, filePath, mtimeMs: s.mtimeMs })
+        candidates.push({ dirName: entry.name, fileName, filePath, mtimeMs: s.mtimeMs, agentKind: "claude" })
       } catch { /* deleted mid-scan */ }
     }
   }
@@ -140,10 +146,25 @@ async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]>
     // identity reads would re-open every rollout file each sweep.
     for (const file of await listCodexSessionFiles()) {
       if (file.mtimeMs < minMtimeMs) continue
-      candidates.push({ dirName: null, fileName: file.fileName, filePath: file.filePath, mtimeMs: file.mtimeMs })
+      candidates.push({ dirName: null, fileName: file.fileName, filePath: file.filePath, mtimeMs: file.mtimeMs, agentKind: "codex" })
     }
   } catch (err) {
     console.error("[sessionMonitor] codex listing failed:", err)
+  }
+
+  try {
+    for (const file of await listCopilotSessionFiles()) {
+      if (file.mtimeMs < minMtimeMs) continue
+      candidates.push({
+        dirName: null,
+        fileName: file.fileName,
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        agentKind: "copilot",
+      })
+    }
+  } catch (err) {
+    console.error("[sessionMonitor] copilot listing failed:", err)
   }
 
   return candidates
@@ -171,21 +192,24 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
       return { meta, status }
     })
 
-    // Codex rollouts: dirName comes from the transcript's cwd; subagents are
-    // reported through their parent. (Claude subagents live under nested
-    // /subagents/ dirs the flat readdir never lists.)
+    // External-provider transcripts derive their project key from the cwd.
     let dirName = candidate.dirName
     if (dirName === null) {
       if (meta.isSubagent || !meta.cwd) return null
-      dirName = encodeCodexDirName(meta.cwd)
+      dirName = candidate.agentKind === "copilot"
+        ? encodeCopilotDirName(meta.cwd)
+        : encodeCodexDirName(meta.cwd)
     }
 
     const snapshot: SessionSnapshot = {
       // The URL scheme addresses a session by its fileName stem (useUrlSync
       // appends ".jsonl"), so nav must use that — not meta.sessionId, which
       // for Codex is the bare thread id.
-      sessionId: candidate.fileName.replace(/\.jsonl$/, ""),
+      sessionId: candidate.agentKind === "copilot"
+        ? candidate.fileName.split("/")[0]
+        : candidate.fileName.replace(/\.jsonl$/, ""),
       dirName,
+      agentKind: candidate.agentKind,
       cwd: meta.cwd ?? null,
       threadId: meta.sessionId || null,
       status: status.status,
@@ -199,13 +223,19 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
 }
 
 function isActiveTurn(snapshot: SessionSnapshot): boolean {
-  if (!snapshot.dirName.startsWith("codex__") || !snapshot.threadId) return false
+  if (snapshot.agentKind === "copilot" && snapshot.threadId) {
+    return copilotRuntime.isTurnActive(snapshot.threadId)
+  }
+  if (snapshot.agentKind !== "codex" || !snapshot.threadId) return false
   return codexAppServer.getActiveTurnId(snapshot.threadId) !== undefined
 }
 
 function titleFor(session: SessionSnapshot): string {
-  if (session.dirName.startsWith("codex__")) {
+  if (session.agentKind === "codex") {
     return `Codex — ${session.cwd ? shortNameFromPath(session.cwd) : "Codex"}`
+  }
+  if (session.agentKind === "copilot") {
+    return `Copilot — ${session.cwd ? shortNameFromPath(session.cwd) : "Copilot"}`
   }
   return `Claude Code — ${projectDirToReadableName(session.dirName).shortName}`
 }

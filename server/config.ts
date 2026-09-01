@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
 import { writeOwnerOnlyJson } from "./atomicJsonFile"
+import { findExecutableOnPath } from "./lib/binaryResolver"
 
 // config.local.json may hold a hashed network password; keep it owner-only.
 const CONFIG_FILE_MODE = 0o600
@@ -44,11 +45,10 @@ export function setConfigPath(p: string): void {
 export interface AppConfig {
   claudeDir: string
   /**
-   * True when Cogpit bootstrapped from an existing Codex installation and the
-   * Claude history directory is only a compatibility path. This keeps the
-   * existing directory contract intact without requiring Claude Code.
+   * Provider used when the Claude history directory is only a compatibility
+   * path created while bootstrapping an external-only installation.
    */
-  codexOnly?: boolean
+  externalOnly?: "codex" | "copilot"
   /** Team-edition opt-in; only the standalone shell honors it. */
   edition?: "team"
   networkAccess?: boolean
@@ -126,18 +126,32 @@ function stripEnvOverride(config: AppConfig): AppConfig {
   return config
 }
 
-async function detectCodexOnlyConfig(): Promise<AppConfig | null> {
-  const codexHome = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
-  try {
-    const codexStat = await stat(codexHome)
-    if (codexStat.isDirectory()) {
+async function detectExternalOnlyConfig(): Promise<AppConfig | null> {
+  const candidates = [
+    ["codex", process.env.CODEX_HOME || join(homedir(), ".codex")],
+    [
+      "copilot",
+      join(process.env.COPILOT_HOME || join(homedir(), ".copilot"), "session-state"),
+    ],
+  ] as const
+
+  for (const [provider, home] of candidates) {
+    try {
+      const providerStat = await stat(resolve(home))
+      if (!providerStat.isDirectory()) continue
       return {
         claudeDir: join(homedir(), ".claude"),
-        codexOnly: true,
+        externalOnly: provider,
       }
+    } catch {
+      // Try the next supported provider.
     }
-  } catch {
-    // Codex is not installed/configured either — show normal setup.
+  }
+  if (findExecutableOnPath("copilot")) {
+    return {
+      claudeDir: join(homedir(), ".claude"),
+      externalOnly: "copilot",
+    }
   }
   return null
 }
@@ -148,12 +162,12 @@ export async function loadConfig(): Promise<AppConfig | null> {
   try {
     raw = await readFile(CONFIG_PATH, "utf-8")
   } catch (error) {
-    // A first-run Codex user should not be forced to create a Claude history
+    // A first-run external-provider user should not need a Claude history
     // directory. Only bootstrap on a genuinely missing config file: malformed
     // or unreadable user configuration must remain visible instead of being
     // silently ignored.
     cachedConfig = (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? await detectCodexOnlyConfig()
+      ? await detectExternalOnlyConfig()
       : null
     return cachedConfig
   }
@@ -192,7 +206,9 @@ export async function loadConfig(): Promise<AppConfig | null> {
 
       cachedConfig = {
         claudeDir: parsed.claudeDir,
-        codexOnly: !!parsed.codexOnly,
+        externalOnly: parsed.externalOnly === "codex" || parsed.externalOnly === "copilot"
+          ? parsed.externalOnly
+          : parsed.codexOnly === true ? "codex" : undefined,
         edition: parsed.edition === "team" ? "team" : undefined,
         networkAccess: !!parsed.networkAccess,
         networkPassword,

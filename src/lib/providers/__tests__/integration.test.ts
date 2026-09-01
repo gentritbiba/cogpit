@@ -60,16 +60,21 @@ describe("getProvider", () => {
     expect(getProvider("codex").kind).toBe("codex")
   })
 
+  it("returns copilot provider for 'copilot' kind", () => {
+    expect(getProvider("copilot").kind).toBe("copilot")
+  })
+
   it("throws for unknown kind", () => {
     expect(() => getProvider("unknown" as never)).toThrow()
   })
 })
 
 describe("AGENT_KINDS", () => {
-  it("contains both supported providers", () => {
+  it("contains every supported provider", () => {
     expect(AGENT_KINDS).toContain("claude")
     expect(AGENT_KINDS).toContain("codex")
-    expect(AGENT_KINDS).toHaveLength(2)
+    expect(AGENT_KINDS).toContain("copilot")
+    expect(AGENT_KINDS).toHaveLength(3)
   })
 })
 

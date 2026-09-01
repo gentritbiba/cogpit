@@ -103,12 +103,13 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     [onEffortChange, changeAndApply],
   )
 
-  // Scope model options to the current agent so a Codex session never shows
-  // a Claude model name (and vice versa). Ignore a session model id that
-  // belongs to the other provider.
+  // Claude and Codex model families are distinguishable by id. Copilot offers
+  // models from several families, so its active model always belongs here.
   const catalogOptions = useModelOptions(agentKind)
   const activeModelIsCodex = activeModelId?.toLowerCase().startsWith("gpt-") ?? false
-  const sessionModelId = activeModelId && activeModelIsCodex === (agentKind === "codex")
+  const activeModelMatchesProvider = agentKind === "copilot"
+    || activeModelIsCodex === (agentKind === "codex")
+  const sessionModelId = activeModelId && activeModelMatchesProvider
     ? activeModelId
     : undefined
   // What "Default" means right now: the active session's model when there is

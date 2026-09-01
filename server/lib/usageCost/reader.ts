@@ -5,14 +5,16 @@
  */
 import { createReadStream } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { createInterface } from "node:readline"
 import type { UsageCostProvider } from "../../../shared/contracts/usageCost"
 import {
   initialCodexScanState,
+  initialCopilotScanState,
   mightCarryUsage,
   parseClaudeUsageLine,
   parseCodexUsageLine,
+  parseCopilotUsageLine,
   type UsageCostRecord,
 } from "./transcripts"
 
@@ -75,6 +77,7 @@ export async function readTranscriptRecords(
 ): Promise<UsageCostRecord[] | null> {
   const records: UsageCostRecord[] = []
   const codexState = initialCodexScanState()
+  const copilotState = initialCopilotScanState(basename(dirname(filePath)))
 
   try {
     const lines = createInterface({
@@ -95,6 +98,12 @@ export async function readTranscriptRecords(
         }
         const record = parseCodexUsageLine(line, codexState)
         if (record !== null) records.push(record)
+        continue
+      }
+
+      if (provider === "copilot") {
+        if (!mightCarryUsage(line, provider) && !line.includes('"session.start"')) continue
+        records.push(...parseCopilotUsageLine(line, copilotState))
         continue
       }
 

@@ -6,6 +6,7 @@ import {
 } from "../../../shared/session/sessionSearch"
 import {
   dirs,
+  encodeCopilotDirName,
   encodeCodexDirName,
   getSessionMeta,
   getSessionStatus,
@@ -23,12 +24,56 @@ import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
 import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
+import { getCopilotSessionInventory } from "../../lib/copilotSessionInventory"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
 import { readClaudeProjectEntries } from "./claudeProjectEntries"
 import { codexAppServer } from "../../codex-app-server"
+import { copilotRuntime } from "../../copilot-runtime"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
+
+interface ActiveSessionCandidate {
+  dirName: string
+  fileName: string
+  filePath: string
+  mtimeMs: number
+  size: number
+  projectPath?: string
+  sessionId?: string
+}
+
+interface ExternalSessionFile {
+  cwd: string
+  fileName: string
+  filePath: string
+  mtimeMs: number
+  size: number
+  sessionId: string
+  isSubagent: boolean
+}
+
+function appendExternalCandidates(
+  candidates: ActiveSessionCandidate[],
+  files: ExternalSessionFile[],
+  encodeDirName: (cwd: string) => string,
+  projectFilter: string,
+): void {
+  for (const file of files) {
+    if (file.isSubagent) continue
+    const dirName = encodeDirName(file.cwd)
+    if (projectFilter && dirName !== projectFilter) continue
+    candidates.push({
+      dirName,
+      fileName: file.fileName,
+      filePath: file.filePath,
+      mtimeMs: file.mtimeMs,
+      size: file.size,
+      projectPath: file.cwd,
+      sessionId: file.sessionId,
+    })
+  }
+}
 
 /**
  * Whether a session's background agents are demonstrably still writing their
@@ -89,14 +134,7 @@ export async function handleActiveSessions(
     const entries = await readClaudeProjectEntries()
 
     // First pass: collect all session files with their mtime (cheap stat only)
-    const candidates: Array<{
-      dirName: string
-      fileName: string
-      filePath: string
-      mtimeMs: number
-      size: number
-      projectPath?: string
-    }> = []
+    const candidates: ActiveSessionCandidate[] = []
 
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === "memory") continue
@@ -126,21 +164,18 @@ export async function handleActiveSessions(
       }
     }
 
-    const codexFiles = await getCodexSessionInventory()
-    for (const file of codexFiles) {
-      // Codex sub-agents are shown inline in their parent.
-      if (file.isSubagent) continue
-      const dirName = encodeCodexDirName(file.cwd)
-      if (projectFilter && dirName !== projectFilter) continue
-      candidates.push({
-        dirName,
-        fileName: file.fileName,
-        filePath: file.filePath,
-        mtimeMs: file.mtimeMs,
-        size: file.size,
-        projectPath: file.cwd,
-      })
-    }
+    appendExternalCandidates(
+      candidates,
+      await getCodexSessionInventory(),
+      encodeCodexDirName,
+      projectFilter,
+    )
+    appendExternalCandidates(
+      candidates,
+      await getCopilotSessionInventory(),
+      encodeCopilotDirName,
+      projectFilter,
+    )
 
     // Sort by mtime descending within each project, then pick top N per project
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -226,7 +261,9 @@ export async function handleActiveSessions(
         const { meta, status: statusInfo } = cached
         const shortName = c.dirName.startsWith("codex__")
           ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Codex"} (Codex)`
-          : projectDirToReadableName(c.dirName).shortName
+          : c.dirName.startsWith("copilot__")
+            ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Copilot"} (Copilot)`
+            : projectDirToReadableName(c.dirName).shortName
         const lastModified = new Date(c.mtimeMs).toISOString()
 
         let matchedMessage: string | undefined
@@ -259,9 +296,11 @@ export async function handleActiveSessions(
         const teamLeadSessionId = meta.teamName
           ? await resolveTeamLead(meta.teamName)
           : null
-        const sessionId = meta.sessionId || c.fileName.replace(".jsonl", "")
+        const sessionId = c.sessionId || meta.sessionId || c.fileName.replace(".jsonl", "")
         const isNativeCodexActive = c.dirName.startsWith("codex__")
           && codexAppServer.getActiveTurnId(sessionId) !== undefined
+        const isCopilotActive = c.dirName.startsWith("copilot__")
+          && copilotRuntime.isTurnActive(sessionId)
         const hasRunningAgents = statusInfo.status === "awaiting_agents"
           && await hasFreshAgentTranscripts(c.filePath)
 
@@ -282,7 +321,7 @@ export async function handleActiveSessions(
           lastActivityAt: meta.lastTimestamp || lastModified,
           turnCount: meta.turnCount,
           size: c.size,
-          isActive: isNativeCodexActive || hasRunningAgents,
+          isActive: isNativeCodexActive || isCopilotActive || hasRunningAgents,
           agentStatus: statusInfo.status,
           agentToolName: statusInfo.toolName,
           agentTerminalReason: statusInfo.terminalReason,
