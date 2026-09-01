@@ -60,11 +60,18 @@ interface Harness {
   server: CodexAppServer
   children: FakeCodexProcess[]
   spawn: ReturnType<typeof vi.fn<CodexAppServerSpawn>>
+  clock: { now: number }
 }
 
 const servers: CodexAppServer[] = []
 
-function createHarness(options: { requestTimeoutMs?: number } = {}): Harness {
+function createHarness(
+  options: {
+    requestTimeoutMs?: number
+    versionCheckIntervalMs?: number
+    readInstalledVersion?: () => Promise<string | null>
+  } = {},
+): Harness {
   const children: FakeCodexProcess[] = []
   const spawn = vi.fn<CodexAppServerSpawn>(
     (
@@ -79,22 +86,28 @@ function createHarness(options: { requestTimeoutMs?: number } = {}): Harness {
       return child
     },
   )
+  const clock = { now: 123_456 }
   const server = new CodexAppServer({
     spawn,
     requestTimeoutMs: options.requestTimeoutMs,
     clientVersion: "9.8.7",
-    now: () => 123_456,
+    now: () => clock.now,
+    versionCheckIntervalMs: options.versionCheckIntervalMs,
+    readInstalledVersion: options.readInstalledVersion,
   })
   servers.push(server)
-  return { server, children, spawn }
+  return { server, children, spawn, clock }
 }
 
-async function initialize(harness: Harness): Promise<FakeCodexProcess> {
+async function initialize(
+  harness: Harness,
+  userAgent = "codex-test",
+): Promise<FakeCodexProcess> {
   const promise = harness.server.start()
   const child = harness.children.at(-1)
   if (!child) throw new Error("Expected Codex child to be spawned")
   const request = child.messages[0]
-  child.send({ id: request.id, result: { userAgent: "codex-test" } })
+  child.send({ id: request.id, result: { userAgent } })
   await promise
   return child
 }
@@ -281,6 +294,90 @@ describe("CodexAppServer transport", () => {
       })
     })
     expect(harness.server.listPendingApprovals("thread-1")).toEqual([])
+  })
+})
+
+describe("CodexAppServer version drift", () => {
+  const OLD = "cogpit/0.151.0 (Mac OS 26.2.0; arm64)"
+
+  it("reconnects when codex is upgraded under an idle connection", async () => {
+    const readInstalledVersion = vi.fn(async () => "0.152.0")
+    const harness = createHarness({ readInstalledVersion })
+    const first = await initialize(harness, OLD)
+
+    harness.clock.now += 60_000
+    const restarted = harness.server.start()
+    await vi.waitFor(() => expect(harness.children).toHaveLength(2))
+    expect(first.kill).toHaveBeenCalledWith("SIGTERM")
+
+    const second = harness.children[1]
+    const request = requestFor(second, "initialize")
+    second.send({ id: request.id, result: { userAgent: "cogpit/0.152.0 (x)" } })
+    await expect(restarted).resolves.toEqual({
+      userAgent: "cogpit/0.152.0 (x)",
+    })
+    expect(readInstalledVersion).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the connection when the installed version still matches", async () => {
+    const readInstalledVersion = vi.fn(async () => "0.151.0")
+    const harness = createHarness({ readInstalledVersion })
+    await initialize(harness, OLD)
+
+    harness.clock.now += 60_000
+    await expect(harness.server.start()).resolves.toEqual({ userAgent: OLD })
+    expect(readInstalledVersion).toHaveBeenCalledTimes(1)
+    expect(harness.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it("probes at most once per interval", async () => {
+    const readInstalledVersion = vi.fn(async () => "0.151.0")
+    const harness = createHarness({ readInstalledVersion })
+    await initialize(harness, OLD)
+
+    await harness.server.start()
+    await harness.server.start()
+    expect(readInstalledVersion).not.toHaveBeenCalled()
+  })
+
+  it("does not restart while a turn is in flight", async () => {
+    const readInstalledVersion = vi.fn(async () => "0.152.0")
+    const harness = createHarness({ readInstalledVersion })
+    const child = await initialize(harness, OLD)
+
+    const turn = harness.server.startTurn("thread-1", "Run the tests")
+    const request = requestFor(child, "turn/start")
+    child.send({
+      id: request.id,
+      result: { turn: { id: "turn-1", status: "inProgress", items: [] } },
+    })
+    await turn
+
+    harness.clock.now += 60_000
+    await harness.server.start()
+    expect(readInstalledVersion).not.toHaveBeenCalled()
+    expect(harness.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips the probe when the app-server reports no version", async () => {
+    const readInstalledVersion = vi.fn(async () => "0.152.0")
+    const harness = createHarness({ readInstalledVersion })
+    await initialize(harness)
+
+    harness.clock.now += 60_000
+    await harness.server.start()
+    expect(readInstalledVersion).not.toHaveBeenCalled()
+    expect(harness.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays connected when the version probe fails", async () => {
+    const readInstalledVersion = vi.fn(async () => null)
+    const harness = createHarness({ readInstalledVersion })
+    await initialize(harness, OLD)
+
+    harness.clock.now += 60_000
+    await expect(harness.server.start()).resolves.toEqual({ userAgent: OLD })
+    expect(harness.spawn).toHaveBeenCalledTimes(1)
   })
 })
 

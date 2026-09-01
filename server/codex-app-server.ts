@@ -39,6 +39,10 @@ import {
 } from "./codex-approval-codec"
 import { resolveAgentCommand } from "./lib/binaryResolver"
 import { forwardCodexStreamNotification } from "./lib/codexStreamAdapter"
+import {
+  parseUserAgentVersion,
+  readInstalledCodexVersion,
+} from "./lib/codexVersion"
 
 export { CODEX_CLIENT_CAPABILITIES } from "./codex-app-server-protocol"
 export type * from "./codex-app-server-protocol"
@@ -90,6 +94,7 @@ interface ServerRequest {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const DEFAULT_VERSION_CHECK_INTERVAL_MS = 60_000
 const MAX_STDERR_LENGTH = 16_000
 const SHUTDOWN_GRACE_MS = 3_000
 const FORCE_KILL_GRACE_MS = 1_000
@@ -124,7 +129,9 @@ function textInput(input: string | UserInput[]): UserInput[] {
  * Persistent JSONL client for `codex app-server --stdio`.
  *
  * One child is kept alive and shared by all calls. If it exits, in-flight
- * requests are rejected and the next call starts a fresh connection.
+ * requests are rejected and the next call starts a fresh connection. An idle
+ * connection also reconnects when the `codex` on disk has been upgraded past
+ * the running child — see {@link beginVersionCheck}.
  */
 export class CodexAppServer {
   private readonly spawn: CodexAppServerSpawn
@@ -134,6 +141,8 @@ export class CodexAppServer {
   private readonly now: () => number
   private readonly setTimer: typeof globalThis.setTimeout
   private readonly clearTimer: typeof globalThis.clearTimeout
+  private readonly versionCheckIntervalMs: number
+  private readonly readInstalledVersion: () => Promise<string | null>
 
   private child: CodexAppServerProcess | null = null
   private reader: ReadlineInterface | null = null
@@ -143,6 +152,9 @@ export class CodexAppServer {
   private shutdownPromise: Promise<void> | null = null
   private nextRequestId = 1
   private stderr = ""
+  private runningVersion: string | null = null
+  private lastVersionCheckAt = 0
+  private versionCheck: Promise<boolean> | null = null
 
   private readonly pendingRequests = new Map<JsonRpcId, PendingRequest>()
   private readonly notificationListeners = new Set<CodexNotificationListener>()
@@ -164,9 +176,61 @@ export class CodexAppServer {
     this.now = options.now ?? Date.now
     this.setTimer = options.setTimeout ?? globalThis.setTimeout
     this.clearTimer = options.clearTimeout ?? globalThis.clearTimeout
+    this.versionCheckIntervalMs =
+      options.versionCheckIntervalMs ?? DEFAULT_VERSION_CHECK_INTERVAL_MS
+    this.readInstalledVersion =
+      options.readInstalledVersion ??
+      (() => readInstalledCodexVersion(this.command))
   }
 
   start(): Promise<InitializeResult> {
+    const versionCheck = this.beginVersionCheck()
+    if (!versionCheck) return this.connect()
+    return versionCheck.then((changed) =>
+      changed ? this.restart() : this.connect(),
+    )
+  }
+
+  /**
+   * Upgrading `codex` swaps the vendored binaries under the running
+   * app-server. The stale process then speaks an older protocol to the
+   * freshly installed code-mode host, and every shell command comes back as
+   * `failed to decode code-mode IPC frame` even though it ran fine. Probe the
+   * installed version while idle so the next session reconnects instead.
+   *
+   * Returns null when there is nothing to check, which keeps the common path
+   * synchronous — callers rely on `start()` spawning before it yields.
+   */
+  private beginVersionCheck(): Promise<boolean> | null {
+    if (this.versionCheck) return this.versionCheck
+    if (this.shuttingDown) return null
+    if (!this.child || !this.initializeResult) return null
+    // An app-server that did not report its version gives us nothing to
+    // compare, and restarting mid-turn would kill an in-flight conversation.
+    if (!this.runningVersion) return null
+    if (this.activeTurnIds.size > 0) return null
+    const now = this.now()
+    if (now - this.lastVersionCheckAt < this.versionCheckIntervalMs) return null
+    this.lastVersionCheckAt = now
+
+    const running = this.runningVersion
+    const check = this.readInstalledVersion()
+      .catch(() => null)
+      .then((installed) => {
+        if (installed === null || installed === running) return false
+        console.warn(
+          `Codex was upgraded from ${running} to ${installed}; restarting the app-server.`,
+        )
+        return true
+      })
+      .finally(() => {
+        if (this.versionCheck === check) this.versionCheck = null
+      })
+    this.versionCheck = check
+    return check
+  }
+
+  private connect(): Promise<InitializeResult> {
     if (this.shuttingDown) {
       return Promise.reject(
         new CodexAppServerError("Codex app-server client has been shut down"),
@@ -230,7 +294,7 @@ export class CodexAppServer {
         new CodexAppServerError("Codex app-server connection restarted"),
       )
     }
-    return this.start()
+    return this.connect()
   }
 
   call<T = unknown>(
@@ -511,6 +575,8 @@ export class CodexAppServer {
       }
       await this.writeMessage(child, { method: "initialized", params: {} })
       this.initializeResult = result
+      this.runningVersion = parseUserAgentVersion(result.userAgent)
+      this.lastVersionCheckAt = this.now()
       return result
     } catch (error) {
       if (error instanceof Error) throw error
@@ -930,6 +996,7 @@ export class CodexAppServer {
     if (this.child !== child) return
     this.child = null
     this.initializeResult = null
+    this.runningVersion = null
     this.startPromise = null
     this.reader?.close()
     this.reader = null

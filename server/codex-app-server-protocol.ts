@@ -35,6 +35,10 @@ export interface CodexAppServerOptions {
   now?: () => number
   setTimeout?: typeof globalThis.setTimeout
   clearTimeout?: typeof globalThis.clearTimeout
+  /** How often an idle connection re-checks the installed Codex version. */
+  versionCheckIntervalMs?: number
+  /** Codex version currently on disk; null when it cannot be determined. */
+  readInstalledVersion?: () => Promise<string | null>
 }
 
 export interface CodexNotification<T = unknown> {
