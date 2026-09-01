@@ -31,6 +31,8 @@ export interface ActiveSessionInfo {
   teamLeadSessionId?: string
   /** Pull requests this session opened, from a whole-file server scan. */
   pullRequests?: SessionPullRequest[]
+  /** Exact PR number that caused this session to appear in remote search results. */
+  matchedPullRequestNumber?: number
 }
 
 export interface RunningProcess {

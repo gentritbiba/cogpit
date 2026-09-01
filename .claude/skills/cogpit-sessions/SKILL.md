@@ -197,7 +197,9 @@ Resolve a bare sessionId to `{ dirName, fileName }`.
 
 ### GET /api/active-sessions
 
-Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
+Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. It also accepts exact pull request searches such as `#157`, `honest-cms #157`, `honest-cms#157`, `PR 157`, and a pasted GitHub pull request URL. PR searches cover sessions that created the pull request or used an explicit `gh pr` action for it. The first search may build the durable transcript index in the background. Poll the same request until `X-Cogpit-PR-Index-Pending` is `0`; `X-Cogpit-PR-Index-Total` reports the number of candidate transcripts. A matching row includes `matchedPullRequestNumber`.
+
+Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
 
 ### GET /api/running-processes
 

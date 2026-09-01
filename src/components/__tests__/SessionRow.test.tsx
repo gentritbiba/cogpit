@@ -228,6 +228,13 @@ describe("SessionRow — pull requests and turn count", () => {
     expect(screen.getByText("+2")).toBeInTheDocument()
   })
 
+  it("shows why a session matched PR search instead of an unrelated created PR", () => {
+    renderRow({ pullRequests: [pr(94)], matchedPullRequestNumber: 85 })
+
+    expect(screen.getByText("Matched #85")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Pull request #94" })).toBeNull()
+  })
+
   it("does not select the session when the pull request link is clicked", () => {
     const onSelectSession = vi.fn()
     renderRow({ pullRequests: [pr(13)] }, onSelectSession)

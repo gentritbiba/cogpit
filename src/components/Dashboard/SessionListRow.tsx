@@ -201,7 +201,11 @@ export function SessionListRow({ session, customName, onSelect }: SessionListRow
       </button>
 
       <span className="flex shrink-0 items-center gap-2 pt-1.5">
-        <PullRequestChips pullRequests={session.pullRequests} max={2} compact />
+        {session.matchedPullRequestNumber ? (
+          <Badge variant="outline">Matched #{session.matchedPullRequestNumber}</Badge>
+        ) : (
+          <PullRequestChips pullRequests={session.pullRequests} max={2} compact />
+        )}
         <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
       </span>
     </div>

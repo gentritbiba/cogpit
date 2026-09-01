@@ -41,4 +41,5 @@ export interface SessionInfo {
   agentTerminalReason?: string
   agentPendingAgents?: number
   pullRequests?: SessionPullRequest[]
+  matchedPullRequestNumber?: number
 }

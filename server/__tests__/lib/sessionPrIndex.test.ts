@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { appendFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getSessionPullRequests, resetSessionPrIndex } from "../../lib/sessionPrIndex"
+import {
+  getCompleteSessionPullRequestData,
+  getSessionPullRequests,
+  resetSessionPrIndex,
+} from "../../lib/sessionPrIndex"
 
 let dir: string
 let file: string
@@ -59,6 +63,36 @@ describe("getSessionPullRequests", () => {
     const prs = await getSessionPullRequests(file, size())
     expect(prs).toHaveLength(1)
     expect(prs[0]).toMatchObject({ number: 42, repo: "o/r", title: "Add search" })
+  })
+
+  it("indexes pull requests explicitly used by GitHub CLI", async () => {
+    write(create("t1", "gh pr view 157 --repo HonestCMS/cms --json title"))
+
+    const data = await getCompleteSessionPullRequestData(file, size())
+
+    expect(data.pullRequests).toEqual([])
+    expect(data.references).toEqual([{ number: 157, repo: "HonestCMS/cms" }])
+  })
+
+  it("indexes GitHub CLI commands nested in a Codex exec call", async () => {
+    const source = 'const r = await tools.exec_command({cmd:"gh pr checks 157 --watch"}); text(r.output);'
+    write(JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-09-01T10:00:00.000Z",
+      payload: { type: "custom_tool_call", call_id: "call-1", input: source },
+    }))
+
+    const data = await getCompleteSessionPullRequestData(file, size())
+
+    expect(data.references).toEqual([{ number: 157, repo: "" }])
+  })
+
+  it("does not index a command that only quotes gh pr text", async () => {
+    write(create("t1", 'rg "gh pr view 157" src'))
+
+    const data = await getCompleteSessionPullRequestData(file, size())
+
+    expect(data.references).toEqual([])
   })
 
   it("picks up a pull request appended after the first scan", async () => {

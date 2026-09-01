@@ -16,6 +16,8 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
+import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
+import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -117,28 +119,17 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [fetchData, refreshRef])
 
   const isMobile = useIsMobile()
+  const pullRequestResults = usePullRequestSessionSearch<ActiveSessionInfo>(searchQuery)
 
-  const filteredSessions = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    if (!query) return sessions
+  const locallyFilteredSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sessions
     return sessions.filter((session) => {
       const customSessionName = sessionNames[session.sessionId]
       const customProjectName = projectNames[session.dirName]
-      return [
-        customSessionName,
-        customProjectName,
-        session.aiTitle,
-        session.firstUserMessage,
-        session.lastUserMessage,
-        session.slug,
-        session.cwd,
-        session.projectShortName,
-        session.gitBranch,
-        session.agentName,
-        session.teamName,
-      ].some((value) => value?.toLowerCase().includes(query))
+      return matchesSessionSearch(session, searchQuery, [customSessionName, customProjectName])
     })
   }, [sessions, searchQuery, sessionNames, projectNames])
+  const filteredSessions = pullRequestResults.results ?? locallyFilteredSessions
 
   // Group sessions by project path
   const grouped = useMemo(() => groupByProject(filteredSessions), [filteredSessions])
@@ -253,6 +244,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         loading={loading}
         isMobile={isMobile}
         searchQuery={searchQuery}
+        searchLoading={pullRequestResults.loading}
         onSearchQueryChange={setSearchQuery}
         onRefresh={() => { hapticMedium(); fetchData() }}
       />
@@ -260,12 +252,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">
           <LiveSessionsFeedback
-            fetchError={fetchError}
-            showEmpty={filteredSessions.length === 0 && !pendingSession && !loading && !fetchError}
+            fetchError={pullRequestResults.error ?? fetchError}
+            showEmpty={filteredSessions.length === 0 && !pendingSession
+              && !loading && !pullRequestResults.loading && !fetchError && !pullRequestResults.error}
             searching={Boolean(searchQuery.trim())}
-            loading={loading}
-            sessionCount={sessions.length}
-            onRetry={fetchData}
+            loading={loading || pullRequestResults.loading}
+            sessionCount={pullRequestResults.active ? filteredSessions.length : sessions.length}
+            onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
 
           {showAttentionStrip && (

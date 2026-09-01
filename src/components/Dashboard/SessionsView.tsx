@@ -33,6 +33,7 @@ interface SessionsViewProps {
   sessions: SessionInfo[]
   sessionsTotal: number
   sessionsLoading: boolean
+  searchLoading: boolean
   searchFilter: string
   setSearchFilter: (value: string) => void
   filteredSessions: SessionInfo[]
@@ -52,6 +53,7 @@ export function SessionsView({
   sessions,
   sessionsTotal,
   sessionsLoading,
+  searchLoading,
   searchFilter,
   setSearchFilter,
   filteredSessions,
@@ -102,7 +104,8 @@ export function SessionsView({
             <SearchInput
               value={searchFilter}
               onChange={setSearchFilter}
-              placeholder="Filter sessions..."
+              placeholder="Search sessions or PRs..."
+              loading={searchLoading}
             />
             {onNewSession && (
               <Button
@@ -122,7 +125,7 @@ export function SessionsView({
 
           {fetchError && <ErrorBanner message={fetchError} onRetry={onRetryFetch} />}
 
-          {sessionsLoading && sessions.length === 0 ? (
+          {(sessionsLoading || searchLoading) && filteredSessions.length === 0 ? (
             <SkeletonRows includeMessagePlaceholder />
           ) : filteredSessions.length === 0 ? (
             <Empty className="min-h-72 border">
@@ -135,7 +138,7 @@ export function SessionsView({
                 </EmptyTitle>
                 <EmptyDescription>
                   {searchFilter
-                    ? "Try a session title, prompt, model, or branch."
+                    ? "Try #157, honest-cms #157, or paste a PR URL."
                     : "Start a session in this project and it will appear here."}
                 </EmptyDescription>
               </EmptyHeader>

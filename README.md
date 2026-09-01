@@ -54,6 +54,8 @@ Start sessions with Claude Code or Codex from the same interface. Model settings
 ### Live Session Monitoring
 Stream active sessions via SSE. Watch Claude or Codex think, call tools, edit files, and coordinate subagents in real time. Codex live work uses its persistent app-server control plane for native threads, turns, steering, interruption, goals, and approvals, with a legacy CLI fallback for older installations. Pull requests opened during a session appear as clickable links in the session list.
 
+Search the desktop sidebar or a project's Sessions page for the work behind a pull request. Enter `#157`, `honest-cms #157`, or paste a GitHub pull request URL. Cogpit searches sessions that created or worked on that pull request and labels the exact match.
+
 The desktop sidebar and mobile Sessions tab use the same searchable live-and-recent session list, including status and attention cues.
 
 Claude token-level streaming is enabled by default. Set `COGPIT_STREAM_PARTIAL=0` (or `false`, `off`, or `no`) before launching Cogpit to disable partial-message streaming while leaving completed session updates intact.

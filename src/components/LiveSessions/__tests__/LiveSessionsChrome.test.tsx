@@ -11,6 +11,7 @@ describe("LiveSessionsToolbar", () => {
         loading={false}
         isMobile={false}
         searchQuery=""
+        searchLoading={false}
         onSearchQueryChange={vi.fn()}
         onRefresh={onRefresh}
       />,
@@ -27,5 +28,6 @@ describe("LiveSessionsToolbar", () => {
 
     fireEvent.click(refresh)
     expect(onRefresh).toHaveBeenCalledOnce()
+    expect(search).toHaveAttribute("placeholder", "Search sessions or PRs")
   })
 })

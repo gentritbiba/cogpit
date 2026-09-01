@@ -4,6 +4,7 @@ import type { Stats, Dirent } from "node:fs"
 
 const mockGetActiveCodexTurnId = vi.hoisted(() => vi.fn())
 const mockGetCodexSessionInventory = vi.hoisted(() => vi.fn())
+const mockGetSessionPrSearchSnapshot = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
   dirs: {
@@ -37,6 +38,10 @@ vi.mock("../../codex-app-server", async (importOriginal) => {
 
 vi.mock("../../lib/codexSessionInventory", () => ({
   getCodexSessionInventory: mockGetCodexSessionInventory,
+}))
+
+vi.mock("../../lib/sessionPrSearchIndex", () => ({
+  getSessionPrSearchSnapshot: mockGetSessionPrSearchSnapshot,
 }))
 
 import {
@@ -105,6 +110,11 @@ describe("project routes", () => {
     mockedGetSessionStatus.mockResolvedValue({ status: "idle" as const })
     mockedListCodexSessionFiles.mockResolvedValue([])
     mockGetCodexSessionInventory.mockResolvedValue([])
+    mockGetSessionPrSearchSnapshot.mockResolvedValue({
+      byFile: new Map(),
+      pending: 0,
+      total: 0,
+    })
     mockedResolveSessionFilePath.mockImplementation(async (dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`)
     mockedFindJsonlPath.mockResolvedValue(null)
     mockGetActiveCodexTurnId.mockReturnValue(undefined)
@@ -490,6 +500,49 @@ describe("project routes", () => {
       expect(response[0].sessionId).toBe("s1")
       expect(response[0].isActive).toBe(false)
       expect(response[0].projectShortName).toBe("a")
+    })
+
+    it("finds a session that worked on a PR by project and exact number", async () => {
+      const handler = getRouteHandler(handlers, "/api/active-sessions")
+      const { req, res, next } = createMockReqRes("GET", "?search=honest-cms%20%23157")
+
+      mockedReaddir.mockResolvedValueOnce([
+        { name: "-work-honest-cms", isDirectory: () => true },
+      ] as unknown as Dirent[])
+      mockedReaddir.mockResolvedValueOnce(["worked-on-pr.jsonl"] as unknown as Dirent[])
+      mockedStat.mockResolvedValueOnce({ mtimeMs: Date.now(), size: 500 } as unknown as Stats)
+      mockedGetSessionMeta.mockResolvedValueOnce(makeSessionMeta({
+        sessionId: "worked-on-pr", version: "", gitBranch: "fix/pr-157", model: "claude",
+        slug: "fix-pr", cwd: "/work/honest-cms", firstUserMessage: "Fix the PR",
+        lastUserMessage: "Checks are green", timestamp: "", turnCount: 3, lineCount: 10,
+      }))
+      mockedProjectDirToReadableName.mockReturnValueOnce({
+        path: "/work/honest-cms",
+        shortName: "honest-cms",
+      })
+      const filePath = "/tmp/test-projects/-work-honest-cms/worked-on-pr.jsonl"
+      mockGetSessionPrSearchSnapshot.mockResolvedValueOnce({
+        byFile: new Map([[filePath, {
+          pullRequests: [],
+          references: [{ number: 157, repo: "HonestCMS/cms" }],
+        }]]),
+        pending: 0,
+        total: 1,
+      })
+
+      await handler(req, res, next)
+
+      expect(JSON.parse(res._getData())).toEqual([
+        expect.objectContaining({
+          sessionId: "worked-on-pr",
+          projectShortName: "honest-cms",
+          matchedPullRequestNumber: 157,
+        }),
+      ])
+      expect(mockGetSessionPrSearchSnapshot).toHaveBeenCalledWith([
+        expect.objectContaining({ filePath, size: 500 }),
+      ])
+      expect(res._getHeaders()["X-Cogpit-PR-Index-Pending"]).toBe("0")
     })
 
     it("sorts active sessions by displayed activity time when it differs from file mtime", async () => {

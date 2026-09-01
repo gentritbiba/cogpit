@@ -1,4 +1,4 @@
-import { AlertTriangle, RefreshCw, Search, X } from "lucide-react"
+import { AlertTriangle, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 import {
   Alert,
   AlertAction,
@@ -15,17 +15,22 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export function SearchInput({ value, onChange, placeholder }: {
+export function SearchInput({ value, onChange, placeholder, loading = false }: {
   value: string
   onChange: (value: string) => void
   placeholder: string
+  loading?: boolean
 }) {
   return (
     <InputGroup className="w-full sm:max-w-sm">
       <InputGroupAddon>
-        <Search aria-hidden="true" />
+        {loading
+          ? <LoaderCircle className="animate-spin" aria-label="Searching session history" />
+          : <Search aria-hidden="true" />}
       </InputGroupAddon>
       <InputGroupInput
+        type="search"
+        aria-busy={loading}
         aria-label={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}

@@ -210,7 +210,13 @@ export function SessionRow({
         </Button>
       )}
 
-      <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
+      {s.matchedPullRequestNumber ? (
+        <Badge variant="outline" className="shrink-0 px-1">
+          Matched #{s.matchedPullRequestNumber}
+        </Badge>
+      ) : (
+        <PullRequestChips pullRequests={s.pullRequests} max={1} compact />
+      )}
       <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
         {formatRelativeTime(s.lastActivityAt || s.lastModified)}
       </span>
