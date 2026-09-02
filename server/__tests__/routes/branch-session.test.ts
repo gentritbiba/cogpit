@@ -36,7 +36,7 @@ vi.mock("../../sessionPaths", () => ({
 }))
 
 vi.mock("../../agents", async () => {
-  const { resolve } = await vi.importActual<typeof import("node:path")>("node:path")
+  const { resolve, sep } = await vi.importActual<typeof import("node:path")>("node:path")
   const roots: Record<string, string> = {
     claude: "/tmp/test-projects",
     codex: "/tmp/test-codex-sessions",
@@ -46,7 +46,9 @@ vi.mock("../../agents", async () => {
     storeFor: (kind: string) => ({ kind, sessionsRoot: () => roots[kind] }),
     storeForPath: (filePath: string) => {
       const resolved = resolve(filePath)
-      const kind = Object.keys(roots).find((key) => resolved.startsWith(`${roots[key]}/`))
+      const kind = Object.keys(roots).find((key) => (
+        resolved.startsWith(`${resolve(roots[key])}${sep}`)
+      ))
       return kind ? { kind } : null
     },
   }
