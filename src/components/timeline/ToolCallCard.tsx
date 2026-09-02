@@ -17,6 +17,9 @@ import { LocalImage, isLocalImagePath } from "./LocalImage"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { BashToolInput, CodexExecToolInput } from "./BashToolInput"
+import { CHIP_TONE_CLASS, SectionedBashCard, sectionChips, type SectionChip } from "./SectionedBashCard"
+import { parseSectionedCommand } from "@/lib/sectionedCommand"
+import { Badge } from "@/components/ui/badge"
 import { AskUserQuestionCard } from "./AskUserQuestionCard"
 import {
   JsonResultHighlighted,
@@ -47,6 +50,7 @@ const TOOL_TIER_STYLES: Record<ToolTier, string> = {
 
 const FAILED_TOOL_TEXT_STYLE = "text-destructive"
 const DESKTOP_RESULT_LINE_LIMIT = 8
+const HEADER_SECTION_CHIP_LIMIT = 4
 const DESKTOP_RESULT_CLASS =
   "whitespace-pre-wrap break-all border-l border-border pl-3 font-mono text-[11px] leading-relaxed text-muted-foreground"
 const MOBILE_RESULT_CLASS =
@@ -249,12 +253,49 @@ function ToolResultPanel({
   )
 }
 
+function SectionChips({ chips }: { chips: SectionChip[] }): React.ReactElement {
+  const shown = chips.slice(0, HEADER_SECTION_CHIP_LIMIT)
+  const hidden = chips.length - shown.length
+  return (
+    <span className="flex min-w-0 items-center gap-1 overflow-hidden" aria-label={`Sections: ${chips.map((chip) => chip.name).join(", ")}`}>
+      {shown.map((chip, index) => (
+        <Badge key={index} variant="outline" className={cn("h-4 shrink-0 px-1.5 font-mono text-[10px]", CHIP_TONE_CLASS[chip.tone])}>
+          {chip.name}
+        </Badge>
+      ))}
+      {hidden > 0 && (
+        <span className="shrink-0 text-[10px] text-muted-foreground">+{hidden}</span>
+      )}
+    </span>
+  )
+}
+
+/** Section chips when the call is a sectioned batch, the plain summary otherwise. */
+function HeaderSummary({
+  chips,
+  summary,
+  isMobile,
+}: {
+  chips?: SectionChip[]
+  summary: string
+  isMobile?: boolean
+}): React.ReactElement | null {
+  if (chips) return <SectionChips chips={chips} />
+  if (!summary) return null
+  return (
+    <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
+      {summary}
+    </span>
+  )
+}
+
 function ToolCallHeaderContent({
   toolCall,
   isMobile,
   isAgentActive,
   displayName,
   summary,
+  sectionChips: chips,
   nameTitle,
   nameClass,
   timeLabel,
@@ -265,6 +306,7 @@ function ToolCallHeaderContent({
   isAgentActive?: boolean
   displayName: string
   summary: string
+  sectionChips?: SectionChip[]
   nameTitle: string
   nameClass: string
   timeLabel?: string
@@ -284,11 +326,7 @@ function ToolCallHeaderContent({
         >
           {displayName}
         </span>
-        {summary && (
-          <span className={cn("truncate font-mono text-muted-foreground", isMobile ? "text-[11px]" : "text-xs")}>
-            {summary}
-          </span>
-        )}
+        <HeaderSummary chips={chips} summary={summary} isMobile={isMobile} />
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0">
         {toolCall.hookDurationMs !== undefined && toolCall.hookDurationMs > 0 && !isMobile && (
@@ -373,6 +411,14 @@ export const ToolCallCard = memo(function ToolCallCard({
   const isCompactMobile = isMobile && isHistoricalTool && !expandAll && !mobileExpanded
   const presentation = useMemo(() => getToolPresentation(toolCall), [toolCall])
   const isCodexExec = isCodexExecCall(toolCall)
+  const sections = useMemo(
+    () => toolCall.name === "Bash" && typeof toolCall.input.command === "string"
+      ? parseSectionedCommand(toolCall.input.command, toolCall.result)
+      : null,
+    [toolCall],
+  )
+  const chips = useMemo(() => (sections ? sectionChips(sections) : undefined), [sections])
+  const bashDescription = typeof toolCall.input.description === "string" ? toolCall.input.description : undefined
   // Abbreviate only when the presentation kept the raw tool name. A derived
   // label is already short and more accurate than the mobile stand-in.
   const displayName = isMobile && presentation.label === toolCall.name
@@ -416,7 +462,9 @@ export const ToolCallCard = memo(function ToolCallCard({
   // preview below stands in for a result well that would always be empty.
   const imagePath = imageReadPath(toolCall)
   const hasImagePreview = imagePath !== null && toolCall.result?.trim() === ""
-  const renderedResult = toolCall.result !== null && !hasImagePreview ? (
+  // A sectioned call interleaves each command with its own output, so the
+  // flat result well would only repeat what the sections already show.
+  const renderedResult = toolCall.result !== null && !hasImagePreview && !sections ? (
     <ToolResultPanel
       toolCall={toolCall}
       resultExpanded={resultExpanded}
@@ -470,11 +518,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             >
               {displayName}
             </span>
-            {summary && (
-              <span className="truncate font-mono text-xs text-muted-foreground">
-                {summary}
-              </span>
-            )}
+            <HeaderSummary chips={chips} summary={summary} />
           </div>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" data-icon="inline-end" />
           <StatusIcon toolCall={toolCall} isAgentActive={isAgentActive} />
@@ -487,6 +531,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             isAgentActive={isAgentActive}
             displayName={displayName}
             summary={summary}
+            sectionChips={chips}
             nameTitle={nameTitle}
             nameClass={nameClass}
             timeLabel={timeLabel}
@@ -511,6 +556,7 @@ export const ToolCallCard = memo(function ToolCallCard({
             isAgentActive={isAgentActive}
             displayName={displayName}
             summary={summary}
+            sectionChips={chips}
             nameTitle={nameTitle}
             nameClass={nameClass}
             timeLabel={timeLabel}
@@ -600,7 +646,14 @@ export const ToolCallCard = memo(function ToolCallCard({
       {isMobile && !isCompactMobile && (
         <Collapsible open={showMobileInput}>
           <CollapsibleContent id={mobileInputId}>
-            {toolCall.name === "Bash" &&
+            {sections ? (
+              <SectionedBashCard
+                sections={sections}
+                description={bashDescription}
+                cwd={session?.cwd}
+                expandAll={payloadsExpanded}
+              />
+            ) : toolCall.name === "Bash" &&
             (typeof toolCall.input.command === "string" ||
               typeof toolCall.input.cmd === "string") ? (
               <BashToolInput input={toolCall.input} />
@@ -640,7 +693,14 @@ export const ToolCallCard = memo(function ToolCallCard({
             )}
 
             {desktopPrimaryPanel === "command" &&
-              (toolCall.name === "Bash" ? (
+              (sections ? (
+                <SectionedBashCard
+                  sections={sections}
+                  description={bashDescription}
+                  cwd={session?.cwd}
+                  expandAll={expandToolPayloads}
+                />
+              ) : toolCall.name === "Bash" ? (
                 <BashToolInput input={toolCall.input} />
               ) : (
                 <CodexExecToolInput input={toolCall.input} />

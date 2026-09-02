@@ -16,7 +16,7 @@ vi.mock("@/lib/auth", () => ({
 
 // Mock useSessionContext — used by ToolCallCard for sessionId and for the
 // pending-interaction lookup that decides whether a question is answerable.
-const mockSession = { sessionId: "test-session-id" }
+const mockSession = { sessionId: "test-session-id", cwd: "/repo" }
 let mockPendingInteraction: unknown = null
 const mockSendMessage = vi.fn()
 vi.mock("@/contexts/SessionContext", () => ({
@@ -1329,5 +1329,119 @@ describe("ToolCallCard mobile AskUserQuestion rendering", () => {
 
     expect(screen.getByText("Input")).toBeTruthy()
     expect(screen.getByText("Result")).toBeTruthy()
+  })
+})
+
+describe("ToolCallCard sectioned Bash commands", () => {
+  const sectioned: ToolCall = {
+    ...makeToolCall("Bash", {
+      command: "echo ---HOTSWAP; grep -rl hot-swap server; echo ---CONFIG; cat src/a.tsx; echo ---CAPS; grep -n configWrite src; echo ---ROUTE; ls server/routes; echo ---TESTS; ls server/__tests__",
+      description: "Survey settings infrastructure",
+    }),
+    result: "---HOTSWAP\nserver/lib/cliProcess.ts\n---CONFIG\nline1\nline2\nline3\n---CAPS\n---ROUTE\nconfig.ts\n---TESTS\nfoo.test.ts",
+  }
+
+  it("shows section chips in the header instead of the raw command", () => {
+    render(<ToolCallCard toolCall={sectioned} expandAll={false} />)
+    const chips = screen.getByLabelText("Sections: HOTSWAP, CONFIG, CAPS, ROUTE, TESTS")
+    expect(chips.textContent).toBe("HOTSWAPCONFIGCAPSROUTE+1")
+    expect(screen.queryByText(/echo ---HOTSWAP/)).toBeNull()
+  })
+
+  it("expands into one row per section with its command and output size", () => {
+    render(<ToolCallCard toolCall={sectioned} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+
+    expect(screen.getByText("5 commands in one call")).toBeInTheDocument()
+    expect(screen.getByText("Survey settings infrastructure")).toBeInTheDocument()
+    const config = screen.getByRole("button", { name: "CONFIG section: cat src/a.tsx" })
+    expect(config.textContent).toContain("3 lines")
+    expect(screen.queryByRole("button", { name: "CAPS section: grep -n configWrite src" })).toBeNull()
+    expect(screen.getByLabelText("CAPS section: grep -n configWrite src").textContent).toContain("no output")
+    expect(screen.queryByLabelText("Bash command")).toBeNull()
+    expect(screen.queryByText("line1")).toBeNull()
+
+    fireEvent.click(config)
+    expect(screen.getByText("line1")).toBeInTheDocument()
+    expect(screen.getByText("line3")).toBeInTheDocument()
+  })
+
+  it("marks sections the result never reached", () => {
+    const truncated: ToolCall = { ...sectioned, result: "---HOTSWAP\nserver/lib/cliProcess.ts\n---CONFIG\nline1" }
+    render(<ToolCallCard toolCall={truncated} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByLabelText(/ROUTE section/).textContent).toContain("not reached")
+    expect(screen.getByText(/3 not reached/)).toBeInTheDocument()
+  })
+
+  it("names unlabelled sections after their leading command word", () => {
+    const bare: ToolCall = {
+      ...makeToolCall("Bash", { command: "ls server; echo ---; grep -rn foo src" }),
+      result: "a\n---\nb",
+    }
+    render(<ToolCallCard toolCall={bare} expandAll={false} />)
+    expect(screen.getByLabelText("Sections: ls, grep")).toBeInTheDocument()
+  })
+
+  it("summarises output volume per section in a share bar", () => {
+    render(<ToolCallCard toolCall={sectioned} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByRole("img", { name: "Output share: HOTSWAP 1, CONFIG 3, CAPS 0, ROUTE 1, TESTS 1" })).toBeInTheDocument()
+    expect(screen.getByText("6 lines")).toBeInTheDocument()
+  })
+
+  it("classifies each section and counts kinds in the header", () => {
+    const mixed: ToolCall = {
+      ...makeToolCall("Bash", {
+        command: "echo ---SRC; cat src/a.ts; echo ---FIND; grep -rn foo src; echo ---PATCH; sed -i '' 's/a/b/' src/a.ts; echo ---TEST; bun run test",
+      }),
+      result: "---SRC\nconst a = 1\n---FIND\nsrc/b.ts:4:foo\n---PATCH\n---TEST\nok",
+    }
+    render(<ToolCallCard toolCall={mixed} expandAll={false} />)
+    expect(screen.getByLabelText("Sections: SRC, FIND, PATCH, TEST").querySelector(".text-foreground")?.textContent).toBe("PATCH")
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByText("1 read · 1 search · 1 run · 1 write")).toBeInTheDocument()
+    expect(screen.getByLabelText("write")).toBeInTheDocument()
+  })
+
+  it("flags a section whose output carries a shell failure", () => {
+    const swallowed: ToolCall = {
+      ...makeToolCall("Bash", { command: "echo ---A; cat src/missing.ts; echo ---B; ls src" }),
+      result: "---A\ncat: src/missing.ts: No such file or directory\n---B\nApp.tsx",
+    }
+    render(<ToolCallCard toolCall={swallowed} expandAll={false} />)
+    expect(screen.getByLabelText("Sections: A, B").querySelector(".text-destructive")?.textContent).toBe("A")
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByText(/1 failed/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /A section/ }).textContent).toContain("failed")
+  })
+
+  it("opens files named in a command, resolved against the session cwd", () => {
+    const withPaths: ToolCall = {
+      ...makeToolCall("Bash", { command: "echo ---A; sed -n 1,80p server/routes/config.ts; echo ---B; grep -rn foo src" }),
+      result: "---A\nline\n---B\nsrc/b.ts:4:foo",
+    }
+    render(<ToolCallCard toolCall={withPaths} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByText("L1–80")).toBeInTheDocument()
+    fireEvent.click(screen.getByTitle("Open /repo/server/routes/config.ts"))
+    expect(mockAuthFetchFn).toHaveBeenCalledWith(
+      "/api/open-in-editor",
+      expect.objectContaining({ body: expect.stringContaining("/repo/server/routes/config.ts") }),
+    )
+    fireEvent.click(screen.getByRole("button", { name: /B section/ }))
+    fireEvent.click(screen.getByTitle("Open /repo/src/b.ts:4"))
+    expect(mockAuthFetchFn).toHaveBeenLastCalledWith(
+      "/api/open-in-editor",
+      expect.objectContaining({ body: expect.stringContaining("\"line\":4") }),
+    )
+  })
+
+  it("keeps the plain command card for an ordinary Bash call", () => {
+    const plain: ToolCall = { ...makeToolCall("Bash", { command: "bun test" }), result: "ok" }
+    render(<ToolCallCard toolCall={plain} expandAll={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /Bash details/ }))
+    expect(screen.getByLabelText("Bash command")).toBeInTheDocument()
+    expect(screen.queryByText(/commands in one call/)).toBeNull()
   })
 })
