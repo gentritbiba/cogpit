@@ -17,8 +17,8 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Separator } from "@/components/ui/separator"
-import type { Branch, Turn, ArchivedTurn } from "@/lib/types"
-import { parseSession } from "@/lib/parser"
+import type { Branch, Turn, ArchivedTurn } from "../../../shared/session/types"
+import { parseSession } from "../../../shared/session/parser"
 import { MiniBranchGraph } from "./MiniBranchGraph"
 import { FullTurnCard, ArchivedTurnCard } from "./TurnCards"
 

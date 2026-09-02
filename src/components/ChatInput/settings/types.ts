@@ -1,11 +1,11 @@
 import type { PermissionMode } from "@/lib/permissions"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import type { ServiceTierOption } from "@/lib/utils"
 
 export interface DropdownOption {
   value: string
   label: string
-  /** Shown in the dropdown menu only (e.g. "Opus (default)"). */
+  /** Shown in the dropdown menu only (e.g. "Default (recommended)"). */
   menuLabel?: string
   description?: string
 }

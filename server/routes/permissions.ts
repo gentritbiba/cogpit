@@ -1,195 +1,73 @@
-import { sendJson, type UseFn } from "../http"
+import { sendJson, type UseFn, withJsonBody } from "../http"
 import { getToolSummary } from "../../shared/session/toolSummary"
 import type { MissionControlPermission } from "../../shared/contracts/missionControl"
-import { persistentSessions, activeProcesses } from "../helpers"
-import { sdkSessions, resolvePermission, resolveAllPermissions, getSDKPermissions } from "../sdk-session"
+import { persistentSessions } from "../processRegistry"
 import {
-  codexAppServer,
+  allRuntimes as defaultAllRuntimes,
+  runtimeForSession as defaultRuntimeForSession,
+  type AgentRuntime,
   type ApprovalDecision,
-  type CodexAppServer,
   type PendingApproval,
-} from "../codex-app-server"
-
-export type CodexApprovalClient = Pick<
-  CodexAppServer,
-  "listPendingApprovals" | "respondApproval" | "listApprovalThreadIds"
->
-
-interface FrontendPermissionRequest {
-  requestId: string
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string
-  title: string
-  displayName: string
-  description?: string
-  decisionReason?: string
-  blockedPath?: string
-  timestamp: number
-  availableDecisions: ApprovalDecision[]
-}
-
-/** Convert provider-native approval data to the existing permission bar shape. */
-export function normalizeCodexApproval(
-  approval: PendingApproval,
-): FrontendPermissionRequest {
-  const command = approval.kind === "commandExecution"
-  const network =
-    approval.networkApprovalContext &&
-    typeof approval.networkApprovalContext === "object" &&
-    !Array.isArray(approval.networkApprovalContext)
-      ? (approval.networkApprovalContext as Record<string, unknown>)
-      : null
-  const networkHost =
-    network && typeof network.host === "string" ? network.host : null
-  const networkProtocol =
-    network && typeof network.protocol === "string"
-      ? network.protocol.replace(/:$/, "")
-      : "https"
-  const networkPort =
-    network && (typeof network.port === "number" || typeof network.port === "string")
-      ? `:${String(network.port)}`
-      : ""
-  const input: Record<string, unknown> = {}
-  if (command) {
-    if (approval.command) input.command = approval.command
-    if (approval.cwd) input.cwd = approval.cwd
-    if (network) input.networkApprovalContext = network
-    if (networkHost) {
-      input.url = `${networkProtocol}://${networkHost}${networkPort}`
-    }
-    for (const field of [
-      "commandActions",
-      "additionalPermissions",
-      "proposedExecpolicyAmendment",
-      "proposedNetworkPolicyAmendments",
-    ]) {
-      if (approval.params[field] !== undefined) {
-        input[field] = approval.params[field]
-      }
-    }
-  } else {
-    if (approval.grantRoot) input.file_path = approval.grantRoot
-    if (approval.params.changes !== undefined) {
-      input.changes = approval.params.changes
-    }
-  }
-  if (approval.reason) input.reason = approval.reason
-  const networkRequest = command && networkHost !== null
-  return {
-    requestId: String(approval.requestId),
-    toolName: networkRequest ? "WebFetch" : command ? "Bash" : "Write",
-    input,
-    toolUseId: approval.itemId,
-    title: networkRequest
-      ? "Allow network access"
-      : command
-        ? "Run command"
-        : "Apply file changes",
-    displayName: networkRequest
-      ? "Network access"
-      : command
-        ? "Command execution"
-        : "File change",
-    description: approval.reason,
-    decisionReason: approval.reason,
-    blockedPath: command ? approval.cwd : approval.grantRoot,
-    timestamp: approval.requestedAt,
-    availableDecisions: [...approval.availableDecisions],
-  }
-}
+} from "../agents/runtimes"
+import { copilotRuntime, type CopilotExitPlanResponse, type CopilotRuntime } from "../agents/copilotTransport"
+import { sendAgentError } from "./agentErrors"
 
 /**
- * Pick a batch decision without silently escalating access. "Always allow"
- * may safely degrade to one-time allow, but one-time allow never broadens to a
- * session grant and deny never changes into an allow.
- */
-function selectCodexBatchDecision(
-  approval: PendingApproval,
-  requested: ApprovalDecision,
-): ApprovalDecision | null {
-  if (approval.availableDecisions.includes(requested)) return requested
-  if (
-    requested === "allow_always" &&
-    approval.availableDecisions.includes("allow")
-  ) {
-    return "allow"
-  }
-  return null
-}
-
-function sendUnavailableDecision(
-  res: Parameters<typeof sendJson>[0],
-  approval: PendingApproval,
-  decision: ApprovalDecision,
-): void {
-  sendJson(res, 400, {
-    error: `Decision '${decision}' is not available for this approval request`,
-    code: "CODEX_APPROVAL_DECISION_UNAVAILABLE",
-    requestId: String(approval.requestId),
-    availableDecisions: approval.availableDecisions,
-  })
-}
-
-function findCodexApproval(
-  client: CodexApprovalClient,
-  threadId: string,
-  requestId: string,
-): PendingApproval | undefined {
-  return client
-    .listPendingApprovals(threadId)
-    .find((approval) => String(approval.requestId) === requestId)
-}
-
-function sendCodexApprovalError(res: Parameters<typeof sendJson>[0], error: unknown): void {
-  sendJson(res, 502, {
-    error:
-      error instanceof Error
-        ? error.message
-        : "Failed to resolve Codex approval request",
-    code: "CODEX_APPROVAL_FAILED",
-  })
-}
-
-/**
- * Pending requests for one session, in provider precedence order.
+ * The permission bar's server side: what is blocking a session, and how the
+ * user's answer reaches the agent that asked.
  *
- * Shared by the per-session route and the cross-session listing so both cannot
- * drift on which provider wins.
+ * Requests are collected from the runtime that actually holds the session, not
+ * from a fixed agent precedence — the old code took whichever registry answered
+ * first with a non-empty list, so a live session with nothing pending handed its
+ * id to the next agent in line. Answering goes through one shared codec, so
+ * "always allow" degrades to a one-time allow the same way everywhere and a
+ * decision an agent cannot express is refused rather than quietly narrowed.
+ */
+
+export type CopilotPlanClient = Pick<CopilotRuntime, "getPendingExitPlans" | "answerExitPlan">
+
+/** Test seam: the registry lookups this module resolves sessions through. */
+export interface PermissionRuntimes {
+  allRuntimes(): readonly AgentRuntime[]
+  runtimeForSession(sessionId: string): AgentRuntime | null
+}
+
+const DEFAULT_RUNTIMES: PermissionRuntimes = {
+  allRuntimes: defaultAllRuntimes,
+  runtimeForSession: defaultRuntimeForSession,
+}
+
+/**
+ * Pending requests for one session.
+ *
+ * Legacy CLI children keep their own map and belong to no runtime — they carry
+ * no dirName to infer an agent from — so they stay a last resort here.
  */
 export function collectPendingPermissions(
   sessionId: string,
-  codex: CodexApprovalClient = codexAppServer,
-): FrontendPermissionRequest[] | ReturnType<typeof getSDKPermissions> {
-  // Check SDK sessions first (real-time canUseTool permissions)
-  const sdkPerms = getSDKPermissions(sessionId)
-  if (sdkPerms.length > 0) return sdkPerms
+  runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
+): PendingApproval[] {
+  const runtime = runtimes.runtimeForSession(sessionId)
+  if (runtime) return runtime.listPendingApprovals(sessionId)
 
-  // Codex app-server approvals are live requests: answering them resumes
-  // the turn directly, with no process kill/retry cycle.
-  const codexPerms = codex.listPendingApprovals(sessionId).map(normalizeCodexApproval)
-  if (codexPerms.length > 0) return codexPerms
-
-  // Fallback: check legacy CLI persistent sessions
-  const ps = persistentSessions.get(sessionId)
-  if (ps) return Array.from(ps.pendingPermissions.values())
-
-  return []
+  const legacy = persistentSessions.get(sessionId)
+  if (!legacy) return []
+  return [...legacy.pendingPermissions.values()].map((request) => ({
+    ...request,
+    sessionId,
+    availableDecisions: ["allow", "allow_always", "deny"] as ApprovalDecision[],
+  }))
 }
 
-/**
- * Every session id that could currently hold a pending request.
- *
- * Codex approvals are reachable from their own thread id, so listing SDK,
- * Codex, and legacy registries covers all three providers.
- */
+/** Every session id currently holding a pending request. */
 export function listPermissionSessionIds(
-  codex: CodexApprovalClient = codexAppServer,
+  runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
 ): string[] {
   const ids = new Set<string>()
-  for (const id of sdkSessions.keys()) ids.add(id)
+  for (const runtime of runtimes.allRuntimes()) {
+    for (const approval of runtime.listPendingApprovals()) ids.add(approval.sessionId)
+  }
   for (const id of persistentSessions.keys()) ids.add(id)
-  for (const id of codex.listApprovalThreadIds()) ids.add(id)
   return [...ids]
 }
 
@@ -205,32 +83,24 @@ export function listPermissionSessionIds(
  */
 function summarizeRequest(
   sessionId: string,
-  request: ReturnType<typeof collectPendingPermissions>[number],
+  request: PendingApproval,
 ): MissionControlPermission {
-  const input = asRecord(request.input)
-  const available = (request as { availableDecisions?: MissionControlPermission["availableDecisions"] })
-    .availableDecisions
   return {
     sessionId,
     requestId: request.requestId,
     toolName: request.toolName,
-    summary: getToolSummary({ name: request.toolName, input }),
+    summary: getToolSummary({ name: request.toolName, input: request.input }),
     ...(request.title && { title: request.title }),
     ...(request.description && { description: request.description }),
-    ...(available && { availableDecisions: available }),
+    ...(request.availableDecisions && { availableDecisions: request.availableDecisions }),
     timestamp: request.timestamp,
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
 export function registerPermissionRoutes(
   use: UseFn,
-  codex: CodexApprovalClient = codexAppServer,
+  runtimes: PermissionRuntimes = DEFAULT_RUNTIMES,
+  copilot: CopilotPlanClient = copilotRuntime,
 ) {
   use("/api/permissions", (req, res, next) => {
     const url = req.url ?? ""
@@ -240,13 +110,21 @@ export function registerPermissionRoutes(
     // are not open.
     if (req.method === "GET" && (url === "" || url === "/" || url.startsWith("?"))) {
       const bySession: Record<string, MissionControlPermission[]> = {}
-      for (const sessionId of listPermissionSessionIds(codex)) {
-        const permissions = collectPendingPermissions(sessionId, codex)
+      for (const sessionId of listPermissionSessionIds(runtimes)) {
+        const permissions = collectPendingPermissions(sessionId, runtimes)
         if (permissions.length > 0) {
           bySession[sessionId] = permissions.map((r) => summarizeRequest(sessionId, r))
         }
       }
-      sendJson(res, 200, { bySession })
+      const plansBySession: Record<
+        string,
+        Array<{ sessionId: string; requestId: string; summary: string }>
+      > = {}
+      for (const { sessionId, requestId, summary } of copilot.getPendingExitPlans()) {
+        const plans = plansBySession[sessionId] ??= []
+        plans.push({ sessionId, requestId, summary })
+      }
+      sendJson(res, 200, { bySession, plansBySession })
       return
     }
 
@@ -254,7 +132,60 @@ export function registerPermissionRoutes(
     const getMatch = url.match(/^\/([^/?]+)$/)
     if (req.method === "GET" && getMatch) {
       const sessionId = decodeURIComponent(getMatch[1])
-      sendJson(res, 200, { permissions: collectPendingPermissions(sessionId, codex) })
+      sendJson(res, 200, {
+        permissions: collectPendingPermissions(sessionId, runtimes),
+        plan: copilot.getPendingExitPlans(sessionId)[0] ?? null,
+      })
+      return
+    }
+
+    const planMatch = url.match(/^\/([^/?]+)\/plan$/)
+    if (req.method === "POST" && planMatch) {
+      const sessionId = decodeURIComponent(planMatch[1])
+      withJsonBody<unknown>(req, res, (body) => {
+        try {
+          const { requestId, approved, selectedAction, feedback } = body as Record<string, unknown>
+          if (typeof requestId !== "string" || !requestId) {
+            sendJson(res, 400, { error: "requestId is required" })
+            return
+          }
+          if (typeof approved !== "boolean") {
+            sendJson(res, 400, { error: "approved must be a boolean" })
+            return
+          }
+          if (selectedAction !== undefined && typeof selectedAction !== "string") {
+            sendJson(res, 400, { error: "selectedAction must be a string" })
+            return
+          }
+          if (feedback !== undefined && typeof feedback !== "string") {
+            sendJson(res, 400, { error: "feedback must be a string" })
+            return
+          }
+          const pending = copilot
+            .getPendingExitPlans(sessionId)
+            .find((plan) => plan.requestId === requestId)
+          if (!pending) {
+            sendJson(res, 404, { error: "Plan request not found or already resolved" })
+            return
+          }
+          const response: CopilotExitPlanResponse = {
+            approved,
+            ...(selectedAction ? { selectedAction } : {}),
+            ...(feedback ? { feedback } : {}),
+          }
+          try {
+            copilot.answerExitPlan(sessionId, requestId, response)
+          } catch (error) {
+            sendJson(res, 400, {
+              error: error instanceof Error ? error.message : "Failed to answer Copilot plan",
+            })
+            return
+          }
+          sendJson(res, 200, { success: true })
+        } catch {
+          sendJson(res, 400, { error: "Invalid JSON body" })
+        }
+      })
       return
     }
 
@@ -262,100 +193,54 @@ export function registerPermissionRoutes(
     const respondMatch = url.match(/^\/([^/?]+)\/respond$/)
     if (req.method === "POST" && respondMatch) {
       const sessionId = decodeURIComponent(respondMatch[1])
-      let body = ""
-      req.on("data", (chunk: string) => { body += chunk })
-      req.on("end", async () => {
+      withJsonBody<unknown>(req, res, async (body) => {
+        let behavior: ApprovalDecision
+        let requestId: string
         try {
-          const { requestId, behavior } = JSON.parse(body)
+          const parsed = body as Record<string, unknown>
+          requestId = parsed.requestId as string
+          behavior = parsed.behavior as ApprovalDecision
+        } catch {
+          sendJson(res, 400, { error: "Invalid JSON body" })
+          return
+        }
+        if (typeof requestId !== "string" || !requestId) {
+          sendJson(res, 400, { error: "requestId is required" })
+          return
+        }
+        if (behavior !== "allow" && behavior !== "allow_always" && behavior !== "deny") {
+          sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
+          return
+        }
 
-          if (typeof requestId !== "string" || !requestId) {
-            sendJson(res, 400, { error: "requestId is required" })
-            return
-          }
-          if (behavior !== "allow" && behavior !== "allow_always" && behavior !== "deny") {
-            sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
-            return
-          }
-
-          // SDK session path: resolves the canUseTool promise directly
-          if (sdkSessions.has(sessionId)) {
-            const result = resolvePermission(sessionId, requestId, behavior)
-            if (!result.found) {
-              sendJson(res, 404, { error: "Permission request not found or already resolved" })
-              return
-            }
-            sendJson(res, 200, {
-              success: true,
-              action: behavior === "deny" ? "denied" : "allowed",
-              toolName: result.toolName,
-            })
-            return
-          }
-
-          const codexApproval = findCodexApproval(codex, sessionId, requestId)
-          if (codexApproval) {
-            const decision = behavior as ApprovalDecision
-            if (!codexApproval.availableDecisions.includes(decision)) {
-              sendUnavailableDecision(res, codexApproval, decision)
-              return
-            }
-            try {
-              await codex.respondApproval(codexApproval, decision)
-            } catch (error) {
-              sendCodexApprovalError(res, error)
-              return
-            }
-            const permission = normalizeCodexApproval(codexApproval)
-            sendJson(res, 200, {
-              success: true,
-              action: behavior === "deny" ? "denied" : "allowed",
-              toolName: permission.toolName,
-              shouldRetry: false,
-            })
-            return
-          }
-
-          // Fallback: legacy CLI session (kill + retry approach)
-          const ps = persistentSessions.get(sessionId)
-          if (!ps) {
-            sendJson(res, 404, { error: "Session not found" })
-            return
-          }
-
-          const permReq = ps.pendingPermissions.get(requestId)
-          if (!permReq) {
+        const runtime = runtimes.runtimeForSession(sessionId)
+        if (!runtime) {
+          sendJson(res, 404, {
+            error: persistentSessions.has(sessionId)
+              ? "Permission request not found or already resolved"
+              : "Session not found",
+          })
+          return
+        }
+        const request = runtime
+          .listPendingApprovals(sessionId)
+          .find((pending) => pending.requestId === requestId)
+        try {
+          const handled = await runtime.respondToApproval(sessionId, requestId, behavior)
+          if (!handled) {
             sendJson(res, 404, { error: "Permission request not found or already resolved" })
             return
           }
-
-          ps.pendingPermissions.delete(requestId)
-
-          if (behavior === "deny") {
-            sendJson(res, 200, { success: true, action: "denied" })
-            return
-          }
-
-          const toolName = permReq.toolName
-          const hasAlready = ps.permArgs.some(
-            (a, i) => a === "--allowedTools" && ps.permArgs[i + 1] === toolName
-          )
-          if (!hasAlready) {
-            ps.permArgs = [...ps.permArgs, "--allowedTools", toolName]
-          }
-
-          if (ps.pendingPermissions.size === 0) {
-            if (!ps.dead) {
-              ps.dead = true
-              try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
-              activeProcesses.delete(sessionId)
-            }
-            sendJson(res, 200, { success: true, action: "allowed", shouldRetry: true, toolName })
-          } else {
-            sendJson(res, 200, { success: true, action: "allowed", shouldRetry: false, toolName })
-          }
-        } catch {
-          sendJson(res, 400, { error: "Invalid JSON body" })
+        } catch (error) {
+          sendAgentError(res, error, "Failed to resolve the permission request")
+          return
         }
+        sendJson(res, 200, {
+          success: true,
+          action: behavior === "deny" ? "denied" : "allowed",
+          toolName: request?.toolName,
+          ...(runtime.kind === "claude" ? {} : { shouldRetry: false }),
+        })
       })
       return
     }
@@ -364,114 +249,35 @@ export function registerPermissionRoutes(
     const respondAllMatch = url.match(/^\/([^/?]+)\/respond-all$/)
     if (req.method === "POST" && respondAllMatch) {
       const sessionId = decodeURIComponent(respondAllMatch[1])
-      let body = ""
-      req.on("data", (chunk: string) => { body += chunk })
-      req.on("end", async () => {
+      withJsonBody<unknown>(req, res, async (body) => {
+        let behavior: ApprovalDecision
         try {
-          const { behavior } = JSON.parse(body)
-
-          if (behavior !== "allow" && behavior !== "allow_always" && behavior !== "deny") {
-            sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
-            return
-          }
-
-          // SDK session path
-          if (sdkSessions.has(sessionId)) {
-            const toolNames = resolveAllPermissions(sessionId, behavior)
-            sendJson(res, 200, {
-              success: true,
-              action: behavior === "deny" ? "denied" : "allowed",
-              count: toolNames.length,
-              toolNames,
-            })
-            return
-          }
-
-          const codexPending = codex.listPendingApprovals(sessionId)
-          if (codexPending.length > 0) {
-            const requestedDecision = behavior as ApprovalDecision
-            const decisions: Array<{
-              approval: PendingApproval
-              decision: ApprovalDecision
-            }> = []
-            for (const approval of codexPending) {
-              const decision = selectCodexBatchDecision(
-                approval,
-                requestedDecision,
-              )
-              if (!decision) {
-                sendUnavailableDecision(res, approval, requestedDecision)
-                return
-              }
-              decisions.push({ approval, decision })
-            }
-            try {
-              await Promise.all(
-                decisions.map(({ approval, decision }) =>
-                  codex.respondApproval(approval, decision),
-                ),
-              )
-            } catch (error) {
-              sendCodexApprovalError(res, error)
-              return
-            }
-            const toolNames = [
-              ...new Set(
-                codexPending.map(
-                  (approval) => normalizeCodexApproval(approval).toolName,
-                ),
-              ),
-            ]
-            sendJson(res, 200, {
-              success: true,
-              action: behavior === "deny" ? "denied" : "allowed",
-              count: codexPending.length,
-              toolNames,
-              shouldRetry: false,
-            })
-            return
-          }
-
-          // Fallback: legacy CLI session
-          const ps = persistentSessions.get(sessionId)
-          if (!ps) {
-            sendJson(res, 404, { error: "Session not found" })
-            return
-          }
-
-          const pending = Array.from(ps.pendingPermissions.values())
-          const toolNames = [...new Set(pending.map((p) => p.toolName))]
-          ps.pendingPermissions.clear()
-
-          if (behavior === "deny") {
-            sendJson(res, 200, { success: true, action: "denied", count: pending.length })
-            return
-          }
-
-          for (const toolName of toolNames) {
-            const hasAlready = ps.permArgs.some(
-              (a, i) => a === "--allowedTools" && ps.permArgs[i + 1] === toolName
-            )
-            if (!hasAlready) {
-              ps.permArgs = [...ps.permArgs, "--allowedTools", toolName]
-            }
-          }
-
-          if (!ps.dead) {
-            ps.dead = true
-            try { ps.proc.kill("SIGTERM") } catch { /* already dead */ }
-            activeProcesses.delete(sessionId)
-          }
-
-          sendJson(res, 200, {
-            success: true,
-            action: "allowed",
-            count: pending.length,
-            toolNames,
-            shouldRetry: true,
-          })
+          behavior = (body as Record<string, unknown>).behavior as ApprovalDecision
         } catch {
           sendJson(res, 400, { error: "Invalid JSON body" })
+          return
+        }
+        if (behavior !== "allow" && behavior !== "allow_always" && behavior !== "deny") {
+          sendJson(res, 400, { error: "behavior must be 'allow', 'allow_always', or 'deny'" })
+          return
+        }
+
+        const runtime = runtimes.runtimeForSession(sessionId)
+        if (!runtime) {
+          sendJson(res, 404, { error: "Session not found" })
+          return
+        }
+        try {
+          const { count, toolNames } = await runtime.respondToAllApprovals(sessionId, behavior)
+          sendJson(res, 200, {
+            success: true,
+            action: behavior === "deny" ? "denied" : "allowed",
+            count,
+            toolNames,
+            ...(runtime.kind === "claude" ? {} : { shouldRetry: false }),
+          })
+        } catch (error) {
+          sendAgentError(res, error, "Failed to resolve the permission requests")
         }
       })
       return

@@ -1,30 +1,8 @@
-import {
-  activeProcesses,
-  persistentSessions,
-  findJsonlPath,
-  getSessionStatus,
-} from "../helpers"
+import { getSessionStatus } from "../helpers"
+import { storeForPath } from "../agents"
+import { runtimeFor } from "../agents/runtimes"
+import { findJsonlPath } from "../sessionPaths"
 import { sendJson, type UseFn } from "../http"
-import { sdkSessions, isSDKQueryLive } from "../sdk-session"
-import { codexAppServer } from "../codex-app-server"
-
-/**
- * In-memory session activity. `live`: the server holds an open query/process
- * that can take follow-ups without a resume (stays true between turns for SDK
- * and legacy sessions). `running`: a turn is in flight right now — set before
- * send-message responds and cleared at the turn boundary, so it is the
- * authoritative completion signal for server-managed sessions, unlike the
- * tail-derived `status`, which lags until the CLI flushes the new turn's JSONL.
- */
-function getSessionActivity(sessionId: string): { live: boolean; running: boolean } {
-  const sdk = sdkSessions.get(sessionId)
-  const persistent = persistentSessions.get(sessionId)
-  const codexTurnActive = codexAppServer.getActiveTurnId(sessionId) !== undefined
-  return {
-    live: isSDKQueryLive(sdk) || Boolean(persistent && !persistent.dead) || codexTurnActive,
-    running: sdk?.running === true || activeProcesses.has(sessionId) || codexTurnActive,
-  }
-}
 
 /**
  * GET /api/session-status/:sessionId — cheap per-session poll for external
@@ -49,8 +27,12 @@ export function registerSessionStatusRoutes(use: UseFn) {
         return
       }
 
+      // The transcript already told us whose it is, so activity comes from the
+      // one runtime that owns the session rather than from an OR across all
+      // three — `live` and `running` mean different things to each of them.
+      const runtime = runtimeFor(storeForPath(filePath)?.kind ?? "claude")
       const statusInfo = await getSessionStatus(filePath)
-      sendJson(res, 200, { sessionId, ...getSessionActivity(sessionId), ...statusInfo })
+      sendJson(res, 200, { sessionId, ...runtime.activity(sessionId), ...statusInfo })
     } catch (err) {
       sendJson(res, 500, { error: String(err) })
     }

@@ -5,7 +5,8 @@ import { LiveIndicator } from "@/components/header-shared"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
 import { useSessionContext, useSessionChatContext } from "@/contexts/SessionContext"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
+import { agentInterruptLabel } from "@/lib/agents/presentation"
 
 interface InputToolbarProps {
   isPlanApproval: boolean
@@ -53,8 +54,8 @@ export function ActionButtons({
   const { isLive, sessionSource, actions: { handleStopSession: onStopSession } } = useSessionContext()
   const { chat: { isConnected, interrupt: onInterrupt } } = useSessionChatContext()
   const showAgentControls = isConnected || isLive
-  const agentKind = sessionSource?.agentKind ?? agentKindFromDirName(sessionSource?.dirName ?? null)
-  const interruptLabel = agentKind === "codex" ? "Stop active turn" : "Interrupt agent"
+  const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
+  const interruptLabel = agentInterruptLabel(agentKind)
 
   return (
     <div className="flex items-center gap-1">
@@ -76,7 +77,7 @@ export function ActionButtons({
       )}
 
       {/* Stop session -- kills the server process */}
-      {showAgentControls && agentKind !== "codex" && (
+      {showAgentControls && capabilitiesFor(agentKind).stopSession && (
         <Tooltip>
           <TooltipTrigger render={<Button
               variant="ghost"

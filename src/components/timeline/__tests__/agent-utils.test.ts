@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { SubAgentMessage } from "@/lib/types"
+import type { SubAgentMessage } from "../../../../shared/session/types"
 import { buildParentToolByAgent } from "../agent-utils"
 
 function msg(agentId: string, parentToolUseId?: string): SubAgentMessage {

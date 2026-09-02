@@ -3,6 +3,7 @@ import { loadModelCatalog, resetModelCatalogFetch } from "../useModelOptions"
 import {
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
+  COPILOT_MODEL_OPTIONS,
   getModelOptions,
   resetDynamicModelOptions,
 } from "@/lib/utils"
@@ -34,13 +35,18 @@ describe("loadModelCatalog", () => {
       { value: "", label: "Default" },
       { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     ]
-    mockedAuthFetch.mockResolvedValue(jsonResponse({ claude, codex }))
+    const copilot = [
+      { value: "", label: "Default" },
+      { value: "claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
+    ]
+    mockedAuthFetch.mockResolvedValue(jsonResponse({ claude, codex, copilot }))
 
     await loadModelCatalog()
 
     expect(mockedAuthFetch).toHaveBeenCalledWith("/api/models")
     expect(getModelOptions("claude")).toEqual(claude)
     expect(getModelOptions("codex")).toEqual(codex)
+    expect(getModelOptions("copilot")).toEqual(copilot)
   })
 
   it("keeps static fallbacks for providers the server could not resolve", async () => {
@@ -54,6 +60,7 @@ describe("loadModelCatalog", () => {
 
     expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
     expect(getModelOptions("codex")).toEqual(codex)
+    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
   })
 
   it("keeps static fallbacks when the request fails", async () => {
@@ -63,17 +70,19 @@ describe("loadModelCatalog", () => {
 
     expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
     expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
+    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
   })
 
   it("ignores malformed catalog entries", async () => {
     mockedAuthFetch.mockResolvedValue(
-      jsonResponse({ claude: [{ nope: true }], codex: "not-an-array" }),
+      jsonResponse({ claude: [{ nope: true }], codex: "not-an-array", copilot: [] }),
     )
 
     await loadModelCatalog()
 
     expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
     expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
+    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
   })
 
   it("only fetches once per page load", async () => {

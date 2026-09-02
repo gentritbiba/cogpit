@@ -4,7 +4,7 @@ import { Separator } from "@/components/ui/separator"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import type { ActiveSessionInfo } from "./types"
 import { usePty } from "@/contexts/PtyContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
@@ -16,6 +16,9 @@ import { useIsMobile } from "@/hooks/useIsMobile"
 import { useLocalStorage } from "@/hooks/useLocalStorage"
 import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
+import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
+import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
+import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -57,8 +60,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession,
     acknowledgeCompleted,
   } = useSessionInventory()
-  const { awaitingPermission, awaitingQuestion, awaitingElicitation, awaitingDialog } =
-    usePendingHumanInput()
+  const {
+    awaitingPermission,
+    awaitingQuestion,
+    awaitingElicitation,
+    awaitingDialog,
+    awaitingPlan,
+  } = usePendingHumanInput()
   const awaitingPrompt = useMemo(
     () => new Set([...awaitingElicitation, ...awaitingDialog]),
     [awaitingElicitation, awaitingDialog],
@@ -117,28 +125,17 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [fetchData, refreshRef])
 
   const isMobile = useIsMobile()
+  const pullRequestResults = usePullRequestSessionSearch<ActiveSessionInfo>(searchQuery)
 
-  const filteredSessions = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    if (!query) return sessions
+  const locallyFilteredSessions = useMemo(() => {
+    if (!searchQuery.trim()) return sessions
     return sessions.filter((session) => {
       const customSessionName = sessionNames[session.sessionId]
       const customProjectName = projectNames[session.dirName]
-      return [
-        customSessionName,
-        customProjectName,
-        session.aiTitle,
-        session.firstUserMessage,
-        session.lastUserMessage,
-        session.slug,
-        session.cwd,
-        session.projectShortName,
-        session.gitBranch,
-        session.agentName,
-        session.teamName,
-      ].some((value) => value?.toLowerCase().includes(query))
+      return matchesSessionSearch(session, searchQuery, [customSessionName, customProjectName])
     })
   }, [sessions, searchQuery, sessionNames, projectNames])
+  const filteredSessions = pullRequestResults.results ?? locallyFilteredSessions
 
   // Group sessions by project path
   const grouped = useMemo(() => groupByProject(filteredSessions), [filteredSessions])
@@ -146,9 +143,23 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   // Cross-project triage for the attention strip (independent of search)
   const attention = useMemo(
     () => classifyAttention(
-      sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion, awaitingPrompt,
+      sessions,
+      procBySession,
+      newlyCompleted,
+      awaitingPermission,
+      awaitingQuestion,
+      awaitingPrompt,
+      awaitingPlan,
     ),
-    [sessions, procBySession, newlyCompleted, awaitingPermission, awaitingQuestion, awaitingPrompt]
+    [
+      sessions,
+      procBySession,
+      newlyCompleted,
+      awaitingPermission,
+      awaitingQuestion,
+      awaitingPrompt,
+      awaitingPlan,
+    ],
   )
   const hasAttention = attention.needsYou.length > 0 || attention.working.length > 0
   const showAttentionStrip = !searchQuery.trim() && hasAttention
@@ -228,18 +239,15 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
     removeSession(s.sessionId)
   }, [onDeleteSession, removeSession])
 
-  /**
-   * Spawn `claude -p --resume <sessionId>` in a PTY terminal so the user can
-   * re-evaluate a permission that was paused by a PreToolUse hook decision:"defer".
-   */
-  const handleResumeSession = useCallback((sessionId: string, cwd?: string) => {
+  const handleResumeSession = useCallback((sessionId: string, cwd: string | undefined, dirName: string) => {
+    const { command, args } = getResumeSpawn(agentKindForDirName(dirName), sessionId)
     const id = `resume_${crypto.randomUUID().slice(0, 8)}`
     pty.send({
       type: "spawn",
       id,
       name: `Resume ${sessionId.slice(0, 8)}`,
-      command: "claude",
-      args: ["-p", "--resume", sessionId],
+      command,
+      args,
       cwd: cwd ?? undefined,
       metadata: { type: "terminal" },
     })
@@ -253,6 +261,7 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
         loading={loading}
         isMobile={isMobile}
         searchQuery={searchQuery}
+        searchLoading={pullRequestResults.loading}
         onSearchQueryChange={setSearchQuery}
         onRefresh={() => { hapticMedium(); fetchData() }}
       />
@@ -260,12 +269,13 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-4 p-2">
           <LiveSessionsFeedback
-            fetchError={fetchError}
-            showEmpty={filteredSessions.length === 0 && !pendingSession && !loading && !fetchError}
+            fetchError={pullRequestResults.error ?? fetchError}
+            showEmpty={filteredSessions.length === 0 && !pendingSession
+              && !loading && !pullRequestResults.loading && !fetchError && !pullRequestResults.error}
             searching={Boolean(searchQuery.trim())}
-            loading={loading}
-            sessionCount={sessions.length}
-            onRetry={fetchData}
+            loading={loading || pullRequestResults.loading}
+            sessionCount={pullRequestResults.active ? filteredSessions.length : sessions.length}
+            onRetry={pullRequestResults.error ? pullRequestResults.refresh : fetchData}
           />
 
           {showAttentionStrip && (

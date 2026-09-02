@@ -6,7 +6,7 @@ import {
   shouldShowEmptyState,
   NEAR_TOP_VIEWPORTS,
 } from "@/lib/timelinePaging"
-import { parseSession } from "@/lib/parser"
+import { parseSession } from "../../../shared/session/parser"
 import {
   peerAttachment,
   peerEnqueueMsg,
@@ -16,7 +16,7 @@ import {
   toolUseAssistant,
   userMsg,
 } from "@/__tests__/fixtures"
-import type { Turn, TurnContentBlock } from "@/lib/types"
+import type { Turn, TurnContentBlock } from "../../../shared/session/types"
 
 function makeTurn(id: string, overrides: Partial<Turn> = {}): Turn {
   return {

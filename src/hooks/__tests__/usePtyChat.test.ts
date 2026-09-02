@@ -38,6 +38,25 @@ describe("usePtyChat", () => {
     expect(mockedAuthFetch).not.toHaveBeenCalled()
   })
 
+  it("does not send or interrupt a read-only session", async () => {
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: { dirName: "copilot__L3Byb2plY3Q", fileName: "sess/events.jsonl", rawText: "" },
+        parsedSessionId: "sess",
+        readOnly: true,
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+      result.current.interrupt()
+    })
+
+    expect(result.current.pendingMessages).toEqual([])
+    expect(result.current.status).toBe("idle")
+    expect(mockedAuthFetch).not.toHaveBeenCalled()
+  })
+
   it("sends message and transitions through connected->idle on success", async () => {
     mockedAuthFetch.mockResolvedValueOnce({
       ok: true,
@@ -120,6 +139,31 @@ describe("usePtyChat", () => {
     expect(firstBody.model).toBe("gpt-5.4-mini")
     expect(secondBody.model).toBeUndefined()
     expect(result.current.status).toBe("idle")
+  })
+
+  it("resolves Copilot's Default selection back to auto", async () => {
+    mockedAuthFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    } as Response)
+
+    const { result } = renderHook(() =>
+      usePtyChat({
+        sessionSource: {
+          dirName: "copilot__L3Byb2plY3Q",
+          fileName: "123e4567-e89b-42d3-a456-426614174000/events.jsonl",
+          rawText: "",
+        },
+        model: "",
+      })
+    )
+
+    await act(async () => {
+      await result.current.sendMessage("hello")
+    })
+
+    const body = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.model).toBe("auto")
   })
 
   it("sends the rollout thread UUID (not the nested file path) for Codex sessions without a parsed id", async () => {

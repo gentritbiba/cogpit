@@ -10,7 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { getContextUsage, formatTokenCount } from "@/lib/format"
-import type { RawMessage } from "@/lib/types"
+import type { RawMessage } from "../../shared/session/types"
 
 /**
  * The one surface for everything that floats over the chat pane now that

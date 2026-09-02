@@ -3,39 +3,25 @@
  *
  * Shared so the server-side Mission Control summary and the client-side context
  * badge cannot disagree about how full a session is.
+ *
+ * Both the window and the compaction reserve come from the agent's descriptor:
+ * they are properties of the CLI, not of Cogpit. Applying one agent's reserve to
+ * another's window is what used to make every Codex and Copilot session report a
+ * 1M window with Claude Code's 33k auto-compaction headroom subtracted.
  */
+import { descriptorFor, type AgentKind } from "./agent-descriptors"
 
 /** Headroom Claude Code reserves before auto-compaction fires. */
-export const AUTO_COMPACT_BUFFER = 33_000
+export const AUTO_COMPACT_BUFFER = descriptorFor("claude").contextWindow.compactBuffer
 
-const EXTENDED_CONTEXT_LIMIT = 1_000_000
-const STANDARD_CONTEXT_LIMIT = 200_000
-
-/**
- * Models whose context window is 200k. Everything else is treated as
- * current-generation (1M), so a model released after this list was written
- * reports the larger window rather than a stale small one.
- *
- * Deliberately not family-based: sonnet-4-5 is 200k while sonnet-4-6 is 1M,
- * and opus-4-5 is 200k while opus-4-6 and later are 1M. Source: LiteLLM
- * `max_input_tokens`, the same table the cost code prices against.
- */
-const STANDARD_CONTEXT_MODELS = [
-  "claude-haiku-4-5",
-  "claude-haiku-4-1",
-  "claude-sonnet-4-5",
-  "claude-opus-4-5",
-  "claude-opus-4-1",
-]
-
-export function getContextLimit(model: string): number {
+export function getContextLimit(model: string, kind: AgentKind): number {
+  const { defaultLimit, limits, extendedContext } = descriptorFor(kind).contextWindow
   const normalized = model.trim().toLowerCase()
-  // An explicit [1m] request wins over the model's default window.
-  if (normalized.includes("[1m]")) return EXTENDED_CONTEXT_LIMIT
+  // An explicit extended-context request wins over the model's default window.
+  if (extendedContext && normalized.includes(extendedContext.marker)) return extendedContext.limit
   // Provider-prefixed ids (`vertex_ai/…`, `bedrock/anthropic.…`) embed the
   // model name, so a substring match covers every spelling.
-  const isStandard = STANDARD_CONTEXT_MODELS.some((id) => normalized.includes(id))
-  return isStandard ? STANDARD_CONTEXT_LIMIT : EXTENDED_CONTEXT_LIMIT
+  return limits.find((entry) => normalized.includes(entry.match))?.limit ?? defaultLimit
 }
 
 /** Token counts reported by one assistant response. */
@@ -66,6 +52,7 @@ export interface ContextUsage {
 export function computeContextUsage(
   usage: ContextUsageInput,
   model: string,
+  kind: AgentKind,
 ): ContextUsage {
   const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0
   const cacheCreate =
@@ -73,8 +60,8 @@ export function computeContextUsage(
   const cacheRead =
     typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : 0
   const used = input + cacheCreate + cacheRead
-  const limit = getContextLimit(model)
-  const compactAt = limit - AUTO_COMPACT_BUFFER
+  const limit = getContextLimit(model, kind)
+  const compactAt = limit - descriptorFor(kind).contextWindow.compactBuffer
   return {
     used,
     limit,

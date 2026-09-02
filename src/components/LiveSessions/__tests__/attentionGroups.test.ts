@@ -16,7 +16,7 @@ function makeSession(overrides: Partial<ActiveSessionInfo> = {}): ActiveSessionI
 
 function procs(...ids: string[]): Map<string, RunningProcess> {
   return new Map(ids.map((id) => [id, {
-    pid: 1, memMB: 100, cpu: 1, sessionId: id, tty: "ttys001", args: "claude", startTime: "10:00",
+    pid: 1, memMB: 100, cpu: 1, sessionId: id, tty: "ttys001", startTime: "10:00",
   }]))
 }
 
@@ -58,6 +58,15 @@ describe("classifyAttention", () => {
       [s], procs("mcp"), new Set(), undefined, undefined, new Set(["mcp"]),
     )
     expect(needsYou).toEqual([{ session: s, reason: "prompt" }])
+    expect(working).toEqual([])
+  })
+
+  it("puts a session waiting for Copilot plan review in needsYou", () => {
+    const s = makeSession({ sessionId: "plan", agentStatus: "tool_use" })
+    const { needsYou, working } = classifyAttention(
+      [s], procs("plan"), new Set(), undefined, undefined, undefined, new Set(["plan"]),
+    )
+    expect(needsYou).toEqual([{ session: s, reason: "plan" }])
     expect(working).toEqual([])
   })
 

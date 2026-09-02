@@ -19,6 +19,7 @@
  * a Bash redirect gives us no way to know whether the file existed beforehand.
  */
 import type { ToolCall } from "./types"
+import { parseCodexToolPatches } from "./codex-patches"
 
 /** Marks a call this module invented, so undo and stats can skip it. */
 const SYNTHESIZED_FROM = "synthesizedFrom"
@@ -340,6 +341,15 @@ function multiEdits(tc: ToolCall, cwd: string | null): ToolCall[] {
   return out
 }
 
+function applyPatchEdits(tc: ToolCall, cwd: string | null): ToolCall[] {
+  const rawInput = [tc.input.patch, tc.input.value, tc.input.input]
+    .find((value): value is string => typeof value === "string")
+  if (!rawInput) return []
+
+  return parseCodexToolPatches("apply_patch", rawInput, tc.id, tc.timestamp, cwd ?? "")
+    .map((call) => synthetic(tc, call.id, call.name as "Edit" | "Write", call.input))
+}
+
 /**
  * Every file change in `toolCalls`, expressed as Edit/Write calls.
  * Errored calls are dropped — they never touched the file.
@@ -354,6 +364,7 @@ export function expandEditToolCalls(
     if (tc.name === "Edit" || tc.name === "Write") out.push(tc)
     else if (tc.name === "MultiEdit") out.push(...multiEdits(tc, cwd))
     else if (tc.name === "Bash") out.push(...bashEdits(tc, cwd))
+    else if (tc.name === "apply_patch") out.push(...applyPatchEdits(tc, cwd))
   }
   return out
 }
@@ -371,6 +382,7 @@ export function hasEditToolCalls(
     if (tc.name === "Edit" || tc.name === "Write") return true
     if (tc.name === "MultiEdit" && multiEdits(tc, cwd).length > 0) return true
     if (tc.name === "Bash" && bashEdits(tc, cwd).length > 0) return true
+    if (tc.name === "apply_patch" && applyPatchEdits(tc, cwd).length > 0) return true
   }
   return false
 }

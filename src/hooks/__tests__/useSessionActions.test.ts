@@ -30,7 +30,7 @@ import { useSessionActions } from "@/hooks/useSessionActions"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { getActiveDeviceScope } from "@/lib/device"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../../shared/session/types"
 import type { SessionTeamContext } from "@/hooks/useSessionTeam"
 import type { TeamMember } from "@/lib/team-types"
 

@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
 
 interface ErrorEntry {

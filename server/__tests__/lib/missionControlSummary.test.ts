@@ -46,6 +46,28 @@ function toolResult(id: string, isError = false, timestamp = "2026-08-01T10:00:0
   })
 }
 
+function copilotEvent(
+  type: string,
+  data: Record<string, unknown>,
+  options: { timestamp?: string; agentId?: string } = {},
+): string {
+  return JSON.stringify({
+    type,
+    data,
+    timestamp: options.timestamp ?? "2026-08-01T10:00:00.000Z",
+    ...(options.agentId ? { agentId: options.agentId } : {}),
+  })
+}
+
+/** One Codex rollout record. */
+function codexRecord(
+  type: string,
+  payload: Record<string, unknown>,
+  timestamp = "2026-08-01T10:00:00.000Z",
+): string {
+  return JSON.stringify({ type, timestamp, payload })
+}
+
 function write(lines: string[]): void {
   writeFileSync(file, lines.join("\n") + "\n")
 }
@@ -186,6 +208,241 @@ describe("summarizeSession", () => {
     ])
     const s = await summarizeSession("s", file)
     expect(s!.tokens.output).toBe(3)
+  })
+
+  it("folds Copilot root and nested activity into a useful card", async () => {
+    write([
+      copilotEvent("session.start", {
+        sessionId: "copilot-session",
+        selectedModel: "claude-sonnet-4.5",
+      }, { timestamp: "2026-08-01T10:00:00.000Z" }),
+      copilotEvent("user.message", { content: "Update the file" }, {
+        timestamp: "2026-08-01T10:00:01.000Z",
+      }),
+      copilotEvent("assistant.message", {
+        model: "claude-sonnet-4.5",
+        content: "I will delegate the edit.",
+        toolRequests: [{
+          toolCallId: "task-1",
+          name: "task",
+          arguments: { description: "Update the implementation" },
+        }],
+      }, { timestamp: "2026-08-01T10:00:02.000Z" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "task-1",
+        toolName: "task",
+        arguments: { description: "Update the implementation" },
+      }),
+      copilotEvent("user.message", { content: "Nested prompt" }, { agentId: "agent-1" }),
+      copilotEvent("assistant.message", {
+        model: "claude-haiku-4.5",
+        content: "Nested progress must not replace the root preview.",
+        toolRequests: [{
+          toolCallId: "edit-1",
+          name: "edit",
+          arguments: { path: "/workspace/a.ts", old_str: "old", new_str: "new\nline" },
+        }],
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "edit-1",
+        toolName: "edit",
+        arguments: { path: "/workspace/a.ts", old_str: "old", new_str: "new\nline" },
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_complete", {
+        toolCallId: "edit-1",
+        success: true,
+      }, { agentId: "agent-1" }),
+      copilotEvent("tool.execution_complete", { toolCallId: "task-1", success: true }),
+      copilotEvent("assistant.usage", {
+        model: "claude-sonnet-4.5",
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 30,
+        cacheWriteTokens: 5,
+      }),
+      copilotEvent("assistant.usage", {
+        model: "claude-haiku-4.5",
+        inputTokens: 40,
+        outputTokens: 10,
+        cacheReadTokens: 8,
+        cacheWriteTokens: 2,
+      }, { agentId: "agent-1" }),
+      copilotEvent("session.shutdown", {
+        currentModel: "claude-sonnet-4.5",
+        currentTokens: 12_000,
+        modelMetrics: {
+          "claude-sonnet-4.5": {
+            usage: {
+              inputTokens: 160,
+              outputTokens: 25,
+              cacheReadTokens: 40,
+              cacheWriteTokens: 10,
+            },
+          },
+          "claude-haiku-4.5": {
+            usage: {
+              inputTokens: 70,
+              outputTokens: 15,
+              cacheReadTokens: 20,
+              cacheWriteTokens: 5,
+            },
+          },
+        },
+      }, { timestamp: "2026-08-01T10:00:09.000Z" }),
+    ])
+
+    const s = await summarizeSession("copilot-session", file)
+    expect(s).toMatchObject({
+      model: "claude-sonnet-4.5",
+      turnCount: 1,
+      totalToolCalls: 2,
+      toolTrail: ["Task", "Edit"],
+      currentTool: null,
+      lastAssistantText: "I will delegate the edit.",
+      lastToolErrored: false,
+      tokens: {
+        input: 155,
+        output: 40,
+        cacheRead: 60,
+        cacheCreation: 15,
+        total: 195,
+      },
+      context: { used: 12_000 },
+      elapsedMs: 9_000,
+    })
+    expect(s!.files).toEqual([{ path: "/workspace/a.ts", additions: 2, deletions: 1 }])
+  })
+
+  it("folds a Codex rollout into a card instead of leaving it blank", async () => {
+    write([
+      codexRecord("session_meta", { id: "codex-session", cwd: "/workspace" }),
+      codexRecord("turn_context", { model: "gpt-5.4" }, "2026-08-01T10:00:00.000Z"),
+      codexRecord("event_msg", { type: "user_message", message: "Fix the parser" },
+        "2026-08-01T10:00:01.000Z"),
+      codexRecord("response_item", {
+        type: "custom_tool_call",
+        call_id: "call_1",
+        name: "exec",
+        input: 'const r = await tools.exec_command({cmd:"bun test"});text(r.output)',
+      }, "2026-08-01T10:00:02.000Z"),
+      codexRecord("response_item", {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: JSON.stringify({ output: "ok", metadata: { exit_code: 0 } }),
+      }, "2026-08-01T10:00:03.000Z"),
+      codexRecord("event_msg", {
+        type: "patch_apply_end",
+        call_id: "exec-1",
+        success: true,
+        changes: {
+          "/workspace/a.ts": {
+            type: "update",
+            unified_diff: "@@\n old\n-gone\n+kept\n+also kept\n",
+          },
+          "/workspace/new.ts": { type: "add", content: "one\ntwo\n" },
+        },
+      }, "2026-08-01T10:00:04.000Z"),
+      codexRecord("event_msg", {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 160_000,
+            cached_input_tokens: 40_000,
+            cache_write_input_tokens: 25_000,
+            output_tokens: 12_000,
+          },
+          last_token_usage: {
+            input_tokens: 130_000,
+            cached_input_tokens: 30_000,
+            cache_write_input_tokens: 20_000,
+            output_tokens: 4_000,
+          },
+          model_context_window: 258_400,
+        },
+      }, "2026-08-01T10:00:05.000Z"),
+      codexRecord("event_msg", {
+        type: "task_complete",
+        last_agent_message: "Parser fixed.",
+      }, "2026-08-01T10:00:06.000Z"),
+    ])
+
+    const summary = await summarizeSession("codex-session", file)
+
+    expect(summary).toMatchObject({
+      model: "gpt-5.4",
+      turnCount: 1,
+      totalToolCalls: 1,
+      toolTrail: ["exec"],
+      lastAssistantText: "Parser fixed.",
+      lastToolErrored: false,
+      currentTool: null,
+      elapsedMs: 6_000,
+    })
+    // total_token_usage is cumulative, so the card shows it as-is rather than
+    // summing every token_count event.
+    expect(summary!.tokens).toEqual({
+      input: 120_000,
+      output: 12_000,
+      cacheRead: 40_000,
+      cacheCreation: 25_000,
+      total: 132_000,
+    })
+    expect(summary!.context).toEqual({ used: 150_000, limit: 258_400, percent: 58 })
+    expect(summary!.files).toEqual([
+      { path: "/workspace/a.ts", additions: 2, deletions: 1 },
+      { path: "/workspace/new.ts", additions: 3, deletions: 0 },
+    ])
+  })
+
+  it("reports a failing Codex tool and keeps an unresolved call current", async () => {
+    write([
+      codexRecord("session_meta", { id: "codex-session" }),
+      codexRecord("response_item", {
+        type: "function_call",
+        call_id: "call_1",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "bun test" }),
+      }),
+    ])
+
+    const running = await summarizeSession("codex-session", file)
+    expect(running!.currentTool).toMatchObject({ name: "exec_command" })
+
+    appendFileSync(file, codexRecord("response_item", {
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "Process exited with code 1",
+    }) + "\n")
+
+    const completed = await summarizeSession("codex-session", file)
+    expect(completed!.currentTool).toBeNull()
+    expect(completed!.lastToolErrored).toBe(true)
+  })
+
+  it("updates a Copilot current tool when its completion is appended", async () => {
+    write([
+      copilotEvent("session.start", { selectedModel: "gpt-5" }),
+      copilotEvent("user.message", { content: "Run it" }),
+      copilotEvent("tool.execution_start", {
+        toolCallId: "shell-1",
+        toolName: "shell",
+        arguments: { command: "bun test" },
+      }),
+    ])
+
+    const running = await summarizeSession("copilot-session", file)
+    expect(running!.currentTool).toEqual({ name: "Bash", summary: "bun test" })
+
+    appendFileSync(file, copilotEvent("tool.execution_complete", {
+      toolCallId: "shell-1",
+      success: false,
+      error: { message: "failed" },
+    }) + "\n")
+
+    const completed = await summarizeSession("copilot-session", file)
+    expect(completed!.currentTool).toBeNull()
+    expect(completed!.lastToolErrored).toBe(true)
+    expect(completed!.totalToolCalls).toBe(1)
   })
 })
 

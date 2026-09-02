@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, RefreshCw, Search, X } from "lucide-react"
+import { Activity, AlertTriangle, LoaderCircle, RefreshCw, Search, X } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ interface LiveSessionsToolbarProps {
   loading: boolean
   isMobile: boolean
   searchQuery: string
+  searchLoading: boolean
   onSearchQueryChange: (query: string) => void
   onRefresh: () => void
 }
@@ -30,6 +31,7 @@ export function LiveSessionsToolbar({
   loading,
   isMobile,
   searchQuery,
+  searchLoading,
   onSearchQueryChange,
   onRefresh,
 }: LiveSessionsToolbarProps) {
@@ -40,11 +42,12 @@ export function LiveSessionsToolbar({
           type="search"
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
-          placeholder="Filter sessions"
-          aria-label="Search sessions by project, branch, title, first prompt, or latest prompt"
+          placeholder="Search sessions or PRs"
+          aria-label="Search sessions by project, branch, title, prompt, PR number, or PR URL"
+          aria-busy={searchLoading}
         />
         <InputGroupAddon align="inline-start">
-          <Search />
+          {searchLoading ? <LoaderCircle className="animate-spin" /> : <Search />}
         </InputGroupAddon>
         {searchQuery && (
           <InputGroupAddon align="inline-end">
@@ -111,8 +114,8 @@ export function LiveSessionsFeedback({
             <EmptyTitle>{searching ? "No matching sessions" : "No sessions yet"}</EmptyTitle>
             <EmptyDescription>
               {searching
-                ? "Try a project, branch, title, or prompt."
-                : "Start Claude Code or Codex to see recent work here."}
+                ? "Try #157, honest-cms #157, or paste a PR URL."
+                : "Start Claude Code, Codex, or Copilot to see recent work here."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

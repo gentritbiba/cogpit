@@ -51,7 +51,7 @@ import { useCapability } from "@/hooks/useCapability"
 import { useCopyWithFeedback } from "@/hooks/useCopyWithFeedback"
 import { can } from "@/lib/capabilities"
 import { parseSubAgentPath } from "@/lib/format"
-import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
+import { agentKindForDirName, capabilitiesFor, getResumeCommand } from "@/lib/agents"
 import { cn, copyToClipboard } from "@/lib/utils"
 import { extractPullRequests, mergePullRequests } from "../../shared/session/prLinks"
 
@@ -140,13 +140,13 @@ export const FloatingChrome = memo(function FloatingChrome({
     [sessionTurns, scanned],
   )
   const activeAgentKind = sessionSource
-    ? sessionSource.agentKind ?? agentKindFromDirName(sessionSource.dirName)
+    ? sessionSource.agentKind ?? agentKindForDirName(sessionSource.dirName)
     : defaultAgentKind
   const isSubAgent = sessionSource ? parseSubAgentPath(sessionSource.fileName) !== null : false
 
   function handleCopyResumeCmd(): void {
     if (!session) return
-    const agentKind = sessionSource?.agentKind ?? agentKindFromDirName(sessionSource?.dirName ?? null)
+    const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
     copyCmd(getResumeCommand(agentKind, session.sessionId, session.cwd))
   }
 
@@ -245,7 +245,7 @@ export const FloatingChrome = memo(function FloatingChrome({
           <div className={cn(FLOATING_PILL, PILL_ROW, "empty:hidden")}>
             <DeviceSwitcher />
           </div>
-          {session && can("share") && (
+          {session && capabilitiesFor(activeAgentKind).sharing && can("share") && (
             <div className={cn(FLOATING_PILL, PILL_ROW)}>
               <ShareButton sessionId={session.sessionId} />
             </div>

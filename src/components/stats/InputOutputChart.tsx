@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import { formatTokenCount } from "@/lib/format"
-import { formatCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "@/lib/token-costs"
+import { formatCost, estimateThinkingTokens, estimateVisibleOutputTokens } from "../../../shared/session/token-costs"
 import { priceTokenUsage, type RateTable } from "@/lib/usagePricing"
 import { useModelRates } from "@/hooks/useModelRates"
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { renderHook, act } from "@testing-library/react"
 import { useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 // Mock auth
 vi.mock("@/lib/auth", () => ({
@@ -891,6 +891,32 @@ describe("useLiveSession", () => {
     })
 
     expect(result.current.isLive).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it("keeps an active Copilot turn live when its transcript is quiet", () => {
+    vi.useFakeTimers()
+    const source: SessionSource = {
+      dirName: "copilot__project",
+      fileName: "11111111-2222-3333-4444-555555555555/events.jsonl",
+      rawText: "{}",
+    }
+
+    const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
+
+    act(() => {
+      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      vi.advanceTimersByTime(29_000)
+      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      vi.advanceTimersByTime(29_000)
+    })
+    expect(result.current.isLive).toBe(true)
+
+    act(() => {
+      vi.advanceTimersByTime(1_000)
+    })
+    expect(result.current.isLive).toBe(false)
+
     vi.useRealTimers()
   })
 

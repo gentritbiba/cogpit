@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compareSessionsByRecency, sortSessionsByRecency } from "../sessionOrdering"
+import { compareSessionsByRecency, sortSessionsByRecency } from "../../../shared/session-ordering"
 
 describe("sessionOrdering", () => {
   it("sorts by displayed activity time before file mtime", () => {

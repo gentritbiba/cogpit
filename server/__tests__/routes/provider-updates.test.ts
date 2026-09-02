@@ -121,9 +121,16 @@ describe("POST /api/provider-updates/run", () => {
     expect(json().status).toBe("succeeded")
   })
 
+  it("accepts Copilot as a known provider", async () => {
+    const { res } = await post({ provider: "copilot" })
+    expect(mockRunProviderUpdate).toHaveBeenCalledWith("copilot")
+    expect(res.statusCode).toBe(200)
+  })
+
   it("rejects an unknown provider without spawning anything", async () => {
-    const { res } = await post({ provider: "rm -rf /" })
+    const { res, json } = await post({ provider: "rm -rf /" })
     expect(res.statusCode).toBe(400)
+    expect(json().error).toContain("copilot")
     expect(mockRunProviderUpdate).not.toHaveBeenCalled()
   })
 

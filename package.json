@@ -1,8 +1,8 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "2.0.1",
-  "description": "Control center for Claude Code and OpenAI Codex agent sessions",
+  "version": "2.1.0",
+  "description": "Control center for Claude Code, OpenAI Codex, and GitHub Copilot CLI sessions",
   "license": "MIT",
   "author": {
     "name": "Gentrit Biba",
@@ -16,6 +16,7 @@
     "build:web": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "check:agents": "bun scripts/check-agents.ts",
     "check:architecture": "bun scripts/check-architecture.ts",
     "check:audit": "bun scripts/check-audit.ts",
     "check:cogpit-memory-sync": "bun scripts/sync-cogpit-memory.ts --check",
@@ -51,6 +52,7 @@
     "electron-updater": "^6.8.3",
     "express": "^5.2.1",
     "node-pty": "^1.1.0",
+    "vscode-jsonrpc": "8.2.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {

@@ -112,6 +112,7 @@ function build(
     questionsBySession,
     elicitationsBySession: new Map(),
     dialogsBySession: new Map(),
+    awaitingPlan: new Set(),
     newlyCompleted: new Set(),
     now: NOW,
     ...extra,
@@ -135,7 +136,7 @@ describe("buildMissionCards — state resolution", () => {
 
   it("keeps a stale session running while a process is still mapped to it", () => {
     const procs = new Map<string, RunningProcess>([
-      ["a", { pid: 1, memMB: 10, cpu: 1, sessionId: "a", tty: "?", args: "claude", startTime: "" }],
+      ["a", { pid: 1, memMB: 10, cpu: 1, sessionId: "a", tty: "?", startTime: "" }],
     ])
     const cards = buildMissionCards({
       sessions: [session({ sessionId: "a", agentStatus: "tool_use", lastModified: STALE })],
@@ -145,6 +146,7 @@ describe("buildMissionCards — state resolution", () => {
       questionsBySession: new Map(),
       elicitationsBySession: new Map(),
       dialogsBySession: new Map(),
+      awaitingPlan: new Set(),
       newlyCompleted: new Set(),
       now: NOW,
     })
@@ -226,6 +228,17 @@ describe("buildMissionCards — state resolution", () => {
     expect(cards[0].dialogs).toHaveLength(1)
   })
 
+  it("opens a pending Copilot plan from the needs-you group", () => {
+    const cards = build(
+      [session({ sessionId: "plan", agentStatus: "tool_use", lastModified: STALE })],
+      [],
+      { awaitingPlan: new Set(["plan"]) },
+    )
+    expect(cards[0].state).toBe("awaiting_answer")
+    expect(cards[0].permissions).toEqual([])
+    expect(filterMissionCards(cards, "needs-you")).toEqual(cards)
+  })
+
   it("lets a permission outrank a parked elicitation", () => {
     const cards = build(
       [session({ sessionId: "a", agentStatus: "tool_use" })],
@@ -280,15 +293,16 @@ describe("buildMissionCards — ordering and inclusion", () => {
         session({ sessionId: "perm", agentStatus: "tool_use" }),
         session({ sessionId: "idle", agentStatus: "idle" }),
         session({ sessionId: "ask", agentStatus: "tool_use" }),
+        session({ sessionId: "plan", agentStatus: "tool_use" }),
       ],
       [permission("perm")],
-      {},
+      { awaitingPlan: new Set(["plan"]) },
       [question("ask")],
     )
     // Grid-resolvable blockers first (permission, then question), then the
     // ones that need the session opened, then work in flight, then results.
     expect(cards.map((c) => c.session.sessionId))
-      .toEqual(["perm", "ask", "idle", "run", "done"])
+      .toEqual(["perm", "ask", "idle", "plan", "run", "done"])
   })
 
   it("hides teammate sessions but keeps a teammate that is blocked on the user", () => {

@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http"
-import { dirs, findJsonlPath, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../helpers"
+import { dirs, join, mkdir, readFile, readTranscriptEffort, sendJson } from "../helpers"
+import { findJsonlPath } from "../sessionPaths"
 import { writeOwnerOnlyJson } from "../atomicJsonFile"
 import { RouteError, sendError, ErrorCodes } from "../lib/routeError"
 import type { UseFn } from "../http"

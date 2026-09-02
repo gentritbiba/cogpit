@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { authFetch } from "@/lib/auth"
-import type { SystemProcessMetric, SystemProcessesResponse } from "@/lib/performanceTypes"
+import type { SystemProcessMetric, SystemProcessesResponse } from "../../shared/contracts/performance"
 
 const POLL_INTERVAL_MS = 60_000
 

@@ -1,14 +1,13 @@
 /**
  * Version advisories for the agent CLIs Cogpit drives.
  *
- * Cogpit never vendors `claude` or `codex` — it spawns whatever the user
- * installed. This module answers two questions about those installs: what
+ * Cogpit never vendors agent CLIs — it spawns whatever the user installed.
+ * This module answers two questions about those installs: what
  * version is on this machine, and what version is published. When the two
  * disagree it also works out how the binary was installed, because that is
  * what decides whether `npm install -g`, `brew upgrade`, or `claude update`
  * is the command that would actually upgrade it.
  */
-import { spawn } from "node:child_process"
 import { realpathSync } from "node:fs"
 
 import {
@@ -19,51 +18,20 @@ import {
   type ProviderUpdateRunStatus,
   type ProviderUpdateStatus,
 } from "../../shared/contracts/providerUpdates"
-import { AGENT_KINDS } from "../../shared/providers/types"
-import { compareVersions, extractVersion } from "../../shared/versions"
-import { findExecutableOnPath, resolveAgentCommand } from "./binaryResolver"
+import {
+  AGENT_KINDS,
+  descriptorFor,
+  descriptorForDirName,
+  type AgentDescriptor,
+} from "../../shared/session/agent-descriptors"
+import { compareVersions } from "../../shared/versions"
+import { findExecutableOnPath } from "./binaryResolver"
+import { CLI_OUTPUT_MAX_CHARS, probeCliVersion, runCli } from "./cliProcess"
 
-const VERSION_PROBE_TIMEOUT_MS = 5_000
 const REGISTRY_TIMEOUT_MS = 4_000
 const REGISTRY_CACHE_TTL_MS = 60 * 60 * 1_000
 const PROBE_CACHE_TTL_MS = 60 * 1_000
 const UPDATE_TIMEOUT_MS = 5 * 60_000
-const UPDATE_OUTPUT_MAX_CHARS = 10_000
-
-interface ProviderDefinition {
-  id: ProviderUpdateId
-  displayName: string
-  binName: string
-  packageName: string
-  homebrewFormula: string | null
-  /** Self-updater for installs that manage their own binary, if any. */
-  native: { args: string[]; matches: (path: string) => boolean } | null
-}
-
-const PROVIDERS: Record<ProviderUpdateId, ProviderDefinition> = {
-  claude: {
-    id: "claude",
-    displayName: "Claude Code",
-    binName: "claude",
-    packageName: "@anthropic-ai/claude-code",
-    homebrewFormula: "claude-code",
-    native: {
-      args: ["update"],
-      matches: (path) =>
-        path.endsWith("/.local/bin/claude") ||
-        path.endsWith("/.local/bin/claude.exe") ||
-        path.includes("/.local/share/claude/"),
-    },
-  },
-  codex: {
-    id: "codex",
-    displayName: "Codex",
-    binName: "codex",
-    packageName: "@openai/codex",
-    homebrewFormula: "codex",
-    native: null,
-  },
-}
 
 export function deriveStatus(
   current: string | null,
@@ -92,11 +60,10 @@ export function detectInstallMethod(
   provider: ProviderUpdateId,
   paths: readonly string[],
 ): ProviderInstallMethod {
-  const native = PROVIDERS[provider].native
+  const { selfUpdate, wingetId } = descriptorFor(provider).cli
   const candidates = paths.filter(Boolean).map(normalizePath)
   if (candidates.length === 0) return "unknown"
 
-  if (native && candidates.some((path) => native.matches(path))) return "native"
   if (candidates.some((path) => path.includes("/.bun/bin/"))) return "bun"
   if (
     candidates.some((path) =>
@@ -118,6 +85,19 @@ export function detectInstallMethod(
   ) {
     return "homebrew"
   }
+  // The package directory carries the winget id; the links directory does not,
+  // so a shim there is only attributable when nothing else claims the path.
+  const wingetPackageDir = wingetId
+    ? `/microsoft/winget/packages/${wingetId.toLowerCase()}`
+    : null
+  if (
+    candidates.some((path) =>
+      path.includes("/microsoft/winget/links/") ||
+      (wingetPackageDir !== null && path.includes(wingetPackageDir)),
+    )
+  ) {
+    return "winget"
+  }
   if (
     candidates.some((path) =>
       path.includes("/node_modules/.bin/") ||
@@ -128,6 +108,7 @@ export function detectInstallMethod(
   ) {
     return "npm"
   }
+  if (selfUpdate && candidates.some((path) => selfUpdate.matches(path))) return "native"
   return "unknown"
 }
 
@@ -142,27 +123,35 @@ export function buildUpdateCommand(
   provider: ProviderUpdateId,
   method: ProviderInstallMethod,
 ): UpdateCommand | null {
-  const definition = PROVIDERS[provider]
+  const { binName, cli } = descriptorFor(provider)
   switch (method) {
     case "native":
-      return definition.native
-        ? { executable: definition.binName, args: definition.native.args, lockKey: `${provider}-native` }
+      return cli.selfUpdate
+        ? { executable: binName, args: [...cli.selfUpdate.args], lockKey: `${provider}-native` }
         : null
     case "bun":
       return {
         executable: "bun",
-        args: ["i", "-g", `${definition.packageName}@latest`],
+        args: ["i", "-g", `${cli.packageName}@latest`],
         lockKey: "bun-global",
       }
     case "pnpm":
       return {
         executable: "pnpm",
-        args: ["add", "-g", `${definition.packageName}@latest`],
+        args: ["add", "-g", `${cli.packageName}@latest`],
         lockKey: "pnpm-global",
       }
     case "homebrew":
-      return definition.homebrewFormula
-        ? { executable: "brew", args: ["upgrade", definition.homebrewFormula], lockKey: "homebrew" }
+      return cli.homebrew
+        ? {
+            executable: "brew",
+            args: [
+              "upgrade",
+              ...(cli.homebrew.cask ? ["--cask"] : []),
+              cli.homebrew.name,
+            ],
+            lockKey: "homebrew",
+          }
         : null
     case "npm":
       return {
@@ -173,11 +162,26 @@ export function buildUpdateCommand(
         args: [
           "install",
           "-g",
-          `--allow-scripts=${definition.packageName}`,
-          `${definition.packageName}@latest`,
+          `--allow-scripts=${cli.packageName}`,
+          `${cli.packageName}@latest`,
         ],
         lockKey: "npm-global",
       }
+    case "winget":
+      return cli.wingetId
+        ? {
+            executable: "winget",
+            args: [
+              "upgrade",
+              "--id",
+              cli.wingetId,
+              "--exact",
+              "--accept-source-agreements",
+              "--accept-package-agreements",
+            ],
+            lockKey: "winget",
+          }
+        : null
     default:
       return null
   }
@@ -188,43 +192,6 @@ export function formatCommand(command: UpdateCommand): string {
 }
 
 // ── Probes ───────────────────────────────────────────────────────────────
-
-function runCommand(
-  executable: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
-  return new Promise((resolve) => {
-    const resolved = resolveAgentCommand(executable, args)
-    const child = spawn(resolved.command, resolved.args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...resolved.spawnOptions,
-    })
-    let stdout = ""
-    let stderr = ""
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      child.kill("SIGKILL")
-    }, timeoutMs)
-
-    // npm's progress output is unbounded; only the tail-end matters and the
-    // response truncates anyway, so stop accumulating well before that.
-    const append = (buffer: string, chunk: Buffer): string =>
-      buffer.length >= UPDATE_OUTPUT_MAX_CHARS ? buffer : buffer + chunk.toString()
-
-    child.stdout?.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk) })
-    child.stderr?.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk) })
-    child.on("error", () => {
-      clearTimeout(timer)
-      resolve({ code: null, stdout, stderr, timedOut })
-    })
-    child.on("close", (code) => {
-      clearTimeout(timer)
-      resolve({ code, stdout, stderr, timedOut })
-    })
-  })
-}
 
 /** Resolve the binary on PATH plus its realpath, deduped. */
 function resolveBinaryPaths(binName: string): string[] {
@@ -296,12 +263,12 @@ export function _resetProviderUpdateCachesForTests(): void {
   updateLocks.clear()
 }
 
-async function probeProvider(definition: ProviderDefinition): Promise<ProviderUpdateInfo> {
-  const paths = resolveBinaryPaths(definition.binName)
+async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdateInfo> {
+  const paths = resolveBinaryPaths(descriptor.binName)
   const base = {
-    provider: definition.id,
-    displayName: definition.displayName,
-    packageName: definition.packageName,
+    provider: descriptor.kind,
+    displayName: descriptor.displayName,
+    packageName: descriptor.cli.packageName,
     binaryPath: paths[0] ?? null,
     checkedAt: new Date().toISOString(),
   }
@@ -318,13 +285,12 @@ async function probeProvider(definition: ProviderDefinition): Promise<ProviderUp
     }
   }
 
-  const [probe, latestVersion] = await Promise.all([
-    runCommand(base.binaryPath, ["--version"], VERSION_PROBE_TIMEOUT_MS),
-    fetchLatestVersion(definition.packageName),
+  const [currentVersion, latestVersion] = await Promise.all([
+    probeCliVersion(base.binaryPath, descriptor.cli.versionArgs),
+    fetchLatestVersion(descriptor.cli.packageName),
   ])
-  const currentVersion = extractVersion(`${probe.stdout}\n${probe.stderr}`)
-  const installMethod = detectInstallMethod(definition.id, paths)
-  const command = buildUpdateCommand(definition.id, installMethod)
+  const installMethod = detectInstallMethod(descriptor.kind, paths)
+  const command = buildUpdateCommand(descriptor.kind, installMethod)
 
   return {
     ...base,
@@ -338,13 +304,24 @@ async function probeProvider(definition: ProviderDefinition): Promise<ProviderUp
 }
 
 /**
+ * Order the banner renders these in. Registry order puts the agent that owns
+ * every unprefixed project last, and it is the one an install always has, so it
+ * leads here instead.
+ */
+const DEFAULT_PROVIDER = descriptorForDirName(null).kind
+const REPORT_ORDER: readonly ProviderUpdateId[] = [
+  DEFAULT_PROVIDER,
+  ...AGENT_KINDS.filter((kind) => kind !== DEFAULT_PROVIDER),
+]
+
+/**
  * Advisory for every provider. Cached briefly: an installed CLI's version
  * only changes when something installs one, and every connected client polls
  * this on mount.
  */
 export function getProviderUpdates(): Promise<ProviderUpdateInfo[]> {
   return Promise.all(
-    AGENT_KINDS.map((id) => probeCache.get(id, () => probeProvider(PROVIDERS[id]))),
+    REPORT_ORDER.map((id) => probeCache.get(id, () => probeProvider(descriptorFor(id)))),
   )
 }
 
@@ -360,9 +337,9 @@ const updateLocks = new Map<string, Promise<unknown>>()
 function truncate(text: string): string | null {
   const trimmed = text.trim()
   if (!trimmed) return null
-  return trimmed.length <= UPDATE_OUTPUT_MAX_CHARS
+  return trimmed.length <= CLI_OUTPUT_MAX_CHARS
     ? trimmed
-    : trimmed.slice(0, UPDATE_OUTPUT_MAX_CHARS)
+    : trimmed.slice(0, CLI_OUTPUT_MAX_CHARS)
 }
 
 async function withUpdateLock<T>(lockKey: string, run: () => Promise<T>): Promise<T> {
@@ -379,8 +356,8 @@ async function withUpdateLock<T>(lockKey: string, run: () => Promise<T>): Promis
 export async function runProviderUpdate(
   provider: ProviderUpdateId,
 ): Promise<ProviderUpdateRunResult> {
-  const definition = PROVIDERS[provider]
-  const before = await probeCache.get(provider, () => probeProvider(definition))
+  const descriptor = descriptorFor(provider)
+  const before = await probeCache.get(provider, () => probeProvider(descriptor))
   const result = (
     status: ProviderUpdateRunStatus,
     message: string,
@@ -389,19 +366,19 @@ export async function runProviderUpdate(
   ): ProviderUpdateRunResult => ({ provider, status, message, output, info })
 
   if (!before.installed) {
-    return result("failed", `${definition.displayName} is not installed on this machine.`, before)
+    return result("failed", `${descriptor.displayName} is not installed on this machine.`, before)
   }
   const command = buildUpdateCommand(provider, before.installMethod)
   if (!command) {
     return result(
       "failed",
-      `Cogpit cannot tell how ${definition.displayName} was installed, so it will not run an update for you.`,
+      `Cogpit cannot tell how ${descriptor.displayName} was installed, so it will not run an update for you.`,
       before,
     )
   }
 
   const run = await withUpdateLock(command.lockKey, () =>
-    runCommand(command.executable, command.args, UPDATE_TIMEOUT_MS),
+    runCli(command.executable, command.args, UPDATE_TIMEOUT_MS),
   )
   const output = truncate(`${run.stderr}\n${run.stdout}`)
 
@@ -418,18 +395,18 @@ export async function runProviderUpdate(
 
   // The registry answer is still valid; the installed version is what changed.
   probeCache.invalidate(provider)
-  const after = await probeCache.get(provider, () => probeProvider(definition))
+  const after = await probeCache.get(provider, () => probeProvider(descriptor))
   if (after.status === "behind" || after.currentVersion === before.currentVersion) {
     return result(
       "unchanged",
-      `The update command finished, but ${definition.displayName} still reports ${after.currentVersion ?? "no version"}.`,
+      `The update command finished, but ${descriptor.displayName} still reports ${after.currentVersion ?? "no version"}.`,
       after,
       output,
     )
   }
   return result(
     "succeeded",
-    `${definition.displayName} updated to ${after.currentVersion ?? "a new version"}.`,
+    `${descriptor.displayName} updated to ${after.currentVersion ?? "a new version"}.`,
     after,
     output,
   )

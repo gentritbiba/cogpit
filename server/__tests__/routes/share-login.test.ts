@@ -26,10 +26,7 @@ vi.mock("../../config", async (importOriginal) => ({
   getConfig: mockGetConfig,
 }))
 
-vi.mock("../../helpers", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../helpers")>()),
-  isRateLimited: mockIsRateLimited,
-}))
+vi.mock("../../lib/rateLimit", () => ({ isRateLimited: mockIsRateLimited }))
 
 vi.mock("../../password-verify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../password-verify")>()

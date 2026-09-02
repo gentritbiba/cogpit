@@ -1,38 +1,86 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from "vitest"
-
-// Mock sdk-session
-const mockResolveUserQuestion = vi.fn()
-const mockSdkSessions = new Map<string, unknown>()
-const mockGetSDKUserQuestions = vi.fn((..._args: unknown[]): unknown[] => [])
-const mockListUserQuestionSessionIds = vi.fn((): string[] => [])
-
-vi.mock("../../sdk-session", () => ({
-  get sdkSessions() { return mockSdkSessions },
-  resolveUserQuestion: (...args: unknown[]) => mockResolveUserQuestion(...args),
-  getSDKUserQuestions: (...args: unknown[]) => mockGetSDKUserQuestions(...args),
-  listUserQuestionSessionIds: () => mockListUserQuestionSessionIds(),
-}))
-
-import { registerAskUserRoutes } from "../../routes/ask-user"
+import { describe, it, expect, vi } from "vitest"
+import { registerAskUserRoutes, type QuestionRuntimes } from "../../routes/ask-user"
+import { normalizeCopilotQuestion } from "../../agents/copilotRuntime"
+import { AgentRuntimeError, type AgentRuntime } from "../../agents/runtimeTypes"
+import type { CopilotPendingUserInput } from "../../agents/copilotTransport"
+import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import type { UseFn, Middleware } from "../../helpers"
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/**
+ * `/api/user-questions` and `/api/ask-user-answer` over the runtime registry.
+ *
+ * The route used to decide "is this Copilot?" by asking whether the id was
+ * absent from the Claude session map, so a Codex session took the Copilot path
+ * and collected an error about a session Copilot had never opened. It now
+ * resolves the session's agent first, which is what these cases pin.
+ */
 
-function buildHandler(path = "/api/ask-user-answer"): Middleware {
+// ── Fakes ─────────────────────────────────────────────────────────────────────
+
+function copilotQuestion(
+  overrides: Partial<CopilotPendingUserInput> = {},
+): CopilotPendingUserInput {
+  return {
+    sessionId: "copilot-1",
+    requestId: "input-1",
+    question: "Which environment?",
+    choices: ["staging", "production"],
+    allowFreeform: true,
+    askedAt: 123,
+    ...overrides,
+  }
+}
+
+type FakeRuntime = Pick<AgentRuntime, "kind" | "listPendingQuestions" | "answerQuestion">
+
+function fakeRuntime(kind: AgentKind, overrides: Partial<FakeRuntime> = {}): FakeRuntime {
+  return {
+    kind,
+    listPendingQuestions: vi.fn(() => []),
+    answerQuestion: vi.fn(async () => false),
+    ...overrides,
+  }
+}
+
+function registryOf(
+  runtimes: Partial<Record<AgentKind, FakeRuntime>>,
+  owner: AgentKind = "claude",
+): QuestionRuntimes {
+  const table: Record<AgentKind, FakeRuntime> = {
+    claude: runtimes.claude ?? fakeRuntime("claude"),
+    codex: runtimes.codex ?? fakeRuntime("codex"),
+    copilot: runtimes.copilot ?? fakeRuntime("copilot"),
+  }
+  return {
+    allRuntimes: () => Object.values(table) as unknown as AgentRuntime[],
+    runtimeFor: (kind) => table[kind] as unknown as AgentRuntime,
+    resolveSessionAgent: async () => ({ kind: owner, filePath: null }),
+  }
+}
+
+function buildHandler(path: string, runtimes: QuestionRuntimes): Middleware {
   const handlers = new Map<string, Middleware>()
-  const use: UseFn = (mounted, h) => { handlers.set(mounted, h) }
-  registerAskUserRoutes(use)
+  const use: UseFn = (mounted, handler) => { handlers.set(mounted, handler) }
+  registerAskUserRoutes(use, runtimes)
   const captured = handlers.get(path)
   if (!captured) throw new Error(`registerAskUserRoutes did not mount ${path}`)
   return captured
 }
 
-function makeReqRes(body: string) {
-  const listeners: Record<string, ((chunk: string) => void)[]> = {}
+/**
+ * Drain the microtask queue that withJsonBody parses on. Deliberately not
+ * setImmediate: several tests here run with fake timers, which never fire it.
+ * readJsonBody settles through promises only, so yielding is enough.
+ */
+async function drainBodyParse() {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve()
+}
 
+function makeReqRes(body: string, method = "POST") {
+  const listeners: Record<string, ((chunk: string) => void)[]> = {}
   const req = {
-    method: "POST",
+    method,
     url: "/api/ask-user-answer",
     on: (event: string, cb: (chunk: string) => void) => {
       if (!listeners[event]) listeners[event] = []
@@ -51,164 +99,145 @@ function makeReqRes(body: string) {
     setHeader: vi.fn(),
     end: vi.fn((data?: string) => { responseBody = data || "" }),
     _getStatus: () => statusCode,
-    _getData: () => JSON.parse(responseBody) as unknown,
+    _getData: () => JSON.parse(responseBody) as { error?: string; ok?: boolean; code?: string },
   }
 
   const next = vi.fn()
-
-  // Simulate streaming the request body. The route parses through
-  // withJsonBody, so the handler runs on the microtask queue rather than
-  // inside the "end" emit; drain it before asserting.
   const simulate = async () => {
     req.emit("data", body)
     req.emit("end")
     await drainBodyParse()
   }
-
   return { req, res, next, simulate }
+}
+
+async function post(runtimes: QuestionRuntimes, body: unknown) {
+  const handler = buildHandler("/api/ask-user-answer", runtimes)
+  const { req, res, next, simulate } = makeReqRes(
+    typeof body === "string" ? body : JSON.stringify(body),
+  )
+  handler(
+    req as Parameters<Middleware>[0],
+    res as unknown as Parameters<Middleware>[1],
+    next,
+  )
+  await simulate()
+  return { res, next }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/**
- * Drain the microtask queue that withJsonBody parses on. Deliberately not
- * setImmediate: several tests here run with fake timers, which never fire it.
- * readJsonBody settles through promises only, so yielding is enough.
- */
-async function drainBodyParse() {
-  for (let i = 0; i < 20; i += 1) await Promise.resolve()
-}
-
 describe("POST /api/ask-user-answer", () => {
-  beforeEach(() => {
-    mockSdkSessions.clear()
-    mockResolveUserQuestion.mockReset()
-  })
+  it.each<AgentKind>(["claude", "codex", "copilot"])(
+    "answers through the %s runtime that owns the session",
+    async (kind) => {
+      const runtime = fakeRuntime(kind, { answerQuestion: vi.fn(async () => true) })
+      const others = (["claude", "codex", "copilot"] as const)
+        .filter((other) => other !== kind)
+        .map((other) => fakeRuntime(other))
 
-  it("returns 200 and resolves a valid string[] payload", async () => {
-    const handler = buildHandler()
+      const { res } = await post(
+        registryOf(
+          { [kind]: runtime, ...Object.fromEntries(others.map((r) => [r.kind, r])) },
+          kind,
+        ),
+        { sessionId: "session-abc", toolUseId: "tu-1", answers: ["Yes", "No"] },
+      )
 
-    mockSdkSessions.set("session-abc", {})
-    mockResolveUserQuestion.mockReturnValue({ found: true })
+      expect(res._getStatus()).toBe(200)
+      expect(res._getData()).toEqual({ ok: true })
+      expect(runtime.answerQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"])
+      for (const other of others) {
+        expect(other.answerQuestion).not.toHaveBeenCalled()
+      }
+    },
+  )
 
-    const body = JSON.stringify({ sessionId: "session-abc", toolUseId: "tu-1", answers: ["Yes", "No"] })
-    const { req, res, next, simulate } = makeReqRes(body)
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
+  it("forwards a Record<string, string> payload unchanged", async () => {
+    const runtime = fakeRuntime("claude", { answerQuestion: vi.fn(async () => true) })
+    const { res } = await post(registryOf({ claude: runtime }), {
+      sessionId: "session-abc",
+      toolUseId: "tu-2",
+      answers: { q1: "blue", q2: "fast" },
+    })
 
     expect(res._getStatus()).toBe(200)
-    expect(res._getData()).toEqual({ ok: true })
-    expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-1", ["Yes", "No"])
+    expect(runtime.answerQuestion).toHaveBeenCalledWith(
+      "session-abc",
+      "tu-2",
+      { q1: "blue", q2: "fast" },
+    )
   })
 
-  it("returns 200 and resolves a Record<string, string> payload", async () => {
-    const handler = buildHandler()
-
-    mockSdkSessions.set("session-abc", {})
-    mockResolveUserQuestion.mockReturnValue({ found: true })
-
-    const body = JSON.stringify({ sessionId: "session-abc", toolUseId: "tu-2", answers: { q1: "blue", q2: "fast" } })
-    const { req, res, next, simulate } = makeReqRes(body)
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
-
-    expect(res._getStatus()).toBe(200)
-    expect(res._getData()).toEqual({ ok: true })
-    expect(mockResolveUserQuestion).toHaveBeenCalledWith("session-abc", "tu-2", { q1: "blue", q2: "fast" })
-  })
-
-  it("returns 404 when sessionId is not a live SDK session", async () => {
-    const handler = buildHandler()
-
-    // Do NOT add session to mockSdkSessions
-    const body = JSON.stringify({ sessionId: "missing-session", toolUseId: "tu-1", answers: ["Yes"] })
-    const { req, res, next, simulate } = makeReqRes(body)
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
+  it("returns 404 when the runtime has no such question", async () => {
+    const { res } = await post(registryOf({}), {
+      sessionId: "missing-session",
+      toolUseId: "tu-1",
+      answers: ["Yes"],
+    })
 
     expect(res._getStatus()).toBe(404)
-    expect((res._getData() as { error: string }).error).toMatch(/not found/i)
+    expect(res._getData().error).toMatch(/not found/i)
   })
 
-  it("returns 400 when sessionId is missing", async () => {
-    const handler = buildHandler()
+  it("surfaces the runtime's own status and code for a failed answer", async () => {
+    const runtime = fakeRuntime("copilot", {
+      answerQuestion: vi.fn(async () => {
+        throw new AgentRuntimeError(502, "COPILOT_USER_INPUT_FAILED", "transport closed")
+      }),
+    })
 
-    const body = JSON.stringify({ toolUseId: "tu-1", answers: ["Yes"] })
-    const { req, res, next, simulate } = makeReqRes(body)
+    const { res } = await post(registryOf({ copilot: runtime }, "copilot"), {
+      sessionId: "copilot-1",
+      toolUseId: "input-1",
+      answers: "staging",
+    })
 
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
-
-    expect(res._getStatus()).toBe(400)
-    expect((res._getData() as { error: string }).error).toContain("sessionId")
+    expect(res._getStatus()).toBe(502)
+    expect(res._getData()).toEqual({
+      error: "transport closed",
+      code: "COPILOT_USER_INPUT_FAILED",
+    })
   })
 
-  it("returns 400 when toolUseId is missing", async () => {
-    const handler = buildHandler()
-
-    const body = JSON.stringify({ sessionId: "s1", answers: ["Yes"] })
-    const { req, res, next, simulate } = makeReqRes(body)
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
-
+  it.each([
+    ["sessionId", { toolUseId: "tu-1", answers: ["Yes"] }],
+    ["toolUseId", { sessionId: "s1", answers: ["Yes"] }],
+    ["answers", { sessionId: "s1", toolUseId: "tu-1" }],
+  ])("returns 400 when %s is missing", async (field, body) => {
+    const { res } = await post(registryOf({}), body)
     expect(res._getStatus()).toBe(400)
-    expect((res._getData() as { error: string }).error).toContain("toolUseId")
-  })
-
-  it("returns 400 when answers is missing", async () => {
-    const handler = buildHandler()
-
-    const body = JSON.stringify({ sessionId: "s1", toolUseId: "tu-1" })
-    const { req, res, next, simulate } = makeReqRes(body)
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
-
-    expect(res._getStatus()).toBe(400)
-    expect((res._getData() as { error: string }).error).toContain("answers")
+    expect(res._getData().error).toContain(field)
   })
 
   it("returns 400 for malformed JSON body", async () => {
-    const handler = buildHandler()
-
-    const { req, res, next, simulate } = makeReqRes("{invalid json")
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
-    await simulate()
-
+    const { res } = await post(registryOf({}), "{invalid json")
     expect(res._getStatus()).toBe(400)
-    expect((res._getData() as { error: string }).error).toMatch(/invalid json/i)
+    expect(res._getData().error).toMatch(/invalid json/i)
   })
 
   it("calls next() for non-POST methods", async () => {
-    const handler = buildHandler()
+    const runtime = fakeRuntime("claude")
+    const handler = buildHandler("/api/ask-user-answer", registryOf({ claude: runtime }))
+    const { req, res, next } = makeReqRes("", "GET")
 
-    const { req, res, next } = makeReqRes("")
-    ;(req as { method: string }).method = "GET"
-
-    handler(req as Parameters<Middleware>[0], res as unknown as Parameters<Middleware>[1], next)
+    handler(
+      req as Parameters<Middleware>[0],
+      res as unknown as Parameters<Middleware>[1],
+      next,
+    )
 
     expect(next).toHaveBeenCalled()
-    expect(mockResolveUserQuestion).not.toHaveBeenCalled()
+    expect(runtime.answerQuestion).not.toHaveBeenCalled()
   })
 })
 
 describe("GET /api/user-questions", () => {
-  beforeEach(() => {
-    mockGetSDKUserQuestions.mockReset().mockReturnValue([])
-    mockListUserQuestionSessionIds.mockReset().mockReturnValue([])
-  })
-
-  function invokeGet(): { status: number; body: unknown } {
-    const handler = buildHandler("/api/user-questions")
+  function invokeGet(runtimes: QuestionRuntimes): { status: number; body: unknown } {
+    const handler = buildHandler("/api/user-questions", runtimes)
     let status = 0
     let payload = ""
     const res = {
-      statusCode: 200,
       setHeader: vi.fn(),
       end: vi.fn((value?: string) => { payload = value ?? "" }),
     }
@@ -225,32 +254,40 @@ describe("GET /api/user-questions", () => {
     return { status, body: payload ? JSON.parse(payload) : null }
   }
 
-  it("groups blocked questions by session", async () => {
+  it("groups every runtime's blocked questions by session", () => {
     // Mission Control renders cards for sessions that are not open, so it needs
     // one call covering all of them.
-    mockListUserQuestionSessionIds.mockReturnValue(["s1"])
-    mockGetSDKUserQuestions.mockImplementation((sessionId: unknown) =>
-      sessionId === "s1"
-        ? [{ sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }]
-        : [],
-    )
+    const claudeQuestion = { sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }
+    const copilotPending = normalizeCopilotQuestion(copilotQuestion())
 
-    const { status, body } = invokeGet()
+    const { status, body } = invokeGet(registryOf({
+      claude: fakeRuntime("claude", { listPendingQuestions: vi.fn(() => [claudeQuestion]) }),
+      copilot: fakeRuntime("copilot", { listPendingQuestions: vi.fn(() => [copilotPending]) }),
+    }))
 
     expect(status).toBe(200)
     expect(body).toEqual({
-      bySession: { s1: [{ sessionId: "s1", toolUseId: "toolu_1", askedAt: 1, questions: [] }] },
+      bySession: { s1: [claudeQuestion], "copilot-1": [copilotPending] },
     })
   })
 
-  it("omits sessions with nothing pending", async () => {
-    mockListUserQuestionSessionIds.mockReturnValue(["quiet"])
-    mockGetSDKUserQuestions.mockReturnValue([])
-
-    expect(invokeGet().body).toEqual({ bySession: {} })
+  it("normalizes a Copilot input request into the shared question shape", () => {
+    expect(normalizeCopilotQuestion(copilotQuestion())).toEqual({
+      sessionId: "copilot-1",
+      toolUseId: "input-1",
+      askedAt: 123,
+      questions: [{
+        question: "Which environment?",
+        multiSelect: false,
+        options: [
+          { label: "staging", hasPreview: false },
+          { label: "production", hasPreview: false },
+        ],
+      }],
+    })
   })
 
-  it("returns an empty map when no session is blocked", async () => {
-    expect(invokeGet().body).toEqual({ bySession: {} })
+  it("returns an empty map when no session is blocked", () => {
+    expect(invokeGet(registryOf({})).body).toEqual({ bySession: {} })
   })
 })

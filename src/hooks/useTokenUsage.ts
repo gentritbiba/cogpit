@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 import { authFetch } from "@/lib/auth"
-import type { AgentKind } from "@/lib/sessionSource"
+import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import { useCapability } from "@/hooks/useCapability"
 
 interface UsageBucket {
@@ -10,7 +10,8 @@ interface UsageBucket {
 }
 
 export interface UsageData {
-  providerName?: "Claude" | "Codex"
+  /** Agent this snapshot came from; names and colours are derived from it. */
+  agentKind?: AgentKind
   /** Client timestamp captured when this snapshot was received. */
   fetchedAt?: number
   fiveHour?: UsageBucket
@@ -36,31 +37,23 @@ interface UseTokenUsageResult {
   refresh: () => void
 }
 
-function mapBucket(raw: Record<string, unknown> | undefined): UsageBucket | undefined {
-  if (!raw || typeof raw.utilization !== "number") return undefined
-  return {
-    utilization: raw.utilization,
-    resetsAt: typeof raw.resets_at === "string" ? raw.resets_at : undefined,
-  }
-}
+// ── Shared normalisation ──────────────────────────────────────────────────
+//
+// Every runtime reports its quota in its own shape, but a meter is a meter:
+// one number between 0 and 100, an optional reset instant and an optional
+// label. The per-agent readers below only locate those three values; clamping
+// and shaping happen here, once.
 
-function mapUsageResponse(data: Record<string, unknown>): UsageData {
-  const extra = data.extra_usage as Record<string, unknown> | undefined
+function usageBucket(
+  utilization: number | undefined,
+  resetsAt?: string,
+  label?: string,
+): UsageBucket | undefined {
+  if (utilization === undefined || !Number.isFinite(utilization)) return undefined
   return {
-    providerName: "Claude",
-    fiveHour: mapBucket(data.five_hour as Record<string, unknown> | undefined),
-    sevenDay: mapBucket(data.seven_day as Record<string, unknown> | undefined),
-    sevenDayOpus: mapBucket(data.seven_day_opus as Record<string, unknown> | undefined),
-    sevenDaySonnet: mapBucket(data.seven_day_sonnet as Record<string, unknown> | undefined),
-    extraUsage: extra
-      ? {
-          isEnabled: !!extra.is_enabled,
-          monthlyLimit: typeof extra.monthly_limit === "number" ? extra.monthly_limit : undefined,
-          usedCredits: typeof extra.used_credits === "number" ? extra.used_credits : undefined,
-          utilization: typeof extra.utilization === "number" ? extra.utilization : undefined,
-        }
-      : undefined,
-    subscriptionType: typeof data.subscriptionType === "string" ? data.subscriptionType : undefined,
+    utilization: Math.min(100, Math.max(0, utilization)),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(label === undefined ? {} : { label }),
   }
 }
 
@@ -70,29 +63,58 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
+function num(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined
+}
+
+// ── Per-runtime readers ───────────────────────────────────────────────────
+
+/** Anthropic-shaped `{ utilization, resets_at }`. */
+function anthropicBucket(raw: Record<string, unknown> | undefined): UsageBucket | undefined {
+  return raw ? usageBucket(num(raw.utilization), str(raw.resets_at)) : undefined
+}
+
+function anthropicExtraUsage(raw: Record<string, unknown> | undefined): UsageData["extraUsage"] {
+  if (!raw) return undefined
+  return {
+    isEnabled: !!raw.is_enabled,
+    monthlyLimit: num(raw.monthly_limit),
+    usedCredits: num(raw.used_credits),
+    utilization: num(raw.utilization),
+  }
+}
+
+/**
+ * The macOS-keychain path, kept only as a fallback for a Claude Code that
+ * predates structured usage on its own control channel.
+ */
+export function mapLegacyClaudeUsage(data: Record<string, unknown>): UsageData {
+  return {
+    fiveHour: anthropicBucket(asObject(data.five_hour)),
+    sevenDay: anthropicBucket(asObject(data.seven_day)),
+    sevenDayOpus: anthropicBucket(asObject(data.seven_day_opus)),
+    sevenDaySonnet: anthropicBucket(asObject(data.seven_day_sonnet)),
+    extraUsage: anthropicExtraUsage(asObject(data.extra_usage)),
+    subscriptionType: str(data.subscriptionType),
+  }
+}
+
 export function mapClaudeRuntimeResponse(data: Record<string, unknown>): UsageData | null {
   if (data.available !== true) return null
   const usage = asObject(data.usage)
   const limits = asObject(usage?.rate_limits)
   const account = asObject(data.account)
-  const extra = asObject(limits?.extra_usage)
   const mapped: UsageData = {
-    providerName: "Claude",
-    fiveHour: mapBucket(asObject(limits?.five_hour)),
-    sevenDay: mapBucket(asObject(limits?.seven_day)),
-    sevenDayOpus: mapBucket(asObject(limits?.seven_day_opus)),
-    sevenDaySonnet: mapBucket(asObject(limits?.seven_day_sonnet)),
-    extraUsage: extra
-      ? {
-          isEnabled: !!extra.is_enabled,
-          monthlyLimit: typeof extra.monthly_limit === "number" ? extra.monthly_limit : undefined,
-          usedCredits: typeof extra.used_credits === "number" ? extra.used_credits : undefined,
-          utilization: typeof extra.utilization === "number" ? extra.utilization : undefined,
-        }
-      : undefined,
-    subscriptionType: typeof usage?.subscription_type === "string"
-      ? usage.subscription_type
-      : typeof account?.subscriptionType === "string" ? account.subscriptionType : undefined,
+    fiveHour: anthropicBucket(asObject(limits?.five_hour)),
+    sevenDay: anthropicBucket(asObject(limits?.seven_day)),
+    sevenDayOpus: anthropicBucket(asObject(limits?.seven_day_opus)),
+    sevenDaySonnet: anthropicBucket(asObject(limits?.seven_day_sonnet)),
+    extraUsage: anthropicExtraUsage(asObject(limits?.extra_usage)),
+    subscriptionType: str(usage?.subscription_type) ?? str(account?.subscriptionType),
   }
   return mapped.fiveHour || mapped.sevenDay || mapped.extraUsage || mapped.subscriptionType
     ? mapped
@@ -100,67 +122,110 @@ export function mapClaudeRuntimeResponse(data: Record<string, unknown>): UsageDa
 }
 
 function codexResetTime(value: unknown): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined
+  const seconds = num(value)
+  if (seconds === undefined) return undefined
   // App-server reports Unix seconds; tolerate milliseconds for forwards
   // compatibility with alternate providers.
-  return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString()
+  return new Date(seconds < 10_000_000_000 ? seconds * 1000 : seconds).toISOString()
 }
 
 function codexWindowLabel(minutes: unknown, fallback: string): string {
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes <= 0) return fallback
-  if (minutes % 1440 === 0) {
-    const days = minutes / 1440
-    return `${days}-day`
-  }
-  if (minutes % 60 === 0) return `${minutes / 60}-hour`
-  return `${minutes}-minute`
+  const value = num(minutes)
+  if (value === undefined || value <= 0) return fallback
+  if (value % 1440 === 0) return `${value / 1440}-day`
+  if (value % 60 === 0) return `${value / 60}-hour`
+  return `${value}-minute`
 }
 
-function mapCodexBucket(raw: Record<string, unknown> | undefined, fallbackLabel: string): UsageBucket | undefined {
-  if (!raw || typeof raw.usedPercent !== "number") return undefined
-  return {
-    utilization: raw.usedPercent,
-    resetsAt: codexResetTime(raw.resetsAt),
-    label: codexWindowLabel(raw.windowDurationMins, fallbackLabel),
-  }
+function codexBucket(
+  raw: Record<string, unknown> | undefined,
+  fallbackLabel: string,
+): UsageBucket | undefined {
+  if (!raw) return undefined
+  return usageBucket(
+    num(raw.usedPercent),
+    codexResetTime(raw.resetsAt),
+    codexWindowLabel(raw.windowDurationMins, fallbackLabel),
+  )
 }
 
-/** Map the provider-native app-server runtime response into the shared header UI. */
+/** Map the app-server runtime response into the shared header UI. */
 export function mapCodexRuntimeResponse(data: Record<string, unknown>): UsageData | null {
   if (data.available !== true) return null
-  const rateLimitResponse = asObject(data.rateLimits)
-  const snapshot = asObject(rateLimitResponse?.rateLimits)
-  const accountResponse = asObject(data.account)
-  const account = asObject(accountResponse?.account)
-  const usageResponse = asObject(data.usage)
-  const summary = asObject(usageResponse?.summary)
+  const snapshot = asObject(asObject(data.rateLimits)?.rateLimits)
+  const account = asObject(asObject(data.account)?.account)
+  const summary = asObject(asObject(data.usage)?.summary)
   const credits = asObject(snapshot?.credits)
-  const primary = mapCodexBucket(asObject(snapshot?.primary), "Primary")
-  const secondary = mapCodexBucket(asObject(snapshot?.secondary), "Secondary")
+  const primary = codexBucket(asObject(snapshot?.primary), "Primary")
+  const secondary = codexBucket(asObject(snapshot?.secondary), "Secondary")
   const lifetime = summary?.lifetimeTokens
-  const lifetimeTokens = typeof lifetime === "number"
-    ? lifetime
-    : typeof lifetime === "string" && Number.isSafeInteger(Number(lifetime))
+  const lifetimeTokens = num(lifetime)
+    ?? (typeof lifetime === "string" && Number.isSafeInteger(Number(lifetime))
       ? Number(lifetime)
-      : undefined
+      : undefined)
 
   if (!primary && !secondary && lifetimeTokens === undefined) return null
   return {
-    providerName: "Codex",
     fiveHour: primary,
     sevenDay: secondary,
-    subscriptionType: typeof snapshot?.planType === "string"
-      ? snapshot.planType
-      : typeof account?.planType === "string" ? account.planType : undefined,
+    subscriptionType: str(snapshot?.planType) ?? str(account?.planType),
     lifetimeTokens,
-    creditBalance: typeof credits?.balance === "string" ? credits.balance : undefined,
+    creditBalance: str(credits?.balance),
     creditsUnlimited: credits?.unlimited === true,
   }
 }
 
+function copilotQuotaBucket(
+  raw: Record<string, unknown> | undefined,
+  label: string,
+): UsageBucket | undefined {
+  if (!raw) return undefined
+  const remaining = num(raw.remainingPercentage)
+  const used = num(raw.usedRequests)
+  const entitlement = num(raw.entitlementRequests)
+
+  let utilization: number | undefined
+  if (remaining !== undefined) utilization = 100 - remaining
+  else if (raw.isUnlimitedEntitlement === true || entitlement === -1) utilization = 0
+  else if (used !== undefined && entitlement !== undefined && entitlement > 0) {
+    utilization = used / entitlement * 100
+  }
+  return usageBucket(utilization, str(raw.resetDate), label)
+}
+
+/** Map Copilot's account quota into the primary shared usage meter. */
+export function mapCopilotRuntimeResponse(data: Record<string, unknown>): UsageData | null {
+  if (data.available !== true) return null
+  const snapshots = asObject(asObject(data.quota)?.quotaSnapshots)
+  const primary = copilotQuotaBucket(asObject(snapshots?.chat), "Chat")
+    ?? copilotQuotaBucket(asObject(snapshots?.premium_interactions), "Premium interactions")
+  return primary ? { fiveHour: primary } : null
+}
+
+// ── The table ─────────────────────────────────────────────────────────────
+
+interface QuotaSource {
+  /** Endpoint carrying this agent's live quota. */
+  endpoint: string
+  /** Reads that endpoint's own response shape into the shared meter. */
+  read(data: Record<string, unknown>): UsageData | null
+  /** Older runtime shape, tried only when the primary endpoint fails. */
+  legacy?: { endpoint: string; read(data: Record<string, unknown>): UsageData | null }
+}
+
+const QUOTA_SOURCES: Record<AgentKind, QuotaSource> = {
+  claude: {
+    endpoint: "/api/claude/runtime",
+    read: mapClaudeRuntimeResponse,
+    legacy: { endpoint: "/api/usage", read: mapLegacyClaudeUsage },
+  },
+  codex: { endpoint: "/api/codex/runtime", read: mapCodexRuntimeResponse },
+  copilot: { endpoint: "/api/copilot/runtime", read: mapCopilotRuntimeResponse },
+}
+
 const POLL_INTERVAL = 5 * 60 * 1000
 
-export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageResult {
+export function useTokenUsage(agentKind: AgentKind = DEFAULT_AGENT_KIND): UseTokenUsageResult {
   const canViewUsage = useCapability("viewUsage")
   const [usage, setUsage] = useState<UsageData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -170,6 +235,8 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
 
   const fetchUsage = useCallback(async () => {
     if (!canViewUsage) return
+    // A monotonic id plus an abort controller, so a slow response in one
+    // agent's shape can never reach another agent's reader after a switch.
     const requestId = ++requestIdRef.current
     activeRequestRef.current?.abort()
     const controller = new AbortController()
@@ -180,16 +247,12 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
 
     setLoading(true)
     try {
-      let res = await authFetch(
-        agentKind === "codex" ? "/api/codex/runtime" : "/api/claude/runtime",
-        { signal: controller.signal },
-      )
-      // Older Claude runtimes do not expose structured usage through the SDK.
-      // Keep the existing macOS OAuth implementation as a compatibility path.
-      let usedLegacyClaudeUsage = false
-      if (agentKind === "claude" && !res.ok && !controller.signal.aborted) {
-        res = await authFetch("/api/usage", { signal: controller.signal })
-        usedLegacyClaudeUsage = true
+      const source = QUOTA_SOURCES[agentKind]
+      let res = await authFetch(source.endpoint, { signal: controller.signal })
+      let read = source.read
+      if (source.legacy && !res.ok && !controller.signal.aborted) {
+        res = await authFetch(source.legacy.endpoint, { signal: controller.signal })
+        read = source.legacy.read
       }
       if (!isCurrentRequest()) return
 
@@ -206,11 +269,9 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
 
       const data = await res.json() as Record<string, unknown>
       if (!isCurrentRequest()) return
-      const mapped = agentKind === "codex"
-        ? mapCodexRuntimeResponse(data)
-        : usedLegacyClaudeUsage ? mapUsageResponse(data) : mapClaudeRuntimeResponse(data)
+      const mapped = read(data)
       setAvailable(mapped !== null)
-      setUsage(mapped ? { ...mapped, fetchedAt: Date.now() } : null)
+      setUsage(mapped ? { ...mapped, agentKind, fetchedAt: Date.now() } : null)
     } catch {
       // Network error — don't change available state or clear existing data
     } finally {
@@ -239,7 +300,7 @@ export function useTokenUsage(agentKind: AgentKind = "claude"): UseTokenUsageRes
       activeRequestRef.current?.abort()
       activeRequestRef.current = null
     }
-  }, [canViewUsage, fetchUsage])
+  }, [agentKind, canViewUsage, fetchUsage])
 
   return {
     usage: canViewUsage ? usage : null,

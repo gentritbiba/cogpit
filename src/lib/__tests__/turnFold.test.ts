@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { planTurnFold, turnFoldLabel } from "@/lib/turnFold"
-import type { TurnContentBlock, ToolCall, ThinkingBlock } from "@/lib/types"
+import type { TurnContentBlock, ToolCall, ThinkingBlock } from "../../../shared/session/types"
 
 function tool(name: string): ToolCall {
   return { id: `t-${name}`, name, input: {}, timestamp: "" } as ToolCall

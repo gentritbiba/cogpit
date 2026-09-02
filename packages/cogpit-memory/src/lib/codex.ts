@@ -1,5 +1,6 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
 import { computeStats, createEmptySessionStats } from "./sessionStats"
+import { appendAssistantText } from "./turnContent"
 import {
   findFailedNestedPatchCallIds,
   parseCodexToolPatches,
@@ -16,6 +17,8 @@ import type {
   ImageBlock,
   ParseSessionOptions,
   ParsedSession,
+  RawRecord,
+  SessionStatusInfo,
   SubAgentMessage,
   ThinkingBlock,
   TokenUsage,
@@ -273,17 +276,6 @@ function parseTokenUsage(value: unknown): TokenUsage | null {
   }
 }
 
-function appendAssistantText(turn: Turn, text: string, timestamp: string): void {
-  if (!text) return
-  turn.assistantText.push(text)
-  const last = turn.contentBlocks[turn.contentBlocks.length - 1]
-  if (last && last.kind === "text") {
-    last.text.push(text)
-    return
-  }
-  turn.contentBlocks.push({ kind: "text", text: [text], timestamp })
-}
-
 function appendThinking(turn: Turn, text: string, timestamp: string): void {
   if (!text) return
   const block: ThinkingBlock = { type: "thinking", thinking: text, signature: "" }
@@ -530,20 +522,47 @@ export function isCodexSessionText(jsonlText: string): boolean {
   return false
 }
 
+/** True when already-parsed raw records came from this CLI. */
+export function isCodexRawRecords(records: readonly { type?: unknown }[]): boolean {
+  return isCodexRecord((records[0] ?? null) as CodexRecord | null)
+}
+
 export function extractCodexMetadataFromLines(lines: string[]) {
   const records = lines.map(safeParseLine).filter(isCodexRecord)
   return extractMetadataFromRecords(records)
 }
 
-export function parseCodexSession(jsonlText: string, options?: ParseSessionOptions): ParsedSession {
-  const records = jsonlText
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(safeParseLine)
-    .filter(isCodexRecord)
+interface CodexWalk extends ParsedSession {
+  /**
+   * Index, into the array handed to the walk, at which each turn began — the
+   * `turn_context` that configures a turn when there is one, otherwise the
+   * record that opened it.
+   */
+  turnStartIndices: number[]
+}
 
-  const metadata = extractMetadataFromRecords(records)
+/**
+ * The single Codex turn walk: builds the turns *and* reports where each one
+ * started.
+ *
+ * Turn boundaries used to be a second predicate that re-answered "what starts a
+ * turn" independently, and it drifted — it only recognised the `event_msg`
+ * prompt shape, which current CLI versions no longer write, so every boundary
+ * scan came back empty and undo silently kept nothing. Deriving both from one
+ * pass makes that class of disagreement unrepresentable.
+ *
+ * Non-Codex entries are skipped in place rather than filtered out, so the
+ * returned indexes stay aligned with the caller's array — `turnBoundaryLines`
+ * substitutes an empty record for a malformed line precisely so a bad line
+ * cannot shift the cut.
+ */
+function walkCodexRecords(
+  records: readonly Record<string, unknown>[],
+  options?: ParseSessionOptions,
+): CodexWalk {
+  const metadata = extractMetadataFromRecords(
+    (records as readonly CodexRecord[]).filter(isCodexRecord),
+  )
   const turns: Turn[] = []
   const pendingToolCalls = new Map<string, ToolCall>()
   const webSearchCalls = new Map<string, ToolCall>()
@@ -654,9 +673,35 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
   // first turn of a window can therefore be a fragment; every later one opens
   // after a `turn_context` or a user message.
   let sawTurnStart = false
+  // Where the turn now being built began. A `turn_context` configures the turn
+  // that follows it, so the boundary is the context record rather than the
+  // prompt — cutting at the prompt would strand a context record belonging to a
+  // turn that no longer exists.
+  const turnStartIndices: number[] = []
+  let recordIndex = 0
+  let pendingContextIndex: number | null = null
+  let pendingTurnStart: number | null = null
+
+  /**
+   * Finalize the open turn and, only if it actually became a turn, record where
+   * it started. `finalizeTurn` drops a turn that never gathered content, so
+   * committing the index on creation instead would leave a boundary pointing at
+   * a turn the parser discarded.
+   */
+  function commitTurn(turn: Turn | null): Turn | null {
+    const before = turns.length
+    const result = finalizeTurn(turns, turn, lastTurnTimestamp)
+    if (turns.length > before && pendingTurnStart !== null) {
+      turnStartIndices.push(pendingTurnStart)
+    }
+    pendingTurnStart = null
+    return result
+  }
 
   function createActiveTurn(turnId: string | null, timestamp: string, model: string | null): Turn {
     const turn = createTurn(turnId, timestamp, model)
+    pendingTurnStart = pendingContextIndex ?? recordIndex
+    pendingContextIndex = null
     if (!sawTurnStart) turn.isFragment = true
     if (pendingCompaction) {
       turn.compactionSummary = pendingCompaction
@@ -692,12 +737,15 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
     appendToolCall(targetTurn, toolCall, timestamp)
   }
 
-  for (const record of records) {
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index] as CodexRecord
+    if (!isCodexRecord(record)) continue
+    recordIndex = index
     const payload = isObject(record.payload) ? record.payload : undefined
     const timestamp = record.timestamp ?? ""
 
     if (record.type === "compacted") {
-      current = finalizeTurn(turns, current, lastTurnTimestamp)
+      current = commitTurn(current)
       pendingCompaction = "Conversation compacted"
       lastTurnTimestamp = timestamp
       continue
@@ -707,7 +755,8 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
     if (record.type === "world_state") continue
 
     if (record.type === "turn_context") {
-      current = finalizeTurn(turns, current, lastTurnTimestamp)
+      current = commitTurn(current)
+      pendingContextIndex = index
       currentTurnId = typeof payload?.turn_id === "string" ? payload.turn_id : null
       currentModel = typeof payload?.model === "string" ? payload.model : currentModel
       lastTurnTimestamp = timestamp
@@ -717,7 +766,7 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
 
     if (record.type === "event_msg" && payload?.type === "user_message" && typeof payload.message === "string") {
       if (current && (current.assistantText.length > 0 || current.toolCalls.length > 0 || current.thinking.length > 0)) {
-        current = finalizeTurn(turns, current, lastTurnTimestamp)
+        current = commitTurn(current)
       }
       sawTurnStart = true
       current ??= createActiveTurn(currentTurnId, timestamp, currentModel)
@@ -1143,9 +1192,10 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
     }
   }
 
-  finalizeTurn(turns, current, lastTurnTimestamp)
+  commitTurn(current)
 
   return {
+    turnStartIndices,
     sessionId: metadata.sessionId,
     version: metadata.version,
     gitBranch: metadata.gitBranch,
@@ -1161,4 +1211,241 @@ export function parseCodexSession(jsonlText: string, options?: ParseSessionOptio
     branchedFrom: metadata.branchedFrom,
     agentKind: "codex" as const,
   }
+}
+
+export function parseCodexSession(jsonlText: string, options?: ParseSessionOptions): ParsedSession {
+  const records = jsonlText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map(safeParseLine)
+    .filter(isCodexRecord)
+
+  const { turnStartIndices: _starts, ...session } = walkCodexRecords(
+    records as readonly unknown[] as readonly Record<string, unknown>[],
+    options,
+  )
+  return session
+}
+
+/**
+ * Incrementally extend a parsed session with newly written lines.
+ *
+ * Rollout records carry cross-turn state (patch folding, collaboration agent
+ * lifecycles, token roll-ups), so the whole transcript is re-parsed rather than
+ * only its tail.
+ */
+export function appendCodexSession(existing: ParsedSession, newJsonlText: string): ParsedSession {
+  const prefix = existing.rawMessages.map((record) => JSON.stringify(record)).join("\n")
+  return parseCodexSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
+}
+
+// ── Background-agent signals (collab) ───────────────────────────────────────
+//
+// Collaboration agents are spawned with spawn_agent, tracked through
+// sub_agent_activity events, and finish via wait_agent results, FINAL_ANSWER
+// inter-agent messages, or interruption. A task_complete with spawned agents
+// still running means the session is waiting on agents, not on the user.
+// This mirrors the lifecycle rules in the full parser above, reduced to
+// alive/done bookkeeping.
+
+const TERMINAL_INTER_AGENT_TYPES = new Set(["FINAL_ANSWER", "ERROR", "FAILED", "INTERRUPTED"])
+
+function codexPayloadText(payload: Record<string, unknown>): string {
+  const content = payload.content
+  if (!Array.isArray(content)) return ""
+  return content
+    .filter((block): block is Record<string, unknown> => isObject(block) && block.type === "input_text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n")
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return isObject(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function collectCodexPendingAgents(rawMessages: readonly RawRecord[]): string[] {
+  const alive = new Map<string, string>() // agentId → description
+  const done = new Set<string>()
+  const agentIdByPath = new Map<string, string>()
+  const spawnCalls = new Map<string, string>() // call_id → task name
+  const waitCalls = new Set<string>()
+  const interruptCalls = new Map<string, string[]>() // call_id → target agent ids
+
+  function markAlive(agentId: string, description: string) {
+    if (!done.has(agentId)) alive.set(agentId, alive.get(agentId) || description)
+  }
+
+  for (const msg of rawMessages) {
+    const payload = isObject(msg.payload) ? msg.payload : null
+    if (!payload) continue
+
+    if (msg.type === "event_msg" && payload.type === "sub_agent_activity"
+      && typeof payload.agent_thread_id === "string" && typeof payload.agent_path === "string") {
+      const agentId = payload.agent_thread_id
+      const kind = typeof payload.kind === "string" ? payload.kind : "started"
+      const eventId = typeof payload.event_id === "string" ? payload.event_id : ""
+      const existingId = agentIdByPath.get(payload.agent_path)
+      const known = alive.has(agentId) || done.has(agentId) || existingId !== undefined || spawnCalls.has(eventId)
+      // Only a `started` event (or a previously known agent) establishes a child.
+      if (kind !== "started" && !known) continue
+
+      // Agent-id renumbering: a provisional id from the spawn output is
+      // superseded by the thread id once activity events arrive.
+      if (existingId && existingId !== agentId) {
+        if (alive.has(existingId)) {
+          markAlive(agentId, alive.get(existingId) ?? "")
+          alive.delete(existingId)
+        }
+        if (done.has(existingId)) done.add(agentId)
+      }
+      agentIdByPath.set(payload.agent_path, agentId)
+
+      if (kind === "interrupted") {
+        done.add(agentId)
+        alive.delete(agentId)
+      } else {
+        markAlive(agentId, spawnCalls.get(eventId) ?? "")
+      }
+      continue
+    }
+
+    if (msg.type !== "response_item") continue
+
+    if (payload.type === "function_call" && typeof payload.call_id === "string") {
+      const name = normalizeFunctionName(typeof payload.name === "string" ? payload.name : "")
+      if (name === "spawn_agent") {
+        const input = parseJsonObject(payload.arguments)
+        spawnCalls.set(payload.call_id, typeof input?.task_name === "string" ? input.task_name : "")
+      } else if (name === "wait_agent") {
+        waitCalls.add(payload.call_id)
+      } else if (name === "interrupt_agent") {
+        const input = parseJsonObject(payload.arguments)
+        const targets = [input?.agent_id, ...(Array.isArray(input?.agent_ids) ? input.agent_ids : [])]
+          .filter((id): id is string => typeof id === "string")
+        interruptCalls.set(payload.call_id, targets)
+      }
+      continue
+    }
+
+    if (payload.type === "function_call_output" && typeof payload.call_id === "string") {
+      const callId = payload.call_id
+      if (spawnCalls.has(callId)) {
+        const output = parseJsonObject(payload.output)
+        const agentId = typeof output?.agent_id === "string" ? output.agent_id : ""
+        if (agentId) {
+          markAlive(agentId, spawnCalls.get(callId) ?? "")
+          const agentPath = typeof output?.task_name === "string" ? output.task_name : ""
+          if (agentPath && !agentIdByPath.has(agentPath)) agentIdByPath.set(agentPath, agentId)
+        }
+      } else if (waitCalls.has(callId)) {
+        const output = parseJsonObject(payload.output)
+        const statusMap = isObject(output?.status) ? output.status : {}
+        for (const [agentId, status] of Object.entries(statusMap)) {
+          const statusValue = isObject(status) ? status : {}
+          const lifecycle = typeof statusValue.status === "string" ? statusValue.status : ""
+          const isTerminal = typeof statusValue.completed === "string"
+            || typeof statusValue.failed === "string"
+            || typeof statusValue.error === "string"
+            || typeof statusValue.interrupted === "string"
+            || lifecycle === "completed" || lifecycle === "failed" || lifecycle === "interrupted"
+          if (isTerminal) {
+            done.add(agentId)
+            alive.delete(agentId)
+          }
+        }
+      } else if (interruptCalls.has(callId)) {
+        for (const agentId of interruptCalls.get(callId) ?? []) {
+          done.add(agentId)
+          alive.delete(agentId)
+        }
+      }
+      continue
+    }
+
+    if (payload.type === "agent_message" && typeof payload.author === "string") {
+      const text = codexPayloadText(payload)
+      const messageType = text.match(/^Message Type:\s*([^\r\n]+)/)?.[1]?.trim().toUpperCase() ?? ""
+      if (!TERMINAL_INTER_AGENT_TYPES.has(messageType)) continue
+      const agentId = agentIdByPath.get(payload.author) ?? payload.author
+      done.add(agentId)
+      alive.delete(agentId)
+    }
+  }
+
+  return [...alive.entries()]
+    .filter(([agentId]) => !done.has(agentId))
+    .map(([, description]) => description)
+}
+
+/** Derive status by walking backward through a rollout's records. */
+export function deriveCodexSessionStatus(rawMessages: readonly RawRecord[]): SessionStatusInfo {
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const msg = rawMessages[i]
+
+    if (msg.type === "event_msg") {
+      const payload = msg.payload as { type?: string; message?: string } | undefined
+      switch (payload?.type) {
+        case "task_complete": {
+          // The turn ended, but spawned collab agents may still be running.
+          const pending = collectCodexPendingAgents(rawMessages)
+          if (pending.length > 0) {
+            return {
+              status: "awaiting_agents",
+              pendingQueue: 0,
+              pendingAgents: pending.length,
+              pendingAgentDescriptions: pending.filter((description) => description.length > 0),
+            }
+          }
+          return { status: "completed" }
+        }
+        case "task_started":
+          return { status: "processing" }
+        case "agent_message":
+          return { status: "thinking" }
+        case "token_count":
+          continue
+      }
+    }
+
+    if (msg.type === "response_item") {
+      const payload = msg.payload as { type?: string; name?: string; role?: string } | undefined
+      if (!payload) continue
+
+      if (payload.type === "function_call") {
+        return { status: "tool_use", toolName: payload.name ? normalizeFunctionName(payload.name) : payload.name }
+      }
+      if (payload.type === "message") {
+        if (payload.role === "assistant") return { status: "thinking" }
+        if (payload.role === "user") return { status: "processing" }
+      }
+    }
+  }
+
+  return { status: "idle" }
+}
+
+// ── Turn boundaries ─────────────────────────────────────────────────────────
+
+/**
+ * Indexes at which a turn starts.
+ *
+ * A rollout writes the `turn_context` record that configures a turn *before*
+ * the user message that opens it, so the boundary reported is that context
+ * record: cutting at the user message alone would strand a context line
+ * belonging to a turn that no longer exists.
+ */
+export function codexTurnBoundaries(
+  records: readonly Record<string, unknown>[],
+): number[] {
+  // Derived from the parser's own walk, not a second predicate, so the cut can
+  // never land somewhere the parser does not consider a turn start. Stats are
+  // skipped because only the indexes are wanted.
+  return walkCodexRecords(records, { skipStats: true }).turnStartIndices
 }

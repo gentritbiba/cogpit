@@ -5,12 +5,12 @@ import { describe, expect, it, vi } from "vitest"
 vi.mock("../../lib/notificationDelivery", () => ({ deliverNotification: vi.fn() }))
 
 import { planReaping, type PendingOrphan } from "../../lib/leakReaper"
-import type { OrphanedClaudeSubtree } from "../../lib/systemProcesses"
+import type { OrphanedAgentSubtree } from "../../lib/systemProcesses"
 
 const HOUR = 3600
 const MIN_AGE = 30 * 60
 
-function subtree(overrides: Partial<OrphanedClaudeSubtree> = {}): OrphanedClaudeSubtree {
+function subtree(overrides: Partial<OrphanedAgentSubtree> = {}): OrphanedAgentSubtree {
   return {
     rootPid: 100,
     command: "claude",

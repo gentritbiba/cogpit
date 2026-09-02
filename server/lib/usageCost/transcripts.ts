@@ -1,10 +1,13 @@
 /**
- * Pure line parsers for the provider CLIs' on-disk session transcripts.
+ * Line parsers for the agent CLIs' on-disk session transcripts, and the scanner
+ * that hides which one a caller is streaming into.
  *
- * Both parsers work line-at-a-time so callers can stream large files without
- * materialising them. Neither touches the filesystem. Ported from T3 Code's
- * usage scanner (itself modelled on ccusage).
+ * The parsers work line-at-a-time so callers can stream large files without
+ * materialising them. Ported from T3 Code's usage scanner (itself modelled on
+ * ccusage).
  */
+import { basename, dirname } from "node:path"
+import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import type { UsageCostProvider, UsageCostTokenTotals } from "../../../shared/contracts/usageCost"
 import { totalUsageCostTokens } from "../../../shared/contracts/usageCost"
 
@@ -39,14 +42,6 @@ function parseJsonRecord(line: string): Record<string, unknown> | null {
   } catch {
     return null
   }
-}
-
-/**
- * Cheap substring gate applied before JSON.parse. Transcripts are mostly tool
- * output; only a minority of lines carry usage.
- */
-export function mightCarryUsage(line: string, provider: UsageCostProvider): boolean {
-  return provider === "claude" ? line.includes('"usage"') : line.includes('"token_count"')
 }
 
 /**
@@ -240,4 +235,172 @@ export function parseCodexUsageLine(line: string, state: CodexScanState): UsageC
     // Events surviving fork-copy suppression are unique to this rollout.
     dedupeKey: null,
   }
+}
+
+export interface CopilotScanState {
+  sessionId: string
+  lastUsageByModel: Map<string, UsageCostTokenTotals>
+}
+
+export function initialCopilotScanState(sessionId = ""): CopilotScanState {
+  return { sessionId, lastUsageByModel: new Map() }
+}
+
+function cumulativeDelta(current: number, previous: number): number {
+  return current >= previous ? current - previous : current
+}
+
+function usageDelta(
+  current: UsageCostTokenTotals,
+  previous: UsageCostTokenTotals | undefined,
+): UsageCostTokenTotals {
+  if (!previous) return current
+  const outputTokens = cumulativeDelta(current.outputTokens, previous.outputTokens)
+  return {
+    uncachedInputTokens: cumulativeDelta(current.uncachedInputTokens, previous.uncachedInputTokens),
+    cachedInputTokens: cumulativeDelta(current.cachedInputTokens, previous.cachedInputTokens),
+    cacheCreationTokens: cumulativeDelta(current.cacheCreationTokens, previous.cacheCreationTokens),
+    cacheCreation1hTokens: 0,
+    outputTokens,
+    reasoningTokens: Math.min(
+      outputTokens,
+      cumulativeDelta(current.reasoningTokens, previous.reasoningTokens),
+    ),
+  }
+}
+
+/** Convert Copilot's cumulative runtime/shutdown metrics into new usage only. */
+export function parseCopilotUsageMetrics(
+  value: unknown,
+  state: CopilotScanState,
+  timestampMs: number,
+): UsageCostRecord[] {
+  const metrics = asRecord(value)
+  const modelMetrics = metrics ? asRecord(metrics.modelMetrics) : null
+  if (!metrics || !modelMetrics || !Number.isFinite(timestampMs)) return []
+
+  const records: UsageCostRecord[] = []
+  for (const [model, rawMetric] of Object.entries(modelMetrics)) {
+    const usage = asRecord(asRecord(rawMetric)?.usage)
+    if (!usage || model.length === 0) continue
+
+    const inputTokens = int(usage.inputTokens)
+    const cachedInputTokens = int(usage.cacheReadTokens)
+    const cacheCreationTokens = int(usage.cacheWriteTokens)
+    const outputTokens = int(usage.outputTokens)
+    const current: UsageCostTokenTotals = {
+      // Copilot's aggregate input count includes both cache categories.
+      uncachedInputTokens: Math.max(0, inputTokens - cachedInputTokens - cacheCreationTokens),
+      cachedInputTokens,
+      cacheCreationTokens,
+      cacheCreation1hTokens: 0,
+      outputTokens,
+      reasoningTokens: Math.min(outputTokens, int(usage.reasoningTokens)),
+    }
+    const totals = usageDelta(current, state.lastUsageByModel.get(model))
+    state.lastUsageByModel.set(model, current)
+    if (totalUsageCostTokens(totals) === 0) continue
+
+    records.push({
+      provider: "copilot",
+      timestampMs,
+      model,
+      sessionId: state.sessionId,
+      totals,
+      reportedCostUsd: null,
+      dedupeKey: null,
+    })
+  }
+  return records
+}
+
+/**
+ * Parses Copilot's durable per-model usage snapshot. Individual
+ * `assistant.usage` events are ephemeral, so shutdown metrics are the only
+ * complete token breakdown available in an on-disk session.
+ */
+export function parseCopilotUsageLine(
+  line: string,
+  state: CopilotScanState,
+): UsageCostRecord[] {
+  const record = parseJsonRecord(line)
+  if (!record || (typeof record.agentId === "string" && record.agentId.length > 0)) return []
+  const data = asRecord(record.data)
+  if (!data) return []
+
+  if (record.type === "session.start") {
+    const sessionId = data.sessionId
+    if (typeof sessionId === "string" && sessionId.length > 0) state.sessionId = sessionId
+    return []
+  }
+
+  if (record.type !== "session.shutdown") return []
+  const timestampMs = parseTimestampMs(record.timestamp)
+  return timestampMs === null ? [] : parseCopilotUsageMetrics(data, state, timestampMs)
+}
+
+// ── Scanner ──────────────────────────────────────────────────────────────
+
+/**
+ * A stateful reducer over one transcript's lines.
+ *
+ * `wantsLine` is deliberately not "might this line carry usage": a transcript
+ * also carries lines that only name the model or the session an eventual usage
+ * record belongs to, and dropping those would leave the record unattributed.
+ */
+export interface UsageScanner {
+  /** Cheap substring gate applied before JSON.parse. */
+  wantsLine(line: string): boolean
+  /** Records this line contributes, after folding it into the scanner's state. */
+  accept(line: string): UsageCostRecord[]
+}
+
+const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> = Object.freeze({
+  claude: (): UsageScanner => ({
+    // Stateless: every assistant record repeats its message's whole usage
+    // object, so a line is either self-contained or of no interest.
+    wantsLine: (line) => line.includes('"usage"'),
+    accept: (line) => {
+      const record = parseClaudeUsageLine(line)
+      return record === null ? [] : [record]
+    },
+  }),
+
+  codex: (): UsageScanner => {
+    const state = initialCodexScanState()
+    return {
+      // token_count carries the usage, turn_context the model it belongs to and
+      // session_meta the session it belongs to. The latter two report no tokens
+      // at all but still have to reach the reducer.
+      wantsLine: (line) =>
+        line.includes('"token_count"')
+        || line.includes('"turn_context"')
+        || line.includes('"session_meta"'),
+      accept: (line) => {
+        const record = parseCodexUsageLine(line, state)
+        return record === null ? [] : [record]
+      },
+    }
+  },
+
+  copilot: (filePath): UsageScanner => {
+    // Seeded from the containing directory, which is the session id, so records
+    // written before `session.start` is reached are still attributed. A later
+    // session.start overrides it.
+    const state = initialCopilotScanState(basename(dirname(filePath)))
+    return {
+      wantsLine: (line) =>
+        (line.includes('"session.shutdown"') && line.includes('"modelMetrics"'))
+        || line.includes('"session.start"'),
+      accept: (line) => parseCopilotUsageLine(line, state),
+    }
+  },
+})
+
+/** A scanner for one transcript, owning its own state and its own line gate. */
+export function createUsageScanner(
+  provider: UsageCostProvider,
+  filePath: string,
+): UsageScanner {
+  return SCANNERS[provider](filePath)
 }

@@ -6,7 +6,7 @@ import {
   isSystemMessage,
   isSummaryMessage,
   isCompactBoundary,
-} from "@/lib/messageTypeGuards"
+} from "../../../shared/session/messageTypeGuards"
 import type {
   UserMessage,
   AssistantMessage,
@@ -14,7 +14,7 @@ import type {
   SystemMessage,
   SummaryMessage,
   TokenUsage,
-} from "@/lib/types"
+} from "../../../shared/session/types"
 
 // ── Minimal fixture factories ────────────────────────────────────────────────
 

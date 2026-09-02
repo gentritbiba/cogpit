@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { matchesSearch } from "../timelineHelpers"
-import type { Turn } from "../types"
+import type { Turn } from "../../../shared/session/types"
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
   return {

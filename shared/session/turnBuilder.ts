@@ -175,6 +175,13 @@ function mergeTokenUsage(
   if (!existing) {
     return { ...incoming }
   }
+  // Thinking tokens are a slice of output_tokens, so they add up the same way.
+  // Dropping them here used to make a turn with several assistant records fall
+  // back to a 4-chars-per-token estimate even though every record reported the
+  // exact count.
+  const thinking =
+    (existing.output_tokens_details?.thinking_tokens ?? 0) +
+    (incoming.output_tokens_details?.thinking_tokens ?? 0)
   return {
     input_tokens: existing.input_tokens + incoming.input_tokens,
     output_tokens: existing.output_tokens + incoming.output_tokens,
@@ -185,6 +192,9 @@ function mergeTokenUsage(
       (existing.cache_read_input_tokens ?? 0) +
       (incoming.cache_read_input_tokens ?? 0),
     speed: incoming.speed ?? existing.speed,
+    ...(existing.output_tokens_details || incoming.output_tokens_details
+      ? { output_tokens_details: { thinking_tokens: thinking } }
+      : {}),
   }
 }
 
@@ -442,6 +452,13 @@ export function pairAgentMessageReplies(turns: readonly Turn[]): Turn[] {
  *
  * Mirrors the turn-creation rule of `buildTurns` below — a parser test asserts
  * the two agree, so keep them in lockstep.
+ *
+ * This is a cheap forward scan on the append hot path, which is the only reason
+ * it restates the rule instead of calling `buildTurnsWithStarts`. It is
+ * deliberately NOT used to cut a transcript: undo and branching go through
+ * `AgentFormat.turnBoundaries`, which is derived from the real turn walk,
+ * because a boundary that disagrees with the parser truncates history. Widen
+ * this only alongside `buildTurns`, never on its own.
  */
 export function findTurnStartIndices(messages: RawMessage[]): number[] {
   const starts: number[] = []
@@ -475,8 +492,25 @@ export function findTurnStartIndices(messages: RawMessage[]): number[] {
   return starts
 }
 
-export function buildTurns(messages: RawMessage[]): Turn[] {
+export interface BuiltTurns {
+  turns: Turn[]
+  /** Index, into `messages`, of the record that opened each turn. */
+  turnStartIndices: number[]
+}
+
+/**
+ * Build turns and report where each one started.
+ *
+ * Turn boundaries used to be derived by a separate predicate that restated this
+ * function's turn rule; the two drifted, and because boundaries decide where a
+ * transcript gets physically cut, the disagreement silently truncated history.
+ * Both now come from this one walk.
+ */
+export function buildTurnsWithStarts(messages: RawMessage[]): BuiltTurns {
   const turns: Turn[] = []
+  const turnStartIndices: number[] = []
+  let pendingTurnStart: number | null = null
+  let recordIndex = 0
   let current: Turn | null = null
 
   // Track the compaction to attach to the next turn
@@ -627,11 +661,14 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // Group EnterPlanMode → ExitPlanMode sequences into plan_mode blocks
     current.contentBlocks = groupPlanModeBlocks(current.contentBlocks)
     turns.push(current)
+    if (pendingTurnStart !== null) turnStartIndices.push(pendingTurnStart)
+    pendingTurnStart = null
     current = null
     agentBlockMap.clear()
   }
 
-  for (const msg of messages) {
+  for (recordIndex = 0; recordIndex < messages.length; recordIndex++) {
+    const msg = messages[recordIndex]
     // Legacy summary record — carries a one-line title, no body
     if (isSummaryMessage(msg)) {
       finalizeTurn()
@@ -653,7 +690,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     // user had typed it.
     if (isCompactSummaryMessage(msg)) {
       finalizeTurn()
-      current = createTurn(msg, null)
+      pendingTurnStart = recordIndex
+        current = createTurn(msg, null)
       current.compactionSummary = extractCompactionSummary(msg.message.content)
       current.compactionMeta = pendingCompaction?.meta
       pendingCompaction = null
@@ -820,6 +858,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
         // No turn to resume: a paged window opened past the launching prompt.
         // A null userMessage marks this as the tail half of a cut turn, so
         // `prependTurns` stitches it back once the older page arrives.
+        pendingTurnStart = recordIndex
         current = createTurn(msg, null)
         current.contentBlocks.push(notification)
         attachPendingCompaction(current)
@@ -827,7 +866,8 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
       }
 
       finalizeTurn()
-      current = createTurn(msg, msg.message.content)
+      pendingTurnStart = recordIndex
+        current = createTurn(msg, msg.message.content)
       attachPendingCompaction(current)
       if (pendingRecap) {
         current.contentBlocks.push({ kind: "recap", content: pendingRecap.content, timestamp: pendingRecap.timestamp })
@@ -839,6 +879,7 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
     if (isAssistantMessage(msg)) {
       if (!current) {
         // Assistant message without a preceding user message; create a synthetic turn
+        pendingTurnStart = recordIndex
         current = createTurn(msg, null)
         attachPendingCompaction(current)
       }
@@ -1114,5 +1155,11 @@ export function buildTurns(messages: RawMessage[]): Turn[] {
   flushPendingQueuedPrompts()
   finalizeTurn()
 
-  return pairAgentMessageReplies(turns)
+  // Pairing is a 1:1 map, so it cannot disturb the start indexes.
+  return { turns: pairAgentMessageReplies(turns), turnStartIndices }
+}
+
+/** Turns only — the common case. */
+export function buildTurns(messages: RawMessage[]): Turn[] {
+  return buildTurnsWithStarts(messages).turns
 }

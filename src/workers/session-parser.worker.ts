@@ -1,5 +1,5 @@
-import { parseSession, parseSessionAppend } from "@/lib/parser"
-import type { ParsedSession } from "@/lib/types"
+import { parseSession, parseSessionAppend } from "../../shared/session/parser"
+import type { ParsedSession } from "../../shared/session/types"
 
 export type WorkerRequest =
   | { type: "parse"; id: number; text: string }

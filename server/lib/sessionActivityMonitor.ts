@@ -1,20 +1,12 @@
-import {
-  dirs,
-  encodeCodexDirName,
-  getSessionMeta,
-  getSessionStatus,
-  join,
-  listCodexSessionFiles,
-  projectDirToReadableName,
-  readdir,
-  shortNameFromPath,
-  stat,
-} from "../helpers"
-import { readClaudeProjectEntries } from "../routes/projects/claudeProjectEntries"
+import { getSessionMeta, getSessionStatus } from "../helpers"
+import { projectDirToReadableName, shortNameFromPath } from "./projectNames"
+import { projectDirNameFor, type AgentKind } from "../../shared/session/agent-descriptors"
+import { allStores } from "../agents"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
-import { codexAppServer } from "../codex-app-server"
+import { codexAppServer } from "../agents/codexAppServer"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
+import { copilotRuntime } from "../agents/copilotTransport"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -48,6 +40,7 @@ const SWEEP_INTERVAL_MS = 4_000
 const RECENT_WINDOW_MS = 30 * 60_000
 
 interface SessionSnapshot extends TrackedSessionSnapshot {
+  agentKind: AgentKind
   dirName: string
   cwd: string | null
   /** Codex thread id — the key codexAppServer tracks active turns by. */
@@ -60,6 +53,7 @@ interface Candidate {
   fileName: string
   filePath: string
   mtimeMs: number
+  agentKind: AgentKind
 }
 
 /**
@@ -114,36 +108,23 @@ async function sweep(): Promise<void> {
 async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  const entries = await readClaudeProjectEntries()
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === "memory") continue
-    const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-    let files: string[]
+  // Stat-level listing only — never the session inventory, whose identity reads
+  // would re-open every transcript on every sweep.
+  for (const store of allStores()) {
     try {
-      files = await readdir(projectDir)
-    } catch {
-      continue
+      for (const file of await store.listSessionFiles()) {
+        if (file.mtimeMs < minMtimeMs) continue
+        candidates.push({
+          dirName: file.dirName,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mtimeMs: file.mtimeMs,
+          agentKind: store.kind,
+        })
+      }
+    } catch (err) {
+      console.error(`[sessionMonitor] ${store.kind} listing failed:`, err)
     }
-    for (const fileName of files) {
-      if (!fileName.endsWith(".jsonl")) continue
-      const filePath = join(projectDir, fileName)
-      try {
-        const s = await stat(filePath)
-        if (s.mtimeMs < minMtimeMs) continue
-        candidates.push({ dirName: entry.name, fileName, filePath, mtimeMs: s.mtimeMs })
-      } catch { /* deleted mid-scan */ }
-    }
-  }
-
-  try {
-    // Stat-level listing only — never getCodexSessionInventory(), whose
-    // identity reads would re-open every rollout file each sweep.
-    for (const file of await listCodexSessionFiles()) {
-      if (file.mtimeMs < minMtimeMs) continue
-      candidates.push({ dirName: null, fileName: file.fileName, filePath: file.filePath, mtimeMs: file.mtimeMs })
-    }
-  } catch (err) {
-    console.error("[sessionMonitor] codex listing failed:", err)
   }
 
   return candidates
@@ -171,21 +152,22 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
       return { meta, status }
     })
 
-    // Codex rollouts: dirName comes from the transcript's cwd; subagents are
-    // reported through their parent. (Claude subagents live under nested
-    // /subagents/ dirs the flat readdir never lists.)
+    // External-provider transcripts derive their project key from the cwd.
     let dirName = candidate.dirName
     if (dirName === null) {
       if (meta.isSubagent || !meta.cwd) return null
-      dirName = encodeCodexDirName(meta.cwd)
+      dirName = projectDirNameFor(candidate.agentKind, meta.cwd)
     }
 
     const snapshot: SessionSnapshot = {
       // The URL scheme addresses a session by its fileName stem (useUrlSync
       // appends ".jsonl"), so nav must use that — not meta.sessionId, which
       // for Codex is the bare thread id.
-      sessionId: candidate.fileName.replace(/\.jsonl$/, ""),
+      sessionId: candidate.agentKind === "copilot"
+        ? candidate.fileName.split("/")[0]
+        : candidate.fileName.replace(/\.jsonl$/, ""),
       dirName,
+      agentKind: candidate.agentKind,
       cwd: meta.cwd ?? null,
       threadId: meta.sessionId || null,
       status: status.status,
@@ -199,13 +181,19 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
 }
 
 function isActiveTurn(snapshot: SessionSnapshot): boolean {
-  if (!snapshot.dirName.startsWith("codex__") || !snapshot.threadId) return false
+  if (snapshot.agentKind === "copilot" && snapshot.threadId) {
+    return copilotRuntime.isTurnActive(snapshot.threadId)
+  }
+  if (snapshot.agentKind !== "codex" || !snapshot.threadId) return false
   return codexAppServer.getActiveTurnId(snapshot.threadId) !== undefined
 }
 
 function titleFor(session: SessionSnapshot): string {
-  if (session.dirName.startsWith("codex__")) {
+  if (session.agentKind === "codex") {
     return `Codex — ${session.cwd ? shortNameFromPath(session.cwd) : "Codex"}`
+  }
+  if (session.agentKind === "copilot") {
+    return `Copilot — ${session.cwd ? shortNameFromPath(session.cwd) : "Copilot"}`
   }
   return `Claude Code — ${projectDirToReadableName(session.dirName).shortName}`
 }

@@ -1,12 +1,11 @@
 import {
-  dirs,
-  isCodexDirName,
-  isWithinDir,
-  resolveSessionFilePath,
   stat,
   open,
   watch,
 } from "../helpers"
+import { agentKindForDirName } from "../../shared/session/agent-descriptors"
+import { storeForPath } from "../agents"
+import { resolveSessionFilePath } from "../sessionPaths"
 import { lstat, readdir, realpath, stat as fsStat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path"
@@ -14,6 +13,7 @@ import { StringDecoder } from "node:string_decoder"
 import type { UseFn } from "../http"
 import * as streamBus from "../lib/streamBus"
 import { beginActivity, recordActivity } from "../lib/activityMonitor"
+import { copilotRuntime } from "../agents/copilotTransport"
 
 // Allowlist of roots that background task output may be read from. Windows has
 // no /tmp, so nothing would ever pass containment there without %TEMP%.
@@ -26,7 +26,11 @@ const SESSION_UUID_RE = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 let canonicalTaskOutputBases: Promise<string[]> | null = null
 
 function streamSessionId(dirName: string, fileName: string): string {
-  if (isCodexDirName(dirName)) {
+  const agentKind = agentKindForDirName(dirName)
+  if (agentKind === "copilot") {
+    return fileName.split("/")[0] || fileName.replace(/\.jsonl$/, "")
+  }
+  if (agentKind === "codex") {
     // Codex rollout filenames include timestamps and nested date directories;
     // app-server notifications use only the trailing thread UUID.
     const match = SESSION_UUID_RE.exec(fileName)
@@ -264,7 +268,7 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     const filePath = await resolveSessionFilePath(dirName, fileName)
     if (res.destroyed || res.writableEnded) return
-    if (!filePath || (!isCodexDirName(dirName) && !isWithinDir(dirs.PROJECTS_DIR, filePath))) {
+    if (!filePath || storeForPath(filePath)?.kind !== agentKindForDirName(dirName)) {
       res.statusCode = 403
       res.end(JSON.stringify({ error: "Access denied" }))
       return
@@ -374,6 +378,14 @@ export function registerFileWatchRoutes(use: UseFn) {
     // app-server. External/fallback sessions never publish, so subscribing is
     // inert for them and they continue to rely on JSONL file updates.
     const sessionId = streamSessionId(dirName, fileName)
+    const streamAgentKind = agentKindForDirName(dirName)
+    const sendHeartbeat = () => {
+      if (streamAgentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)) {
+        res.write(`data: ${JSON.stringify({ type: "copilot_activity" })}\n\n`)
+      } else {
+        res.write(": heartbeat\n\n")
+      }
+    }
     const snapshot = streamBus.getSnapshot(sessionId)
     if (snapshot && snapshot.length > 0) {
       res.write(`data: ${JSON.stringify({ type: "stream_snapshot", messages: snapshot })}\n\n`)
@@ -410,6 +422,9 @@ export function registerFileWatchRoutes(use: UseFn) {
         initialized = true
         const recentlyActive = Date.now() - s.mtimeMs < 30_000
         res.write(`data: ${JSON.stringify({ type: "init", offset, recentlyActive })}\n\n`)
+        if (streamAgentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)) {
+          sendHeartbeat()
+        }
         void flushNewLines()
       })
       .catch(() => {
@@ -468,7 +483,8 @@ export function registerFileWatchRoutes(use: UseFn) {
     const SUBAGENT_STAT_CAP = 100
     let subagentTick = 0
 
-    const subagentPoller = isCodexDirName(dirName)
+    // Only Claude writes sub-agent transcripts as sibling files to poll for.
+    const subagentPoller = streamAgentKind !== "claude"
       ? null
       : setInterval(async () => {
         if (closed) return
@@ -520,7 +536,7 @@ export function registerFileWatchRoutes(use: UseFn) {
 
     // Heartbeat to keep connection alive
     heartbeat = setInterval(() => {
-      if (!closed) res.write(": heartbeat\n\n")
+      if (!closed) sendHeartbeat()
     }, 15000)
 
     // Cleanup on disconnect

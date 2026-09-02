@@ -1,11 +1,11 @@
 ---
 name: cogpit-memory
-description: CLI tool for Claude Code and Codex session introspection -- retrieves conversation history, tool calls, thinking, sub-agent/team activity, full-text search, and session discovery. All output is JSON to stdout.
+description: CLI tool for Claude Code, Codex, and GitHub Copilot CLI session introspection -- retrieves conversation history, tool calls, thinking, full-text search, session discovery, and supported sub-agent/team activity. All output is JSON to stdout.
 ---
 
 # Cogpit Memory -- Session Context CLI
 
-CLI tool that gives any AI assistant memory of past Claude Code and Codex sessions. Retrieve conversation history, tool usage, thinking, and sub-agent activity via a layered command structure. Session discovery and layered context support both providers; cross-session full-text indexing currently covers Claude Code history, while `search --session` supports either provider.
+CLI tool that gives any AI assistant memory of past Claude Code, Codex, and GitHub Copilot CLI sessions. Retrieve conversation history, tool usage, thinking, and supported sub-agent activity via a layered command structure. Session discovery, root context and cross-session full-text indexing all cover every provider. Copilot nested activity is included inline in the root session, but `context --agent` is unavailable because Copilot CLI does not write separate sub-agent transcript files.
 
 Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
 
@@ -154,7 +154,7 @@ Key details:
 - `contentBlocks` kinds: `thinking`, `text`, `tool_calls`, `sub_agent`, `background_agent`, `queued_prompt`, `hook_event`, `plan_mode`, `recap`, `agent_message`
 - Tool call `result` is truncated at 10,000 chars -- check `resultTruncated: true`
 - Tool call `result` may be `null` if the tool hasn't returned yet
-- Sub-agent blocks show prompt + result text. For full sub-agent conversation, use Layer 3
+- Sub-agent blocks show prompt + result text. When the provider writes a separate sub-agent transcript, use Layer 3 for the full conversation
 
 **Make separate requests per turn** -- do not try to batch multiple turns in one call.
 
@@ -214,13 +214,13 @@ The typical workflow for drilling into sub-agent activity:
 
 1. Call Layer 1 to get the session overview
 2. Look at `turns[].subAgents[]` to find agent IDs
-3. Call Layer 3 with the `--agent` flag to get that sub-agent's overview
+3. If the provider writes a separate sub-agent transcript, call Layer 3 with the `--agent` flag to get that sub-agent's overview
 4. Call Layer 3 + `--turn` to drill into a specific sub-agent turn
 5. If the sub-agent itself had sub-agents, repeat from step 2 using the sub-agent's overview
 
 ## Session Search -- Find keywords across sessions
 
-Search for keywords across all sessions or within a specific session. Searches **everything**: user messages, assistant responses, thinking blocks, tool call inputs/results, sub-agent messages, sub-agent tool calls, and compaction summaries.
+Cross-session search indexes every provider's history. With `--session`, Claude Code, Codex, and Copilot CLI sessions are all supported, including user and assistant messages, thinking, tool I/O, inline sub-agent content, and compaction summaries when the provider records them.
 
 **When to use search vs Layer 1:**
 - You know the session -> Use Layer 1 overview, then drill with Layer 2/3
@@ -229,7 +229,7 @@ Search for keywords across all sessions or within a specific session. Searches *
 ### Basic usage
 
 ```bash
-# Search across all recent sessions (last 5 days)
+# Search recent indexed sessions from all supported CLIs (last 5 days)
 bunx cogpit-memory search "authentication"
 
 # Search within a specific session
@@ -298,14 +298,14 @@ Locations map directly to Layer 2/3 drill-down commands -- use them to fetch ful
 - `turn/{i}/toolCall/{id}/input` -- tool call input -> drill with `--turn {i}`
 - `turn/{i}/toolCall/{id}/result` -- tool call result -> drill with `--turn {i}`
 - `turn/{i}/compactionSummary` -- compaction summary -> drill with `--turn {i}`
-- `agent/{agentId}/...` -- sub-agent content -> drill with `--agent {agentId}` then `--agent {agentId} --turn {i}`
+- `agent/{agentId}/...` -- sub-agent content; drill with `--agent {agentId}` only when the provider writes a separate transcript
 
 ### Typical workflow
 
 1. Search for keyword: `bunx cogpit-memory search "auth"`
 2. Pick a hit from results (e.g., `sessionId: "abc-123"`, `location: "turn/3/assistantMessage"`)
 3. Get full turn context: `bunx cogpit-memory context abc-123 --turn 3`
-4. If hit is in a sub-agent, get agent overview first: `bunx cogpit-memory context abc-123 --agent a7f3bc2`
+4. If a hit is in a sub-agent with a separate transcript, get its overview: `bunx cogpit-memory context abc-123 --agent a7f3bc2`
 
 ### Performance notes
 
@@ -316,7 +316,7 @@ Locations map directly to Layer 2/3 drill-down commands -- use them to fetch ful
 
 ## Index management
 
-The search index is an FTS5 trigram database at `~/.claude/cogpit-memory/search-index.db`. Most commands work without the index (falling back to raw file scanning), but indexed search is significantly faster.
+The search index is an FTS5 database at `~/.claude/cogpit-memory/search-index.db`. Most commands work without the index (falling back to raw file scanning), but indexed search is significantly faster.
 
 ```bash
 # Show index stats (session count, staleness, DB size)
@@ -337,8 +337,8 @@ bunx cogpit-memory index rebuild
 | Turn detail | `bunx cogpit-memory context <sessionId> --turn <N>` |
 | Sub-agent overview | `bunx cogpit-memory context <sessionId> --agent <agentId>` |
 | Sub-agent turn detail | `bunx cogpit-memory context <sessionId> --agent <agentId> --turn <N>` |
-| **Search across sessions** | `bunx cogpit-memory search "<query>"` |
-| **Search single session** | `bunx cogpit-memory search "<query>" --session <sessionId>` |
+| **Search indexed sessions** | `bunx cogpit-memory search "<query>"` |
+| **Search any single provider session** | `bunx cogpit-memory search "<query>" --session <sessionId>` |
 | Index stats | `bunx cogpit-memory index stats` |
 | Index rebuild | `bunx cogpit-memory index rebuild` |
 

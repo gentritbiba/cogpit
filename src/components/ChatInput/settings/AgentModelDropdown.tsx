@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import { AGENT_OPTIONS } from "./modelOptions"
 import { DropdownOptionItem } from "./DropdownOptionItem"
 import type { DropdownOption } from "./types"
@@ -32,7 +32,7 @@ export function AgentModelDropdown({
   options,
   onChange,
 }: AgentModelDropdownProps) {
-  const agentLabel = agentKind === "codex" ? "Codex" : "Claude"
+  const agentLabel = AGENT_OPTIONS.find((option) => option.value === agentKind)?.label ?? agentKind
   const selectedLabel = options.find((option) => option.value === value)?.label ?? fallbackLabel
 
   return (

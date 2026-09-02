@@ -1,6 +1,6 @@
 import { memo, useState } from "react"
 import { ChevronRight, ChevronDown, Webhook, AlertCircle } from "lucide-react"
-import type { ParsedHookEvent } from "@/lib/types"
+import type { ParsedHookEvent } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"

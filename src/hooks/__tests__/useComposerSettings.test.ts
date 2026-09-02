@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import type { ModelOption } from "@/lib/utils"
 
 const modelOptions: Record<AgentKind, ModelOption[]> = {
@@ -14,6 +14,10 @@ const modelOptions: Record<AgentKind, ModelOption[]> = {
   codex: [
     { value: "", label: "Default" },
     { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  ],
+  copilot: [
+    { value: "", label: "Default" },
+    { value: "claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
   ],
 }
 

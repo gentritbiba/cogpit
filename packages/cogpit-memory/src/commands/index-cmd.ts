@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { SearchIndex, type IndexStats } from "../lib/search-index"
-import { DEFAULT_DB_PATH, dirs } from "../lib/dirs"
+import { DEFAULT_DB_PATH } from "../lib/dirs"
 
 export async function indexStats(dbPath?: string): Promise<IndexStats | { error: string }> {
   const path = dbPath ?? DEFAULT_DB_PATH
@@ -26,7 +26,7 @@ export async function indexRebuild(dbPath?: string): Promise<{ status: string; s
   const path = dbPath ?? DEFAULT_DB_PATH
   mkdirSync(dirname(path), { recursive: true })
   const index = new SearchIndex(path)
-  index.buildFull(dirs.PROJECTS_DIR)
+  index.buildFull()
   const stats = index.getStats()
   index.close()
   return { status: "rebuilt", stats }

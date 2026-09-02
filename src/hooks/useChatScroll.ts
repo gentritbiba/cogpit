@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 
 interface UseChatScrollOpts {
   session: ParsedSession | null

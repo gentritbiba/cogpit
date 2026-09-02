@@ -21,11 +21,12 @@ describe("SetupScreen", () => {
     validation.save.mockReset()
   })
 
-  it("explains that Codex is detected automatically", () => {
+  it("explains that Codex and Copilot are detected automatically", () => {
     render(<SetupScreen onConfigured={vi.fn()} />)
 
-    expect(screen.getByText(/connects to Codex automatically/i)).toBeInTheDocument()
+    expect(screen.getByText(/detects Codex and GitHub Copilot CLI automatically/i)).toBeInTheDocument()
     expect(screen.getByText("~/.codex")).toBeInTheDocument()
+    expect(screen.getByText("~/.copilot/session-state")).toBeInTheDocument()
   })
 
   it("keeps the explicit Claude Code connection path", async () => {

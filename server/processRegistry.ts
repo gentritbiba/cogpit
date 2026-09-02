@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import type { AgentKind } from "../shared/providers/types"
+import type { AgentKind } from "../shared/session/types"
 import type { SubagentWatcher } from "./subagentWatcher"
 
 export interface PermissionRequest {
@@ -171,4 +171,86 @@ export async function cleanupProcesses(): Promise<void> {
   } finally {
     for (const observer of observers.values()) observer.dispose()
   }
+}
+
+const SIGKILL_GRACE_MS = 3_000
+
+/** SIGTERM now, SIGKILL after a grace window if the process is still there. */
+function terminate(proc: ChildProcess, stillTracked: () => boolean = () => true): void {
+  try {
+    proc.kill("SIGTERM")
+  } catch {
+    return
+  }
+  const forceKill = setTimeout(() => {
+    if (!stillTracked()) return
+    try { proc.kill("SIGKILL") } catch { /* already dead */ }
+  }, SIGKILL_GRACE_MS)
+  forceKill.unref()
+}
+
+/**
+ * Stop whatever child process a session owns, in either registry.
+ *
+ * Only the agents that spawn a CLI per session are ever in here — the ones
+ * driven over a shared RPC connection own no process to signal.
+ */
+export function terminateTrackedSession(sessionId: string): boolean {
+  let stopped = false
+
+  const session = persistentSessions.get(sessionId)
+  if (session) {
+    stopped = true
+    if (!session.dead) {
+      session.dead = true
+      persistentSessions.delete(sessionId)
+      terminate(session.proc)
+    } else {
+      persistentSessions.delete(sessionId)
+    }
+  }
+
+  const child = activeProcesses.get(sessionId)
+  if (child) {
+    stopped = true
+    activeProcesses.delete(sessionId)
+    terminate(child)
+  }
+  return stopped
+}
+
+/**
+ * Stop every tracked child process and empty both registries, returning how
+ * many were signalled. Unlike `cleanupProcesses`, this does not wait for exits:
+ * `/api/kill-all` answers immediately and lets the grace timer do the rest.
+ */
+export function killTrackedProcesses(): number {
+  let killed = 0
+  const survivors: ChildProcess[] = []
+
+  for (const [sessionId, session] of [...persistentSessions.entries()]) {
+    persistentSessions.delete(sessionId)
+    if (session.dead) continue
+    session.dead = true
+    survivors.push(session.proc)
+    try { session.proc.kill("SIGTERM") } catch { /* already dead */ }
+    killed++
+  }
+
+  for (const [sessionId, proc] of [...activeProcesses.entries()]) {
+    activeProcesses.delete(sessionId)
+    survivors.push(proc)
+    try { proc.kill("SIGTERM") } catch { /* already dead */ }
+    killed++
+  }
+
+  if (survivors.length > 0) {
+    const forceKill = setTimeout(() => {
+      for (const proc of survivors) {
+        try { proc.kill("SIGKILL") } catch { /* already dead */ }
+      }
+    }, SIGKILL_GRACE_MS)
+    forceKill.unref()
+  }
+  return killed
 }

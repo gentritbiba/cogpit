@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../../shared/session/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({

@@ -6,7 +6,7 @@ import {
   Loader2,
   ExternalLink,
 } from "lucide-react"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
 import { useIsMobile } from "@/hooks/useIsMobile"
@@ -528,6 +528,17 @@ export const ToolCallCard = memo(function ToolCallCard({
           thumbnailClassName="max-h-40"
         />
       )}
+
+      {!isCompactMobile && toolCall.resultImages?.map((image, index) => (
+        <LocalImage
+          key={`${image.source.media_type}-${image.source.data.length}-${image.source.data.slice(0, 32)}-${image.source.data.slice(-32)}`}
+          src={`data:${image.source.media_type};base64,${image.source.data}`}
+          alt={`Tool result image ${index + 1}`}
+          id={`tool-result-image:${toolCall.id}:${index}`}
+          className="my-1.5"
+          thumbnailClassName="max-h-40"
+        />
+      ))}
 
       {skillMeta && !isCompactMobile && (
         <div className="mt-1 flex items-center gap-2 font-mono text-xs text-muted-foreground">

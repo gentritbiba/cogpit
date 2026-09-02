@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { PlanModeBlock } from "../PlanModeBlock"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
 // Mock useSessionContext — required by ToolCallCard

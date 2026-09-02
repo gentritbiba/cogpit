@@ -26,7 +26,7 @@ import { DeviceSwitcher } from "@/components/DeviceSwitcher"
 import { ContextBadge } from "@/components/header-shared"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { projectName } from "@/lib/format"
-import type { ParsedSession, RawMessage } from "@/lib/types"
+import type { ParsedSession, RawMessage } from "../../shared/session/types"
 
 export interface SessionInfoBarProps {
   creatingSession: boolean

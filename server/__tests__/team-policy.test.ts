@@ -114,7 +114,7 @@ describe("requirementFor", () => {
     expect(requirementFor("/api/new-session", "POST")).toBe("authed")
     expect(requirementFor("/api/notifications", "GET")).toBe("authed")
     expect(requirementFor("/api/notifications/read", "POST")).toBe("authed")
-    expect(requirementFor("/api/undo/apply", "POST")).toBe("admin")
+    expect(requirementFor("/api/undo-state/session-1", "GET")).toBe("admin")
     expect(requirementFor("/hub/", "GET")).toBe("authed")
     expect(requirementFor("/hub/device-1/api/projects", "GET")).toBe("authed")
   })
@@ -214,7 +214,7 @@ describe("teamAuthzMiddleware (team edition)", () => {
 
   it("blocks members from caller-selected host file APIs", () => {
     for (const [url, method] of [
-      ["/api/undo/apply", "POST"],
+      ["/api/undo/transaction", "POST"],
       ["/api/project-file", "PUT"],
       ["/api/file-content", "GET"],
       ["/api/session-file-changes/session-1?content=true", "GET"],

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
-import type { ParsedSession, ToolCall, Turn } from "@/lib/types"
+import type { ParsedSession, ToolCall, Turn } from "../../../../shared/session/types"
 
 const mocks = vi.hoisted(() => ({
   status: "thinking" as "thinking" | "completed",
@@ -33,7 +33,7 @@ vi.mock("@/hooks/useSkillMetadata", () => ({
   useSkillMetadata: () => new Map(),
 }))
 
-vi.mock("@/lib/sessionStatus", () => ({
+vi.mock("../../../../shared/session/sessionStatus", () => ({
   deriveSessionStatus: () => ({ status: mocks.status }),
 }))
 

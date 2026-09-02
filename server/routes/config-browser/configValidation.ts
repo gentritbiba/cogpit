@@ -11,26 +11,36 @@ import {
   win32,
 } from "node:path"
 
+import { AGENT_KINDS, allDescriptors } from "../../../shared/session/agent-descriptors"
 import type { ConfigFileType } from "../../../shared/contracts/configBrowser"
+import { agentHomeDir } from "../../config"
+import { CONFIG_ROOT_DIR_NAMES } from "./configTypes"
 
 export type { ConfigFileType }
 
-/**
- * Directories that hold agent configuration: Claude Code's `.claude`, Codex
- * CLI's `.codex`, and `.agents`, the shared source of truth both CLIs symlink
- * into. A path is trusted when it lives inside one of them.
- */
-const CONFIG_ROOT_DIRS = new Set([".claude", ".codex", ".agents"])
-
 /** Instruction files that sit beside, rather than inside, a config root. */
-const INSTRUCTION_FILES = new Set(["CLAUDE.md", "AGENTS.md"])
+const INSTRUCTION_FILES: ReadonlySet<string> = new Set(
+  allDescriptors().flatMap((descriptor) =>
+    descriptor.config.instructions
+      .filter((file) => file.in === "scope")
+      .map((file) => basename(file.path)),
+  ),
+)
 
-/**
- * Claude's settings files. Codex's `config.toml` is not listed: it only ever
- * reaches the tree through `buildFileItem`, which types it directly, while
- * `getFileType` is reached only for the `.md`/`.json` files a scan keeps.
- */
-const SETTINGS_FILES = new Set(["settings.json", "settings.local.json"])
+/** Every CLI's settings files, by name. */
+const SETTINGS_FILES: ReadonlySet<string> = new Set(
+  allDescriptors().flatMap((descriptor) =>
+    descriptor.config.settings.map((file) => basename(file.path)),
+  ),
+)
+
+/** Directory names holding skills, agents and commands, per category. */
+const AGENT_DIR_NAMES: ReadonlySet<string> = new Set(
+  allDescriptors().flatMap((descriptor) => descriptor.config.agentsDir ?? []),
+)
+const COMMAND_DIR_NAMES: ReadonlySet<string> = new Set(
+  allDescriptors().flatMap((descriptor) => descriptor.config.commandsDir ?? []),
+)
 
 type ConfigPathKind = "config-directory" | "instructions-file"
 
@@ -53,13 +63,23 @@ interface ResolveConfigPathOptions {
   requireConfigDirectory?: boolean
 }
 
+/**
+ * The configured home of every agent. A CLI whose home has been moved — a
+ * `$CODEX_HOME`, or a Claude directory that is not called `.claude` — is still
+ * a trusted root, even though its name does not say so.
+ */
+function configuredAgentHomes(): Set<string> {
+  return new Set(AGENT_KINDS.map((kind) => agentHomeDir(kind)))
+}
+
 function findConfigRoot(filePath: string): string | null {
+  const homes = configuredAgentHomes()
   let current = filePath
   let configRoot: string | null = null
   while (true) {
     // Keep walking after a match. Anchoring to the outermost config boundary
-    // prevents a nested `.claude` symlink from redefining the trusted root.
-    if (CONFIG_ROOT_DIRS.has(basename(current))) configRoot = current
+    // prevents a nested config-root symlink from redefining the trusted root.
+    if (CONFIG_ROOT_DIR_NAMES.has(basename(current)) || homes.has(current)) configRoot = current
     const parent = dirname(current)
     if (parent === current) return configRoot
     current = parent
@@ -245,9 +265,9 @@ export function getFileType(filePath: string, parentDir: string): ConfigFileType
   // Checked before the agents directory so a skill stored under a shared
   // `.agents` tree is still typed as a skill.
   if (name === "SKILL.md") return "skill"
-  if (isUnderDir(parentDir, "agents")) return "agent"
-  // Codex calls its commands "prompts".
-  if (isUnderDir(parentDir, "commands") || isUnderDir(parentDir, "prompts")) return "command"
+  if ([...AGENT_DIR_NAMES].some((dir) => isUnderDir(parentDir, dir))) return "agent"
+  // Each CLI names this directory itself; Codex calls its commands "prompts".
+  if ([...COMMAND_DIR_NAMES].some((dir) => isUnderDir(parentDir, dir))) return "command"
   return "unknown"
 }
 

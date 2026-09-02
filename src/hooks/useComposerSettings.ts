@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelOptions } from "@/hooks/useModelOptions"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import type { ParsedSession } from "@/lib/types"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { ParsedSession } from "../../shared/session/types"
+import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import {
   getFastServiceTierOption,
   isUltracodeCapableModel,
@@ -29,7 +29,7 @@ export function useComposerSettings({
   pendingDirName,
   isLive,
 }: UseComposerSettingsOptions) {
-  const effectiveAgentKind = agentKind ?? "claude"
+  const effectiveAgentKind = agentKind ?? DEFAULT_AGENT_KIND
   const availableModelOptions = useModelOptions(effectiveAgentKind)
 
   // An empty model or effort delegates to the provider's recommended default.
@@ -51,7 +51,7 @@ export function useComposerSettings({
   const imageInputAvailable = supportsImageInput(effectiveAgentKind, selectedModel)
 
   const [modelFallbackNotice, setModelFallbackNotice] = useState<string | null>(null)
-  const lastClaudeFallbackRef = useRef<string | null>(null)
+  const lastFallbackRef = useRef<string | null>(null)
 
   // Ultracode is expensive, so it never rides along: opening another session or
   // starting a new one turns it back off, and only an explicit click (or the
@@ -99,9 +99,10 @@ export function useComposerSettings({
     return () => clearTimeout(timer)
   }, [modelFallbackNotice])
 
+  const rawMessages = session?.rawMessages
   useEffect(() => {
-    if (!isLive || session?.agentKind !== "claude") return
-    const rawMessages = session.rawMessages
+    if (!isLive || !rawMessages) return
+    if (!capabilitiesFor(effectiveAgentKind).modelFallbackNotices) return
     let fallback: (typeof rawMessages)[number] | undefined
     for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
       const message = rawMessages[index]
@@ -114,15 +115,15 @@ export function useComposerSettings({
     const identity = typeof fallback.uuid === "string"
       ? fallback.uuid
       : `${String(fallback.original_model)}:${String(fallback.fallback_model)}:${String(fallback.request_id)}`
-    if (lastClaudeFallbackRef.current === identity) return
-    lastClaudeFallbackRef.current = identity
+    if (lastFallbackRef.current === identity) return
+    lastFallbackRef.current = identity
     const original = typeof fallback.original_model === "string" ? fallback.original_model : "Fable"
     const replacement = typeof fallback.fallback_model === "string" ? fallback.fallback_model : "Opus"
     const explanation = typeof fallback.api_refusal_explanation === "string"
       ? ` ${fallback.api_refusal_explanation}`
       : ""
     setModelFallbackNotice(`${original} could not handle this request, so Claude continued with ${replacement}.${explanation}`)
-  }, [isLive, session?.agentKind, session?.rawMessages])
+  }, [isLive, rawMessages, effectiveAgentKind])
 
   return {
     selectedModel,

@@ -5,7 +5,7 @@ import { PowerMonitor } from "@/components/PowerMonitor"
 import type {
   ElectronPerformanceSnapshot,
   ServerPerformanceSnapshot,
-} from "@/lib/performanceTypes"
+} from "../../../shared/contracts/performance"
 
 const mocks = vi.hoisted(() => ({
   authFetch: vi.fn(),

@@ -1,4 +1,5 @@
-import type { SessionStatus } from "@/lib/sessionStatus"
+import type { SessionStatus } from "../../../shared/session/sessionStatus"
+import type { AgentKind } from "@/lib/agents"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
 
 export interface ActiveSessionInfo {
@@ -31,6 +32,8 @@ export interface ActiveSessionInfo {
   teamLeadSessionId?: string
   /** Pull requests this session opened, from a whole-file server scan. */
   pullRequests?: SessionPullRequest[]
+  /** Exact PR number that caused this session to appear in remote search results. */
+  matchedPullRequestNumber?: number
 }
 
 export interface RunningProcess {
@@ -38,7 +41,9 @@ export interface RunningProcess {
   memMB: number
   cpu: number
   sessionId: string | null
+  agentKind?: AgentKind
+  /** Whether Cogpit owns the process and can execute lifecycle controls for it. */
+  managed?: boolean
   tty: string
-  args: string
   startTime: string
 }

@@ -254,7 +254,11 @@ describe("app-server upgrade lifecycle", () => {
 describe("app-server initialization and proxy failures", () => {
   it("blocks data APIs until configuration exists", async () => {
     const previousCodexHome = process.env.CODEX_HOME
+    const previousCopilotHome = process.env.COPILOT_HOME
+    const previousPath = process.env.PATH
     process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
+    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
     try {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
@@ -268,12 +272,20 @@ describe("app-server initialization and proxy failures", () => {
     } finally {
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME
       else process.env.CODEX_HOME = previousCodexHome
+      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
+      else process.env.COPILOT_HOME = previousCopilotHome
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
     }
   })
 
   it("leaves /api/me and the team bootstrap reachable before configuration", async () => {
     const previousCodexHome = process.env.CODEX_HOME
+    const previousCopilotHome = process.env.COPILOT_HOME
+    const previousPath = process.env.PATH
     process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
+    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
     try {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
@@ -304,12 +316,20 @@ describe("app-server initialization and proxy failures", () => {
     } finally {
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME
       else process.env.CODEX_HOME = previousCodexHome
+      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
+      else process.env.COPILOT_HOME = previousCopilotHome
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
     }
   })
 
   it("matches 503-gate exemptions on segment boundaries only", async () => {
     const previousCodexHome = process.env.CODEX_HOME
+    const previousCopilotHome = process.env.COPILOT_HOME
+    const previousPath = process.env.PATH
     process.env.CODEX_HOME = join(fixtureRoot, "missing-codex-home")
+    process.env.COPILOT_HOME = join(fixtureRoot, "missing-copilot-home")
+    process.env.PATH = join(fixtureRoot, "missing-bin-dir")
     try {
       const appServer = await createStandaloneAppServer(staticDir, userDataDir)
       const baseUrl = await listen(appServer.httpServer)
@@ -328,6 +348,10 @@ describe("app-server initialization and proxy failures", () => {
     } finally {
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME
       else process.env.CODEX_HOME = previousCodexHome
+      if (previousCopilotHome === undefined) delete process.env.COPILOT_HOME
+      else process.env.COPILOT_HOME = previousCopilotHome
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
     }
   })
 

@@ -1,9 +1,16 @@
+import { AGENT_KINDS } from "../../shared/session/agent-descriptors"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import {
   getProviderUpdates,
   isProviderUpdateId,
   runProviderUpdate,
 } from "../lib/providerUpdates"
+
+/** Spelled from the registry, so a fourth agent cannot leave the message stale. */
+const KNOWN_PROVIDERS = AGENT_KINDS.map((kind) => `"${kind}"`)
+const KNOWN_PROVIDERS_MESSAGE = `provider must be ${
+  KNOWN_PROVIDERS.slice(0, -1).join(", ")
+}, or ${KNOWN_PROVIDERS[KNOWN_PROVIDERS.length - 1]}`
 
 /**
  * GET  /api/provider-updates      — version advisory for each agent CLI.
@@ -30,7 +37,7 @@ export function registerProviderUpdateRoutes(use: UseFn) {
 
     withJsonBody<{ provider?: unknown }>(req, res, async (body) => {
       if (!isProviderUpdateId(body?.provider)) {
-        sendJson(res, 400, { error: "provider must be \"claude\" or \"codex\"" })
+        sendJson(res, 400, { error: KNOWN_PROVIDERS_MESSAGE })
         return
       }
       try {

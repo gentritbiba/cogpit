@@ -201,7 +201,10 @@ describe("buildProjectSection", () => {
     const byName = new Map(section.items.map((item) => [item.name, item]))
 
     expect(byName.get("CLAUDE.md")).toMatchObject({ fileType: "instructions", cli: ["claude"] })
-    expect(byName.get("AGENTS.md")).toMatchObject({ fileType: "instructions", cli: ["codex"] })
+    expect(byName.get("AGENTS.md")).toMatchObject({
+      fileType: "instructions",
+      cli: ["codex", "copilot"],
+    })
     expect(byName.get("settings.local.json")).toMatchObject({ fileType: "settings", cli: ["claude"] })
     expect(byName.get("config.toml")).toMatchObject({ fileType: "settings", cli: ["codex"] })
   })

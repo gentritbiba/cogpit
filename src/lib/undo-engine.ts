@@ -1,5 +1,5 @@
-import type { Turn, ArchivedTurn, ArchivedToolCall, Branch, UndoState } from "./types"
-import { getUserMessageText } from "./parser"
+import type { Turn, ArchivedTurn, ArchivedToolCall, Branch, UndoState } from "../../shared/session/types"
+import { getUserMessageText } from "../../shared/session/parser"
 import { isSynthesized } from "../../shared/session/edit-calls"
 
 // ── Extract reversible tool calls from a Turn ────────────────────────────

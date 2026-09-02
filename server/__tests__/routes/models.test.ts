@@ -2,46 +2,51 @@
 import { describe, it, expect } from "vitest"
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk"
 
-import { mapClaudeModels, mapCodexModels, type CodexModel } from "../../routes/models"
+import {
+  mapClaudeModels,
+  mapCodexModels,
+  mapCopilotModels,
+  type CodexModel,
+} from "../../routes/models"
 
 describe("mapClaudeModels", () => {
   const sdkModels: ModelInfo[] = [
     {
       value: "default",
+      resolvedModel: "claude-sonnet-5",
       displayName: "Default (recommended)",
-      description: "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+      description: "Sonnet 5 · Org default",
     },
     {
       value: "claude-fable-5[1m]",
+      resolvedModel: "claude-fable-5",
       displayName: "Fable",
       description: "Fable 5 · Most capable for your hardest tasks",
     },
-    { value: "sonnet", displayName: "Sonnet", description: "Sonnet 4.6 · Efficient" },
+    { value: "sonnet", resolvedModel: "claude-sonnet-5", displayName: "Sonnet", description: "Sonnet 5 · Efficient" },
     { value: "haiku", displayName: "Haiku", description: "Haiku 4.5 · Fastest" },
   ]
 
-  it("maps the SDK 'default' pseudo-model to the empty value", () => {
+  it("maps the SDK 'default' pseudo-model to the empty value, keeping the CLI's own label and resolution", () => {
     const options = mapClaudeModels(sdkModels)!
-    expect(options[0]).toMatchObject({ value: "", label: "Default" })
-  })
-
-  it("keeps the recommended model family explicitly selectable", () => {
-    const options = mapClaudeModels(sdkModels)!
-    expect(options[1]).toEqual({
-      value: "opus",
-      label: "Opus",
-      description: "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+    expect(options[0]).toEqual({
+      value: "",
+      label: "Default (recommended)",
+      description: "Sonnet 5 · Org default",
+      resolvedModel: "claude-sonnet-5",
+      isDefault: true,
     })
   })
 
-  it("keeps real models with their display names and descriptions", () => {
+  it("passes the SDK rows through verbatim without inventing entries", () => {
     const options = mapClaudeModels(sdkModels)!
     expect(options).toContainEqual({
       value: "claude-fable-5[1m]",
       label: "Fable",
       description: "Fable 5 · Most capable for your hardest tasks",
+      resolvedModel: "claude-fable-5",
     })
-    expect(options.map((o) => o.value)).toEqual(["", "opus", "claude-fable-5[1m]", "sonnet", "haiku"])
+    expect(options.map((o) => o.value)).toEqual(["", "claude-fable-5[1m]", "sonnet", "haiku"])
   })
 
   it("preserves Claude capability flags for effort, Fast, and Auto controls", () => {
@@ -74,11 +79,8 @@ describe("mapClaudeModels", () => {
   it("returns null for empty or useless input", () => {
     expect(mapClaudeModels([])).toBeNull()
     expect(mapClaudeModels(undefined as unknown as ModelInfo[])).toBeNull()
-    // A default entry with no identifiable model family gives us no real choice.
-    expect(mapClaudeModels([{
-      ...sdkModels[0],
-      description: "Use the recommended model",
-    }])).toBeNull()
+    // A catalog containing only the default pseudo-model gives us no real choice.
+    expect(mapClaudeModels([sdkModels[0]])).toBeNull()
   })
 
   it("skips malformed entries", () => {
@@ -86,17 +88,7 @@ describe("mapClaudeModels", () => {
       { value: "", displayName: "" } as ModelInfo,
       ...sdkModels,
     ])!
-    expect(options.map((o) => o.value)).toEqual(["", "opus", "claude-fable-5[1m]", "sonnet", "haiku"])
-  })
-
-  it("does not duplicate a recommended family already listed by the SDK", () => {
-    const options = mapClaudeModels([
-      sdkModels[0],
-      { value: "opus", displayName: "Opus", description: "Opus alias" },
-      sdkModels[1],
-    ])!
-
-    expect(options.filter((o) => o.value === "opus")).toHaveLength(1)
+    expect(options.map((o) => o.value)).toEqual(["", "claude-fable-5[1m]", "sonnet", "haiku"])
   })
 })
 
@@ -149,6 +141,7 @@ describe("mapCodexModels", () => {
     expect(options[0]).toMatchObject({
       value: "",
       label: "Default",
+      resolvedModel: "gpt-5.6-sol",
       isDefault: true,
       defaultReasoningEffort: "medium",
     })
@@ -183,5 +176,59 @@ describe("mapCodexModels", () => {
   it("returns null when nothing is visible", () => {
     expect(mapCodexModels([])).toBeNull()
     expect(mapCodexModels([codexModels[2]])).toBeNull()
+  })
+})
+
+describe("mapCopilotModels", () => {
+  it("maps the live multi-provider catalog and its capabilities", () => {
+    const options = mapCopilotModels([
+      {
+        id: "auto",
+        name: "Auto",
+        capabilities: { supports: { vision: true, reasoningEffort: true } },
+        supportedReasoningEfforts: ["low", "high"],
+        defaultReasoningEffort: "high",
+      },
+      {
+        id: "claude-sonnet-4.6",
+        name: "Claude Sonnet 4.6",
+        capabilities: { supports: { vision: false } },
+      },
+    ])!
+
+    expect(options[0]).toMatchObject({
+      value: "",
+      label: "Default",
+      resolvedModel: "auto",
+      isDefault: true,
+      defaultReasoningEffort: "high",
+      inputModalities: ["text", "image"],
+    })
+    expect(options[1]).toMatchObject({
+      value: "auto",
+      supportsEffort: true,
+      supportedReasoningEfforts: [
+        { value: "low", label: "Light" },
+        { value: "high", label: "High" },
+      ],
+    })
+    expect(options[2]).toMatchObject({
+      value: "claude-sonnet-4.6",
+      inputModalities: ["text"],
+    })
+  })
+
+  it("returns null for an empty or malformed catalog", () => {
+    expect(mapCopilotModels([])).toBeNull()
+    expect(mapCopilotModels([{ id: "", name: "broken" }])).toBeNull()
+  })
+
+  it("omits models disabled by Copilot policy", () => {
+    const options = mapCopilotModels([
+      { id: "auto", name: "Auto" },
+      { id: "blocked", name: "Blocked", policy: { state: "disabled" } },
+    ])!
+
+    expect(options.map((option) => option.value)).toEqual(["", "auto"])
   })
 })

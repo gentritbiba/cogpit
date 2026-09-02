@@ -4,6 +4,19 @@ Chronological record of all documentation audits for the agent-window project.
 
 ## Recent Audits
 
+### 2026-09-02 09:05 UTC - Agent and session architecture release (68acd29)
+- **File:** `audit-history/audit-20260902T090554Z-68acd29.md`
+- **Status:** PASS AFTER UPDATES
+- **Scope:** Consolidated agent descriptors, transcript formats, session stores
+  and live runtimes; expanded `cogpit-memory` indexing to all supported CLIs;
+  prepared the 2.1.0 app and `cogpit` npm release.
+- **Documentation:** Corrected the vocabulary gate's documented scope, fourth
+  CLI guidance, npm tag stamping, architecture terminology, and stale
+  `cogpit-memory` search examples.
+- **Risk:** MEDIUM (broad session architecture refactor; existing tag-driven
+  release and npm publication path)
+- **Commit:** `68acd29`
+
 ### 2026-08-21 00:49 UTC - Session list detail endpoint enhancement (9439a0d)
 - **File:** `audit-history/audit-9439a0d-session-list-detail.md`
 - **Status:** PASS AFTER UPDATES

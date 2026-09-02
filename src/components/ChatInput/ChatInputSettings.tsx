@@ -5,11 +5,11 @@ import {
   supportsAutoPermissionMode,
 } from "@/lib/utils"
 import { useModelOptions } from "@/hooks/useModelOptions"
-import type { AgentKind } from "@/lib/sessionSource"
+import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import type { PermissionMode } from "@/lib/permissions"
 import { DesktopChatInputSettings } from "./settings/DesktopChatInputSettings"
 import { MobileChatInputSettings } from "./settings/MobileChatInputSettings"
-import { friendlyModelName } from "./settings/modelOptions"
+import { friendlyModelName, resolveDefaultModelName } from "./settings/modelOptions"
 import type { CommonSettingsControlProps, DropdownOption } from "./settings/types"
 
 export interface ChatInputSettingsProps {
@@ -56,7 +56,7 @@ export interface ChatInputSettingsProps {
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
-  agentKind = "claude",
+  agentKind = DEFAULT_AGENT_KIND,
   onAgentKindChange,
   selectedModel,
   onModelChange,
@@ -103,25 +103,25 @@ export const ChatInputSettings = memo(function ChatInputSettings({
     [onEffortChange, changeAndApply],
   )
 
-  // Scope model options to the current agent so a Codex session never shows
-  // a Claude model name (and vice versa).
+  // Claude and Codex model families are distinguishable by id. Copilot offers
+  // models from several families, so its active model always belongs here.
   const catalogOptions = useModelOptions(agentKind)
-  const providerDefaultLabel = catalogOptions.find((option) => option.value !== "")?.label
-  const resolvedDefaultName = agentKind === "codex"
-    ? (activeModelId?.toLowerCase().startsWith("gpt-")
-        ? friendlyModelName(activeModelId, catalogOptions)
-        : providerDefaultLabel ?? "GPT")
-    : (activeModelId ? friendlyModelName(activeModelId, catalogOptions) : "Opus")
+  const activeModelIsCodex = activeModelId?.toLowerCase().startsWith("gpt-") ?? false
+  const activeModelMatchesProvider = agentKind === "copilot"
+    || activeModelIsCodex === (agentKind === "codex")
+  const sessionModelId = activeModelId && activeModelMatchesProvider
+    ? activeModelId
+    : undefined
+  // What "Default" means right now: the active session's model when there is
+  // one, otherwise whatever the catalog says its default resolves to. Both
+  // come straight from the provider CLI — never a hardcoded model name.
+  const resolvedDefaultName = sessionModelId
+    ? friendlyModelName(sessionModelId, catalogOptions)
+    : resolveDefaultModelName(catalogOptions)
   const modelOptions: readonly DropdownOption[] = catalogOptions.map((option) => {
     const description = [option.description, option.availabilityMessage].filter(Boolean).join(" · ") || undefined
     return option.value === ""
-      ? {
-          ...option,
-          description,
-          value: "",
-          label: resolvedDefaultName,
-          menuLabel: `${resolvedDefaultName} (default)`,
-        }
+      ? { ...option, description, label: resolvedDefaultName, menuLabel: option.label }
       : { ...option, description }
   })
   const effortOptions = getEffortOptions(agentKind, selectedModel)

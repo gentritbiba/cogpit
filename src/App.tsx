@@ -56,27 +56,32 @@ import type { SessionConfig } from "@/lib/sessionConfig"
 import { useProjectWorkspace } from "@/hooks/useProjectWorkspace"
 import { useProjectSessionLaunch } from "@/hooks/useProjectSessionLaunch"
 import { prefetchSession as prefetchSessionFn } from "@/lib/sessionPrefetch"
-import { detectPendingInteraction } from "@/lib/parser"
+import { detectPendingInteraction } from "../shared/session/parser"
 import { dirNameToPath, parseSubAgentPath } from "@/lib/format"
 import { OPEN_SUBAGENT_EVENT } from "@/components/FileChangesPanel/file-change-indicators"
 import { FOCUS_FILE_EVENT } from "@/components/FileChangesPanel"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../shared/session/types"
 import { hasEditToolCalls } from "../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { getSessionConfigKey } from "@/lib/sessionConfig"
 import { can } from "@/lib/capabilities"
 import {
-  agentKindFromDirName,
-} from "@/lib/sessionSource"
+  agentKindForDirName,
+  capabilitiesFor,
+  sessionIdFromFileName,
+} from "@/lib/agents"
+import { readOnlySessionNotice } from "@/lib/agents/presentation"
 import { LoginScreen } from "@/components/LoginScreen"
 import { BootstrapScreen } from "@/components/BootstrapScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
 import type { PanelSize } from "react-resizable-panels"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
+import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
+import { isExternallyDrivenSession } from "@/lib/sessionControl"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -96,6 +101,7 @@ export default function App() {
   const isMobile = useIsMobile()
   const themeCtx = useTheme()
   const [state, dispatch] = useSessionState()
+  const { procBySession } = useSessionInventory()
   const { parse: workerParse, append: workerAppend } = useParserWorker()
 
   const handleOlderTurns = useCallback((olderTurns: Turn[]) => {
@@ -156,12 +162,17 @@ export default function App() {
   // pendingCwd is the authoritative path; dirNameToPath is a lossy fallback.
   const pendingPath = state.pendingCwd ?? (state.pendingDirName ? dirNameToPath(state.pendingDirName) : null)
   const currentAgentKind = state.sessionSource?.agentKind
-    ?? agentKindFromDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
-  const supportsWorktrees = currentAgentKind === "claude"
-  const supportsMcp = currentAgentKind === "claude"
+    ?? agentKindForDirName(state.sessionSource?.dirName ?? state.pendingDirName ?? null)
+  const currentProcess = state.session?.sessionId
+    ? procBySession.get(state.session.sessionId)
+    : undefined
+  const agentCapabilities = capabilitiesFor(currentAgentKind)
+  const isReadOnlySession = isExternallyDrivenSession(currentAgentKind, currentProcess)
+  const supportsWorktrees = agentCapabilities.worktrees
+  const supportsMcp = agentCapabilities.mcp
   const slashSuggestions = useSlashSuggestions(
     configAdminEnabled ? state.session?.cwd ?? pendingPath ?? undefined : undefined,
-    configAdminEnabled,
+    configAdminEnabled && agentCapabilities.slashCommands,
   )
 
   const handleEditCommand = useCallback((commandName: string) => {
@@ -246,23 +257,23 @@ export default function App() {
   // Drives the trigger button and gates the per-session workflow fetch/watch so
   // we never open an fs.watch on sessions that never launched a workflow.
   const workflowToolCallCount = useMemo(() => {
-    if (!state.session) return 0
+    if (!state.session || !agentCapabilities.workflows) return 0
     let n = 0
     for (const turn of state.session.turns)
       for (const tc of turn.toolCalls)
         if (tc.name === "Workflow") n++
     return n
-  }, [state.session])
+  }, [state.session, agentCapabilities.workflows])
   const hasWorkflowToolCalls = workflowToolCallCount > 0
 
   // Workflows live under the top-level session dir; not shown on sub-agent views.
   const workflowSource = useMemo(() => {
     const src = state.sessionSource
-    if (!src || parseSubAgentPath(src.fileName)) {
+    if (!src || !agentCapabilities.workflows || parseSubAgentPath(src.fileName)) {
       return { dirName: null as string | null, sessionId: null as string | null }
     }
-    return { dirName: src.dirName, sessionId: src.fileName.replace(/\.jsonl$/, "") }
-  }, [state.sessionSource])
+    return { dirName: src.dirName, sessionId: sessionIdFromFileName(src.fileName) }
+  }, [state.sessionSource, agentCapabilities.workflows])
 
   const sessionWorkflows = useSessionWorkflows(
     workflowSource.dirName,
@@ -302,8 +313,7 @@ export default function App() {
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
   }, [hostFilesEnabled, setShowFileChanges, isMobile])
 
-  // Detect pending interactive prompts (plan approval, user questions)
-  const pendingInteraction = useMemo(
+  const transcriptInteraction = useMemo(
     () => state.session ? detectPendingInteraction(state.session) : null,
     [state.session],
   )
@@ -348,7 +358,12 @@ export default function App() {
   const permsSetMode = perms.setMode
 
   // Permission requests — SDK resolves canUseTool in-place, no retry needed
-  const permReqs = usePermissionRequests(state.session?.sessionId ?? null, perms.config.mode)
+  const permReqs = usePermissionRequests(
+    isReadOnlySession ? null : state.session?.sessionId ?? null,
+  )
+  const pendingInteraction = isReadOnlySession
+    ? null
+    : permReqs.plan ?? transcriptInteraction
 
   const {
     selectedModel,
@@ -466,12 +481,13 @@ export default function App() {
     ultracode: ultracodeActive,
     mcpConfig: supportsMcp && configAdminEnabled ? mcpData.mcpConfigJson : null,
     onCodexModelRejected: handleCodexModelRejected,
+    readOnly: isReadOnlySession,
     onCreateSession: state.pendingDirName ? createAndSend : undefined,
   })
 
   // Detect if session belongs to a team
   const teamContext = useSessionTeam(
-    currentAgentKind === "claude" ? state.sessionSource?.fileName ?? null : null,
+    agentCapabilities.agentTeams ? state.sessionSource?.fileName ?? null : null,
     state.sessionSource?.dirName ?? null
   )
 
@@ -694,17 +710,17 @@ export default function App() {
   useEffect(() => {
     const handler = (e: Event) => {
       const { agentId } = (e as CustomEvent<{ agentId: string }>).detail ?? {}
-      if (!agentId || !state.sessionSource) return
+      if (!agentId || !state.sessionSource || !agentCapabilities.subagentTranscripts) return
       // Derive the parent session ID: if already viewing a sub-agent, use its parentSessionId;
       // otherwise strip .jsonl from the current fileName.
       const parentId = subAgentInfo
         ? subAgentInfo.parentSessionId
-        : state.sessionSource.fileName.replace(/\.jsonl$/, "")
+        : sessionIdFromFileName(state.sessionSource.fileName)
       navigateToSession(state.sessionSource.dirName, `${parentId}/subagents/agent-${agentId}.jsonl`)
     }
     window.addEventListener(OPEN_SUBAGENT_EVENT, handler)
     return () => window.removeEventListener(OPEN_SUBAGENT_EVENT, handler)
-  }, [state.sessionSource, subAgentInfo, navigateToSession])
+  }, [state.sessionSource, subAgentInfo, navigateToSession, agentCapabilities.subagentTranscripts])
 
   const [retainedBranchModalTurn, setRetainedBranchModalTurn] = useState<number | null>(null)
   const branchModalOpen = handlers.branchModalTurn !== null
@@ -727,6 +743,18 @@ export default function App() {
       <span className="text-xs text-muted-foreground">Viewing sub-agent session (read-only)</span>
     </div>
   ) : null
+  const externallyDrivenReadOnlyNode = isReadOnlySession ? (
+    <div
+      role="status"
+      className="flex shrink-0 items-center justify-center gap-2 border-t bg-card px-4 py-2.5"
+    >
+      <Bot data-icon="inline-start" className="size-3.5 text-muted-foreground" />
+      <span className="text-xs text-muted-foreground">
+        {readOnlySessionNotice(currentAgentKind)}
+      </span>
+    </div>
+  ) : null
+  const activeReadOnlyNode = subAgentReadOnlyNode || externallyDrivenReadOnlyNode
 
   // Collect all error messages for toast display — first non-null wins
   const activeError = actions.loadError || createError || null
@@ -1011,11 +1039,11 @@ export default function App() {
     </Suspense>
   )
 
-  const goalSession = currentAgentKind && state.session ? state.session : null
+  const goalSession = agentCapabilities.goals ? state.session : null
 
   const buildChatInputSettings = (includeGoal: boolean) => (
     <ChatInputSettings
-      agentKind={currentAgentKind ?? "claude"}
+      agentKind={currentAgentKind}
       onAgentKindChange={isNewSession ? pendingAgentKindChange : undefined}
       selectedModel={selectedModel}
       onModelChange={setSelectedModel}
@@ -1061,7 +1089,7 @@ export default function App() {
     </div>
   )
 
-  const chatInputNode = goalSession && currentAgentKind ? (
+  const chatInputNode = goalSession ? (
     <GoalProvider
       agentKind={currentAgentKind}
       session={goalSession}
@@ -1118,7 +1146,7 @@ export default function App() {
           sessionId={previewSessionId}
           loadError={previewLoadError}
           searchInputRef={searchInputRef}
-          activeComposer={subAgentReadOnlyNode || previewChatInputNode}
+          activeComposer={activeReadOnlyNode || previewChatInputNode}
           hasMoreTurns={chunkedSession.hasMore}
           isLoadingOlderTurns={chunkedSession.isLoadingOlder}
           onLoadMoreTurns={chunkedSession.loadMore}
@@ -1152,7 +1180,7 @@ export default function App() {
           sessionView={{
             searchInputRef,
             teamMembersBar,
-            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            activeComposer: activeReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,
             todoProgress: todoProgress && <TodoProgressPanel progress={todoProgress} />,
@@ -1215,7 +1243,7 @@ export default function App() {
             searchInputRef,
             chatInputRef,
             teamMembersBar,
-            activeComposer: subAgentReadOnlyNode || chatInputNode,
+            activeComposer: activeReadOnlyNode || chatInputNode,
             pendingComposer: chatInputNode,
             pendingTurns: pendingPreviewList,
             todoProgress,

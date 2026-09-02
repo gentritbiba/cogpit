@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useSessionState } from "@/hooks/useSessionState"
 import type { SessionState } from "@/hooks/useSessionState"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { makeTurn } from "@/__tests__/fixtures"
 

@@ -1,5 +1,5 @@
 import { shortPath, dirNameToPath, parseWorktreePath, truncate } from "@/lib/format"
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 
 /**

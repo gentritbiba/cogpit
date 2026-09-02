@@ -2,7 +2,7 @@
  * Undo/redo apply operations — file mutation + JSONL truncation/append.
  */
 
-import type { ParsedSession, UndoState, Branch } from "@/lib/types"
+import type { ParsedSession, UndoState, Branch } from "../../../shared/session/types"
 import type { SessionSource } from "../useLiveSession"
 import {
   buildUndoOperations,
@@ -12,8 +12,9 @@ import {
   splitChildBranches,
   type FileOperation,
 } from "@/lib/undo-engine"
-import { findCutoffLine, type UndoConfirmState } from "./undoHelpers"
+import { findCutoffLine, findCutoffLineForTurn, type UndoConfirmState } from "./undoHelpers"
 import type { UndoSessionMutation } from "../../../shared/contracts/undo"
+import { capabilitiesForDirName } from "@/lib/agents"
 
 /** Sentinel error to abort confirm-apply without setting an error message. */
 export class ApplyAbort extends Error { constructor() { super("abort") } }
@@ -47,7 +48,14 @@ export async function applyUndo(
   const ops = buildUndoOperations(session.turns, session.turns.length - 1, effectiveTarget)
   const keepTurnCount = effectiveTarget + 1
   const allLines = freshRawText.split("\n").filter(Boolean)
-  const cutoffLine = findCutoffLine(allLines, keepTurnCount)
+  // `allLines` is the whole file while `session.turns` may be only its tail, so
+  // the cut has to be anchored to the turn itself, not to its window index.
+  const cutoffLine = findCutoffLineForTurn(
+    allLines,
+    session.turns[effectiveTarget],
+    keepTurnCount,
+    sessionSource.dirName,
+  )
   const removedJsonlLines = allLines.slice(cutoffLine)
 
   if (removedJsonlLines.length === 0) {
@@ -64,7 +72,8 @@ export async function applyUndo(
     branches: [...retained, branch],
     activeBranchId: null,
   }
-  const rewindTarget = session.agentKind === "claude"
+  // Only an agent that checkpoints files itself can restore them from a turn id.
+  const rewindTarget = capabilitiesForDirName(sessionSource.dirName).fileCheckpoints
     ? session.turns[effectiveTarget + 1]?.id
     : undefined
 
@@ -101,7 +110,9 @@ export async function applyRedo(
   const redoTurnCount = upToIdx + 1
 
   const ops = buildRedoFromArchived(branch.turns, upToIdx)
-  const cutoff = isPartial ? findCutoffLine(branch.jsonlLines, redoTurnCount) : branch.jsonlLines.length
+  const cutoff = isPartial
+    ? findCutoffLine(branch.jsonlLines, redoTurnCount, sessionSource.dirName)
+    : branch.jsonlLines.length
   const linesToAppend = branch.jsonlLines.slice(0, cutoff)
   const remainingLines = branch.jsonlLines.slice(cutoff)
   const children = branch.childBranches ?? []
@@ -173,7 +184,12 @@ export async function applyBranchSwitch(
     updatedBranches = retained
 
     const keepTurnCount = branch.branchPointTurnIndex + 1
-    const cutoffLine = findCutoffLine(sessionLines, keepTurnCount)
+    const cutoffLine = findCutoffLineForTurn(
+      sessionLines,
+      session.turns[branch.branchPointTurnIndex],
+      keepTurnCount,
+      sessionSource.dirName,
+    )
     const removedJsonlLines = sessionLines.slice(cutoffLine)
 
     if (removedJsonlLines.length > 0) {
@@ -189,7 +205,7 @@ export async function applyBranchSwitch(
   const redoOps = buildRedoFromArchived(branch.turns, upToIdx)
   operations.push(...redoOps)
   const jsonlCutoff = isPartial
-    ? findCutoffLine(branch.jsonlLines, redoTurnCount)
+    ? findCutoffLine(branch.jsonlLines, redoTurnCount, sessionSource.dirName)
     : branch.jsonlLines.length
   const restoredJsonlLines = branch.jsonlLines.slice(0, jsonlCutoff)
   const remainingJsonlLines = branch.jsonlLines.slice(jsonlCutoff)

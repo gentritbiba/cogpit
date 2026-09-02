@@ -11,6 +11,12 @@
 
 import { open, stat } from "node:fs/promises"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
+import { formatForRecords } from "../../shared/session/agents"
+import {
+  inferToolError,
+  normalizeFunctionName,
+  parseCustomToolOutput,
+} from "../../shared/session/codex-tool-normalization"
 import { computeContextUsage } from "../../shared/session/contextWindow"
 import { getToolSummary } from "../../shared/session/toolSummary"
 import type {
@@ -45,6 +51,10 @@ interface SessionAccumulator {
   lastAssistantText: string | null
   /** tool_use id → the call, until its tool_result arrives. */
   pendingToolUses: Map<string, MissionControlCurrentTool>
+  /** Copilot announces the same call in assistant.message and tool.execution_start. */
+  copilotToolUses: Set<string>
+  /** Copilot edit inputs must only contribute to the net diff once per call. */
+  copilotFileEdits: Set<string>
   lastToolErrored: boolean
 }
 
@@ -95,6 +105,8 @@ function createAccumulator(): SessionAccumulator {
     files: new Map(),
     lastAssistantText: null,
     pendingToolUses: new Map(),
+    copilotToolUses: new Set(),
+    copilotFileEdits: new Set(),
     lastToolErrored: false,
   }
 }
@@ -118,13 +130,13 @@ function recordEdit(acc: SessionAccumulator, path: string, op: EditOp): void {
 }
 
 /** Fold one Edit/Write/MultiEdit/NotebookEdit call into the file accumulator. */
-function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>): void {
+function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<string, unknown>): boolean {
   const path = str(input.file_path) || str(input.path) || str(input.notebook_path)
-  if (!path) return
+  if (!path) return false
 
   if (name === "Write") {
     recordEdit(acc, path, { oldString: "", newString: str(input.content), isWrite: true })
-    return
+    return true
   }
   // MultiEdit-style batches carry an `edits` array; a single edit carries the
   // old/new pair on the input itself, so treat it as a batch of one.
@@ -137,6 +149,7 @@ function foldFileEdit(acc: SessionAccumulator, name: string, input: Record<strin
       isWrite: false,
     })
   }
+  return true
 }
 
 function foldAssistant(acc: SessionAccumulator, entry: Record<string, unknown>): void {
@@ -156,7 +169,7 @@ function foldAssistant(acc: SessionAccumulator, entry: Record<string, unknown>):
 
   if (input || output || cacheRead || cacheCreation) {
     // Latest response wins: it reports the whole window the model is carrying.
-    const context = computeContextUsage(usage, model || acc.model || "")
+    const context = computeContextUsage(usage, model || acc.model || "", "claude")
     acc.context = {
       used: context.used,
       limit: context.limit,
@@ -213,6 +226,412 @@ function foldUser(acc: SessionAccumulator, entry: Record<string, unknown>): void
   if (!sawToolResult) acc.turnCount += 1
 }
 
+function copilotText(value: unknown): string {
+  if (typeof value === "string") return value
+  if (!Array.isArray(value)) return ""
+  return value
+    .flatMap((part) => {
+      if (typeof part === "string") return part ? [part] : []
+      const record = asRecord(part)
+      const text = str(record.text) || str(record.content)
+      return text ? [text] : []
+    })
+    .join("\n")
+}
+
+function normalizeCopilotToolName(name: string): string {
+  switch (name.toLowerCase().replace(/-/g, "_")) {
+    case "ask_user": return "AskUserQuestion"
+    case "bash":
+    case "powershell":
+    case "shell": return "Bash"
+    case "create": return "Write"
+    case "edit": return "Edit"
+    case "glob": return "Glob"
+    case "grep": return "Grep"
+    case "task": return "Task"
+    case "view": return "Read"
+    case "web_fetch": return "WebFetch"
+    default: return name
+  }
+}
+
+function normalizeCopilotToolInput(
+  name: string,
+  value: unknown,
+): Record<string, unknown> {
+  const input = asRecord(value)
+  if (name === "Edit") {
+    return {
+      ...input,
+      file_path: str(input.file_path) || str(input.path),
+      old_string: str(input.old_string) || str(input.old_str),
+      new_string: str(input.new_string) || str(input.new_str),
+    }
+  }
+  if (name === "Write") {
+    return {
+      ...input,
+      file_path: str(input.file_path) || str(input.path),
+      content: str(input.content) || str(input.file_text),
+    }
+  }
+  if (name === "Bash" && typeof input.command !== "string" && typeof input.cmd === "string") {
+    return { ...input, command: input.cmd }
+  }
+  return input
+}
+
+function foldCopilotToolUse(
+  acc: SessionAccumulator,
+  id: string,
+  rawName: string,
+  rawInput: unknown,
+): void {
+  if (!rawName) return
+  const name = normalizeCopilotToolName(rawName)
+  const input = normalizeCopilotToolInput(name, rawInput)
+  const isNew = !id || !acc.copilotToolUses.has(id)
+
+  if (isNew) {
+    acc.totalToolCalls += 1
+    acc.toolTrail.push(name)
+    if (acc.toolTrail.length > TRAIL_LENGTH) acc.toolTrail.shift()
+    if (id) acc.copilotToolUses.add(id)
+  }
+
+  if (id) {
+    acc.pendingToolUses.set(id, { name, summary: getToolSummary({ name, input }) })
+  }
+
+  if (
+    (name === "Edit" || name === "Write" || name === "MultiEdit" || name === "NotebookEdit")
+    && (!id || !acc.copilotFileEdits.has(id))
+    && foldFileEdit(acc, name, input)
+    && id
+  ) {
+    acc.copilotFileEdits.add(id)
+  }
+}
+
+function foldCopilotUsage(
+  acc: SessionAccumulator,
+  data: Record<string, unknown>,
+  inputIncludesCache: boolean,
+): boolean {
+  const cacheRead = num(data.cacheReadTokens)
+  const cacheCreation = num(data.cacheWriteTokens)
+  const reportedInput = num(data.inputTokens)
+  const input = inputIncludesCache
+    ? Math.max(0, reportedInput - cacheRead - cacheCreation)
+    : reportedInput
+  const output = num(data.outputTokens)
+  if (!input && !output && !cacheRead && !cacheCreation) return false
+
+  acc.tokens.input += input
+  acc.tokens.output += output
+  acc.tokens.cacheRead += cacheRead
+  acc.tokens.cacheCreation += cacheCreation
+  return true
+}
+
+function replaceCopilotShutdownUsage(
+  acc: SessionAccumulator,
+  data: Record<string, unknown>,
+): void {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }
+  let found = false
+  const modelMetrics = asRecord(data.modelMetrics)
+  for (const value of Object.values(modelMetrics)) {
+    const usage = asRecord(asRecord(value).usage)
+    const cacheRead = num(usage.cacheReadTokens)
+    const cacheCreation = num(usage.cacheWriteTokens)
+    const reportedInput = num(usage.inputTokens)
+    const output = num(usage.outputTokens)
+    if (!reportedInput && !output && !cacheRead && !cacheCreation) continue
+    found = true
+    totals.input += Math.max(0, reportedInput - cacheRead - cacheCreation)
+    totals.output += output
+    totals.cacheRead += cacheRead
+    totals.cacheCreation += cacheCreation
+  }
+
+  if (!found) {
+    const details = asRecord(data.tokenDetails)
+    totals.input = num(asRecord(details.input).tokenCount)
+    totals.output = num(asRecord(details.output).tokenCount)
+    totals.cacheRead = num(asRecord(details.cache_read).tokenCount)
+    totals.cacheCreation = num(asRecord(details.cache_write).tokenCount)
+    found = Object.values(totals).some((value) => value > 0)
+  }
+
+  if (found) acc.tokens = totals
+}
+
+function setCopilotContext(
+  acc: SessionAccumulator,
+  usage: Record<string, unknown>,
+): void {
+  const model = str(usage.model) || acc.model || ""
+  const context = computeContextUsage({
+    input_tokens: num(usage.inputTokens),
+    cache_creation_input_tokens: num(usage.cacheWriteTokens),
+    cache_read_input_tokens: num(usage.cacheReadTokens),
+  }, model, "copilot")
+  if (!context.used) return
+  acc.context = { used: context.used, limit: context.limit, percent: Math.round(context.percent) }
+}
+
+function foldCopilot(acc: SessionAccumulator, entry: Record<string, unknown>): void {
+  const type = str(entry.type)
+  const data = asRecord(entry.data)
+  const nested = typeof entry.agentId === "string" && entry.agentId.length > 0
+
+  if (!nested) {
+    const model = type === "session.start" || type === "session.resume"
+      ? str(data.selectedModel)
+      : type === "session.auto_mode_resolved"
+        ? str(data.chosenModel)
+        : type === "session.model_change"
+          ? str(data.newModel)
+          : type === "session.shutdown"
+            ? str(data.currentModel)
+            : str(data.model)
+    if (model) acc.model = model
+  }
+
+  if (type === "user.message") {
+    if (!nested) acc.turnCount += 1
+    return
+  }
+
+  if (type === "assistant.message") {
+    if (!nested) {
+      const text = copilotText(data.content).trim()
+      if (text) acc.lastAssistantText = text.slice(0, PREVIEW_LIMIT)
+    }
+    if (Array.isArray(data.toolRequests)) {
+      for (const value of data.toolRequests) {
+        const request = asRecord(value)
+        foldCopilotToolUse(
+          acc,
+          str(request.toolCallId),
+          str(request.name),
+          request.arguments,
+        )
+      }
+    }
+    return
+  }
+
+  if (type === "tool.execution_start") {
+    foldCopilotToolUse(acc, str(data.toolCallId), str(data.toolName), data.arguments)
+    return
+  }
+
+  if (type === "tool.execution_complete") {
+    const id = str(data.toolCallId)
+    if (!acc.copilotToolUses.has(id) && str(data.toolName)) {
+      foldCopilotToolUse(acc, id, str(data.toolName), data.arguments)
+    }
+    if (id) acc.pendingToolUses.delete(id)
+    acc.lastToolErrored = data.success === false || data.error !== undefined
+    return
+  }
+
+  if (type === "assistant.usage") {
+    if (foldCopilotUsage(acc, data, false) && !nested) setCopilotContext(acc, data)
+    return
+  }
+
+  if (type === "session.shutdown" && !nested) {
+    replaceCopilotShutdownUsage(acc, data)
+    const currentTokens = num(data.currentTokens)
+    if (currentTokens) setCopilotContext(acc, { inputTokens: currentTokens, model: acc.model })
+  }
+}
+
+// ── Codex ───────────────────────────────────────────────────────────────────
+
+/** Codex reports input inclusive of cache; the rest of Cogpit keeps them apart. */
+function codexTokens(usage: Record<string, unknown>): SessionAccumulator["tokens"] {
+  const cacheRead = num(usage.cached_input_tokens)
+  const cacheCreation = num(usage.cache_write_input_tokens)
+  return {
+    input: Math.max(0, num(usage.input_tokens) - cacheRead),
+    // reasoning_output_tokens is a subset of output_tokens, not an addition.
+    output: num(usage.output_tokens),
+    cacheRead,
+    cacheCreation,
+  }
+}
+
+/**
+ * Reconstruct both sides of a unified diff hunk so the net-diff math sees the
+ * same shape it gets from an Edit tool call. Codex reports an update only as a
+ * diff — there is no before/after content anywhere in the transcript.
+ */
+function editOpFromUnifiedDiff(unifiedDiff: string): EditOp {
+  const oldLines: string[] = []
+  const newLines: string[] = []
+  for (const line of unifiedDiff.split("\n")) {
+    if (line.startsWith("@@")) continue
+    if (line.startsWith("-")) oldLines.push(line.slice(1))
+    else if (line.startsWith("+")) newLines.push(line.slice(1))
+    else if (line.startsWith(" ")) {
+      oldLines.push(line.slice(1))
+      newLines.push(line.slice(1))
+    }
+  }
+  return { oldString: oldLines.join("\n"), newString: newLines.join("\n"), isWrite: false }
+}
+
+/** Fold the structured file changes a completed `apply_patch` reports. */
+function foldCodexFileChanges(acc: SessionAccumulator, changes: Record<string, unknown>): void {
+  for (const [path, value] of Object.entries(changes)) {
+    const change = asRecord(value)
+    if (change.type === "add") {
+      recordEdit(acc, path, { oldString: "", newString: str(change.content), isWrite: true })
+    } else if (change.type === "update") {
+      recordEdit(acc, path, editOpFromUnifiedDiff(str(change.unified_diff)))
+    }
+    // A delete carries no content, so there are no lines to attribute to it.
+  }
+}
+
+function foldCodexToolCall(
+  acc: SessionAccumulator,
+  callId: string,
+  rawName: string,
+  input: Record<string, unknown>,
+): void {
+  const name = normalizeFunctionName(rawName)
+  acc.totalToolCalls += 1
+  acc.toolTrail.push(name)
+  if (acc.toolTrail.length > TRAIL_LENGTH) acc.toolTrail.shift()
+  if (callId) {
+    acc.pendingToolUses.set(callId, { name, summary: getToolSummary({ name, input }) })
+  }
+}
+
+function foldCodexEvent(acc: SessionAccumulator, payload: Record<string, unknown>): void {
+  const type = str(payload.type)
+
+  if (type === "token_count") {
+    // total_token_usage is cumulative for the whole session, so it replaces
+    // rather than adds — summing it would multiply every earlier turn back in.
+    const info = asRecord(payload.info)
+    const total = asRecord(info.total_token_usage)
+    if (Object.keys(total).length > 0) acc.tokens = codexTokens(total)
+
+    // The window the model is carrying is the last request's input, because
+    // Codex re-sends the whole conversation on every request.
+    const last = asRecord(info.last_token_usage)
+    const context = computeContextUsage({
+      input_tokens: num(last.input_tokens) - num(last.cached_input_tokens),
+      cache_read_input_tokens: num(last.cached_input_tokens),
+      cache_creation_input_tokens: num(last.cache_write_input_tokens),
+    }, acc.model ?? "", "codex")
+    if (context.used) {
+      const limit = num(info.model_context_window) || context.limit
+      acc.context = {
+        used: context.used,
+        limit,
+        percent: Math.round(Math.min(100, (context.used / limit) * 100)),
+      }
+    }
+    return
+  }
+
+  if (type === "user_message") {
+    acc.turnCount += 1
+    return
+  }
+
+  if (type === "agent_message" && str(payload.phase) === "final_answer") {
+    const text = str(payload.message).trim()
+    if (text) acc.lastAssistantText = text.slice(0, PREVIEW_LIMIT)
+    return
+  }
+
+  if (type === "task_complete") {
+    const text = str(payload.last_agent_message).trim()
+    if (text) acc.lastAssistantText = text.slice(0, PREVIEW_LIMIT)
+    return
+  }
+
+  if (type === "patch_apply_end") {
+    foldCodexFileChanges(acc, asRecord(payload.changes))
+    return
+  }
+
+  if (type === "mcp_tool_call_end") {
+    const invocation = asRecord(payload.invocation)
+    const name = `mcp__${str(invocation.server)}__${str(invocation.tool)}`
+    foldCodexToolCall(acc, str(payload.call_id), name, asRecord(invocation.arguments))
+    acc.pendingToolUses.delete(str(payload.call_id))
+    acc.lastToolErrored = "Err" in asRecord(payload.result)
+  }
+}
+
+function foldCodexResponseItem(acc: SessionAccumulator, payload: Record<string, unknown>): void {
+  const type = str(payload.type)
+
+  if (type === "function_call") {
+    let input: Record<string, unknown> = {}
+    try {
+      input = asRecord(JSON.parse(str(payload.arguments)))
+    } catch {
+      input = { raw: str(payload.arguments) }
+    }
+    foldCodexToolCall(acc, str(payload.call_id), str(payload.name), input)
+    return
+  }
+
+  if (type === "custom_tool_call") {
+    // The input of a custom tool is a raw script, not JSON; the tool summarizer
+    // recognises it under `raw` and lexes the nested calls out of it.
+    foldCodexToolCall(acc, str(payload.call_id), str(payload.name), { raw: str(payload.input) })
+    return
+  }
+
+  if (type === "function_call_output") {
+    acc.pendingToolUses.delete(str(payload.call_id))
+    acc.lastToolErrored = inferToolError(str(payload.output))
+    return
+  }
+
+  if (type === "custom_tool_call_output") {
+    acc.pendingToolUses.delete(str(payload.call_id))
+    acc.lastToolErrored = parseCustomToolOutput(payload.output).isError
+    return
+  }
+
+  if (type === "message" && str(payload.role) === "assistant") {
+    const content = Array.isArray(payload.content) ? payload.content : []
+    const text = content
+      .map((block) => str(asRecord(block).text))
+      .filter(Boolean)
+      .join("\n")
+      .trim()
+    if (text) acc.lastAssistantText = text.slice(0, PREVIEW_LIMIT)
+  }
+}
+
+function foldCodex(acc: SessionAccumulator, entry: Record<string, unknown>): void {
+  const type = str(entry.type)
+  const payload = asRecord(entry.payload)
+
+  // Model is per turn and can change mid-session, so the newest wins.
+  if (type === "turn_context") {
+    const model = str(payload.model)
+    if (model) acc.model = model
+    return
+  }
+  if (type === "event_msg") foldCodexEvent(acc, payload)
+  else if (type === "response_item") foldCodexResponseItem(acc, payload)
+}
+
 function foldLine(acc: SessionAccumulator, line: string): void {
   const trimmed = line.trim()
   if (!trimmed) return
@@ -230,8 +649,19 @@ function foldLine(acc: SessionAccumulator, line: string): void {
     acc.lastEventAt = timestamp
   }
 
-  if (entry.type === "assistant") foldAssistant(acc, entry)
-  else if (entry.type === "user") foldUser(acc, entry)
+  // One record is enough to name the format: the three vocabularies are
+  // disjoint, and a transcript never mixes them.
+  switch (formatForRecords([entry]).kind) {
+    case "codex":
+      foldCodex(acc, entry)
+      return
+    case "copilot":
+      foldCopilot(acc, entry)
+      return
+    default:
+      if (entry.type === "assistant") foldAssistant(acc, entry)
+      else if (entry.type === "user") foldUser(acc, entry)
+  }
 }
 
 function buildFiles(acc: SessionAccumulator): Pick<MissionControlSummary, "files" | "filesTotal"> {

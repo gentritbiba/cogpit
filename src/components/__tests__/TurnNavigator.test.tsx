@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { getTurnKey } from "../stats/turnKey"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 
 function makeTurn(userMessage: string): Turn {
   return {

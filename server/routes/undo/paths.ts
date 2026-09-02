@@ -1,11 +1,11 @@
 import { dirname } from "node:path"
 import {
   dirs,
-  isCodexDirName,
   isWithinDir,
   resolve,
-  resolveSessionFilePath,
 } from "../../helpers"
+import { storeForPath } from "../../agents"
+import { resolveSessionFilePath } from "../../sessionPaths"
 
 function isOpaqueFileName(value: string): boolean {
   return value.length > 0
@@ -39,7 +39,8 @@ export async function resolveUndoSessionPath(
   if (typeof dirName !== "string" || typeof fileName !== "string") return null
   const filePath = await resolveSessionFilePath(dirName, fileName)
   if (!filePath) return null
-  return isCodexDirName(dirName) || isWithinDir(dirs.PROJECTS_DIR, filePath)
-    ? filePath
-    : null
+  // Undo may only touch a transcript some agent actually owns. Asking the store
+  // registry covers every agent by construction, where the two-arm check this
+  // replaced silently excluded whichever agent was added last.
+  return storeForPath(filePath) ? filePath : null
 }

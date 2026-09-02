@@ -1,5 +1,6 @@
-import { pairAgentMessageReplies } from "@/lib/turnBuilder"
-import type { Turn } from "@/lib/types"
+import { pairAgentMessageReplies } from "../../shared/session/turnBuilder"
+import type { Turn } from "../../shared/session/types"
+import type { AgentKind } from "@/lib/agents"
 
 /**
  * Pure logic for timeline infinite scrolling. Kept out of the components so
@@ -53,8 +54,8 @@ export function isPrepend(prev: TimelineSnapshot | null, keys: readonly string[]
  * reliably a cut point. Codex turns legitimately have no user message, so its
  * parser marks the halves it could not see the start of instead.
  */
-function isCutFragment(head: Turn, agentKind?: "claude" | "codex"): boolean {
-  if (agentKind === "codex") return head.isFragment === true
+function isCutFragment(head: Turn, agentKind?: AgentKind): boolean {
+  if (agentKind && agentKind !== "claude") return head.isFragment === true
   return head.userMessage === null
 }
 
@@ -124,7 +125,7 @@ function dedupeAgentMessages(turns: readonly Turn[]): Turn[] {
 export function prependTurns(
   existing: Turn[],
   older: readonly Turn[],
-  agentKind?: "claude" | "codex",
+  agentKind?: AgentKind,
 ): Turn[] {
   const existingIds = new Set(existing.map((t) => t.id))
   const unique = older.filter((t) => !existingIds.has(t.id))

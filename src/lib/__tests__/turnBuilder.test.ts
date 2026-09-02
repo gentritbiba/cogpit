@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest"
-import { parseSession, parseSessionAppend } from "@/lib/parser"
+import { parseSession, parseSessionAppend } from "../../../shared/session/parser"
 import {
   resetFixtureCounter,
   userMsg,
@@ -24,7 +24,7 @@ import {
   peerAttachment,
   peerEnqueueMsg,
 } from "@/__tests__/fixtures"
-import type { ProgressMessage, SystemMessage, TurnContentBlock } from "@/lib/types"
+import type { ProgressMessage, SystemMessage, TurnContentBlock } from "../../../shared/session/types"
 
 beforeEach(() => {
   resetFixtureCounter()

@@ -40,7 +40,7 @@ import {
 const INVENTORY_REFRESH_MS = 8_000
 const MAX_NATIVE_TRANSITION_CARDS = 12
 
-const EMPTY_HINT = "Start Claude Code or Codex and every session shows up here"
+const EMPTY_HINT = "Start Claude Code, Codex, or Copilot and every session shows up here"
 
 type Layout = "grid" | "list"
 
@@ -69,6 +69,7 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
     questionsBySession,
     elicitationsBySession,
     dialogsBySession,
+    awaitingPlan,
     responding,
     respond,
     answerQuestion,
@@ -96,11 +97,12 @@ export function MissionControl({ onSelectSession }: MissionControlProps) {
       questionsBySession,
       elicitationsBySession,
       dialogsBySession,
+      awaitingPlan,
       newlyCompleted,
     }),
     [
       sessions, procBySession, summaries, permissionsBySession, questionsBySession,
-      elicitationsBySession, dialogsBySession, newlyCompleted,
+      elicitationsBySession, dialogsBySession, awaitingPlan, newlyCompleted,
     ],
   )
 

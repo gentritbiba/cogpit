@@ -1,7 +1,15 @@
 import { Database } from "bun:sqlite"
-import { type Dirent, type FSWatcher, readFileSync, readdirSync, statSync, unlinkSync, watch } from "node:fs"
-import { join, basename } from "node:path"
+import { type FSWatcher, readFileSync, statSync, unlinkSync, watch } from "node:fs"
+import { join } from "node:path"
+import type { AgentKind } from "./agent-descriptors"
 import { parseSession, getUserMessageText } from "./parser"
+import {
+  allStores,
+  storeFor,
+  storeForPath,
+  type SessionFile,
+  type SessionFileIdentity,
+} from "./stores"
 
 export interface IndexStats {
   dbPath: string
@@ -25,12 +33,12 @@ export interface SearchHit {
 }
 
 /** A discovered JSONL file awaiting indexing. */
-interface FileDescriptor {
-  path: string
-  sessionId: string
-  mtimeMs: number
-  isSubagent: boolean
-  parentSessionId: string | null
+type FileDescriptor = SessionFile
+
+/** One directory to index, and the agent whose layout it uses. */
+interface IndexRoot {
+  kind: AgentKind
+  root: string
 }
 
 /**
@@ -44,10 +52,21 @@ function truncContent(text: string): string {
   return text.length > MAX_CONTENT_LEN ? text.slice(0, MAX_CONTENT_LEN) : text
 }
 
+/**
+ * Which session a transcript belongs to, asked of the store that owns its root.
+ * A path under no known root is read with the default agent's layout, which is
+ * what a caller naming its own directory has always meant.
+ */
+function identifyTranscript(filePath: string, root?: string): SessionFileIdentity {
+  const store = storeForPath(filePath) ?? storeFor("claude")
+  return store.identify(filePath, root ?? store.root())
+}
+
 export class SearchIndex {
   private db: Database
   private dbPath: string
   projectsDir: string | null = null
+  private roots: IndexRoot[] = []
   private _watcherRunning = false
   private _lastFullBuild: string | null = null
   private _lastUpdate: string | null = null
@@ -201,9 +220,9 @@ export class SearchIndex {
     mtimeMs?: number,
     opts?: { isSubagent?: boolean; parentSessionId?: string | null }
   ): void {
-    if (!sessionId) {
-      sessionId = basename(filePath, ".jsonl")
-    }
+    // Without an explicit id, ask the store that owns the path — Copilot's file
+    // is literally `events.jsonl`, so its name is not its session.
+    const resolvedSessionId = sessionId ?? identifyTranscript(filePath).sessionId
     if (mtimeMs == null) {
       mtimeMs = statSync(filePath).mtimeMs
     }
@@ -230,8 +249,8 @@ export class SearchIndex {
     const txn = this.db.transaction(() => {
       deleteContent.run(filePath)
       deleteFile.run(filePath)
-      this.insertSessionContent(insert, sessionId!, filePath, session)
-      insertFile.run(filePath, mtimeMs, sessionId, isSubagent, parentSessionId)
+      this.insertSessionContent(insert, resolvedSessionId, filePath, session)
+      insertFile.run(filePath, mtimeMs, resolvedSessionId, isSubagent, parentSessionId)
     })
 
     txn()
@@ -357,19 +376,26 @@ export class SearchIndex {
   }
 
   /**
-   * Clear all indexed data and re-index every JSONL file under `projectsDir`.
-   * Structure: projectsDir/{projectName}/{sessionId}.jsonl
-   * Subagents:  projectsDir/{projectName}/{sessionId}/subagents/agent-{id}.jsonl
+   * Clear all indexed data and re-index every transcript, from every agent.
+   *
+   * Called with no arguments — the normal case — every configured agent root is
+   * indexed. Codex was absent from the index entirely until this stopped being
+   * a hand-listed pair of directories.
+   *
+   * The positional form is the signature this method has always had and is kept
+   * for published consumers; it can only ever name Claude and Copilot.
    *
    * Optimized: discovers all files first, then processes them in a single
    * SQLite transaction with pre-prepared statements. This avoids the overhead
    * of 3000+ individual transactions (each forcing a disk sync).
-   *
-   * Stores `projectsDir` as a class field so `rebuild()` can reuse it.
    */
-  buildFull(projectsDir: string): void {
-    this.projectsDir = projectsDir
+  buildFull(projectsDir?: string, copilotSessionsDir?: string): void {
+    this.setRoots(projectsDir, copilotSessionsDir)
+    this.buildOverRoots()
+  }
 
+  /** The build itself, over whatever roots {@link setRoots} last recorded. */
+  private buildOverRoots(): void {
     // Drop and recreate the DB file — DELETE doesn't reclaim space in SQLite,
     // so reusing a bloated DB file makes rebuilds slower than starting fresh.
     this.db.close()
@@ -391,9 +417,7 @@ export class SearchIndex {
     // Discover all files first (fast — just readdir + stat)
     const files: FileDescriptor[] = []
 
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
-      files.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
-    })
+    this.discoverFiles((file) => { files.push(file) })
 
     // Prepare statements once, run all inserts in a single transaction
     const insert = this.db.prepare(
@@ -432,8 +456,8 @@ export class SearchIndex {
    * On large session stores (3000+ files) this can take minutes.
    * Prefer `updateRecent()` for CLI search paths.
    */
-  updateStale(projectsDir: string): void {
-    this.projectsDir = projectsDir
+  updateStale(projectsDir?: string): void {
+    this.setRoots(projectsDir)
 
     const getIndexed = this.db.prepare(
       "SELECT mtime_ms FROM indexed_files WHERE file_path = ?"
@@ -441,11 +465,9 @@ export class SearchIndex {
 
     const filesToIndex: FileDescriptor[] = []
 
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
-      const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
-      if (!existing || existing.mtime_ms < mtimeMs) {
-        filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
-      }
+    this.discoverFiles((file) => {
+      const existing = getIndexed.get(file.path) as { mtime_ms: number } | undefined
+      if (!existing || existing.mtime_ms < file.mtimeMs) filesToIndex.push(file)
     })
 
     for (const file of filesToIndex) {
@@ -472,8 +494,8 @@ export class SearchIndex {
    * Caps re-indexing to `maxFiles` to prevent blocking on large backlogs
    * (run `index rebuild` for a full catch-up).
    */
-  updateRecent(projectsDir: string, maxFiles: number = 50): void {
-    this.projectsDir = projectsDir
+  updateRecent(projectsDir?: string, maxFiles: number = 50, copilotSessionsDir?: string): void {
+    this.setRoots(projectsDir, copilotSessionsDir)
 
     // Find the high-water mark — newest indexed file mtime
     const row = this.db.prepare(
@@ -487,13 +509,13 @@ export class SearchIndex {
 
     const filesToIndex: FileDescriptor[] = []
 
-    this.discoverFiles(projectsDir, (filePath, sessionId, mtimeMs, isSubagent, parentSessionId) => {
+    this.discoverFiles((file) => {
       // Skip files that are already indexed with a current mtime
-      if (mtimeMs <= highWater) {
-        const existing = getIndexed.get(filePath) as { mtime_ms: number } | undefined
-        if (existing && existing.mtime_ms >= mtimeMs) return // already indexed and unchanged
+      if (file.mtimeMs <= highWater) {
+        const existing = getIndexed.get(file.path) as { mtime_ms: number } | undefined
+        if (existing && existing.mtime_ms >= file.mtimeMs) return // already indexed and unchanged
       }
-      filesToIndex.push({ path: filePath, sessionId, mtimeMs, isSubagent, parentSessionId })
+      filesToIndex.push(file)
     })
 
     // Sort newest first so the most relevant files get indexed within the cap
@@ -516,115 +538,41 @@ export class SearchIndex {
     }
   }
 
-  /**
-   * Re-run buildFull using the previously stored projectsDir.
-   * No-op if projectsDir was never set.
-   */
+  /** Re-run the full build over the roots the last one used. */
   rebuild(): void {
-    if (!this.projectsDir) return
-    this.buildFull(this.projectsDir)
+    if (this.roots.length === 0) return
+    this.buildOverRoots()
   }
 
   /**
-   * Walk the projects directory tree and invoke `callback` for every JSONL file.
+   * Record which roots to index.
    *
-   * Directory structure:
-   *   projectsDir/
-   *     {projectName}/
-   *       {sessionId}.jsonl              <- session file
-   *       {sessionId}/subagents/
-   *         agent-{agentId}.jsonl        <- subagent file (recursive)
-   *
-   * Skips the "memory" directory.
+   * With no arguments this is every configured agent root, which is the only
+   * form that reaches Codex. The positional arguments exist because they are
+   * the published signature; they name Claude's projects tree and Copilot's
+   * session-state directory, in that order.
    */
-  private discoverFiles(
-    projectsDir: string,
-    callback: (
-      filePath: string,
-      sessionId: string,
-      mtimeMs: number,
-      isSubagent: boolean,
-      parentSessionId: string | null
-    ) => void
-  ): void {
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(projectsDir, { withFileTypes: true })    } catch {
+  private setRoots(projectsDir?: string, copilotSessionsDir?: string): void {
+    if (projectsDir === undefined) {
+      this.roots = allStores().map((store) => ({ kind: store.kind, root: store.root() }))
+      this.projectsDir = storeFor("claude").root()
       return
     }
-
-    for (const entry of entries) {
-      if (entry.name === "memory" || !entry.isDirectory()) continue
-      const projectDir = join(projectsDir, entry.name)
-
-      let files: Dirent[]
-      try {
-        files = readdirSync(projectDir, { withFileTypes: true })      } catch {
-        continue
-      }
-
-      for (const file of files) {
-        if (!file.name.endsWith(".jsonl") || !file.isFile()) continue
-        const filePath = join(projectDir, file.name)
-        const sessionId = basename(file.name, ".jsonl")
-        try {
-          const s = statSync(filePath)
-          callback(filePath, sessionId, s.mtimeMs, false, null)
-        } catch {
-          continue
-        }
-
-        // Discover subagent files recursively
-        this.discoverSubagents(filePath, sessionId, callback, 0, 4)
-      }
-    }
+    this.projectsDir = projectsDir
+    this.roots = [
+      { kind: "claude", root: projectsDir },
+      ...(copilotSessionsDir ? [{ kind: "copilot" as const, root: copilotSessionsDir }] : []),
+    ]
   }
 
   /**
-   * Recursively discover subagent JSONL files under the subagents directory
-   * that corresponds to `parentPath`.
-   *
-   * For a parent at `/path/to/session-1.jsonl`, looks for subagents at
-   * `/path/to/session-1/subagents/agent-*.jsonl`.
-   *
-   * Recurses up to `maxDepth` levels (default 4).
+   * Every transcript under the recorded roots, each already tagged with the
+   * session it belongs to. The walking lives in `./stores`, so the index and
+   * the raw-scan search can never cover different sets of agents again.
    */
-  private discoverSubagents(
-    parentPath: string,
-    parentSessionId: string,
-    callback: (
-      filePath: string,
-      sessionId: string,
-      mtimeMs: number,
-      isSubagent: boolean,
-      parentSessionId: string | null
-    ) => void,
-    depth: number,
-    maxDepth: number
-  ): void {
-    if (depth >= maxDepth) return
-
-    // subagents dir lives at: parentPath minus .jsonl extension, plus /subagents
-    const subDir = parentPath.replace(/\.jsonl$/, "") + "/subagents"
-    let files: string[]
-    try {
-      files = readdirSync(subDir)
-    } catch {
-      return
-    }
-
-    for (const file of files) {
-      if (!file.startsWith("agent-") || !file.endsWith(".jsonl")) continue
-      const filePath = join(subDir, file)
-      try {
-        const s = statSync(filePath)
-        callback(filePath, parentSessionId, s.mtimeMs, true, parentSessionId)
-      } catch {
-        continue
-      }
-
-      // Recurse deeper for nested subagents
-      this.discoverSubagents(filePath, parentSessionId, callback, depth + 1, maxDepth)
+  private discoverFiles(callback: (file: FileDescriptor) => void): void {
+    for (const { kind, root } of this.roots) {
+      for (const file of storeFor(kind).list(0, root)) callback(file)
     }
   }
 
@@ -685,30 +633,12 @@ export class SearchIndex {
         this.debounceTimers.delete(filePath)
         try {
           const s = statSync(filePath)
-
-          // Determine sessionId and subagent status from the file path
-          const parts = filePath.split("/")
-          const fileName = parts[parts.length - 1]
-          const isSubagent = parts.includes("subagents")
-
-          let sessionId: string
-          let parentSessionId: string | null = null
-
-          if (isSubagent) {
-            // Walk up to find the parent session directory name
-            // Structure: .../projects/{project}/{sessionId}/subagents/agent-{id}.jsonl
-            const subagentsIdx = parts.lastIndexOf("subagents")
-            const parentDir = parts[subagentsIdx - 1]
-            sessionId = parentDir
-            parentSessionId = parentDir
-          } else {
-            sessionId = basename(fileName, ".jsonl")
-          }
-
-          this.indexFile(filePath, sessionId, s.mtimeMs, {
-            isSubagent,
-            parentSessionId,
-          })
+          // The owning store knows the layout, so this no longer splits the path
+          // on a literal "/" (broken on Windows) or takes Copilot's session id
+          // from a file called `events`.
+          const { sessionId, isSubagent, parentSessionId } =
+            identifyTranscript(filePath, this.projectsDir ?? undefined)
+          this.indexFile(filePath, sessionId, s.mtimeMs, { isSubagent, parentSessionId })
         } catch {
           // File may have been deleted or is still being written to
         }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { HookEventChip } from "../HookEventChip"
-import type { ParsedHookEvent } from "@/lib/types"
+import type { ParsedHookEvent } from "../../../../shared/session/types"
 
 function makeEvent(overrides: Partial<ParsedHookEvent> = {}): ParsedHookEvent {
   return {

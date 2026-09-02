@@ -1,4 +1,4 @@
-import type { Turn, ContentBlock } from "@/lib/types"
+import type { Turn, ContentBlock } from "../../shared/session/types"
 import {
   parseInterrupts,
   parseTaskNotifications,

@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import type { AgentKind } from "./sessionSource"
+import { capabilitiesFor, type AgentKind } from "./agents"
 
 export type EffortOption = { value: string; label: string; description?: string }
 
@@ -10,6 +10,8 @@ export type ModelOption = {
   value: string
   label: string
   description?: string
+  /** Canonical wire model id this option resolves to (e.g. "" → "claude-sonnet-5"). */
+  resolvedModel?: string
   isDefault?: boolean
   defaultReasoningEffort?: string
   supportedReasoningEfforts?: EffortOption[]
@@ -28,7 +30,7 @@ export function cn(...inputs: ClassValue[]) {
 
 // ── Model options ────────────────────────────────────────────────────────────
 // The lists below are STATIC FALLBACKS only. At runtime the app fetches the
-// live model catalogs from the installed claude/codex CLIs via GET /api/models
+// live model catalogs from the installed provider CLIs via GET /api/models
 // (see useModelOptions) and swaps them in, so new models appear without a
 // Cogpit release. Keep the fallbacks roughly current anyway for offline/error
 // paths.
@@ -72,7 +74,7 @@ const SOL_CAPABILITIES: Partial<ModelOption> = {
 }
 
 export const CODEX_MODEL_OPTIONS: ModelOption[] = [
-  { value: "", label: "Default", description: "Use Codex's recommended model (GPT-5.6 Sol)", ...SOL_CAPABILITIES },
+  { value: "", label: "Default", description: "Use Codex's recommended model (GPT-5.6 Sol)", resolvedModel: "gpt-5.6-sol", ...SOL_CAPABILITIES },
   { value: "gpt-5.6-sol", label: "GPT-5.6 Sol", description: "Flagship model for the most ambitious work", ...SOL_CAPABILITIES },
   { value: "gpt-5.6-terra", label: "GPT-5.6 Terra", description: "Balanced model for everyday work", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_ULTRA_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
   { value: "gpt-5.6-luna", label: "GPT-5.6 Luna", description: "Fastest, most cost-efficient model", defaultReasoningEffort: "medium", supportedReasoningEfforts: CODEX_STANDARD_EFFORTS, inputModalities: ["text", "image"], supportsPersonality: false, serviceTiers: CODEX_FAST_TIER },
@@ -82,10 +84,28 @@ export const CODEX_MODEL_OPTIONS: ModelOption[] = [
   { value: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark", description: "Ultra-fast text-only coding model", defaultReasoningEffort: "high", supportedReasoningEfforts: CODEX_XHIGH_EFFORTS, inputModalities: ["text"], supportsPersonality: true },
 ]
 
+export const COPILOT_MODEL_OPTIONS: ModelOption[] = [
+  { value: "", label: "Default", supportsEffort: false, inputModalities: ["text"] },
+  {
+    value: "auto",
+    label: "Auto",
+    description: "Let Copilot choose the best available model",
+    supportsEffort: false,
+    inputModalities: ["text"],
+  },
+]
+
+const staticModelOptions: Record<AgentKind, readonly ModelOption[]> = {
+  claude: CLAUDE_MODEL_OPTIONS,
+  codex: CODEX_MODEL_OPTIONS,
+  copilot: COPILOT_MODEL_OPTIONS,
+}
+
 // Live catalogs fetched from the CLIs (null = not loaded, use static fallback)
 const dynamicModelOptions: Record<AgentKind, ModelOption[] | null> = {
   claude: null,
   codex: null,
+  copilot: null,
 }
 const modelOptionListeners = new Set<() => void>()
 
@@ -106,6 +126,7 @@ export function subscribeModelOptions(listener: () => void): () => void {
 export function resetDynamicModelOptions() {
   dynamicModelOptions.claude = null
   dynamicModelOptions.codex = null
+  dynamicModelOptions.copilot = null
   modelOptionListeners.forEach((listener) => listener())
 }
 
@@ -121,10 +142,7 @@ const EFFORT_OPTIONS: readonly EffortOption[] = [
 ]
 
 export function getModelOptions(agentKind: AgentKind): readonly ModelOption[] {
-  return (
-    dynamicModelOptions[agentKind] ??
-    (agentKind === "codex" ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS)
-  )
+  return dynamicModelOptions[agentKind] ?? staticModelOptions[agentKind]
 }
 
 export function getSelectedModelOption(agentKind: AgentKind, model?: string | null): ModelOption | undefined {
@@ -139,7 +157,9 @@ export function getEffortOptions(agentKind: AgentKind, model?: string | null): r
   const selected = getSelectedModelOption(agentKind, model)
   const supported = selected?.supportedReasoningEfforts
   if (supported && supported.length > 0) return supported
-  if (selected?.supportsEffort === false) return []
+  // Agents without a default effort ladder only offer what their catalog
+  // advertises, so a silent catalog means no effort chip at all.
+  if (selected?.supportsEffort === false || !capabilitiesFor(agentKind).reasoningEffort) return []
   return EFFORT_OPTIONS
 }
 
@@ -155,20 +175,26 @@ export function getFastServiceTierOption(agentKind: AgentKind, model?: string | 
 
 export function supportsImageInput(agentKind: AgentKind, model?: string | null): boolean {
   const modalities = getSelectedModelOption(agentKind, model)?.inputModalities
-  return !modalities || modalities.includes("image")
+  // A catalog that lists modalities is authoritative either way; the capability
+  // only decides what an unannotated model means.
+  if (modalities) return modalities.includes("image")
+  return capabilitiesFor(agentKind).imageInput
 }
 
 export function supportsAutoPermissionMode(agentKind: AgentKind, model?: string | null): boolean {
-  return agentKind === "claude" && getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
+  const mode = capabilitiesFor(agentKind).autoPermissionMode
+  if (mode === "always") return true
+  if (mode === "never") return false
+  return getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
 }
 
 /**
- * Whether a Claude model can run "ultracode" (which requires xhigh effort).
- * Haiku doesn't support high-effort levels; every other Claude alias — including
- * the empty "Default" (Opus) — does. Codex has no ultracode concept.
+ * Whether the selected model can run "ultracode", which pins effort to xhigh.
+ * Only the haiku family lacks the high-effort levels it needs, so every other
+ * selection — including the empty "Default" — qualifies.
  */
 export function isUltracodeCapableModel(agentKind: AgentKind, model?: string | null): boolean {
-  if (agentKind !== "claude") return false
+  if (!capabilitiesFor(agentKind).ultracode) return false
   return !(model ?? "").toLowerCase().startsWith("haiku")
 }
 

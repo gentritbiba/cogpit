@@ -4,7 +4,7 @@ import {
   aggregateAttribution,
   attributedDimensions,
 } from "../../../shared/session/attributionStats"
-import type { MessageAttribution, TokenUsage, Turn } from "../types"
+import type { MessageAttribution, TokenUsage, Turn } from "../../../shared/session/types"
 
 let turnCounter = 0
 

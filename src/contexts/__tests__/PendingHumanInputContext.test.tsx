@@ -91,6 +91,7 @@ function Probe() {
   const {
     permissionsBySession, questionsBySession, awaitingPermission, awaitingQuestion,
     elicitationsBySession, dialogsBySession, awaitingElicitation, awaitingDialog,
+    awaitingPlan,
     answerQuestion, answerElicitation, answerDialog, refresh,
   } = usePendingHumanInput()
   const question = [...questionsBySession.values()][0]?.[0]
@@ -114,6 +115,7 @@ function Probe() {
       </button>
       <span data-testid="elicitations">{[...awaitingElicitation].sort().join(",")}</span>
       <span data-testid="dialogs">{[...awaitingDialog].sort().join(",")}</span>
+      <span data-testid="plans">{[...awaitingPlan].sort().join(",")}</span>
       <span data-testid="etext">{elicitation?.message ?? ""}</span>
       <span data-testid="dmodel">{dialog?.fallbackModel ?? ""}</span>
       <button
@@ -172,6 +174,26 @@ describe("PendingHumanInputProvider", () => {
     expect(screen.getByTestId("questions").textContent).toBe("sess-q")
     expect(screen.getByTestId("permSummary").textContent).toBe("rm -rf dist")
     expect(screen.getByTestId("qtext").textContent).toBe("Which language?")
+  })
+
+  it("exposes only the session ids that have pending plans", async () => {
+    routeFetch({
+      bySession: {},
+      plansBySession: {
+        "sess-plan": [{
+          sessionId: "sess-plan",
+          requestId: "plan-1",
+          summary: "Implementation plan",
+        }],
+        empty: [],
+      },
+    }, { bySession: {} })
+
+    renderProbe()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plans").textContent).toBe("sess-plan")
+    })
   })
 
   it("surfaces a new question even while the permissions payload is unchanged", async () => {

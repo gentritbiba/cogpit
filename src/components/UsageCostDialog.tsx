@@ -10,13 +10,15 @@ import {
 import { Spinner } from "@/components/ui/Spinner"
 import { useUsageCost } from "@/hooks/useUsageCost"
 import { cn } from "@/lib/utils"
-import { formatCost } from "@/lib/token-costs"
+import { formatCost } from "../../shared/session/token-costs"
 import { formatTokenCount } from "@/lib/format"
 import {
   totalUsageCostTokens,
   type UsageCostProvider,
   type UsageCostSummary,
 } from "@/lib/usagePricing"
+import { descriptorFor } from "@/lib/agents"
+import { AGENT_DISPLAY_ORDER, agentChartColor } from "@/lib/agents/presentation"
 
 const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
@@ -26,11 +28,17 @@ const WINDOW_OPTIONS = [
 
 type Metric = "cost" | "tokens"
 
-/** Fixed provider order and colors — identity-stable, never reassigned. */
-const PROVIDERS: { key: UsageCostProvider; label: string; color: string }[] = [
-  { key: "claude", label: "Claude Code", color: "var(--chart-1)" },
-  { key: "codex", label: "Codex", color: "var(--chart-2)" },
-]
+/**
+ * Fixed agent order and colors — identity-stable, never reassigned. Names and
+ * colours come from the registry, so a legend cannot spell an agent differently
+ * from the rest of the app or miss one entirely.
+ */
+const PROVIDERS: { key: UsageCostProvider; label: string; color: string }[] =
+  AGENT_DISPLAY_ORDER.map((kind) => ({
+    key: kind,
+    label: descriptorFor(kind).displayName,
+    color: agentChartColor(kind),
+  }))
 
 interface DayTotals {
   day: string
@@ -67,7 +75,11 @@ function enumerateDays(sinceDay: string, untilDay: string): string[] {
 }
 
 function emptyProviderTotals(): Record<UsageCostProvider, { costUsd: number; tokens: number }> {
-  return { claude: { costUsd: 0, tokens: 0 }, codex: { costUsd: 0, tokens: 0 } }
+  return {
+    claude: { costUsd: 0, tokens: 0 },
+    codex: { costUsd: 0, tokens: 0 },
+    copilot: { costUsd: 0, tokens: 0 },
+  }
 }
 
 function derive(summary: UsageCostSummary): Derived {

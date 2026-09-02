@@ -10,7 +10,7 @@ import { teamAuthzMiddleware } from "./team/authz"
 import { describeEditionSuppression, initEdition } from "./team/edition"
 import { initDeviceRegistry } from "./hub/registry"
 import { initShareRegistry } from "./share/registry"
-import { codexAppServer } from "./codex-app-server"
+import { allRuntimes } from "./agents/runtimes"
 
 export function sessionApiPlugin(): Plugin {
   return {
@@ -20,7 +20,7 @@ export function sessionApiPlugin(): Plugin {
       server.httpServer?.on("close", () => {
         void Promise.all([
           cleanupProcesses(),
-          codexAppServer.shutdown(),
+          ...allRuntimes().map((runtime) => runtime.shutdown()),
         ])
       })
 

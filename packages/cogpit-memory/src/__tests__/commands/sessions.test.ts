@@ -8,7 +8,13 @@ import { tmpdir } from "node:os"
 // Use a mutable object so updates in beforeEach are visible through the
 // captured import reference.
 let tmpDir: string
-const mockDirs = { PROJECTS_DIR: "", TEAMS_DIR: "", TASKS_DIR: "", CODEX_SESSIONS_DIR: "" }
+const mockDirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  CODEX_SESSIONS_DIR: "",
+  COPILOT_SESSIONS_DIR: "",
+}
 
 mock.module("../../lib/dirs", () => ({
   dirs: mockDirs,
@@ -61,6 +67,34 @@ function writeSession(
   return filePath
 }
 
+function writeCopilotSession(sessionId: string, cwd = "/test/project"): string {
+  const sessionDir = join(mockDirs.COPILOT_SESSIONS_DIR, sessionId)
+  mkdirSync(sessionDir, { recursive: true })
+  const timestamp = new Date().toISOString()
+  const lines = [
+    JSON.stringify({
+      type: "session.start",
+      data: {
+        sessionId,
+        copilotVersion: "1.0.4",
+        selectedModel: "gpt-5.4",
+        context: { cwd, branch: "main" },
+      },
+      timestamp,
+    }),
+    JSON.stringify({ type: "user.message", data: { content: "Help from Copilot" }, timestamp }),
+    JSON.stringify({ type: "assistant.message", data: { content: "Sure" }, timestamp }),
+    JSON.stringify({
+      type: "session.shutdown",
+      data: { shutdownType: "routine", currentModel: "gpt-5.4", modelMetrics: {} },
+      timestamp,
+    }),
+  ]
+  const filePath = join(sessionDir, "events.jsonl")
+  writeFileSync(filePath, lines.join("\n"))
+  return filePath
+}
+
 describe("sessions command", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "cogpit-sessions-test-"))
@@ -70,6 +104,7 @@ describe("sessions command", () => {
     mockDirs.TEAMS_DIR = join(projectsDir, "..", "teams")
     mockDirs.TASKS_DIR = join(projectsDir, "..", "tasks")
     mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
   })
 
   afterEach(() => {
@@ -199,6 +234,23 @@ describe("sessions command", () => {
       const result = await listSessions({ maxAge: "1d" })
       expect(result.length).toBe(2)
     })
+
+    it("discovers and identifies Copilot sessions without a Claude history directory", async () => {
+      rmSync(mockDirs.PROJECTS_DIR, { recursive: true, force: true })
+      writeCopilotSession("11111111-1111-4111-8111-111111111111", "/workspace/copilot")
+
+      const result = await listSessions({ maxAge: "1d" })
+
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        source: "copilot",
+        cwd: "/workspace/copilot",
+        model: "gpt-5.4",
+        firstMessage: "Help from Copilot",
+        status: "completed",
+      })
+    })
   })
 
   // ── currentSession ────────────────────────────────────────────────────────
@@ -279,6 +331,17 @@ describe("sessions command", () => {
       const result = await currentSession("/Users/me/.config")
       expect(result).not.toBeNull()
       expect(result!.sessionId).toBe("dotpath")
+    })
+
+    it("finds the current Copilot session by cwd", async () => {
+      writeCopilotSession("22222222-2222-4222-8222-222222222222", "/workspace/copilot")
+
+      const result = await currentSession("/workspace/copilot")
+
+      expect(result).toMatchObject({
+        sessionId: "22222222-2222-4222-8222-222222222222",
+        source: "copilot",
+      })
     })
   })
 })

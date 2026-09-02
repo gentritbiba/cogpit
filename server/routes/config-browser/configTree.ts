@@ -1,7 +1,6 @@
 import { readdir, readFile, stat, lstat, realpath, access } from "node:fs/promises"
 import { constants } from "node:fs"
 import { join } from "node:path"
-import { homedir } from "node:os"
 import { parseFrontmatter } from "../slash-suggestions"
 import { hasExecutableExtension } from "../../lib/binaryResolver"
 import { getFileType, type ConfigFileType } from "./configValidation"
@@ -226,6 +225,7 @@ async function buildMergedDirectory(
   sources: CliSourceDir[],
   opts: Omit<ScanDirOptions, "cli"> = {},
 ): Promise<ConfigTreeItem | null> {
+  if (sources.length === 0) return null
   const groups = await Promise.all(
     sources.map((source) => scanDir(source.dir, { ...opts, cli: source.cli })),
   )
@@ -242,27 +242,23 @@ async function buildMergedDirectory(
 }
 
 async function buildScopeItems(layout: ConfigScopeLayout): Promise<ConfigTreeItem[]> {
-  const themesDir = layout.themesDir
   const [instructions, settings, agents, commands, skills, themes] = await Promise.all([
     Promise.all(layout.instructions.map((file) => buildFileItem(file, "instructions"))),
     Promise.all(layout.settings.map((file) => buildFileItem(file, "settings"))),
     buildMergedDirectory("agents", layout.agents),
     buildMergedDirectory("commands", layout.commands),
     buildMergedDirectory("skills", layout.skills, { isSkillsDir: true }),
-    themesDir ? scanDir(themesDir, { isThemesDir: true, cli: ["claude"] }) : [],
+    buildMergedDirectory("themes", layout.themes, { isThemesDir: true }),
   ])
 
-  // Shared setups link ~/.claude/CLAUDE.md at ~/AGENTS.md, so the two files
-  // collapse into one entry carrying both CLIs.
+  // Shared setups link one CLI's instruction file at another's, so the two
+  // files collapse into one entry carrying both CLIs.
   const items = await mergeCliItems([
     [...instructions, ...settings].filter((item): item is ConfigTreeItem => item !== null),
   ])
 
-  for (const directory of [agents, commands, skills]) {
+  for (const directory of [agents, commands, skills, themes]) {
     if (directory) items.push(directory)
-  }
-  if (themesDir && themes.length > 0) {
-    items.push({ name: "themes", path: themesDir, type: "directory", children: themes })
   }
   return items
 }
@@ -281,10 +277,22 @@ export async function buildProjectSection(cwd: string): Promise<ConfigTreeSectio
   return { label: "Project", scope: "project", baseDir: layout.baseDir, items }
 }
 
-/** Build plugin sections */
+/**
+ * Installed-plugin trees, one section per plugin. Everything a plugin ships is
+ * read-only: it belongs to the plugin, not to the user.
+ */
 export async function buildPluginSections(): Promise<ConfigTreeSection[]> {
   const sections: ConfigTreeSection[] = []
-  const installedPath = join(homedir(), ".claude", "plugins", "installed_plugins.json")
+  for (const source of globalLayout().plugins) {
+    sections.push(...await buildPluginSectionsUnder(source))
+  }
+  return sections
+}
+
+async function buildPluginSectionsUnder(source: CliSourceDir): Promise<ConfigTreeSection[]> {
+  const sections: ConfigTreeSection[] = []
+  const installedPath = join(source.dir, "installed_plugins.json")
+  const cli = source.cli
 
   try {
     const raw = await readFile(installedPath, "utf-8")
@@ -301,42 +309,42 @@ export async function buildPluginSections(): Promise<ConfigTreeSection[]> {
 
       // skills/
       const skillsDir = join(installPath, "skills")
-      const skills = await scanDir(skillsDir, { readOnly: true, isSkillsDir: true, cli: ["claude"] })
+      const skills = await scanDir(skillsDir, { readOnly: true, isSkillsDir: true, cli })
       if (skills.length > 0) {
         items.push({ name: "skills", path: skillsDir, type: "directory", children: skills, readOnly: true })
       }
 
       // commands/
       const commandsDir = join(installPath, "commands")
-      const commands = await scanDir(commandsDir, { readOnly: true, cli: ["claude"] })
+      const commands = await scanDir(commandsDir, { readOnly: true, cli })
       if (commands.length > 0) {
         items.push({ name: "commands", path: commandsDir, type: "directory", children: commands, readOnly: true })
       }
 
       // agents/
       const agentsDir = join(installPath, "agents")
-      const agents = await scanDir(agentsDir, { readOnly: true, cli: ["claude"] })
+      const agents = await scanDir(agentsDir, { readOnly: true, cli })
       if (agents.length > 0) {
         items.push({ name: "agents", path: agentsDir, type: "directory", children: agents, readOnly: true })
       }
 
       // themes/ (since Claude Code 2.1.118)
       const pluginThemesDir = join(installPath, "themes")
-      const pluginThemes = await scanDir(pluginThemesDir, { readOnly: true, isThemesDir: true, cli: ["claude"] })
+      const pluginThemes = await scanDir(pluginThemesDir, { readOnly: true, isThemesDir: true, cli })
       if (pluginThemes.length > 0) {
         items.push({ name: "themes", path: pluginThemesDir, type: "directory", children: pluginThemes, readOnly: true })
       }
 
       // monitors/ (each subdir is a monitor)
       const monitorsDir = join(installPath, "monitors")
-      const monitors = await scanDir(monitorsDir, { readOnly: true, isMonitorsDir: true, cli: ["claude"] })
+      const monitors = await scanDir(monitorsDir, { readOnly: true, isMonitorsDir: true, cli })
       if (monitors.length > 0) {
         items.push({ name: "monitors", path: monitorsDir, type: "directory", children: monitors, readOnly: true })
       }
 
       // bin/ (executable files only)
       const binDir = join(installPath, "bin")
-      const bins = await scanDir(binDir, { readOnly: true, isBinDir: true, cli: ["claude"] })
+      const bins = await scanDir(binDir, { readOnly: true, isBinDir: true, cli })
       if (bins.length > 0) {
         items.push({ name: "bin", path: binDir, type: "directory", children: bins, readOnly: true })
       }

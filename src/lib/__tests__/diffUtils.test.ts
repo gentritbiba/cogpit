@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { diffLineCount, computeNetDiff } from "@/lib/diffUtils"
-import type { EditOp } from "@/lib/diffUtils"
+import { diffLineCount, computeNetDiff } from "../../../shared/diff-utils"
+import type { EditOp } from "../../../shared/diff-utils"
 
 describe("diffLineCount", () => {
   it("returns zeros for two empty strings", () => {

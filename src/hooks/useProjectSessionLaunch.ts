@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch } from "react"
 import { useNewSession } from "@/hooks/useNewSession"
 import { authFetch } from "@/lib/auth"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import {
-  findClaudeProjectDirNameForCwd,
-  isCodexDirName,
-  projectDirNameForAgent,
-  projectDirNameForNewFolder,
+  agentKindForDirName,
+  findProjectDirNameForCwd,
+  projectDirNameFor,
   type AgentKind,
-} from "@/lib/sessionSource"
+} from "@/lib/agents"
 
 interface UseProjectSessionLaunchOptions {
   permissionsConfig: PermissionsConfig
@@ -29,8 +28,8 @@ interface UseProjectSessionLaunchOptions {
 
 /**
  * Owns lazy new-session launch state and provider-aware project resolution.
- * A Codex project remembers its matching Claude directory so the pending
- * composer can switch agents without losing the real cwd.
+ * External-provider projects remember their matching Claude directory so the
+ * pending composer can switch agents without losing the real cwd.
  */
 export function useProjectSessionLaunch({
   permissionsConfig,
@@ -89,7 +88,7 @@ export function useProjectSessionLaunch({
         return null
       }
       const projects = await response.json() as Array<{ dirName: string; path: string }>
-      const match = findClaudeProjectDirNameForCwd(projects, cwd)
+      const match = findProjectDirNameForCwd(projects, cwd, "claude")
       cache.set(cwd, match)
       return match
     } catch {
@@ -106,29 +105,29 @@ export function useProjectSessionLaunch({
       return
     }
 
-    const startsInCodex = isCodexDirName(dirName)
-    const claudeDirName = startsInCodex
+    const startsInExternalProvider = agentKindForDirName(dirName) !== "claude"
+    const claudeDirName = startsInExternalProvider
       ? await resolveClaudeProjectDirName(normalizedCwd)
-      : projectDirNameForNewFolder(normalizedCwd, "claude")
+      : projectDirNameFor("claude", normalizedCwd)
 
     setPendingAgentSource(claudeDirName ? { claudeDirName, cwd: normalizedCwd } : null)
     beginNewSession(
-      startsInCodex || !claudeDirName ? dirName : claudeDirName,
+      startsInExternalProvider || !claudeDirName ? dirName : claudeDirName,
       normalizedCwd,
     )
   }, [beginNewSession, resolveClaudeProjectDirName])
 
   const handleStartNewFolder = useCallback((cwd: string) => {
-    const dirName = projectDirNameForNewFolder(cwd, defaultAgentKind)
+    const dirName = projectDirNameFor(defaultAgentKind, cwd)
     void handleStartNewSession(dirName, cwd)
   }, [defaultAgentKind, handleStartNewSession])
 
   const handlePendingSessionAgentChange = useCallback((agentKind: AgentKind) => {
     if (!pendingAgentSource) return
-    const nextDirName = projectDirNameForAgent(
-      pendingAgentSource.claudeDirName,
-      pendingAgentSource.cwd,
+    const nextDirName = projectDirNameFor(
       agentKind,
+      pendingAgentSource.cwd,
+      pendingAgentSource.claudeDirName,
     )
     beginNewSession(nextDirName, pendingAgentSource.cwd)
   }, [pendingAgentSource, beginNewSession])

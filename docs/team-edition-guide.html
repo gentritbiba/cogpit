@@ -160,7 +160,7 @@
 
 <header class="hero">
   <h1>Cogpit Team Edition</h1>
-  <p class="lede">One Cogpit on a shared box, a login for every person using it. Your team drives Claude Code and Codex sessions through the browser; the machine, the CLI logins, and the MCP connections stay in one place.</p>
+  <p class="lede">One Cogpit on a shared box, a login for every person using it. Your team drives Claude Code, Codex, and GitHub Copilot CLI sessions through the browser; the machine, the CLI logins, and the MCP connections stay in one place.</p>
   <div class="pills">
     <span class="pill on">Personal edition unchanged</span>
     <span class="pill">cogpit-server only</span>
@@ -191,7 +191,7 @@
 
   <div class="note">
     <b>One agent login, many people</b>
-    Claude Code and Codex are logged in once, as the server's OS user. Every team member's sessions run under that login; Cogpit records who started what. That is the model — it is not per-user credential isolation.
+    Claude Code, Codex, and GitHub Copilot CLI are logged in once, as the server's OS user. Every team member's sessions run under those logins; Cogpit records who started what. That is the model — it is not per-user credential isolation.
   </div>
 </section>
 
@@ -201,7 +201,7 @@
 
   <ol class="steps">
     <li>
-      <b>Install Claude Code and/or Codex on the server, and log them in.</b>
+      <b>Install at least one supported CLI on the server — Claude Code, Codex, or GitHub Copilot CLI — and log in.</b>
       Cogpit drives those CLIs — it has no models of its own and needs no API keys.
     </li>
     <li>

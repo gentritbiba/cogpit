@@ -12,9 +12,15 @@ const ROOT = join(import.meta.dir, "..")
 const SRC = join(ROOT, "shared/session")
 const DEST = join(ROOT, "packages/cogpit-memory/src/lib")
 
+// Deliberately explicit, never directory auto-discovery: a glob over
+// shared/session would sweep __tests__ files into the published npm package.
 const FILES = [
   "parser.ts",
+  "agents.ts",
+  "agent-descriptors.ts",
+  "claude.ts",
   "codex.ts",
+  "copilot.ts",
   "codex-patches.ts",
   "codex-exec.ts",
   "codex-tool-normalization.ts",
@@ -23,6 +29,7 @@ const FILES = [
   "types.ts",
   "messageTypeGuards.ts",
   "sessionStats.ts",
+  "turnContent.ts",
   "sessionStatus.ts",
   "token-costs.ts",
   "interactiveState.ts",

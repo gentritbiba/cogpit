@@ -3,7 +3,7 @@
  * ordered and filtered. Kept free of React so it can be tested directly.
  */
 
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import { WORKING_STATUSES, isSessionActive } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import type {
@@ -81,6 +81,7 @@ function resolveState(
   hasPermission: boolean,
   hasPrompt: boolean,
   hasQuestion: boolean,
+  hasPlan: boolean,
 ): MissionCardState {
   if (hasPermission) return "awaiting_approval"
   // Same reasoning as the question branch below: the CLI is parked on a
@@ -92,6 +93,7 @@ function resolveState(
   // then "Done" — a session waiting on the user would vanish into the finished
   // bucket.
   if (hasQuestion) return "awaiting_question"
+  if (hasPlan) return "awaiting_answer"
   // A deferred hook needs the user but cannot be answered from the grid.
   if (session.agentStatus === "deferred") return "awaiting_answer"
   if (session.agentStatus === "idle" && active) return "awaiting_answer"
@@ -112,6 +114,8 @@ export interface BuildCardsOptions {
   questionsBySession: Map<string, MissionControlQuestion[]>
   elicitationsBySession: Map<string, MissionControlElicitation[]>
   dialogsBySession: Map<string, MissionControlUserDialog[]>
+  /** Copilot plans are reviewed in the full session, not rendered in the grid. */
+  awaitingPlan: ReadonlySet<string>
   /** Sessions that finished during this browser session, kept visible. */
   newlyCompleted: ReadonlySet<string>
   /** Finished sessions to keep after the recently-finished ones. */
@@ -131,6 +135,7 @@ export function buildMissionCards({
   questionsBySession,
   elicitationsBySession,
   dialogsBySession,
+  awaitingPlan,
   newlyCompleted,
   finishedLimit = DEFAULT_FINISHED_LIMIT,
   now = Date.now(),
@@ -142,7 +147,9 @@ export function buildMissionCards({
     const questions = questionsBySession.get(session.sessionId) ?? []
     const elicitations = elicitationsBySession.get(session.sessionId) ?? []
     const dialogs = dialogsBySession.get(session.sessionId) ?? []
+    const hasPlan = awaitingPlan.has(session.sessionId)
     const blockers = permissions.length + questions.length + elicitations.length + dialogs.length
+      + Number(hasPlan)
     // A teammate's own session is represented by its lead, unless it is the one
     // actually blocked on the user.
     const isTeammate = Boolean(session.teamName && session.agentName)
@@ -156,6 +163,7 @@ export function buildMissionCards({
         permissions.length > 0,
         elicitations.length > 0 || dialogs.length > 0,
         questions.length > 0,
+        hasPlan,
       ),
       summary: summaries.get(session.sessionId) ?? null,
       permissions,

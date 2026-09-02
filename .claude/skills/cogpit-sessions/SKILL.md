@@ -131,7 +131,7 @@ Body:
   "message": "string (required unless images provided)",
   "images": [{ "data": "base64", "mediaType": "image/png" }],
   "permissions": { "mode": "bypassPermissions" },
-  "model": "string (e.g. 'sonnet', 'opus', or a full model id; GET /api/models lists options)",
+  "model": "string (e.g. 'sonnet', '' for provider default, or a full model id; GET /api/models lists options)",
   "effort": "'low' | 'medium' | 'high' | 'xhigh' | 'max'",
   "fastMode": "boolean (fast/priority service tier)",
   "ultracode": "boolean (Claude ultracode; needs xhigh-capable model)",
@@ -197,7 +197,9 @@ Resolve a bare sessionId to `{ dirName, fileName }`.
 
 ### GET /api/active-sessions
 
-Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
+Recent sessions across all projects, newest first. `?search=<q>` filters by title/message/branch/cwd content. It also accepts exact pull request searches such as `#157`, `honest-cms #157`, `honest-cms#157`, `PR 157`, and a pasted GitHub pull request URL. PR searches cover sessions that created the pull request or used an explicit `gh pr` action for it. The first search may build the durable transcript index in the background. Poll the same request until `X-Cogpit-PR-Index-Pending` is `0`; `X-Cogpit-PR-Index-Total` reports the number of candidate transcripts. A matching row includes `matchedPullRequestNumber`.
+
+Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd`, `gitBranch`, `model`, `turnCount`, `lastActivityAt`, `agentStatus` (same values as session-status), `agentToolName`, `agentPendingAgents` (present when status is awaiting_agents), `pullRequests`, and for team members `teamName`, `agentName`, `teamLeadSessionId`.
 
 ### GET /api/running-processes
 

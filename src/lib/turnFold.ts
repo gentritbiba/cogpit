@@ -1,4 +1,4 @@
-import type { TurnContentBlock } from "@/lib/types"
+import type { TurnContentBlock } from "../../shared/session/types"
 import { formatDuration } from "@/lib/format"
 
 /** Which blocks a turn hides behind its work disclosure. */

@@ -9,7 +9,6 @@ vi.mock("../helpers", () => ({
   isTrustedDirectLocalRequest: vi.fn(),
   hasTrustedMutationSource: vi.fn(),
   canIssueBrowserSession: vi.fn(),
-  isRateLimited: vi.fn(),
   createSessionToken: vi.fn(),
   getRequestSessionToken: vi.fn(),
   setBrowserSessionCookie: vi.fn(),
@@ -22,6 +21,8 @@ vi.mock("../helpers", () => ({
   revokeAllSessions: vi.fn(),
   getConnectedDevices: vi.fn(),
 }))
+
+vi.mock("../lib/rateLimit", () => ({ isRateLimited: vi.fn() }))
 
 vi.mock("../config", () => ({
   getConfig: vi.fn(),
@@ -37,12 +38,12 @@ import {
   isTrustedDirectLocalRequest,
   hasTrustedMutationSource,
   canIssueBrowserSession,
-  isRateLimited,
   createSessionToken,
   setBrowserSessionCookie,
   verifyPasswordAsync,
   hashPassword,
 } from "../helpers"
+import { isRateLimited } from "../lib/rateLimit"
 import { getConfig } from "../config"
 import { flushSessionPersistence } from "../team/sessionPersistence"
 import { initEdition, __resetEditionForTest } from "../team/edition"

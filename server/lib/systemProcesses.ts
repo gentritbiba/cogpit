@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process"
 
+import { allDescriptors } from "../../shared/session/agent-descriptors"
 import type {
   SystemProcessKind,
   SystemProcessMetric,
@@ -58,11 +59,32 @@ export function parsePsOutput(text: string): RawProcess[] {
   return rows
 }
 
+/**
+ * How to spot each agent CLI in a `ps` line, and what to call it.
+ *
+ * Driven by the descriptor table so a CLI cannot be left out — the matcher used
+ * to hard-code "claude", which meant an orphaned Codex or Copilot session was
+ * neither reported as a leak nor reaped.
+ */
+const AGENT_MATCHERS: ReadonlyArray<{
+  kind: SystemProcessKind
+  pattern: RegExp
+  label: string
+}> = allDescriptors().map((descriptor) => ({
+  kind: descriptor.kind,
+  // Either invoked by name, or run out of a versioned install directory.
+  pattern: new RegExp(
+    `(?:^|/)${descriptor.binName}(?:\\s|$)|\\.local/share/${descriptor.binName}/versions/`,
+  ),
+  label: `${descriptor.displayName} session`,
+}))
+
 function classifyKind(command: string): SystemProcessKind | null {
   if (/Cogpit Helper|Cogpit\.app/.test(command)) return "cogpit"
   if (/chrome-headless-shell|headless_shell/.test(command)) return "headless-browser"
   if (/agent-browser\/(?:bin|dist)/.test(command)) return "browser-daemon"
-  if (/(?:^|\/)claude(?:\s|$)|\.local\/share\/claude\/versions\//.test(command)) return "claude"
+  const agent = AGENT_MATCHERS.find((matcher) => matcher.pattern.test(command))
+  if (agent) return agent.kind
   if (
     /(?:^|\/)(?:bun|node)(?:\s|$)/.test(command) &&
     /scratchpad|\/tmp\/|\s-e\s/.test(command)
@@ -73,7 +95,8 @@ function classifyKind(command: string): SystemProcessKind | null {
 }
 
 function labelFor(kind: SystemProcessKind, command: string): string {
-  if (kind === "claude") return "Claude session"
+  const agent = AGENT_MATCHERS.find((matcher) => matcher.kind === kind)
+  if (agent) return agent.label
   if (kind === "headless-browser") return "Headless Chrome"
   if (kind === "browser-daemon") return "agent-browser daemon"
 
@@ -99,7 +122,7 @@ function buildChildrenIndex(rows: RawProcess[]): Map<number, RawProcess[]> {
   return childrenOf
 }
 
-export interface OrphanedClaudeSubtree {
+export interface OrphanedAgentSubtree {
   rootPid: number
   command: string
   ageSeconds: number
@@ -107,16 +130,19 @@ export interface OrphanedClaudeSubtree {
   pids: number[]
 }
 
+const AGENT_KIND_SET = new Set<SystemProcessKind>(AGENT_MATCHERS.map((matcher) => matcher.kind))
+
 /**
- * A claude session whose parent died (reparented to launchd) is a leak, and
+ * An agent session whose parent died (reparented to launchd) is a leak, and
  * so is everything it keeps alive underneath it. These are the only subtrees
  * safe to auto-reap: nothing can still be controlling them.
  */
-export function collectOrphanedClaudeSubtrees(rows: RawProcess[]): OrphanedClaudeSubtree[] {
+export function collectOrphanedAgentSubtrees(rows: RawProcess[]): OrphanedAgentSubtree[] {
   const childrenOf = buildChildrenIndex(rows)
-  const subtrees: OrphanedClaudeSubtree[] = []
+  const subtrees: OrphanedAgentSubtree[] = []
   for (const row of rows) {
-    if (row.ppid !== 1 || classifyKind(row.command) !== "claude") continue
+    const kind = classifyKind(row.command)
+    if (row.ppid !== 1 || kind === null || !AGENT_KIND_SET.has(kind)) continue
     const pids: number[] = []
     const collect = (pid: number): void => {
       if (pids.includes(pid)) return
@@ -147,7 +173,7 @@ export function classifyProcesses(rows: RawProcess[], selfPid: number): SystemPr
   }
 
   const leakedSubtree = new Set<number>(
-    collectOrphanedClaudeSubtrees(rows).flatMap((subtree) => subtree.pids),
+    collectOrphanedAgentSubtrees(rows).flatMap((subtree) => subtree.pids),
   )
 
   const metrics: SystemProcessMetric[] = []

@@ -1,7 +1,7 @@
 import { useReducer } from "react"
 import { prependTurns } from "@/lib/timelinePaging"
-import type { AgentKind } from "@/lib/sessionSource"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { AgentKind } from "@/lib/agents"
+import type { ParsedSession, Turn } from "../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { MobileTab } from "@/components/MobileNav"
 

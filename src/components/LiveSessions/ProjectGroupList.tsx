@@ -31,7 +31,7 @@ interface ProjectGroupSharedProps {
   onNewSession?: (dirName: string, cwd?: string) => void
   creatingSession?: boolean
   onPrefetchSession?: (dirName: string, fileName: string) => void
-  onResumeSession?: (sessionId: string, cwd?: string) => void
+  onResumeSession?: (sessionId: string, cwd: string | undefined, dirName: string) => void
 }
 
 interface ProjectGroupListProps extends ProjectGroupSharedProps {

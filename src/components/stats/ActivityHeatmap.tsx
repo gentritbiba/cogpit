@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 
 const SVG_WIDTH = 280
 const SVG_HEIGHT = 32

@@ -1,5 +1,6 @@
 import { sendJson, type UseFn } from "../http"
-import { findJsonlPath, readFile, stat } from "../helpers"
+import { readFile, stat } from "../helpers"
+import { findJsonlPath } from "../sessionPaths"
 import type { ToolCall, ToolUseBlock } from "../../shared/session/types"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
 import { expandEditToolCalls } from "../../shared/session/edit-calls"
@@ -8,6 +9,7 @@ import {
   parseCustomToolOutput,
   parseCodexToolPatches,
 } from "../../shared/session/codex"
+import { isCopilotSessionText, parseCopilotSession } from "../../shared/session/copilot"
 
 export interface ComputedFileChange {
   filePath: string
@@ -42,10 +44,57 @@ function editCallsFromBlock(block: ToolUseBlock, cwd: string): ToolCall[] {
   return expandEditToolCalls([tc], cwd)
 }
 
+function normalizeCopilotFileChangeEvents(jsonlContent: string): string {
+  const session = parseCopilotSession(jsonlContent)
+  const records: unknown[] = [{ type: "system", cwd: session.cwd }]
+
+  for (const turn of session.turns) {
+    records.push({
+      type: "user",
+      message: { content: [{ type: "text", text: turn.userMessage }] },
+    })
+    const toolCalls = [
+      ...turn.toolCalls,
+      ...turn.subAgentActivity.flatMap((message) => message.toolCalls),
+    ]
+    if (toolCalls.length === 0) continue
+
+    records.push({
+      type: "assistant",
+      cwd: session.cwd,
+      message: {
+        content: toolCalls.map((call) => ({
+          type: "tool_use",
+          id: call.id,
+          name: call.name,
+          input: call.input,
+        })),
+      },
+    })
+    records.push({
+      type: "user",
+      message: {
+        content: toolCalls.map((call) => ({
+          type: "tool_result",
+          tool_use_id: call.id,
+          content: call.result ?? "",
+          is_error: call.isError,
+        })),
+      },
+    })
+  }
+
+  return records.map((record) => JSON.stringify(record)).join("\n")
+}
+
 export async function parseSessionFileChanges(
   jsonlContent: string,
   includeContent: boolean,
 ): Promise<{ changes: ComputedFileChange[]; cwd: string }> {
+  if (isCopilotSessionText(jsonlContent)) {
+    return parseSessionFileChanges(normalizeCopilotFileChangeEvents(jsonlContent), includeContent)
+  }
+
   const lines = jsonlContent.split("\n").filter(Boolean)
 
   let cwd = ""

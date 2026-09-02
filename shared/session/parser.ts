@@ -1,16 +1,18 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
+/**
+ * Transcript entry point: pick the format a transcript was written in, then let
+ * it do the work. Every grammar lives in its own module behind `AgentFormat`;
+ * this file only routes and holds the small presentation helpers that operate
+ * on the already-parsed model.
+ */
+import { TERMINAL_AGENT_KIND, formatForRecords, formatForText } from "./agents"
 import type {
-  RawMessage,
-  ParsedSession,
   ContentBlock,
   ImageBlock,
   ParseSessionOptions,
+  ParsedSession,
   UserContent,
 } from "./types"
-import { buildTurns, findTurnStartIndices, pairAgentMessageReplies } from "./turnBuilder"
-import { computeStats, createEmptySessionStats } from "./sessionStats"
-import { isCodexSessionText, parseCodexSession } from "./codex"
-import { isAssistantMessage } from "./messageTypeGuards"
 
 export type { PendingInteraction } from "./interactiveState"
 export type { ParseSessionOptions } from "./types"
@@ -26,160 +28,27 @@ function extractTextFromContent(content: string | ContentBlock[]): string {
     .join("\n")
 }
 
-// ── Parsing ─────────────────────────────────────────────────────────────────
-
-function parseLines(jsonlText: string): RawMessage[] {
-  const messages: RawMessage[] = []
-  for (const line of jsonlText.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      messages.push(JSON.parse(trimmed) as RawMessage)
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return messages
-}
-
-function isCodexRawMessages(rawMessages: Array<{ type: string; [key: string]: unknown }>): boolean {
-  const firstType = rawMessages[0]?.type
-  return firstType === "session_meta"
-    || firstType === "turn_context"
-    || firstType === "event_msg"
-    || firstType === "response_item"
-    || firstType === "compacted"
-    || firstType === "world_state"
-    || firstType === "inter_agent_communication_metadata"
-}
-
-function serializeRawMessages(rawMessages: Array<{ type: string; [key: string]: unknown }>): string {
-  return rawMessages.map((msg) => JSON.stringify(msg)).join("\n")
-}
-
-function extractSessionMetadata(messages: RawMessage[]) {
-  const meta = { sessionId: "", version: "", gitBranch: "", cwd: "", slug: "", name: "", model: "", branchedFrom: undefined as { sessionId: string; turnIndex?: number | null } | undefined }
-
-  for (const msg of messages) {
-    if (msg.sessionId && !meta.sessionId) meta.sessionId = msg.sessionId
-    if (msg.version && !meta.version) meta.version = msg.version
-    if (msg.gitBranch && !meta.gitBranch) meta.gitBranch = msg.gitBranch
-    if (msg.cwd && !meta.cwd) meta.cwd = msg.cwd
-    if (msg.slug && !meta.slug) meta.slug = msg.slug
-    if ((msg as Record<string, unknown>).name && !meta.name) meta.name = (msg as Record<string, unknown>).name as string
-    if ((msg as Record<string, unknown>).branchedFrom && !meta.branchedFrom) {
-      meta.branchedFrom = (msg as Record<string, unknown>).branchedFrom as typeof meta.branchedFrom
-    }
-    if (isAssistantMessage(msg) && msg.message.model && !meta.model) {
-      meta.model = msg.message.model
-    }
-    if (meta.sessionId && meta.version && meta.gitBranch && meta.cwd && meta.model) break
-  }
-
-  return meta
-}
-
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export function parseSession(jsonlText: string, options?: ParseSessionOptions): ParsedSession {
-  if (isCodexSessionText(jsonlText)) {
-    return parseCodexSession(jsonlText, options)
-  }
-  const rawMessages = parseLines(jsonlText)
-  const metadata = extractSessionMetadata(rawMessages)
-  const turns = buildTurns(rawMessages)
-  const stats = options?.skipStats ? createEmptySessionStats(turns.length) : computeStats(turns)
-
-  return {
-    ...metadata,
-    turns,
-    stats,
-    rawMessages: options?.skipStats ? [] : rawMessages,
-    agentKind: "claude" as const,
-  }
+  return formatForText(jsonlText).parse(jsonlText, options)
 }
 
 /**
  * Incrementally append new JSONL lines to an existing parsed session.
- * Avoids re-parsing all turns from scratch — only re-processes the last
- * (potentially incomplete) turn and any new messages.
+ *
+ * Dispatch is on raw-record shape, never on `existing.agentKind`: that field is
+ * optional on `ParsedSession` and this is the append hot path. When the records
+ * carry no discriminator — an empty window, or one paged in above the loaded
+ * range — the newly arrived text decides instead.
  */
 export function parseSessionAppend(
   existing: ParsedSession,
   newJsonlText: string
 ): ParsedSession {
-  if (isCodexRawMessages(existing.rawMessages) || isCodexSessionText(newJsonlText)) {
-    const prefix = serializeRawMessages(existing.rawMessages)
-    return parseCodexSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
-  }
-
-  const newMessages = parseLines(newJsonlText)
-  if (newMessages.length === 0) return existing
-
-  // The Codex path returns above, so the remaining raw records use Claude's
-  // discriminated message union and are safe to pass to the Claude turn builder.
-  const existingRawMessages = existing.rawMessages as RawMessage[]
-  const allRawMessages = [...existingRawMessages, ...newMessages]
-
-  // Only the last turn can still change, so keep every turn before it and
-  // rebuild from where it started. Both the cut point and the keep-count come
-  // from `turnStarts` so they cannot disagree — even for a window that begins
-  // mid-turn (bottom-first loading) and therefore has no turn-starting user
-  // record to walk back to.
-  const turnStarts = findTurnStartIndices(existingRawMessages)
-  // Turns paged in above the loaded window have no raw messages behind them.
-  const historyTurnCount = Math.max(0, existing.turns.length - turnStarts.length)
-  let rebuildFromTurn = Math.max(0, turnStarts.length - 1)
-
-  // Claude Code can flush sub-agent progress events AFTER the parent turn's
-  // tool_result and even after the next turn has started. When that happens we
-  // rebuild from the turn that owns the tool call so the sub-agent content
-  // block lands in the correct turn.
-  const progressParentIds = new Set<string>()
-  for (const msg of newMessages) {
-    if (msg.type === "progress") {
-      const parentId = (msg as typeof newMessages[0] & { parentToolUseID?: string }).parentToolUseID
-      if (parentId) progressParentIds.add(parentId)
-    }
-  }
-
-  if (progressParentIds.size > 0) {
-    for (let t = rebuildFromTurn - 1; t >= 0; t--) {
-      const turn = existing.turns[historyTurnCount + t]
-      if (turn?.toolCalls.some((tc) => progressParentIds.has(tc.id))) {
-        rebuildFromTurn = t
-        break
-      }
-    }
-  }
-
-  // With no turns in the window at all, there is nothing to rebuild — parse
-  // the new messages on their own and keep everything already known.
-  const rebuildFrom = turnStarts[rebuildFromTurn] ?? existingRawMessages.length
-  const keptTurns = existing.turns.slice(0, historyTurnCount + rebuildFromTurn)
-  const tailTurns = buildTurns(allRawMessages.slice(rebuildFrom))
-
-  // Only the rebuilt tail passed through pairing, and it cannot see the kept
-  // turns above it — so a peer message two or more turns back would lose the
-  // reply it already had the moment the next line lands.
-  const allTurns = pairAgentMessageReplies([...keptTurns, ...tailTurns])
-  const stats = computeStats(allTurns)
-
-  // Preserve metadata from existing (already extracted)
-  return {
-    sessionId: existing.sessionId,
-    version: existing.version,
-    gitBranch: existing.gitBranch,
-    cwd: existing.cwd,
-    slug: existing.slug,
-    name: existing.name,
-    model: existing.model || (allTurns.length > 0 ? allTurns[allTurns.length - 1].model || "" : ""),
-    turns: allTurns,
-    stats,
-    rawMessages: allRawMessages,
-    branchedFrom: existing.branchedFrom,
-    agentKind: existing.agentKind,
-  }
+  const byRecords = formatForRecords(existing.rawMessages)
+  const format = byRecords.kind === TERMINAL_AGENT_KIND ? formatForText(newJsonlText) : byRecords
+  return format.append(existing, newJsonlText)
 }
 
 export function getUserMessageText(content: UserContent | null): string {

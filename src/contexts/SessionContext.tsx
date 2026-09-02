@@ -1,9 +1,9 @@
 import { createContext, useContext, type RefObject, type ReactNode } from "react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource, SseConnectionState } from "@/hooks/useLiveSession"
 import type { UseUndoRedoResult } from "@/hooks/useUndoRedo"
 import type { PtyChatStatus } from "@/hooks/usePtyChat"
-import type { PendingInteraction } from "@/lib/parser"
+import type { PendingInteraction } from "../../shared/session/parser"
 import type { SlashSuggestion } from "@/hooks/useSlashSuggestions"
 import type { PermissionRequest, PermissionDecision } from "@/hooks/usePermissionRequests"
 
@@ -74,8 +74,8 @@ export interface SessionContextValue {
     handleEditConfig?: (filePath: string) => void
     handleEditCommand?: (commandName: string) => void
     handleExpandCommand?: (commandName: string, args?: string) => Promise<string | null>
-    handleOpenBranches: (turnIndex: number) => void
-    handleBranchFromHere: (turnIndex: number) => void
+    handleOpenBranches?: (turnIndex: number) => void
+    handleBranchFromHere?: (turnIndex: number) => void
     handleToggleExpandAll: () => void
     /** Load a session (or sub-agent session) by dirName + fileName — matches the sidebar behavior. */
     handleLoadSession: (dirName: string, fileName: string) => void

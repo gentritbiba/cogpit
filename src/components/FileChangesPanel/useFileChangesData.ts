@@ -1,11 +1,11 @@
 import { useMemo, useState, useEffect, useRef } from "react"
-import type { ParsedSession, ToolCall } from "@/lib/types"
-import { computeNetDiff, type EditOp } from "@/lib/diffUtils"
+import type { ParsedSession, ToolCall } from "../../../shared/session/types"
+import { computeNetDiff, type EditOp } from "../../../shared/diff-utils"
 import { expandEditToolCalls } from "../../../shared/session/edit-calls"
 import { authFetch } from "@/lib/auth"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { parseSubagentJsonl } from "@/hooks/useSubagentContent"
-import { isCodexDirName } from "@/lib/sessionSource"
+import { agentKindForDirName } from "@/lib/agents"
 import { useCapability } from "@/hooks/useCapability"
 import { deviceScopedKey } from "@/lib/device"
 
@@ -22,7 +22,7 @@ export function useFileChangesData(session: ParsedSession) {
   const canAccessHostFiles = useCapability("hostFiles")
   const { sessionSource } = useSessionContext()
   const dirName = sessionSource?.dirName
-  const isCodexSession = isCodexDirName(dirName)
+  const isCodexSession = agentKindForDirName(dirName) === "codex"
 
   // Stable cache key: total tool call count across all turns (cheaper than session object identity)
   const turnCount = session.turns.length

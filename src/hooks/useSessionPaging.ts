@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
 import { prependTurns } from "@/lib/timelinePaging"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../shared/session/types"
 
 interface BeforeResponse {
   headerLines: string[]

@@ -1,6 +1,6 @@
 import { createContext, useContext, type Dispatch, type ReactNode } from "react"
 import type { SessionState, SessionAction } from "@/hooks/useSessionState"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import type { CogpitEdition, MeResponse } from "../../shared/contracts/team"
 
 // ── App Config ──────────────────────────────────────────────────────────────

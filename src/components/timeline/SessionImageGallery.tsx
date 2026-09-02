@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import type { Turn } from "@/lib/types"
-import { getUserMessageImages } from "@/lib/parser"
+import type { Turn } from "../../../shared/session/types"
+import { getUserMessageImages } from "../../../shared/session/parser"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { ImageViewer, type ImageViewerItem } from "./ImageViewer"
 

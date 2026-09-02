@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
+  dirNameToPath,
   shortenModel,
   formatTokenCount,
   formatDuration,
@@ -13,7 +14,7 @@ import {
   getTurnDuration,
 } from "@/lib/format"
 import { assistantMsg, makeTurn, makeToolCall, resetFixtureCounter } from "@/__tests__/fixtures"
-import type { RawMessage } from "@/lib/types"
+import type { RawMessage } from "../../../shared/session/types"
 
 beforeEach(() => {
   resetFixtureCounter()
@@ -282,8 +283,8 @@ describe("formatCost", () => {
 // format.ts only re-exports the helper, so this pins the re-export itself.
 describe("getContextLimit", () => {
   it("re-exports the shared context-limit helper", () => {
-    expect(getContextLimit("claude-opus-5")).toBe(1_000_000)
-    expect(getContextLimit("claude-haiku-4-5")).toBe(200_000)
+    expect(getContextLimit("claude-opus-5", "claude")).toBe(1_000_000)
+    expect(getContextLimit("claude-haiku-4-5", "claude")).toBe(200_000)
   })
 })
 
@@ -517,5 +518,19 @@ describe("getTurnDuration", () => {
 
   it("returns null when nothing in the turn is timestamped", () => {
     expect(getTurnDuration(makeTurn({ durationMs: null, contentBlocks: [] }))).toBeNull()
+  })
+})
+
+describe("dirNameToPath", () => {
+  // The dash-separated decoder used to run against every dirName, so a base64
+  // project name came back as a plausible-looking path that pointed nowhere.
+  it("decodes each agent's own project directory encoding", () => {
+    expect(dirNameToPath("-Users-me-proj")).toBe("/Users/me/proj")
+    expect(dirNameToPath("codex__L3RtcC9wcm9qZWN0")).toBe("/tmp/project")
+    expect(dirNameToPath("copilot__L3RtcC9wcm9qZWN0")).toBe("/tmp/project")
+  })
+
+  it("falls back to the directory name when the payload cannot be decoded", () => {
+    expect(dirNameToPath("codex__!!!not-base64!!!")).toBe("codex__!!!not-base64!!!")
   })
 })

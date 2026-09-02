@@ -2,8 +2,15 @@ import { readFile, stat, readdir, chmod } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { fileURLToPath } from "node:url"
+import {
+  AGENT_KINDS,
+  allDescriptors,
+  descriptorFor,
+  type AgentKind,
+} from "../shared/session/agent-descriptors"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
 import { writeOwnerOnlyJson } from "./atomicJsonFile"
+import { findExecutableOnPath } from "./lib/binaryResolver"
 
 // config.local.json may hold a hashed network password; keep it owner-only.
 const CONFIG_FILE_MODE = 0o600
@@ -42,13 +49,20 @@ export function setConfigPath(p: string): void {
 }
 
 export interface AppConfig {
-  claudeDir: string
   /**
-   * True when Cogpit bootstrapped from an existing Codex installation and the
-   * Claude history directory is only a compatibility path. This keeps the
-   * existing directory contract intact without requiring Claude Code.
+   * Claude Code's home directory. The only agent home Cogpit stores itself;
+   * every other CLI puts its own at a fixed, environment-overridable location
+   * that {@link agentHomeDir} discovers.
    */
-  codexOnly?: boolean
+  claudeDir: string
+  /** Agent new sessions default to. */
+  defaultAgent?: AgentKind
+  /**
+   * Whether `claudeDir` was invented while bootstrapping an install that has no
+   * Claude Code, and so has never been proven to be a real Claude home. Saving
+   * settings may reuse that exact path; any other path must still validate.
+   */
+  claudeDirIsPlaceholder?: boolean
   /** Team-edition opt-in; only the standalone shell honors it. */
   edition?: "team"
   networkAccess?: boolean
@@ -126,20 +140,55 @@ function stripEnvOverride(config: AppConfig): AppConfig {
   return config
 }
 
-async function detectCodexOnlyConfig(): Promise<AppConfig | null> {
-  const codexHome = resolve(process.env.CODEX_HOME || join(homedir(), ".codex"))
-  try {
-    const codexStat = await stat(codexHome)
-    if (codexStat.isDirectory()) {
-      return {
-        claudeDir: join(homedir(), ".claude"),
-        codexOnly: true,
+/**
+ * Absolute home directory of one agent CLI.
+ *
+ * Claude's is whatever the user configured; the rest live at a fixed name under
+ * the user's home unless their own environment variable moves them. Read live
+ * rather than captured at import, because the config browser has to follow a
+ * `claudeDir` change without a restart.
+ */
+export function agentHomeDir(kind: AgentKind): string {
+  const { cli } = descriptorFor(kind)
+  const fallback = join(homedir(), cli.homeDirName)
+  if (!cli.homeIsDiscoverable) return resolve(cachedConfig?.claudeDir || fallback)
+  const override = cli.homeEnvVar ? process.env[cli.homeEnvVar] : undefined
+  return resolve(override || fallback)
+}
+
+/**
+ * Bootstrap configuration for a machine that has an agent CLI but no Claude
+ * Code. `claudeDir` is a placeholder so the rest of the app has a history root
+ * to name; nothing is ever read from it until the user points it somewhere real.
+ *
+ * Evidence is either the CLI's own state directory or its binary on PATH — the
+ * second case covers a CLI that has been installed but never run.
+ */
+async function detectBootstrapConfig(): Promise<AppConfig | null> {
+  const discoverable = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable)
+  const placeholder = () => join(homedir(), descriptorFor("claude").cli.homeDirName)
+
+  for (const descriptor of discoverable) {
+    const marker = join(agentHomeDir(descriptor.kind), descriptor.cli.installMarker)
+    try {
+      if ((await stat(marker)).isDirectory()) {
+        return { claudeDir: placeholder(), defaultAgent: descriptor.kind, claudeDirIsPlaceholder: true }
       }
+    } catch {
+      // Try the next agent.
     }
-  } catch {
-    // Codex is not installed/configured either — show normal setup.
+  }
+  for (const descriptor of discoverable) {
+    if (findExecutableOnPath(descriptor.binName)) {
+      return { claudeDir: placeholder(), defaultAgent: descriptor.kind, claudeDirIsPlaceholder: true }
+    }
   }
   return null
+}
+
+/** Narrow an arbitrary persisted value to an agent kind. */
+function parseAgentKind(value: unknown): AgentKind | undefined {
+  return AGENT_KINDS.find((kind) => kind === value)
 }
 
 export async function loadConfig(): Promise<AppConfig | null> {
@@ -148,12 +197,12 @@ export async function loadConfig(): Promise<AppConfig | null> {
   try {
     raw = await readFile(CONFIG_PATH, "utf-8")
   } catch (error) {
-    // A first-run Codex user should not be forced to create a Claude history
+    // A first-run external-provider user should not need a Claude history
     // directory. Only bootstrap on a genuinely missing config file: malformed
     // or unreadable user configuration must remain visible instead of being
     // silently ignored.
     cachedConfig = (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? await detectCodexOnlyConfig()
+      ? await detectBootstrapConfig()
       : null
     return cachedConfig
   }
@@ -190,9 +239,19 @@ export async function loadConfig(): Promise<AppConfig | null> {
         await chmod(CONFIG_PATH, CONFIG_FILE_MODE)
       }
 
+      // `externalOnly` (and before it `codexOnly`) fused two facts into one
+      // field: which agent to default to, and that `claudeDir` was never a real
+      // Claude home. Older files are migrated into the two separate fields, so
+      // choosing a real directory no longer silently resets the agent.
+      const legacyExternalOnly = parseAgentKind(parsed.externalOnly)
+        ?? (parsed.codexOnly === true ? "codex" as const : undefined)
+
       cachedConfig = {
         claudeDir: parsed.claudeDir,
-        codexOnly: !!parsed.codexOnly,
+        defaultAgent: parseAgentKind(parsed.defaultAgent) ?? legacyExternalOnly,
+        claudeDirIsPlaceholder: parsed.claudeDirIsPlaceholder === true
+          || legacyExternalOnly !== undefined
+          || undefined,
         edition: parsed.edition === "team" ? "team" : undefined,
         networkAccess: !!parsed.networkAccess,
         networkPassword,

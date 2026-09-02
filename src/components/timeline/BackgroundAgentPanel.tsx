@@ -1,6 +1,6 @@
 import { memo } from "react"
 import { AgentPanel } from "./AgentPanel"
-import type { SubAgentMessage } from "@/lib/types"
+import type { SubAgentMessage } from "../../../shared/session/types"
 
 interface BackgroundAgentPanelProps {
   messages: SubAgentMessage[]

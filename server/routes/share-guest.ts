@@ -1,15 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { Readable } from "node:stream"
-import { isCodexDirName } from "../helpers"
+import { agentKindForDirName } from "../../shared/session/agent-descriptors"
 import { MAX_REQUEST_BODY_BYTES, sendJson, withJsonBody, type Middleware, type UseFn } from "../http"
 import { getRequestShareToken, validateShareToken } from "../security"
 import { getShareWithHash, type ShareRecord } from "../share/registry"
 import { sessionTitle } from "./shares"
 import { registerAskUserRoutes } from "./ask-user"
-import { registerClaudeManageRoutes } from "./claude-manage"
-import { registerClaudeRoutes } from "./claude"
+import { registerSessionManageRoutes } from "./session-manage"
+import { registerSessionSendRoutes } from "./session-send"
 import { collectPendingPermissions, registerPermissionRoutes } from "./permissions"
-import { getSDKUserQuestions } from "../sdk-session"
+import { runtimeForSession } from "../agents/runtimes"
 
 /**
  * Everything a share guest can do that changes something.
@@ -120,10 +120,10 @@ function guestPost(
 }
 
 export function registerShareGuestRoutes(use: UseFn) {
-  const claudeManage = mounts(registerClaudeManageRoutes)
-  const sendMessage = mounts(registerClaudeRoutes)("/api/send-message")
-  const stop = claudeManage("/api/stop-session")
-  const interrupt = claudeManage("/api/interrupt-session")
+  const sessionManage = mounts(registerSessionManageRoutes)
+  const sendMessage = mounts(registerSessionSendRoutes)("/api/send-message")
+  const stop = sessionManage("/api/stop-session")
+  const interrupt = sessionManage("/api/interrupt-session")
   const permissions = mounts(registerPermissionRoutes)("/api/permissions")
   const answer = mounts(registerAskUserRoutes)("/api/ask-user-answer")
 
@@ -136,7 +136,7 @@ export function registerShareGuestRoutes(use: UseFn) {
       dirName: share.dirName,
       fileName: share.fileName,
       title: await sessionTitle(share.dirName, share.fileName),
-      provider: isCodexDirName(share.dirName) ? "codex" : "claude",
+      provider: agentKindForDirName(share.dirName),
     })
   })
 
@@ -153,7 +153,8 @@ export function registerShareGuestRoutes(use: UseFn) {
     if (!share) return
     sendJson(res, 200, {
       permissions: collectPendingPermissions(share.sessionId),
-      questions: getSDKUserQuestions(share.sessionId),
+      questions: runtimeForSession(share.sessionId)
+        ?.listPendingQuestions(share.sessionId) ?? [],
     })
   })
 

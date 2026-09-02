@@ -4,13 +4,13 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "./useLiveSession"
 import type { SessionAction } from "./useSessionState"
 import { authFetch } from "@/lib/auth"
 import { loadSessionTailCached, loadSessionTailFresh } from "@/lib/sessionLoader"
 import { parseSubAgentPath } from "@/lib/format"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
 import type { PermissionsConfig } from "@/lib/permissions"
 
 interface AppHandlersDeps {
@@ -248,8 +248,8 @@ export function useAppHandlers(deps: AppHandlersDeps): AppHandlersResult {
     const nextMcpConfig = mcpConfigRef.current
     const nextPermissions = permissionsConfigRef.current
     const agentKind = state.sessionSource?.agentKind
-      ?? agentKindFromDirName(state.sessionSource?.dirName ?? null)
-    if (agentKind === "claude") {
+      ?? agentKindForDirName(state.sessionSource?.dirName ?? null)
+    if (capabilitiesFor(agentKind).settingsApply === "live") {
       await authFetch(`/api/claude/settings/${encodeURIComponent(currentSessionId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

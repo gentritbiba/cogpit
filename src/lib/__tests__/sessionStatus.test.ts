@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   deriveSessionStatus,
   getStatusLabel,
-} from "../sessionStatus"
+} from "../../../shared/session/sessionStatus"
 
 describe("deriveSessionStatus", () => {
   it("returns idle for empty messages", () => {
@@ -580,5 +580,118 @@ describe("deriveSessionStatus — Codex format", () => {
     const result = deriveSessionStatus(msgs)
     expect(result.status).toBe("tool_use")
     expect(result.toolName).toBe("ls")
+  })
+})
+
+describe("deriveSessionStatus — Copilot format", () => {
+  it("tracks a tool call and waits for session idle before completing", () => {
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "run tests" } },
+      { type: "tool.execution_start", data: { toolName: "shell" } },
+    ])).toEqual({ status: "tool_use", toolName: "shell" })
+
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "run tests" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "shell" }] } },
+      { type: "assistant.turn_end", data: {} },
+    ])).toEqual({ status: "processing" })
+
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "run tests" } },
+      { type: "assistant.message", data: { content: "Done" } },
+      { type: "assistant.turn_end", data: {} },
+    ])).toEqual({ status: "completed" })
+  })
+
+  it("ignores nested subagent events when deriving the root status", () => {
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "shell" }] } },
+      { type: "assistant.turn_end", data: {} },
+      { type: "tool.execution_start", agentId: "subagent-1", data: { toolName: "shell" } },
+    ])).toEqual({ status: "processing" })
+  })
+
+  it("reports an interrupted tool turn as completed", () => {
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "run a long command" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "shell" }] } },
+      { type: "tool.execution_start", data: { toolName: "shell" } },
+      { type: "abort", data: {} },
+      { type: "assistant.turn_end", data: {} },
+    ])).toEqual({ status: "completed" })
+  })
+
+  it.each([
+    ["abort", {}, { status: "completed" }],
+    ["session.shutdown", {}, { status: "completed" }],
+    ["session.error", { message: "model failed" }, {
+      status: "completed",
+      terminalReason: "model failed",
+    }],
+  ])("clears stale nested agents on root %s", (type, data, expected) => {
+    expect(deriveSessionStatus([
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      {
+        type: "subagent.started",
+        agentId: "subagent-1",
+        data: { agentDisplayName: "Old worker" },
+      },
+      { type, data },
+    ])).toEqual(expected)
+  })
+
+  it("allows activity after shutdown to become active again", () => {
+    const resumed = [
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      {
+        type: "subagent.started",
+        agentId: "subagent-old",
+        data: { agentDisplayName: "Old worker" },
+      },
+      { type: "session.shutdown", data: {} },
+      { type: "session.resume", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "Continue" } },
+    ]
+
+    expect(deriveSessionStatus(resumed)).toEqual({ status: "processing" })
+    expect(deriveSessionStatus([
+      ...resumed,
+      {
+        type: "subagent.started",
+        agentId: "subagent-new",
+        data: { agentDisplayName: "New worker" },
+      },
+    ])).toEqual({
+      status: "awaiting_agents",
+      pendingAgents: 1,
+      pendingAgentDescriptions: ["New worker"],
+      pendingQueue: 0,
+    })
+  })
+
+  it("dismisses only the permission request that completed", () => {
+    const activeTool = [
+      { type: "session.start", data: { sessionId: "copilot-1" } },
+      { type: "user.message", data: { content: "create a file" } },
+      { type: "tool.execution_start", data: { toolName: "create" } },
+    ]
+
+    expect(deriveSessionStatus([
+      ...activeTool,
+      { type: "permission.requested", data: { requestId: "path" } },
+      { type: "permission.completed", data: { requestId: "path", result: { kind: "approved" } } },
+    ])).toEqual({ status: "thinking" })
+
+    expect(deriveSessionStatus([
+      ...activeTool,
+      { type: "permission.requested", data: { requestId: "still-pending" } },
+      { type: "permission.requested", data: { requestId: "path" } },
+      { type: "permission.completed", data: { requestId: "path", result: { kind: "approved" } } },
+    ])).toEqual({ status: "deferred" })
   })
 })

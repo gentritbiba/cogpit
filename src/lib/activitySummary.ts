@@ -1,5 +1,5 @@
-import { diffLineCount } from "@/lib/diffUtils"
-import type { ToolCall } from "@/lib/types"
+import { diffLineCount } from "../../shared/diff-utils"
+import type { ToolCall } from "../../shared/session/types"
 
 /**
  * Mirrors the one-line activity summary Claude Code renders for a collapsed

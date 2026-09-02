@@ -1,5 +1,5 @@
 import { RotateCcw, GitFork, Copy } from "lucide-react"
-import type { Branch } from "@/lib/types"
+import type { Branch } from "../../shared/session/types"
 import {
   ContextMenu,
   ContextMenuContent,

@@ -23,6 +23,27 @@ passing and then segfault in `bun:sqlite` at teardown on Bun 1.4.0-canary.1.
 That crash predates any current work and takes down a whole-package `bun test`
 run, so run those three files individually to read their results.
 
+## Agent Layer
+
+Cogpit drives three agent CLIs. New agent-specific knowledge belongs in
+`server/agents/`, `src/lib/agents/` and the `shared/session/` agent modules.
+
+Everything else asks the layer instead: `descriptorFor(kind)` /
+`descriptorForDirName(dirName)` for facts and capabilities, `formatFor()` for
+transcript grammar, `storeFor()` for files on disk, `runtimeFor()` for the live
+process. If a feature needs a fourth arm, the missing piece is a capability flag
+or a descriptor field — add it there.
+
+`bun run check:agents` prevents agent names from spreading while older call
+sites are migrated. Files outside the agent layer carry a per-file line budget
+in `scripts/agent-vocabulary.json` that may only shrink. Going over fails, and
+coming in under also fails with the new number, so a cleanup lowers its budget
+in the same commit. The check measures vocabulary, not control flow. After
+removing agent names from a file, re-seed with
+`bun scripts/check-agents.ts --write` and commit the result.
+
+`ARCHITECTURE.md` has the full picture, including how to add a fourth CLI.
+
 ## Adding New API Routes
 
 Define the route module under `server/routes/` and register it once in
@@ -60,6 +81,14 @@ automatically:
 Never commit to the mirror directly — it is cleared and rewritten from this repo,
 so anything landed there is lost on the next sync. The push needs the
 `COGPIT_MEMORY_DEPLOY_KEY` secret, a write-scoped deploy key on that repo.
+
+## Cogpit npm launcher
+
+`packages/cogpit-cli/` publishes as `cogpit`. On a `v*` tag,
+`.github/workflows/release.yml` stamps the package version from the tag before
+running its tests, package-contract build and `npm publish`. The release commit
+does not need to keep `packages/cogpit-cli/package.json` synchronized with the
+app version. The tag is the source of truth for the published launcher.
 
 ## External Session API (cogpit-sessions skill)
 

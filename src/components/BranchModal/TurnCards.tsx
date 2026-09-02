@@ -1,7 +1,7 @@
 import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { toolInputPreview } from "./branchStyles"
 import { getToolPresentation } from "../../../shared/session/toolSummary"

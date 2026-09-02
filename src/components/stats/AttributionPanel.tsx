@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatTokenCount } from "@/lib/format"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import {
   ATTRIBUTION_DIMENSION_LABELS,
   aggregateAttribution,

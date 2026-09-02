@@ -4,6 +4,7 @@ import { projectName, dirNameToPath } from "@/lib/format"
 import { SessionsView } from "./SessionsView"
 import { ProjectsView } from "./ProjectsView"
 import { matchesSessionFilter } from "./sessionPresentation"
+import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import type { ProjectInfo, SessionInfo } from "./types"
 import {
   readCachedList,
@@ -189,10 +190,16 @@ export const Dashboard = memo(function Dashboard({
     fetchSessions(selectedProjectDirName, sessionsPage + 1, true)
   }, [selectedProjectDirName, sessionsPage, fetchSessions])
 
+  const pullRequestResults = usePullRequestSessionSearch<SessionInfo>(
+    selectedProjectDirName ? searchFilter : "",
+    selectedProjectDirName ?? undefined,
+  )
+
   const filteredSessions = useMemo(() => {
     if (!searchFilter) return sessions
     return sessions.filter((s) => matchesSessionFilter(s, searchFilter))
   }, [sessions, searchFilter])
+  const visibleSessions = pullRequestResults.results ?? filteredSessions
 
   function handleDeleteSession(dirName: string, fileName: string) {
     onDeleteSession?.(dirName, fileName)
@@ -208,10 +215,11 @@ export const Dashboard = memo(function Dashboard({
         sessions={sessions}
         sessionsTotal={sessionsTotal}
         sessionsLoading={sessionsLoading}
+        searchLoading={pullRequestResults.loading}
         searchFilter={searchFilter}
         setSearchFilter={setSearchFilter}
-        filteredSessions={filteredSessions}
-        fetchError={fetchError}
+        filteredSessions={visibleSessions}
+        fetchError={pullRequestResults.error ?? fetchError}
         onSelectSession={onSelectSession}
         onNewSession={onNewSession}
         creatingSession={creatingSession}
@@ -219,6 +227,10 @@ export const Dashboard = memo(function Dashboard({
         onDeleteSession={handleDeleteSession}
         onBack={handleBack}
         onRetryFetch={() => {
+          if (pullRequestResults.error) {
+            pullRequestResults.refresh()
+            return
+          }
           setFetchError(null)
           if (selectedProjectDirName) {
             void fetchSessions(selectedProjectDirName)

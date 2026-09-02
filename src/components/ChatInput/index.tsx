@@ -12,10 +12,11 @@ import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
-import type { AgentKind } from "@/lib/sessionSource"
+import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
+import { submitCopilotPlanResponse } from "@/lib/copilotPlanApi"
 import { useCapability } from "@/hooks/useCapability"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -117,6 +118,10 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
 
   const [text, setText] = useState("")
   const [isMultiline, setIsMultiline] = useState(false)
+  const [planResponding, setPlanResponding] = useState(false)
+  const [planResponseError, setPlanResponseError] = useState<string | null>(null)
+  const planRespondingRequestRef = useRef<string | null>(null)
+  const planRequestIdRef = useRef<string | null>(null)
   const isMultilineRef = useRef(false)
   const textRef = useRef("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -156,6 +161,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   useEffect(() => { setFileSelectedIndex(0) }, [fileMention?.query])
 
   const elapsedSec = useElapsedTimer(isConnected)
+  const planRequestId = pendingInteraction?.type === "plan"
+    ? pendingInteraction.requestId ?? null
+    : null
+
+  useEffect(() => {
+    planRequestIdRef.current = planRequestId
+    planRespondingRequestRef.current = null
+    setPlanResponding(false)
+    setPlanResponseError(null)
+  }, [planRequestId])
 
   const submitUserQuestion = useCallback(async (answer: string) => {
     const interaction = pendingInteraction
@@ -176,24 +191,63 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     if (!result.ok) onSend(answer)
   }, [pendingInteraction, session?.sessionId, onSend])
 
-  const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
-    setText(`/${suggestion.name} `)
-    setSlashSelectedIndex(0)
+  const submitPlanResponse = useCallback(async (
+    approved: boolean,
+    selectedAction?: string,
+    feedback?: string,
+  ): Promise<boolean> => {
+    const interaction = pendingInteraction
+    if (
+      interaction?.type === "plan"
+      && interaction.provider === "copilot"
+      && interaction.requestId
+      && session?.sessionId
+    ) {
+      const requestId = interaction.requestId
+      if (planRespondingRequestRef.current) return false
+      planRespondingRequestRef.current = requestId
+      setPlanResponding(true)
+      setPlanResponseError(null)
+      try {
+        const submitted = await submitCopilotPlanResponse(session.sessionId, requestId, {
+          approved,
+          ...(selectedAction ? { selectedAction } : {}),
+          ...(feedback ? { feedback } : {}),
+        })
+        if (!submitted && planRequestIdRef.current === requestId) {
+          setPlanResponseError("Couldn't send the plan response. Try again.")
+        }
+        return submitted
+      } finally {
+        if (planRespondingRequestRef.current === requestId) {
+          planRespondingRequestRef.current = null
+          setPlanResponding(false)
+        }
+      }
+    }
+    onSend(approved ? "yes" : feedback || "no")
+    return true
+  }, [pendingInteraction, session?.sessionId, onSend])
+
+  const focusComposerAtEnd = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
     })
   }, [updateMultiline])
 
+  const handleSlashSelect = useCallback((suggestion: SlashSuggestion) => {
+    setText(`/${suggestion.name} `)
+    setSlashSelectedIndex(0)
+    focusComposerAtEnd()
+  }, [focusComposerAtEnd])
+
   // Fills the composer and leaves the caret at the end: the prediction is a
   // draft to edit, so it deliberately does not send.
   const applySuggestion = useCallback((suggestion: string) => {
     setText(suggestion)
-    requestAnimationFrame(() => {
-      const el = textareaRef.current
-      if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; updateMultiline(autoResize(el, isMultilineRef.current)) }
-    })
-  }, [updateMultiline])
+    focusComposerAtEnd()
+  }, [focusComposerAtEnd])
 
   const handleFileSelect = useCallback((path: string) => {
     if (!fileMention) return
@@ -210,7 +264,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
     })
   }, [fileMention, text, updateMultiline])
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const trimmed = text.trim()
     if (!trimmed && images.length === 0) return
     if (!allowImages && images.length > 0) return
@@ -223,13 +277,23 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       return
     }
 
+    if (pendingInteraction?.type === "plan" && pendingInteraction.provider === "copilot") {
+      if (!trimmed) return
+      const submitted = await submitPlanResponse(false, undefined, trimmed)
+      if (!submitted) return
+      setText("")
+      updateMultiline(false)
+      if (textareaRef.current) textareaRef.current.style.height = "auto"
+      return
+    }
+
     const imagePayload = allowImages && images.length > 0 ? images.map((img) => ({ data: img.data, mediaType: img.mediaType })) : undefined
     onSend(trimmed, imagePayload)
     setText("")
     clearImages()
     updateMultiline(false)
     if (textareaRef.current) textareaRef.current.style.height = "auto"
-  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion])
+  }, [text, images, allowImages, onSend, clearImages, updateMultiline, pendingInteraction, submitUserQuestion, submitPlanResponse])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showFiles && e.key === "Escape") {
@@ -249,7 +313,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       if (e.key === "Escape") { e.preventDefault(); setText(""); return }
     }
     if (e.key === "Escape" && canInterrupt && onInterrupt) { e.preventDefault(); onInterrupt(); return }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSubmit() }
   }, [handleSubmit, canInterrupt, onInterrupt, showFiles, fileSuggestions.files, fileSelectedIndex, handleFileSelect, showSlash, filteredSlashList, slashSelectedIndex, handleSlashSelect])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => { setText(e.target.value); setFileSuggestionsDismissed(false); updateMultiline(autoResize(e.target, isMultilineRef.current)) }, [updateMultiline])
@@ -268,7 +332,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const isUserQuestion = pendingInteraction?.type === "question"
   const hasPermissions = permissionRequests.length > 0
   const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
-  const isSteering = agentKind === "codex" && canInterrupt
+  const isSteering = capabilitiesFor(agentKind ?? DEFAULT_AGENT_KIND).midTurnSteering && canInterrupt
   const suggestionListId = showFiles ? "file-suggestions" : showSlash ? "slash-suggestions" : undefined
   const activeSuggestionId = showFiles && fileSuggestions.files[fileSelectedIndex]
     ? `file-suggestion-${fileSelectedIndex}`
@@ -309,7 +373,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
       )}
 
       <div>
-          {isPlanApproval && <PlanApprovalBar allowedPrompts={pendingInteraction.allowedPrompts} onApprove={() => onSend("yes")} onSend={onSend} />}
+          {isPlanApproval && (
+            <PlanApprovalBar
+              allowedPrompts={pendingInteraction.allowedPrompts}
+              summary={pendingInteraction.summary}
+              planContent={pendingInteraction.planContent}
+              actions={pendingInteraction.actions}
+              recommendedAction={pendingInteraction.recommendedAction}
+              responding={planResponding}
+              responseError={planResponseError}
+              onApprove={(action) => { void submitPlanResponse(true, action) }}
+              onReject={() => { void submitPlanResponse(false) }}
+            />
+          )}
 
         {/* Sits above the composer it fills. Renders nothing when the CLI sent
             no suggestion, which is most turns. */}

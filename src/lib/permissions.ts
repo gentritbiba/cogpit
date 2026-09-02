@@ -1,3 +1,5 @@
+import type { PermissionsConfig as AgentPermissionsConfig } from "../../shared/session/agent-descriptors"
+
 export type PermissionMode =
   | "bypassPermissions"
   | "default"
@@ -7,7 +9,12 @@ export type PermissionMode =
   | "auto"
   | "delegate"
 
-export interface PermissionsConfig {
+/**
+ * The access picker's value on this device. It is the wire contract every agent
+ * reads (`AgentDescriptor.launchArgs.permissions`) with the fields pinned down:
+ * the renderer always has all three, because it writes them itself.
+ */
+export interface PermissionsConfig extends AgentPermissionsConfig {
   mode: PermissionMode
   allowedTools: string[]
   disallowedTools: string[]
@@ -34,36 +41,3 @@ export const KNOWN_TOOLS = [
 ] as const
 
 export const PERMISSIONS_STORAGE_KEY = "cogpit:permissions"
-
-export function buildPermissionArgs(config: PermissionsConfig): string[] {
-  // Only an explicit bypassPermissions mode yields the skip flag. A missing or
-  // falsy mode is NOT a bypass — it is treated as "default" (fail safe).
-  if (config.mode === "bypassPermissions") {
-    return ["--dangerously-skip-permissions"]
-  }
-
-  const args: string[] = []
-
-  const mode = config.mode || "default"
-  const modeMap: Record<string, string> = {
-    default: "default",
-    plan: "plan",
-    acceptEdits: "acceptEdits",
-    dontAsk: "dontAsk",
-    auto: "auto",
-  }
-  const mapped = modeMap[mode]
-  if (mapped) {
-    args.push("--permission-mode", mapped)
-  }
-
-  for (const tool of config.allowedTools ?? []) {
-    args.push("--allowedTools", tool)
-  }
-
-  for (const tool of config.disallowedTools ?? []) {
-    args.push("--disallowedTools", tool)
-  }
-
-  return args
-}

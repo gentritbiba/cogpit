@@ -1,8 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
+vi.mock("../../sessionPaths", () => ({ findJsonlPath: vi.fn() }))
+
 vi.mock("../../helpers", () => ({
-  findJsonlPath: vi.fn(),
   readFile: vi.fn(),
   readdir: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
@@ -20,7 +21,8 @@ vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(),
 }))
 
-import { findJsonlPath, readFile, readdir } from "../../helpers"
+import { readFile, readdir } from "../../helpers"
+import { findJsonlPath } from "../../sessionPaths"
 import { parseSession } from "../../../shared/session/parser"
 import { registerSessionContextRoutes } from "../../routes/session-context"
 import type { UseFn, Middleware } from "../../helpers"

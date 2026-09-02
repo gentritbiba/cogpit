@@ -2,15 +2,15 @@ import type { ReapedEvent } from "../../shared/contracts/performance"
 import { deliverNotification } from "./notificationDelivery"
 import { recordActivity } from "./activityMonitor"
 import {
-  collectOrphanedClaudeSubtrees,
+  collectOrphanedAgentSubtrees,
   listSystemProcesses,
   parsePsOutput,
-  type OrphanedClaudeSubtree,
+  type OrphanedAgentSubtree,
 } from "./systemProcesses"
 
 /**
  * Auto-reaps the one class of leak that is unambiguously safe to kill:
- * orphaned claude sessions (parent already dead, reparented to launchd) and
+ * orphaned agent sessions (parent already dead, reparented to launchd) and
  * the subtree of shells/scripts they keep alive. Requires the same orphan to
  * be seen in two consecutive sweeps before killing, so a transient state or a
  * recycled pid never gets shot. Everything else (hot headless browsers,
@@ -29,16 +29,16 @@ export interface PendingOrphan {
 }
 
 export interface ReapPlan {
-  toKill: OrphanedClaudeSubtree[]
+  toKill: OrphanedAgentSubtree[]
   nextPending: Map<number, PendingOrphan>
 }
 
 export function planReaping(
-  subtrees: OrphanedClaudeSubtree[],
+  subtrees: OrphanedAgentSubtree[],
   pending: Map<number, PendingOrphan>,
   opts: { minAgeSeconds: number; now: number },
 ): ReapPlan {
-  const toKill: OrphanedClaudeSubtree[] = []
+  const toKill: OrphanedAgentSubtree[] = []
   const nextPending = new Map<number, PendingOrphan>()
 
   for (const tree of subtrees) {
@@ -94,7 +94,7 @@ async function sweep(): Promise<void> {
   recordActivity("Leak reaper sweeps")
   const rows = parsePsOutput(await listSystemProcesses())
   const { toKill, nextPending } = planReaping(
-    collectOrphanedClaudeSubtrees(rows),
+    collectOrphanedAgentSubtrees(rows),
     pendingOrphans,
     { minAgeSeconds: MIN_ORPHAN_AGE_SECONDS, now: Date.now() },
   )
@@ -116,7 +116,7 @@ async function sweep(): Promise<void> {
     const processCount = toKill.reduce((sum, tree) => sum + tree.pids.length, 0)
     deliverNotification({
       title: "Cogpit",
-      body: `Cleaned up ${processCount} leaked agent ${processCount === 1 ? "process" : "processes"} (orphaned Claude ${toKill.length === 1 ? "session" : "sessions"})`,
+      body: `Cleaned up ${processCount} leaked agent ${processCount === 1 ? "process" : "processes"} (orphaned ${toKill.length === 1 ? "session" : "sessions"})`,
       nav: { sessionId: null, dirName: null },
     })
   }

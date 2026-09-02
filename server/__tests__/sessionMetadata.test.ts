@@ -3,7 +3,13 @@ import { describe, it, expect, afterEach } from "vitest"
 import { writeFile, rm, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { getCodexSessionIdentity, getSessionMeta, getSessionStatus } from "../sessionMetadata"
+import {
+  getCodexSessionIdentity,
+  getCopilotSessionIdentity,
+  getSessionMeta,
+  getSessionStatus,
+  searchSessionMessages,
+} from "../sessionMetadata"
 
 const cleanups: string[] = []
 
@@ -59,6 +65,167 @@ describe("getCodexSessionIdentity", () => {
   it("returns null for non-Codex JSONL", async () => {
     const filePath = await writeSession([userLine("regular Claude session")])
     await expect(getCodexSessionIdentity(filePath)).resolves.toBeNull()
+  })
+})
+
+describe("Copilot session metadata", () => {
+  it("extracts identity and list metadata from durable Copilot events", async () => {
+    const filePath = await writeSession([
+      {
+        type: "session.start",
+        timestamp: "2026-08-31T10:00:00Z",
+        data: {
+          sessionId: "8b62e405-4685-4548-8fa8-35ea66337737",
+          copilotVersion: "0.0.350",
+          selectedModel: "gpt-5.1",
+          context: { cwd: "/code/copilot-project", branch: "feat/copilot" },
+        },
+      },
+      {
+        type: "user.message",
+        timestamp: "2026-08-31T10:00:01Z",
+        data: { content: "add Copilot support" },
+      },
+      {
+        type: "session.title_changed",
+        timestamp: "2026-08-31T10:00:02Z",
+        data: { title: "Add Copilot support" },
+      },
+    ])
+
+    await expect(getCopilotSessionIdentity(filePath)).resolves.toEqual({
+      sessionId: "8b62e405-4685-4548-8fa8-35ea66337737",
+      cwd: "/code/copilot-project",
+      gitBranch: "feat/copilot",
+      isSubagent: false,
+      parentSessionId: null,
+    })
+    const meta = await getSessionMeta(filePath)
+    expect(meta).toMatchObject({
+      sessionId: "8b62e405-4685-4548-8fa8-35ea66337737",
+      cwd: "/code/copilot-project",
+      gitBranch: "feat/copilot",
+      model: "gpt-5.1",
+      name: "Add Copilot support",
+      firstUserMessage: "add Copilot support",
+      turnCount: 1,
+    })
+    await expect(searchSessionMessages(filePath, "Copilot")).resolves.toContain("add Copilot support")
+  })
+
+  it("derives live and completed status from root Copilot events", async () => {
+    const live = await writeSession([
+      { type: "session.start", data: { sessionId: "s1", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "run tests" } },
+      { type: "tool.execution_start", data: { toolName: "shell" } },
+    ])
+    await expect(getSessionStatus(live)).resolves.toEqual({ status: "tool_use", toolName: "shell" })
+
+    const done = await writeSession([
+      { type: "session.start", data: { sessionId: "s2", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "run tests" } },
+      { type: "assistant.message", data: { content: "All tests passed" } },
+      { type: "assistant.turn_end", data: {} },
+      { type: "session.title_changed", data: { title: "Run tests" } },
+    ])
+    await expect(getSessionStatus(done)).resolves.toEqual({ status: "completed" })
+  })
+
+  it("reports an interrupted Copilot tool turn as completed", async () => {
+    const filePath = await writeSession([
+      { type: "session.start", data: { sessionId: "s1", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "run a long command" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "shell" }] } },
+      { type: "tool.execution_start", data: { toolName: "shell" } },
+      { type: "abort", data: {} },
+      { type: "assistant.turn_end", data: {} },
+    ])
+
+    await expect(getSessionStatus(filePath)).resolves.toEqual({ status: "completed" })
+  })
+
+  it("moves past a completed Copilot permission while its tool resumes", async () => {
+    const filePath = await writeSession([
+      { type: "session.start", data: { sessionId: "s1", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "create a file" } },
+      { type: "tool.execution_start", data: { toolName: "create" } },
+      { type: "permission.requested", data: { requestId: "path" } },
+      {
+        type: "permission.completed",
+        data: { requestId: "path", result: { kind: "approved" } },
+      },
+    ])
+
+    await expect(getSessionStatus(filePath)).resolves.toEqual({ status: "thinking" })
+  })
+
+  it("reports awaiting agents for an external Copilot session with a running subagent", async () => {
+    const filePath = await writeSession([
+      { type: "session.start", data: { sessionId: "s1", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "delegate this" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "task" }] } },
+      { type: "assistant.turn_end", data: {} },
+      {
+        type: "subagent.started",
+        agentId: "agent-1",
+        data: { agentDisplayName: "Inspect the parser" },
+      },
+      { type: "tool.execution_start", agentId: "agent-1", data: { toolName: "view" } },
+    ])
+
+    await expect(getSessionStatus(filePath)).resolves.toEqual({
+      status: "awaiting_agents",
+      pendingAgents: 1,
+      pendingAgentDescriptions: ["Inspect the parser"],
+      pendingQueue: 0,
+    })
+  })
+
+  it("does not keep a completed external Copilot subagent pending", async () => {
+    const filePath = await writeSession([
+      { type: "session.start", data: { sessionId: "s1", context: { cwd: "/tmp" } } },
+      { type: "user.message", data: { content: "delegate this" } },
+      { type: "assistant.message", data: { toolRequests: [{ name: "task" }] } },
+      { type: "assistant.turn_end", data: {} },
+      { type: "subagent.started", agentId: "agent-1", data: {} },
+      { type: "subagent.completed", agentId: "agent-1", data: {} },
+    ])
+
+    await expect(getSessionStatus(filePath)).resolves.toEqual({ status: "processing" })
+  })
+})
+
+describe("getSessionMeta agent detection", () => {
+  /**
+   * Detection now runs through the shared format registry rather than a
+   * hand-rolled copy of it, which was missing a third of the Copilot event
+   * namespace. A transcript that opens on one of those events used to fall
+   * through to the Claude reader and come back shaped wrong.
+   */
+  it.each([
+    ["user_input.requested", { id: "q1" }],
+    ["permission.requested", { toolCallId: "t1" }],
+    ["subagent.started", { agentId: "a1" }],
+  ])("reads a transcript opening on %s as Copilot", async (type, data) => {
+    const filePath = await writeSession([
+      { type, data, timestamp: "2026-08-01T10:00:00.000Z" },
+      { type: "user.message", data: { content: "hello" }, timestamp: "2026-08-01T10:00:01.000Z" },
+    ])
+
+    const meta = await getSessionMeta(filePath)
+    // The Copilot reader reports the last event time; the Claude reader, which
+    // used to take this file, reports nothing at all.
+    expect(meta.lastTimestamp).toBe("2026-08-01T10:00:01.000Z")
+    expect(meta.turnCount).toBe(1)
+  })
+
+  it("still reads an untagged transcript as Claude", async () => {
+    const filePath = await writeSession([
+      { type: "user", sessionId: "claude-1", message: { content: "hello" } },
+    ])
+
+    const meta = await getSessionMeta(filePath)
+    expect(meta.sessionId).toBe("claude-1")
   })
 })
 

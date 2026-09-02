@@ -10,11 +10,11 @@
  * exactly where the tail ended instead of re-streaming the file.
  */
 
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import { authFetch } from "@/lib/auth"
 import { sessionCache } from "@/lib/sessionCache"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName } from "@/lib/agents"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
 
 export interface TailResponse {
@@ -58,7 +58,7 @@ export async function fetchTailAndParse(
       dirName,
       fileName,
       rawText: text,
-      agentKind: agentKindFromDirName(dirName),
+      agentKind: agentKindForDirName(dirName),
       watchOffset: data.totalSize,
     },
     byteOffset: data.byteOffset,

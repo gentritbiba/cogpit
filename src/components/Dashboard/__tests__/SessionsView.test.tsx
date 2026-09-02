@@ -33,6 +33,7 @@ function renderView(overrides: Partial<React.ComponentProps<typeof SessionsView>
     sessions: [session],
     sessionsTotal: 1,
     sessionsLoading: false,
+    searchLoading: false,
     searchFilter: "",
     setSearchFilter: vi.fn(),
     filteredSessions: [session],
@@ -104,7 +105,7 @@ describe("SessionsView", () => {
     renderView({ searchFilter: "missing", filteredSessions: [] })
 
     expect(screen.getByText("No sessions match your search")).toBeInTheDocument()
-    expect(screen.getByText("Try a session title, prompt, model, or branch.")).toBeInTheDocument()
+    expect(screen.getByText("Try #157, honest-cms #157, or paste a PR URL.")).toBeInTheDocument()
   })
 
   it("surfaces what a session actually did", () => {

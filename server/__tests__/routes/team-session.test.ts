@@ -3,14 +3,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Dirent } from "node:fs"
 import type { FileHandle } from "node:fs/promises"
 
+vi.mock("../../lib/agentTeamIdentity", () => ({
+  matchSubagentToMember: vi.fn(),
+  readSessionTeamTags: vi.fn(),
+}))
+
 vi.mock("../../helpers", () => ({
   dirs: {
     TEAMS_DIR: "/tmp/test-teams",
     PROJECTS_DIR: "/tmp/test-projects",
   },
   isWithinDir: (parent: string, child: string) => child.startsWith(parent),
-  matchSubagentToMember: vi.fn(),
-  readSessionTeamTags: vi.fn(),
   readdir: vi.fn(),
   readFile: vi.fn(),
   open: vi.fn(),
@@ -19,13 +22,12 @@ vi.mock("../../helpers", () => ({
 }))
 
 import {
-  matchSubagentToMember,
-  readSessionTeamTags,
   readdir,
   readFile,
   open,
   stat,
 } from "../../helpers"
+import { matchSubagentToMember, readSessionTeamTags } from "../../lib/agentTeamIdentity"
 
 const mockedMatchSubagent = vi.mocked(matchSubagentToMember)
 const mockedReadSessionTeamTags = vi.mocked(readSessionTeamTags)

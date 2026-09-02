@@ -1,4 +1,50 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
+
+// ── Agent identity ──────────────────────────────────────────────────────────
+//
+// This module is the leaf of the session core: it imports nothing, so it is the
+// only place an identifier can live and still be reachable from the renderer,
+// the server, Electron and the standalone cogpit-memory package alike.
+
+/** The agent CLIs Cogpit can drive. */
+export type AgentKind = "claude" | "codex" | "copilot"
+
+/**
+ * Every agent kind, in transcript-detection order. Codex and Copilot carry
+ * positive discriminators in their records; Claude is the terminal fallback and
+ * must stay last.
+ */
+export const AGENT_KINDS: readonly AgentKind[] = ["codex", "copilot", "claude"]
+
+// ── Session status ──────────────────────────────────────────────────────────
+
+export type SessionStatus =
+  | "idle"
+  | "thinking"
+  | "tool_use"
+  | "processing"
+  | "completed"
+  | "compacting"
+  | "deferred"
+  | "awaiting_agents"
+
+export interface SessionStatusInfo {
+  status: SessionStatus
+  /** Name of the tool currently being used (if status is tool_use) */
+  toolName?: string
+  /** Number of pending queue items (user messages waiting to be processed) */
+  pendingQueue?: number
+  /** Why the session terminated (from Claude Code's terminal_reason). Only set for non-normal endings. */
+  terminalReason?: string
+  /** Number of background agents/workflows still running (status awaiting_agents) */
+  pendingAgents?: number
+  /** Short descriptions of the pending background agents, oldest first */
+  pendingAgentDescriptions?: string[]
+}
+
+/** A raw transcript record, before any agent-specific interpretation. */
+export type RawRecord = { type: string; [key: string]: unknown }
+
 // ── Content Blocks ──────────────────────────────────────────────────────────
 
 export interface TextBlock {
@@ -390,6 +436,8 @@ export interface ToolCall {
   name: string
   input: Record<string, unknown>
   result: string | null
+  /** Binary images returned by a tool, when the provider persists them. */
+  resultImages?: ImageBlock[]
   isError: boolean
   timestamp: string
   /** Set by parser when a PostToolUse hook replaced this tool's output */
@@ -540,10 +588,11 @@ export interface ParsedSession {
   rawMessages: Array<{ type: string; [key: string]: unknown }>
   branchedFrom?: { sessionId: string; turnIndex?: number | null }
   /**
-   * The provider that produced this session. Set by the parser when the
-   * format is known. Consumers can use this instead of inspecting rawMessages.
+   * The agent that produced this session, as determined by the parser from the
+   * transcript's own bytes. This is the parser's finding, not the app's source
+   * of truth — the session's dirName is (see `shared/session/agents.ts`).
    */
-  agentKind?: "claude" | "codex"
+  agentKind?: AgentKind
 }
 
 // ── Undo/Redo & Branching ────────────────────────────────────────────────

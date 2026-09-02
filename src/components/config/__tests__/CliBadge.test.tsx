@@ -5,11 +5,14 @@ import { CliBadge } from "../CliBadge"
 import { LinkIndicator } from "../LinkIndicator"
 
 describe("CliBadge", () => {
-  it("marks an entry both CLIs load", () => {
-    render(<CliBadge cli={["claude", "codex"]} />)
+  it("marks an entry every CLI loads", () => {
+    render(<CliBadge cli={["claude", "codex", "copilot"]} />)
 
     expect(screen.getByTitle("Loaded by Claude Code")).toHaveTextContent("C")
     expect(screen.getByTitle("Loaded by Codex CLI")).toHaveTextContent("X")
+    // Copilot used to be unrepresentable here: an unguarded lookup on a
+    // two-agent map threw the moment the server tagged an entry with it.
+    expect(screen.getByTitle("Loaded by GitHub Copilot CLI")).toHaveTextContent("G")
   })
 
   it("marks an entry only one CLI loads", () => {
@@ -24,7 +27,7 @@ describe("CliBadge", () => {
 
     expect(
       screen.getByTitle(
-        "Present in the shared source directory but not linked into Claude or Codex",
+        "Present in the shared source directory but not linked into any CLI",
       ),
     ).toHaveTextContent("unlinked")
   })

@@ -26,13 +26,20 @@ vi.mock("../../config", async (importOriginal) => ({
 
 vi.mock("../../helpers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../helpers")>()),
-  findJsonlPath: mockFindJsonlPath,
-  resolveSessionFilePath: mockResolveSessionFilePath,
   getSessionMeta: mockGetSessionMeta,
 }))
 
+vi.mock("../../sessionPaths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../sessionPaths")>()),
+  findJsonlPath: mockFindJsonlPath,
+  resolveSessionFilePath: mockResolveSessionFilePath,
+}))
+
 import type { Middleware, UseFn } from "../../helpers"
-import { CODEX_SESSIONS_DIR } from "../../sessionPaths"
+import { storeFor } from "../../agents"
+
+const CODEX_SESSIONS_DIR = storeFor("codex").sessionsRoot() as string
+const COPILOT_SESSIONS_DIR = storeFor("copilot").sessionsRoot() as string
 import { verifyPassword } from "../../password-utils"
 import { registerShareRoutes } from "../../routes/shares"
 import {
@@ -157,6 +164,21 @@ describe("POST /api/shares", () => {
     expect(result.json().error).toBe("Sharing Codex sessions isn't supported yet")
     expect(listShares()).toEqual([])
     expect(getShareWithHash("codex-uuid")).toBeUndefined()
+  })
+
+  it("refuses a Copilot session explicitly, and stores nothing", async () => {
+    mockFindJsonlPath.mockResolvedValue(
+      `${COPILOT_SESSIONS_DIR}/123e4567-e89b-42d3-a456-426614174000/events.jsonl`,
+    )
+
+    const result = await call("/api/shares", {
+      method: "POST",
+      body: { sessionId: "123e4567-e89b-42d3-a456-426614174000" },
+    })
+
+    expect(result.res.statusCode).toBe(400)
+    expect(result.json().error).toBe("Sharing Copilot sessions isn't supported yet")
+    expect(listShares()).toEqual([])
   })
 
   it("404s on a session with no transcript, and stores nothing", async () => {

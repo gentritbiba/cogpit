@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { authUrl } from "@/lib/auth"
-import type { ParsedSession } from "@/lib/types"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { ParsedSession } from "../../shared/session/types"
+import type { AgentKind } from "@/lib/agents"
 import { sessionCache } from "@/lib/sessionCache"
 import {
   applyDeltas,
@@ -283,6 +283,9 @@ export function useLiveSession(
         } else if (data.type === "subagent_activity") {
           // Background agents write only to their own transcripts, so the
           // parent stream goes quiet while they run. Keep the session live.
+          setIsLive(true)
+          resetStaleTimer()
+        } else if (data.type === "copilot_activity") {
           setIsLive(true)
           resetStaleTimer()
         } else if (data.type === "stream_snapshot") {

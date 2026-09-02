@@ -3,10 +3,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { FloatingChrome } from "@/components/FloatingChrome"
 import { setMe, __resetCapabilitiesForTest } from "@/lib/capabilities"
-import { getResumeCommand } from "@/lib/sessionSource"
+import { getResumeCommand, type AgentKind } from "@/lib/agents"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../../shared/session/types"
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
     dirName: string
     fileName: string
     rawText: string
-    agentKind?: "claude" | "codex"
+    agentKind?: AgentKind
   } | null,
   isLive: false,
   copy: vi.fn(),
@@ -126,6 +126,7 @@ function makeSession(overrides: Partial<ParsedSession> = {}): ParsedSession {
       turnCount: 0,
     },
     rawMessages: [],
+    agentKind: "claude",
     ...overrides,
   }
 }
@@ -284,6 +285,37 @@ describe("FloatingChrome", () => {
     expect(details).toHaveTextContent(/left before compact/)
   })
 
+  it("does not interpret Copilot provider records as Claude context usage", async () => {
+    const user = userEvent.setup()
+    mocks.session = makeSession({
+      agentKind: "copilot",
+      rawMessages: [{
+        type: "assistant",
+        message: {
+          model: "claude-sonnet-4.6",
+          usage: {
+            input_tokens: 50_000,
+            output_tokens: 1_000,
+            cache_creation_input_tokens: 10_000,
+            cache_read_input_tokens: 5_000,
+          },
+        },
+      }],
+    })
+    mocks.sessionSource = {
+      dirName: "copilot__L3RtcC9wcm9qZWN0",
+      fileName: "test-session-id/events.jsonl",
+      rawText: "",
+      agentKind: "copilot",
+    }
+
+    renderChrome()
+
+    expect(screen.queryByText(/61%/)).not.toBeInTheDocument()
+    const details = await openSessionDetails(user)
+    expect(details).not.toHaveTextContent(/left before compact/)
+  })
+
   it("preserves sub-agent navigation and identity", async () => {
     const user = userEvent.setup()
     mocks.sessionSource = {
@@ -360,6 +392,22 @@ describe("FloatingChrome", () => {
     mocks.session = null
     renderChrome()
     expect(screen.queryByRole("button", { name: "Share session" })).not.toBeInTheDocument()
+  })
+
+  // The share route only accepts agents whose transcripts it can publish, so
+  // offering the control anywhere else just produced a 400 on click.
+  it.each([
+    ["-Users-me-proj", true],
+    ["codex__L3RtcC9wcm9qZWN0", false],
+    ["copilot__L3RtcC9wcm9qZWN0", false],
+  ])("offers the share control in %s only when the agent can be shared", (dirName, shareable) => {
+    mocks.sessionSource = { dirName, fileName: "s.jsonl", rawText: "" }
+
+    renderChrome()
+
+    const control = screen.queryByRole("button", { name: "Share session" })
+    if (shareable) expect(control).toBeInTheDocument()
+    else expect(control).not.toBeInTheDocument()
   })
 
   it("withholds the share control from a member who may not share", () => {

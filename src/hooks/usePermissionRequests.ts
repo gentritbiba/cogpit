@@ -5,6 +5,7 @@ import {
   respondToPermission,
   type PermissionDecision,
 } from "@/lib/permissionApi"
+import type { PlanApprovalState } from "../../shared/session/interactiveState"
 
 export type { PermissionDecision }
 
@@ -37,11 +38,9 @@ function permissionRequestsEqual(
   return JSON.stringify(current) === JSON.stringify(next)
 }
 
-export function usePermissionRequests(
-  sessionId: string | null,
-  _permissionMode: string | undefined,
-) {
+export function usePermissionRequests(sessionId: string | null) {
   const [requests, setRequests] = useState<PermissionRequest[]>([])
+  const [plan, setPlan] = useState<PlanApprovalState | null>(null)
   const [responding, setResponding] = useState<Set<string>>(new Set())
 
   // Access mode controls future tool calls. An approval already issued by a
@@ -49,6 +48,7 @@ export function usePermissionRequests(
   useEffect(() => {
     if (!sessionId) {
       setRequests([])
+      setPlan(null)
       return
     }
 
@@ -60,11 +60,27 @@ export function usePermissionRequests(
         const res = await authFetch(`/api/permissions/${encodeURIComponent(sessionId)}`)
         if (cancelled) return
         if (res.ok) {
-          const data = await res.json() as { permissions: PermissionRequest[] }
+          const data = await res.json() as {
+            permissions: PermissionRequest[]
+            plan?: {
+              requestId: string
+              summary: string
+              planContent?: string
+              actions: string[]
+              recommendedAction: string
+            } | null
+          }
+          if (cancelled) return
           setRequests((current) => (
             permissionRequestsEqual(current, data.permissions)
               ? current
               : data.permissions
+          ))
+          const nextPlan: PlanApprovalState | null = data.plan
+            ? { type: "plan", provider: "copilot", ...data.plan }
+            : null
+          setPlan((current) => (
+            JSON.stringify(current) === JSON.stringify(nextPlan) ? current : nextPlan
           ))
         }
       } catch {
@@ -124,5 +140,5 @@ export function usePermissionRequests(
     }
   }, [sessionId])
 
-  return { requests, responding, respond, respondAll }
+  return { requests, plan, responding, respond, respondAll }
 }

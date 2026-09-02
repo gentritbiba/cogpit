@@ -12,30 +12,39 @@ function file(name: string, path: string, extra: Partial<ConfigTreeItem> = {}): 
 }
 
 describe("config layouts", () => {
-  it("covers Claude, Codex, and the shared source for skills", () => {
+  it("covers every agent plus the shared source for skills", () => {
     const layout = globalLayout()
     const skillDirs = layout.skills.map((source) => source.dir)
 
     expect(skillDirs.some((dir) => dir.endsWith(join(".claude", "skills")))).toBe(true)
     expect(skillDirs.some((dir) => dir.endsWith(join(".codex", "skills")))).toBe(true)
+    expect(skillDirs.some((dir) => dir.endsWith(join(".copilot", "skills")))).toBe(true)
     expect(skillDirs.some((dir) => dir.endsWith(join(".agents", "skills")))).toBe(true)
     // The shared directory is a source of truth, not something a CLI loads.
     expect(layout.skills.find((source) => source.dir.includes(".agents"))?.cli).toEqual([])
   })
 
-  it("covers both instruction files and both settings files per scope", () => {
+  it("covers every agent's instruction and settings files per scope", () => {
     const project = projectLayout("/tmp/demo")
 
-    expect(project.instructions.map((source) => source.name)).toEqual([
-      "CLAUDE.md",
-      ".claude/CLAUDE.md",
-      "AGENTS.md",
+    // AGENTS.md appears once per CLI that reads it; the two collapse into one
+    // row carrying both badges once the paths are canonicalised.
+    expect(project.instructions.map((source) => [source.name, source.cli])).toEqual([
+      ["CLAUDE.md", ["claude"]],
+      [".claude/CLAUDE.md", ["claude"]],
+      ["AGENTS.md", ["codex"]],
+      ["AGENTS.md", ["copilot"]],
     ])
     expect(project.settings.map((source) => source.name)).toEqual([
       "settings.local.json",
       "config.toml",
     ])
     expect(project.agents.map((source) => source.cli)).toEqual([["claude"], ["codex"]])
+  })
+
+  it("gives Copilot a global settings file, which it had none of before", () => {
+    const settings = globalLayout().settings
+    expect(settings.some((source) => source.cli.includes("copilot"))).toBe(true)
   })
 })
 
@@ -71,6 +80,26 @@ describe("mergeCliItems", () => {
     // The first group supplies the representative entry.
     expect(merged[0].path).toBe(join(claudeLink, "SKILL.md"))
     expect(merged[0].description).toBe("Commit")
+  })
+
+  it("keeps every agent through a merge instead of silently dropping one", async () => {
+    // The CLI order doubles as the whitelist a union is filtered through, so an
+    // agent missing from it loses its badge here rather than failing loudly.
+    // Copilot was exactly that agent.
+    const shared = join(tmpDir, "shared", "review")
+    await mkdir(shared, { recursive: true })
+    await writeFile(join(shared, "SKILL.md"), "shared", "utf-8")
+
+    const links = await Promise.all(["claude", "codex", "copilot"].map(async (cli) => {
+      const link = join(tmpDir, `${cli}-review`)
+      await symlink(shared, link, process.platform === "win32" ? "junction" : undefined)
+      return [file("review", join(link, "SKILL.md"), { cli: [cli as "claude"] })]
+    }))
+
+    const merged = await mergeCliItems(links)
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].cli).toEqual(["claude", "codex", "copilot"])
   })
 
   it("keeps same-named copies that are genuinely different files apart", async () => {

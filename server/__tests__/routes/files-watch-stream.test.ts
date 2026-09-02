@@ -10,21 +10,40 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const { mockStat, mockOpen, mockWatch } = vi.hoisted(() => ({
+const { mockStat, mockOpen, mockWatch, mockIsCopilotTurnActive } = vi.hoisted(() => ({
   mockStat: vi.fn(),
   mockOpen: vi.fn(),
   mockWatch: vi.fn(),
+  mockIsCopilotTurnActive: vi.fn(),
 }))
 
 vi.mock("../../helpers", () => ({
-  dirs: { PROJECTS_DIR: "/tmp/projects" },
-  isCodexDirName: (d: string) => d.startsWith("codex__"),
-  isWithinDir: () => true,
-  resolveSessionFilePath: vi.fn(async (dirName: string, fileName: string) => `/tmp/projects/${dirName}/${fileName}`),
   stat: mockStat,
   open: mockOpen,
   watch: mockWatch,
   resolve: (p: string) => p,
+}))
+
+vi.mock("../../sessionPaths", () => ({
+  resolveSessionFilePath: vi.fn(
+    async (dirName: string, fileName: string) => `/tmp/projects/${dirName}/${fileName}`,
+  ),
+}))
+
+// The fixture resolves every path into the project of the dirName that asked.
+vi.mock("../../agents", async () => {
+  const { agentKindForDirName } = await vi.importActual<
+    typeof import("../../../shared/session/agent-descriptors")
+  >("../../../shared/session/agent-descriptors")
+  return {
+    storeForPath: (filePath: string) => ({
+      kind: agentKindForDirName(filePath.replace("/tmp/projects/", "").split("/")[0]),
+    }),
+  }
+})
+
+vi.mock("../../agents/copilotTransport", () => ({
+  copilotRuntime: { isTurnActive: mockIsCopilotTurnActive },
 }))
 
 import { registerFileWatchRoutes } from "../../routes/files-watch"
@@ -103,10 +122,12 @@ beforeEach(() => {
     close: vi.fn().mockResolvedValue(undefined),
   })
   mockWatch.mockReturnValue({ on: vi.fn(), close: vi.fn() })
+  mockIsCopilotTurnActive.mockReturnValue(false)
 })
 
 afterEach(() => {
   _resetForTests()
+  vi.useRealTimers()
 })
 
 describe("/api/watch stream-bus forwarding", () => {
@@ -170,6 +191,27 @@ describe("/api/watch stream-bus forwarding", () => {
       | undefined
     expect(snapshot?.messages[0].blocks[0].text).toBe("codex live")
     closeConnection()
+  })
+
+  it("keeps an active Copilot turn live across quiet transcript periods", async () => {
+    vi.useFakeTimers()
+    mockIsCopilotTurnActive.mockReturnValue(true)
+    const handler = getHandler("/api/watch/")
+    const harness = makeReqRes(
+      `/copilot__proj/${encodeURIComponent(`${SESSION}/events.jsonl`)}`,
+    )
+
+    await handler(harness.req as never, harness.res as never, harness.next)
+    await Promise.resolve()
+    expect(parseFrames(harness.frames)).toContainEqual({ type: "copilot_activity" })
+
+    const activityCount = () => parseFrames(harness.frames)
+      .filter((event) => event.type === "copilot_activity").length
+    const initialCount = activityCount()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(activityCount()).toBeGreaterThan(initialCount)
+
+    harness.closeConnection()
   })
 
   it("replays lines written after the client snapshot offset", async () => {

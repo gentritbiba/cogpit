@@ -62,6 +62,15 @@ describe("CommandPalette", () => {
     expect(props.onGoHome).toHaveBeenCalledOnce()
   })
 
+  it("indexes resume commands under Copilot", async () => {
+    const user = userEvent.setup()
+    render(<CommandPalette {...createProps()} onCopyResumeCommand={vi.fn()} />)
+
+    await user.type(screen.getByRole("combobox", { name: "Search commands" }), "copilot")
+
+    expect(screen.getByText("Copy resume command")).toBeInTheDocument()
+  })
+
   it("exposes the project file workspace when a project is active", async () => {
     const user = userEvent.setup()
     const props = { ...createProps(), onToggleProjectFiles: vi.fn(), showProjectFiles: false }

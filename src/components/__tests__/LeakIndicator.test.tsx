@@ -3,7 +3,7 @@ import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { LeakIndicator } from "@/components/LeakIndicator"
-import type { SystemProcessMetric } from "@/lib/performanceTypes"
+import type { SystemProcessMetric } from "../../../shared/contracts/performance"
 
 const mocks = vi.hoisted(() => ({ useLeakMonitor: vi.fn() }))
 

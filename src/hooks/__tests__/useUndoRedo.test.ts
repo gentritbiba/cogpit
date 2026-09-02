@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
-import type { ParsedSession, Turn, Branch, UndoState } from "@/lib/types"
+import type { ParsedSession, Turn, Branch, UndoState } from "../../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 
 // Mock authFetch before importing useUndoRedo
@@ -39,7 +39,7 @@ vi.mock("@/lib/undo-engine", () => ({
 }))
 
 // Mock parseSession for redoGhostTurns
-vi.mock("@/lib/parser", () => ({
+vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(() => ({ turns: [] })),
 }))
 
@@ -94,9 +94,12 @@ function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): Par
   }
 }
 
-function makeSource(): SessionSource {
-  return { dirName: "test-dir", fileName: "test.jsonl", rawText: "" }
+function makeSource(dirName = "test-dir"): SessionSource {
+  return { dirName, fileName: "test.jsonl", rawText: "" }
 }
+
+/** A project directory owned by the agent with the native rewind RPC. */
+const COPILOT_DIR = "copilot__L3RtcC9wcm9qZWN0"
 
 function makeBranch(overrides: Partial<Branch> = {}): Branch {
   return {
@@ -141,12 +144,6 @@ function setupMockFetch(undoStateResponse: UndoState | null = null) {
       )
     }
     if (url.includes("/api/undo/transaction")) {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }
-    if (url.includes("/api/undo/truncate-jsonl")) {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }
-    if (url.includes("/api/undo/append-jsonl")) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     }
     if (url.includes("/api/sessions/")) {
@@ -490,6 +487,61 @@ describe("useUndoRedo", () => {
       expect(result.current.confirmState).not.toBeNull()
       expect(result.current.confirmState?.targetTurnIndex).toBe(-1)
     })
+
+    it("offers Copilot file restoration without enabling it by default", async () => {
+      const session = makeSession(3, {
+        agentKind: "copilot",
+        turns: [
+          makeTurn({ id: "copilot@event-1" }),
+          makeTurn({ id: "copilot@event-2" }),
+          makeTurn({ id: "copilot@event-3" }),
+        ],
+      })
+      mockAuthFetch.mockResolvedValue(new Response(JSON.stringify({
+        available: true,
+        fileCount: 1,
+        files: [{ path: "src/App.tsx" }],
+      }), { status: 200 }))
+
+      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), vi.fn()))
+      act(() => result.current.requestUndo(1))
+
+      await waitFor(() => expect(result.current.confirmState).not.toBeNull())
+      expect(result.current.confirmState?.copilot).toEqual({
+        eventId: "event-2",
+        mode: "conversation",
+        filesAvailable: true,
+      })
+    })
+
+    it("ignores a Copilot preview that resolves after switching sessions", async () => {
+      let resolvePreview: (response: Response) => void = () => undefined
+      mockAuthFetch.mockImplementation(() => new Promise<Response>((resolve) => {
+        resolvePreview = resolve
+      }))
+      const first = makeSession(2, {
+        sessionId: "copilot-one",
+        agentKind: "copilot",
+        turns: [makeTurn({ id: "event-1" }), makeTurn({ id: "event-2" })],
+      })
+      const second = makeSession(2, {
+        sessionId: "copilot-two",
+        agentKind: "copilot",
+        turns: [makeTurn({ id: "event-a" }), makeTurn({ id: "event-b" })],
+      })
+      const { result, rerender } = renderHook(
+        ({ current }) => useUndoRedo(current, makeSource(COPILOT_DIR), vi.fn()),
+        { initialProps: { current: first } },
+      )
+
+      act(() => result.current.requestUndo(1))
+      rerender({ current: second })
+      await act(async () => {
+        resolvePreview(new Response(JSON.stringify({ available: true, fileCount: 1 }), { status: 200 }))
+      })
+
+      expect(result.current.confirmState).toBeNull()
+    })
   })
 
   // ── requestRedoAll ────────────────────────────────────────────────────
@@ -704,6 +756,40 @@ describe("useUndoRedo", () => {
         await result.current.confirmApply()
       })
       expect(result.current.isApplying).toBe(false)
+    })
+
+    it("rewinds Copilot conversation and files only when selected", async () => {
+      const session = makeSession(2, {
+        agentKind: "copilot",
+        turns: [makeTurn({ id: "event-1" }), makeTurn({ id: "event-2" })],
+      })
+      const onReload = vi.fn().mockResolvedValue(undefined)
+      mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString()
+        if (url.endsWith("/preview")) {
+          return new Response(JSON.stringify({
+            available: true,
+            fileCount: 1,
+            files: [{ path: "src/App.tsx" }],
+          }), { status: 200 })
+        }
+        if (url.endsWith("/rewind")) {
+          return new Response(JSON.stringify({ outcome: "success" }), { status: 200 })
+        }
+        return new Response("not found", { status: 404 })
+      })
+      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), onReload))
+
+      act(() => result.current.requestUndo(1))
+      await waitFor(() => expect(result.current.confirmState).not.toBeNull())
+      await act(async () => result.current.confirmApply(true))
+
+      const rewindCall = mockAuthFetch.mock.calls.find(([url]) => String(url).endsWith("/rewind"))
+      expect(JSON.parse((rewindCall?.[1] as RequestInit).body as string)).toEqual({
+        eventId: "event-2",
+        mode: "conversation-and-files",
+      })
+      expect(onReload).toHaveBeenCalledOnce()
     })
 
     it("calls onReloadSession after successful undo apply", async () => {

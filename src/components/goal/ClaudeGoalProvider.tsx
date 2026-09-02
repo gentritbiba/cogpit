@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Check, Flag, Pencil, Trash2, X } from "lucide-react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import { extractClaudeGoalState, type ClaudeGoalState } from "@/lib/goals"
 import { formatTokenCount } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"

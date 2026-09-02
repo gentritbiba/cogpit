@@ -46,6 +46,27 @@ describe("ProviderUpdateBanner", () => {
     expect(update).toHaveBeenCalledWith("claude")
   })
 
+  it("labels and updates GitHub Copilot CLI", async () => {
+    const update = vi.fn().mockResolvedValue(undefined)
+    const copilot = makeProviderUpdateInfo({
+      provider: "copilot",
+      displayName: "GitHub Copilot CLI",
+      packageName: "@github/copilot",
+      binaryPath: "/opt/homebrew/bin/copilot",
+      currentVersion: "1.0.0",
+      latestVersion: "1.1.0",
+      installMethod: "homebrew",
+      updateCommand: "brew upgrade --cask copilot-cli",
+    })
+    mocks.useProviderUpdates.mockReturnValue(hookValue({ pending: [copilot], update }))
+
+    render(<ProviderUpdateBanner />)
+    expect(screen.getByText("GitHub Copilot CLI v1.0.0 → v1.1.0")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /^update$/i }))
+    expect(update).toHaveBeenCalledWith("copilot")
+  })
+
   it("shows the manual command when the install method is unknown", () => {
     mocks.useProviderUpdates.mockReturnValue(
       hookValue({

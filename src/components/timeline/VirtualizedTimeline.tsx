@@ -8,7 +8,7 @@ import { CompactionMarker } from "./CompactionMarker"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isNearTop, isPrepend, type TimelineSnapshot } from "@/lib/timelinePaging"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
 
 // ── Types ────────────────────────────────────────────────────────────────────

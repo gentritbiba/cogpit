@@ -4,25 +4,19 @@ import type { UseFn, Middleware } from "../../helpers"
 
 // Mock helpers module
 vi.mock("../../helpers", () => ({
-  CODEX_SESSIONS_DIR: "/tmp/test-codex-sessions",
   dirs: {
     PROJECTS_DIR: "/tmp/test-projects",
   },
   dirname: vi.fn((path: string) => path.split("/").slice(0, -1).join("/")),
-  formatCodexRolloutFileName: vi.fn((sessionId: string) => `2026/03/18/rollout-2026-03-18T10-00-00-${sessionId}.jsonl`),
-  isCodexDirName: vi.fn(() => false),
   isWithinDir: vi.fn(),
   mkdir: vi.fn(),
   readFile: vi.fn(),
-  resolveSessionFilePath: vi.fn((dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`),
   writeFile: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
   randomUUID: vi.fn(() => "new-uuid-1234"),
   // Stubs for other exports the route file imports
-  friendlySpawnError: vi.fn(),
   activeProcesses: new Map(),
   persistentSessions: new Map(),
-  findJsonlPath: vi.fn(),
   watchSubagents: vi.fn(),
   spawn: vi.fn(),
   createInterface: vi.fn(),
@@ -31,19 +25,56 @@ vi.mock("../../helpers", () => ({
   stat: vi.fn(),
 }))
 
+vi.mock("../../agents/spawnError", () => ({ friendlySpawnError: vi.fn() }))
+
+vi.mock("../../sessionPaths", () => ({
+  resolveSessionFilePath: vi.fn(
+    (dirName: string, fileName: string) => `/tmp/test-projects/${dirName}/${fileName}`,
+  ),
+  findJsonlPath: vi.fn(),
+  findNewestCodexSessionForCwd: vi.fn(),
+}))
+
+vi.mock("../../agents", async () => {
+  const { resolve, sep } = await vi.importActual<typeof import("node:path")>("node:path")
+  const roots: Record<string, string> = {
+    claude: "/tmp/test-projects",
+    codex: "/tmp/test-codex-sessions",
+    copilot: "/tmp/copilot/session-state",
+  }
+  return {
+    storeFor: (kind: string) => ({ kind, sessionsRoot: () => roots[kind] }),
+    storeForPath: (filePath: string) => {
+      const resolved = resolve(filePath)
+      const kind = Object.keys(roots).find((key) => (
+        resolved.startsWith(`${resolve(roots[key])}${sep}`)
+      ))
+      return kind ? { kind } : null
+    },
+  }
+})
+
+vi.mock("../../agents/copilotTransport", () => ({
+  copilotRuntime: {
+    forkSession: vi.fn(),
+  },
+}))
+
 import {
-  formatCodexRolloutFileName,
-  isCodexDirName,
   isWithinDir,
   mkdir,
   readFile,
-  resolveSessionFilePath,
   writeFile,
 } from "../../helpers"
-import { registerClaudeNewRoutes } from "../../routes/claude-new"
+import { resolveSessionFilePath } from "../../sessionPaths"
+import { descriptorFor } from "../../../shared/session/agent-descriptors"
+import { copilotRuntime } from "../../agents/copilotTransport"
+import { registerSessionNewRoutes } from "../../routes/session-new"
 
-const mockedFormatCodexRolloutFileName = vi.mocked(formatCodexRolloutFileName)
-const mockedIsCodexDirName = vi.mocked(isCodexDirName)
+const CODEX_DIR_NAME = descriptorFor("codex").dirName
+  .encode("/Users/gentritbiba/.claude/agent-window")
+const COPILOT_DIR_NAME = descriptorFor("copilot").dirName.encode("/Users/gentritbiba/project")
+const mockedForkCopilotSession = vi.mocked(copilotRuntime.forkSession)
 const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedMkdir = vi.mocked(mkdir)
 const mockedReadFile = vi.mocked(readFile)
@@ -90,11 +121,7 @@ let handlers: Map<string, Middleware>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockedFormatCodexRolloutFileName.mockImplementation(
-    (sessionId: string) =>
-      `2026/03/18/rollout-2026-03-18T10-00-00-${sessionId}.jsonl`
-  )
-  mockedIsCodexDirName.mockReturnValue(false)
+  mockedForkCopilotSession.mockResolvedValue({ sessionId: "forked-copilot" })
   mockedResolveSessionFilePath.mockImplementation(
     async (dirName: string, fileName: string) =>
       `/tmp/test-projects/${dirName}/${fileName}`
@@ -106,7 +133,7 @@ beforeEach(() => {
   const use: UseFn = (path: string, handler: Middleware) => {
     handlers.set(path, handler)
   }
-  registerClaudeNewRoutes(use)
+  registerSessionNewRoutes(use)
 })
 
 function callHandler(path: string, method: string, body?: string) {
@@ -292,6 +319,51 @@ describe("POST /api/branch-session", () => {
     })
   })
 
+  it("does not treat a mixed tool-result record as the start of a turn", async () => {
+    // This is the case the client and the server used to disagree on: the
+    // client rejected a user record carrying *any* tool_result block, the
+    // server only one where *every* block was. The client computes keepLines
+    // and the server verifies it, so a disagreement here truncates a turn early
+    // and writes a corrupted transcript. One scan now, and `some` wins.
+    mockedIsWithinDir.mockReturnValue(true)
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "first" } }),
+      JSON.stringify({ type: "assistant", uuid: "a1", message: { role: "assistant", content: [] } }),
+      JSON.stringify({
+        type: "user",
+        uuid: "mixed-1",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "tool-1", content: "ok" },
+            { type: "text", text: "and also do this" },
+          ],
+        },
+      }),
+      JSON.stringify({ type: "user", uuid: "u2", message: { role: "user", content: "second" } }),
+    ].join("\n") as never)
+    mockedWriteFile.mockResolvedValue(undefined as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: "my-project",
+        fileName: "original-session-id.jsonl",
+        turnIndex: 0,
+      }),
+    )
+
+    await vi.waitFor(() => {
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toBeTruthy()
+    })
+
+    const writtenLines = (mockedWriteFile.mock.calls[0][1] as string).trim().split("\n")
+    expect(writtenLines).toHaveLength(3)
+    expect(JSON.parse(writtenLines[2]).uuid).toBe("mixed-1")
+  })
+
   it("keeps all lines when turnIndex >= total turns", async () => {
     mockedIsWithinDir.mockReturnValue(true)
     const sourceContent = buildJsonl(2)
@@ -406,7 +478,6 @@ describe("POST /api/branch-session", () => {
   })
 
   it("branches Codex sessions with rollout naming and metadata", async () => {
-    mockedIsCodexDirName.mockReturnValue(true)
     mockedResolveSessionFilePath.mockResolvedValue(
       "/tmp/test-codex-sessions/2026/03/18/original.jsonl" as never
     )
@@ -417,7 +488,7 @@ describe("POST /api/branch-session", () => {
       "/api/branch-session",
       "POST",
       JSON.stringify({
-        dirName: "codex:/Users/gentritbiba/.claude/agent-window",
+        dirName: CODEX_DIR_NAME,
         fileName: "2026/03/18/original.jsonl",
         turnIndex: 0,
       })
@@ -428,12 +499,15 @@ describe("POST /api/branch-session", () => {
       expect(res.statusCode).toBe(200)
     })
 
+    // The rollout name is stamped with the moment the branch was written, so
+    // it is pinned by shape rather than by re-deriving it from a second clock read.
+    const ROLLOUT_NAME =
+      /^\d{4}\/\d{2}\/\d{2}\/rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-new-uuid-1234\.jsonl$/
     expect(mockedMkdir).toHaveBeenCalledTimes(1)
-    expect(mockedFormatCodexRolloutFileName).toHaveBeenCalledWith("new-uuid-1234")
-    expect(mockedWriteFile).toHaveBeenCalledWith(
-      "/tmp/test-codex-sessions/2026/03/18/rollout-2026-03-18T10-00-00-new-uuid-1234.jsonl",
-      expect.any(String)
-    )
+    const writtenPath = mockedWriteFile.mock.calls[0][0] as string
+    expect(writtenPath.startsWith("/tmp/test-codex-sessions/")).toBe(true)
+    const rolloutName = writtenPath.slice("/tmp/test-codex-sessions/".length)
+    expect(rolloutName).toMatch(ROLLOUT_NAME)
 
     const writtenContent = mockedWriteFile.mock.calls[0][1] as string
     const writtenLines = writtenContent.trim().split("\n")
@@ -448,8 +522,99 @@ describe("POST /api/branch-session", () => {
 
     const data = JSON.parse(res.body)
     expect(data.fileName).toBe(
-      "2026/03/18/rollout-2026-03-18T10-00-00-new-uuid-1234.jsonl"
+      rolloutName
     )
     expect(data.branchedFrom).toBe("original-codex-session")
+  })
+
+  it("forks a complete Copilot session through the native API", async () => {
+    mockedResolveSessionFilePath.mockResolvedValue(
+      "/tmp/copilot/session-state/11111111-1111-4111-8111-111111111111/events.jsonl" as never,
+    )
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({
+        type: "session.start",
+        id: "start-event",
+        data: { sessionId: "11111111-1111-4111-8111-111111111111" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-1",
+        data: { turnId: "turn-1", content: "First" },
+      }),
+    ].join("\n") as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: COPILOT_DIR_NAME,
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+      }),
+    )
+
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(mockedForkCopilotSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      {},
+    )
+    expect(JSON.parse(res.body)).toEqual({
+      dirName: COPILOT_DIR_NAME,
+      fileName: "forked-copilot/events.jsonl",
+      sessionId: "forked-copilot",
+      branchedFrom: "11111111-1111-4111-8111-111111111111",
+    })
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
+
+  it("forks Copilot through the selected turn's next durable user event", async () => {
+    mockedResolveSessionFilePath.mockResolvedValue(
+      "/tmp/copilot/session-state/11111111-1111-4111-8111-111111111111/events.jsonl" as never,
+    )
+    mockedReadFile.mockResolvedValue([
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-1",
+        data: { turnId: "turn-1", content: "First" },
+      }),
+      JSON.stringify({
+        type: "assistant.message",
+        id: "assistant-event-1",
+        data: { content: "Done" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-2",
+        data: { turnId: "turn-2", content: "Second" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "nested-user-event",
+        agentId: "subagent-1",
+        data: { turnId: "nested", content: "Nested" },
+      }),
+      JSON.stringify({
+        type: "user.message",
+        id: "user-event-3",
+        data: { turnId: "turn-3", content: "Third" },
+      }),
+    ].join("\n") as never)
+
+    const { res } = callHandler(
+      "/api/branch-session",
+      "POST",
+      JSON.stringify({
+        dirName: COPILOT_DIR_NAME,
+        fileName: "11111111-1111-4111-8111-111111111111/events.jsonl",
+        turnIndex: 0,
+        turnUuid: "turn-2@user-event-2",
+      }),
+    )
+
+    await vi.waitFor(() => expect(res.body).toBeTruthy())
+    expect(mockedForkCopilotSession).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      { toEventId: "user-event-3" },
+    )
   })
 })

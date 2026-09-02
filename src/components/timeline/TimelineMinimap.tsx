@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { MINIMAP_MIN_TURNS, tickWidthClass, turnPreviewText } from "@/lib/minimap"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 

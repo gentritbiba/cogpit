@@ -1,4 +1,5 @@
 import { truncate } from "@/lib/format"
+import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
 import type { SessionInfo } from "./types"
 
 /** A transcript touched this recently is treated as still running. */
@@ -41,17 +42,5 @@ export function sessionPreviewText(s: SessionInfo, title: string): string | null
 }
 
 export function matchesSessionFilter(s: SessionInfo, query: string): boolean {
-  const q = query.toLowerCase()
-  return [
-    s.aiTitle,
-    s.name,
-    s.slug,
-    s.customTitle,
-    s.firstUserMessage,
-    s.lastUserMessage,
-    s.model,
-    s.gitBranch,
-    s.agentName,
-    s.sessionId,
-  ].some((field) => field?.toLowerCase().includes(q))
+  return matchesSessionSearch(s, query)
 }

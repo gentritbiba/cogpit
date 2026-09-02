@@ -1,5 +1,6 @@
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../shared/session/types"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
+import type { AgentKind } from "@/lib/agents"
 
 export interface CacheEntry {
   parsed: ParsedSession
@@ -13,7 +14,7 @@ export interface CacheEntry {
     dirName: string
     fileName: string
     rawText: string
-    agentKind?: "claude" | "codex"
+    agentKind?: AgentKind
     watchOffset?: number
   }
   nextByteOffset: number
@@ -52,7 +53,7 @@ class SessionCache {
     rawText: string,
     nextByteOffset: number,
     hasMore: boolean,
-    agentKind?: "claude" | "codex",
+    agentKind?: AgentKind,
     watchOffset?: number,
   ): void {
     const key = makeKey(dirName, fileName)

@@ -96,6 +96,17 @@ describe("useAppConfig", () => {
       expect(result.current.defaultAgentKind).toBe("codex")
     })
 
+    it("preserves Copilot as the configured provider", async () => {
+      mockAuthFetch.mockResolvedValue(
+        new Response(JSON.stringify({ claudeDir: "/compat/.claude", mode: "copilot" }), { status: 200 }),
+      )
+
+      const { result } = renderHook(() => useAppConfig())
+
+      await waitFor(() => expect(result.current.configLoading).toBe(false))
+      expect(result.current.defaultAgentKind).toBe("copilot")
+    })
+
     it("handles config with null claudeDir", async () => {
       mockAuthFetch.mockImplementation(async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString()

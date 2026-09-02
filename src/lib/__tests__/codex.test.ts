@@ -6,7 +6,7 @@ import {
   parseApplyPatch,
   parseCodexSession,
   parseCodexToolPatches,
-} from "@/lib/codex"
+} from "../../../shared/session/codex"
 import { parseCodexSession as parseCanonicalCodexSession } from "../../../shared/session/codex"
 import { prependTurns } from "@/lib/timelinePaging"
 

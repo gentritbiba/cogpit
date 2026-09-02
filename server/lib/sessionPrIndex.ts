@@ -4,6 +4,7 @@ import {
   createPullRequestScanner,
   type PullRequestScanner,
   type SessionPullRequest,
+  type SessionPullRequestReference,
 } from "../../shared/session/prLinks"
 
 interface IndexEntry {
@@ -26,6 +27,11 @@ const CHUNK_BYTES = 256 * 1024
  */
 const MAX_BYTES_PER_CALL = 4 * 1024 * 1024
 
+export interface SessionPullRequestData {
+  pullRequests: SessionPullRequest[]
+  references: SessionPullRequestReference[]
+}
+
 function freshEntry(): IndexEntry {
   return { parsedBytes: 0, scanner: createPullRequestScanner(), decoder: new StringDecoder("utf8") }
 }
@@ -47,10 +53,11 @@ function touch(filePath: string, entry: IndexEntry) {
  * A call folds in at most `MAX_BYTES_PER_CALL`; anything beyond that is picked
  * up by the next call, which resumes from the same byte offset.
  */
-export async function getSessionPullRequests(
+async function scanSessionPullRequests(
   filePath: string,
   size: number,
-): Promise<SessionPullRequest[]> {
+  complete: boolean,
+): Promise<SessionPullRequestData> {
   const cached = cache.get(filePath)
   // A file that shrank was rewritten (undo, branch restore) — its old scan state
   // no longer describes the content, so start over.
@@ -60,7 +67,9 @@ export async function getSessionPullRequests(
     try {
       const handle = await open(filePath, "r")
       try {
-        let remaining = Math.min(size - entry.parsedBytes, MAX_BYTES_PER_CALL)
+        let remaining = complete
+          ? size - entry.parsedBytes
+          : Math.min(size - entry.parsedBytes, MAX_BYTES_PER_CALL)
         const buffer = Buffer.allocUnsafe(Math.min(remaining, CHUNK_BYTES))
         while (remaining > 0) {
           const want = Math.min(remaining, buffer.length)
@@ -75,12 +84,30 @@ export async function getSessionPullRequests(
       }
     } catch {
       cache.delete(filePath)
-      return []
+      return { pullRequests: [], references: [] }
     }
   }
 
   touch(filePath, entry)
-  return entry.scanner.pullRequests
+  return {
+    pullRequests: entry.scanner.pullRequests,
+    references: entry.scanner.references,
+  }
+}
+
+export async function getSessionPullRequests(
+  filePath: string,
+  size: number,
+): Promise<SessionPullRequest[]> {
+  return (await scanSessionPullRequests(filePath, size, false)).pullRequests
+}
+
+/** Completes the index for an explicit PR search, including long and old transcripts. */
+export async function getCompleteSessionPullRequestData(
+  filePath: string,
+  size: number,
+): Promise<SessionPullRequestData> {
+  return scanSessionPullRequests(filePath, size, true)
 }
 
 /**

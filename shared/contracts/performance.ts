@@ -23,7 +23,10 @@ export interface ActivityMetric {
 }
 
 export type SystemProcessKind =
+  /** One kind per agent CLI, matching `AgentKind`. */
   | "claude"
+  | "codex"
+  | "copilot"
   | "headless-browser"
   | "browser-daemon"
   | "cogpit"

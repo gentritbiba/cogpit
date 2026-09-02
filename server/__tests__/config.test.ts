@@ -22,8 +22,13 @@ vi.mock("../password-utils", () => ({
   isPasswordHashed: vi.fn(),
 }))
 
+vi.mock("../lib/binaryResolver", () => ({
+  findExecutableOnPath: vi.fn(),
+}))
+
 import { readFile, writeFile, stat, readdir, chmod } from "node:fs/promises"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "../password-utils"
+import { findExecutableOnPath } from "../lib/binaryResolver"
 import { dirname, resolve, join } from "node:path"
 import { asReaddirMock } from "./http-fixtures"
 
@@ -35,6 +40,7 @@ const mockedChmod = vi.mocked(chmod)
 const mockedHashPassword = vi.mocked(hashPassword)
 const mockedIsMalformedPasswordHash = vi.mocked(isMalformedPasswordHash)
 const mockedIsPasswordHashed = vi.mocked(isPasswordHashed)
+const mockedFindExecutableOnPath = vi.mocked(findExecutableOnPath)
 
 // ── getDirs ─────────────────────────────────────────────────────────────
 
@@ -130,6 +136,7 @@ describe("loadConfig", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     delete process.env.CODEX_HOME
+    delete process.env.COPILOT_HOME
   })
 
   it("loads valid config with already-hashed password (no migration)", async () => {
@@ -268,7 +275,8 @@ describe("loadConfig", () => {
 
     expect(config).toEqual({
       claudeDir: join("/home/test", ".claude"),
-      codexOnly: true,
+      defaultAgent: "codex",
+      claudeDirIsPlaceholder: true,
     })
     expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.codex"))
     expect(mockedWriteFile).not.toHaveBeenCalled()
@@ -282,8 +290,58 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
 
-    expect(config?.codexOnly).toBe(true)
+    expect(config?.defaultAgent).toBe("codex")
     expect(mockedStat).toHaveBeenCalledWith(resolve("/opt/codex-data"))
+  })
+
+  it("bootstraps a Copilot-only config when Codex is unavailable", async () => {
+    const { loadConfig } = await import("../config")
+    process.env.COPILOT_HOME = "/opt/copilot-data"
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      .mockResolvedValueOnce({ isDirectory: () => true } as unknown as Stats)
+
+    const config = await loadConfig()
+
+    expect(config).toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "copilot",
+      claudeDirIsPlaceholder: true,
+    })
+    expect(mockedStat).toHaveBeenNthCalledWith(1, resolve("/home/test/.codex"))
+    expect(mockedStat).toHaveBeenNthCalledWith(2, resolve("/opt/copilot-data/session-state"))
+  })
+
+  it("bootstraps a first Copilot session when only that CLI is on PATH", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
+      binName === "copilot" ? "/usr/local/bin/copilot" : undefined,
+    )
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "copilot",
+      claudeDirIsPlaceholder: true,
+    })
+    expect(mockedFindExecutableOnPath).toHaveBeenCalledWith("copilot")
+  })
+
+  it("bootstraps from any discoverable CLI on PATH, not just one", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
+      binName === "codex" ? "/usr/local/bin/codex" : undefined,
+    )
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "codex",
+      claudeDirIsPlaceholder: true,
+    })
   })
 
   it("returns null for malformed JSON", async () => {
@@ -303,7 +361,7 @@ describe("loadConfig", () => {
     expect(config).toBeNull()
   })
 
-  it("restores a persisted Codex-only config", async () => {
+  it("migrates a persisted Codex-only config", async () => {
     const { loadConfig } = await import("../config")
     mockedReadFile.mockResolvedValueOnce(JSON.stringify({
       claudeDir: "/home/test/.claude",
@@ -312,7 +370,34 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
 
-    expect(config?.codexOnly).toBe(true)
+    expect(config?.defaultAgent).toBe("codex")
+    expect(config?.claudeDirIsPlaceholder).toBe(true)
+  })
+
+  it("migrates a persisted externalOnly config into its two separate facts", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/test/.claude",
+      externalOnly: "copilot",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.defaultAgent).toBe("copilot")
+    expect(config?.claudeDirIsPlaceholder).toBe(true)
+  })
+
+  it("keeps the preferred agent without marking a real Claude directory", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/test/.claude",
+      defaultAgent: "codex",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.defaultAgent).toBe("codex")
+    expect(config?.claudeDirIsPlaceholder).toBeUndefined()
   })
 
   it("loads the team edition flag", async () => {

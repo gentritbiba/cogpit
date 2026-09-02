@@ -1,8 +1,8 @@
 import * as React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { AttentionStrip } from "../AttentionStrip"
-import type { ActiveSessionInfo } from "../types"
+import type { ActiveSessionInfo, RunningProcess } from "../types"
 
 vi.mock("@/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -46,5 +46,60 @@ describe("AttentionStrip working list", () => {
     expect(screen.getByText("gentritbiba/agent-window")).toBeInTheDocument()
     expect(container.querySelector("[data-working-list]")).toBeInTheDocument()
     expect(container.querySelector("[data-relative-time]")).toBeNull()
+  })
+
+  it("opens a session that needs Copilot plan review", () => {
+    const session = makeSession()
+    const onSelectSession = vi.fn()
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [{ session, reason: "plan" }], working: [] }}
+        activeSessionKey={null}
+        procBySession={new Map()}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={onSelectSession}
+      />,
+    )
+
+    const chip = screen.getByText("Review plan")
+    fireEvent.click(chip.closest("button")!)
+    expect(onSelectSession).toHaveBeenCalledWith("agent-window", "session.jsonl")
+  })
+
+  it("removes lifecycle controls for an externally owned Copilot session", () => {
+    const session = makeSession({
+      dirName: "copilot__L3RtcC9wcm9qZWN0",
+      agentStatus: "deferred",
+    })
+    const process: RunningProcess = {
+      pid: 4242,
+      memMB: 100,
+      cpu: 1,
+      sessionId: session.sessionId,
+      agentKind: "copilot",
+      managed: false,
+      tty: "ttys001",
+      startTime: "10:00",
+    }
+
+    render(
+      <AttentionStrip
+        groups={{ needsYou: [{ session, reason: "deferred" }], working: [] }}
+        activeSessionKey={null}
+        procBySession={new Map([[session.sessionId, process]])}
+        killingPids={new Set()}
+        sessionNames={{}}
+        projectNames={{}}
+        onSelectSession={vi.fn()}
+        onKill={vi.fn()}
+        onResumeSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Read-only")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /resume to evaluate/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /kill process/i })).toBeNull()
   })
 })

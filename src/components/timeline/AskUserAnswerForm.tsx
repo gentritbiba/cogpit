@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Check } from "lucide-react"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../shared/session/types"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
 import { useSessionChatContext } from "@/contexts/SessionContext"
 import { cn } from "@/lib/utils"

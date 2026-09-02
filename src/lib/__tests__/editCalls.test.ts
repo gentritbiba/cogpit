@@ -73,6 +73,35 @@ describe("MultiEdit expansion", () => {
   })
 })
 
+describe("apply_patch expansion", () => {
+  it("normalizes raw Copilot patch arguments", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: src/app.ts",
+      "@@",
+      "-const value = 1",
+      "+const value = 2",
+      "*** End Patch",
+    ].join("\n")
+
+    const out = expandEditToolCalls([call("apply_patch", { value: patch })], "/workspace")
+
+    expect(out).toEqual([
+      expect.objectContaining({
+        id: "tc1",
+        name: "Edit",
+        input: expect.objectContaining({
+          file_path: "/workspace/src/app.ts",
+          old_string: "const value = 1",
+          new_string: "const value = 2",
+          synthesizedFrom: "apply_patch",
+        }),
+      }),
+    ])
+    expect(hasEditToolCalls([call("apply_patch", { value: patch })], "/workspace")).toBe(true)
+  })
+})
+
 describe("Bash heredoc writes", () => {
   it("recovers content from cat > path <<'EOF'", () => {
     const out = bashEdits(bash("cat > /tmp/x.html <<'HTML'\n<p>hi</p>\nline two\nHTML"))

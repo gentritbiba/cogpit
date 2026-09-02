@@ -8,7 +8,13 @@ import { SearchIndex } from "../../lib/search-index"
 // Use a mutable object so updates in beforeEach are visible through the
 // captured import reference.
 let tmpDir: string
-const mockDirs = { PROJECTS_DIR: "", TEAMS_DIR: "", TASKS_DIR: "" }
+const mockDirs = {
+  PROJECTS_DIR: "",
+  TEAMS_DIR: "",
+  TASKS_DIR: "",
+  CODEX_SESSIONS_DIR: "",
+  COPILOT_SESSIONS_DIR: "",
+}
 const mockDbPath = { value: "" }
 
 mock.module("../../lib/dirs", () => ({
@@ -141,6 +147,62 @@ function writeSessionWithToolCalls(
   return filePath
 }
 
+/**
+ * A Codex rollout, nested by date the way the CLI writes them. Codex was absent
+ * from both the FTS index and the raw scan, so nothing here used to be findable.
+ */
+function writeCodexSession(
+  sessionId: string,
+  userMessage: string,
+  cwd = "/workspace/codex",
+): string {
+  const dir = join(mockDirs.CODEX_SESSIONS_DIR, "2026", "01", "01")
+  mkdirSync(dir, { recursive: true })
+  const filePath = join(dir, `rollout-2026-01-01T00-00-00-${sessionId}.jsonl`)
+  writeFileSync(filePath, [
+    JSON.stringify({
+      type: "session_meta",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: { id: sessionId, cwd },
+    }),
+    JSON.stringify({
+      type: "turn_context",
+      timestamp: "2026-01-01T00:00:00.500Z",
+      payload: { turn_id: "turn-1", cwd, model: "gpt-5.4" },
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      payload: { type: "user_message", message: userMessage },
+    }),
+  ].join("\n"))
+  return filePath
+}
+
+function writeCopilotSession(
+  sessionId: string,
+  userMessage: string,
+  cwd = "/workspace/copilot",
+): string {
+  const sessionDir = join(mockDirs.COPILOT_SESSIONS_DIR, sessionId)
+  mkdirSync(sessionDir, { recursive: true })
+  const timestamp = new Date().toISOString()
+  const filePath = join(sessionDir, "events.jsonl")
+  writeFileSync(filePath, [
+    JSON.stringify({
+      type: "session.start",
+      data: { sessionId, context: { cwd } },
+      timestamp,
+    }),
+    JSON.stringify({
+      type: "user.message",
+      data: { content: userMessage },
+      timestamp,
+    }),
+  ].join("\n"))
+  return filePath
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("search command", () => {
@@ -151,6 +213,8 @@ describe("search command", () => {
     mockDirs.PROJECTS_DIR = projectsDir
     mockDirs.TEAMS_DIR = join(mockDirs.PROJECTS_DIR, "..", "teams")
     mockDirs.TASKS_DIR = join(mockDirs.PROJECTS_DIR, "..", "tasks")
+    mockDirs.CODEX_SESSIONS_DIR = join(tmpDir, "codex-sessions")
+    mockDirs.COPILOT_SESSIONS_DIR = join(tmpDir, "copilot-sessions")
     mockDbPath.value = join(mockDirs.PROJECTS_DIR, "..", "nonexistent-search-index.db")
   })
 
@@ -236,6 +300,19 @@ describe("search command", () => {
       expect(userHit).toBeDefined()
     })
 
+    it("finds a Codex rollout, which the scan used to skip entirely", async () => {
+      writeCodexSession(
+        "11111111-2222-3333-4444-555555555555",
+        "explain the rollout format",
+      )
+
+      const result = await searchSessions("rollout format", { maxAge: "3650d" }, null)
+      expect(result).not.toHaveProperty("error")
+      const resp = result as { results: Array<{ sessionId: string }> }
+      expect(resp.results.length).toBe(1)
+      expect(resp.results[0].sessionId).toBe("11111111-2222-3333-4444-555555555555")
+    })
+
     it("finds matches in assistant messages", async () => {
       const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
       mkdirSync(projDir, { recursive: true })
@@ -294,6 +371,29 @@ describe("search command", () => {
       expect(result).not.toHaveProperty("error")
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(2)
+    })
+
+    it("searches a live Copilot session missing from the index", async () => {
+      const sessionId = "22222222-2222-4222-8222-222222222222"
+      writeCopilotSession(sessionId, "Find the Copilot-specific needle")
+
+      const result = await searchSessions("specific needle", { sessionId })
+      const response = result as { results: Array<{ sessionId: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId }),
+      ])
+    })
+
+    it("discovers Copilot sessions during a global raw scan", async () => {
+      rmSync(mockDirs.PROJECTS_DIR, { recursive: true, force: true })
+      const sessionId = "33333333-3333-4333-8333-333333333333"
+      writeCopilotSession(sessionId, "Global Copilot discovery needle")
+
+      const result = await searchSessions("discovery needle", { maxAge: "1d" }, null)
+      const response = result as { results: Array<{ sessionId: string; cwd: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId, cwd: "/workspace/copilot" }),
+      ])
     })
 
     it("respects the limit parameter", async () => {
@@ -407,6 +507,31 @@ describe("search command", () => {
       index.close()
     })
 
+    it("indexes every agent's root, Codex included", async () => {
+      const dbPath = join(tmpDir, "all-agents.db")
+      const index = new SearchIndex(dbPath)
+
+      const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
+      mkdirSync(projDir, { recursive: true })
+      writeSession(projDir, "claude-one.jsonl", { userMessage: "shared-index-term claude" })
+      writeCodexSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "shared-index-term codex")
+      writeCopilotSession("cccccccc-dddd-eeee-ffff-000000000000", "shared-index-term copilot")
+
+      // No arguments: every configured root, which is the only form that
+      // reaches Codex.
+      index.buildFull()
+
+      const result = await searchSessions("shared-index-term", {}, index)
+      const resp = result as { results: Array<{ sessionId: string }> }
+      expect(resp.results.map((r) => r.sessionId).sort()).toEqual([
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "cccccccc-dddd-eeee-ffff-000000000000",
+        "claude-one",
+      ])
+
+      index.close()
+    })
+
     it("groups FTS5 results by sessionId", async () => {
       const dbPath = join(tmpDir, "test-search.db")
       const index = new SearchIndex(dbPath)
@@ -469,6 +594,26 @@ describe("search command", () => {
       const resp = result as { results: Array<{ sessionId: string }> }
       expect(resp.results.length).toBe(1)
       expect(resp.results[0].sessionId).toBe("target-sess")
+
+      index.close()
+    })
+
+    it("reads Copilot cwd from session.start context", async () => {
+      const dbPath = join(tmpDir, "test-search.db")
+      const index = new SearchIndex(dbPath)
+      const sessionId = "44444444-4444-4444-8444-444444444444"
+      const sessionFile = writeCopilotSession(
+        sessionId,
+        "indexed Copilot context needle",
+        "/workspace/copilot-context",
+      )
+      index.indexFile(sessionFile, sessionId)
+
+      const result = await searchSessions("context needle", {}, index)
+      const response = result as { results: Array<{ sessionId: string; cwd: string }> }
+      expect(response.results).toEqual([
+        expect.objectContaining({ sessionId, cwd: "/workspace/copilot-context" }),
+      ])
 
       index.close()
     })

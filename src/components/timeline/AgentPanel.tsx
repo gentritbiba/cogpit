@@ -1,7 +1,7 @@
 import { useState, memo, useMemo } from "react"
 import { Users, ChevronRight, ChevronDown, Clock, Wrench, CheckCircle2, XCircle, Loader2, ExternalLink } from "lucide-react"
 import { formatDuration, parseSubAgentPath } from "@/lib/format"
-import type { SubAgentMessage } from "@/lib/types"
+import type { SubAgentMessage } from "../../../shared/session/types"
 import { LiveSubagentTranscript } from "./LiveSubagentTranscript"
 import { buildAgentLabelMap, buildParentToolByAgent } from "./agent-utils"
 import { useSubagentContent } from "@/hooks/useSubagentContent"
@@ -10,6 +10,7 @@ import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins, preprocessImagePaths } from "./markdown-components"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { capabilitiesForDirName } from "@/lib/agents"
 
 interface AgentPanelProps {
   messages: SubAgentMessage[]
@@ -39,10 +40,10 @@ export const AgentPanel = memo(function AgentPanel({
   const [open, setOpen] = useState(false)
   const isOpen = expandAll || open
 
-  const { enrichedMessages: displayMessages, isLoading, unavailable } =
-    useSubagentContent(messages, lazyLoad && isOpen)
-
   const { sessionSource, actions } = useSessionContext()
+  const hasSubagentTranscripts = capabilitiesForDirName(sessionSource?.dirName).subagentTranscripts
+  const { enrichedMessages: displayMessages, isLoading, unavailable } =
+    useSubagentContent(messages, lazyLoad && isOpen && hasSubagentTranscripts)
 
   // Parent session id used to construct sub-agent file paths. Mirrors the
   // logic in AgentsPanel (sidebar) so navigation is consistent.
@@ -184,7 +185,7 @@ export const AgentPanel = memo(function AgentPanel({
             const stats = statsByAgent.get(id)
             // Opening a sub-agent chat is a session load, which a guest
             // cannot perform, so the button would do nothing at all.
-            const canNavigate = !!sessionSource && !!parentSessionId && !unavailable
+            const canNavigate = hasSubagentTranscripts && !!sessionSource && !!parentSessionId && !unavailable
             return (
               <AgentReturnItem
                 key={id}

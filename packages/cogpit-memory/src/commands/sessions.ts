@@ -3,12 +3,11 @@
  * Ported from the HTTP handlers in routes/sessions-list.ts.
  */
 
-import { readdir, stat } from "node:fs/promises"
-import { join } from "node:path"
-import { dirs } from "../lib/dirs"
-import { encodeClaudeDirName } from "../lib/helpers"
+import { join, sep } from "node:path"
+import { descriptorFor, type AgentKind } from "../lib/agent-descriptors"
 import { parseMaxAge } from "../lib/response"
 import { getSessionMeta, getSessionStatus } from "../lib/metadata"
+import { listAllSessionFiles, storeFor, storeForPath, type SessionFile } from "../lib/stores"
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,18 +24,13 @@ export interface SessionSummary {
   turnCount: number
   status: string
   mtime: number
-  source?: "claude" | "codex"
+  source?: AgentKind
 }
 
 export interface SessionsOptions {
   cwd?: string
   limit?: number
   maxAge?: string
-}
-
-interface SessionFile {
-  path: string
-  mtimeMs: number
 }
 
 type SessionMeta = Awaited<ReturnType<typeof getSessionMeta>>
@@ -55,39 +49,9 @@ function toSessionSummary(file: SessionFile, meta: SessionMeta, status: string):
     turnCount: meta.turnCount,
     status,
     mtime: file.mtimeMs,
-    source: file.path.startsWith(dirs.CODEX_SESSIONS_DIR + "/") ? "codex" : "claude",
+    // Which root the transcript came out of, which is known before it is read.
+    source: storeForPath(file.path)?.kind ?? descriptorFor("claude").kind,
   }
-}
-
-async function listCodexSessionFiles(cutoff: number): Promise<SessionFile[]> {
-  const walk = async (dir: string, depth: number): Promise<SessionFile[]> => {
-    if (depth > 4) return []
-    let entries: import("node:fs").Dirent[]
-    try {
-      entries = await readdir(dir, { withFileTypes: true }) as import("node:fs").Dirent[]
-    } catch {
-      return []
-    }
-
-    const results: SessionFile[] = []
-    for (const entry of entries) {
-      const filePath = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        results.push(...await walk(filePath, depth + 1))
-        continue
-      }
-      if (!entry.name.endsWith(".jsonl")) continue
-      try {
-        const s = await stat(filePath)
-        if (s.mtimeMs >= cutoff) results.push({ path: filePath, mtimeMs: s.mtimeMs })
-      } catch {
-        continue
-      }
-    }
-    return results
-  }
-
-  return walk(dirs.CODEX_SESSIONS_DIR, 0)
 }
 
 // ── listSessions ─────────────────────────────────────────────────────────────
@@ -105,46 +69,9 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
   const maxAgeMs = parseMaxAge(opts.maxAge ?? "7d")
   const cutoff = Date.now() - maxAgeMs
 
-  // 1. Read all project directories
-  let entries: import("node:fs").Dirent[]
-  try {
-    entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true }) as import("node:fs").Dirent[]
-  } catch {
-    return []
-  }
+  const allFiles = listAllSessionFiles(cutoff)
+    .filter((file) => !file.isSubagent)
 
-  const projectDirs = entries
-    .filter(e => e.isDirectory() && e.name !== "memory")
-    .map(e => join(dirs.PROJECTS_DIR, e.name))
-
-  // 2. Discover all .jsonl files, stat them, filter by maxAge
-  const [nested, codexFiles] = await Promise.all([
-    Promise.all(
-      projectDirs.map(async (projectDir) => {
-        try {
-          const files = (await readdir(projectDir)) as string[]
-          const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-          const statResults = await Promise.all(
-            jsonlFiles.map(async (f) => {
-              const filePath = join(projectDir, f)
-              try {
-                const s = await stat(filePath)
-                return s.mtimeMs >= cutoff ? { path: filePath, mtimeMs: s.mtimeMs } : null
-              } catch { return null }
-            }),
-          )
-          return statResults.filter((r): r is SessionFile => r !== null)
-        } catch { return [] }
-      }),
-    ),
-    listCodexSessionFiles(cutoff),
-  ])
-
-  // 3. Sort by mtime descending
-  const allFiles = [...nested.flat(), ...codexFiles]
-  allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs)
-
-  // 4. For each file, get metadata + status (up to limit)
   const results: SessionSummary[] = []
 
   for (const file of allFiles) {
@@ -175,44 +102,25 @@ export async function listSessions(opts: SessionsOptions = {}): Promise<SessionS
  * Returns null if no sessions exist for the given cwd.
  */
 export async function currentSession(cwd: string): Promise<SessionSummary | null> {
-  const projectDir = join(dirs.PROJECTS_DIR, encodeClaudeDirName(cwd))
+  const claude = storeFor("claude")
+  // Claude encodes the project into its directory name, so its candidates are
+  // one readdir away. Every other agent records the project inside the file,
+  // which costs a metadata read per candidate.
+  const projectDir = join(claude.root(), claude.descriptor.dirName.encode(cwd))
+  const direct = claude.list(0, claude.root())
+    .filter((file) => !file.isSubagent && file.path.startsWith(projectDir + sep))
 
-  let files: string[]
-  try {
-    files = (await readdir(projectDir)) as string[]
-  } catch {
-    files = []
-  }
-
-  const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-  const [statResults, codexCandidates] = await Promise.all([
-    Promise.all(
-      jsonlFiles.map(async (f) => {
-        const filePath = join(projectDir, f)
-        try {
-          const s = await stat(filePath)
-          return { path: filePath, mtimeMs: s.mtimeMs }
-        } catch {
-          return null
-        }
-      }),
-    ),
-    listCodexSessionFiles(0),
-  ])
-  const codexMatches: SessionFile[] = []
-  for (const file of codexCandidates) {
+  const searched: SessionFile[] = []
+  for (const file of listAllSessionFiles(0)) {
+    if (file.isSubagent || storeForPath(file.path)?.kind === "claude") continue
     try {
-      const meta = await getSessionMeta(file.path)
-      if (meta.cwd === cwd) codexMatches.push(file)
+      if ((await getSessionMeta(file.path)).cwd === cwd) searched.push(file)
     } catch {
       continue
     }
   }
 
-  const valid = [
-    ...statResults.filter((r): r is SessionFile => r !== null),
-    ...codexMatches,
-  ]
+  const valid = [...direct, ...searched]
   if (valid.length === 0) return null
   valid.sort((a, b) => b.mtimeMs - a.mtimeMs)
   const latest = valid[0]

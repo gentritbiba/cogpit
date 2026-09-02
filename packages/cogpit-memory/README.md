@@ -1,15 +1,16 @@
 # cogpit-memory
 
-CLI tool that gives any AI assistant memory of past Claude Code and Codex
-sessions. Browse either provider's conversation history, tool usage, thinking
-blocks, and sub-agent activity. Cross-session FTS search currently indexes
-Claude Code history.
+CLI tool that gives any AI assistant memory of past Claude Code, Codex, and
+GitHub Copilot CLI sessions. Browse normalized conversation history, tool
+usage, thinking blocks, and inline sub-agent activity. Cross-session FTS search
+indexes Claude Code, Codex, and GitHub Copilot CLI history.
 
 All output is JSON to stdout — designed for programmatic consumption by AI agents.
 
 Session compatibility is validated against Claude Code 2.1.217 and Codex CLI
 0.145.0. The parser also retains backward compatibility with older rollout
-formats covered by the test suite.
+formats covered by the test suite. Copilot support follows the documented SDK
+event schema and `~/.copilot/session-state/` layout.
 
 ## Install
 
@@ -35,7 +36,7 @@ cogpit-memory context <sessionId>
 # Drill into a specific turn
 cogpit-memory context <sessionId> --turn 3
 
-# Search across all sessions
+# Search indexed sessions from all supported CLIs
 cogpit-memory search "authentication"
 ```
 
@@ -68,14 +69,22 @@ Three layers of detail. Start at L1, drill down only as needed.
 | **L3** — Sub-agent | `cogpit-memory context <sessionId> --agent <agentId>` | Full sub-agent conversation (same shape as L1) |
 | **L3** — Sub-agent turn | `cogpit-memory context <sessionId> --agent <agentId> --turn 0` | Sub-agent turn detail (same shape as L2) |
 
-**Discovery flow:** L1 gives you `turnIndex` and `agentId` values → use those to drill into L2/L3.
+**Discovery flow:** L1 gives you `turnIndex` and `agentId` values. Use those to
+drill into L2 and, when a separate sub-agent transcript exists, L3.
+
+Copilot CLI keeps nested agent events in the root `events.jsonl`, so L1 and L2
+include that activity inline. L3 needs a separate sub-agent transcript file and
+is not available for Copilot sessions.
 
 ### `search` — Full-text search with FTS5
 
-Searches everything: user messages, assistant responses, thinking blocks, tool call inputs/outputs, sub-agent content, and compaction summaries.
+Cross-session search indexes Claude Code, Codex, and Copilot CLI history. With
+`--session`, all three are supported too,
+including user and assistant messages, thinking, tool I/O, inline sub-agent
+content, and compaction summaries when the provider records them.
 
 ```bash
-cogpit-memory search "authentication"                        # Cross-session search
+cogpit-memory search "authentication"                        # Cross-session index, every agent
 cogpit-memory search "auth" --session <sessionId>            # Single session
 cogpit-memory search "bug" --max-age 30d --limit 50          # Custom window
 cogpit-memory search "AuthProvider" --case-sensitive          # Case-sensitive
@@ -110,7 +119,7 @@ Benchmarked against a real Claude Code history: **765 sessions, 1,745 sub-agents
 | `sessions --limit 20` | **38ms** | File-system scan, no DB needed |
 | `context <sessionId>` (L1) | **34ms** | Single JSONL file parse |
 | `context <sessionId> --turn N` (L2) | **35ms** | Same file, filtered to one turn |
-| `search "keyword"` (cross-session) | **56–200ms** | FTS5 trigram across 210K rows |
+| `search "keyword"` (cross-session) | **56–200ms** | FTS5 across 210K rows |
 | `search "keyword" --session <id>` | **30ms** | Scoped to single session |
 | `index stats` | **50ms** | Single DB query |
 
@@ -123,19 +132,20 @@ Benchmarked against a real Claude Code history: **765 sessions, 1,745 sub-agents
 | Heavy (1 year) | ~2,000 | ~500K | ~3.5 GB | 100–400ms |
 | Power user (2+ years) | ~5,000 | ~1.2M | ~8 GB | 200–800ms |
 
-FTS5 trigram search is sublinear — doubling the index size does not double query time. The index uses SQLite WAL mode for concurrent reads and is incrementally updated.
+FTS5 search is sublinear — doubling the index size does not double query time. The index uses SQLite WAL mode for concurrent reads and is incrementally updated.
 
 ## How It Works
 
 Session discovery and context commands read Claude Code JSONL history from
-`~/.claude/projects/` and Codex JSONL history from `~/.codex/sessions/`. The
-shared parser normalizes each provider into the same conversation structure
-(turns, tool calls, thinking blocks, and sub-agents) for layered drill-down.
+`~/.claude/projects/`, Codex history from `~/.codex/sessions/`, and GitHub
+Copilot CLI history from `~/.copilot/session-state/`. The shared parser
+normalizes each provider into the same conversation structure for layered
+drill-down.
 
-Cross-session search currently builds its FTS5 trigram index from the Claude
-project tree and stores it at `~/.claude/cogpit-memory/search-index.db`. The
-trigram tokenizer enables substring matching (not just whole-word) — searching
-for `"auth"` matches `"authentication"`, `"OAuth"`, and `"AuthProvider"`.
+Cross-session search builds its FTS5 index from every agent's history root, then
+stores it at `~/.claude/cogpit-memory/search-index.db`. It uses SQLite's
+`unicode61` tokenizer, so a query matches whole tokens: searching for `"auth"`
+finds `"auth"`, not `"authentication"`.
 
 ## Development
 

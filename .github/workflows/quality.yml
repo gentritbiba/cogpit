@@ -49,6 +49,9 @@ jobs:
       - name: Check architecture boundaries
         run: bun run check:architecture
 
+      - name: Check agent-vocabulary containment
+        run: bun run check:agents
+
       - name: Check ungoverned duplication
         run: bun run check:duplicates
 

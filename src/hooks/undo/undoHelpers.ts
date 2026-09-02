@@ -7,6 +7,9 @@ import {
   type FileOperation,
   type OperationSummary,
 } from "@/lib/undo-engine"
+import { agentKindForDirName } from "@/lib/agents"
+import { cutLineAfterUuid, cutLineForTurnCount, formatFor } from "../../../shared/session/agents"
+import type { Turn } from "../../../shared/session/types"
 
 export interface UndoConfirmState {
   type: "undo" | "redo" | "branch-switch"
@@ -16,6 +19,11 @@ export interface UndoConfirmState {
   branchTurnIndex?: number
   /** For partial redo: index into the archived turns array (inclusive) */
   redoUpToArchiveIndex?: number
+  copilot?: {
+    eventId: string
+    mode: "conversation" | "conversation-and-files"
+    filesAvailable?: boolean
+  }
 }
 
 /** Build an OperationSummary, falling back to a turnCount-only summary when ops is empty. */
@@ -24,49 +32,55 @@ export function buildSummary(ops: FileOperation[], fallbackTurnCount: number): O
   return { turnCount: fallbackTurnCount, fileCount: 0, filePaths: [], operationCount: 0 }
 }
 
-/** Check if a JSONL user message starts a new turn (not meta, not a tool_result). */
-function isTurnStartingUserMessage(obj: Record<string, unknown>): boolean {
-  if (obj.type !== "user" || obj.isMeta) return false
-  const content = (obj as { message?: { content?: unknown } }).message?.content
-  if (Array.isArray(content) && content.some((b: { type: string }) => b.type === "tool_result")) {
-    return false
-  }
-  return true
-}
-
-function isCodexTurnStartingMessage(obj: Record<string, unknown>): boolean {
-  return obj.type === "event_msg"
-    && typeof obj.payload === "object"
-    && obj.payload !== null
-    && (obj.payload as { type?: unknown }).type === "user_message"
-    && typeof (obj.payload as { message?: unknown }).message === "string"
+/**
+ * Find the JSONL line index where turn `keepTurnCount` ends.
+ *
+ * Delegates to the agent's own boundary scan in `shared/session`, which the
+ * server's branch and undo routes call too — the client computes `keepLines`
+ * and the server verifies it before cutting, so a disagreement of one line
+ * between the two would write a corrupted transcript.
+ */
+export function findCutoffLine(
+  allLines: string[],
+  keepTurnCount: number,
+  dirName: string | null | undefined,
+): number {
+  return cutLineForTurnCount(
+    formatFor(agentKindForDirName(dirName)),
+    allLines,
+    keepTurnCount,
+  )
 }
 
 /**
- * Find the JSONL line index where turn `keepTurnCount` ends.
- * Parses JSONL lines directly (robust against skipped lines in rawMessages).
+ * Line to cut at to keep everything through `lastKeptTurn`.
+ *
+ * Prefers the turn's own uuid, which is what makes this safe: `session.turns`
+ * is only the loaded tail of a long session, so its indexes do not line up with
+ * the full file's turns. Cutting by index would keep N turns counted from the
+ * top of the *file* while the user picked the Nth turn of the *window*, quietly
+ * deleting everything in between. Falls back to the index cut when there is no
+ * uuid to match — not every agent writes one — which is the pre-existing
+ * behaviour and is correct whenever the whole session is loaded.
+ *
+ * Mirrors the server's branch route, which resolves the same way.
  */
-export function findCutoffLine(allLines: string[], keepTurnCount: number): number {
-  let userMsgCount = 0
-  let pendingCodexTurnContextIndex: number | null = null
-  for (let i = 0; i < allLines.length; i++) {
-    try {
-      const obj = JSON.parse(allLines[i]) as Record<string, unknown>
-      if (obj.type === "turn_context") {
-        pendingCodexTurnContextIndex = i
-        continue
-      }
-      if (isTurnStartingUserMessage(obj)) {
-        userMsgCount++
-        if (userMsgCount > keepTurnCount) return i
-        continue
-      }
-      if (isCodexTurnStartingMessage(obj)) {
-        userMsgCount++
-        if (userMsgCount > keepTurnCount) return pendingCodexTurnContextIndex ?? i
-        pendingCodexTurnContextIndex = null
-      }
-    } catch { /* skip malformed */ }
+export function findCutoffLineForTurn(
+  allLines: string[],
+  lastKeptTurn: Turn | undefined,
+  keepTurnCount: number,
+  dirName: string | null | undefined,
+): number {
+  const format = formatFor(agentKindForDirName(dirName))
+  // `Turn.id` is the originating record's uuid where the agent writes one, and
+  // a generated id otherwise (turnBuilder.ts). An unmatched id simply falls
+  // through to the index cut, which is what agents whose turns carry no uuid
+  // have always used. Same resolution order as the server's branch route.
+  const turnUuid = lastKeptTurn?.id
+  if (turnUuid) {
+    const byUuid = cutLineAfterUuid(format, allLines, turnUuid)
+    if (byUuid === "keep-all") return allLines.length
+    if (byUuid !== null) return byUuid
   }
-  return allLines.length
+  return cutLineForTurnCount(format, allLines, keepTurnCount)
 }

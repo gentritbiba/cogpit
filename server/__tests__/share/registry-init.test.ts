@@ -42,7 +42,7 @@ import { createShare } from "../../share/registry"
 import { setConfigPath } from "../../config"
 import { __resetEditionForTest } from "../../team/edition"
 import { cleanupProcesses } from "../../processRegistry"
-import { codexAppServer } from "../../codex-app-server"
+import { codexAppServer } from "../../agents/codexAppServer"
 
 let fixtureRoot: string
 let staticDir: string

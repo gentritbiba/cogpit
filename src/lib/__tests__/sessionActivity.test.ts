@@ -22,7 +22,7 @@ const NO_PROCS = new Map<string, RunningProcess>()
 
 function procsFor(sessionId: string): Map<string, RunningProcess> {
   return new Map([[sessionId, {
-    pid: 1, memMB: 1, cpu: 0, sessionId, tty: "?", args: "claude", startTime: "",
+    pid: 1, memMB: 1, cpu: 0, sessionId, tty: "?", startTime: "",
   }]])
 }
 

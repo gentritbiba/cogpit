@@ -38,4 +38,26 @@ describe("ProjectSwitcherModal", () => {
     expect(onNewFolder).toHaveBeenCalledWith("/workspace/new-project")
     expect(onClose).toHaveBeenCalled()
   })
+
+  it("labels a new-folder session with the selected Copilot provider", async () => {
+    const user = userEvent.setup()
+    render(
+      <ProjectSwitcherModal
+        open
+        onClose={vi.fn()}
+        onNewSession={vi.fn()}
+        onNewFolder={vi.fn()}
+        defaultAgentKind="copilot"
+        currentProjectDirName={null}
+        currentProjectCwd={null}
+      />,
+    )
+
+    await user.type(
+      screen.getByPlaceholderText("Search projects or paste an absolute path..."),
+      "/workspace/copilot-project",
+    )
+
+    expect(screen.getByRole("option", { name: /GitHub Copilot/ })).toBeInTheDocument()
+  })
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { TurnSection } from "../TurnSection"
-import type { ToolCall, Turn, TurnContentBlock } from "@/lib/types"
+import type { ToolCall, Turn, TurnContentBlock } from "../../../../shared/session/types"
 
 vi.mock("@/contexts/AppContext", () => ({
   useAppContext: () => ({
@@ -26,7 +26,7 @@ vi.mock("@/hooks/useNearViewport", () => ({
 
 vi.mock("@/hooks/useSkillMetadata", () => ({ useSkillMetadata: () => new Map() }))
 
-vi.mock("@/lib/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
+vi.mock("../../../../shared/session/sessionStatus", () => ({ deriveSessionStatus: () => ({ status: "thinking" }) }))
 
 vi.mock("../AgentStatusIndicator", () => ({ LiveElapsed: () => <span>elapsed</span> }))
 
