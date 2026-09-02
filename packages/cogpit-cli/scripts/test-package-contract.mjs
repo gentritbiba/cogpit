@@ -12,6 +12,18 @@ assert.equal(manifest.engines.node, ">=20.11")
 assert.ok(manifest.dependencies.express)
 assert.ok(manifest.dependencies["node-pty"])
 
+// esbuild leaves every package external, so each one the bundle imports has
+// to be declared here — on a machine with nothing else installed, `npx cogpit`
+// resolves them from this manifest alone.
+const bundle = readFileSync("dist/cli.js", "utf8")
+const externalSpecifier = /(?:from\s*|import\s*\(?\s*|require\(\s*)"((?:@[^/"]+\/)?[^./"][^/"]*)/g
+const externals = new Set(
+  [...bundle.matchAll(externalSpecifier)].map((match) => match[1]).filter((name) => !name.startsWith("node:")),
+)
+for (const name of externals) {
+  assert.ok(manifest.dependencies[name], `dist/cli.js imports ${name} but package.json does not declare it`)
+}
+
 const help = spawnSync(process.execPath, ["dist/cli.js", "--help"], { encoding: "utf8" })
 assert.equal(help.status, 0, help.stderr)
 assert.match(help.stdout, /cogpit \[options\]/i)
