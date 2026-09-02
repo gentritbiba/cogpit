@@ -195,6 +195,40 @@ describe("Copilot session metadata", () => {
   })
 })
 
+describe("getSessionMeta agent detection", () => {
+  /**
+   * Detection now runs through the shared format registry rather than a
+   * hand-rolled copy of it, which was missing a third of the Copilot event
+   * namespace. A transcript that opens on one of those events used to fall
+   * through to the Claude reader and come back shaped wrong.
+   */
+  it.each([
+    ["user_input.requested", { id: "q1" }],
+    ["permission.requested", { toolCallId: "t1" }],
+    ["subagent.started", { agentId: "a1" }],
+  ])("reads a transcript opening on %s as Copilot", async (type, data) => {
+    const filePath = await writeSession([
+      { type, data, timestamp: "2026-08-01T10:00:00.000Z" },
+      { type: "user.message", data: { content: "hello" }, timestamp: "2026-08-01T10:00:01.000Z" },
+    ])
+
+    const meta = await getSessionMeta(filePath)
+    // The Copilot reader reports the last event time; the Claude reader, which
+    // used to take this file, reports nothing at all.
+    expect(meta.lastTimestamp).toBe("2026-08-01T10:00:01.000Z")
+    expect(meta.turnCount).toBe(1)
+  })
+
+  it("still reads an untagged transcript as Claude", async () => {
+    const filePath = await writeSession([
+      { type: "user", sessionId: "claude-1", message: { content: "hello" } },
+    ])
+
+    const meta = await getSessionMeta(filePath)
+    expect(meta.sessionId).toBe("claude-1")
+  })
+})
+
 describe("getSessionMeta ai-title support", () => {
   it("extracts the AI-generated title from ai-title events", async () => {
     const filePath = await writeSession([

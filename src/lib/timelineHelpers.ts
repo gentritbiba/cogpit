@@ -1,4 +1,4 @@
-import type { Turn, TurnContentBlock, ToolCall, ThinkingBlock } from "@/lib/types"
+import type { Turn, TurnContentBlock, ToolCall, ThinkingBlock } from "../../shared/session/types"
 
 /** Check whether any part of a turn matches a search query. */
 export function matchesSearch(turn: Turn, query: string): boolean {

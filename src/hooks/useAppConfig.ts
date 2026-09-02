@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { authFetch, hubFetch } from "@/lib/auth"
 import { setBuiltInEditorEnabled } from "@/lib/fileOpener"
 import type { AppConfig } from "@/contexts/AppContext"
-import type { AgentKind } from "@/lib/sessionSource"
+import { DEFAULT_AGENT_KIND, parseAgentKind, type AgentKind } from "@/lib/agents"
 
 interface NetworkState {
   url: string | null
@@ -45,10 +45,9 @@ async function fetchConfig(signal?: AbortSignal): Promise<ConfigSnapshot> {
     mode?: string
     useBuiltInEditor?: boolean
   } | null
-  const mode = data?.mode
   return {
     claudeDir: data?.claudeDir ?? null,
-    defaultAgentKind: mode === "codex" || mode === "copilot" ? mode : "claude",
+    defaultAgentKind: parseAgentKind(data?.mode, DEFAULT_AGENT_KIND),
     useBuiltInEditor: data?.useBuiltInEditor === true,
   }
 }
@@ -57,7 +56,7 @@ export function useAppConfig(): AppConfig {
   const [configLoading, setConfigLoading] = useState(true)
   const [configError, setConfigError] = useState<string | null>(null)
   const [claudeDir, setClaudeDir] = useState<string | null>(null)
-  const [defaultAgentKind, setDefaultAgentKind] = useState<AgentKind>("claude")
+  const [defaultAgentKind, setDefaultAgentKind] = useState<AgentKind>(DEFAULT_AGENT_KIND)
   const [showConfigDialog, setShowConfigDialog] = useState(false)
   const [networkUrl, setNetworkUrl] = useState<string | null>(null)
   const [networkAccessDisabled, setNetworkAccessDisabled] = useState(false)

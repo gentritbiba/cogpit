@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../../shared/session/types"
 import { collectSessionImageItems } from "../SessionImageGallery"
 
 function makeTurn(id: string, content: Turn["userMessage"]): Turn {

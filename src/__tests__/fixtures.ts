@@ -13,7 +13,7 @@ import type {
   TokenUsage,
   Turn,
   ToolCall,
-} from "@/lib/types"
+} from "../../shared/session/types"
 import type { ProviderUpdateInfo } from "../../shared/contracts/providerUpdates"
 
 // ── Factory Helpers ─────────────────────────────────────────────────────────

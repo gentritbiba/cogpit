@@ -1,4 +1,4 @@
-import type { CodexNotification } from "../codex-app-server-protocol"
+import type { CodexNotification } from "../agents/codexAppServerProtocol"
 import * as streamBus from "./streamBus"
 
 function isObject(value: unknown): value is Record<string, unknown> {

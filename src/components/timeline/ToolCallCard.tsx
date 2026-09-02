@@ -6,7 +6,7 @@ import {
   Loader2,
   ExternalLink,
 } from "lucide-react"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { LiveSubagentTranscript } from "@/components/timeline/LiveSubagentTranscript"
 import { useIsMobile } from "@/hooks/useIsMobile"

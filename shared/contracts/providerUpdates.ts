@@ -7,7 +7,7 @@
  * `latest`, and — when it can tell how the binary was installed — hands back
  * the exact command that would upgrade it.
  */
-import type { AgentKind } from "../providers/types"
+import type { AgentKind } from "../session/types"
 
 export type ProviderUpdateId = AgentKind
 

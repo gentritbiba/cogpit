@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, dirNameToPath } from "@/lib/format"
-import { getStatusLabel } from "@/lib/sessionStatus"
-import { agentKindFromDirName } from "@/lib/sessionSource"
-import { isExternalCopilotSession } from "@/lib/sessionControl"
+import { getStatusLabel } from "../../../shared/session/sessionStatus"
+import { agentKindForDirName } from "@/lib/agents"
+import { isExternallyDrivenSession } from "@/lib/sessionControl"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 import type { AttentionGroups, AttentionItem } from "./attentionGroups"
 import { workingChip } from "./attentionGroups"
@@ -87,11 +87,11 @@ function StripRow({
   onResume,
   onPrefetch,
 }: StripRowProps) {
-  const isExternalCopilot = isExternalCopilotSession(agentKindFromDirName(s.dirName), proc)
-  const statusLabel = isExternalCopilot
+  const isReadOnlySession = isExternallyDrivenSession(agentKindForDirName(s.dirName), proc)
+  const statusLabel = isReadOnlySession
     ? "Read-only"
     : getStatusLabel(s.agentStatus, s.agentToolName, s.agentTerminalReason, s.agentPendingAgents) ?? chip.label
-  const canResume = Boolean(onResume) && !isExternalCopilot
+  const canResume = Boolean(onResume) && !isReadOnlySession
   const { onHoverStart, onHoverEnd } = useHoverPrefetch(onPrefetch)
   return (
     <div
@@ -132,7 +132,7 @@ function StripRow({
               variant="outline"
               className={cn("shrink-0", compact ? "text-muted-foreground" : chip.className)}
             >
-              {isExternalCopilot ? "Read-only" : chip.label}
+              {isReadOnlySession ? "Read-only" : chip.label}
             </Badge>
             {!compact && <TimeSince iso={s.lastActivityAt || s.lastModified} />}
           </span>
@@ -156,7 +156,7 @@ function StripRow({
           Resume
         </Button>
       )}
-      {proc && onKill && !isExternalCopilot && (
+      {proc && onKill && !isReadOnlySession && (
         <Button
           type="button"
           variant="ghost"

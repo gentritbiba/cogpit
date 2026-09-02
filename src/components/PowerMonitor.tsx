@@ -31,7 +31,7 @@ import type {
   ElectronProcessMetric,
   ServerPerformanceSnapshot,
   SystemProcessMetric,
-} from "@/lib/performanceTypes"
+} from "../../shared/contracts/performance"
 
 const POLL_INTERVAL_MS = 2_000
 const MAX_HISTORY_SAMPLES = 30

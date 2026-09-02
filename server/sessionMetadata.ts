@@ -1,9 +1,15 @@
 import { readFile, stat, open } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
+import { formatForRecords } from "../shared/session/agents"
 import { deriveSessionStatus, type SessionStatusInfo } from "../shared/session/sessionStatus"
 import { extractCodexMetadataFromLines } from "../shared/session/codex"
 import { extractCopilotMetadataFromLines } from "../shared/session/copilot"
-import type { AgentSettingMessage, WorktreeStateMessage } from "../shared/session/types"
+import type { AgentSettingMessage, RawRecord, WorktreeStateMessage } from "../shared/session/types"
+import {
+  classifyTailRecord,
+  type AgentTailFormat,
+  type TailMatch,
+} from "./agents/tailRecords"
 
 // ── Session metadata extraction ─────────────────────────────────────
 
@@ -339,34 +345,27 @@ export async function getSessionMeta(filePath: string) {
     lines = content.split("\n").filter(Boolean)
   }
 
-  let firstParsed: { type?: string; payload?: unknown } | null = null
+  let firstParsed: { type?: unknown } | null = null
   if (lines.length > 0) {
     try {
-      firstParsed = JSON.parse(lines[0]) as { type?: string; payload?: unknown }
+      firstParsed = JSON.parse(lines[0]) as { type?: unknown }
     } catch {
       firstParsed = null
     }
   }
-  const isCodex = firstParsed?.type === "session_meta" || firstParsed?.type === "turn_context"
-  if (isCodex) {
+
+  // The first record's shape names the agent. Both external formats extract
+  // from whole records rather than the head-plus-tail walk Claude uses, so they
+  // need the complete file; Claude falls through to the incremental scan below.
+  const agentKind = formatForRecords(firstParsed ? [firstParsed] : []).kind
+  if (agentKind !== "claude") {
     if (isPartialRead) {
       const content = await readFile(filePath, "utf-8")
       lines = content.split("\n").filter(Boolean)
     }
-    const meta = extractCodexMetadataFromLines(lines)
-    return { ...meta, lineCount: lines.length, teamName: "", agentName: "" }
-  }
-  const isCopilot = typeof firstParsed?.type === "string" && (
-    firstParsed.type === "user.message"
-    || firstParsed.type === "abort"
-    || firstParsed.type.startsWith("assistant.")
-    || firstParsed.type.startsWith("session.")
-    || firstParsed.type.startsWith("tool.")
-  )
-  if (isCopilot) {
-    if (isPartialRead) {
-      const content = await readFile(filePath, "utf-8")
-      lines = content.split("\n").filter(Boolean)
+    if (agentKind === "codex") {
+      const meta = extractCodexMetadataFromLines(lines)
+      return { ...meta, lineCount: lines.length, teamName: "", agentName: "" }
     }
     const meta = extractCopilotMetadataFromLines(lines)
     return {
@@ -561,42 +560,19 @@ export async function getSessionMeta(filePath: string) {
 }
 
 /**
- * Lines that can still change the verdict once the turn-ending line is known:
- * background agent/workflow launches, task notifications, and TaskStop calls
- * (Claude), or collab-agent lifecycle records (Codex).
- */
-const CLAUDE_TAIL_MARKERS = ["async_launched", "task-notification", '"TaskStop"']
-// function_call_output is included because output lines carry only a call_id —
-// the tracker links them back to the spawn/wait/interrupt call they answer.
-const CODEX_TAIL_MARKERS = ["spawn_agent", "spawnAgent", "wait_agent", "waitAgent", "interrupt_agent", "interruptAgent", "sub_agent_activity", "agent_message", "function_call_output"]
-const COPILOT_TAIL_MARKERS = ['"abort"', '"assistant.message"', '"user.message"', '"subagent.']
-
-function isCopilotSubagentLifecycle(obj: { type: string; [key: string]: unknown }): boolean {
-  return obj.type.startsWith("subagent.")
-    && typeof obj.agentId === "string"
-    && obj.agentId.length > 0
-}
-
-/** Cheap string test that keeps the filtered phase from parsing irrelevant lines. */
-function isTailCandidate(line: string, provider: "claude" | "codex" | "copilot", needUserActivity: boolean): boolean {
-  const markers = provider === "claude"
-    ? CLAUDE_TAIL_MARKERS
-    : provider === "codex" ? CODEX_TAIL_MARKERS : COPILOT_TAIL_MARKERS
-  return markers.some((marker) => line.includes(marker))
-    || (needUserActivity && line.includes('"type":"user"'))
-}
-
-/**
  * Read backward through a session JSONL to derive agent status.
- * Scans in 4KB chunks from the tail, parsing one line at a time until it
- * finds a meaningful message (assistant or non-meta user). This reads only
- * as far as needed — typically one chunk — and uses the same
- * deriveSessionStatus() function as the client side.
  *
- * A turn-ending line (Claude end_turn / Codex task_complete) alone cannot
- * distinguish "done" from "waiting on background agents", so it switches the
- * scan into a filtered second phase that keeps reading (up to the cap) but
- * only collects the lines that matter for that verdict.
+ * Scans in 4KB chunks from the tail, parsing one line at a time until it finds
+ * a record that settles the verdict. This reads only as far as needed —
+ * typically one chunk — and hands the result to the same deriveSessionStatus()
+ * the client uses.
+ *
+ * Two phases. Until a turn-ending line is seen the transcript's agent is
+ * unknown, so every tail format gets a look at each record; their record
+ * vocabularies are disjoint, so at most one answers. A turn-ending line alone
+ * cannot tell "done" from "waiting on background agents", so it names the agent
+ * and switches the scan into a filtered phase that keeps reading — up to the
+ * cap — but only collects lines that could still change that verdict.
  */
 export async function getSessionStatus(filePath: string): Promise<SessionStatusInfo> {
   const CHUNK = 4096
@@ -607,11 +583,16 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
 
     const fh = await open(filePath, "r")
     try {
-      const meaningful: Array<{ type: string; [key: string]: unknown }> = []
+      const meaningful: RawRecord[] = []
       let cursor = fileStat.size
       let leftover = ""
-      let turnEnded: "claude" | "codex" | "copilot" | null = null
+      let turnEnded: AgentTailFormat | null = null
       let needUserActivity = false
+
+      /** Cheap string test that keeps the filtered phase from parsing irrelevant lines. */
+      const isTailCandidate = (line: string, format: AgentTailFormat): boolean =>
+        format.markers.some((marker) => line.includes(marker))
+        || (needUserActivity && line.includes('"type":"user"'))
 
       for (let chunk = 0; chunk < MAX_CHUNKS && cursor > 0; chunk++) {
         const readSize = Math.min(CHUNK, cursor)
@@ -631,139 +612,41 @@ export async function getSessionStatus(filePath: string): Promise<SessionStatusI
           if (!line) continue
           // Filtered phase: skip lines that cannot change the verdict before
           // paying for a JSON parse.
-          if (turnEnded && !isTailCandidate(line, turnEnded, needUserActivity)) continue
+          if (turnEnded && !isTailCandidate(line, turnEnded)) continue
 
-          let obj: { type: string; [key: string]: unknown }
-          try { obj = JSON.parse(line) } catch { continue }
+          let record: RawRecord
+          try { record = JSON.parse(line) } catch { continue }
+          if (typeof record?.type !== "string") continue
 
-          if (turnEnded) {
-            if (turnEnded === "claude") {
-              if (obj.type !== "user" && obj.type !== "assistant" && obj.type !== "queue-operation" && obj.type !== "attachment") continue
-              meaningful.unshift(obj)
-              if (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta) needUserActivity = false
-            } else if (turnEnded === "codex" && (obj.type === "event_msg" || obj.type === "response_item")) {
-              meaningful.unshift(obj)
-            } else if (turnEnded === "copilot") {
-              if (isCopilotSubagentLifecycle(obj)) {
-                meaningful.unshift(obj)
-                continue
-              }
-              if (typeof obj.agentId === "string" && obj.agentId) continue
-              if (
-                obj.type === "abort"
-                || obj.type === "assistant.message"
-                || obj.type === "user.message"
-              ) {
-                meaningful.unshift(obj)
-                return deriveSessionStatus(meaningful)
-              }
-            }
-            continue
-          }
+          const match: TailMatch | null = turnEnded
+            ? { format: turnEnded, verdict: turnEnded.classifyAfterTurnEnd(record) }
+            : classifyTailRecord(record)
+          if (!match) continue
+          const { verdict } = match
 
-          if (isCopilotSubagentLifecycle(obj)) {
-            meaningful.unshift(obj)
-            continue
-          }
-
-          // terminal_reason system message — session ended abnormally
-          if (obj.type === "system" && (obj as { subtype?: string }).subtype === "terminal_reason") {
-            const reason = (obj as { reason?: string }).reason
-            if (reason) return { status: "completed", terminalReason: reason }
-          }
-
-          if (obj.type === "event_msg") {
-            const payload = obj.payload as { type?: string } | undefined
-            switch (payload?.type) {
-              case "task_complete":
-                // Spawned collab agents may still be running — keep scanning
-                // for their lifecycle records.
-                meaningful.unshift(obj)
-                turnEnded = "codex"
-                continue
-              case "task_started":
-                return { status: "processing" }
-              case "agent_message":
-                return { status: "thinking" }
-              case "token_count":
-                continue
-            }
-          }
-
-          if (
-            obj.type === "abort"
-            || obj.type === "user.message"
-            || obj.type.startsWith("assistant.")
-            || obj.type.startsWith("permission.")
-            || obj.type.startsWith("session.")
-            || obj.type.startsWith("tool.")
-            || obj.type.startsWith("user_input.")
-          ) {
-            if (typeof obj.agentId === "string" && obj.agentId) continue
-            if (obj.type === "assistant.turn_end") {
-              meaningful.unshift(obj)
-              turnEnded = "copilot"
+          switch (verdict.kind) {
+            case "ignore":
               continue
-            }
-            meaningful.unshift(obj)
-            const status = deriveSessionStatus(meaningful)
-            if (
-              status.status !== "idle"
-              || obj.type === "session.start"
-              || obj.type === "session.resume"
-            ) return status
-            continue
-          }
-
-          if (obj.type === "response_item") {
-            const payload = obj.payload as { type?: string; role?: string } | undefined
-            const decides = payload?.type === "function_call"
-              || (payload?.type === "message" && (payload.role === "assistant" || payload.role === "user"))
-            if (decides) {
-              meaningful.unshift(obj)
+            case "final":
+              return verdict.status
+            case "keep":
+              meaningful.unshift(record)
+              if (verdict.sawUserActivity) needUserActivity = false
+              continue
+            case "answer":
+              meaningful.unshift(record)
               return deriveSessionStatus(meaningful)
-            }
-            continue
-          }
-
-          // Deferred hook_progress — prepend and return immediately
-          if (obj.type === "progress") {
-            const data = (obj as { data?: { type?: string; decision?: string; hookSpecificOutput?: { permissionDecision?: string } } }).data
-            if (data?.type === "hook_progress") {
-              const decision = data.decision ?? data.hookSpecificOutput?.permissionDecision
-              if (decision === "defer") {
-                meaningful.unshift(obj)
-                return deriveSessionStatus(meaningful)
-              }
-            }
-            // Non-deferred progress — not meaningful for status, skip
-            continue
-          }
-
-          // Task-notification attachments in the tail mean a wakeup is being
-          // delivered — deriveSessionStatus reads them during its walk.
-          if (obj.type === "attachment") {
-            meaningful.unshift(obj)
-            continue
-          }
-
-          if (obj.type === "assistant" || obj.type === "user" || obj.type === "queue-operation") {
-            // Prepend so array stays in file order (oldest first)
-            meaningful.unshift(obj)
-
-            // Can we derive status from what we've collected?
-            // end_turn needs user context and pending background-launch info,
-            // so it switches to the filtered scan instead of deciding here.
-            const isEndTurn = obj.type === "assistant"
-              && (obj.message as { stop_reason?: string } | undefined)?.stop_reason === "end_turn"
-            if (isEndTurn) {
-              turnEnded = "claude"
-              needUserActivity = true
+            case "answer-if-active": {
+              meaningful.unshift(record)
+              const status = deriveSessionStatus(meaningful)
+              if (status.status !== "idle") return status
               continue
             }
-            const canDerive = obj.type === "assistant"
-              || (obj.type === "user" && !(obj as { isMeta?: boolean }).isMeta)
-            if (canDerive) return deriveSessionStatus(meaningful)
+            case "turn-end":
+              meaningful.unshift(record)
+              turnEnded = match.format
+              needUserActivity = verdict.awaitUserActivity === true
+              continue
           }
         }
       }

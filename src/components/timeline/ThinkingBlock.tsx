@@ -1,6 +1,6 @@
 import { useState, memo } from "react"
 import { ChevronRight, ChevronDown } from "lucide-react"
-import type { ThinkingBlock as ThinkingBlockType } from "@/lib/types"
+import type { ThinkingBlock as ThinkingBlockType } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 

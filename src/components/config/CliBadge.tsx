@@ -1,16 +1,16 @@
 import { Unlink } from "lucide-react"
+import { allDescriptors } from "@/lib/agents"
+import { agentConfigBadge } from "@/lib/agents/presentation"
 import type { ConfigCli } from "./config-types"
 
-const CLI_META: Record<ConfigCli, { letter: string; label: string }> = {
-  claude: {
-    letter: "C",
-    label: "Loaded by Claude Code",
-  },
-  codex: {
-    letter: "X",
-    label: "Loaded by Codex CLI",
-  },
-}
+/**
+ * Keyed off the agent registry rather than hand-listed, so an agent Cogpit
+ * knows about cannot silently go missing here — which is exactly how Copilot
+ * ended up unrepresentable.
+ */
+const CLI_META = Object.fromEntries(
+  allDescriptors().map((descriptor) => [descriptor.kind, agentConfigBadge(descriptor.kind)]),
+) as Record<ConfigCli, { letter: string; label: string }>
 
 interface CliBadgeProps {
   cli?: ConfigCli[]
@@ -29,7 +29,7 @@ export function CliBadge({ cli, variant = "compact" }: CliBadgeProps) {
     return (
       <span
         className="flex shrink-0 items-center gap-1 text-xs text-warning"
-        title="Present in the shared source directory but not linked into Claude or Codex"
+        title="Present in the shared source directory but not linked into any CLI"
       >
         <Unlink data-icon="inline-start" className="size-3" />
         {variant === "full" && "unlinked"}

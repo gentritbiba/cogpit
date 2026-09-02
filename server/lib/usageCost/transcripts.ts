@@ -1,10 +1,13 @@
 /**
- * Pure line parsers for the provider CLIs' on-disk session transcripts.
+ * Line parsers for the agent CLIs' on-disk session transcripts, and the scanner
+ * that hides which one a caller is streaming into.
  *
  * The parsers work line-at-a-time so callers can stream large files without
- * materialising them. Neither touches the filesystem. Ported from T3 Code's
- * usage scanner (itself modelled on ccusage).
+ * materialising them. Ported from T3 Code's usage scanner (itself modelled on
+ * ccusage).
  */
+import { basename, dirname } from "node:path"
+import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import type { UsageCostProvider, UsageCostTokenTotals } from "../../../shared/contracts/usageCost"
 import { totalUsageCostTokens } from "../../../shared/contracts/usageCost"
 
@@ -39,16 +42,6 @@ function parseJsonRecord(line: string): Record<string, unknown> | null {
   } catch {
     return null
   }
-}
-
-/**
- * Cheap substring gate applied before JSON.parse. Transcripts are mostly tool
- * output; only a minority of lines carry usage.
- */
-export function mightCarryUsage(line: string, provider: UsageCostProvider): boolean {
-  if (provider === "claude") return line.includes('"usage"')
-  if (provider === "codex") return line.includes('"token_count"')
-  return line.includes('"session.shutdown"') && line.includes('"modelMetrics"')
 }
 
 /**
@@ -344,4 +337,70 @@ export function parseCopilotUsageLine(
   if (record.type !== "session.shutdown") return []
   const timestampMs = parseTimestampMs(record.timestamp)
   return timestampMs === null ? [] : parseCopilotUsageMetrics(data, state, timestampMs)
+}
+
+// ── Scanner ──────────────────────────────────────────────────────────────
+
+/**
+ * A stateful reducer over one transcript's lines.
+ *
+ * `wantsLine` is deliberately not "might this line carry usage": a transcript
+ * also carries lines that only name the model or the session an eventual usage
+ * record belongs to, and dropping those would leave the record unattributed.
+ */
+export interface UsageScanner {
+  /** Cheap substring gate applied before JSON.parse. */
+  wantsLine(line: string): boolean
+  /** Records this line contributes, after folding it into the scanner's state. */
+  accept(line: string): UsageCostRecord[]
+}
+
+const SCANNERS: Readonly<Record<AgentKind, (filePath: string) => UsageScanner>> = Object.freeze({
+  claude: (): UsageScanner => ({
+    // Stateless: every assistant record repeats its message's whole usage
+    // object, so a line is either self-contained or of no interest.
+    wantsLine: (line) => line.includes('"usage"'),
+    accept: (line) => {
+      const record = parseClaudeUsageLine(line)
+      return record === null ? [] : [record]
+    },
+  }),
+
+  codex: (): UsageScanner => {
+    const state = initialCodexScanState()
+    return {
+      // token_count carries the usage, turn_context the model it belongs to and
+      // session_meta the session it belongs to. The latter two report no tokens
+      // at all but still have to reach the reducer.
+      wantsLine: (line) =>
+        line.includes('"token_count"')
+        || line.includes('"turn_context"')
+        || line.includes('"session_meta"'),
+      accept: (line) => {
+        const record = parseCodexUsageLine(line, state)
+        return record === null ? [] : [record]
+      },
+    }
+  },
+
+  copilot: (filePath): UsageScanner => {
+    // Seeded from the containing directory, which is the session id, so records
+    // written before `session.start` is reached are still attributed. A later
+    // session.start overrides it.
+    const state = initialCopilotScanState(basename(dirname(filePath)))
+    return {
+      wantsLine: (line) =>
+        (line.includes('"session.shutdown"') && line.includes('"modelMetrics"'))
+        || line.includes('"session.start"'),
+      accept: (line) => parseCopilotUsageLine(line, state),
+    }
+  },
+})
+
+/** A scanner for one transcript, owning its own state and its own line gate. */
+export function createUsageScanner(
+  provider: UsageCostProvider,
+  filePath: string,
+): UsageScanner {
+  return SCANNERS[provider](filePath)
 }

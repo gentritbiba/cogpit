@@ -60,8 +60,12 @@ describe("getSessionPrSearchSnapshot", () => {
       ])
     })
 
-    const persisted = JSON.parse(readFileSync(join(dir, "pr-search-index.json"), "utf-8"))
-    expect(persisted.entries).toHaveLength(1)
+    // The snapshot reports `pending: 0` as soon as the scan finishes; the
+    // durable write it triggers lands a tick later.
+    await vi.waitFor(() => {
+      const persisted = JSON.parse(readFileSync(join(dir, "pr-search-index.json"), "utf-8"))
+      expect(persisted.entries).toHaveLength(1)
+    })
 
     resetSessionPrSearchIndex()
     resetSessionPrIndex()

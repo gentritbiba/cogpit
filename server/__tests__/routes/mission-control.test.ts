@@ -2,26 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  getCodexSessionInventory: vi.fn(),
-  getCopilotSessionInventory: vi.fn(),
-  readClaudeProjectEntries: vi.fn(),
+  getSessionInventory: vi.fn(),
+  listClaudeSessionFiles: vi.fn(),
   summarizeSession: vi.fn(),
 }))
 
-vi.mock("../../helpers", () => ({
-  dirs: { PROJECTS_DIR: "/tmp/claude-projects" },
-  join: (...parts: string[]) => parts.join("/"),
-  readdir: vi.fn(),
-  stat: vi.fn(),
+vi.mock("../../agents", () => ({
+  storeFor: () => ({ listSessionFiles: mocks.listClaudeSessionFiles }),
 }))
-vi.mock("../../lib/codexSessionInventory", () => ({
-  getCodexSessionInventory: mocks.getCodexSessionInventory,
-}))
-vi.mock("../../lib/copilotSessionInventory", () => ({
-  getCopilotSessionInventory: mocks.getCopilotSessionInventory,
-}))
-vi.mock("../../routes/projects/claudeProjectEntries", () => ({
-  readClaudeProjectEntries: mocks.readClaudeProjectEntries,
+vi.mock("../../lib/sessionInventory", () => ({
+  getSessionInventory: mocks.getSessionInventory,
 }))
 vi.mock("../../lib/missionControlSummary", () => ({
   summarizeSession: mocks.summarizeSession,
@@ -33,14 +23,13 @@ import { asIncomingMessage, asServerResponse } from "../http-fixtures"
 describe("GET /api/mission-control", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.readClaudeProjectEntries.mockResolvedValue([])
-    mocks.getCodexSessionInventory.mockResolvedValue([])
-    mocks.getCopilotSessionInventory.mockResolvedValue([])
+    mocks.listClaudeSessionFiles.mockResolvedValue([])
+    mocks.getSessionInventory.mockResolvedValue([])
     mocks.summarizeSession.mockImplementation(async (sessionId: string) => ({ sessionId }))
   })
 
   it("includes root Copilot sessions and skips nested agents", async () => {
-    mocks.getCopilotSessionInventory.mockResolvedValue([
+    mocks.getSessionInventory.mockImplementation(async (kind: string) => kind !== "copilot" ? [] : [
       {
         sessionId: "11111111-1111-4111-8111-111111111111",
         filePath: "/tmp/copilot/11111111-1111-4111-8111-111111111111/events.jsonl",

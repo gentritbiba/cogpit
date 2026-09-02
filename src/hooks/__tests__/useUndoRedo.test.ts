@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
-import type { ParsedSession, Turn, Branch, UndoState } from "@/lib/types"
+import type { ParsedSession, Turn, Branch, UndoState } from "../../../shared/session/types"
 import type { SessionSource } from "@/hooks/useLiveSession"
 
 // Mock authFetch before importing useUndoRedo
@@ -39,7 +39,7 @@ vi.mock("@/lib/undo-engine", () => ({
 }))
 
 // Mock parseSession for redoGhostTurns
-vi.mock("@/lib/parser", () => ({
+vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(() => ({ turns: [] })),
 }))
 
@@ -94,9 +94,12 @@ function makeSession(turnCount = 3, overrides: Partial<ParsedSession> = {}): Par
   }
 }
 
-function makeSource(): SessionSource {
-  return { dirName: "test-dir", fileName: "test.jsonl", rawText: "" }
+function makeSource(dirName = "test-dir"): SessionSource {
+  return { dirName, fileName: "test.jsonl", rawText: "" }
 }
+
+/** A project directory owned by the agent with the native rewind RPC. */
+const COPILOT_DIR = "copilot__L3RtcC9wcm9qZWN0"
 
 function makeBranch(overrides: Partial<Branch> = {}): Branch {
   return {
@@ -141,12 +144,6 @@ function setupMockFetch(undoStateResponse: UndoState | null = null) {
       )
     }
     if (url.includes("/api/undo/transaction")) {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }
-    if (url.includes("/api/undo/truncate-jsonl")) {
-      return new Response(JSON.stringify({ ok: true }), { status: 200 })
-    }
-    if (url.includes("/api/undo/append-jsonl")) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     }
     if (url.includes("/api/sessions/")) {
@@ -506,7 +503,7 @@ describe("useUndoRedo", () => {
         files: [{ path: "src/App.tsx" }],
       }), { status: 200 }))
 
-      const { result } = renderHook(() => useUndoRedo(session, makeSource(), vi.fn()))
+      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), vi.fn()))
       act(() => result.current.requestUndo(1))
 
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())
@@ -533,7 +530,7 @@ describe("useUndoRedo", () => {
         turns: [makeTurn({ id: "event-a" }), makeTurn({ id: "event-b" })],
       })
       const { result, rerender } = renderHook(
-        ({ current }) => useUndoRedo(current, makeSource(), vi.fn()),
+        ({ current }) => useUndoRedo(current, makeSource(COPILOT_DIR), vi.fn()),
         { initialProps: { current: first } },
       )
 
@@ -781,7 +778,7 @@ describe("useUndoRedo", () => {
         }
         return new Response("not found", { status: 404 })
       })
-      const { result } = renderHook(() => useUndoRedo(session, makeSource(), onReload))
+      const { result } = renderHook(() => useUndoRedo(session, makeSource(COPILOT_DIR), onReload))
 
       act(() => result.current.requestUndo(1))
       await waitFor(() => expect(result.current.confirmState).not.toBeNull())

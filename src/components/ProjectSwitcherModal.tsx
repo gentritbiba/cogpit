@@ -25,8 +25,8 @@ import {
 import { authFetch } from "@/lib/auth"
 import { shortPath } from "@/lib/format"
 import { useProjectNames } from "@/hooks/useProjectNames"
-import { findClaudeProjectDirNameForCwd } from "@/lib/sessionSource"
-import type { AgentKind } from "@/lib/sessionSource"
+import { findProjectDirNameForCwd, type AgentKind } from "@/lib/agents"
+import { agentSwitcherName } from "@/lib/agents/presentation"
 import { matchesKeybinding } from "@/lib/keybindings"
 
 interface ProjectInfo {
@@ -36,13 +36,6 @@ interface ProjectInfo {
   sessionCount: number
   lastModified: string | null
 }
-
-const AGENT_LABELS: Record<AgentKind, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  copilot: "GitHub Copilot",
-}
-
 
 interface ProjectSwitcherModalProps {
   open: boolean
@@ -84,7 +77,7 @@ export function ProjectSwitcherModal({
         e.preventDefault()
         const resolvedDirName = currentProjectCwd
           ? (
-            findClaudeProjectDirNameForCwd(projects, currentProjectCwd)
+            findProjectDirNameForCwd(projects, currentProjectCwd, "claude")
             ?? projects.find((project) => project.path === currentProjectCwd)?.dirName
             ?? currentProjectDirName
           )
@@ -166,7 +159,7 @@ export function ProjectSwitcherModal({
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">Start in this folder</div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {folderPath} · {AGENT_LABELS[defaultAgentKind]}
+                      {folderPath} · {agentSwitcherName(defaultAgentKind)}
                     </div>
                   </div>
                 </CommandItem>

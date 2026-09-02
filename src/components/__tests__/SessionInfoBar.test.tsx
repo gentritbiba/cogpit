@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 const mocks = vi.hoisted(() => ({
   session: null as ParsedSession | null,
+  dirName: null as string | null,
 }))
 
 vi.mock("@/contexts/AppContext", () => ({
@@ -13,7 +14,9 @@ vi.mock("@/contexts/AppContext", () => ({
 vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: () => ({
     session: mocks.session,
-    sessionSource: null,
+    sessionSource: mocks.dirName === null
+      ? null
+      : { dirName: mocks.dirName, fileName: "s.jsonl", rawText: "" },
   }),
 }))
 
@@ -34,6 +37,7 @@ function makeSession(agentKind: ParsedSession["agentKind"]): ParsedSession {
 
 beforeEach(() => {
   mocks.session = null
+  mocks.dirName = null
 })
 
 afterEach(() => {
@@ -42,16 +46,31 @@ afterEach(() => {
 })
 
 describe("SessionInfoBar", () => {
-  it("passes Claude records to the context badge", () => {
+  it("passes records to the context badge for an agent that tracks context", () => {
     mocks.session = makeSession("claude")
+    mocks.dirName = "-Users-me-proj"
 
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 
     expect(screen.getByTestId("claude-raw-count")).toHaveTextContent("1")
   })
 
-  it.each(["codex", "copilot"] as const)("does not treat %s records as Claude usage", (agentKind) => {
+  it.each([
+    ["codex", "codex__L3RtcC9wcm9qZWN0"],
+    ["copilot", "copilot__L3RtcC9wcm9qZWN0"],
+  ] as const)("withholds records for %s, which reports no context window", (agentKind, dirName) => {
     mocks.session = makeSession(agentKind)
+    mocks.dirName = dirName
+
+    render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
+
+    expect(screen.getByTestId("claude-raw-count")).toHaveTextContent("0")
+  })
+
+  it("follows the project directory, not the parser's own guess", () => {
+    // The dirName is known before a byte is read, so it wins.
+    mocks.session = makeSession("claude")
+    mocks.dirName = "codex__L3RtcC9wcm9qZWN0"
 
     render(<SessionInfoBar creatingSession={false} onNewSession={vi.fn()} />)
 

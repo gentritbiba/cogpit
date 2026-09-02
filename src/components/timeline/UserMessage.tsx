@@ -2,8 +2,8 @@ import { useState, useMemo, useCallback, memo, type ReactNode } from "react"
 import { ChevronDown, ChevronRight, Eye, EyeOff, Hand, Maximize2, Terminal, Pencil, Users } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { markdownComponents, markdownPlugins } from "./markdown-components"
-import type { UserContent } from "@/lib/types"
-import { getUserMessageText, getUserMessageImages } from "@/lib/parser"
+import type { UserContent } from "../../../shared/session/types"
+import { getUserMessageText, getUserMessageImages } from "../../../shared/session/parser"
 import { parseAgentEnvelope } from "../../../shared/session/agentEnvelope"
 import {
   extractCommandArgs,

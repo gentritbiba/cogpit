@@ -3,7 +3,7 @@ import { FileCode2, ChevronsDownUp, ChevronsUpDown, Layers, Clock, X, Sigma, Lis
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { GroupedFileCard, type DiffMode } from "./GroupedFileCard"
 import { useFileChangesData, buildGroupedFiles, buildGroupedFilesByAgent, type AgentGroup } from "./useFileChangesData"

@@ -1,12 +1,6 @@
-import { Bot, Code2, Github } from "lucide-react"
 import type { ModelOption } from "@/lib/utils"
-import type { AgentKind } from "@/lib/sessionSource"
 
-export const AGENT_OPTIONS: Array<{ value: AgentKind; label: string; Icon: typeof Bot }> = [
-  { value: "claude", label: "Claude", Icon: Bot },
-  { value: "codex", label: "Codex", Icon: Code2 },
-  { value: "copilot", label: "Copilot", Icon: Github },
-]
+export { AGENT_OPTIONS } from "@/lib/agents/presentation"
 
 /**
  * Find the catalog row a model id refers to — an exact value/alias match wins

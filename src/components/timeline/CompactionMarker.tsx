@@ -6,7 +6,7 @@ import { markdownComponents } from "./markdown-components"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { formatTokenCount } from "@/lib/format"
-import type { CompactionMeta } from "@/lib/types"
+import type { CompactionMeta } from "../../../shared/session/types"
 
 interface Props {
   /** Summary written by the compacting model; absent when the transcript only recorded the boundary. */

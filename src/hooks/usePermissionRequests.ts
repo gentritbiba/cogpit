@@ -38,10 +38,7 @@ function permissionRequestsEqual(
   return JSON.stringify(current) === JSON.stringify(next)
 }
 
-export function usePermissionRequests(
-  sessionId: string | null,
-  _permissionMode: string | undefined,
-) {
+export function usePermissionRequests(sessionId: string | null) {
   const [requests, setRequests] = useState<PermissionRequest[]>([])
   const [plan, setPlan] = useState<PlanApprovalState | null>(null)
   const [responding, setResponding] = useState<Set<string>>(new Set())

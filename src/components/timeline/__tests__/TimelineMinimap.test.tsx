@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { createRef } from "react"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineMinimap } from "../TimelineMinimap"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../../shared/session/types"
 
 function makeTurns(prompts: string[]): Turn[] {
   return prompts.map((p, i) => ({

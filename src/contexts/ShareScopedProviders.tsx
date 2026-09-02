@@ -17,11 +17,11 @@ import { useTheme } from "@/hooks/useTheme"
 import { useUndoRedo } from "@/hooks/useUndoRedo"
 import { setMe } from "@/lib/capabilities"
 import { isRemoteClient } from "@/lib/auth"
-import { detectPendingInteraction } from "@/lib/parser"
+import { detectPendingInteraction } from "../../shared/session/parser"
 import { loadSessionTailFresh } from "@/lib/sessionLoader"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName } from "@/lib/agents"
 import { stopShare, type SharedSessionInfo } from "@/lib/shareApi"
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../shared/session/types"
 import { NO_CAPABILITIES, type MeResponse } from "../../shared/contracts/team"
 
 /**
@@ -164,7 +164,7 @@ export function ShareScopedProviders({ info, children }: ShareScopedProvidersPro
       configLoading: false,
       configError: null,
       claudeDir: null,
-      defaultAgentKind: agentKindFromDirName(info.dirName) ?? "claude",
+      defaultAgentKind: agentKindForDirName(info.dirName),
       setClaudeDir: noop,
       showConfigDialog: false,
       openConfigDialog: noop,

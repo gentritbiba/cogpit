@@ -4,9 +4,9 @@ import {
   findFailedNestedPatchCallIds as facadeFindFailedNestedPatchCallIds,
   parseApplyPatch as facadeParseApplyPatch,
   parseCodexToolPatches as facadeParseCodexToolPatches,
-} from "../codex"
+} from "../../../shared/session/codex"
 import * as patches from "../../../shared/session/codex-patches"
-import type { ToolCall } from "../types"
+import type { ToolCall } from "../../../shared/session/types"
 
 const ADD_PATCH = [
   "*** Begin Patch",

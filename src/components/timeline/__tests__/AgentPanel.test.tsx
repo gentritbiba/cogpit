@@ -5,7 +5,7 @@ import {
   type SessionChatContextValue,
   type SessionContextValue,
 } from "@/contexts/SessionContext"
-import type { ParsedSession, SubAgentMessage } from "@/lib/types"
+import type { ParsedSession, SubAgentMessage } from "../../../../shared/session/types"
 import { AgentPanel } from "../AgentPanel"
 
 const authFetch = vi.hoisted(() => vi.fn())

@@ -1,5 +1,5 @@
 import type { PermissionMode } from "@/lib/permissions"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import type { ServiceTierOption } from "@/lib/utils"
 
 export interface DropdownOption {

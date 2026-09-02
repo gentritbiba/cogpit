@@ -8,7 +8,7 @@ import { can } from "@/lib/capabilities"
 import { LOCAL_DEVICE_ID, switchDevice } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
 import { isEditableTarget, matchesKeybinding } from "@/lib/keybindings"
-import { agentKindFromDirName, getResumeCommand } from "@/lib/sessionSource"
+import { agentKindForDirName, getResumeCommand } from "@/lib/agents"
 import { copyToClipboard } from "@/lib/utils"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
@@ -80,7 +80,7 @@ export function DesktopOverlays({
 
   const handleCopyResumeCommand = useCallback(() => {
     if (!session) return
-    const agentKind = sessionSource?.agentKind ?? agentKindFromDirName(sessionSource?.dirName ?? null)
+    const agentKind = sessionSource?.agentKind ?? agentKindForDirName(sessionSource?.dirName ?? null)
     void copyToClipboard(getResumeCommand(agentKind, session.sessionId, session.cwd))
   }, [session, sessionSource])
 

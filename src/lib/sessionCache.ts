@@ -1,6 +1,6 @@
-import type { ParsedSession, Turn } from "@/lib/types"
+import type { ParsedSession, Turn } from "../../shared/session/types"
 import { getActiveDeviceScope, getActiveIdentity } from "@/lib/device"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 
 export interface CacheEntry {
   parsed: ParsedSession

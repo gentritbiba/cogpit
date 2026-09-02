@@ -1,8 +1,8 @@
 import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { UseFn } from "../http"
 import { claudeCliPath } from "../sdk-session"
-import { codexAppServer } from "../codex-app-server"
-import { copilotRuntime, type CopilotModel } from "../copilot-runtime"
+import { codexAppServer } from "../agents/codexAppServer"
+import { copilotRuntime, type CopilotModel } from "../agents/copilotTransport"
 
 /** Option shape consumed by the frontend model dropdowns. */
 export interface ModelOption {

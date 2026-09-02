@@ -35,17 +35,14 @@ describe("usePermissionRequests", () => {
     })
   })
 
-  it("keeps an already-pending approval visible when full access is selected", async () => {
-    const { result, rerender } = renderHook(
-      ({ permissionMode }) => usePermissionRequests("session-1", permissionMode),
-      { initialProps: { permissionMode: "default" as string | undefined } },
-    )
+  it("keeps an already-pending approval visible across re-renders", async () => {
+    const { result, rerender } = renderHook(() => usePermissionRequests("session-1"))
 
     await waitFor(() => {
       expect(result.current.requests).toEqual([pendingRequest])
     })
 
-    rerender({ permissionMode: "bypassPermissions" })
+    rerender()
 
     expect(result.current.requests).toEqual([pendingRequest])
     expect(mockedAuthFetch).not.toHaveBeenCalledWith(
@@ -55,9 +52,7 @@ describe("usePermissionRequests", () => {
   })
 
   it("still polls for pending approvals when a session already uses full access", async () => {
-    const { result } = renderHook(() => (
-      usePermissionRequests("session-1", "bypassPermissions")
-    ))
+    const { result } = renderHook(() => usePermissionRequests("session-1"))
 
     await waitFor(() => {
       expect(result.current.requests).toEqual([pendingRequest])
@@ -78,7 +73,7 @@ describe("usePermissionRequests", () => {
     })
 
     const { result, unmount } = renderHook(() => (
-      usePermissionRequests("session-1", "default")
+      usePermissionRequests("session-1")
     ))
 
     await waitFor(() => expect(result.current.requests).toEqual([pendingRequest]))
@@ -102,7 +97,7 @@ describe("usePermissionRequests", () => {
     })
 
     const { result, unmount } = renderHook(() => (
-      usePermissionRequests("session-1", "default")
+      usePermissionRequests("session-1")
     ))
 
     await act(async () => { await Promise.resolve() })

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { MessageAttribution, TokenUsage, Turn } from "@/lib/types"
+import type { MessageAttribution, TokenUsage, Turn } from "../../../../shared/session/types"
 import { AttributionPanel } from "../AttributionPanel"
 
 let turnCounter = 0

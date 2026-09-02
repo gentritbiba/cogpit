@@ -7,7 +7,6 @@ vi.mock("../../helpers", () => ({
   isTrustedDirectLocalRequest: vi.fn(),
   hasTrustedMutationSource: vi.fn(),
   canIssueBrowserSession: vi.fn(),
-  isRateLimited: vi.fn(),
   createSessionToken: vi.fn(),
   getRequestSessionToken: vi.fn(),
   setBrowserSessionCookie: vi.fn(),
@@ -19,6 +18,8 @@ vi.mock("../../helpers", () => ({
   validatePasswordStrength: vi.fn(),
   revokeAllSessions: vi.fn(),
 }))
+
+vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn() }))
 
 vi.mock("../../config", () => ({
   getConfig: vi.fn(),
@@ -36,7 +37,6 @@ import {
   isTrustedDirectLocalRequest,
   hasTrustedMutationSource,
   canIssueBrowserSession,
-  isRateLimited,
   createSessionToken,
   getRequestSessionToken,
   setBrowserSessionCookie,
@@ -48,6 +48,7 @@ import {
   validatePasswordStrength,
   revokeAllSessions,
 } from "../../helpers"
+import { isRateLimited } from "../../lib/rateLimit"
 import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../../config"
 import { networkInterfaces } from "node:os"
 
@@ -537,7 +538,8 @@ describe("config routes", () => {
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
-        externalOnly: "codex",
+        defaultAgent: "codex",
+        claudeDirIsPlaceholder: true,
       })
 
       await handler(req, res, next)
@@ -550,7 +552,8 @@ describe("config routes", () => {
       const { req, res, next } = createMockReqRes("GET", "/")
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
-        externalOnly: "copilot",
+        defaultAgent: "copilot",
+        claudeDirIsPlaceholder: true,
       })
 
       await handler(req, res, next)
@@ -634,7 +637,8 @@ describe("config routes", () => {
       const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
       mockedGetConfig.mockReturnValueOnce({
         claudeDir: "/home/.claude",
-        externalOnly: "copilot",
+        defaultAgent: "copilot",
+        claudeDirIsPlaceholder: true,
       })
       mockedValidateClaudeDir.mockResolvedValueOnce({
         valid: false,
@@ -651,7 +655,8 @@ describe("config routes", () => {
       expect(res._getStatus()).toBe(200)
       expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
         claudeDir: "/home/.claude",
-        externalOnly: "copilot",
+        defaultAgent: "copilot",
+        claudeDirIsPlaceholder: true,
         terminalApp: "Ghostty",
         editorApp: "Visual Studio Code",
       }))

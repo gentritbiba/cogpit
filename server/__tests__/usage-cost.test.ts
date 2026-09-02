@@ -9,7 +9,7 @@ import { dedupeWithinFile } from "../lib/usageCost/reader"
 import {
   initialCodexScanState,
   initialCopilotScanState,
-  mightCarryUsage,
+  createUsageScanner,
   parseClaudeUsageLine,
   parseCodexUsageLine,
   parseCopilotUsageLine,
@@ -335,8 +335,9 @@ describe("parseClaudeUsageLine", () => {
   })
 
   it("gates lines cheaply on the usage substring", () => {
-    expect(mightCarryUsage(claudeLine(), "claude")).toBe(true)
-    expect(mightCarryUsage('{"type":"user"}', "claude")).toBe(false)
+    const scanner = createUsageScanner("claude", "/tmp/session.jsonl")
+    expect(scanner.wantsLine(claudeLine())).toBe(true)
+    expect(scanner.wantsLine('{"type":"user"}')).toBe(false)
   })
 })
 
@@ -549,7 +550,8 @@ describe("parseCopilotUsageLine", () => {
       shutdown("2026-08-19T10:00:00.000Z", { model: { usage: {} } }),
       state,
     )).toEqual([])
-    expect(mightCarryUsage(shutdown("2026-08-19T10:00:00.000Z", {}), "copilot")).toBe(true)
+    const scanner = createUsageScanner("copilot", "/tmp/copilot-session/events.jsonl")
+    expect(scanner.wantsLine(shutdown("2026-08-19T10:00:00.000Z", {}))).toBe(true)
   })
 })
 

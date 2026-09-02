@@ -8,7 +8,7 @@ import {
   CircleHelp,
   Clock3,
 } from "lucide-react"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../shared/session/types"
 import { cn } from "@/lib/utils"
 import { AskUserAnswerForm } from "./AskUserAnswerForm"
 import { Badge } from "@/components/ui/badge"

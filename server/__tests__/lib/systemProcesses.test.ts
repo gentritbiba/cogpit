@@ -17,6 +17,9 @@ const PS_FIXTURE = [
   "  201   200  0.0  50000 01-22:55:46 /Users/me/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell --type=browser",
   "  202   201 54.6 150000 01-22:55:46 /Users/me/Library/Caches/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-mac-arm64/chrome-headless-shell --type=renderer",
   "  300   299  8.1 120000       02:45 claude --dangerously-skip-permissions",
+  "  310     1  0.0  25000 30-01:00:00 codex exec resume 0f1e2d3c-4b5a-4968-8877-665544332211",
+  "  311   310  0.0   1000 30-00:59:00 /bin/zsh -c ls",
+  "  320     1  0.0  22000 20-01:00:00 /Users/me/.local/share/copilot/versions/1.0.81/copilot --resume",
   "  301     1  0.0  30000 09-17:04:03 bun /private/tmp/claude-501/project/scratchpad/ua-echo.ts",
   "  400     1  3.4 400000    14:29:11 /Applications/Cogpit.app/Contents/Frameworks/Cogpit Helper (Renderer).app/Contents/MacOS/Cogpit Helper (Renderer) --type=renderer",
   "  500   499  0.0   5000       01:02 ps -axo pid=,ppid=,pcpu=,rss=,etime=,args=",
@@ -39,7 +42,7 @@ describe("parseEtimeSeconds", () => {
 describe("parsePsOutput", () => {
   it("parses pid, ppid, cpu, rss, etime, and full command with spaces", () => {
     const rows = parsePsOutput(PS_FIXTURE)
-    expect(rows).toHaveLength(11)
+    expect(rows).toHaveLength(14)
     const renderer = rows.find((row) => row.pid === 400)
     expect(renderer).toMatchObject({
       ppid: 1,
@@ -63,16 +66,24 @@ describe("classifyProcesses", () => {
     expect(byPid.has(600)).toBe(false) // Spotify
     expect(byPid.has(500)).toBe(false) // the ps invocation itself
     expect(byPid.get(100)?.kind).toBe("claude")
+    expect(byPid.get(310)?.kind).toBe("codex")
+    expect(byPid.get(320)?.kind).toBe("copilot")
     expect(byPid.get(200)?.kind).toBe("browser-daemon")
     expect(byPid.get(202)?.kind).toBe("headless-browser")
     expect(byPid.get(301)?.kind).toBe("script")
     expect(byPid.get(400)?.kind).toBe("cogpit")
   })
 
-  it("flags orphaned claude sessions and their whole subtree as leaks", () => {
+  it("flags orphaned agent sessions and their whole subtree as leaks", () => {
     expect(byPid.get(100)).toMatchObject({ orphaned: true, suspectedLeak: true })
     expect(byPid.get(101)?.suspectedLeak).toBe(true) // zsh under orphaned claude
     expect(byPid.get(102)?.suspectedLeak).toBe(true) // bun script under orphaned claude
+  })
+
+  it("flags every agent CLI, not just the one the matcher was written for", () => {
+    expect(byPid.get(310)).toMatchObject({ orphaned: true, suspectedLeak: true })
+    expect(byPid.get(311)?.suspectedLeak).toBe(true) // zsh under the orphaned codex run
+    expect(byPid.get(320)).toMatchObject({ orphaned: true, suspectedLeak: true })
   })
 
   it("flags high-CPU headless browsers but not idle daemons", () => {
@@ -102,7 +113,8 @@ describe("classifyProcesses", () => {
   })
 
   it("gives processes readable labels", () => {
-    expect(byPid.get(100)?.label).toBe("Claude session")
+    expect(byPid.get(100)?.label).toBe("Claude Code session")
+    expect(byPid.get(310)?.label).toBe("Codex session")
     expect(byPid.get(202)?.label).toBe("Headless Chrome")
     expect(byPid.get(200)?.label).toBe("agent-browser daemon")
     expect(byPid.get(301)?.label).toBe("bun ua-echo.ts")

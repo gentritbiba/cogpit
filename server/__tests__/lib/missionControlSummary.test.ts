@@ -59,6 +59,15 @@ function copilotEvent(
   })
 }
 
+/** One Codex rollout record. */
+function codexRecord(
+  type: string,
+  payload: Record<string, unknown>,
+  timestamp = "2026-08-01T10:00:00.000Z",
+): string {
+  return JSON.stringify({ type, timestamp, payload })
+}
+
 function write(lines: string[]): void {
   writeFileSync(file, lines.join("\n") + "\n")
 }
@@ -302,6 +311,112 @@ describe("summarizeSession", () => {
       elapsedMs: 9_000,
     })
     expect(s!.files).toEqual([{ path: "/workspace/a.ts", additions: 2, deletions: 1 }])
+  })
+
+  it("folds a Codex rollout into a card instead of leaving it blank", async () => {
+    write([
+      codexRecord("session_meta", { id: "codex-session", cwd: "/workspace" }),
+      codexRecord("turn_context", { model: "gpt-5.4" }, "2026-08-01T10:00:00.000Z"),
+      codexRecord("event_msg", { type: "user_message", message: "Fix the parser" },
+        "2026-08-01T10:00:01.000Z"),
+      codexRecord("response_item", {
+        type: "custom_tool_call",
+        call_id: "call_1",
+        name: "exec",
+        input: 'const r = await tools.exec_command({cmd:"bun test"});text(r.output)',
+      }, "2026-08-01T10:00:02.000Z"),
+      codexRecord("response_item", {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: JSON.stringify({ output: "ok", metadata: { exit_code: 0 } }),
+      }, "2026-08-01T10:00:03.000Z"),
+      codexRecord("event_msg", {
+        type: "patch_apply_end",
+        call_id: "exec-1",
+        success: true,
+        changes: {
+          "/workspace/a.ts": {
+            type: "update",
+            unified_diff: "@@\n old\n-gone\n+kept\n+also kept\n",
+          },
+          "/workspace/new.ts": { type: "add", content: "one\ntwo\n" },
+        },
+      }, "2026-08-01T10:00:04.000Z"),
+      codexRecord("event_msg", {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 160_000,
+            cached_input_tokens: 40_000,
+            cache_write_input_tokens: 25_000,
+            output_tokens: 12_000,
+          },
+          last_token_usage: {
+            input_tokens: 130_000,
+            cached_input_tokens: 30_000,
+            cache_write_input_tokens: 20_000,
+            output_tokens: 4_000,
+          },
+          model_context_window: 258_400,
+        },
+      }, "2026-08-01T10:00:05.000Z"),
+      codexRecord("event_msg", {
+        type: "task_complete",
+        last_agent_message: "Parser fixed.",
+      }, "2026-08-01T10:00:06.000Z"),
+    ])
+
+    const summary = await summarizeSession("codex-session", file)
+
+    expect(summary).toMatchObject({
+      model: "gpt-5.4",
+      turnCount: 1,
+      totalToolCalls: 1,
+      toolTrail: ["exec"],
+      lastAssistantText: "Parser fixed.",
+      lastToolErrored: false,
+      currentTool: null,
+      elapsedMs: 6_000,
+    })
+    // total_token_usage is cumulative, so the card shows it as-is rather than
+    // summing every token_count event.
+    expect(summary!.tokens).toEqual({
+      input: 120_000,
+      output: 12_000,
+      cacheRead: 40_000,
+      cacheCreation: 25_000,
+      total: 132_000,
+    })
+    expect(summary!.context).toEqual({ used: 150_000, limit: 258_400, percent: 58 })
+    expect(summary!.files).toEqual([
+      { path: "/workspace/a.ts", additions: 2, deletions: 1 },
+      { path: "/workspace/new.ts", additions: 3, deletions: 0 },
+    ])
+  })
+
+  it("reports a failing Codex tool and keeps an unresolved call current", async () => {
+    write([
+      codexRecord("session_meta", { id: "codex-session" }),
+      codexRecord("response_item", {
+        type: "function_call",
+        call_id: "call_1",
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: "bun test" }),
+      }),
+    ])
+
+    const running = await summarizeSession("codex-session", file)
+    expect(running!.currentTool).toMatchObject({ name: "exec_command" })
+
+    appendFileSync(file, codexRecord("response_item", {
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "Process exited with code 1",
+    }) + "\n")
+
+    const completed = await summarizeSession("codex-session", file)
+    expect(completed!.currentTool).toBeNull()
+    expect(completed!.lastToolErrored).toBe(true)
   })
 
   it("updates a Copilot current tool when its completion is appended", async () => {

@@ -5,7 +5,7 @@ description: CLI tool for Claude Code, Codex, and GitHub Copilot CLI session int
 
 # Cogpit Memory -- Session Context CLI
 
-CLI tool that gives any AI assistant memory of past Claude Code, Codex, and GitHub Copilot CLI sessions. Retrieve conversation history, tool usage, thinking, and supported sub-agent activity via a layered command structure. Session discovery and root context support all three providers. Cross-session full-text indexing currently covers Claude Code history, while `search --session` supports every provider. Copilot nested activity is included inline in the root session, but `context --agent` is unavailable because Copilot CLI does not write separate sub-agent transcript files.
+CLI tool that gives any AI assistant memory of past Claude Code, Codex, and GitHub Copilot CLI sessions. Retrieve conversation history, tool usage, thinking, and supported sub-agent activity via a layered command structure. Session discovery, root context and cross-session full-text indexing all cover every provider. Copilot nested activity is included inline in the root session, but `context --agent` is unavailable because Copilot CLI does not write separate sub-agent transcript files.
 
 Always start with session discovery or the overview (Layer 1), and drill into specific turns or sub-agents only as needed. Use search when you need to **find** content rather than browse known sessions.
 
@@ -220,16 +220,16 @@ The typical workflow for drilling into sub-agent activity:
 
 ## Session Search -- Find keywords across sessions
 
-Cross-session search currently uses the Claude Code FTS index. With `--session`, Claude Code, Codex, and Copilot CLI sessions are all supported, including user and assistant messages, thinking, tool I/O, inline sub-agent content, and compaction summaries when the provider records them.
+Cross-session search indexes every provider's history. With `--session`, Claude Code, Codex, and Copilot CLI sessions are all supported, including user and assistant messages, thinking, tool I/O, inline sub-agent content, and compaction summaries when the provider records them.
 
 **When to use search vs Layer 1:**
 - You know the session -> Use Layer 1 overview, then drill with Layer 2/3
-- You need to **find** which indexed Claude session discussed something -> Use search first, then drill into hits
+- You need to **find** which session discussed something -> Use search first, then drill into hits
 
 ### Basic usage
 
 ```bash
-# Search recent indexed Claude Code sessions (last 5 days)
+# Search recent indexed sessions from all supported CLIs (last 5 days)
 bunx cogpit-memory search "authentication"
 
 # Search within a specific session
@@ -316,7 +316,7 @@ Locations map directly to Layer 2/3 drill-down commands -- use them to fetch ful
 
 ## Index management
 
-The search index is an FTS5 trigram database at `~/.claude/cogpit-memory/search-index.db`. Most commands work without the index (falling back to raw file scanning), but indexed search is significantly faster.
+The search index is an FTS5 database at `~/.claude/cogpit-memory/search-index.db`. Most commands work without the index (falling back to raw file scanning), but indexed search is significantly faster.
 
 ```bash
 # Show index stats (session count, staleness, DB size)
@@ -337,7 +337,7 @@ bunx cogpit-memory index rebuild
 | Turn detail | `bunx cogpit-memory context <sessionId> --turn <N>` |
 | Sub-agent overview | `bunx cogpit-memory context <sessionId> --agent <agentId>` |
 | Sub-agent turn detail | `bunx cogpit-memory context <sessionId> --agent <agentId> --turn <N>` |
-| **Search indexed Claude sessions** | `bunx cogpit-memory search "<query>"` |
+| **Search indexed sessions** | `bunx cogpit-memory search "<query>"` |
 | **Search any single provider session** | `bunx cogpit-memory search "<query>" --session <sessionId>` |
 | Index stats | `bunx cogpit-memory index stats` |
 | Index rebuild | `bunx cogpit-memory index rebuild` |

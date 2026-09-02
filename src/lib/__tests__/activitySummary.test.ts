@@ -5,7 +5,7 @@ import {
   isScratchpadPath,
   summarizeActivity,
 } from "../activitySummary"
-import type { ToolCall } from "../types"
+import type { ToolCall } from "../../../shared/session/types"
 
 let idCounter = 0
 function call(name: string, input: Record<string, unknown> = {}): ToolCall {

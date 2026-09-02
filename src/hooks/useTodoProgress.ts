@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 
 export interface TodoItem {
   id?: string

@@ -7,7 +7,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 
 interface MobileFileChangesProps {
   open: boolean

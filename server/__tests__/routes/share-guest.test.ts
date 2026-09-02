@@ -39,8 +39,12 @@ vi.mock("../../helpers", async (importOriginal) => ({
   sdkSessions: mocks.sdkSessions,
   persistentSessions: mocks.persistentSessions,
   activeProcesses: mocks.activeProcesses,
-  findJsonlPath: mocks.findJsonlPath,
   getSessionMeta: mocks.getSessionMeta,
+}))
+
+vi.mock("../../sessionPaths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../sessionPaths")>()),
+  findJsonlPath: mocks.findJsonlPath,
   resolveSessionFilePath: mocks.resolveSessionFilePath,
 }))
 
@@ -59,8 +63,8 @@ vi.mock("../../sdk-session", async (importOriginal) => ({
   getSDKUserQuestions: mocks.getSDKUserQuestions,
 }))
 
-vi.mock("../../codex-app-server", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../codex-app-server")>()),
+vi.mock("../../agents/codexAppServer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/codexAppServer")>()),
   codexAppServer: {
     getActiveTurnId: mocks.getActiveTurnId,
     interruptTurn: mocks.interruptTurn,
@@ -317,13 +321,22 @@ describe("GET /api/share/pending", () => {
     // waiting: /api/permissions and /api/user-questions are both off the
     // allowlist, session-status carries no permission data, and the transcript
     // stream carries only lines.
+    mocks.sdkSessions.set(SESSION_A, {})
     mocks.getSDKPermissions.mockReturnValue([PERMISSION_A])
     mocks.getSDKUserQuestions.mockReturnValue([QUESTION_A])
 
     const result = await call("/api/share/pending")
 
     expect(result.res.statusCode).toBe(200)
-    expect(result.json()).toEqual({ permissions: [PERMISSION_A], questions: [QUESTION_A] })
+    expect(result.json()).toEqual({
+      // The runtime adds the fields the permission bar needs uniformly.
+      permissions: [{
+        ...PERMISSION_A,
+        sessionId: SESSION_A,
+        availableDecisions: ["allow", "allow_always", "deny"],
+      }],
+      questions: [QUESTION_A],
+    })
   })
 
   it("returns empty lists when nothing is waiting", async () => {
@@ -333,6 +346,8 @@ describe("GET /api/share/pending", () => {
 
   it("reads the token's session, never a neighbouring share", async () => {
     await createShare({ sessionId: SESSION_B, dirName: DIR_NAME, fileName: "sess-b.jsonl" })
+    mocks.sdkSessions.set(SESSION_A, {})
+    mocks.sdkSessions.set(SESSION_B, {})
     mocks.getSDKPermissions.mockImplementation(
       (id: string) => (id === SESSION_A ? [PERMISSION_A] : []),
     )
@@ -348,6 +363,7 @@ describe("GET /api/share/pending", () => {
   })
 
   it("ignores a sessionId in the query string", async () => {
+    mocks.sdkSessions.set(SESSION_A, {})
     mocks.getSDKPermissions.mockImplementation(
       (id: string) => (id === SESSION_A ? [PERMISSION_A] : []),
     )

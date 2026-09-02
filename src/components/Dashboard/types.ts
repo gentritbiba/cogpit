@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@/lib/sessionStatus"
+import type { SessionStatus } from "../../../shared/session/sessionStatus"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
 
 export interface ProjectInfo {

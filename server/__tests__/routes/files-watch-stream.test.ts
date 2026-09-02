@@ -18,18 +18,31 @@ const { mockStat, mockOpen, mockWatch, mockIsCopilotTurnActive } = vi.hoisted(()
 }))
 
 vi.mock("../../helpers", () => ({
-  dirs: { PROJECTS_DIR: "/tmp/projects" },
-  isCodexDirName: (d: string) => d.startsWith("codex__"),
-  isCopilotDirName: (d: string) => d.startsWith("copilot__"),
-  isWithinDir: () => true,
-  resolveSessionFilePath: vi.fn(async (dirName: string, fileName: string) => `/tmp/projects/${dirName}/${fileName}`),
   stat: mockStat,
   open: mockOpen,
   watch: mockWatch,
   resolve: (p: string) => p,
 }))
 
-vi.mock("../../copilot-runtime", () => ({
+vi.mock("../../sessionPaths", () => ({
+  resolveSessionFilePath: vi.fn(
+    async (dirName: string, fileName: string) => `/tmp/projects/${dirName}/${fileName}`,
+  ),
+}))
+
+// The fixture resolves every path into the project of the dirName that asked.
+vi.mock("../../agents", async () => {
+  const { agentKindForDirName } = await vi.importActual<
+    typeof import("../../../shared/session/agent-descriptors")
+  >("../../../shared/session/agent-descriptors")
+  return {
+    storeForPath: (filePath: string) => ({
+      kind: agentKindForDirName(filePath.replace("/tmp/projects/", "").split("/")[0]),
+    }),
+  }
+})
+
+vi.mock("../../agents/copilotTransport", () => ({
   copilotRuntime: { isTurnActive: mockIsCopilotTurnActive },
 }))
 

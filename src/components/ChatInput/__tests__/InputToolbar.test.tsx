@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 
 const mocks = vi.hoisted(() => ({
   agentKind: "claude" as AgentKind,

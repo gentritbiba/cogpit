@@ -1,7 +1,8 @@
-import type { RawMessage, Turn } from "./types"
+import type { RawMessage, Turn } from "../../shared/session/types"
 import { computeContextUsage, type ContextUsage } from "../../shared/session/contextWindow"
+import { descriptorForDirName } from "@/lib/agents"
 
-export { formatCost } from "./token-costs"
+export { formatCost } from "../../shared/session/token-costs"
 
 /** General model family name ("opus", not "opus 4.8") from any model id. */
 export function shortenModel(model: string): string {
@@ -112,8 +113,18 @@ export function truncate(s: string, max: number): string {
   return s.slice(0, max) + "..."
 }
 
+/**
+ * Best-effort project path for a project directory name.
+ *
+ * Each agent encodes a cwd into a dirName differently, so the decode has to go
+ * through the agent that owns the name — decoding a base64 payload with the
+ * dash-separated scheme produces a plausible-looking path that points nowhere.
+ * A dirName no agent can decode falls back to itself, which at least stays
+ * recognisable in the UI; a caller holding the session's recorded `cwd` should
+ * always prefer that, since the dash-separated encoding is lossy.
+ */
 export function dirNameToPath(dirName: string): string {
-  return "/" + dirName.replace(/^-/, "").replace(/-/g, "/")
+  return descriptorForDirName(dirName).dirName.decode(dirName) ?? dirName
 }
 
 /** Show the last N segments of a filesystem path. */
@@ -173,7 +184,7 @@ export function getContextUsage(
   for (let i = rawMessages.length - 1; i >= 0; i--) {
     const msg = rawMessages[i]
     if (msg.type === "assistant") {
-      return computeContextUsage(msg.message.usage, msg.message.model ?? "")
+      return computeContextUsage(msg.message.usage, msg.message.model ?? "", "claude")
     }
   }
   return null

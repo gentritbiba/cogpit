@@ -2,11 +2,11 @@ import { useState, useCallback, useRef, type Dispatch } from "react"
 import type { PermissionsConfig } from "@/lib/permissions"
 import type { SessionAction } from "@/hooks/useSessionState"
 import type { SessionSource } from "@/hooks/useLiveSession"
-import type { ParsedSession } from "@/lib/types"
-import { parseSession } from "@/lib/parser"
+import type { ParsedSession } from "../../shared/session/types"
+import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { slugifyWorktreeName } from "@/lib/utils"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName, capabilitiesFor } from "@/lib/agents"
 import { fetchWithCodexModelFallback } from "@/lib/codexModelFallback"
 import { rename as renameSession } from "@/hooks/useSessionNames"
 
@@ -68,7 +68,7 @@ function buildSessionSource(response: CreateSessionResponse, rawText: string): S
     dirName: response.dirName,
     fileName: response.fileName,
     rawText,
-    agentKind: agentKindFromDirName(response.dirName),
+    agentKind: agentKindForDirName(response.dirName),
   }
 }
 
@@ -84,7 +84,7 @@ function buildEmptyParsedSession(response: CreateSessionResponse): ParsedSession
     turns: [],
     stats: { ...EMPTY_SESSION_STATS },
     rawMessages: [],
-    agentKind: agentKindFromDirName(response.dirName),
+    agentKind: agentKindForDirName(response.dirName),
   }
 }
 
@@ -268,7 +268,7 @@ export function useNewSession({
     ): Promise<string | null> => {
       const dirName = pendingDirNameRef.current
       if (!dirName) return null
-      const agentKind = agentKindFromDirName(dirName)
+      const agentKind = agentKindForDirName(dirName)
       const cwd = pendingCwdRef.current
 
       abortRef.current?.abort()
@@ -282,6 +282,7 @@ export function useNewSession({
 
       try {
         const sessionName = deriveSessionName(message)
+        const capabilities = capabilitiesFor(agentKind)
         const requestBody = {
           dirName,
           cwd: agentKind === "claude" ? (cwd ?? undefined) : undefined,
@@ -290,12 +291,12 @@ export function useNewSession({
           permissions: permissionsConfig,
           effort: effort || undefined,
           fastMode: fastMode ? true : undefined,
-          ultracode: agentKind === "claude" && ultracode ? true : undefined,
+          ultracode: capabilities.ultracode && ultracode ? true : undefined,
           name: agentKind === "claude" || agentKind === "copilot"
             ? (sessionName || undefined)
             : undefined,
-          worktreeName: agentKind === "claude" && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
-          mcpConfig: agentKind === "claude" ? (mcpConfig || undefined) : undefined,
+          worktreeName: capabilities.worktrees && worktreeEnabled ? (worktreeName || slugifyWorktreeName(message)) : undefined,
+          mcpConfig: capabilities.mcp ? (mcpConfig || undefined) : undefined,
         }
 
         const { res, errorMessage } = await fetchWithCodexModelFallback(

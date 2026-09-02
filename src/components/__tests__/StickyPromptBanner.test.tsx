@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { StickyPromptBanner } from "@/components/StickyPromptBanner"
 import { makeTurn } from "@/__tests__/fixtures"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 function makeSession(
   sessionId: string,

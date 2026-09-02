@@ -12,7 +12,7 @@ import { useImageUpload } from "./useImageUpload"
 import { InputToolbar, ActionButtons } from "./InputToolbar"
 import { ErrorBanner } from "./ErrorBanner"
 import { PromptSuggestionBar } from "./PromptSuggestionBar"
-import type { AgentKind } from "@/lib/sessionSource"
+import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import { findFileMention, replaceFileMention } from "@/lib/fileMentions"
 import { useProjectFileSuggestions } from "@/hooks/useProjectFileSuggestions"
 import { submitUserQuestionAnswers } from "@/lib/askUserApi"
@@ -332,7 +332,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, ChatInputProps>(functi
   const isUserQuestion = pendingInteraction?.type === "question"
   const hasPermissions = permissionRequests.length > 0
   const hasContent = (text.trim().length > 0 || images.length > 0) && !hasUnsupportedAttachments
-  const isSteering = (agentKind === "codex" || agentKind === "copilot") && canInterrupt
+  const isSteering = capabilitiesFor(agentKind ?? DEFAULT_AGENT_KIND).midTurnSteering && canInterrupt
   const suggestionListId = showFiles ? "file-suggestions" : showSlash ? "slash-suggestions" : undefined
   const activeSuggestionId = showFiles && fileSuggestions.files[fileSelectedIndex]
     ? `file-suggestion-${fileSelectedIndex}`

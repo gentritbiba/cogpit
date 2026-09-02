@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import type { AgentKind } from "./sessionSource"
+import { capabilitiesFor, type AgentKind } from "./agents"
 
 export type EffortOption = { value: string; label: string; description?: string }
 
@@ -157,7 +157,9 @@ export function getEffortOptions(agentKind: AgentKind, model?: string | null): r
   const selected = getSelectedModelOption(agentKind, model)
   const supported = selected?.supportedReasoningEfforts
   if (supported && supported.length > 0) return supported
-  if (selected?.supportsEffort === false || agentKind === "copilot") return []
+  // Agents without a default effort ladder only offer what their catalog
+  // advertises, so a silent catalog means no effort chip at all.
+  if (selected?.supportsEffort === false || !capabilitiesFor(agentKind).reasoningEffort) return []
   return EFFORT_OPTIONS
 }
 
@@ -173,23 +175,26 @@ export function getFastServiceTierOption(agentKind: AgentKind, model?: string | 
 
 export function supportsImageInput(agentKind: AgentKind, model?: string | null): boolean {
   const modalities = getSelectedModelOption(agentKind, model)?.inputModalities
-  if (agentKind === "copilot") return modalities?.includes("image") === true
-  return !modalities || modalities.includes("image")
+  // A catalog that lists modalities is authoritative either way; the capability
+  // only decides what an unannotated model means.
+  if (modalities) return modalities.includes("image")
+  return capabilitiesFor(agentKind).imageInput
 }
 
 export function supportsAutoPermissionMode(agentKind: AgentKind, model?: string | null): boolean {
-  return agentKind === "copilot"
-    || agentKind === "claude" && getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
+  const mode = capabilitiesFor(agentKind).autoPermissionMode
+  if (mode === "always") return true
+  if (mode === "never") return false
+  return getSelectedModelOption(agentKind, model)?.supportsAutoMode === true
 }
 
 /**
- * Whether a Claude model can run "ultracode" (which requires xhigh effort).
- * Haiku is the only Claude alias without high-effort levels, so every other
- * selection — including the empty "Default" — qualifies. Codex has no
- * ultracode concept.
+ * Whether the selected model can run "ultracode", which pins effort to xhigh.
+ * Only the haiku family lacks the high-effort levels it needs, so every other
+ * selection — including the empty "Default" — qualifies.
  */
 export function isUltracodeCapableModel(agentKind: AgentKind, model?: string | null): boolean {
-  if (agentKind !== "claude") return false
+  if (!capabilitiesFor(agentKind).ultracode) return false
   return !(model ?? "").toLowerCase().startsWith("haiku")
 }
 

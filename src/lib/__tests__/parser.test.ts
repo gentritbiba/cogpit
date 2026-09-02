@@ -6,9 +6,9 @@ import {
   getUserMessageImages,
   getToolColor,
   detectPendingInteraction,
-} from "@/lib/parser"
-import { buildTurns, findTurnStartIndices } from "@/lib/turnBuilder"
-import type { ParsedSession, RawMessage, SubAgentMessage, TokenUsage } from "@/lib/types"
+} from "../../../shared/session/parser"
+import { buildTurns, findTurnStartIndices } from "../../../shared/session/turnBuilder"
+import type { ParsedSession, RawMessage, SubAgentMessage, TokenUsage } from "../../../shared/session/types"
 import {
   resetFixtureCounter,
   userMsg,

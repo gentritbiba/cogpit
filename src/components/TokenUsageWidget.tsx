@@ -1,11 +1,12 @@
 import { useTokenUsage, type UsageData } from "@/hooks/useTokenUsage"
+import { agentShortName } from "@/lib/agents/presentation"
 import { cn } from "@/lib/utils"
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip"
-import type { AgentKind } from "@/lib/sessionSource"
+import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import { formatTokenCount } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -40,7 +41,7 @@ function TooltipBody({ usage }: { usage: UsageData }) {
   return (
     <div className="flex min-w-[200px] flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide">{usage.providerName ?? "Agent"} usage</span>
+        <span className="text-xs font-medium uppercase tracking-wide">{usage.agentKind ? agentShortName(usage.agentKind) : "Agent"} usage</span>
         {usage.subscriptionType && (
           <Badge variant="secondary">
             {usage.subscriptionType}
@@ -92,7 +93,7 @@ function TooltipBody({ usage }: { usage: UsageData }) {
  * what gets sampled. It only takes on colour under real quota pressure.
  * Renders nothing if usage is unavailable.
  */
-export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: AgentKind }) {
+export function TokenUsageIndicator({ agentKind = DEFAULT_AGENT_KIND }: { agentKind?: AgentKind }) {
   const { usage, loading, available, refresh } = useTokenUsage(agentKind)
 
   if (!available || !usage) return null
@@ -103,7 +104,7 @@ export function TokenUsageIndicator({ agentKind = "claude" }: { agentKind?: Agen
 
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.providerName ?? "agent"} usage`} onClick={refresh} disabled={loading} className="mr-1 font-mono" />}>
+      <TooltipTrigger render={<Button type="button" variant="ghost" size="xs" aria-label={`Refresh ${usage.agentKind ? agentShortName(usage.agentKind) : "agent"} usage`} onClick={refresh} disabled={loading} className="mr-1 font-mono" />}>
           <span className={cn(
             "tabular-nums",
             USAGE_TEXT_COLOR[usageLevel(primary)],

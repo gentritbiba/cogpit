@@ -5,7 +5,7 @@ import { authFetch } from "@/lib/auth"
 import { SectionHeading } from "@/components/stats/SectionHeading"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 

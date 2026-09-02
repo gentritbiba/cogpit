@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../../shared/session/types"
 import { AgentsPanel } from "../AgentsPanel"
 
 function makeSession(): ParsedSession {

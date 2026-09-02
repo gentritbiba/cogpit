@@ -1,4 +1,4 @@
-import type { ParsedSession } from "./types"
+import type { ParsedSession } from "../../shared/session/types"
 import { sessionCache } from "./sessionCache"
 import { loadSessionTailCached } from "./sessionLoader"
 import { getActiveDeviceScope, getActiveIdentity } from "./device"

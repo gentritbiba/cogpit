@@ -1,4 +1,4 @@
-import type { SubAgentMessage } from "@/lib/types"
+import type { SubAgentMessage } from "../../../shared/session/types"
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id

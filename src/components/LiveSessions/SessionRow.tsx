@@ -7,9 +7,9 @@ import { PullRequestChips } from "@/components/PullRequestChips"
 import { SessionContextMenu } from "@/components/SessionContextMenu"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { getStatusLabel } from "@/lib/sessionStatus"
-import { agentKindFromDirName } from "@/lib/sessionSource"
-import { isExternalCopilotSession } from "@/lib/sessionControl"
+import { getStatusLabel } from "../../../shared/session/sessionStatus"
+import { agentKindForDirName } from "@/lib/agents"
+import { isExternallyDrivenSession } from "@/lib/sessionControl"
 import { SessionPreview } from "./SessionPreview"
 import { getStatusColor, isIdleStatus } from "./sessionStatusPresentation"
 import { sessionTitle } from "./sessionListView"
@@ -70,9 +70,9 @@ export function SessionRow({
   const isLive = hasProcess || isNativeLive
   const isNativeIdle = isNativeLive && isIdleStatus(s.agentStatus)
   const isDeferred = s.agentStatus === "deferred"
-  const isExternalCopilot = isExternalCopilotSession(agentKindFromDirName(s.dirName), proc)
+  const isReadOnlySession = isExternallyDrivenSession(agentKindForDirName(s.dirName), proc)
   const [resuming, setResuming] = useState(false)
-  const statusLabel = isExternalCopilot
+  const statusLabel = isReadOnlySession
     ? "Read-only"
     : isLive
     ? (isNativeIdle
@@ -195,7 +195,7 @@ export function SessionRow({
         </Button>
       )}
 
-      {isDeferred && onResumeSession && !isExternalCopilot && (
+      {isDeferred && onResumeSession && !isReadOnlySession && (
         <Button
           type="button"
           variant="outline"
@@ -222,7 +222,7 @@ export function SessionRow({
         {formatRelativeTime(s.lastActivityAt || s.lastModified)}
       </span>
 
-      {hasProcess && onKill && !isExternalCopilot && (
+      {hasProcess && onKill && !isReadOnlySession && (
         <Button
           type="button"
           variant="ghost"

@@ -8,7 +8,7 @@ import { __resetCapabilitiesForTest, can } from "@/lib/capabilities"
 // The worker transport is unavailable in jsdom; parsing itself is the real
 // implementation, so only the postMessage hop is replaced.
 vi.mock("@/hooks/useParserWorker", async () => {
-  const { parseSession, parseSessionAppend } = await import("@/lib/parser")
+  const { parseSession, parseSessionAppend } = await import("../../../../shared/session/parser")
   return {
     useParserWorker: () => ({
       parse: async (text: string) => parseSession(text),

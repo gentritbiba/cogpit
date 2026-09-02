@@ -5,18 +5,10 @@
  */
 import { createReadStream } from "node:fs"
 import { readdir, stat } from "node:fs/promises"
-import { basename, dirname, join } from "node:path"
+import { join } from "node:path"
 import { createInterface } from "node:readline"
 import type { UsageCostProvider } from "../../../shared/contracts/usageCost"
-import {
-  initialCodexScanState,
-  initialCopilotScanState,
-  mightCarryUsage,
-  parseClaudeUsageLine,
-  parseCodexUsageLine,
-  parseCopilotUsageLine,
-  type UsageCostRecord,
-} from "./transcripts"
+import { createUsageScanner, type UsageCostRecord } from "./transcripts"
 
 export interface TranscriptFile {
   path: string
@@ -76,8 +68,7 @@ export async function readTranscriptRecords(
   provider: UsageCostProvider,
 ): Promise<UsageCostRecord[] | null> {
   const records: UsageCostRecord[] = []
-  const codexState = initialCodexScanState()
-  const copilotState = initialCopilotScanState(basename(dirname(filePath)))
+  const scanner = createUsageScanner(provider, filePath)
 
   try {
     const lines = createInterface({
@@ -86,30 +77,8 @@ export async function readTranscriptRecords(
     })
 
     for await (const line of lines) {
-      if (provider === "codex") {
-        // Codex carries the active model on turn_context lines that hold no
-        // usage of their own, so those still pass through the reducer.
-        if (
-          !mightCarryUsage(line, provider)
-          && !line.includes('"turn_context"')
-          && !line.includes('"session_meta"')
-        ) {
-          continue
-        }
-        const record = parseCodexUsageLine(line, codexState)
-        if (record !== null) records.push(record)
-        continue
-      }
-
-      if (provider === "copilot") {
-        if (!mightCarryUsage(line, provider) && !line.includes('"session.start"')) continue
-        records.push(...parseCopilotUsageLine(line, copilotState))
-        continue
-      }
-
-      if (!mightCarryUsage(line, provider)) continue
-      const record = parseClaudeUsageLine(line)
-      if (record !== null) records.push(record)
+      if (!scanner.wantsLine(line)) continue
+      records.push(...scanner.accept(line))
     }
   } catch {
     return null

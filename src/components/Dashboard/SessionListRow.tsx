@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { PullRequestChips } from "@/components/PullRequestChips"
 import { getStatusColor, isIdleStatus } from "@/components/LiveSessions/sessionStatusPresentation"
 import { STATUS_DOT } from "@/components/LiveSessions/statusDot"
-import { getStatusLabel, getTerminalReasonLabel } from "@/lib/sessionStatus"
+import { getStatusLabel, getTerminalReasonLabel } from "../../../shared/session/sessionStatus"
 import {
   formatDuration,
   formatFileSize,

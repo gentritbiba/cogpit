@@ -1,10 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
-import {
-  parseCliVersion,
-  parseUserAgentVersion,
-} from "../../lib/codexVersion"
+import { parseUserAgentVersion } from "../../lib/codexVersion"
 
+// `codex --version` parsing now goes through the one shared CLI probe; its
+// parser is covered by src/lib/__tests__/versions.test.ts.
 describe("parseUserAgentVersion", () => {
   it("reads the codex version out of an initialize user agent", () => {
     expect(
@@ -24,15 +23,5 @@ describe("parseUserAgentVersion", () => {
     expect(parseUserAgentVersion("codex-test")).toBeNull()
     expect(parseUserAgentVersion("cogpit/unknown (x)")).toBeNull()
     expect(parseUserAgentVersion(undefined)).toBeNull()
-  })
-})
-
-describe("parseCliVersion", () => {
-  it("reads the version out of `codex --version`", () => {
-    expect(parseCliVersion("codex-cli 0.152.0\n")).toBe("0.152.0")
-  })
-
-  it("returns null when nothing looks like a version", () => {
-    expect(parseCliVersion("command not found")).toBeNull()
   })
 })

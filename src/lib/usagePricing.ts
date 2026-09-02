@@ -1,5 +1,5 @@
 // Facade over the shared raw-API pricing core, plus session-shaped adapters.
-import type { TokenUsage } from "@/lib/types"
+import type { TokenUsage } from "../../shared/session/types"
 import { priceUsage, type RateTable } from "../../shared/usageCost/pricing"
 
 export * from "../../shared/usageCost/pricing"

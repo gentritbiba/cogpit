@@ -12,6 +12,8 @@ const { mockDirs, mockFindJsonlPath, mockReadTranscriptEffort } = vi.hoisted(() 
   mockReadTranscriptEffort: vi.fn(async (_filePath: string): Promise<string | null> => null),
 }))
 
+vi.mock("../../sessionPaths", () => ({ findJsonlPath: mockFindJsonlPath }))
+
 vi.mock("../../helpers", async () => {
   const fs = await import("node:fs/promises")
   const path = await import("node:path")
@@ -20,7 +22,6 @@ vi.mock("../../helpers", async () => {
     join: path.join,
     mkdir: fs.mkdir,
     readFile: fs.readFile,
-    findJsonlPath: mockFindJsonlPath,
     readTranscriptEffort: mockReadTranscriptEffort,
     sendJson: (
       res: { statusCode: number; setHeader: (n: string, v: string) => void; end: (v?: string) => void },

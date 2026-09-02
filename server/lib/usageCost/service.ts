@@ -20,9 +20,9 @@ import {
   type UsageCostTokenTotals,
 } from "../../../shared/contracts/usageCost"
 import { parseRateTable, type RateTable } from "../../../shared/usageCost/pricing"
-import { copilotRuntime } from "../../copilot-runtime"
+import { copilotRuntime } from "../../agents/copilotTransport"
 import { getDataRoot } from "../../config"
-import { CODEX_SESSIONS_DIR, COPILOT_SESSIONS_DIR, dirs } from "../../sessionPaths"
+import { sessionStorageRoots } from "../../sessionPaths"
 import { UsageCostAggregator, makeDayFormatter } from "./aggregate"
 import {
   dedupeWithinFile,
@@ -221,17 +221,12 @@ export async function readUsageCostSummary(input: {
     rates,
   })
 
-  const sources: Array<{ provider: UsageCostProvider; dir: string }> = [
-    { provider: "claude", dir: dirs.PROJECTS_DIR },
-    { provider: "codex", dir: CODEX_SESSIONS_DIR },
-    { provider: "copilot", dir: COPILOT_SESSIONS_DIR },
-  ]
+  const sources = sessionStorageRoots()
 
   const durableCopilotTotals = new Map<string, Map<string, UsageCostTokenTotals>>()
   let scannedFiles = 0
-  for (const { provider, dir } of sources) {
-    if (!dir) continue
-    const files = await listTranscriptFiles(dir, windowStartMs)
+  for (const { kind: provider, root } of sources) {
+    const files = await listTranscriptFiles(root, windowStartMs)
     for (const file of files) {
       const records = await readFileRecords(file, provider)
       scannedFiles += 1

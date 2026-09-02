@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { authUrl } from "@/lib/auth"
-import type { ParsedSession } from "@/lib/types"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { ParsedSession } from "../../shared/session/types"
+import type { AgentKind } from "@/lib/agents"
 import { sessionCache } from "@/lib/sessionCache"
 import {
   applyDeltas,

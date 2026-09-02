@@ -8,13 +8,14 @@
  * .worktrees/session-context-server/packages/cogpit-memory/src/routes/session-search.ts (raw-scan).
  */
 
-import { type Dirent, existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync } from "node:fs"
 import { open, readFile, readdir, stat } from "node:fs/promises"
 import { join, basename, dirname } from "node:path"
 import { SearchIndex } from "../lib/search-index"
-import { DEFAULT_DB_PATH, dirs } from "../lib/dirs"
+import { DEFAULT_DB_PATH } from "../lib/dirs"
 import { parseMaxAge } from "../lib/response"
 import { findJsonlPath } from "../lib/helpers"
+import { listAllSessionFiles } from "../lib/stores"
 import { parseSession, getUserMessageText } from "../lib/parser"
 import type { ParsedSession } from "../lib/types"
 
@@ -82,10 +83,10 @@ export async function searchSessions(
 
       if (!dbExists) {
         // First run — build the full index
-        index.buildFull(dirs.PROJECTS_DIR, dirs.COPILOT_SESSIONS_DIR)
+        index.buildFull()
       } else {
         // Incremental — only index files newer than the high-water mark
-        index.updateRecent(dirs.PROJECTS_DIR, 50, dirs.COPILOT_SESSIONS_DIR)
+        index.updateRecent()
       }
     } catch { /* DB corrupt or locked — fall through to raw scan */ }
   }
@@ -272,68 +273,15 @@ async function discoverSingleSession(sessionId: string): Promise<Array<{ path: s
   return [{ path: jsonlPath, mtimeMs: s.mtimeMs }]
 }
 
-async function discoverAllSessions(maxAgeMs: number): Promise<Array<{ path: string; mtimeMs: number }>> {
-  const cutoff = Date.now() - maxAgeMs
-
-  let entries: Dirent[] = []
-  try {
-    entries = await readdir(dirs.PROJECTS_DIR, { withFileTypes: true })
-  } catch {
-    entries = []
-  }
-
-  const projectDirs = entries
-    .filter(e => e.isDirectory() && e.name !== "memory")
-    .map(e => join(dirs.PROJECTS_DIR, e.name))
-
-  const copilotFilesPromise = discoverCopilotSessions(cutoff)
-
-  // Read all project directories in parallel
-  const nested = await Promise.all(
-    projectDirs.map(async (projectDir) => {
-      try {
-        const files = (await readdir(projectDir)) as string[]
-        const jsonlFiles = files.filter(f => f.endsWith(".jsonl"))
-        // Stat all files in this directory in parallel
-        const statResults = await Promise.all(
-          jsonlFiles.map(async (f) => {
-            const filePath = join(projectDir, f)
-            try {
-              const s = await stat(filePath)
-              return s.mtimeMs >= cutoff ? { path: filePath, mtimeMs: s.mtimeMs } : null
-            } catch { return null }
-          }),
-        )
-        return statResults.filter((r): r is { path: string; mtimeMs: number } => r !== null)
-      } catch { return [] }
-    }),
-  )
-
-  const copilotFiles = await copilotFilesPromise
-  const results = [...nested.flat(), ...copilotFiles]
-  results.sort((a, b) => b.mtimeMs - a.mtimeMs)
-  return results
-}
-
-async function discoverCopilotSessions(cutoff: number): Promise<Array<{ path: string; mtimeMs: number }>> {
-  let entries: Dirent[]
-  try {
-    entries = await readdir(dirs.COPILOT_SESSIONS_DIR, { withFileTypes: true })
-  } catch {
-    return []
-  }
-
-  const files = await Promise.all(entries.map(async (entry) => {
-    if (!entry.isDirectory()) return null
-    const filePath = join(dirs.COPILOT_SESSIONS_DIR, entry.name, "events.jsonl")
-    try {
-      const fileStat = await stat(filePath)
-      return fileStat.mtimeMs >= cutoff ? { path: filePath, mtimeMs: fileStat.mtimeMs } : null
-    } catch {
-      return null
-    }
-  }))
-  return files.filter((file): file is { path: string; mtimeMs: number } => file !== null)
+/**
+ * Every agent's transcripts, newest first. Driven by the one store registry, so
+ * the raw scan cannot cover a different set of agents from the FTS index — the
+ * disagreement that made Codex sessions unfindable by either path.
+ */
+function discoverAllSessions(maxAgeMs: number): Array<{ path: string; mtimeMs: number }> {
+  return listAllSessionFiles(Date.now() - maxAgeMs)
+    .filter((file) => !file.isSubagent)
+    .map((file) => ({ path: file.path, mtimeMs: file.mtimeMs }))
 }
 
 // ── Phase 2: Raw Text Pre-Filter ─────────────────────────────────────────────
@@ -495,7 +443,7 @@ async function rawScanSearch(
     // Phase 1: Discover files
     const files = sessionId
       ? await discoverSingleSession(sessionId)
-      : await discoverAllSessions(maxAgeMs)
+      : discoverAllSessions(maxAgeMs)
 
     let totalHits = 0
     let returnedHits = 0

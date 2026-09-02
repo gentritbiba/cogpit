@@ -1,8 +1,8 @@
 import { memo, useEffect, useMemo, useState } from "react"
 import { ChevronUp, MessageSquareText } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import type { ParsedSession, Turn } from "@/lib/types"
-import { getUserMessageText } from "@/lib/parser"
+import type { ParsedSession, Turn } from "../../shared/session/types"
+import { getUserMessageText } from "../../shared/session/parser"
 import { parseAgentEnvelope } from "../../shared/session/agentEnvelope"
 import {
   extractCommandArgs,

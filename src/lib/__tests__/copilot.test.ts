@@ -4,8 +4,8 @@ import {
   isCopilotSessionText,
   parseCopilotSession,
 } from "../../../shared/session/copilot"
-import { detectPendingInteraction, parseSession, parseSessionAppend } from "@/lib/parser"
-import { getProviderForSessionText } from "@/lib/providers/registry"
+import { detectPendingInteraction, parseSession, parseSessionAppend } from "../../../shared/session/parser"
+import { formatForText } from "../../../shared/session/agents"
 
 interface EventOptions {
   id?: string
@@ -42,7 +42,7 @@ describe("Copilot session detection and metadata", () => {
 
     expect(isCopilotSessionText(text)).toBe(true)
     expect(parseSession(text).agentKind).toBe("copilot")
-    expect(getProviderForSessionText(text).kind).toBe("copilot")
+    expect(formatForText(text).kind).toBe("copilot")
     expect(isCopilotSessionText(JSON.stringify({ type: "user", message: {} }))).toBe(false)
   })
 

@@ -2,14 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import { basename, dirname } from "node:path"
 import {
   canIssueBrowserSession,
-  findJsonlPath,
   getSessionMeta,
   hasTrustedMutationSource,
-  isCodexFilePath,
-  isCopilotFilePath,
-  isRateLimited,
-  resolveSessionFilePath,
 } from "../helpers"
+import { isRateLimited } from "../lib/rateLimit"
+import { storeForPath } from "../agents"
+import { findJsonlPath, resolveSessionFilePath } from "../sessionPaths"
 import { sendJson, withJsonBody, type UseFn } from "../http"
 import { getConfig } from "../config"
 import { getDummyHash, verifyRemotePassword } from "../password-verify"
@@ -78,8 +76,10 @@ async function resolveShareTarget(sessionId: string): Promise<ShareTarget> {
   // record would hand out a passphrase for a transcript that 403s on every
   // read. Refused here rather than fixed by widening the allowlist: this
   // function shipped a traversal bug once already.
-  if (isCodexFilePath(filePath)) return { shareable: false, reason: "codex" }
-  if (isCopilotFilePath(filePath)) return { shareable: false, reason: "copilot" }
+  const agentKind = storeForPath(filePath)?.kind
+  if (agentKind === "codex" || agentKind === "copilot") {
+    return { shareable: false, reason: agentKind }
+  }
 
   const dirName = basename(dirname(filePath))
   const fileName = basename(filePath)

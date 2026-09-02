@@ -1,6 +1,6 @@
-import { pairAgentMessageReplies } from "@/lib/turnBuilder"
-import type { Turn } from "@/lib/types"
-import type { AgentKind } from "@/lib/sessionSource"
+import { pairAgentMessageReplies } from "../../shared/session/turnBuilder"
+import type { Turn } from "../../shared/session/types"
+import type { AgentKind } from "@/lib/agents"
 
 /**
  * Pure logic for timeline infinite scrolling. Kept out of the components so

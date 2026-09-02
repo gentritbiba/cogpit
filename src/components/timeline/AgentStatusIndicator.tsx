@@ -1,10 +1,10 @@
 import { memo, useMemo, useRef, useState, useEffect } from "react"
 import { Bot, Brain, CheckCircle2, CircleEllipsis, ChevronsDownUp, CircleHelp, TerminalSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { deriveSessionStatus, getStatusLabel, getTerminalReasonLabel } from "@/lib/sessionStatus"
+import { deriveSessionStatus, getStatusLabel, getTerminalReasonLabel } from "../../../shared/session/sessionStatus"
 import { formatDuration, getTurnDuration } from "@/lib/format"
 import { useSessionContext } from "@/contexts/SessionContext"
-import type { SessionStatus, SessionStatusInfo } from "@/lib/sessionStatus"
+import type { SessionStatus, SessionStatusInfo } from "../../../shared/session/sessionStatus"
 
 function StatusIcon({ status }: { status: SessionStatus }) {
   switch (status) {

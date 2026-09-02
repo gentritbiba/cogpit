@@ -1,7 +1,7 @@
 import { useState, useCallback, startTransition, type Dispatch } from "react"
 import type { SessionAction } from "./useSessionState"
 import type { SessionTeamContext } from "./useSessionTeam"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import type { SessionSource } from "./useLiveSession"
 import type { TeamMember } from "@/lib/team-types"
 import type { MobileTab } from "@/components/MobileNav"

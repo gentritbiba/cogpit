@@ -1,4 +1,4 @@
-import type { ToolCall as ParsedToolCall } from "@/lib/types"
+import type { ToolCall as ParsedToolCall } from "../../../shared/session/types"
 
 /**
  * Compact preview for tools that carry a familiar input key.

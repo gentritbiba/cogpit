@@ -2,22 +2,25 @@
 import { EventEmitter } from "node:events"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Middleware, UseFn } from "../../helpers"
-import type { CopilotRuntime } from "../../copilot-runtime"
+import type { CopilotRuntime } from "../../agents/copilotTransport"
 import { registerCopilotHistoryRoutes } from "../../routes/copilot-history"
 
-const { mockFindJsonlPath, mockIsCopilotFilePath } = vi.hoisted(() => ({
+const { mockFindJsonlPath, mockOwnsPath } = vi.hoisted(() => ({
   mockFindJsonlPath: vi.fn(),
-  mockIsCopilotFilePath: vi.fn(),
+  mockOwnsPath: vi.fn(),
 }))
 
-vi.mock("../../helpers", () => ({
+vi.mock("../../sessionPaths", () => ({
   findJsonlPath: (...args: unknown[]) => mockFindJsonlPath(...args),
-  isCopilotFilePath: (...args: unknown[]) => mockIsCopilotFilePath(...args),
+}))
+
+vi.mock("../../agents", () => ({
+  storeFor: () => ({ ownsPath: (...args: unknown[]) => mockOwnsPath(...args) }),
 }))
 
 type HistoryClient = Pick<
   CopilotRuntime,
-  "isSessionActive" | "resumeSession" | "destroySession" | "listRewindPoints" | "previewRewind" | "rewind"
+  "isSessionActive" | "resumeSession" | "destroySession" | "previewRewind" | "rewind"
 >
 
 function client(active = false): HistoryClient {
@@ -30,10 +33,6 @@ function client(active = false): HistoryClient {
     }),
     destroySession: vi.fn().mockImplementation(async () => {
       sessionActive = false
-    }),
-    listRewindPoints: vi.fn().mockResolvedValue({
-      fileChangeTrackingEnabled: true,
-      points: [],
     }),
     previewRewind: vi.fn().mockResolvedValue({
       available: true,
@@ -93,7 +92,7 @@ beforeEach(() => {
   mockFindJsonlPath.mockReset().mockResolvedValue(
     "/home/test/.copilot/session-state/session-1/events.jsonl",
   )
-  mockIsCopilotFilePath.mockReset().mockReturnValue(true)
+  mockOwnsPath.mockReset().mockReturnValue(true)
 })
 
 describe("Copilot history routes", () => {
@@ -133,9 +132,14 @@ describe("Copilot history routes", () => {
   })
 
   it("rejects non-Copilot sessions", async () => {
-    mockIsCopilotFilePath.mockReturnValue(false)
+    mockOwnsPath.mockReturnValue(false)
     const runtime = client(false)
-    const response = await invoke(handler(runtime), "GET", "/session-1")
+    const response = await invoke(
+      handler(runtime),
+      "POST",
+      "/session-1/preview",
+      { eventId: "user-event-1" },
+    )
 
     expect(response.statusCode).toBe(404)
     expect(runtime.resumeSession).not.toHaveBeenCalled()

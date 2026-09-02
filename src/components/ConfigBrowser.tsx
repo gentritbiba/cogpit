@@ -28,7 +28,7 @@ import { EmptyState } from "@/components/config/EmptyState"
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/** Lets "claude", "codex" and "unlinked" narrow to one CLI's view of the config. */
+/** Lets an agent's own name, or "unlinked", narrow the config to one CLI's view. */
 function cliSearchText(item: ConfigItem): string {
   if (!item.cli) return ""
   return item.cli.length > 0 ? item.cli.join(" ") : "unlinked"

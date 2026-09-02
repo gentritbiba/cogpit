@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { renderHook, act } from "@testing-library/react"
 import { useLiveSession } from "../useLiveSession"
 import type { SessionSource } from "../useLiveSession"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 // Mock auth
 vi.mock("@/lib/auth", () => ({

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { tickWidthClass, turnPreviewText, MINIMAP_MIN_TURNS } from "@/lib/minimap"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 
 function turn(userMessage: Turn["userMessage"]): Turn {
   return {

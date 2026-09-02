@@ -1,24 +1,12 @@
-import {
-  dirs,
-  encodeCopilotDirName,
-  encodeCodexDirName,
-  getSessionMeta,
-  getSessionStatus,
-  join,
-  listCodexSessionFiles,
-  listCopilotSessionFiles,
-  projectDirToReadableName,
-  readdir,
-  shortNameFromPath,
-  stat,
-} from "../helpers"
-import type { AgentKind } from "../../shared/providers/types"
-import { readClaudeProjectEntries } from "../routes/projects/claudeProjectEntries"
+import { getSessionMeta, getSessionStatus } from "../helpers"
+import { projectDirToReadableName, shortNameFromPath } from "./projectNames"
+import { projectDirNameFor, type AgentKind } from "../../shared/session/agent-descriptors"
+import { allStores } from "../agents"
 import { getOrLoadSessionMeta } from "./sessionMetaCache"
-import { codexAppServer } from "../codex-app-server"
+import { codexAppServer } from "../agents/codexAppServer"
 import { SessionAlertTracker, type TrackedSessionSnapshot } from "./sessionAlertTracker"
 import { deliverNotification } from "./notificationDelivery"
-import { copilotRuntime } from "../copilot-runtime"
+import { copilotRuntime } from "../agents/copilotTransport"
 
 /**
  * Server-owned notification source: watches every session transcript (Cogpit-
@@ -120,51 +108,23 @@ async function sweep(): Promise<void> {
 async function collectRecentCandidates(minMtimeMs: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  const entries = await readClaudeProjectEntries()
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === "memory") continue
-    const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-    let files: string[]
+  // Stat-level listing only — never the session inventory, whose identity reads
+  // would re-open every transcript on every sweep.
+  for (const store of allStores()) {
     try {
-      files = await readdir(projectDir)
-    } catch {
-      continue
+      for (const file of await store.listSessionFiles()) {
+        if (file.mtimeMs < minMtimeMs) continue
+        candidates.push({
+          dirName: file.dirName,
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mtimeMs: file.mtimeMs,
+          agentKind: store.kind,
+        })
+      }
+    } catch (err) {
+      console.error(`[sessionMonitor] ${store.kind} listing failed:`, err)
     }
-    for (const fileName of files) {
-      if (!fileName.endsWith(".jsonl")) continue
-      const filePath = join(projectDir, fileName)
-      try {
-        const s = await stat(filePath)
-        if (s.mtimeMs < minMtimeMs) continue
-        candidates.push({ dirName: entry.name, fileName, filePath, mtimeMs: s.mtimeMs, agentKind: "claude" })
-      } catch { /* deleted mid-scan */ }
-    }
-  }
-
-  try {
-    // Stat-level listing only — never getCodexSessionInventory(), whose
-    // identity reads would re-open every rollout file each sweep.
-    for (const file of await listCodexSessionFiles()) {
-      if (file.mtimeMs < minMtimeMs) continue
-      candidates.push({ dirName: null, fileName: file.fileName, filePath: file.filePath, mtimeMs: file.mtimeMs, agentKind: "codex" })
-    }
-  } catch (err) {
-    console.error("[sessionMonitor] codex listing failed:", err)
-  }
-
-  try {
-    for (const file of await listCopilotSessionFiles()) {
-      if (file.mtimeMs < minMtimeMs) continue
-      candidates.push({
-        dirName: null,
-        fileName: file.fileName,
-        filePath: file.filePath,
-        mtimeMs: file.mtimeMs,
-        agentKind: "copilot",
-      })
-    }
-  } catch (err) {
-    console.error("[sessionMonitor] copilot listing failed:", err)
   }
 
   return candidates
@@ -196,9 +156,7 @@ async function loadSnapshot(candidate: Candidate): Promise<SessionSnapshot | nul
     let dirName = candidate.dirName
     if (dirName === null) {
       if (meta.isSubagent || !meta.cwd) return null
-      dirName = candidate.agentKind === "copilot"
-        ? encodeCopilotDirName(meta.cwd)
-        : encodeCodexDirName(meta.cwd)
+      dirName = projectDirNameFor(candidate.agentKind, meta.cwd)
     }
 
     const snapshot: SessionSnapshot = {

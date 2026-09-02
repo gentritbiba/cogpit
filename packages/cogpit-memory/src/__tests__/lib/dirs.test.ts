@@ -1,16 +1,19 @@
 import { describe, expect, it } from "bun:test"
-import { copilotSessionsDir } from "../../lib/dirs"
+import { agentHomeDir } from "../../lib/dirs"
 
-describe("copilotSessionsDir", () => {
-  it("uses COPILOT_HOME when configured", () => {
-    expect(copilotSessionsDir("/opt/copilot-data", "/Users/me")).toBe(
-      "/opt/copilot-data/session-state",
-    )
+describe("agentHomeDir", () => {
+  it("uses the environment variable each CLI publishes", () => {
+    expect(agentHomeDir("copilot", { COPILOT_HOME: "/opt/copilot-data" }, "/Users/me"))
+      .toBe("/opt/copilot-data")
+    // Codex's override used to be ignored here, so a redirected install was
+    // invisible to every command in the package.
+    expect(agentHomeDir("codex", { CODEX_HOME: "/opt/codex-data" }, "/Users/me"))
+      .toBe("/opt/codex-data")
   })
 
-  it("falls back to the user's Copilot home", () => {
-    expect(copilotSessionsDir(undefined, "/Users/me")).toBe(
-      "/Users/me/.copilot/session-state",
-    )
+  it("falls back to the CLI's directory under the user's home", () => {
+    expect(agentHomeDir("copilot", {}, "/Users/me")).toBe("/Users/me/.copilot")
+    expect(agentHomeDir("codex", {}, "/Users/me")).toBe("/Users/me/.codex")
+    expect(agentHomeDir("claude", {}, "/Users/me")).toBe("/Users/me/.claude")
   })
 })

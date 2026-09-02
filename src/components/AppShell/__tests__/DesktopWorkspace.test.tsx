@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { DesktopWorkspace } from "../DesktopWorkspace"
 import type { DesktopAppShellProps } from "../desktopTypes"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../../shared/session/types"
 import type { useAppContext } from "@/contexts/AppContext"
 import type { useSessionContext } from "@/contexts/SessionContext"
 

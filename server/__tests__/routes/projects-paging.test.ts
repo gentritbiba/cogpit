@@ -6,8 +6,8 @@ import { join } from "node:path"
 
 const state = vi.hoisted(() => ({ filePath: "" }))
 
-vi.mock("../../helpers", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../helpers")>()
+vi.mock("../../sessionPaths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../sessionPaths")>()
   return {
     ...actual,
     resolveSessionFilePath: vi.fn(async () => state.filePath),

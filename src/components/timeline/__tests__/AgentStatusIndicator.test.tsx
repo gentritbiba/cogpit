@@ -5,7 +5,7 @@ import {
   type SessionChatContextValue,
   type SessionContextValue,
 } from "@/contexts/SessionContext"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../../shared/session/types"
 import { AgentStatusIndicator, LiveElapsed } from "../AgentStatusIndicator"
 
 interface MockSession {

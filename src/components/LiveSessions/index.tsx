@@ -4,7 +4,7 @@ import { Separator } from "@/components/ui/separator"
 import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { dirNameToPath } from "@/lib/format"
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import type { ActiveSessionInfo } from "./types"
 import { usePty } from "@/contexts/PtyContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
@@ -18,7 +18,7 @@ import { hapticMedium } from "@/lib/haptics"
 import { useCapability } from "@/hooks/useCapability"
 import { usePullRequestSessionSearch } from "@/hooks/usePullRequestSessionSearch"
 import { matchesSessionSearch } from "../../../shared/session/sessionSearch"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName, getResumeSpawn } from "@/lib/agents"
 import { groupByProject, projectGroupKey } from "./sessionListView"
 import { classifyAttention } from "./attentionGroups"
 import { AttentionStrip } from "./AttentionStrip"
@@ -240,14 +240,14 @@ export const LiveSessions = memo(function LiveSessions({ activeSessionKey, onSel
   }, [onDeleteSession, removeSession])
 
   const handleResumeSession = useCallback((sessionId: string, cwd: string | undefined, dirName: string) => {
-    const copilot = agentKindFromDirName(dirName) === "copilot"
+    const { command, args } = getResumeSpawn(agentKindForDirName(dirName), sessionId)
     const id = `resume_${crypto.randomUUID().slice(0, 8)}`
     pty.send({
       type: "spawn",
       id,
       name: `Resume ${sessionId.slice(0, 8)}`,
-      command: copilot ? "copilot" : "claude",
-      args: copilot ? [`--resume=${sessionId}`] : ["-p", "--resume", sessionId],
+      command,
+      args,
       cwd: cwd ?? undefined,
       metadata: { type: "terminal" },
     })

@@ -192,11 +192,17 @@ describe("LiveSessions committed-state synchronization", () => {
     expect(mocks.authFetch.mock.calls.some(([url]) => url === "/api/kill-process")).toBe(false)
   })
 
-  it("resumes a deferred Copilot session with Copilot CLI", () => {
+  // Every deferred resume used to spawn `claude -p --resume <id>` unless the
+  // project was Copilot's, so a Codex session was resumed with the wrong binary.
+  it.each([
+    ["-tmp-project", "claude", ["--resume", "deferred-session"]],
+    ["codex__L3RtcC9wcm9qZWN0", "codex", ["resume", "deferred-session"]],
+    ["copilot__L3RtcC9wcm9qZWN0", "copilot", ["--resume=deferred-session"]],
+  ])("resumes a deferred session in %s with its own CLI", (dirName, command, args) => {
     window.history.replaceState(null, "", "/")
     writeCachedList(sessionListCacheKeys.activeSessions, [{
-      ...session("copilot-session"),
-      dirName: "copilot__L3RtcC9wcm9qZWN0",
+      ...session("deferred-session"),
+      dirName,
       cwd: "/tmp/project",
       agentStatus: "deferred",
     }])
@@ -207,11 +213,11 @@ describe("LiveSessions committed-state synchronization", () => {
         onSelectSession={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "Resume copilot-session" }))
+    fireEvent.click(screen.getByRole("button", { name: "Resume deferred-session" }))
 
     expect(mocks.ptySend).toHaveBeenCalledWith(expect.objectContaining({
-      command: "copilot",
-      args: ["--resume=copilot-session"],
+      command,
+      args,
       cwd: "/tmp/project",
     }))
   })

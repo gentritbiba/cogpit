@@ -7,6 +7,7 @@ import { MiniDropdown } from "./MiniDropdown"
 import { PermissionDropdown } from "./PermissionDropdown"
 import type { CommonSettingsControlProps } from "./types"
 import { Button } from "@/components/ui/button"
+import { capabilitiesFor } from "@/lib/agents"
 
 interface DesktopChatInputSettingsProps extends CommonSettingsControlProps {
   /** Additional desktop-only controls appended to the settings row. */
@@ -43,14 +44,14 @@ export function DesktopChatInputSettings({
   changeAndApply,
   trailingExtra,
 }: DesktopChatInputSettingsProps) {
-  const showWorktree = agentKind === "claude"
+  const { worktrees: showWorktree, ultracode: showUltracode, settingsApply } = capabilitiesFor(agentKind)
   // Whether a change takes effect now or next turn is the one thing this row
   // has to tell you. It used to be a permanent caption; `title` alone would
   // have made it mouse-only, so the group carries it as a description too.
   const applyHintId = useId()
   const applyHint = isNewSession
     ? undefined
-    : agentKind === "claude" ? "Changes apply live" : "Changes apply next turn"
+    : settingsApply === "live" ? "Changes apply live" : "Changes apply next turn"
 
   // pl-6 lines the chip labels up with the message placeholder: the composer's
   // px-3 inset + 1px card border + the textarea's pl-4, less the chip's own px-1.5.
@@ -132,7 +133,7 @@ export function DesktopChatInputSettings({
           </Button>
         )}
 
-        {showWorktree && onUltracodeEnabledChange && (
+        {showUltracode && onUltracodeEnabledChange && (
           <Button
             type="button"
             variant={ultracodeEnabled ? "secondary" : "ghost"}

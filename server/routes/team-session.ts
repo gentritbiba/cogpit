@@ -1,14 +1,13 @@
 import {
   dirs,
   isWithinDir,
-  matchSubagentToMember,
-  readSessionTeamTags,
   readdir,
   readFile,
   open,
   join,
   stat,
 } from "../helpers"
+import { matchSubagentToMember, readSessionTeamTags } from "../lib/agentTeamIdentity"
 import type { UseFn } from "../http"
 
 /** List project dir names under PROJECTS_DIR (excluding the memory dir). */

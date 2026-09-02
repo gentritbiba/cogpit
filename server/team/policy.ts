@@ -65,13 +65,13 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     "/api/active-sessions",
     "/api/find-session",
   ),
-  claude: authed("/api/send-message"),
-  "claude-new": authed(
+  "session-send": authed("/api/send-message"),
+  "session-new": authed(
     "/api/new-session",
     "/api/create-and-send",
     "/api/branch-session",
   ),
-  "claude-manage": [
+  "session-manage": [
     ...admin("/api/kill-all", "/api/kill-process", "/api/claude/checkpoints"),
     ...authed(
       "/api/claude/settings",
@@ -97,13 +97,7 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
   // These routes accept caller-selected host paths and can read, overwrite, or
   // delete files. Until project roots are server-owned and path-confined, they
   // are administrative host-management capabilities, not member workspace APIs.
-  undo: admin(
-    "/api/undo-state",
-    "/api/undo/apply",
-    "/api/undo/truncate-jsonl",
-    "/api/undo/append-jsonl",
-    "/api/undo/transaction",
-  ),
+  undo: admin("/api/undo-state", "/api/undo/transaction"),
   files: admin("/api/check-files-exist"),
   "files-watch": authed("/api/task-output", "/api/watch"),
   // Returns exact before/after content and absolute host paths parsed from the
@@ -175,12 +169,14 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     "/api/user-dialog-answer",
   ),
   models: authed("/api/models"),
-  "codex-runtime": [
-    ...admin("/api/codex/runtime"),
-    ...authed("/api/codex/goals", "/api/codex/threads"),
-  ],
-  "claude-runtime": admin("/api/claude/runtime"),
-  "copilot-runtime": admin("/api/copilot/runtime"),
+  "codex-threads": authed("/api/codex/goals", "/api/codex/threads"),
+  // One entry per agent: the paths are generated from the descriptor table, so
+  // a fourth CLI adds a row here at the same time it adds one there.
+  "agent-runtime": admin(
+    "/api/claude/runtime",
+    "/api/codex/runtime",
+    "/api/copilot/runtime",
+  ),
   // Reading CLI versions is harmless; running the upgrade installs software on
   // the host, so that half stays an admin capability.
   "provider-updates": [

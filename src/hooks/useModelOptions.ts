@@ -6,7 +6,7 @@ import {
   subscribeModelOptions,
   type ModelOption,
 } from "@/lib/utils"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 
 let fetchStarted = false
 

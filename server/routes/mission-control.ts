@@ -8,10 +8,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { sendJson, type NextFn, type UseFn } from "../http"
-import { dirs, join, readdir, stat } from "../helpers"
-import { getCodexSessionInventory } from "../lib/codexSessionInventory"
-import { getCopilotSessionInventory } from "../lib/copilotSessionInventory"
-import { readClaudeProjectEntries } from "./projects/claudeProjectEntries"
+import { storeFor } from "../agents"
+import { getSessionInventory } from "../lib/sessionInventory"
 import { summarizeSession } from "../lib/missionControlSummary"
 import type { MissionControlResponse } from "../../shared/contracts/missionControl"
 
@@ -24,47 +22,33 @@ interface Candidate {
   mtimeMs: number
 }
 
-/** Most recently modified session files across all supported providers. */
+/** Most recently modified session files across every agent. */
 async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  for (const entry of await readClaudeProjectEntries()) {
-    if (!entry.isDirectory() || entry.name === "memory") continue
-    const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-    let files: string[]
+  // Claude names its transcripts after the session, so the listing alone is
+  // enough; the other agents need the identity read the inventory pays for.
+  for (const file of await storeFor("claude").listSessionFiles()) {
+    candidates.push({
+      sessionId: file.fileName.replace(/\.jsonl$/, ""),
+      filePath: file.filePath,
+      mtimeMs: file.mtimeMs,
+    })
+  }
+
+  for (const kind of ["codex", "copilot"] as const) {
     try {
-      files = await readdir(projectDir)
-    } catch {
-      continue
-    }
-    for (const file of files) {
-      if (!file.endsWith(".jsonl")) continue
-      const filePath = join(projectDir, file)
-      try {
-        const { mtimeMs } = await stat(filePath)
-        candidates.push({ sessionId: file.replace(/\.jsonl$/, ""), filePath, mtimeMs })
-      } catch {
-        /* skip unreadable files */
+      for (const file of await getSessionInventory(kind)) {
+        if (file.isSubagent) continue
+        candidates.push({
+          sessionId: file.sessionId,
+          filePath: file.filePath,
+          mtimeMs: file.mtimeMs,
+        })
       }
+    } catch {
+      /* An agent with no local history simply contributes nothing. */
     }
-  }
-
-  try {
-    for (const file of await getCodexSessionInventory()) {
-      if (file.isSubagent) continue
-      candidates.push({ sessionId: file.sessionId, filePath: file.filePath, mtimeMs: file.mtimeMs })
-    }
-  } catch {
-    /* Codex inventory is optional */
-  }
-
-  try {
-    for (const file of await getCopilotSessionInventory()) {
-      if (file.isSubagent) continue
-      candidates.push({ sessionId: file.sessionId, filePath: file.filePath, mtimeMs: file.mtimeMs })
-    }
-  } catch {
-    /* Copilot inventory is optional */
   }
 
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)

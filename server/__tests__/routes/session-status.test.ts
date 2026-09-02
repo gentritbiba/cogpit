@@ -12,10 +12,47 @@ const mockIsCopilotSessionActive = vi.hoisted(() => vi.fn())
 const mockIsCopilotTurnActive = vi.hoisted(() => vi.fn())
 
 vi.mock("../../helpers", () => ({
-  findJsonlPath: mockFindJsonlPath,
   getSessionStatus: mockGetSessionStatus,
   persistentSessions: mockPersistentSessions,
   activeProcesses: mockActiveProcesses,
+  join: (...parts: string[]) => parts.join("/"),
+  homedir: () => "/Users/me",
+}))
+
+vi.mock("../../processRegistry", () => ({
+  persistentSessions: mockPersistentSessions,
+  activeProcesses: mockActiveProcesses,
+  terminateTrackedSession: vi.fn(() => false),
+  killTrackedProcesses: vi.fn(() => 0),
+}))
+
+vi.mock("../../sessionPaths", () => ({
+  findJsonlPath: mockFindJsonlPath,
+  findNewestCodexSessionForCwd: vi.fn().mockResolvedValue(null),
+}))
+
+// Which agent owns the session is decided by whose storage its transcript is
+// in, so each case below says where the file lives rather than naming a kind.
+const ROOTS: Record<string, string> = {
+  claude: "/tmp/projects",
+  codex: "/tmp/codex/sessions",
+  copilot: "/tmp/copilot/session-state",
+}
+const CLAUDE_TRANSCRIPT = `${ROOTS.claude}/-tmp-app/abc.jsonl`
+const CODEX_TRANSCRIPT = `${ROOTS.codex}/2026/09/01/rollout-2026-09-01T10-00-00-abc.jsonl`
+const COPILOT_TRANSCRIPT = `${ROOTS.copilot}/abc/events.jsonl`
+
+vi.mock("../../agents", () => ({
+  storeFor: (kind: string) => ({
+    kind,
+    sessionsRoot: () => ROOTS[kind],
+    listSessionFiles: vi.fn().mockResolvedValue([]),
+  }),
+  storeForPath: (filePath: string | null) => {
+    if (!filePath) return null
+    const kind = Object.keys(ROOTS).find((key) => filePath.startsWith(`${ROOTS[key]}/`))
+    return kind ? { kind } : null
+  },
 }))
 
 vi.mock("../../sdk-session", () => ({
@@ -23,14 +60,21 @@ vi.mock("../../sdk-session", () => ({
   isSDKQueryLive: mockIsSDKQueryLive,
 }))
 
-vi.mock("../../codex-app-server", () => ({
-  codexAppServer: { getActiveTurnId: mockGetActiveTurnId },
+vi.mock("../../agents/codexAppServer", () => ({
+  codexAppServer: {
+    getActiveTurnId: mockGetActiveTurnId,
+    listApprovalThreadIds: vi.fn(() => []),
+    listActiveTurns: vi.fn(() => []),
+  },
 }))
 
-vi.mock("../../copilot-runtime", () => ({
+vi.mock("../../agents/copilotTransport", () => ({
   copilotRuntime: {
     isSessionActive: mockIsCopilotSessionActive,
     isTurnActive: mockIsCopilotTurnActive,
+    getPendingPermissions: vi.fn(() => []),
+    getPendingUserInputs: vi.fn(() => []),
+    getActiveSessionIds: vi.fn(() => []),
   },
 }))
 
@@ -65,7 +109,7 @@ describe("GET /api/session-status/:sessionId", () => {
     mockPersistentSessions.clear()
     mockActiveProcesses.clear()
     mockSdkSessions.clear()
-    mockFindJsonlPath.mockResolvedValue("/tmp/projects/-tmp-app/abc.jsonl")
+    mockFindJsonlPath.mockResolvedValue(CLAUDE_TRANSCRIPT)
     mockGetSessionStatus.mockResolvedValue({ status: "completed" })
     mockIsSDKQueryLive.mockReturnValue(false)
     mockGetActiveTurnId.mockReturnValue(undefined)
@@ -136,6 +180,8 @@ describe("GET /api/session-status/:sessionId", () => {
   })
 
   it("reports live=true for a tracked legacy process, but not a dead one", async () => {
+    // Only the pre-app-server Codex CLI ever puts a child in this registry.
+    mockFindJsonlPath.mockResolvedValue(CODEX_TRANSCRIPT)
     mockPersistentSessions.set("abc", { dead: true })
     expect((await request("GET", "/abc")).json()).toMatchObject({ live: false, running: false })
 
@@ -148,12 +194,25 @@ describe("GET /api/session-status/:sessionId", () => {
     expect((await request("GET", "/abc")).json()).toMatchObject({ live: false, running: true })
   })
 
+  it("ignores another agent's live turn for a session it does not own", async () => {
+    // The old union asked every runtime about every id, so an unrelated Codex
+    // turn made a Claude session read as running.
+    mockGetActiveTurnId.mockReturnValue("turn-1")
+    mockIsCopilotSessionActive.mockReturnValue(true)
+    expect((await request("GET", "/abc")).json()).toMatchObject({
+      live: false,
+      running: false,
+    })
+  })
+
   it("reports live=true running=true for an active native Codex turn", async () => {
+    mockFindJsonlPath.mockResolvedValue(CODEX_TRANSCRIPT)
     mockGetActiveTurnId.mockReturnValue("turn-1")
     expect((await request("GET", "/abc")).json()).toMatchObject({ live: true, running: true })
   })
 
   it("reports live=true running=false between turns of an open Copilot session", async () => {
+    mockFindJsonlPath.mockResolvedValue(COPILOT_TRANSCRIPT)
     mockIsCopilotSessionActive.mockReturnValue(true)
 
     expect((await request("GET", "/abc")).json()).toMatchObject({
@@ -163,6 +222,7 @@ describe("GET /api/session-status/:sessionId", () => {
   })
 
   it("reports live=true running=true while a Copilot turn is in flight", async () => {
+    mockFindJsonlPath.mockResolvedValue(COPILOT_TRANSCRIPT)
     mockIsCopilotSessionActive.mockReturnValue(true)
     mockIsCopilotTurnActive.mockReturnValue(true)
 

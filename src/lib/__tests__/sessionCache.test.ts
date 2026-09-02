@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import { sessionCache } from "@/lib/sessionCache"
 import {
   __resetDeviceRevisionsForTest,

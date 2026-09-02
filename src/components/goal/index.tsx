@@ -1,7 +1,7 @@
 import { Flag } from "lucide-react"
 import type { ReactNode } from "react"
-import type { AgentKind } from "@/lib/sessionSource"
-import type { ParsedSession } from "@/lib/types"
+import { capabilitiesFor, type AgentKind } from "@/lib/agents"
+import type { ParsedSession } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
 import { ClaudeGoalProvider } from "./ClaudeGoalProvider"
 import { CodexGoalProvider } from "./CodexGoalProvider"
@@ -18,10 +18,10 @@ interface GoalProviderProps {
  *  pieces independently: a full-width row above the input, and a compact
  *  trigger that lives inline with the other composer settings. */
 export function GoalProvider({ agentKind, session, onSendCommand, children }: GoalProviderProps) {
+  if (!capabilitiesFor(agentKind).goals) return children
   if (agentKind === "codex") {
     return <CodexGoalProvider threadId={session.sessionId}>{children}</CodexGoalProvider>
   }
-  if (agentKind === "copilot") return children
   return (
     <ClaudeGoalProvider session={session} onSendCommand={onSendCommand}>
       {children}

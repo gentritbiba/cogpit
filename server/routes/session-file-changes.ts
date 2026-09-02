@@ -1,5 +1,6 @@
 import { sendJson, type UseFn } from "../http"
-import { findJsonlPath, readFile, stat } from "../helpers"
+import { readFile, stat } from "../helpers"
+import { findJsonlPath } from "../sessionPaths"
 import type { ToolCall, ToolUseBlock } from "../../shared/session/types"
 import { computeNetDiff, type EditOp } from "../../shared/diff-utils"
 import { expandEditToolCalls } from "../../shared/session/edit-calls"

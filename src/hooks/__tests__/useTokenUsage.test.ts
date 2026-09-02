@@ -7,7 +7,7 @@ vi.mock("@/lib/auth", () => ({
 
 import { authFetch } from "@/lib/auth"
 import { __resetCapabilitiesForTest, setMe } from "@/lib/capabilities"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import { MEMBER_CAPABILITIES } from "../../../shared/contracts/team"
 import {
   mapClaudeRuntimeResponse,
@@ -51,7 +51,6 @@ describe("mapCodexRuntimeResponse", () => {
     })
 
     expect(usage).toMatchObject({
-      providerName: "Codex",
       subscriptionType: "plus",
       lifetimeTokens: 1_234_567,
       creditBalance: "25.5",
@@ -80,7 +79,6 @@ describe("mapClaudeRuntimeResponse", () => {
         },
       },
     })).toMatchObject({
-      providerName: "Claude",
       subscriptionType: "max",
       fiveHour: { utilization: 31 },
       sevenDay: { utilization: 12 },
@@ -105,7 +103,6 @@ describe("mapCopilotRuntimeResponse", () => {
         },
       },
     })).toEqual({
-      providerName: "Copilot",
       fiveHour: {
         utilization: 5.5,
         resetsAt: "2026-10-01T00:00:00Z",
@@ -180,7 +177,7 @@ describe("useTokenUsage", () => {
 
     await vi.waitFor(() => {
       expect(result.current.usage).toMatchObject({
-        providerName: "Copilot",
+        agentKind: "copilot",
         fiveHour: { utilization: 5.5, label: "Chat" },
       })
     })
@@ -236,7 +233,7 @@ describe("useTokenUsage", () => {
     })
 
     await vi.waitFor(() => {
-      expect(result.current.usage?.providerName).toBe("Codex")
+      expect(result.current.usage?.agentKind).toBe("codex")
     })
 
     await act(async () => {
@@ -247,7 +244,7 @@ describe("useTokenUsage", () => {
       await Promise.resolve()
     })
 
-    expect(result.current.usage?.providerName).toBe("Codex")
+    expect(result.current.usage?.agentKind).toBe("codex")
     expect(result.current.usage?.fiveHour?.utilization).toBe(12)
   })
 })

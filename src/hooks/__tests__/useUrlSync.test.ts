@@ -10,7 +10,7 @@ vi.mock("@/lib/auth", () => ({
 
 import { authFetch } from "@/lib/auth"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 import { useUrlSync } from "../useUrlSync"
 import type { SessionState } from "../useSessionState"
 

@@ -3,8 +3,8 @@ import { authFetch } from "@/lib/auth"
 import { deviceScopedKey } from "@/lib/device"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { isSharedPath } from "@/lib/sharePath"
-import type { SubAgentMessage, ToolCall, ContentBlock } from "@/lib/types"
-import { isCodexSessionText, parseCodexSession } from "@/lib/codex"
+import type { SubAgentMessage, ToolCall, ContentBlock } from "../../shared/session/types"
+import { isCodexSessionText, parseCodexSession } from "../../shared/session/codex"
 
 function extractToolResultText(content: string | ContentBlock[] | undefined | null): string {
   if (!content) return ""

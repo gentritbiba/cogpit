@@ -7,17 +7,13 @@ import { join as joinPath } from "node:path"
 // Every route under test reads the same `../../helpers` barrel, so one factory
 // has to cover the union of what claude-manage, config and the branch route
 // import from it.
+vi.mock("../../lib/rateLimit", () => ({ isRateLimited: vi.fn(() => false) }))
+
 vi.mock("../../helpers", () => ({
   activeProcesses: new Map(),
   persistentSessions: new Map(),
   dirs: { PROJECTS_DIR: "/tmp/lifecycle-projects" },
-  CODEX_SESSIONS_DIR: "/tmp/lifecycle-codex",
-  isCodexDirName: vi.fn(() => false),
-  isCopilotDirName: vi.fn(() => false),
   isWithinDir: vi.fn(() => true),
-  resolveSessionFilePath: vi.fn(
-    (dirName: string, fileName: string) => `/tmp/lifecycle-projects/${dirName}/${fileName}`,
-  ),
   unlink: vi.fn().mockResolvedValue(undefined),
   spawn: vi.fn(),
   dirname: (path: string) => path.split("/").slice(0, -1).join("/"),
@@ -25,13 +21,11 @@ vi.mock("../../helpers", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn(),
   writeFile: vi.fn().mockResolvedValue(undefined),
-  formatCodexRolloutFileName: vi.fn((id: string) => `rollout-${id}.jsonl`),
   randomUUID: vi.fn(() => "branched-session"),
   refreshDirs: vi.fn(),
   isTrustedDirectLocalRequest: vi.fn(() => false),
   hasTrustedMutationSource: vi.fn(() => true),
   canIssueBrowserSession: vi.fn(() => true),
-  isRateLimited: vi.fn(() => false),
   createSessionToken: vi.fn(() => "device-token"),
   getRequestSessionToken: vi.fn(() => null),
   setBrowserSessionCookie: vi.fn(),
@@ -42,6 +36,18 @@ vi.mock("../../helpers", () => ({
   validatePasswordStrength: vi.fn(() => null),
   revokeAllSessions: vi.fn().mockResolvedValue(undefined),
   getConnectedDevices: vi.fn(() => []),
+}))
+
+vi.mock("../../sessionPaths", () => ({
+  resolveSessionFilePath: vi.fn(
+    (dirName: string, fileName: string) => `/tmp/lifecycle-projects/${dirName}/${fileName}`,
+  ),
+}))
+
+// Every path the fixture resolves lives under the Claude projects root.
+vi.mock("../../agents", () => ({
+  storeFor: () => ({ sessionsRoot: () => "/tmp/lifecycle-codex" }),
+  storeForPath: () => ({ kind: "claude" }),
 }))
 
 vi.mock("../../config", () => ({
@@ -76,9 +82,9 @@ import {
   initShareRegistry,
   listShares,
 } from "../../share/registry"
-import { registerClaudeManageRoutes } from "../../routes/claude-manage"
+import { registerSessionManageRoutes } from "../../routes/session-manage"
 import { registerConfigRoutes } from "../../routes/config"
-import { registerBranchSessionRoute } from "../../routes/claude-new/sessionBranching"
+import { registerBranchSessionRoute } from "../../routes/session-new/sessionBranching"
 
 const mockedReadFile = vi.mocked(readFile)
 const mockedGetConfig = vi.mocked(getConfig)
@@ -142,7 +148,7 @@ describe("share lifecycle", () => {
 
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => { handlers.set(path, handler) }
-    registerClaudeManageRoutes(use)
+    registerSessionManageRoutes(use)
     registerConfigRoutes(use)
     registerBranchSessionRoute(use)
   })

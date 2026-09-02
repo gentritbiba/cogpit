@@ -3,7 +3,7 @@ import { act, render, screen, fireEvent } from "@testing-library/react"
 import type { ReactElement } from "react"
 import { AgentMessageCard, agentAccentHue, flattenToPlainText } from "../AgentMessageCard"
 import type { ActiveSessionInfo } from "@/components/LiveSessions/types"
-import type { SessionStatus } from "@/lib/sessionStatus"
+import type { SessionStatus } from "../../../../shared/session/sessionStatus"
 
 const mocks = vi.hoisted(() => ({
   inventory: null as { sessions: ActiveSessionInfo[] } | null,

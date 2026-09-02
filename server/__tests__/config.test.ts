@@ -275,7 +275,8 @@ describe("loadConfig", () => {
 
     expect(config).toEqual({
       claudeDir: join("/home/test", ".claude"),
-      externalOnly: "codex",
+      defaultAgent: "codex",
+      claudeDirIsPlaceholder: true,
     })
     expect(mockedStat).toHaveBeenCalledWith(resolve("/home/test/.codex"))
     expect(mockedWriteFile).not.toHaveBeenCalled()
@@ -289,7 +290,7 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
 
-    expect(config?.externalOnly).toBe("codex")
+    expect(config?.defaultAgent).toBe("codex")
     expect(mockedStat).toHaveBeenCalledWith(resolve("/opt/codex-data"))
   })
 
@@ -305,23 +306,42 @@ describe("loadConfig", () => {
 
     expect(config).toEqual({
       claudeDir: join("/home/test", ".claude"),
-      externalOnly: "copilot",
+      defaultAgent: "copilot",
+      claudeDirIsPlaceholder: true,
     })
     expect(mockedStat).toHaveBeenNthCalledWith(1, resolve("/home/test/.codex"))
     expect(mockedStat).toHaveBeenNthCalledWith(2, resolve("/opt/copilot-data/session-state"))
   })
 
-  it("bootstraps a first Copilot session when the CLI is installed", async () => {
+  it("bootstraps a first Copilot session when only that CLI is on PATH", async () => {
     const { loadConfig } = await import("../config")
     mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
     mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
-    mockedFindExecutableOnPath.mockReturnValue("/usr/local/bin/copilot")
+    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
+      binName === "copilot" ? "/usr/local/bin/copilot" : undefined,
+    )
 
     await expect(loadConfig()).resolves.toEqual({
       claudeDir: join("/home/test", ".claude"),
-      externalOnly: "copilot",
+      defaultAgent: "copilot",
+      claudeDirIsPlaceholder: true,
     })
     expect(mockedFindExecutableOnPath).toHaveBeenCalledWith("copilot")
+  })
+
+  it("bootstraps from any discoverable CLI on PATH, not just one", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+    mockedFindExecutableOnPath.mockImplementation((binName: string) =>
+      binName === "codex" ? "/usr/local/bin/codex" : undefined,
+    )
+
+    await expect(loadConfig()).resolves.toEqual({
+      claudeDir: join("/home/test", ".claude"),
+      defaultAgent: "codex",
+      claudeDirIsPlaceholder: true,
+    })
   })
 
   it("returns null for malformed JSON", async () => {
@@ -350,7 +370,34 @@ describe("loadConfig", () => {
 
     const config = await loadConfig()
 
-    expect(config?.externalOnly).toBe("codex")
+    expect(config?.defaultAgent).toBe("codex")
+    expect(config?.claudeDirIsPlaceholder).toBe(true)
+  })
+
+  it("migrates a persisted externalOnly config into its two separate facts", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/test/.claude",
+      externalOnly: "copilot",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.defaultAgent).toBe("copilot")
+    expect(config?.claudeDirIsPlaceholder).toBe(true)
+  })
+
+  it("keeps the preferred agent without marking a real Claude directory", async () => {
+    const { loadConfig } = await import("../config")
+    mockedReadFile.mockResolvedValueOnce(JSON.stringify({
+      claudeDir: "/home/test/.claude",
+      defaultAgent: "codex",
+    }))
+
+    const config = await loadConfig()
+
+    expect(config?.defaultAgent).toBe("codex")
+    expect(config?.claudeDirIsPlaceholder).toBeUndefined()
   })
 
   it("loads the team edition flag", async () => {

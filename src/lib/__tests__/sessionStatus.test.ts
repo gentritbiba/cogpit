@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   deriveSessionStatus,
   getStatusLabel,
-} from "../sessionStatus"
+} from "../../../shared/session/sessionStatus"
 
 describe("deriveSessionStatus", () => {
   it("returns idle for empty messages", () => {

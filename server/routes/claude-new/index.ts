@@ -1,9 +1,0 @@
-import type { UseFn } from "../../http"
-import { registerNewSessionRoute, registerCreateAndSendRoute } from "./sessionSpawner"
-import { registerBranchSessionRoute } from "./sessionBranching"
-
-export function registerClaudeNewRoutes(use: UseFn) {
-  registerNewSessionRoute(use)
-  registerCreateAndSendRoute(use)
-  registerBranchSessionRoute(use)
-}

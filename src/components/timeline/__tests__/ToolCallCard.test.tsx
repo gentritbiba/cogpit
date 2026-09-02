@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { getToolSummary, getToolTextStyle, getToolTier, ToolCallCard } from "../ToolCallCard"
 import { CollapsibleToolCalls } from "../CollapsibleToolCalls"
-import type { ToolCall } from "@/lib/types"
+import type { ToolCall } from "../../../../shared/session/types"
 import type { SkillMeta } from "@/hooks/useSkillMetadata"
 
 // Mock authFetch — needed when "Open SKILL.md" button is clicked / answer submission

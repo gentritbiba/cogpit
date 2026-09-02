@@ -1,4 +1,5 @@
 // SHARED SESSION CORE: edit shared/session only; cogpit-memory copies are generated.
+import { normalizeFunctionName } from "./codex-tool-normalization"
 import { computeStats, createEmptySessionStats } from "./sessionStats"
 import { appendAssistantText } from "./turnContent"
 import type {
@@ -6,6 +7,8 @@ import type {
   ImageBlock,
   ParseSessionOptions,
   ParsedSession,
+  RawRecord,
+  SessionStatusInfo,
   SubAgentMessage,
   ThinkingBlock,
   TokenUsage,
@@ -210,6 +213,11 @@ export function isCopilotSessionText(jsonlText: string): boolean {
     }
   }
   return false
+}
+
+/** True when already-parsed raw records came from this CLI. */
+export function isCopilotRawRecords(records: readonly { type?: unknown }[]): boolean {
+  return isCopilotEventType(records[0]?.type)
 }
 
 export function extractCopilotMetadataFromLines(lines: string[]): CopilotMetadata {
@@ -999,4 +1007,166 @@ export function parseCopilotSession(
       : events as Array<{ type: string; [key: string]: unknown }>,
     agentKind: "copilot",
   }
+}
+
+/**
+ * Incrementally extend a parsed session with newly written lines.
+ *
+ * Copilot's durable events carry cross-turn state (permission requests, usage
+ * roll-ups, sub-agent lifecycles), so the whole transcript is re-parsed rather
+ * than only its tail.
+ */
+export function appendCopilotSession(existing: ParsedSession, newJsonlText: string): ParsedSession {
+  const prefix = existing.rawMessages.map((record) => JSON.stringify(record)).join("\n")
+  return parseCopilotSession(prefix ? `${prefix}\n${newJsonlText}` : newJsonlText)
+}
+
+// ── Status ──────────────────────────────────────────────────────────────────
+
+/** True when a record `type` belongs to this CLI's durable event stream. */
+export function isCopilotEventType(type: unknown): type is string {
+  return typeof type === "string" && (
+    type === "abort"
+    || type === "binary_asset"
+    || type === "user.message"
+    || type.startsWith("assistant.")
+    || type.startsWith("permission.")
+    || type.startsWith("session.")
+    || type.startsWith("subagent.")
+    || type.startsWith("tool.")
+    || type.startsWith("user_input.")
+  )
+}
+
+/** Derive status from Copilot CLI's durable session events. */
+export function deriveCopilotSessionStatus(rawMessages: readonly RawRecord[]): SessionStatusInfo {
+  const pendingAgents = new Map<string, string>()
+  for (const event of rawMessages) {
+    const agentId = typeof event.agentId === "string" ? event.agentId : ""
+    if (
+      !agentId
+      && (event.type === "abort" || event.type === "session.shutdown" || event.type === "session.error")
+    ) {
+      pendingAgents.clear()
+      continue
+    }
+    if (!agentId || !event.type.startsWith("subagent.")) continue
+    const data = isObject(event.data) ? event.data : {}
+    if (event.type === "subagent.completed" || event.type === "subagent.failed") {
+      pendingAgents.delete(agentId)
+      continue
+    }
+    if (event.type === "subagent.started" || event.type === "subagent.configured") {
+      const description = [data.agentDisplayName, data.description, data.agentName]
+        .find((value): value is string => typeof value === "string") ?? ""
+      pendingAgents.set(agentId, description || pendingAgents.get(agentId) || "")
+    }
+  }
+  if (pendingAgents.size > 0) {
+    const descriptions = [...pendingAgents.values()]
+    return {
+      status: "awaiting_agents",
+      pendingQueue: 0,
+      pendingAgents: descriptions.length,
+      pendingAgentDescriptions: descriptions.filter((description) => description.length > 0),
+    }
+  }
+
+  let sawUserActivity = false
+  const completedPermissionRequests = new Set<string>()
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const event = rawMessages[i]
+    if (typeof event.agentId === "string" && event.agentId) continue
+    const data = isObject(event.data) ? event.data : {}
+
+    switch (event.type) {
+      case "abort":
+      case "session.shutdown":
+        return { status: "completed" }
+      case "assistant.turn_end": {
+        // session.idle is not durable in every CLI version. Infer whether this
+        // model iteration ended the request or handed work to tools.
+        for (let j = i - 1; j >= 0; j--) {
+          const previous = rawMessages[j]
+          if (typeof previous.agentId === "string" && previous.agentId) continue
+          if (previous.type === "user.message") break
+          if (previous.type === "abort") return { status: "completed" }
+          if (previous.type !== "assistant.message") continue
+          const previousData = isObject(previous.data) ? previous.data : {}
+          return Array.isArray(previousData.toolRequests) && previousData.toolRequests.length > 0
+            ? { status: "processing" }
+            : { status: "completed" }
+        }
+        return { status: "processing" }
+      }
+      case "session.error":
+        return {
+          status: "completed",
+          terminalReason: typeof data.message === "string" ? data.message : "Copilot session error",
+        }
+      case "assistant.idle":
+      case "session.idle":
+        return { status: sawUserActivity ? "completed" : "idle" }
+      case "permission.completed": {
+        const requestId = typeof data.requestId === "string" ? data.requestId : ""
+        if (requestId) completedPermissionRequests.add(requestId)
+        continue
+      }
+      case "permission.requested": {
+        const requestId = typeof data.requestId === "string" ? data.requestId : ""
+        if (requestId && completedPermissionRequests.has(requestId)) continue
+        return { status: "deferred" }
+      }
+      case "user_input.requested":
+        return { status: "tool_use", toolName: "AskUserQuestion" }
+      case "tool.execution_start":
+        if (completedPermissionRequests.size > 0) return { status: "thinking" }
+        return {
+          status: "tool_use",
+          toolName: typeof data.toolName === "string"
+            ? normalizeFunctionName(data.toolName)
+            : typeof data.name === "string" ? normalizeFunctionName(data.name) : undefined,
+        }
+      case "tool.execution_complete":
+        return { status: "thinking" }
+      case "assistant.turn_start":
+        return { status: "processing" }
+      case "assistant.message":
+      case "assistant.message_delta":
+      case "assistant.reasoning":
+      case "assistant.reasoning_delta":
+        return { status: "thinking" }
+      case "user.message":
+        sawUserActivity = true
+        return { status: "processing" }
+      case "session.start":
+      case "session.resume":
+        return { status: sawUserActivity ? "processing" : "idle" }
+    }
+  }
+  return { status: "idle" }
+}
+
+// ── Turn boundaries ─────────────────────────────────────────────────────────
+
+/**
+ * Indexes of the `user.message` events that open a turn.
+ *
+ * Sub-agent events carry an `agentId` and belong to the turn already in
+ * flight. An event with no durable `id` cannot be addressed by the CLI's fork
+ * and rewind RPCs, so it cannot be a boundary either.
+ */
+export function copilotTurnBoundaries(
+  records: readonly Record<string, unknown>[],
+): number[] {
+  const boundaries: number[] = []
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]
+    if (record.type !== "user.message" || typeof record.agentId === "string") continue
+    const data = record.data
+    if (!data || typeof data !== "object" || Array.isArray(data)) continue
+    if (typeof record.id !== "string" || !record.id) continue
+    boundaries.push(index)
+  }
+  return boundaries
 }

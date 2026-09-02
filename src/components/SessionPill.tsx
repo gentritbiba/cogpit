@@ -37,7 +37,8 @@ import {
   projectName,
   shortenModel,
 } from "@/lib/format"
-import type { ParsedSession, RawMessage } from "@/lib/types"
+import type { ParsedSession, RawMessage } from "../../shared/session/types"
+import { capabilitiesForDirName } from "@/lib/agents"
 import { cn } from "@/lib/utils"
 import type { SessionPullRequest } from "../../shared/session/prLinks"
 
@@ -74,8 +75,10 @@ export const SessionPill = memo(function SessionPill({
   const subAgentInfo = sessionSource ? parseSubAgentPath(sessionSource.fileName) : null
   const subAgentLabel = subAgentInfo ? formatAgentLabel(subAgentInfo.agentId) : null
   const thinkingEnabled = session.turns.some((turn) => turn.thinking.length > 0)
+  // Context usage is read out of the transcript, so only agents whose records
+  // carry token accounting can answer it.
   const rawMessages = (
-    session.agentKind === "claude" ? session.rawMessages : []
+    capabilitiesForDirName(sessionSource?.dirName).contextWindow ? session.rawMessages : []
   ) as readonly RawMessage[]
 
   return (

@@ -3,13 +3,12 @@ import { catchAsyncErrors, type UseFn } from "./http"
 import { createHubProxyHandler } from "./hub/proxy"
 import { registerAgentPromptRoutes } from "./routes/agent-prompts"
 import { registerAskUserRoutes } from "./routes/ask-user"
+import { registerAgentRuntimeRoutes } from "./routes/agent-runtime"
 import { registerCopilotHistoryRoutes } from "./routes/copilot-history"
-import { registerCopilotRuntimeRoutes } from "./routes/copilot-runtime"
-import { registerClaudeManageRoutes } from "./routes/claude-manage"
-import { registerClaudeNewRoutes } from "./routes/claude-new"
-import { registerClaudeRuntimeRoutes } from "./routes/claude-runtime"
-import { registerClaudeRoutes } from "./routes/claude"
-import { registerCodexRuntimeRoutes } from "./routes/codex-runtime"
+import { registerSessionManageRoutes } from "./routes/session-manage"
+import { registerSessionNewRoutes } from "./routes/session-new"
+import { registerSessionSendRoutes } from "./routes/session-send"
+import { registerCodexThreadRoutes } from "./routes/codex-threads"
 import { registerConfigBrowserRoutes } from "./routes/config-browser"
 import { registerConfigRoutes } from "./routes/config"
 import { registerDeviceRoutes } from "./routes/devices"
@@ -74,8 +73,14 @@ function apiRoute(
  *
  * This preserves the original Vite development order. Order is intentional:
  * public device discovery and the hub proxy precede performance monitoring,
- * followed by configuration, domain APIs, and provider runtime controls.
+ * followed by configuration, domain APIs, and agent runtime controls.
  * Add every new route group here so all server entry points stay in parity.
+ *
+ * Ids name the concern, not an agent: `session-send`, `session-new` and
+ * `session-manage` serve all three CLIs, and only a genuinely single-agent
+ * capability (`codex-threads`, `copilot-history`) may carry an agent's name.
+ * Every id also has to exist in `team/policy.ts` — an unlisted path falls
+ * through to the admin default and silently locks members out.
  */
 export const API_ROUTE_REGISTRY = [
   { id: "hello", register: registerHelloRoutes },
@@ -88,9 +93,9 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("config", registerConfigRoutes),
   apiRoute("team-admin", registerTeamAdminRoutes),
   apiRoute("projects", registerProjectRoutes),
-  apiRoute("claude", registerClaudeRoutes),
-  apiRoute("claude-new", registerClaudeNewRoutes),
-  apiRoute("claude-manage", registerClaudeManageRoutes),
+  apiRoute("session-send", registerSessionSendRoutes),
+  apiRoute("session-new", registerSessionNewRoutes),
+  apiRoute("session-manage", registerSessionManageRoutes),
   apiRoute("ports", registerPortRoutes),
   apiRoute("teams", registerTeamRoutes),
   apiRoute("team-session", registerTeamSessionRoutes),
@@ -126,9 +131,8 @@ export const API_ROUTE_REGISTRY = [
   apiRoute("copilot-history", registerCopilotHistoryRoutes),
   apiRoute("agent-prompts", registerAgentPromptRoutes),
   apiRoute("models", registerModelRoutes),
-  apiRoute("codex-runtime", registerCodexRuntimeRoutes),
-  apiRoute("claude-runtime", registerClaudeRuntimeRoutes),
-  apiRoute("copilot-runtime", registerCopilotRuntimeRoutes),
+  apiRoute("codex-threads", registerCodexThreadRoutes),
+  apiRoute("agent-runtime", registerAgentRuntimeRoutes),
   apiRoute("provider-updates", registerProviderUpdateRoutes),
 ] as const satisfies readonly ApiRouteDefinition[]
 

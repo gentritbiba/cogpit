@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useNewSession } from "../useNewSession"
 import type { PermissionsConfig } from "@/lib/permissions"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 // Mock authFetch
 vi.mock("@/lib/auth", () => ({
@@ -10,12 +10,12 @@ vi.mock("@/lib/auth", () => ({
 }))
 
 // Mock parseSession
-vi.mock("@/lib/parser", () => ({
+vi.mock("../../../shared/session/parser", () => ({
   parseSession: vi.fn(),
 }))
 
 import { authFetch } from "@/lib/auth"
-import { parseSession } from "@/lib/parser"
+import { parseSession } from "../../../shared/session/parser"
 
 const mockedAuthFetch = vi.mocked(authFetch)
 const mockedParseSession = vi.mocked(parseSession)

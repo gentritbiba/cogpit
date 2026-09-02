@@ -1,5 +1,5 @@
-import type { SessionStatus } from "@/lib/sessionStatus"
-import type { AgentKind } from "../../../shared/providers/types"
+import type { SessionStatus } from "../../../shared/session/sessionStatus"
+import type { AgentKind } from "@/lib/agents"
 import type { SessionPullRequest } from "../../../shared/session/prLinks"
 
 export interface ActiveSessionInfo {

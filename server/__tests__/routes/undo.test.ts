@@ -15,10 +15,6 @@ vi.mock("../../helpers", async () => {
       const normalizedParent = parent.replace(/\/+$/, "")
       return child === normalizedParent || child.startsWith(`${normalizedParent}/`)
     }),
-    isCodexDirName: vi.fn(() => false),
-    resolveSessionFilePath: vi.fn((_dirName: string, fileName: string) =>
-      Promise.resolve(`/tmp/test-projects/proj/${fileName}`)
-    ),
     readFile: vi.fn(),
     writeFile: vi.fn(),
     mkdir: vi.fn(),
@@ -28,6 +24,16 @@ vi.mock("../../helpers", async () => {
     homedir: () => "/home/testuser",
   }
 })
+
+vi.mock("../../sessionPaths", () => ({
+  resolveSessionFilePath: vi.fn((_dirName: string, fileName: string) =>
+    Promise.resolve(`/tmp/test-projects/proj/${fileName}`)
+  ),
+}))
+
+const mockStoreForPath = vi.hoisted(() => vi.fn())
+
+vi.mock("../../agents", () => ({ storeForPath: mockStoreForPath }))
 
 vi.mock("node:fs/promises", () => ({
   appendFile: vi.fn(),
@@ -48,21 +54,12 @@ const checkpointControls = vi.hoisted(() => ({
 
 vi.mock("../../sdk-session", () => checkpointControls)
 
-import {
-  isWithinDir,
-  readFile,
-  writeFile,
-  mkdir,
-  unlink,
-} from "../../helpers"
-import { appendFile, lstat, realpath } from "node:fs/promises"
+import { readFile, writeFile, unlink } from "../../helpers"
+import { lstat, realpath } from "node:fs/promises"
 
-const mockedIsWithinDir = vi.mocked(isWithinDir)
 const mockedReadFile = vi.mocked(readFile)
 const mockedWriteFile = vi.mocked(writeFile)
-const mockedMkdir = vi.mocked(mkdir)
 const mockedUnlink = vi.mocked(unlink)
-const mockedAppendFile = vi.mocked(appendFile)
 const mockedLstat = vi.mocked(lstat)
 const mockedRealpath = vi.mocked(realpath)
 
@@ -112,12 +109,20 @@ function createMockReqRes(method: string, url: string, body?: string) {
 
 // Import and register routes
 import { registerUndoRoutes } from "../../routes/undo"
+import {
+  commitFileOperations,
+  prepareFileOperations,
+  UndoOperationError,
+} from "../../routes/undo/fileOperations"
 
 describe("undo routes", () => {
   let handlers: Map<string, Middleware>
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // Every fixture path lives under the Claude projects root unless a test
+    // says otherwise.
+    mockStoreForPath.mockReturnValue({ kind: "claude" })
     handlers = new Map()
     const use: UseFn = (path: string, handler: Middleware) => {
       handlers.set(path, handler)
@@ -172,42 +177,6 @@ describe("undo routes", () => {
       await handler(req, res, next)
 
       expect(next).toHaveBeenCalled()
-    })
-  })
-
-  describe("POST /api/undo-state/:sessionId", () => {
-    it("saves undo state", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo-state/")
-      const body = JSON.stringify({ history: [] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "save-session", body)
-      mockedMkdir.mockResolvedValueOnce(undefined)
-      mockedWriteFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      // Wait for async handlers
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      expect(mockedMkdir).toHaveBeenCalled()
-      expect(atomicFiles.writeOwnerOnlyJson).toHaveBeenCalledWith(
-        "/tmp/test-undo/save-session.json",
-        JSON.parse(body),
-      )
-    })
-
-    it("rejects encoded traversal before creating or writing undo state", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo-state/")
-      const body = JSON.stringify({ history: [] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "..%2Foutside", body)
-
-      await handler(req, res, next)
-      sendBody()
-
-      expect(res._getStatus()).toBe(403)
-      expect(mockedMkdir).not.toHaveBeenCalled()
-      expect(mockedWriteFile).not.toHaveBeenCalled()
     })
   })
 
@@ -420,458 +389,145 @@ describe("undo routes", () => {
     })
   })
 
-  // ── /api/undo/truncate-jsonl ──────────────────────────────────────────
+})
 
-  describe("POST /api/undo/truncate-jsonl", () => {
-    it("rejects paths outside PROJECTS_DIR", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/truncate-jsonl")
-      const body = JSON.stringify({ dirName: "../../etc", fileName: "passwd", keepLines: 0 })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/truncate-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(false)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-    })
-
-    it("truncates file to specified number of lines", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/truncate-jsonl")
-      const body = JSON.stringify({ dirName: "proj", fileName: "sess.jsonl", keepLines: 2 })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/truncate-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReadFile.mockResolvedValueOnce("line1\nline2\nline3\nline4\n" as unknown as Buffer)
-      mockedWriteFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-      expect(response.removedLines).toEqual(["line3", "line4"])
-    })
-
-    it("no-ops when keepLines >= total lines", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/truncate-jsonl")
-      const body = JSON.stringify({ dirName: "proj", fileName: "sess.jsonl", keepLines: 10 })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/truncate-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedReadFile.mockResolvedValueOnce("line1\nline2\n" as unknown as Buffer)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-      expect(response.removedLines).toEqual([])
-    })
-
-    it("calls next for non-POST methods", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/truncate-jsonl")
-      const { req, res, next } = createMockReqRes("GET", "/api/undo/truncate-jsonl")
-
-      await handler(req, res, next)
-
-      expect(next).toHaveBeenCalled()
-    })
+/**
+ * The file-operation gate every undo mutation passes through.
+ *
+ * These were routed through `/api/undo/apply` until that endpoint was removed
+ * as dead — nothing but a test ever called it, and real undo has gone through
+ * `/api/undo/transaction` for a while. The safety rules are the valuable part,
+ * so they are asserted against the module that enforces them.
+ */
+describe("undo file operations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockedLstat.mockResolvedValue({ isSymbolicLink: () => false } as never)
+    mockedRealpath.mockImplementation(((path: string) => Promise.resolve(path)) as never)
   })
 
-  // ── /api/undo/append-jsonl ────────────────────────────────────────────
+  async function rejectsWith(status: number, operations: unknown): Promise<void> {
+    await expect(prepareFileOperations(operations)).rejects.toMatchObject({ status })
+  }
 
-  describe("POST /api/undo/append-jsonl", () => {
-    it("rejects paths outside PROJECTS_DIR", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/append-jsonl")
-      const body = JSON.stringify({ dirName: "../../etc", fileName: "passwd", lines: ["data"] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/append-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(false)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-    })
-
-    it("appends lines to file", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/append-jsonl")
-      const body = JSON.stringify({ dirName: "proj", fileName: "sess.jsonl", lines: ["line1", "line2"] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/append-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(true)
-      mockedAppendFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-      expect(response.appended).toBe(2)
-    })
-
-    it("no-ops for empty lines array", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/append-jsonl")
-      const body = JSON.stringify({ dirName: "proj", fileName: "sess.jsonl", lines: [] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/append-jsonl", body)
-      mockedIsWithinDir.mockReturnValueOnce(true)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.appended).toBe(0)
-    })
+  it("rejects non-absolute paths", async () => {
+    await rejectsWith(403, [
+      { type: "create-write", filePath: "relative/path.txt", content: "test" },
+    ])
   })
 
-  // ── /api/undo/apply ───────────────────────────────────────────────────
+  it("rejects traversal segments even when the resolved target stays under home", async () => {
+    await rejectsWith(403, [{
+      type: "create-write",
+      filePath: "/home/testuser/project/../other/file.ts",
+      content: "test",
+    }])
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
 
-  describe("POST /api/undo/apply", () => {
-    it("rejects non-absolute paths", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{ type: "create-write", filePath: "relative/path.txt", content: "test" }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+  it("rejects empty operations array", async () => {
+    await rejectsWith(400, [])
+  })
 
-      await handler(req, res, next)
-      sendBody()
+  it("rejects non-array operations", async () => {
+    await rejectsWith(400, "not-array")
+  })
 
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-    })
+  it.each([
+    ["a forbidden system directory", "/etc/passwd"],
+    ["a /usr/ system path", "/usr/bin/test"],
+  ])("rejects %s", async (_label, filePath) => {
+    await rejectsWith(403, [{ type: "create-write", filePath, content: "test" }])
+  })
 
-    it("rejects traversal segments even when the resolved target stays under home", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "create-write",
-          filePath: "/home/testuser/project/../other/file.ts",
-          content: "test",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+  it("rejects an in-home target that is itself a symbolic link", async () => {
+    mockedLstat.mockResolvedValueOnce({ isSymbolicLink: () => true } as never)
 
-      await handler(req, res, next)
-      sendBody()
+    await rejectsWith(403, [{
+      type: "create-write",
+      filePath: "/home/testuser/project/escape.ts",
+      content: "blocked",
+    }])
+    expect(mockedReadFile).not.toHaveBeenCalled()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
 
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-      expect(mockedWriteFile).not.toHaveBeenCalled()
-    })
+  it("rejects an in-home path whose canonical target escapes home", async () => {
+    mockedRealpath
+      .mockResolvedValueOnce("/home/testuser" as never)
+      .mockResolvedValueOnce("/tmp/outside.ts" as never)
 
-    it("rejects empty operations array", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({ operations: [] })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+    await rejectsWith(403, [{
+      type: "reverse-edit",
+      filePath: "/home/testuser/project-link/outside.ts",
+      oldString: "before",
+      newString: "after",
+    }])
+    expect(mockedReadFile).not.toHaveBeenCalled()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
 
-      await handler(req, res, next)
-      sendBody()
+  it("rejects a new file beneath an in-home symlinked directory that escapes home", async () => {
+    mockedLstat.mockRejectedValueOnce(Object.assign(new Error("missing"), { code: "ENOENT" }))
+    mockedRealpath
+      .mockResolvedValueOnce("/home/testuser" as never)
+      .mockResolvedValueOnce("/tmp/outside" as never)
 
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(400)
-      })
-    })
+    await rejectsWith(403, [{
+      type: "create-write",
+      filePath: "/home/testuser/project-link/new.ts",
+      content: "blocked",
+    }])
+    expect(mockedReadFile).not.toHaveBeenCalled()
+    expect(mockedWriteFile).not.toHaveBeenCalled()
+  })
 
-    it("rejects non-array operations", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({ operations: "not-array" })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+  it("applies a single reverse-edit operation", async () => {
+    mockedReadFile.mockResolvedValueOnce("say hello to everyone" as unknown as Buffer)
 
-      await handler(req, res, next)
-      sendBody()
+    const batch = await prepareFileOperations([{
+      type: "reverse-edit",
+      filePath: "/home/testuser/project/file.ts",
+      oldString: "hello",
+      newString: "world",
+    }])
+    await commitFileOperations(batch)
 
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(400)
-      })
-    })
+    expect(batch.operationCount).toBe(1)
+    expect(mockedWriteFile).toHaveBeenCalledWith(
+      "/home/testuser/project/file.ts",
+      "say world to everyone",
+      "utf-8",
+    )
+  })
 
-    it("rejects paths in forbidden system directories", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{ type: "create-write", filePath: "/etc/passwd", content: "test" }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+  it("applies replaceAll edits", async () => {
+    mockedReadFile.mockResolvedValueOnce("foo and foo and foo" as unknown as Buffer)
 
-      await handler(req, res, next)
-      sendBody()
+    const batch = await prepareFileOperations([{
+      type: "reverse-edit",
+      filePath: "/home/testuser/project/file.ts",
+      oldString: "foo",
+      newString: "bar",
+      replaceAll: true,
+    }])
+    await commitFileOperations(batch)
 
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-    })
+    expect(mockedWriteFile).toHaveBeenCalledWith(
+      "/home/testuser/project/file.ts",
+      "bar and bar and bar",
+      "utf-8",
+    )
+  })
 
-    it("rejects /usr/ system path", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{ type: "create-write", filePath: "/usr/bin/test", content: "x" }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
+  it("refuses an edit whose expected string is not unique", async () => {
+    mockedReadFile.mockResolvedValueOnce("foo and foo" as unknown as Buffer)
 
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-    })
-
-    it("rejects an in-home target that is itself a symbolic link", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "create-write",
-          filePath: "/home/testuser/project/escape.ts",
-          content: "blocked",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-      mockedLstat.mockResolvedValueOnce({ isSymbolicLink: () => true } as never)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-      expect(mockedReadFile).not.toHaveBeenCalled()
-      expect(mockedWriteFile).not.toHaveBeenCalled()
-    })
-
-    it("rejects an in-home path whose canonical target escapes home", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "reverse-edit",
-          filePath: "/home/testuser/project-link/outside.ts",
-          oldString: "before",
-          newString: "after",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-      mockedRealpath
-        .mockResolvedValueOnce("/home/testuser")
-        .mockResolvedValueOnce("/tmp/outside.ts")
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-      expect(mockedReadFile).not.toHaveBeenCalled()
-      expect(mockedWriteFile).not.toHaveBeenCalled()
-    })
-
-    it("rejects a new file beneath an in-home symlinked directory that escapes home", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "create-write",
-          filePath: "/home/testuser/project-link/new.ts",
-          content: "blocked",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-      const missingTarget = Object.assign(new Error("missing"), { code: "ENOENT" })
-      mockedLstat.mockRejectedValueOnce(missingTarget)
-      mockedRealpath
-        .mockResolvedValueOnce("/home/testuser")
-        .mockResolvedValueOnce("/tmp/outside")
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(403)
-      })
-      expect(mockedReadFile).not.toHaveBeenCalled()
-      expect(mockedWriteFile).not.toHaveBeenCalled()
-    })
-
-    it("applies a single reverse-edit operation", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "reverse-edit",
-          filePath: "/home/testuser/project/file.ts",
-          oldString: "hello",
-          newString: "world",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      mockedReadFile.mockResolvedValueOnce("say hello to everyone" as unknown as Buffer)
-      mockedWriteFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-      expect(response.applied).toBe(1)
-    })
-
-    it("applies replaceAll edits", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "reverse-edit",
-          filePath: "/home/testuser/project/file.ts",
-          oldString: "foo",
-          newString: "bar",
-          replaceAll: true,
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      mockedReadFile.mockResolvedValueOnce("foo and foo and foo" as unknown as Buffer)
-      mockedWriteFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-    })
-
-    it("returns 409 when string not found (conflict)", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "reverse-edit",
-          filePath: "/home/testuser/project/file.ts",
-          oldString: "missing-text",
-          newString: "replacement",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      mockedReadFile.mockResolvedValueOnce("some other content" as unknown as Buffer)
-      mockedWriteFile.mockResolvedValue(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(409)
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.error).toContain("Conflict")
-    })
-
-    it("returns 409 when multiple occurrences found for non-replaceAll edit", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "reverse-edit",
-          filePath: "/home/testuser/project/file.ts",
-          oldString: "dup",
-          newString: "unique",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      mockedReadFile.mockResolvedValueOnce("dup and dup again" as unknown as Buffer)
-      mockedWriteFile.mockResolvedValue(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(409)
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.error).toContain("expected exactly 1 occurrence")
-    })
-
-    it("handles create-write operation", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "create-write",
-          filePath: "/home/testuser/project/new.ts",
-          content: "new content",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      // File doesn't exist yet
-      mockedReadFile.mockRejectedValueOnce(new Error("ENOENT"))
-      mockedWriteFile.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-    })
-
-    it("handles delete-write operation", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const body = JSON.stringify({
-        operations: [{
-          type: "delete-write",
-          filePath: "/home/testuser/project/old.ts",
-        }],
-      })
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", body)
-
-      mockedReadFile.mockResolvedValueOnce("existing content" as unknown as Buffer)
-      mockedUnlink.mockResolvedValueOnce(undefined)
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res.end).toHaveBeenCalled()
-      })
-      const response = JSON.parse(res._getData())
-      expect(response.success).toBe(true)
-    })
-
-    it("calls next for non-POST methods", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const { req, res, next } = createMockReqRes("GET", "/api/undo/apply")
-
-      await handler(req, res, next)
-
-      expect(next).toHaveBeenCalled()
-    })
-
-    it("rejects invalid JSON body", async () => {
-      const handler = getRouteHandler(handlers, "/api/undo/apply")
-      const { req, res, next, sendBody } = createMockReqRes("POST", "/api/undo/apply", "not-json{{{")
-
-      await handler(req, res, next)
-      sendBody()
-
-      await vi.waitFor(() => {
-        expect(res._getStatus()).toBe(400)
-      })
-    })
+    await expect(prepareFileOperations([{
+      type: "reverse-edit",
+      filePath: "/home/testuser/project/file.ts",
+      oldString: "foo",
+      newString: "bar",
+    }])).rejects.toBeInstanceOf(UndoOperationError)
   })
 })

@@ -6,7 +6,7 @@ import {
   type ModelOption,
 } from "@/lib/utils"
 import type { PermissionMode } from "@/lib/permissions"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -30,6 +30,7 @@ import {
 import { AGENT_OPTIONS, friendlyModelName } from "./modelOptions"
 import { getPermissionModeOptions, type PermissionModeOption } from "./permissionOptions"
 import type { CommonSettingsControlProps, DropdownOption, McpServer } from "./types"
+import { capabilitiesFor } from "@/lib/agents"
 
 interface MobileControlProps {
   label: string
@@ -240,7 +241,7 @@ function MobileAdvancedControls({
   onMcpAuth,
   changeAndApply,
 }: MobileAdvancedControlsProps) {
-  const showWorktree = agentKind === "claude"
+  const { worktrees: showWorktree, ultracode: showUltracode } = capabilitiesFor(agentKind)
   const showMcp = Boolean(
     onToggleMcpServer &&
     onRefreshMcpServers &&
@@ -249,7 +250,7 @@ function MobileAdvancedControls({
   )
   const showAdvanced = Boolean(
     (showWorktree && isNewSession && onWorktreeEnabledChange) ||
-    (showWorktree && onUltracodeEnabledChange) ||
+    (showUltracode && onUltracodeEnabledChange) ||
     showMcp,
   )
   const selectedNames = new Set(selectedMcpServers ?? [])
@@ -277,7 +278,7 @@ function MobileAdvancedControls({
           </MobileControl>
         )}
 
-        {showWorktree && onUltracodeEnabledChange && (
+        {showUltracode && onUltracodeEnabledChange && (
           <MobileControl label="Workflow">
             <Button
               type="button"
@@ -482,7 +483,9 @@ export function MobileChatInputSettings({
 
             {!isNewSession && (
               <p className="text-xs text-muted-foreground">
-                {agentKind === "claude" ? "Changes apply live." : "Changes apply on the next turn."}
+                {capabilitiesFor(agentKind).settingsApply === "live"
+                  ? "Changes apply live."
+                  : "Changes apply on the next turn."}
               </p>
             )}
           </div>

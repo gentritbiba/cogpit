@@ -3,7 +3,7 @@
  * ordered and filtered. Kept free of React so it can be tested directly.
  */
 
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import { WORKING_STATUSES, isSessionActive } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "@/components/LiveSessions/types"
 import type {

@@ -1,11 +1,12 @@
 import type { ServerResponse } from "node:http"
-import { copilotRuntime, type CopilotRewindMode, type CopilotRuntime } from "../copilot-runtime"
-import { findJsonlPath, isCopilotFilePath } from "../helpers"
+import { copilotRuntime, type CopilotRewindMode, type CopilotRuntime } from "../agents/copilotTransport"
+import { storeFor } from "../agents"
+import { findJsonlPath } from "../sessionPaths"
 import { sendJson, type UseFn, withJsonBody } from "../http"
 
 type CopilotHistoryClient = Pick<
   CopilotRuntime,
-  "isSessionActive" | "resumeSession" | "destroySession" | "listRewindPoints" | "previewRewind" | "rewind"
+  "isSessionActive" | "resumeSession" | "destroySession" | "previewRewind" | "rewind"
 >
 
 async function ensureCopilotSession(
@@ -13,7 +14,7 @@ async function ensureCopilotSession(
   runtime: CopilotHistoryClient,
 ): Promise<"active" | "resumed" | null> {
   const filePath = await findJsonlPath(sessionId)
-  if (!filePath || !isCopilotFilePath(filePath)) return null
+  if (!filePath || !storeFor("copilot").ownsPath(filePath)) return null
   if (runtime.isSessionActive(sessionId)) return "active"
   await runtime.resumeSession(sessionId)
   return "resumed"
@@ -59,19 +60,6 @@ export function registerCopilotHistoryRoutes(
 ) {
   use("/api/copilot-history", (req, res, next) => {
     const url = req.url ?? ""
-    const listMatch = /^\/([^/?]+)$/.exec(url)
-    if (req.method === "GET" && listMatch) {
-      const sessionId = decodeURIComponent(listMatch[1])
-      void respondFromInspectedSession(
-        res,
-        sessionId,
-        runtime,
-        "Failed to list Copilot rewind points",
-        () => runtime.listRewindPoints(sessionId),
-      )
-      return
-    }
-
     const previewMatch = /^\/([^/?]+)\/preview$/.exec(url)
     if (req.method === "POST" && previewMatch) {
       const sessionId = decodeURIComponent(previewMatch[1])

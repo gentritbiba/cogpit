@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react"
-import type { ParsedSession, UndoState, Branch, Turn } from "@/lib/types"
+import type { ParsedSession, UndoState, Branch, Turn } from "../../shared/session/types"
 import type { SessionSource } from "./useLiveSession"
-import { parseSession } from "@/lib/parser"
+import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
+import { capabilitiesForDirName } from "@/lib/agents"
 import {
   buildUndoOperations,
   buildRedoFromArchived,
@@ -71,7 +72,8 @@ export function useUndoRedo(
     if (session.sessionId === sessionIdRef.current) return
     sessionIdRef.current = session.sessionId
 
-    if (session.agentKind === "copilot") {
+    // No persisted undo history to fetch when the CLI keeps none of its own.
+    if (!capabilitiesForDirName(sessionSource?.dirName).redo) {
       setUndoState(null)
       return
     }
@@ -169,7 +171,7 @@ export function useUndoRedo(
     const effectiveTarget = targetTurnIndex - 1
     if (effectiveTarget >= session.turns.length - 1 || effectiveTarget < -1) return
 
-    if (session.agentKind === "copilot") {
+    if (capabilitiesForDirName(sessionSource?.dirName).nativeRewind) {
       const turn = session.turns[targetTurnIndex]
       if (!turn) return
       const requestedSessionId = session.sessionId
@@ -234,7 +236,7 @@ export function useUndoRedo(
       summary: buildSummary(ops, session.turns.length - 1 - effectiveTarget),
       targetTurnIndex: effectiveTarget,
     })
-  }, [enabled, session])
+  }, [enabled, session, sessionSource?.dirName])
 
   // Request redo: restore the entire most recent branch
   const requestRedoAll = useCallback(() => {

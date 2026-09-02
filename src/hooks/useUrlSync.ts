@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback, useState, type Dispatch } from "react"
 import type { SessionState, SessionAction } from "./useSessionState"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../shared/session/types"
 import { loadSessionTailCached } from "@/lib/sessionLoader"
 import { getActiveDeviceId, LOCAL_DEVICE_ID, saveLastPath } from "@/lib/device"
 import { authFetch } from "@/lib/auth"
 import { previewSessionIdFromPath } from "@/lib/previewMode"
-import { isCopilotDirName, sessionUrlIdFromFileName } from "@/lib/sessionSource"
+import { fileNameFromUrlId, sessionUrlIdFromFileName } from "@/lib/agents"
 
 interface UseUrlSyncOpts {
   state: SessionState
@@ -60,8 +60,7 @@ function stripDevicePrefix(pathname: string): string {
 }
 
 function fileNameFromSessionId(dirName: string, sessionId: string): string {
-  if (isCopilotDirName(dirName)) return `${sessionId}/events.jsonl`
-  return sessionId.endsWith(".jsonl") ? sessionId : `${sessionId}.jsonl`
+  return fileNameFromUrlId(dirName, sessionId)
 }
 
 function stateToPath(state: SessionState): string {

@@ -26,13 +26,20 @@ vi.mock("../../config", async (importOriginal) => ({
 
 vi.mock("../../helpers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../helpers")>()),
-  findJsonlPath: mockFindJsonlPath,
-  resolveSessionFilePath: mockResolveSessionFilePath,
   getSessionMeta: mockGetSessionMeta,
 }))
 
+vi.mock("../../sessionPaths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../sessionPaths")>()),
+  findJsonlPath: mockFindJsonlPath,
+  resolveSessionFilePath: mockResolveSessionFilePath,
+}))
+
 import type { Middleware, UseFn } from "../../helpers"
-import { CODEX_SESSIONS_DIR, COPILOT_SESSIONS_DIR } from "../../sessionPaths"
+import { storeFor } from "../../agents"
+
+const CODEX_SESSIONS_DIR = storeFor("codex").sessionsRoot() as string
+const COPILOT_SESSIONS_DIR = storeFor("copilot").sessionsRoot() as string
 import { verifyPassword } from "../../password-utils"
 import { registerShareRoutes } from "../../routes/shares"
 import {

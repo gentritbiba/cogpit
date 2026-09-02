@@ -1,6 +1,7 @@
 import { sendJson, type UseFn } from "../http"
-import { findJsonlPath, readFile, readdir, join, dirs } from "../helpers"
-import { matchSubagentToMember } from "../helpers"
+import { readFile, readdir, join, dirs } from "../helpers"
+import { findJsonlPath } from "../sessionPaths"
+import { matchSubagentToMember } from "../lib/agentTeamIdentity"
 import { parseSession } from "../../shared/session/parser"
 import type {
   ParsedSession,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useTodoProgress } from "@/hooks/useTodoProgress"
-import type { ParsedSession, Turn, ToolCall } from "@/lib/types"
+import type { ParsedSession, Turn, ToolCall } from "../../../shared/session/types"
 
 function makeToolCall(overrides?: Partial<ToolCall>): ToolCall {
   return {

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from "react"
-import { parseSession, parseSessionAppend } from "@/lib/parser"
-import type { ParsedSession } from "@/lib/types"
+import { parseSession, parseSessionAppend } from "../../shared/session/parser"
+import type { ParsedSession } from "../../shared/session/types"
 import type { WorkerRequest, WorkerResponse } from "@/workers/session-parser.worker"
 
 type PendingRequest = {

@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { AgentKind } from "@/lib/sessionSource"
+import type { AgentKind } from "@/lib/agents"
 import { AGENT_OPTIONS } from "./modelOptions"
 import { DropdownOptionItem } from "./DropdownOptionItem"
 import type { DropdownOption } from "./types"

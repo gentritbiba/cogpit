@@ -5,7 +5,7 @@ import {
   supportsAutoPermissionMode,
 } from "@/lib/utils"
 import { useModelOptions } from "@/hooks/useModelOptions"
-import type { AgentKind } from "@/lib/sessionSource"
+import { DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
 import type { PermissionMode } from "@/lib/permissions"
 import { DesktopChatInputSettings } from "./settings/DesktopChatInputSettings"
 import { MobileChatInputSettings } from "./settings/MobileChatInputSettings"
@@ -56,7 +56,7 @@ export interface ChatInputSettingsProps {
 }
 
 export const ChatInputSettings = memo(function ChatInputSettings({
-  agentKind = "claude",
+  agentKind = DEFAULT_AGENT_KIND,
   onAgentKindChange,
   selectedModel,
   onModelChange,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import type { ParsedSession } from "@/lib/types"
+import type { ParsedSession } from "../../../shared/session/types"
 
 vi.mock("@/lib/auth", () => ({ authFetch: vi.fn() }))
 vi.mock("@/lib/sessionCache", () => ({

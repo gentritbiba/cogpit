@@ -9,7 +9,10 @@
  * not money actually spent; subscription plans bill separately.
  */
 
-export type UsageCostProvider = "claude" | "codex" | "copilot"
+import type { AgentKind } from "../session/types"
+
+/** Alias kept for the wire contract's own vocabulary; the set is the agent set. */
+export type UsageCostProvider = AgentKind
 
 /**
  * Why a bucket's cost is what it is.

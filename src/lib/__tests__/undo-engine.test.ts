@@ -12,7 +12,7 @@ import {
   createEmptyUndoState,
 } from "@/lib/undo-engine"
 import type { FileOperation } from "@/lib/undo-engine"
-import type { Branch, ArchivedTurn } from "@/lib/types"
+import type { Branch, ArchivedTurn } from "../../../shared/session/types"
 import {
   makeTurn,
   makeEditToolCall,

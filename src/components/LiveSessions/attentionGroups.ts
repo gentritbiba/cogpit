@@ -1,4 +1,4 @@
-import { sortSessionsByRecency } from "@/lib/sessionOrdering"
+import { sortSessionsByRecency } from "../../../shared/session-ordering"
 import { isSessionActive, WORKING_STATUSES } from "@/lib/sessionActivity"
 import type { ActiveSessionInfo, RunningProcess } from "./types"
 

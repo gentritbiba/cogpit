@@ -6,29 +6,26 @@ import {
 } from "../../../shared/session/sessionSearch"
 import {
   dirs,
-  encodeCopilotDirName,
-  encodeCodexDirName,
   getSessionMeta,
   getSessionStatus,
   isWithinDir,
   join,
-  projectDirToReadableName,
   readFile,
   readdir,
   searchSessionMessages,
-  shortNameFromPath,
   stat,
 } from "../../helpers"
+import { agentKindForDirName, projectDirNameFor } from "../../../shared/session/agent-descriptors"
+import { storeFor } from "../../agents"
 import type { NextFn } from "../../http"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getSessionPullRequests } from "../../lib/sessionPrIndex"
 import { getSessionPrSearchSnapshot } from "../../lib/sessionPrSearchIndex"
-import { getCodexSessionInventory } from "../../lib/codexSessionInventory"
-import { getCopilotSessionInventory } from "../../lib/copilotSessionInventory"
+import { getSessionInventory } from "../../lib/sessionInventory"
 import { RouteError, sendError, ErrorCodes } from "../../lib/routeError"
-import { readClaudeProjectEntries } from "./claudeProjectEntries"
-import { codexAppServer } from "../../codex-app-server"
-import { copilotRuntime } from "../../copilot-runtime"
+import { projectLabel } from "./projectLabel"
+import { codexAppServer } from "../../agents/codexAppServer"
+import { copilotRuntime } from "../../agents/copilotTransport"
 
 const DEFAULT_PER_PROJECT = 10
 const DEFAULT_TOTAL = 50
@@ -131,51 +128,29 @@ export async function handleActiveSessions(
   const projectFilter = url.searchParams.get("project")?.trim() || ""
 
   try {
-    const entries = await readClaudeProjectEntries()
-
     // First pass: collect all session files with their mtime (cheap stat only)
     const candidates: ActiveSessionCandidate[] = []
 
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name === "memory") continue
-      if (projectFilter && entry.name !== projectFilter) continue
-      const projectDir = join(dirs.PROJECTS_DIR, entry.name)
-
-      let files: string[]
-      try {
-        files = await readdir(projectDir)
-      } catch {
-        continue
-      }
-      const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"))
-
-      for (const f of jsonlFiles) {
-        const filePath = join(projectDir, f)
-        try {
-          const s = await stat(filePath)
-          candidates.push({
-            dirName: entry.name,
-            fileName: f,
-            filePath,
-            mtimeMs: s.mtimeMs,
-            size: s.size,
-          })
-        } catch { /* skip */ }
-      }
+    for (const file of await storeFor("claude").listSessionFiles()) {
+      if (!file.dirName) continue
+      if (projectFilter && file.dirName !== projectFilter) continue
+      candidates.push({
+        dirName: file.dirName,
+        fileName: file.fileName,
+        filePath: file.filePath,
+        mtimeMs: file.mtimeMs,
+        size: file.size,
+      })
     }
 
-    appendExternalCandidates(
-      candidates,
-      await getCodexSessionInventory(),
-      encodeCodexDirName,
-      projectFilter,
-    )
-    appendExternalCandidates(
-      candidates,
-      await getCopilotSessionInventory(),
-      encodeCopilotDirName,
-      projectFilter,
-    )
+    for (const kind of ["codex", "copilot"] as const) {
+      appendExternalCandidates(
+        candidates,
+        await getSessionInventory(kind),
+        (cwd) => projectDirNameFor(kind, cwd),
+        projectFilter,
+      )
+    }
 
     // Sort by mtime descending within each project, then pick top N per project
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -259,11 +234,7 @@ export async function handleActiveSessions(
         ])
         const references = indexedPullRequestData?.references ?? pullRequests
         const { meta, status: statusInfo } = cached
-        const shortName = c.dirName.startsWith("codex__")
-          ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Codex"} (Codex)`
-          : c.dirName.startsWith("copilot__")
-            ? `${meta.cwd ? shortNameFromPath(meta.cwd) : "Copilot"} (Copilot)`
-            : projectDirToReadableName(c.dirName).shortName
+        const shortName = projectLabel(c.dirName, meta.cwd)
         const lastModified = new Date(c.mtimeMs).toISOString()
 
         let matchedMessage: string | undefined
@@ -297,10 +268,10 @@ export async function handleActiveSessions(
           ? await resolveTeamLead(meta.teamName)
           : null
         const sessionId = c.sessionId || meta.sessionId || c.fileName.replace(".jsonl", "")
-        const isNativeCodexActive = c.dirName.startsWith("codex__")
-          && codexAppServer.getActiveTurnId(sessionId) !== undefined
-        const isCopilotActive = c.dirName.startsWith("copilot__")
-          && copilotRuntime.isTurnActive(sessionId)
+        const agentKind = agentKindForDirName(c.dirName)
+        const isRuntimeActive = agentKind === "codex"
+          ? codexAppServer.getActiveTurnId(sessionId) !== undefined
+          : agentKind === "copilot" && copilotRuntime.isTurnActive(sessionId)
         const hasRunningAgents = statusInfo.status === "awaiting_agents"
           && await hasFreshAgentTranscripts(c.filePath)
 
@@ -321,7 +292,7 @@ export async function handleActiveSessions(
           lastActivityAt: meta.lastTimestamp || lastModified,
           turnCount: meta.turnCount,
           size: c.size,
-          isActive: isNativeCodexActive || isCopilotActive || hasRunningAgents,
+          isActive: isRuntimeActive || hasRunningAgents,
           agentStatus: statusInfo.status,
           agentToolName: statusInfo.toolName,
           agentTerminalReason: statusInfo.terminalReason,

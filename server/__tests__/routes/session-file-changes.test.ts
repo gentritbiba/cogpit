@@ -2,8 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Stats } from "node:fs"
 
+vi.mock("../../sessionPaths", () => ({ findJsonlPath: vi.fn() }))
+
 vi.mock("../../helpers", () => ({
-  findJsonlPath: vi.fn(),
   readFile: vi.fn(),
   stat: vi.fn(),
   join: (...parts: string[]) => parts.join("/"),
@@ -14,7 +15,8 @@ vi.mock("../../helpers", () => ({
   },
 }))
 
-import { findJsonlPath, readFile, stat } from "../../helpers"
+import { readFile, stat } from "../../helpers"
+import { findJsonlPath } from "../../sessionPaths"
 import { parseSessionFileChanges, registerSessionFileChangesRoutes } from "../../routes/session-file-changes"
 import type { UseFn, Middleware } from "../../helpers"
 

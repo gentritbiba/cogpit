@@ -16,7 +16,8 @@ import { ProjectContextMenu } from "@/components/ProjectContextMenu"
 import { useProjectNames } from "@/hooks/useProjectNames"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime, projectName, shortPath } from "@/lib/format"
-import { agentKindFromDirName } from "@/lib/sessionSource"
+import { agentKindForDirName } from "@/lib/agents"
+import { agentProjectBadge } from "@/lib/agents/presentation"
 import { ErrorBanner, SearchInput, SkeletonRows } from "./DashboardWidgets"
 import { isRecentlyActive } from "./sessionPresentation"
 import type { ProjectInfo } from "./types"
@@ -135,10 +136,7 @@ export function ProjectsView({
               {filteredProjects.map((project, index) => {
                 const activeCount = activeCountByProject[project.dirName] || 0
                 const customName = projectNames[project.dirName]
-                const agentKind = agentKindFromDirName(project.dirName)
-                const providerLabel = agentKind === "claude"
-                  ? null
-                  : agentKind === "codex" ? "Codex" : "Copilot"
+                const providerLabel = agentProjectBadge(agentKindForDirName(project.dirName))
 
                 return (
                   <Fragment key={project.dirName}>

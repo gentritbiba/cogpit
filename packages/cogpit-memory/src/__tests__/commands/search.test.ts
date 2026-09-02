@@ -147,6 +147,38 @@ function writeSessionWithToolCalls(
   return filePath
 }
 
+/**
+ * A Codex rollout, nested by date the way the CLI writes them. Codex was absent
+ * from both the FTS index and the raw scan, so nothing here used to be findable.
+ */
+function writeCodexSession(
+  sessionId: string,
+  userMessage: string,
+  cwd = "/workspace/codex",
+): string {
+  const dir = join(mockDirs.CODEX_SESSIONS_DIR, "2026", "01", "01")
+  mkdirSync(dir, { recursive: true })
+  const filePath = join(dir, `rollout-2026-01-01T00-00-00-${sessionId}.jsonl`)
+  writeFileSync(filePath, [
+    JSON.stringify({
+      type: "session_meta",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: { id: sessionId, cwd },
+    }),
+    JSON.stringify({
+      type: "turn_context",
+      timestamp: "2026-01-01T00:00:00.500Z",
+      payload: { turn_id: "turn-1", cwd, model: "gpt-5.4" },
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      payload: { type: "user_message", message: userMessage },
+    }),
+  ].join("\n"))
+  return filePath
+}
+
 function writeCopilotSession(
   sessionId: string,
   userMessage: string,
@@ -266,6 +298,19 @@ describe("search command", () => {
       expect(resp.results.length).toBe(1)
       const userHit = resp.results[0].hits.find(h => h.location.includes("userMessage"))
       expect(userHit).toBeDefined()
+    })
+
+    it("finds a Codex rollout, which the scan used to skip entirely", async () => {
+      writeCodexSession(
+        "11111111-2222-3333-4444-555555555555",
+        "explain the rollout format",
+      )
+
+      const result = await searchSessions("rollout format", { maxAge: "3650d" }, null)
+      expect(result).not.toHaveProperty("error")
+      const resp = result as { results: Array<{ sessionId: string }> }
+      expect(resp.results.length).toBe(1)
+      expect(resp.results[0].sessionId).toBe("11111111-2222-3333-4444-555555555555")
     })
 
     it("finds matches in assistant messages", async () => {
@@ -458,6 +503,31 @@ describe("search command", () => {
       const resp = result as { totalHits: number; results: Array<{ sessionId: string }> }
       expect(resp.totalHits).toBeGreaterThan(0)
       expect(resp.results.length).toBeGreaterThan(0)
+
+      index.close()
+    })
+
+    it("indexes every agent's root, Codex included", async () => {
+      const dbPath = join(tmpDir, "all-agents.db")
+      const index = new SearchIndex(dbPath)
+
+      const projDir = join(mockDirs.PROJECTS_DIR, "-test-project")
+      mkdirSync(projDir, { recursive: true })
+      writeSession(projDir, "claude-one.jsonl", { userMessage: "shared-index-term claude" })
+      writeCodexSession("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "shared-index-term codex")
+      writeCopilotSession("cccccccc-dddd-eeee-ffff-000000000000", "shared-index-term copilot")
+
+      // No arguments: every configured root, which is the only form that
+      // reaches Codex.
+      index.buildFull()
+
+      const result = await searchSessions("shared-index-term", {}, index)
+      const resp = result as { results: Array<{ sessionId: string }> }
+      expect(resp.results.map((r) => r.sessionId).sort()).toEqual([
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "cccccccc-dddd-eeee-ffff-000000000000",
+        "claude-one",
+      ])
 
       index.close()
     })

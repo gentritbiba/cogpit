@@ -4,9 +4,9 @@ import {
   estimateVisibleOutputTokens,
   formatCost,
   CHARS_PER_TOKEN,
-} from "@/lib/token-costs"
+} from "../../../shared/session/token-costs"
 import { parseRateTable, priceTokenUsage } from "@/lib/usagePricing"
-import type { Turn } from "@/lib/types"
+import type { Turn } from "../../../shared/session/types"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
