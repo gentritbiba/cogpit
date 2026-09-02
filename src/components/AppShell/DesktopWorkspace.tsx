@@ -5,16 +5,10 @@ import { Button } from "@/components/ui/button"
 import { DisabledHint } from "@/components/ui/disabled-hint"
 import { ChatArea } from "@/components/ChatArea"
 import { FloatingChrome } from "@/components/FloatingChrome"
-import { FileChangesPanel } from "@/components/FileChangesPanel"
-import { HoverRevealPanel } from "@/components/HoverRevealPanel"
 import { SidebarHeader } from "@/components/SidebarHeader"
-import { StatsPanel } from "@/components/StatsPanel"
 import { TodoProgressPanel } from "@/components/TodoProgressPanel"
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable"
+import { DesktopWorkspacePanels } from "@/components/workspace-panels/DesktopWorkspacePanels"
+import { availableWorkspacePanels } from "@/components/workspace-panels/WorkspaceActivityBar"
 import { useAppContext } from "@/contexts/AppContext"
 import { useSessionContext } from "@/contexts/SessionContext"
 import { can } from "@/lib/capabilities"
@@ -23,6 +17,8 @@ import { isBuiltInEditorEnabled, openProject, revealInFolder } from "@/lib/fileO
 import { dirNameToPath } from "@/lib/format"
 import { shortcutLabel } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
+import type { ProjectPromptContext, WorkspacePanelContext } from "@/plugin-api"
+import { workspacePanels } from "@/plugins/registry"
 import { SessionInputFooter } from "./SessionInputFooter"
 import { NewSessionHeadline } from "./NewSessionHero"
 import {
@@ -41,7 +37,6 @@ import type { DesktopAppShellProps } from "./desktopTypes"
 
 const ConfigBrowser = lazy(() => import("@/components/ConfigBrowser").then((module) => ({ default: module.ConfigBrowser })))
 const PreviewPanel = lazy(() => import("@/components/PreviewPanel").then((module) => ({ default: module.PreviewPanel })))
-const ProjectFilesPanel = lazy(() => import("@/components/ProjectFilesPanel").then((module) => ({ default: module.ProjectFilesPanel })))
 
 type DesktopViewProps = Pick<
   DesktopAppShellProps,
@@ -49,60 +44,37 @@ type DesktopViewProps = Pick<
 >
 
 function DesktopSessionContent({
-  navigation,
   sessionView,
-  project,
   floatingChrome,
-}: DesktopViewProps & { floatingChrome: ReactNode }) {
-  const { state } = useAppContext()
+}: Pick<DesktopAppShellProps, "sessionView"> & { floatingChrome: ReactNode }) {
   const { session } = useSessionContext()
   if (!session) return null
 
   return (
     <div className="flex min-h-0 flex-1 bg-background">
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize={project.hasFileChanges && navigation.panels.showFileChanges ? 70 : 100} minSize="500px">
-          <div className="relative flex h-full min-h-0 flex-col">
-            {floatingChrome}
-            {sessionView.teamMembersBar && (
-              <div className="pt-10">{sessionView.teamMembersBar}</div>
-            )}
-            <ChatArea
-              searchInputRef={sessionView.searchInputRef}
-              hasTodos={Boolean(sessionView.todoProgress) && sessionView.todosExpanded}
-              hasMore={sessionView.hasMoreTurns}
-              isLoadingOlder={sessionView.isLoadingOlderTurns}
-              onLoadMore={sessionView.onLoadMoreTurns}
-            />
-            <SessionInputFooter floating>
-              {sessionView.todoProgress && (
-                <TodoProgressPanel
-                  progress={sessionView.todoProgress}
-                  expanded={sessionView.todosExpanded}
-                  onExpandedChange={sessionView.onTodosExpandedChange}
-                />
-              )}
-              {sessionView.activeComposer}
-            </SessionInputFooter>
-          </div>
-        </ResizablePanel>
-
-        {project.hasFileChanges && navigation.panels.showFileChanges && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              defaultSize={30}
-              minSize={0}
-              collapsible
-              onResize={sessionView.onFileChangesPanelResize}
-            >
-              {!sessionView.fileChangesCollapsed && (
-                <FileChangesPanel session={session} sessionChangeKey={state.sessionChangeKey} />
-              )}
-            </ResizablePanel>
-          </>
+      <div className="relative flex h-full min-h-0 flex-1 flex-col">
+        {floatingChrome}
+        {sessionView.teamMembersBar && (
+          <div className="pt-10">{sessionView.teamMembersBar}</div>
         )}
-      </ResizablePanelGroup>
+        <ChatArea
+          searchInputRef={sessionView.searchInputRef}
+          hasTodos={Boolean(sessionView.todoProgress) && sessionView.todosExpanded}
+          hasMore={sessionView.hasMoreTurns}
+          isLoadingOlder={sessionView.isLoadingOlderTurns}
+          onLoadMore={sessionView.onLoadMoreTurns}
+        />
+        <SessionInputFooter floating>
+          {sessionView.todoProgress && (
+            <TodoProgressPanel
+              progress={sessionView.todoProgress}
+              expanded={sessionView.todosExpanded}
+              onExpandedChange={sessionView.onTodosExpandedChange}
+            />
+          )}
+          {sessionView.activeComposer}
+        </SessionInputFooter>
+      </div>
     </div>
   )
 }
@@ -148,9 +120,7 @@ function DesktopMainView({
   if (view === "session") {
     return (
       <DesktopSessionContent
-        navigation={navigation}
         sessionView={sessionView}
-        project={project}
         floatingChrome={floatingChrome}
       />
     )
@@ -250,13 +220,7 @@ export function DesktopWorkspace({
     startLine,
     endLine,
     comment,
-  }: {
-    path: string
-    text?: string
-    startLine?: number
-    endLine?: number
-    comment?: string
-  }): void {
+  }: ProjectPromptContext): void {
     const context = formatProjectPromptContext({ path, text, startLine, endLine, comment })
     const current = sessionView.chatInputRef.current?.getText().trimEnd() ?? ""
     sessionView.chatInputRef.current?.setText(current ? `${current}\n\n${context}\n` : `${context}\n`)
@@ -281,15 +245,36 @@ export function DesktopWorkspace({
 
   const sidebarRendered = navigation.panels.showSidebar && state.mainView !== "config"
 
+  const panelContext: WorkspacePanelContext = {
+    session,
+    sessionChangeKey: state.sessionChangeKey,
+    projectPath: project.currentCwd ?? null,
+    hasFileChanges: project.hasFileChanges,
+    canAccessHostFiles: can("hostFiles"),
+  }
+  const visiblePanels = state.mainView === "config"
+    ? []
+    : availableWorkspacePanels(workspacePanels, panelContext)
+  const activePanel = visiblePanels.find(
+    (panel) => panel.id === navigation.panels.activeWorkspacePanel,
+  )
+
+  function toggleWorkspacePanel(panelId: string): void {
+    if (project.showPreview) project.onCloseRightWorkspace()
+    navigation.panels.toggleWorkspacePanel(panelId)
+  }
+
+  function openWorkspacePanel(panelId: string): void {
+    if (project.showPreview) project.onCloseRightWorkspace()
+    navigation.panels.openWorkspacePanel(panelId)
+  }
+
   const floatingChrome = (
     <FloatingChrome
       showSidebar={navigation.panels.showSidebar}
       sidebarRendered={sidebarRendered}
       sidebarShortcut={shortcutLabel("toggleSidebar")}
-      showStats={navigation.panels.showStats}
       showWorktrees={project.supportsWorktrees && navigation.panels.showWorktrees}
-      showFileChanges={navigation.panels.showFileChanges}
-      hasFileChanges={project.hasFileChanges}
       killing={chrome.killing}
       creatingSession={navigation.creatingSession}
       onNewSession={navigation.onStartNewSession}
@@ -299,9 +284,7 @@ export function DesktopWorkspace({
       onShowWorkflows={sessionView.onShowWorkflows}
       workflowCount={sessionView.workflowCount}
       onToggleSidebar={navigation.panels.handleToggleSidebar}
-      onToggleStats={navigation.panels.handleToggleStats}
       onToggleWorktrees={project.supportsWorktrees ? navigation.panels.handleToggleWorktrees : undefined}
-      onToggleFileChanges={navigation.panels.handleToggleFileChanges}
       showConfig={state.mainView === "config"}
       onToggleConfig={can("configWrite") ? navigation.panels.handleToggleConfig : undefined}
       showMission={state.mainView === "mission"}
@@ -319,34 +302,36 @@ export function DesktopWorkspace({
         </div>
       )}
 
-      <main className="app-view-transition relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* The session view hosts the chrome inside its transcript column so the
-            pills never sit on top of the file-changes panel beside it. The
-            chrome brings its own window-drag strip along. */}
-        {view !== "session" && floatingChrome}
-        <DesktopMainView
-          navigation={navigation}
-          sessionView={sessionView}
-          project={project}
-          view={view}
-          floatingChrome={floatingChrome}
-        />
-      </main>
-
-      <HoverRevealPanel
-        side="right"
-        visible={!project.showPreview && !project.showProjectFiles && navigation.panels.showStats && Boolean(session) && state.mainView !== "config"}
-        enabled={!project.showPreview && !project.showProjectFiles && Boolean(session) && state.mainView !== "config"}
+      <DesktopWorkspacePanels
+        panels={visiblePanels}
+        context={panelContext}
+        activePanel={activePanel ?? null}
+        services={{
+          projectFilesRoot: project.projectFilesRoot ?? project.currentCwd ?? null,
+          projectFilesRequest: project.projectFilesRequest,
+          backgroundAgents: project.backgroundAgents,
+          searchInputRef: sessionView.searchInputRef,
+          addProjectContext,
+          jumpToTurn: navigation.actions.handleJumpToTurn,
+          toggleServer: project.processPanel.handleToggleServer,
+          serversChanged: project.processPanel.handleServersChanged,
+          loadSession: navigation.handlers.handleLoadSessionScrollAware,
+        }}
+        onClosePanel={navigation.panels.closeWorkspacePanel}
+        onOpenPanel={openWorkspacePanel}
+        onTogglePanel={toggleWorkspacePanel}
       >
-        <StatsPanel
-          onJumpToTurn={navigation.actions.handleJumpToTurn}
-          onToggleServer={project.processPanel.handleToggleServer}
-          onServersChanged={project.processPanel.handleServersChanged}
-          searchInputRef={sessionView.searchInputRef}
-          onLoadSession={navigation.handlers.handleLoadSessionScrollAware}
-          backgroundAgents={project.backgroundAgents}
-        />
-      </HoverRevealPanel>
+        <main className="app-view-transition relative flex size-full min-w-0 flex-col overflow-hidden">
+          {view !== "session" && floatingChrome}
+          <DesktopMainView
+            navigation={navigation}
+            sessionView={sessionView}
+            project={project}
+            view={view}
+            floatingChrome={floatingChrome}
+          />
+        </main>
+      </DesktopWorkspacePanels>
 
       {project.showPreview && project.currentCwd && (
         <Suspense fallback={null}>
@@ -354,16 +339,6 @@ export function DesktopWorkspace({
         </Suspense>
       )}
 
-      {project.showProjectFiles && project.projectFilesRoot && (
-        <Suspense fallback={null}>
-          <ProjectFilesPanel
-            cwd={project.projectFilesRoot}
-            onClose={project.onCloseRightWorkspace}
-            onAddToPrompt={addProjectContext}
-            openRequest={project.projectFilesRequest}
-          />
-        </Suspense>
-      )}
     </div>
   )
 }

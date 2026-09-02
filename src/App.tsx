@@ -75,13 +75,13 @@ import { readOnlySessionNotice } from "@/lib/agents/presentation"
 import { LoginScreen } from "@/components/LoginScreen"
 import { BootstrapScreen } from "@/components/BootstrapScreen"
 import { useNetworkAuth } from "@/hooks/useNetworkAuth"
-import type { PanelSize } from "react-resizable-panels"
 import { AppProvider } from "@/contexts/AppContext"
 import { SessionProvider, type SessionContextValue, type SessionChatContextValue } from "@/contexts/SessionContext"
 import { useSessionInventory } from "@/contexts/SessionInventoryContext"
 import { StreamingOverlayProvider } from "@/contexts/StreamingOverlayContext"
 import { PtyProvider } from "@/contexts/PtyContext"
 import { isExternallyDrivenSession } from "@/lib/sessionControl"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 // Lazy-loaded components (only rendered when user opens them)
 const BranchModal = lazy(() => import("@/components/BranchModal").then(m => ({ default: m.BranchModal })))
@@ -152,6 +152,11 @@ export default function App() {
   const handleExpandAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: true }), [dispatch])
   const handleExpandToolPayloads = useCallback(() => dispatch({ type: "SET_EXPAND_TOOL_PAYLOADS", value: true }), [dispatch])
   const handleCollapseAll = useCallback(() => dispatch({ type: "SET_EXPAND_ALL", value: false }), [dispatch])
+  const toggleWorkspacePanel = panels.toggleWorkspacePanel
+  const handleToggleSessionInfo = useCallback(
+    () => toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo),
+    [toggleWorkspacePanel],
+  )
   const handleSelectProject = useCallback((dirName: string | null) => {
     startTransition(() => {
       dispatch({ type: "SET_DASHBOARD_PROJECT", dirName })
@@ -228,6 +233,9 @@ export default function App() {
     // Only the desktop shell mounts the file workspace; mobile open requests
     // fall through to the host editor.
     supportsFileWorkspace: !isMobile && hostFilesEnabled,
+    activeWorkspacePanel: panels.activeWorkspacePanel,
+    openWorkspacePanel: panels.openWorkspacePanel,
+    closeWorkspacePanel: panels.closeWorkspacePanel,
   })
 
   // TODO progress from session's TodoWrite tool calls
@@ -285,33 +293,24 @@ export default function App() {
   const setShowWorkflows = panels.setShowWorkflows
   const handleShowWorkflows = useCallback(() => setShowWorkflows(true), [setShowWorkflows])
 
-  // Track whether the file changes panel has been collapsed via drag
-  const [fileChangesCollapsed, setFileChangesCollapsed] = useState(false)
-  const handleFileChangesPanelResize = useCallback((size: PanelSize) => {
-    setFileChangesCollapsed(size.asPercentage === 0)
-  }, [])
-
   // Mobile file changes bottom sheet
   const [showMobileFileChanges, setShowMobileFileChanges] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
 
   // Force-show file changes panel when a file is clicked in TurnChangedFiles
-  const setShowFileChanges = panels.setShowFileChanges
+  const openWorkspacePanel = panels.openWorkspacePanel
   useEffect(() => {
     if (!hostFilesEnabled) return
     const handler = () => {
       if (isMobile) {
         setShowMobileFileChanges(true)
       } else {
-        startTransition(() => {
-          setShowFileChanges(true)
-          setFileChangesCollapsed(false)
-        })
+        openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
       }
     }
     window.addEventListener(FOCUS_FILE_EVENT, handler)
     return () => window.removeEventListener(FOCUS_FILE_EVENT, handler)
-  }, [hostFilesEnabled, setShowFileChanges, isMobile])
+  }, [hostFilesEnabled, openWorkspacePanel, isMobile])
 
   const transcriptInteraction = useMemo(
     () => state.session ? detectPendingInteraction(state.session) : null,
@@ -675,7 +674,7 @@ export default function App() {
     chatInputRef,
     dispatch,
     onToggleSidebar: panels.handleToggleSidebar,
-    onToggleRightSidebar: panels.handleToggleStats,
+    onToggleRightSidebar: handleToggleSessionInfo,
     onToggleMissionControl: panels.handleToggleMission,
     onOpenCommandPalette: handleOpenCommandPalette,
     onOpenProjectSwitcher: panels.handleOpenProjectSwitcher,
@@ -1122,7 +1121,9 @@ export default function App() {
   ))
 
   // Server discovery when StatsPanel is hidden — StatsPanel has its own BackgroundServers instance
-  const statsPanelVisible = isMobile ? state.mobileTab === "stats" : panels.showStats
+  const statsPanelVisible = isMobile
+    ? state.mobileTab === "stats"
+    : panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
   const backgroundServers = state.session && !statsPanelVisible && (
     <div className="hidden">
       <BackgroundServers
@@ -1255,8 +1256,6 @@ export default function App() {
             onBackToMain: handleBackToMain,
             onShowWorkflows: handleShowWorkflows,
             workflowCount: workflowBadgeCount,
-            fileChangesCollapsed,
-            onFileChangesPanelResize: handleFileChangesPanelResize,
           }}
           project={{
             processPanel,

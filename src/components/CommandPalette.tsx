@@ -269,7 +269,7 @@ export function CommandPalette(props: CommandPaletteProps) {
     ),
     props.hasSession && action(
       "toggle-stats",
-      props.showStats ? "Hide session analytics" : "Show session analytics",
+      props.showStats ? "Hide session details" : "Show session details",
       "stats tokens usage panel",
       BarChart3,
       props.onToggleStats,

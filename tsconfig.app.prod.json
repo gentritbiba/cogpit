@@ -3,6 +3,9 @@
   "exclude": [
     "src/**/__tests__/**",
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/**/*.test.tsx",
+    "plugins/**/__tests__/**",
+    "plugins/**/*.test.ts",
+    "plugins/**/*.test.tsx"
   ]
 }

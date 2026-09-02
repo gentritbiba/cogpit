@@ -28,6 +28,7 @@ import { useSessionContext } from "@/contexts/SessionContext"
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface StatsPanelProps {
+  embedded?: boolean
   onJumpToTurn?: (turnIndex: number, toolCallId?: string) => void
   onToggleServer?: (id: string, outputPath: string, title: string) => void
   onServersChanged?: (servers: { id: string; outputPath: string; title: string }[]) => void
@@ -85,6 +86,7 @@ function SearchHeader({ searchInputRef }: SearchHeaderProps): React.JSX.Element 
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export const StatsPanel = memo(function StatsPanel({
+  embedded = false,
   onJumpToTurn,
   onToggleServer,
   onServersChanged,
@@ -100,7 +102,11 @@ export const StatsPanel = memo(function StatsPanel({
   return (
     <aside className={cn(
       "h-full min-h-0 shrink-0 overflow-y-auto bg-background",
-      isMobile ? "mobile-scroll w-full flex-1" : "view-transition-right-panel panel-enter-right w-[320px] border-l"
+      isMobile
+        ? "mobile-scroll w-full flex-1"
+        : embedded
+          ? "w-full"
+          : "view-transition-right-panel panel-enter-right w-[320px] border-l",
     )}>
       {searchInputRef && (
         <SearchHeader

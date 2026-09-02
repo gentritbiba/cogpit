@@ -20,12 +20,6 @@ vi.mock("@/contexts/SessionContext", () => ({
   useSessionContext: contextMocks.useSessionContext,
 }))
 
-vi.mock("@/components/HoverRevealPanel", () => ({
-  HoverRevealPanel: ({ side, children }: { side: string; children: ReactNode }) => (
-    <section data-testid={`${side}-panel`}>{children}</section>
-  ),
-}))
-
 vi.mock("@/components/session-browser", () => ({
   SessionBrowser: ({ activeSessionKey, header }: { activeSessionKey: string | null; header?: ReactNode }) => (
     <div data-testid="session-browser">
@@ -156,15 +150,15 @@ function makeProps(
     navigation: {
       panels: {
         showSidebar: true,
-        showStats: false,
         showWorktrees: false,
-        showFileChanges: true,
+        activeWorkspacePanel: null,
         showProjectSwitcher: false,
         showThemeSelector: false,
         handleToggleSidebar: vi.fn(),
-        handleToggleStats: vi.fn(),
         handleToggleWorktrees: vi.fn(),
-        handleToggleFileChanges: vi.fn(),
+        toggleWorkspacePanel: vi.fn(),
+        openWorkspacePanel: vi.fn(),
+        closeWorkspacePanel: vi.fn(),
         handleToggleConfig: vi.fn(),
         handleToggleMission: vi.fn(),
         handleOpenProjectSwitcher: vi.fn(),
@@ -209,8 +203,6 @@ function makeProps(
       onBackToMain: vi.fn(),
       onShowWorkflows: vi.fn(),
       workflowCount: 0,
-      fileChangesCollapsed: false,
-      onFileChangesPanelResize: vi.fn(),
     },
     project: {
       processPanel: {
@@ -329,6 +321,28 @@ describe("DesktopWorkspace", () => {
     render(<DesktopWorkspace {...props} />)
 
     expect(screen.queryByTestId("session-browser")).not.toBeInTheDocument()
+  })
+
+  it("shows one active workspace panel behind the right activity rail", () => {
+    setContexts({ session: makeSession() })
+    const props = makeProps()
+    props.project.currentCwd = "/workspace/current"
+    props.project.hasFileChanges = true
+    props.navigation.panels.activeWorkspacePanel = "cogpit.file-changes"
+
+    const { rerender } = render(<DesktopWorkspace {...props} />)
+
+    expect(screen.getByRole("button", { name: "Project files" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "File changes" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Session details" })).toBeInTheDocument()
+    expect(screen.getByTestId("file-changes")).toBeInTheDocument()
+    expect(screen.queryByTestId("stats-panel")).not.toBeInTheDocument()
+
+    props.navigation.panels.activeWorkspacePanel = "cogpit.session-info"
+    rerender(<DesktopWorkspace {...props} />)
+
+    expect(screen.queryByTestId("file-changes")).not.toBeInTheDocument()
+    expect(screen.getByTestId("stats-panel")).toBeInTheDocument()
   })
 
 })

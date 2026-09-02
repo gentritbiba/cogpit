@@ -3,7 +3,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import ts from "typescript"
 
 const root = resolve(import.meta.dir, "..")
-const sourceRoots = ["shared", "src", "server", "electron", "packages/cogpit-memory/src"] as const
+const sourceRoots = ["shared", "src", "plugins", "server", "electron", "packages/cogpit-memory/src"] as const
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts"])
 const emittedExtensions = new Set([".js", ".jsx", ".mjs", ".cjs"])
 
@@ -101,9 +101,10 @@ function resolveLocalImport(source: string, specifier: string, files: Set<string
   return candidates.find((candidate) => files.has(candidate)) ?? null
 }
 
-function layer(path: string): "shared" | "src" | "server" | "electron" | "package" | null {
+function layer(path: string): "shared" | "src" | "plugin" | "server" | "electron" | "package" | null {
   if (path.startsWith("shared/")) return "shared"
   if (path.startsWith("src/")) return "src"
+  if (path.startsWith("plugins/")) return "plugin"
   if (path.startsWith("server/")) return "server"
   if (path.startsWith("electron/")) return "electron"
   if (path.startsWith("packages/")) return "package"
@@ -115,6 +116,14 @@ function isForbiddenCrossLayerEdge(edge: Edge): boolean {
   const targetLayer = layer(edge.target)
   if (!sourceLayer || !targetLayer || sourceLayer === targetLayer) return false
 
+  if (sourceLayer === "plugin") {
+    return targetLayer !== "plugin"
+      && targetLayer !== "shared"
+      && !edge.target.startsWith("src/plugin-api/")
+  }
+  if (targetLayer === "plugin") {
+    return edge.source !== "src/plugins/registry.ts"
+  }
   if (targetLayer === "shared") return false
   if (sourceLayer === "shared") return true
   if (sourceLayer === "package") return targetLayer !== "package"

@@ -9,6 +9,7 @@ import {
   type FileOpenTarget,
   type ProjectRef,
 } from "@/lib/fileOpener"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 interface UseProjectWorkspaceOptions {
   sessionId: string | null | undefined
@@ -22,6 +23,9 @@ interface UseProjectWorkspaceOptions {
    * decline built-in open requests so they fall through to the host editor.
    */
   supportsFileWorkspace: boolean
+  activeWorkspacePanel: string | null
+  openWorkspacePanel: (panelId: string) => void
+  closeWorkspacePanel: () => void
 }
 
 type RightWorkspace =
@@ -47,6 +51,9 @@ export function useProjectWorkspace({
   pendingDirName,
   dashboardProject,
   supportsFileWorkspace,
+  activeWorkspacePanel,
+  openWorkspacePanel,
+  closeWorkspacePanel,
 }: UseProjectWorkspaceOptions) {
   const processPanel = useProcessPanel(sessionId)
   const [rightWorkspace, setRightWorkspace] = useState<RightWorkspace | null>(null)
@@ -122,21 +129,27 @@ export function useProjectWorkspace({
   const handleTogglePreview = useCallback(() => {
     if (!currentCwd) return
     startTransition(() => {
+      closeWorkspacePanel()
       setRightWorkspace(showPreview ? null : { kind: "preview", cwd: currentCwd })
     })
-  }, [currentCwd, showPreview])
+  }, [closeWorkspacePanel, currentCwd, showPreview])
 
   const handleToggleProjectFiles = useCallback(() => {
     if (!currentCwd) return
+    if (activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles) {
+      closeWorkspacePanel()
+      return
+    }
     startTransition(() => {
-      setRightWorkspace(projectFiles ? null : {
+      setRightWorkspace({
         kind: "project-files",
         root: currentCwd,
         anchorCwd: currentCwd,
         request: null,
       })
+      openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles)
     })
-  }, [currentCwd, projectFiles])
+  }, [activeWorkspacePanel, closeWorkspacePanel, currentCwd, openWorkspacePanel])
 
   /** Serve an "open in editor" request from the built-in file workspace. */
   const openInFileWorkspace = useCallback((target: FileOpenTarget): boolean => {
@@ -153,8 +166,9 @@ export function useProjectWorkspace({
         ? { file: resolved.file, mode: resolved.mode, line: resolved.line, token }
         : null,
     }))
+    openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles)
     return true
-  }, [currentCwd, supportsFileWorkspace])
+  }, [currentCwd, openWorkspacePanel, supportsFileWorkspace])
 
   useEffect(() => registerBuiltInFileOpener(openInFileWorkspace), [openInFileWorkspace])
 
@@ -166,7 +180,9 @@ export function useProjectWorkspace({
     processPanel,
     currentCwd,
     showPreview,
-    showProjectFiles: projectFiles !== null,
+    showProjectFiles: Boolean(
+      currentCwd && activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles,
+    ),
     projectFilesRoot: projectFiles?.root,
     projectFilesRequest: projectFiles?.request ?? null,
     launchTerminalRequest,

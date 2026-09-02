@@ -5,7 +5,6 @@ import type {
   RefObject,
   SetStateAction,
 } from "react"
-import type { PanelSize } from "react-resizable-panels"
 import type { ChatInputHandle } from "@/components/ChatInput"
 import type { BgAgent } from "@/hooks/useBackgroundAgents"
 import type { useAppHandlers } from "@/hooks/useAppHandlers"
@@ -19,15 +18,15 @@ import type { BuiltInEditorRequest, ProjectRef } from "@/lib/fileOpener"
 export type DesktopPanels = Pick<
   ReturnType<typeof usePanelState>,
   | "showSidebar"
-  | "showStats"
   | "showWorktrees"
-  | "showFileChanges"
+  | "activeWorkspacePanel"
   | "showProjectSwitcher"
   | "showThemeSelector"
   | "handleToggleSidebar"
-  | "handleToggleStats"
   | "handleToggleWorktrees"
-  | "handleToggleFileChanges"
+  | "toggleWorkspacePanel"
+  | "openWorkspacePanel"
+  | "closeWorkspacePanel"
   | "handleToggleConfig"
   | "handleToggleMission"
   | "handleOpenProjectSwitcher"
@@ -96,8 +95,6 @@ export interface DesktopSessionView {
   onBackToMain: () => void
   onShowWorkflows: () => void
   workflowCount: number
-  fileChangesCollapsed: boolean
-  onFileChangesPanelResize: (size: PanelSize) => void
 }
 
 export interface DesktopProject {

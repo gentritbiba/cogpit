@@ -5,6 +5,7 @@
 import { useState, useCallback, startTransition } from "react"
 import { useLocalStorage } from "./useLocalStorage"
 import type { SessionState, SessionAction } from "./useSessionState"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 /**
  * Panel visibility survives a relaunch. Values come back from localStorage
@@ -31,18 +32,18 @@ function usePersistedFlag(key: string, defaultValue: boolean) {
 
 interface PanelState {
   showSidebar: boolean
-  showStats: boolean
   showWorktrees: boolean
   showWorkflows: boolean
-  showFileChanges: boolean
+  activeWorkspacePanel: string | null
   showProjectSwitcher: boolean
   showThemeSelector: boolean
 
   handleToggleSidebar: () => void
-  handleToggleStats: () => void
   handleToggleWorktrees: () => void
   handleToggleWorkflows: () => void
-  handleToggleFileChanges: () => void
+  toggleWorkspacePanel: (panelId: string) => void
+  openWorkspacePanel: (panelId: string) => void
+  closeWorkspacePanel: () => void
   handleToggleConfig: () => void
   handleToggleMission: () => void
   handleEditConfig: (filePath: string) => void
@@ -54,7 +55,21 @@ interface PanelState {
   setShowSidebar: React.Dispatch<React.SetStateAction<boolean>>
   setShowWorktrees: React.Dispatch<React.SetStateAction<boolean>>
   setShowWorkflows: React.Dispatch<React.SetStateAction<boolean>>
-  setShowFileChanges: React.Dispatch<React.SetStateAction<boolean>>
+}
+
+function initialWorkspacePanel(): string | null {
+  if (typeof window === "undefined") return BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges
+  try {
+    if (JSON.parse(localStorage.getItem("panel-stats-visible") ?? "false") === true) {
+      return BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo
+    }
+    if (JSON.parse(localStorage.getItem("panel-file-changes-visible") ?? "true") === false) {
+      return null
+    }
+  } catch {
+    // Ignore corrupt legacy state and use the shipped default.
+  }
+  return BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges
 }
 
 export function usePanelState(
@@ -62,10 +77,15 @@ export function usePanelState(
   dispatch: React.Dispatch<SessionAction>,
 ): PanelState {
   const [showSidebar, setShowSidebar] = usePersistedFlag("panel-sidebar-visible", true)
-  const [showStats, setShowStats] = usePersistedFlag("panel-stats-visible", false)
   const [showWorktrees, setShowWorktrees] = usePersistedFlag("panel-worktrees-visible", false)
   const [showWorkflows, setShowWorkflows] = usePersistedFlag("panel-workflows-visible", false)
-  const [showFileChanges, setShowFileChanges] = usePersistedFlag("panel-file-changes-visible", true)
+  const [storedWorkspacePanel, setStoredWorkspacePanel] = useLocalStorage<string | null>(
+    "workspace-panel-active",
+    initialWorkspacePanel(),
+  )
+  const activeWorkspacePanel = typeof storedWorkspacePanel === "string" || storedWorkspacePanel === null
+    ? storedWorkspacePanel
+    : initialWorkspacePanel()
   // Project switcher and theme selector are transient overlays, not layout.
   const [showProjectSwitcher, setShowProjectSwitcher] = useState(false)
   const [showThemeSelector, setShowThemeSelector] = useState(false)
@@ -73,14 +93,19 @@ export function usePanelState(
   const handleToggleSidebar = useCallback(() => {
     startTransition(() => setShowSidebar(!showSidebar))
   }, [setShowSidebar, showSidebar])
-  const handleToggleStats = useCallback(() => {
-    startTransition(() => setShowStats(!showStats))
-  }, [setShowStats, showStats])
   const handleToggleWorktrees = useCallback(() => setShowWorktrees((p) => !p), [setShowWorktrees])
   const handleToggleWorkflows = useCallback(() => setShowWorkflows((p) => !p), [setShowWorkflows])
-  const handleToggleFileChanges = useCallback(() => {
-    startTransition(() => setShowFileChanges(!showFileChanges))
-  }, [setShowFileChanges, showFileChanges])
+  const toggleWorkspacePanel = useCallback((panelId: string) => {
+    startTransition(() => {
+      setStoredWorkspacePanel((current) => current === panelId ? null : panelId)
+    })
+  }, [setStoredWorkspacePanel])
+  const openWorkspacePanel = useCallback((panelId: string) => {
+    startTransition(() => setStoredWorkspacePanel(panelId))
+  }, [setStoredWorkspacePanel])
+  const closeWorkspacePanel = useCallback(() => {
+    startTransition(() => setStoredWorkspacePanel(null))
+  }, [setStoredWorkspacePanel])
   const handleToggleConfig = useCallback(() => {
     const closing = state.mainView === "config"
     startTransition(() => {
@@ -105,17 +130,17 @@ export function usePanelState(
 
   return {
     showSidebar,
-    showStats,
     showWorktrees,
     showWorkflows,
-    showFileChanges,
+    activeWorkspacePanel,
     showProjectSwitcher,
     showThemeSelector,
     handleToggleSidebar,
-    handleToggleStats,
     handleToggleWorktrees,
     handleToggleWorkflows,
-    handleToggleFileChanges,
+    toggleWorkspacePanel,
+    openWorkspacePanel,
+    closeWorkspacePanel,
     handleToggleConfig,
     handleToggleMission,
     handleEditConfig,
@@ -126,6 +151,5 @@ export function usePanelState(
     setShowSidebar,
     setShowWorktrees,
     setShowWorkflows,
-    setShowFileChanges,
   }
 }

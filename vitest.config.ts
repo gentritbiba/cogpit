@@ -14,6 +14,8 @@ export default defineConfig({
     include: [
       "src/**/*.test.ts",
       "src/**/*.test.tsx",
+      "plugins/**/*.test.ts",
+      "plugins/**/*.test.tsx",
       "server/**/*.test.ts",
       "electron/**/*.test.ts",
     ],

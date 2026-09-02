@@ -1,7 +1,7 @@
 {
   "name": "cogpit",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Control center for Claude Code, OpenAI Codex, and GitHub Copilot CLI sessions",
   "license": "MIT",
   "author": {
@@ -111,11 +111,11 @@
   "overrides": {
     "@babel/core": "7.29.7",
     "@hono/node-server": "1.19.15",
-    "@xmldom/xmldom": "0.8.13",
+    "@xmldom/xmldom": "0.9.12",
     "app-builder-lib": "26.15.3",
     "body-parser": "2.3.0",
     "builder-util-runtime": "9.7.0",
-    "fast-uri": "3.1.5",
+    "fast-uri": "4.1.4",
     "flatted": "3.4.2",
     "form-data": "4.0.6",
     "hono": "4.13.1",
@@ -124,7 +124,7 @@
     "lodash": "4.18.1",
     "nanoid": "3.3.18",
     "postcss": "8.5.26",
-    "qs": "6.15.3",
+    "qs": "6.16.0",
     "tar": "7.5.21",
     "tmp": "0.2.7",
     "undici": "7.29.0"

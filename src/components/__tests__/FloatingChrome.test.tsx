@@ -67,7 +67,6 @@ vi.mock("@/components/UsageCostDialog", () => ({
 const PROPS = {
   showSidebar: true,
   sidebarShortcut: "\u2318B",
-  showStats: false,
   killing: false,
   creatingSession: false,
   onNewSession: vi.fn(),
@@ -77,7 +76,6 @@ const PROPS = {
   onShowWorkflows: vi.fn(),
   workflowCount: 0,
   onToggleSidebar: vi.fn(),
-  onToggleStats: vi.fn(),
   onKillAll: vi.fn(),
   onOpenSettings: vi.fn(),
 }

@@ -5,14 +5,11 @@ import {
   ChartColumn,
   Check,
   ChevronRight,
-  FileCode2,
   GitBranch,
   Globe,
   LayoutGrid,
   MoreHorizontal,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Settings,
   Skull,
   SlidersHorizontal,
@@ -65,10 +62,7 @@ interface FloatingChromeProps {
    */
   sidebarRendered?: boolean
   sidebarShortcut: string
-  showStats: boolean
   showWorktrees?: boolean
-  showFileChanges?: boolean
-  hasFileChanges?: boolean
   killing: boolean
   creatingSession: boolean
   onNewSession: (dirName: string, cwd?: string) => void
@@ -78,9 +72,7 @@ interface FloatingChromeProps {
   onShowWorkflows?: () => void
   workflowCount?: number
   onToggleSidebar: () => void
-  onToggleStats: () => void
   onToggleWorktrees?: () => void
-  onToggleFileChanges?: () => void
   onKillAll: () => void
   onOpenSettings: () => void
   showConfig?: boolean
@@ -100,10 +92,7 @@ export const FloatingChrome = memo(function FloatingChrome({
   showSidebar,
   sidebarRendered = showSidebar,
   sidebarShortcut,
-  showStats,
   showWorktrees,
-  showFileChanges,
-  hasFileChanges,
   killing,
   creatingSession,
   onNewSession,
@@ -113,9 +102,7 @@ export const FloatingChrome = memo(function FloatingChrome({
   onShowWorkflows,
   workflowCount,
   onToggleSidebar,
-  onToggleStats,
   onToggleWorktrees,
-  onToggleFileChanges,
   onKillAll,
   onOpenSettings,
   showConfig,
@@ -280,20 +267,6 @@ export const FloatingChrome = memo(function FloatingChrome({
                       <GitBranch />
                       Worktrees
                       {showWorktrees && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  )}
-                  {hasFileChanges && onToggleFileChanges && (
-                    <DropdownMenuItem onClick={onToggleFileChanges}>
-                      <FileCode2 />
-                      File changes
-                      {showFileChanges && <Check className="ml-auto" />}
-                    </DropdownMenuItem>
-                  )}
-                  {session && (
-                    <DropdownMenuItem onClick={onToggleStats}>
-                      {showStats ? <PanelRightClose /> : <PanelRightOpen />}
-                      Session details
-                      {showStats && <Check className="ml-auto" />}
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuGroup>

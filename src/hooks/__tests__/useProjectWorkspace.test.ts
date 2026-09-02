@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react"
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -32,6 +33,17 @@ const baseOptions = {
   supportsFileWorkspace: true,
 }
 
+function useTestWorkspace(options: typeof baseOptions) {
+  const [activeWorkspacePanel, setActiveWorkspacePanel] = useState<string | null>(null)
+  const closeWorkspacePanel = useCallback(() => setActiveWorkspacePanel(null), [])
+  return useProjectWorkspace({
+    ...options,
+    activeWorkspacePanel,
+    openWorkspacePanel: setActiveWorkspacePanel,
+    closeWorkspacePanel,
+  })
+}
+
 describe("useProjectWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -42,7 +54,7 @@ describe("useProjectWorkspace", () => {
   afterEach(() => __resetFileOpenerForTest())
 
   it("opens a native terminal with the authoritative session path and project", () => {
-    const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+    const { result } = renderHook(() => useTestWorkspace(baseOptions))
 
     act(() => result.current.handleOpenTerminal())
 
@@ -55,7 +67,7 @@ describe("useProjectWorkspace", () => {
 
   it("keeps native terminal and MCP auth actions local-only", () => {
     mockIsRemoteDeviceActive.mockReturnValue(true)
-    const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+    const { result } = renderHook(() => useTestWorkspace(baseOptions))
 
     act(() => {
       result.current.handleOpenTerminal()
@@ -66,7 +78,7 @@ describe("useProjectWorkspace", () => {
   })
 
   it("launches MCP authentication in the resolved project", () => {
-    const { result } = renderHook(() => useProjectWorkspace({
+    const { result } = renderHook(() => useTestWorkspace({
       ...baseOptions,
       sessionCwd: null,
       sessionDirName: null,
@@ -86,7 +98,7 @@ describe("useProjectWorkspace", () => {
   })
 
   it("exposes the pending project without borrowing active-session state", () => {
-    const { result } = renderHook(() => useProjectWorkspace({
+    const { result } = renderHook(() => useTestWorkspace({
       ...baseOptions,
       sessionCwd: null,
       sessionDirName: null,
@@ -101,7 +113,7 @@ describe("useProjectWorkspace", () => {
   })
 
   it("requests a terminal when none exists, then toggles the latest terminal", () => {
-    const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+    const { result } = renderHook(() => useTestWorkspace(baseOptions))
 
     act(() => result.current.handleToggleIntegratedTerminal())
     expect(result.current.launchTerminalRequest).toBe(1)
@@ -125,7 +137,7 @@ describe("useProjectWorkspace", () => {
   })
 
   it("does not request an integrated terminal without a real cwd", () => {
-    const { result } = renderHook(() => useProjectWorkspace({
+    const { result } = renderHook(() => useTestWorkspace({
       ...baseOptions,
       sessionCwd: null,
       pendingPath: null,
@@ -139,9 +151,9 @@ describe("useProjectWorkspace", () => {
     expect(result.current.launchTerminalRequest).toBe(0)
   })
 
-  it("scopes preview and project-files panes to the current cwd", () => {
+  it("keeps preview and workspace panels mutually exclusive across projects", () => {
     const { result, rerender } = renderHook(
-      (options: typeof baseOptions) => useProjectWorkspace(options),
+      (options: typeof baseOptions) => useTestWorkspace(options),
       { initialProps: baseOptions },
     )
 
@@ -155,7 +167,7 @@ describe("useProjectWorkspace", () => {
 
     rerender({ ...baseOptions, sessionCwd: "/other-repo" })
     expect(result.current.showPreview).toBe(false)
-    expect(result.current.showProjectFiles).toBe(false)
+    expect(result.current.showProjectFiles).toBe(true)
 
     act(() => result.current.handleTogglePreview())
     expect(result.current.showPreview).toBe(true)
@@ -165,7 +177,7 @@ describe("useProjectWorkspace", () => {
 
   describe("built-in file workspace", () => {
     it("opens a project file in place, without touching the host editor", () => {
-      const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+      const { result } = renderHook(() => useTestWorkspace(baseOptions))
       setBuiltInEditorEnabled(true)
 
       act(() => openFile("/repo/src/app.ts", { line: 12 }))
@@ -182,7 +194,7 @@ describe("useProjectWorkspace", () => {
     })
 
     it("opens a git diff in the workspace", () => {
-      const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+      const { result } = renderHook(() => useTestWorkspace(baseOptions))
       setBuiltInEditorEnabled(true)
 
       act(() => openFile("/repo/src/app.ts", { mode: "diff" }))
@@ -194,7 +206,7 @@ describe("useProjectWorkspace", () => {
     })
 
     it("issues a fresh token for every request so repeat opens still apply", () => {
-      const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+      const { result } = renderHook(() => useTestWorkspace(baseOptions))
       setBuiltInEditorEnabled(true)
 
       act(() => openFile("/repo/src/app.ts"))
@@ -204,19 +216,18 @@ describe("useProjectWorkspace", () => {
     })
 
     it("browses the containing directory for files outside the project", () => {
-      const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+      const { result } = renderHook(() => useTestWorkspace(baseOptions))
       setBuiltInEditorEnabled(true)
 
       act(() => openFile("/home/me/.claude/skills/commit/SKILL.md"))
 
       expect(result.current.projectFilesRoot).toBe("/home/me/.claude/skills/commit")
       expect(result.current.projectFilesRequest).toMatchObject({ file: "SKILL.md" })
-      // Anchored to the active project, so switching sessions hides it.
       expect(result.current.showProjectFiles).toBe(true)
     })
 
     it("opens a project with no file selected", () => {
-      const { result } = renderHook(() => useProjectWorkspace(baseOptions))
+      const { result } = renderHook(() => useTestWorkspace(baseOptions))
       setBuiltInEditorEnabled(true)
 
       act(() => openProject({ path: "/repo", dirName: "-repo" }))
@@ -225,9 +236,9 @@ describe("useProjectWorkspace", () => {
       expect(result.current.projectFilesRequest).toBeNull()
     })
 
-    it("hides the workspace once another project becomes active", () => {
+    it("keeps the workspace selected while repointing it to another project", () => {
       const { result, rerender } = renderHook(
-        (options: typeof baseOptions) => useProjectWorkspace(options),
+        (options: typeof baseOptions) => useTestWorkspace(options),
         { initialProps: baseOptions },
       )
       setBuiltInEditorEnabled(true)
@@ -236,12 +247,12 @@ describe("useProjectWorkspace", () => {
       expect(result.current.showProjectFiles).toBe(true)
 
       rerender({ ...baseOptions, sessionCwd: "/other-repo" })
-      expect(result.current.showProjectFiles).toBe(false)
+      expect(result.current.showProjectFiles).toBe(true)
       expect(result.current.projectFilesRoot).toBeUndefined()
     })
 
     it("defers to the host editor in shells without a file workspace", () => {
-      const { result } = renderHook(() => useProjectWorkspace({
+      const { result } = renderHook(() => useTestWorkspace({
         ...baseOptions,
         supportsFileWorkspace: false,
       }))

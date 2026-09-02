@@ -10,6 +10,7 @@ import { dirNameToPath } from "@/lib/format"
 import { isEditableTarget, matchesKeybinding } from "@/lib/keybindings"
 import { agentKindForDirName, getResumeCommand } from "@/lib/agents"
 import { copyToClipboard } from "@/lib/utils"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 import type { DesktopAppShellProps } from "./desktopTypes"
 
 const CommandPaletteHost = lazy(() => import("@/components/CommandPaletteHost").then((module) => ({ default: module.CommandPaletteHost })))
@@ -152,8 +153,12 @@ export function DesktopOverlays({
           onOpenProject={navigation.onOpenPaletteProject}
           onOpenSession={navigation.actions.handleDashboardSelect}
           onToggleSidebar={navigation.panels.handleToggleSidebar}
-          onToggleStats={navigation.panels.handleToggleStats}
-          onToggleFileChanges={navigation.panels.handleToggleFileChanges}
+          onToggleStats={() => navigation.panels.toggleWorkspacePanel(
+            BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo,
+          )}
+          onToggleFileChanges={() => navigation.panels.toggleWorkspacePanel(
+            BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges,
+          )}
           onToggleWorktrees={navigation.panels.handleToggleWorktrees}
           onToggleMissionControl={navigation.panels.handleToggleMission}
           onDuplicateSession={session ? navigation.handlers.handleDuplicateSession : undefined}
@@ -186,9 +191,9 @@ export function DesktopOverlays({
           hasFileChanges={can("hostFiles") && project.hasFileChanges}
           supportsWorktrees={project.supportsWorktrees}
           showSidebar={navigation.panels.showSidebar}
-          showStats={navigation.panels.showStats}
+          showStats={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo}
           showProjectFiles={project.showProjectFiles}
-          showFileChanges={navigation.panels.showFileChanges}
+          showFileChanges={navigation.panels.activeWorkspacePanel === BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges}
           showWorktrees={navigation.panels.showWorktrees}
           showConfig={state.mainView === "config"}
           showMission={state.mainView === "mission"}

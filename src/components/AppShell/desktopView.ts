@@ -1,4 +1,4 @@
-import type { ProjectPromptContext } from "@/components/ProjectFilesPanel"
+import type { ProjectPromptContext } from "@/plugin-api"
 
 export type DesktopMainView =
   | "config"

@@ -45,6 +45,7 @@ import type { BuiltInEditorRequest } from "@/lib/fileOpener"
 import { fileTypeIcon } from "@/lib/fileTypeColors"
 import { matchesKeybinding } from "@/lib/keybindings"
 import { cn } from "@/lib/utils"
+import type { ProjectPromptContext } from "@/plugin-api"
 import { parseProjectFilesResponse } from "@/hooks/useProjectFileSuggestions"
 import { diffLineCount } from "../../shared/diff-utils"
 
@@ -54,14 +55,8 @@ interface ProjectFilesPanelProps {
   onAddToPrompt?: (context: ProjectPromptContext) => void
   /** An "open this file" instruction routed here by {@link openFile}. */
   openRequest?: BuiltInEditorRequest | null
-}
-
-export interface ProjectPromptContext {
-  path: string
-  text?: string
-  startLine?: number
-  endLine?: number
-  comment?: string
+  /** Render inside the shared workspace panel host instead of owning its width. */
+  embedded?: boolean
 }
 
 interface ProjectFileData {
@@ -166,7 +161,13 @@ function offsetOfLine(text: string, line: number): number {
   return offset
 }
 
-export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: ProjectFilesPanelProps) {
+export function ProjectFilesPanel({
+  cwd,
+  onClose,
+  onAddToPrompt,
+  openRequest,
+  embedded = false,
+}: ProjectFilesPanelProps) {
   const panelRef = useRef<HTMLElement>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const pendingFocusRef = useRef<{ text: string; line?: number } | null>(null)
@@ -581,17 +582,24 @@ export function ProjectFilesPanel({ cwd, onClose, onAddToPrompt, openRequest }: 
     <aside
       ref={panelRef}
       aria-label="Project files"
-      className="view-transition-right-panel panel-enter-right relative flex min-h-0 shrink-0 flex-col border-l bg-background"
-      style={{ width }}
+      className={cn(
+        "relative flex min-h-0 flex-col bg-background",
+        embedded
+          ? "size-full"
+          : "view-transition-right-panel panel-enter-right shrink-0 border-l",
+      )}
+      style={embedded ? undefined : { width }}
     >
-      <div
-        aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-1 cursor-col-resize hover:bg-accent"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-      />
+      {!embedded && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-1 cursor-col-resize hover:bg-accent"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+        />
+      )}
 
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
         <FolderTree data-icon="inline-start" aria-hidden="true" className="size-4 text-muted-foreground" />

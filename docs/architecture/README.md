@@ -22,7 +22,8 @@ Electron composition -> server public composition API
 5. Published package artifacts are independently consumable. Package build adapters may import a canonical server composition point so the packaged runtime does not fork application logic; the resulting bundle must not depend on repository source files.
 6. Route registration has one canonical manifest. Platform roots supply context; they do not maintain parallel route lists.
 7. Session parsing, turn construction, status, token, and pricing semantics have one governed implementation consumed by the app and CLI.
-8. Circular imports are not allowed.
+8. Root `plugins/` may import plugin peers, `shared/`, and the public `src/plugin-api/` surface. Only `src/plugins/registry.ts` may import root plugins; plugins may not import private renderer, server, or Electron modules.
+9. Circular imports are not allowed.
 
 `bun run check:architecture` enforces new cross-layer imports, exact legacy exceptions, and cycles. Exceptions are a debt ledger, not a permanent allow-list: when an edge is removed, the check fails until its exception is deleted too.
 
@@ -43,6 +44,7 @@ Electron composition -> server public composition API
 | Notification contract and fan-out | `shared/notifications.ts`, `server/lib/notificationDelivery.ts` | The server only *describes* a notification and posts it over the utilityProcess parent port; `electron/notifications.ts` owns the `Notification` API and reports desktop presence back. Server code never imports Electron, so the standalone server degrades to `osascript` plus ntfy push. |
 | Install-free npm launcher | `packages/cogpit-cli/`, `server/standalone-runtime.ts` | The package bundles the web app and canonical standalone server at publish time; the installed artifact runs on Node.js without repository files or a pre-existing Cogpit process. |
 | Renderer orchestration | feature hooks plus `src/components/AppShell/` | `src/App.tsx` composes state and feature boundaries; feature logic should not move back into it. |
+| Compile-time UI plugins | `plugins/`, `src/plugin-api/`, `src/plugins/registry.ts` | The public API is the only renderer surface available to root plugins. Built-in panels adapt existing UI and services through `src/components/workspace-panels/`. |
 | Renderer live-event lifecycle | `src/hooks/useLiveEventStream.ts` | Team and workflow hooks supply parsing/domain state only; connection, stale-timer, and cleanup semantics stay shared. |
 | Quality and release policy | `.github/workflows/quality.yml`, `.github/workflows/release.yml` | Releases cannot package or publish until the reusable quality workflow passes. Third-party actions and build containers are immutable references. |
 

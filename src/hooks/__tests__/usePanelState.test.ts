@@ -3,6 +3,7 @@ import { renderHook, act } from "@testing-library/react"
 
 import { usePanelState } from "../usePanelState"
 import type { SessionState } from "../useSessionState"
+import { BUILT_IN_WORKSPACE_PANEL_IDS } from "@/plugins/builtInPanelIds"
 
 const state = { mainView: "sessions" } as SessionState
 
@@ -18,8 +19,7 @@ describe("usePanelState", () => {
   it("starts from the shipped defaults when nothing is stored", () => {
     const { result } = render()
     expect(result.current.showSidebar).toBe(true)
-    expect(result.current.showFileChanges).toBe(true)
-    expect(result.current.showStats).toBe(false)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
     expect(result.current.showWorktrees).toBe(false)
     expect(result.current.showWorkflows).toBe(false)
   })
@@ -28,23 +28,21 @@ describe("usePanelState", () => {
     const first = render()
     act(() => {
       first.result.current.handleToggleSidebar()
-      first.result.current.handleToggleStats()
-      first.result.current.handleToggleFileChanges()
+      first.result.current.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
     })
     first.unmount()
 
     const { result } = render()
     expect(result.current.showSidebar).toBe(false)
-    expect(result.current.showStats).toBe(true)
-    expect(result.current.showFileChanges).toBe(false)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
   })
 
   it("falls back to the default when a stored value is corrupt", () => {
     localStorage.setItem("panel-sidebar-visible", "{not json")
-    localStorage.setItem("panel-stats-visible", '"maybe"')
+    localStorage.setItem("workspace-panel-active", "{not json")
     const { result } = render()
     expect(result.current.showSidebar).toBe(true)
-    expect(result.current.showStats).toBe(false)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.fileChanges)
   })
 
   it("never restores the transient overlays", () => {
@@ -62,17 +60,30 @@ describe("usePanelState", () => {
     expect(result.current.showThemeSelector).toBe(false)
   })
 
-  it("recovers from a corrupt stored value on the first toggle, not the second", () => {
-    // The setter is functional, so an unsanitized previous value made the first
-    // click a no-op: !"maybe" is false, which is what it already showed.
-    localStorage.setItem("panel-stats-visible", JSON.stringify("maybe"))
+  it("keeps exactly one workspace panel active", () => {
     const { result } = render()
-    expect(result.current.showStats).toBe(false)
 
     act(() => {
-      result.current.handleToggleStats()
+      result.current.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles)
     })
-    expect(result.current.showStats).toBe(true)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.projectFiles)
+
+    act(() => {
+      result.current.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
+    })
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
+
+    act(() => {
+      result.current.toggleWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
+    })
+    expect(result.current.activeWorkspacePanel).toBeNull()
+  })
+
+  it("migrates the legacy panel visibility preference", () => {
+    localStorage.setItem("panel-stats-visible", "true")
+    const { result } = render()
+
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
   })
 
   it("updates shell panels and lazy views without forcing synchronous commits", () => {
@@ -81,12 +92,12 @@ describe("usePanelState", () => {
 
     act(() => {
       result.current.handleToggleSidebar()
-      result.current.handleToggleStats()
+      result.current.openWorkspacePanel(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
       result.current.handleToggleConfig()
     })
 
     expect(result.current.showSidebar).toBe(false)
-    expect(result.current.showStats).toBe(true)
+    expect(result.current.activeWorkspacePanel).toBe(BUILT_IN_WORKSPACE_PANEL_IDS.sessionInfo)
     expect(dispatch).toHaveBeenCalledWith({ type: "OPEN_CONFIG" })
   })
 })
