@@ -111,7 +111,7 @@
   "overrides": {
     "@babel/core": "7.29.7",
     "@hono/node-server": "1.19.15",
-    "@xmldom/xmldom": "0.9.12",
+    "@xmldom/xmldom": "0.8.15",
     "app-builder-lib": "26.15.3",
     "body-parser": "2.3.0",
     "builder-util-runtime": "9.7.0",
