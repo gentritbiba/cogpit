@@ -85,6 +85,11 @@ export function hasExecutableExtension(fileName: string, env: NodeJS.ProcessEnv 
   return hasExtension(fileName, pathExtensions({ env }))
 }
 
+/** Whether Windows' CreateProcess can launch this file without cmd.exe. */
+export function isDirectlyLaunchable(fileName: string): boolean {
+  return DIRECT_EXTENSIONS.includes(win32.extname(fileName).toLowerCase())
+}
+
 export interface FindOptions extends ResolveEnvironment {
   /** Only accept binaries the OS can launch without cmd.exe (Windows only). */
   directOnly?: boolean
@@ -173,7 +178,7 @@ export function resolveAgentCommand(
   // Nothing on PATH: keep the bare name so the caller still gets the ENOENT it
   // already knows how to report.
   if (!resolved) return { command: binName, args, spawnOptions: {} }
-  if (DIRECT_EXTENSIONS.includes(win32.extname(resolved).toLowerCase())) {
+  if (isDirectlyLaunchable(resolved)) {
     return { command: resolved, args, spawnOptions: {} }
   }
   return throughCmdExe(resolved, args, options)

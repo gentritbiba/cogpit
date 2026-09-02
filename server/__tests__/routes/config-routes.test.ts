@@ -519,6 +519,25 @@ describe("config routes", () => {
       expect(JSON.parse(res._getData()).useBuiltInEditor).toBe(true)
     })
 
+    it("reports the executable choice, defaulting to auto", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      const first = createMockReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({ claudeDir: "/home/.claude" })
+      await handler(first.req, first.res, first.next)
+      expect(JSON.parse(first.res._getData()).agentExecutable).toEqual({ source: "auto" })
+
+      const second = createMockReqRes("GET", "/")
+      mockedGetConfig.mockReturnValueOnce({
+        claudeDir: "/home/.claude",
+        agentExecutable: { source: "custom", path: "/opt/claude" },
+      })
+      await handler(second.req, second.res, second.next)
+      expect(JSON.parse(second.res._getData()).agentExecutable).toEqual({
+        source: "custom",
+        path: "/opt/claude",
+      })
+    })
+
     it("returns null networkPassword when not set", async () => {
       const handler = getRouteHandler(handlers, "/api/config")
       const { req, res, next } = createMockReqRes("GET", "/")
@@ -678,6 +697,30 @@ describe("config routes", () => {
       expect(mockedSaveConfig).toHaveBeenCalledWith(expect.objectContaining({
         useBuiltInEditor: true,
       }))
+    })
+
+    it("persists a well-formed executable choice and drops a malformed one", async () => {
+      const handler = getRouteHandler(handlers, "/api/config")
+      for (const [posted, saved] of [
+        [{ source: "npm" }, { source: "npm" }],
+        [{ source: "custom", path: " /opt/claude " }, { source: "custom", path: "/opt/claude" }],
+        [{ source: "custom", path: "" }, undefined],
+        [{ source: "auto" }, undefined],
+        ["bundled", undefined],
+      ] as const) {
+        const body = JSON.stringify({ claudeDir: "/home/.claude", agentExecutable: posted })
+        const { req, res, next, sendBody } = createMockReqRes("POST", "/", body)
+        mockedValidateClaudeDir.mockResolvedValueOnce({ valid: true, resolved: "/home/.claude" })
+        mockedSaveConfig.mockResolvedValueOnce(undefined)
+
+        await handler(req, res, next)
+        sendBody()
+        await vi.waitFor(() => { expect(res.end).toHaveBeenCalled() })
+
+        expect(mockedSaveConfig).toHaveBeenLastCalledWith(expect.objectContaining({
+          agentExecutable: saved,
+        }))
+      }
     })
 
     it("carries the persisted edition through an unrelated config save", async () => {

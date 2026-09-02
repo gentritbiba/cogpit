@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { authFetch } from "@/lib/auth"
+import type { ExecutableChoice } from "../../shared/contracts/agentExecutable"
 
 type ValidationStatus = "idle" | "validating" | "valid" | "invalid"
 
@@ -10,6 +11,7 @@ export interface ConfigSettingsPayload {
   terminalApp?: string
   editorApp?: string
   useBuiltInEditor?: boolean
+  agentExecutable?: ExecutableChoice
 }
 
 export function useConfigValidation() {

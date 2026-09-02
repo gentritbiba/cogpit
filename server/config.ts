@@ -12,6 +12,10 @@ import {
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
 import { writeOwnerOnlyJson } from "./atomicJsonFile"
 import { findExecutableOnPath } from "./lib/binaryResolver"
+import {
+  parseExecutableChoice,
+  type ExecutableChoice,
+} from "../shared/contracts/agentExecutable"
 
 // config.local.json may hold a hashed network password; keep it owner-only.
 const CONFIG_FILE_MODE = 0o600
@@ -82,6 +86,8 @@ export interface AppConfig {
   editorApp?: string
   /** Route "open in editor" affordances to Cogpit's own file workspace. */
   useBuiltInEditor?: boolean
+  /** Which binary the configured-home agent is spawned from; absent means auto. */
+  agentExecutable?: ExecutableChoice
 }
 
 let cachedConfig: AppConfig | null = null
@@ -270,6 +276,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
         terminalApp: parsed.terminalApp || undefined,
         editorApp: parsed.editorApp || undefined,
         useBuiltInEditor: !!parsed.useBuiltInEditor,
+        agentExecutable: parseExecutableChoice(parsed.agentExecutable),
       }
       return cachedConfig
     }

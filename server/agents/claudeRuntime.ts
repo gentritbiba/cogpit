@@ -9,13 +9,13 @@ import {
   stat,
   unlink,
 } from "../helpers"
+import { claudeCliPath } from "./claudeExecutable"
 import { fetchClaudeModels } from "./claudeModels"
 import { friendlySpawnError } from "./spawnError"
 import { resolveAgentCommand } from "../lib/binaryResolver"
 import { activeProcesses, terminateTrackedSession } from "../processRegistry"
 import {
   attachSubagentWatcher,
-  claudeCliPath,
   cleanupAllSDKSessions,
   createSDKSession,
   getSDKPermissions,

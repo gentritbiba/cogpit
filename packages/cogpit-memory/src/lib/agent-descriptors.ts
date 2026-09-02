@@ -172,8 +172,9 @@ export interface AgentProcessMatch {
 
 /**
  * Everything Cogpit needs to find, version and upgrade one CLI, plus where that
- * CLI keeps its own state. Cogpit never vendors an agent: it drives whatever
- * the user installed, so all of this is discovery, never assumption.
+ * CLI keeps its own state. Cogpit drives whatever the user installed, so all of
+ * this is discovery, never assumption — the one exception being a CLI that
+ * Cogpit's own dependencies happen to ship a copy of.
  */
 export interface AgentCli {
   /** npm package publishing this CLI. */
@@ -183,6 +184,12 @@ export interface AgentCli {
   /** argv that makes the CLI print its version. */
   readonly versionArgs: readonly string[]
   readonly selfUpdate: AgentSelfUpdate | null
+  /**
+   * Whether an SDK in Cogpit's dependency tree vendors its own copy of this
+   * CLI. That is the only case where there is more than one binary to choose
+   * from, so it is what enables the executable picker.
+   */
+  readonly bundledBySdk: boolean
   /** Directory holding the CLI's own state, relative to the user's home. */
   readonly homeDirName: string
   /** Environment variable overriding that directory, if the CLI has one. */
@@ -530,6 +537,7 @@ const claude: AgentDescriptor = {
         || path.endsWith("/.local/bin/claude.exe")
         || path.includes("/.local/share/claude/"),
     },
+    bundledBySdk: true,
     homeDirName: ".claude",
     homeEnvVar: null,
     installMarker: "projects",
@@ -691,6 +699,7 @@ const codex: AgentDescriptor = {
     // Codex ships no self-updater; a hand-placed binary has to be replaced by
     // whatever put it there.
     selfUpdate: null,
+    bundledBySdk: false,
     homeDirName: ".codex",
     homeEnvVar: "CODEX_HOME",
     installMarker: "",
@@ -811,6 +820,7 @@ const copilot: AgentDescriptor = {
       matches: (path) =>
         path.endsWith("/.local/bin/copilot") || path === "/usr/local/bin/copilot",
     },
+    bundledBySdk: false,
     homeDirName: ".copilot",
     homeEnvVar: "COPILOT_HOME",
     installMarker: "session-state",

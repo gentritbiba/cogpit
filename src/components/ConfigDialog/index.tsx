@@ -28,6 +28,22 @@ import { authFetch } from "@/lib/auth"
 import { can } from "@/lib/capabilities"
 import { isRemoteDeviceActive } from "@/lib/device"
 import { NetworkAccessSection } from "./NetworkAccessSection"
+import { ExecutableSection } from "./ExecutableSection"
+import {
+  DEFAULT_EXECUTABLE_CHOICE,
+  parseExecutableChoice,
+  type ExecutableChoice,
+} from "../../../shared/contracts/agentExecutable"
+import { allDescriptors } from "../../../shared/session/agent-descriptors"
+
+/** Agents with more than one binary on offer, so a picker is worth showing. */
+const EXECUTABLE_CHOICE_KINDS = allDescriptors()
+  .filter((descriptor) => descriptor.cli.bundledBySdk)
+  .map((descriptor) => descriptor.kind)
+
+function sameChoice(a: ExecutableChoice, b: ExecutableChoice): boolean {
+  return a.source === b.source && (a.source !== "custom" || a.path === b.path)
+}
 
 function ValidationStatus({ status, error }: { status: string; error: string | null }) {
   if (status === "validating") {
@@ -91,6 +107,10 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
   const [useBuiltInEditor, setUseBuiltInEditor] = useState(false)
   const [initialUseBuiltInEditor, setInitialUseBuiltInEditor] = useState(false)
 
+  const [agentExecutable, setAgentExecutable] = useState<ExecutableChoice>(DEFAULT_EXECUTABLE_CHOICE)
+  const [executableReportVersion, setExecutableReportVersion] = useState(0)
+  const [initialAgentExecutable, setInitialAgentExecutable] = useState<ExecutableChoice>(DEFAULT_EXECUTABLE_CHOICE)
+
   // Track whether network settings changed (to enable save without path change)
   const [initialNetworkAccess, setInitialNetworkAccess] = useState(false)
   const [hasExistingPassword, setHasExistingPassword] = useState(false)
@@ -121,6 +141,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
           const builtIn = data?.useBuiltInEditor === true
           setUseBuiltInEditor(builtIn)
           setInitialUseBuiltInEditor(builtIn)
+          const executable = parseExecutableChoice(data?.agentExecutable) ?? DEFAULT_EXECUTABLE_CHOICE
+          setAgentExecutable(executable)
+          setInitialAgentExecutable(executable)
           // Fetch connected devices if network is active
           if (access && data?.networkPassword && !remoteDevice) {
             authFetch("/api/connected-devices")
@@ -155,12 +178,14 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
       terminalApp: terminalApp.trim() || undefined,
       editorApp: editorApp.trim() || undefined,
       useBuiltInEditor,
+      agentExecutable,
     })
     if (result.success && result.claudeDir) {
+      setExecutableReportVersion((version) => version + 1)
       onSaved(result.claudeDir)
     }
     setSaving(false)
-  }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, save, onSaved, remoteDevice, initialNetworkAccess])
+  }, [path, networkAccess, networkPassword, terminalApp, editorApp, useBuiltInEditor, agentExecutable, save, onSaved, remoteDevice, initialNetworkAccess])
 
   const MIN_PASSWORD_LENGTH = 16
 
@@ -174,7 +199,9 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
     const terminalChanged = terminalApp !== initialTerminalApp
     const editorChanged = editorApp !== initialEditorApp
       || useBuiltInEditor !== initialUseBuiltInEditor
-    if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged) return false
+    const executableChanged = !sameChoice(agentExecutable, initialAgentExecutable)
+    if (!pathChanged && !networkChanged && !terminalChanged && !editorChanged && !executableChanged) return false
+    if (agentExecutable.source === "custom" && !agentExecutable.path?.trim()) return false
 
     // Validate password requirements when network is enabled
     if (!remoteDevice && networkAccess) {
@@ -274,6 +301,17 @@ export function ConfigDialog({ open, currentPath, onClose, onSaved }: ConfigDial
               disabled={!canWriteConfig || useBuiltInEditor}
             />
           </Field>
+
+          {EXECUTABLE_CHOICE_KINDS.map((kind) => (
+            <ExecutableSection
+              key={kind}
+              kind={kind}
+              value={agentExecutable}
+              onChange={setAgentExecutable}
+              disabled={!canWriteConfig}
+              reportVersion={executableReportVersion}
+            />
+          ))}
 
           {/* Network Access — hidden for remote devices: changing it through the
               proxy would revoke the very sessions this hub depends on. Hidden

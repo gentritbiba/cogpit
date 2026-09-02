@@ -24,6 +24,10 @@ import { isTeamEdition } from "../team/edition"
 import { getUserByUsername, withVerifiedUser } from "../team/users"
 import { getConfig, getConfiguredEditionValue, saveConfig, validateClaudeDir } from "../config"
 import { descriptorForDirName } from "../../shared/session/agent-descriptors"
+import {
+  DEFAULT_EXECUTABLE_CHOICE,
+  parseExecutableChoice,
+} from "../../shared/contracts/agentExecutable"
 import { flushSessionPersistence } from "../team/sessionPersistence"
 import { networkInterfaces } from "node:os"
 import { resolve } from "node:path"
@@ -347,6 +351,7 @@ export function registerConfigRoutes(use: UseFn) {
         terminalApp: config.terminalApp || null,
         editorApp: config.editorApp || null,
         useBuiltInEditor: config.useBuiltInEditor || false,
+        agentExecutable: config.agentExecutable ?? DEFAULT_EXECUTABLE_CHOICE,
       } : null))
       return
     }
@@ -428,6 +433,7 @@ export function registerConfigRoutes(use: UseFn) {
             terminalApp: parsed.terminalApp || undefined,
             editorApp: parsed.editorApp || undefined,
             useBuiltInEditor: !!parsed.useBuiltInEditor,
+            agentExecutable: parseExecutableChoice(parsed.agentExecutable),
           })
           refreshDirs()
 

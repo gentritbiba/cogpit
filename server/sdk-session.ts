@@ -17,10 +17,8 @@ import type {
   UserDialogResult,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { MessageParam } from "@anthropic-ai/sdk/resources"
-import { execFileSync } from "node:child_process"
-import { createRequire } from "node:module"
 import { watchSubagents, type SubagentWatcher } from "./subagentWatcher"
-import { findExecutableOnPath, nativeBinaryName } from "./lib/binaryResolver"
+import { claudeCliPath } from "./agents/claudeExecutable"
 import * as streamBus from "./lib/streamBus"
 import type {
   MissionControlQuestion,
@@ -34,101 +32,6 @@ import type {
   MissionControlUserDialog,
   UserDialogChoice,
 } from "../shared/contracts/agentPrompts"
-
-const CLI_BIN_NAME = nativeBinaryName("claude")
-
-/** First executable named `claude` on PATH, if any. */
-function findClaudeOnPath(): string | undefined {
-  // The SDK spawns this path with no shell, so a Windows .cmd shim could only
-  // ENOENT there — those installs fall back to the vendored native binary.
-  return findExecutableOnPath("claude", { directOnly: true })
-}
-
-/** `2.1.220 (Claude Code)` -> `[2, 1, 220]`; undefined if the binary won't answer. */
-function readCliVersion(binPath: string): number[] | undefined {
-  try {
-    const output = execFileSync(binPath, ["--version"], {
-      encoding: "utf-8",
-      timeout: 5_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-    const match = output.match(/(\d+)\.(\d+)\.(\d+)/)
-    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function isAtLeast(version: number[], floor: number[]): boolean {
-  for (let i = 0; i < 3; i += 1) {
-    if (version[i] !== floor[i]) return version[i] > floor[i]
-  }
-  return true
-}
-
-/** Separator-agnostic so the packaged Windows app is detected too. */
-const ASAR_SEGMENT = /([\\/])app\.asar([\\/])/
-
-export interface ClaudeCliProbes {
-  findOnPath?: () => string | undefined
-  readVersion?: (binPath: string) => number[] | undefined
-}
-
-// The SDK ships a Claude CLI binary in a platform package. Development and
-// server installs can use it as a fallback, but Electron packages omit it
-// because Cogpit requires an installed CLI. Prefer that installed CLI whenever
-// it is at least as new as the SDK copy available in the current environment.
-export function resolveClaudeCliPath(
-  resolveModule: (id: string) => string,
-  probes: ClaudeCliProbes = {},
-): string | undefined {
-  const findOnPath = probes.findOnPath ?? findClaudeOnPath
-  const readVersion = probes.readVersion ?? readCliVersion
-
-  let vendored: string | undefined
-  try {
-    const platformPkg = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
-    // Swapping the file name keeps the resolver's own separators, which the
-    // asar rewrite below relies on.
-    vendored = resolveModule(`${platformPkg}/package.json`).replace(/package\.json$/, CLI_BIN_NAME)
-  } catch {
-    vendored = undefined
-  }
-  const insideAsar = vendored !== undefined && ASAR_SEGMENT.test(vendored)
-  const vendoredExecutable = insideAsar
-    ? vendored!.replace(ASAR_SEGMENT, "$1app.asar.unpacked$2")
-    : vendored
-  const fallback = insideAsar ? vendoredExecutable : undefined
-
-  const installed = findOnPath()
-  if (!installed) return fallback
-  const installedVersion = readVersion(installed)
-  // Without a version there is nothing to compare, so only reach for the
-  // vendored copy when one exists; otherwise the installed CLI is all there is.
-  if (!installedVersion) return vendoredExecutable ? fallback : installed
-
-  // Never downgrade: a CLI older than the one the SDK was built against can
-  // break the control protocol, not just the model list.
-  const vendoredVersion = vendoredExecutable ? readVersion(vendoredExecutable) : undefined
-  if (vendoredVersion && !isAtLeast(installedVersion, vendoredVersion)) return fallback
-
-  return installed
-}
-
-let cliPathProbed = false
-let cliPath: string | undefined
-
-/**
- * Path to the Claude CLI to spawn, or undefined to let the SDK resolve it.
- * Memoized — resolution shells out to `claude --version`.
- */
-export function claudeCliPath(): string | undefined {
-  if (!cliPathProbed) {
-    cliPath = resolveClaudeCliPath((id) => createRequire(import.meta.url).resolve(id))
-    cliPathProbed = true
-  }
-  return cliPath
-}
 
 /**
  * Parse COGPIT_STREAM_PARTIAL as an opt-out kill switch. Streaming stays on

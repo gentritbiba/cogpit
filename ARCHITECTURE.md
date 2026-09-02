@@ -106,6 +106,20 @@ cross-checks, it never overrides. `parseSessionAppend` dispatches on raw-record
 shape rather than `agentKind`, because `agentKind` is optional on
 `ParsedSession` and a lookup would throw on the append hot path.
 
+### Executable resolution for Claude
+
+Claude Code is the only agent whose binary can come from multiple sources: a user-installed CLI on `PATH`, an npm shim that wraps a native binary, or the copy vendored by Cogpit's Agent SDK dependency. Codex and Copilot run whatever `PATH` offers, so they have no choice to make.
+
+Cogpit stores the user's executable preference in `AppConfig.agentExecutable` (one of `"auto"` / `"path"` / `"npm"` / `"bundled"` / `"custom"`, with optional custom path). When spawning Claude sessions, `server/agents/claudeExecutable.ts` resolves that choice:
+
+- `"auto"` — prefer the installed CLI if it is at least as new as the bundled copy; otherwise fall back to bundled
+- `"path"` — use the installed CLI, or undefined if not found
+- `"npm"` — follow the npm shim to the native binary it wraps, or undefined if not found
+- `"bundled"` — use the SDK's vendored copy, or undefined if the platform package is not present
+- `"custom"` — use a user-supplied path, or undefined if it is empty
+
+The descriptor's `AgentCli.bundledBySdk` boolean (set to `true` only for Claude) indicates whether the SDK vendors a copy, which is what enables the executable picker. The live binary path is queried via `GET /api/agent-executable/:kind`, which is a read-only endpoint (registered in `server/team/policy.ts` as authed-only).
+
 ## Enforcement
 
 `bun run check:agents` (wired into `.github/workflows/quality.yml`) splits the

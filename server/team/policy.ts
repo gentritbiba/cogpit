@@ -183,6 +183,10 @@ export const ROUTE_POLICIES: Record<string, PolicyRule[]> = {
     { prefix: "/api/provider-updates", methods: ["GET"], requires: "authed" },
     { prefix: "/api/provider-updates/run", requires: "admin" },
   ],
+  // Reports which binary the server spawns; the choice itself is saved through /api/config.
+  "agent-executable": [
+    { prefix: "/api/agent-executable", methods: ["GET"], requires: "authed" },
+  ],
 }
 
 const ALL_RULES: readonly PolicyRule[] = Object.values(ROUTE_POLICIES).flat()

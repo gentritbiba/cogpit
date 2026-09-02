@@ -1,10 +1,9 @@
 /**
  * Version advisories for the agent CLIs Cogpit drives.
  *
- * Cogpit never vendors agent CLIs — it spawns whatever the user installed.
- * This module answers two questions about those installs: what
- * version is on this machine, and what version is published. When the two
- * disagree it also works out how the binary was installed, because that is
+ * This module answers two questions about the binary Cogpit spawns for each
+ * agent: what version is on this machine, and what version is published. When
+ * the two disagree it also works out how the binary was installed, because that is
  * what decides whether `npm install -g`, `brew upgrade`, or `claude update`
  * is the command that would actually upgrade it.
  */
@@ -25,6 +24,7 @@ import {
   type AgentDescriptor,
 } from "../../shared/session/agent-descriptors"
 import { compareVersions } from "../../shared/versions"
+import { activeExecutableFor } from "../agents/executables"
 import { findExecutableOnPath } from "./binaryResolver"
 import { CLI_OUTPUT_MAX_CHARS, probeCliVersion, runCli } from "./cliProcess"
 
@@ -193,9 +193,12 @@ export function formatCommand(command: UpdateCommand): string {
 
 // ── Probes ───────────────────────────────────────────────────────────────
 
-/** Resolve the binary on PATH plus its realpath, deduped. */
-function resolveBinaryPaths(binName: string): string[] {
-  const onPath = findExecutableOnPath(binName)
+/**
+ * The binary Cogpit spawns for this agent plus its realpath, deduped. Agents
+ * without an executable choice resolve through PATH like any shell would.
+ */
+function resolveBinaryPaths(descriptor: AgentDescriptor): string[] {
+  const onPath = activeExecutableFor(descriptor.kind) ?? findExecutableOnPath(descriptor.binName)
   if (!onPath) return []
   try {
     const real = realpathSync(onPath)
@@ -264,7 +267,7 @@ export function _resetProviderUpdateCachesForTests(): void {
 }
 
 async function probeProvider(descriptor: AgentDescriptor): Promise<ProviderUpdateInfo> {
-  const paths = resolveBinaryPaths(descriptor.binName)
+  const paths = resolveBinaryPaths(descriptor)
   const base = {
     provider: descriptor.kind,
     displayName: descriptor.displayName,

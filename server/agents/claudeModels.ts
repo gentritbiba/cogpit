@@ -1,5 +1,5 @@
 import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
-import { claudeCliPath } from "../sdk-session"
+import { claudeCliPath } from "./claudeExecutable"
 import { effortLabel, MODEL_FETCH_TIMEOUT_MS, type ModelOption } from "./modelCatalog"
 import { withTimeout } from "./timeout"
 import { shortenModel } from "../../shared/session/model-names"

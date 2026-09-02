@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, afterEach } from "vitest"
 import { streamingEnabledForTest } from "../sdk-session"
 

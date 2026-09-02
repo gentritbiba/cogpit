@@ -205,6 +205,17 @@ Fields per session: `dirName`, `projectShortName`, `fileName`, `sessionId`, `cwd
 
 System-wide agent processes with PID, memory, CPU, and sessionId.
 
+### GET /api/agent-executable/:kind
+
+Cogpit's choice of which Claude Code binary to spawn, and all available options. Only Claude has a choice (the Agent SDK vendors a copy); Codex and Copilot run whatever `PATH` offers, so this endpoint returns 404 for them.
+
+Response 200: `{ choice, candidates, active }` where:
+- `choice` — the user's stored preference: `{ source: "auto" | "path" | "npm" | "bundled" | "custom", path?: string }`
+- `candidates` — each detected binary: `[{ source, path, version }]`
+- `active` — the one Cogpit will spawn: `{ source, path, version }` or `null` if nothing is launchable given the choice
+
+Response 404: agent has no choice to make (e.g., `GET /api/agent-executable/codex`).
+
 ## Typical agent workflow
 
 ```bash
