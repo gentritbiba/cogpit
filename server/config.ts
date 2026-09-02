@@ -6,6 +6,7 @@ import {
   AGENT_KINDS,
   allDescriptors,
   descriptorFor,
+  soleDescriptorWhere,
   type AgentKind,
 } from "../shared/session/agent-descriptors"
 import { hashPassword, isMalformedPasswordHash, isPasswordHashed } from "./password-utils"
@@ -48,11 +49,21 @@ export function setConfigPath(p: string): void {
   CONFIG_PATH = p
 }
 
+/**
+ * The one agent whose home Cogpit has to be told about. Every other CLI keeps
+ * its own at a fixed, environment-overridable location {@link agentHomeDir}
+ * discovers; this one's is a user-chosen path stored in Cogpit's own config.
+ */
+const CONFIGURED_HOME_AGENT = soleDescriptorWhere(
+  (descriptor) => !descriptor.cli.homeIsDiscoverable,
+  "a home Cogpit has to be told about",
+)
+
 export interface AppConfig {
   /**
-   * Claude Code's home directory. The only agent home Cogpit stores itself;
-   * every other CLI puts its own at a fixed, environment-overridable location
-   * that {@link agentHomeDir} discovers.
+   * Claude Code's home directory: the one agent home Cogpit stores itself,
+   * the rest being discovered. The field keeps its historical name on disk
+   * and on the wire.
    */
   claudeDir: string
   /** Agent new sessions default to. */
@@ -143,10 +154,10 @@ function stripEnvOverride(config: AppConfig): AppConfig {
 /**
  * Absolute home directory of one agent CLI.
  *
- * Claude's is whatever the user configured; the rest live at a fixed name under
- * the user's home unless their own environment variable moves them. Read live
- * rather than captured at import, because the config browser has to follow a
- * `claudeDir` change without a restart.
+ * The configured agent's is whatever the user chose; the rest live at a fixed
+ * name under the user's home unless their own environment variable moves them.
+ * Read live rather than captured at import, because the config browser has to
+ * follow a `claudeDir` change without a restart.
  */
 export function agentHomeDir(kind: AgentKind): string {
   const { cli } = descriptorFor(kind)
@@ -157,16 +168,17 @@ export function agentHomeDir(kind: AgentKind): string {
 }
 
 /**
- * Bootstrap configuration for a machine that has an agent CLI but no Claude
- * Code. `claudeDir` is a placeholder so the rest of the app has a history root
- * to name; nothing is ever read from it until the user points it somewhere real.
+ * Bootstrap configuration for a machine that has a discoverable agent CLI but
+ * not the configured one. `claudeDir` is a placeholder so the rest of the app
+ * has a history root to name; nothing is ever read from it until the user
+ * points it somewhere real.
  *
  * Evidence is either the CLI's own state directory or its binary on PATH — the
  * second case covers a CLI that has been installed but never run.
  */
 async function detectBootstrapConfig(): Promise<AppConfig | null> {
   const discoverable = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable)
-  const placeholder = () => join(homedir(), descriptorFor("claude").cli.homeDirName)
+  const placeholder = () => join(homedir(), CONFIGURED_HOME_AGENT.cli.homeDirName)
 
   for (const descriptor of discoverable) {
     const marker = join(agentHomeDir(descriptor.kind), descriptor.cli.installMarker)
@@ -295,10 +307,11 @@ export async function validateClaudeDir(dirPath: string): Promise<ValidationResu
 
   try {
     const entries = await readdir(resolved)
-    if (!entries.includes("projects")) {
+    const { installMarker, homeDirName } = CONFIGURED_HOME_AGENT.cli
+    if (!entries.includes(installMarker)) {
       return {
         valid: false,
-        error: 'Directory does not contain a "projects" subdirectory. This does not appear to be a valid .claude directory.',
+        error: `Directory does not contain a "${installMarker}" subdirectory. This does not appear to be a valid ${homeDirName} directory.`,
       }
     }
   } catch {
@@ -310,7 +323,7 @@ export async function validateClaudeDir(dirPath: string): Promise<ValidationResu
 
 export function getDirs(claudeDir: string) {
   return {
-    PROJECTS_DIR: join(claudeDir, "projects"),
+    PROJECTS_DIR: join(claudeDir, CONFIGURED_HOME_AGENT.cli.installMarker),
     TEAMS_DIR: join(claudeDir, "teams"),
     TASKS_DIR: join(claudeDir, "tasks"),
     UNDO_DIR: join(DATA_ROOT, "undo-history"),

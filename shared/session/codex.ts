@@ -1431,6 +1431,21 @@ export function deriveCodexSessionStatus(rawMessages: readonly RawRecord[]): Ses
   return { status: "idle" }
 }
 
+// ── Branching ──────────────────────────────────────────────────────────────
+
+/** A branch keeps the `session_meta` record, renamed and pointed back at its origin. */
+export function brandCodexBranch(
+  firstRecord: Record<string, unknown>,
+  sessionId: string,
+  turnIndex: number | null,
+): { record: Record<string, unknown>; originalId: string } {
+  const payload = isObject(firstRecord.payload) ? { ...firstRecord.payload } : {}
+  const originalId = typeof payload.id === "string" ? payload.id : ""
+  payload.id = sessionId
+  payload.branchedFrom = { sessionId: originalId, turnIndex }
+  return { record: { ...firstRecord, payload }, originalId }
+}
+
 // ── Turn boundaries ─────────────────────────────────────────────────────────
 
 /**

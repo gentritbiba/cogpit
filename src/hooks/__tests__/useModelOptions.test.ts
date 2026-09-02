@@ -1,9 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
+import { fallbackModelsFor } from "@/lib/agents/models"
 import { loadModelCatalog, resetModelCatalogFetch } from "../useModelOptions"
 import {
-  CLAUDE_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
-  COPILOT_MODEL_OPTIONS,
   getModelOptions,
   resetDynamicModelOptions,
 } from "@/lib/utils"
@@ -58,9 +56,9 @@ describe("loadModelCatalog", () => {
 
     await loadModelCatalog()
 
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
     expect(getModelOptions("codex")).toEqual(codex)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
   it("keeps static fallbacks when the request fails", async () => {
@@ -68,9 +66,9 @@ describe("loadModelCatalog", () => {
 
     await loadModelCatalog()
 
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
-    expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
+    expect(getModelOptions("codex")).toBe(fallbackModelsFor("codex"))
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
   it("ignores malformed catalog entries", async () => {
@@ -80,9 +78,9 @@ describe("loadModelCatalog", () => {
 
     await loadModelCatalog()
 
-    expect(getModelOptions("claude")).toBe(CLAUDE_MODEL_OPTIONS)
-    expect(getModelOptions("codex")).toBe(CODEX_MODEL_OPTIONS)
-    expect(getModelOptions("copilot")).toBe(COPILOT_MODEL_OPTIONS)
+    expect(getModelOptions("claude")).toBe(fallbackModelsFor("claude"))
+    expect(getModelOptions("codex")).toBe(fallbackModelsFor("codex"))
+    expect(getModelOptions("copilot")).toBe(fallbackModelsFor("copilot"))
   })
 
   it("only fetches once per page load", async () => {

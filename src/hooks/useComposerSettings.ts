@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useModelOptions } from "@/hooks/useModelOptions"
 import type { SessionSource } from "@/hooks/useLiveSession"
 import type { ParsedSession } from "../../shared/session/types"
-import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind } from "@/lib/agents"
+import { capabilitiesFor, DEFAULT_AGENT_KIND, type AgentKind, descriptorFor } from "@/lib/agents"
 import {
   getFastServiceTierOption,
   isUltracodeCapableModel,
@@ -72,12 +72,12 @@ export function useComposerSettings({
     setUltracodeEnabled(false)
   }, [pendingDirName])
 
-  const handleCodexModelRejected = useCallback((rejectedModel: string) => {
+  const handleModelRejected = useCallback((rejectedModel: string) => {
     setSelectedModel((current) => current === rejectedModel ? "" : current)
     setModelFallbackNotice(
-      `${rejectedModel} is unavailable for this account. Cogpit retried the turn with Codex's default model.`,
+      `${rejectedModel} is unavailable for this account. Cogpit retried the turn with ${descriptorFor(effectiveAgentKind).displayName}'s default model.`,
     )
-  }, [])
+  }, [effectiveAgentKind])
 
   const dismissModelFallbackNotice = useCallback(() => {
     setModelFallbackNotice(null)
@@ -142,6 +142,6 @@ export function useComposerSettings({
     imageInputAvailable,
     modelFallbackNotice,
     dismissModelFallbackNotice,
-    handleCodexModelRejected,
+    handleModelRejected,
   }
 }

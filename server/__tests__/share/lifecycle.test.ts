@@ -47,7 +47,19 @@ vi.mock("../../sessionPaths", () => ({
 // Every path the fixture resolves lives under the Claude projects root.
 vi.mock("../../agents", () => ({
   storeFor: () => ({ sessionsRoot: () => "/tmp/lifecycle-codex" }),
+  storeForDirName: () => ({
+    kind: "claude",
+    transcriptPath: (dirName: string, sessionId: string) => ({
+      fileName: `${sessionId}.jsonl`,
+      filePath: `/tmp/lifecycle-projects/${dirName}/${sessionId}.jsonl`,
+    }),
+  }),
   storeForPath: () => ({ kind: "claude" }),
+}))
+
+vi.mock("../../agents/runtimes", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../agents/runtimes")>(),
+  runtimeForDirName: () => ({ fork: vi.fn() }),
 }))
 
 vi.mock("../../config", () => ({

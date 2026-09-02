@@ -24,6 +24,7 @@ import {
   descriptorFor,
   type AgentDescriptor,
   type AgentKind,
+  descriptorForDirName,
 } from "./agent-descriptors"
 import { dirs } from "./dirs"
 
@@ -320,6 +321,11 @@ export function storeFor(kind: AgentKind): AgentSessionStore {
 }
 
 /** Every store, in registry order. */
+/** The store a path under no known root is read with: the agent that owns every unprefixed project. */
+export function defaultStore(): AgentSessionStore {
+  return storeFor(descriptorForDirName(null).kind)
+}
+
 export function allStores(): readonly AgentSessionStore[] {
   return AGENT_KINDS.map((kind) => STORES[kind])
 }

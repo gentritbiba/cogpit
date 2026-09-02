@@ -1,8 +1,13 @@
-export type ClaudeGoalStatus = "active" | "achieved" | "failed"
+/**
+ * Long-running goals, in the two shapes the agents keep them: Claude Code
+ * records goal state in its transcript and takes a `/goal` slash command;
+ * Codex exposes goals through its app-server thread API, which Cogpit proxies.
+ */
+export type TranscriptGoalStatus = "active" | "achieved" | "failed"
 
-export interface ClaudeGoalState {
+export interface TranscriptGoalState {
   condition: string
-  status: ClaudeGoalStatus
+  status: TranscriptGoalStatus
   reason?: string
   iterations: number
   durationMs: number
@@ -15,10 +20,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-/** Read Claude Code's native `goal_status` attachment from session JSONL. */
-export function extractClaudeGoalState(
+/**
+ * Read the goal a transcript-tracked agent records: Claude Code writes its
+ * native `goal_status` attachment into the session JSONL.
+ */
+export function extractTranscriptGoalState(
   messages: Array<{ type: string; [key: string]: unknown }>,
-): ClaudeGoalState | null {
+): TranscriptGoalState | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message.type !== "attachment") continue
@@ -44,4 +52,9 @@ export function extractClaudeGoalState(
     }
   }
   return null
+}
+
+/** The proxied thread-goal endpoint for an agent whose goals live on the CLI. */
+export function threadGoalPath(threadId: string): string {
+  return `/api/codex/goals/${encodeURIComponent(threadId)}`
 }

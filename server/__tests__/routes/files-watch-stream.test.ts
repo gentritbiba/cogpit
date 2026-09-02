@@ -42,8 +42,10 @@ vi.mock("../../agents", async () => {
   }
 })
 
-vi.mock("../../agents/copilotTransport", () => ({
-  copilotRuntime: { isTurnActive: mockIsCopilotTurnActive },
+vi.mock("../../agents/runtimes", () => ({
+  runtimeForDirName: () => ({
+    activity: (sessionId: string) => ({ live: false, running: mockIsCopilotTurnActive(sessionId) }),
+  }),
 }))
 
 import { registerFileWatchRoutes } from "../../routes/files-watch"
@@ -203,10 +205,10 @@ describe("/api/watch stream-bus forwarding", () => {
 
     await handler(harness.req as never, harness.res as never, harness.next)
     await Promise.resolve()
-    expect(parseFrames(harness.frames)).toContainEqual({ type: "copilot_activity" })
+    expect(parseFrames(harness.frames)).toContainEqual({ type: "runtime_activity" })
 
     const activityCount = () => parseFrames(harness.frames)
-      .filter((event) => event.type === "copilot_activity").length
+      .filter((event) => event.type === "runtime_activity").length
     const initialCount = activityCount()
     await vi.advanceTimersByTimeAsync(15_000)
     expect(activityCount()).toBeGreaterThan(initialCount)

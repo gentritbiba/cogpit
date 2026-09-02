@@ -905,9 +905,9 @@ describe("useLiveSession", () => {
     const { result } = renderHook(() => useLiveSession(source, onUpdate, workerParse, workerAppend))
 
     act(() => {
-      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      getLastEventSource().simulateMessage({ type: "runtime_activity" })
       vi.advanceTimersByTime(29_000)
-      getLastEventSource().simulateMessage({ type: "copilot_activity" })
+      getLastEventSource().simulateMessage({ type: "runtime_activity" })
       vi.advanceTimersByTime(29_000)
     })
     expect(result.current.isLive).toBe(true)

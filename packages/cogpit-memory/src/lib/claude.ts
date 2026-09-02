@@ -436,6 +436,21 @@ export function deriveClaudeSessionStatus(rawMessages: readonly RawRecord[]): Se
   return { status: "idle" }
 }
 
+// ── Branching ──────────────────────────────────────────────────────────────
+
+/** A branch keeps the header record, renamed and pointed back at its origin. */
+export function brandClaudeBranch(
+  firstRecord: Record<string, unknown>,
+  sessionId: string,
+  turnIndex: number | null,
+): { record: Record<string, unknown>; originalId: string } {
+  const originalId = typeof firstRecord.sessionId === "string" ? firstRecord.sessionId : ""
+  return {
+    record: { ...firstRecord, sessionId, branchedFrom: { sessionId: originalId, turnIndex } },
+    originalId,
+  }
+}
+
 // ── Turn boundaries ─────────────────────────────────────────────────────────
 
 /**

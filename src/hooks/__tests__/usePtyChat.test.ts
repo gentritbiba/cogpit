@@ -106,7 +106,7 @@ describe("usePtyChat", () => {
   })
 
   it("retries Codex send-message without a rejected model override", async () => {
-    const onCodexModelRejected = vi.fn()
+    const onModelRejected = vi.fn()
     mockedAuthFetch
       .mockResolvedValueOnce({
         ok: false,
@@ -124,7 +124,7 @@ describe("usePtyChat", () => {
       usePtyChat({
         sessionSource: { dirName: "codex__proj", fileName: "sess.jsonl", rawText: "" },
         model: "gpt-5.4-mini",
-        onCodexModelRejected,
+        onModelRejected,
       })
     )
 
@@ -132,7 +132,7 @@ describe("usePtyChat", () => {
       await result.current.sendMessage("hello")
     })
 
-    expect(onCodexModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
+    expect(onModelRejected).toHaveBeenCalledWith("gpt-5.4-mini")
 
     const firstBody = JSON.parse((mockedAuthFetch.mock.calls[0][1] as RequestInit).body as string)
     const secondBody = JSON.parse((mockedAuthFetch.mock.calls[1][1] as RequestInit).body as string)

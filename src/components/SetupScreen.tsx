@@ -23,10 +23,39 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/Spinner"
 import { useConfigValidation } from "@/hooks/useConfigValidation"
+import { allDescriptors, soleDescriptorWhere } from "@/lib/agents"
 
 interface SetupScreenProps {
   onConfigured: (claudeDir: string) => void
 }
+
+/** The one agent whose home Cogpit cannot find on its own and has to be told. */
+const configuredAgent = soleDescriptorWhere(
+  (descriptor) => !descriptor.cli.homeIsDiscoverable,
+  "a home Cogpit has to be told about",
+)
+/** The rest are found where their CLIs keep them. */
+const detectedAgents = allDescriptors().filter((descriptor) => descriptor.cli.homeIsDiscoverable)
+
+/** `a`, `a and b`, `a, b and c`. */
+function joinNames(parts: readonly React.ReactNode[]): React.ReactNode[] {
+  return parts.flatMap((part, index) => {
+    if (index === 0) return [part]
+    return [index === parts.length - 1 ? " and " : ", ", part]
+  })
+}
+
+function Path({ children }: { children: string }) {
+  return <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">{children}</code>
+}
+
+const detectedNames = joinNames(detectedAgents.map((descriptor) => descriptor.displayName))
+const detectedHomes = joinNames(detectedAgents.map((descriptor) => (
+  <Path key={descriptor.kind}>
+    {["~", descriptor.cli.homeDirName, descriptor.cli.installMarker].filter(Boolean).join("/")}
+  </Path>
+)))
+const configuredHome = `~/${configuredAgent.cli.homeDirName}`
 
 export function SetupScreen({ onConfigured }: SetupScreenProps) {
   const [path, setPath] = useState("")
@@ -64,38 +93,36 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
             </div>
             <CardTitle>Connect your coding agent</CardTitle>
             <CardDescription>
-              Cogpit detects Codex and GitHub Copilot CLI automatically. Existing histories live in{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.codex</code>{" "}
-              and{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.copilot/session-state</code>.{" "}
-              For Claude Code, enter its data directory, usually{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">~/.claude</code>.
+              Cogpit detects {detectedNames} automatically. Existing histories live in{" "}
+              {detectedHomes}.{" "}
+              For {configuredAgent.displayName}, enter its data directory, usually{" "}
+              <Path>{configuredHome}</Path>.
             </CardDescription>
           </CardHeader>
 
           <CardContent>
             <FieldGroup>
               <Field data-invalid={status === "invalid"}>
-                <FieldLabel htmlFor="claude-data-directory">
-                  Claude Code data directory
+                <FieldLabel htmlFor="agent-data-directory">
+                  {configuredAgent.displayName} data directory
                 </FieldLabel>
                 <InputGroup>
                   <InputGroupAddon>
                     <FolderOpen aria-hidden="true" />
                   </InputGroupAddon>
                   <InputGroupInput
-                    id="claude-data-directory"
+                    id="agent-data-directory"
                     value={path}
                     onChange={handleChange}
-                    placeholder="/Users/you/.claude"
+                    placeholder={`/Users/you/${configuredAgent.cli.homeDirName}`}
                     autoFocus
                     aria-invalid={status === "invalid"}
-                    aria-describedby="claude-directory-status"
+                    aria-describedby="agent-directory-status"
                   />
                 </InputGroup>
 
                 <div
-                  id="claude-directory-status"
+                  id="agent-directory-status"
                   className="min-h-5"
                   role="status"
                   aria-live="polite"
@@ -109,7 +136,7 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
                   {status === "valid" && (
                     <FieldDescription className="flex items-center gap-2 text-success">
                       <CheckCircle className="size-4" />
-                      Claude Code history found
+                      {configuredAgent.displayName} history found
                     </FieldDescription>
                   )}
                   {status === "invalid" && error && (
@@ -130,7 +157,7 @@ export function SetupScreen({ onConfigured }: SetupScreenProps) {
               disabled={status !== "valid" || saving}
             >
               {saving && <Spinner data-icon="inline-start" />}
-              {saving ? "Saving..." : "Connect Claude Code"}
+              {saving ? "Saving..." : `Connect ${configuredAgent.displayName}`}
             </Button>
           </CardFooter>
         </Card>

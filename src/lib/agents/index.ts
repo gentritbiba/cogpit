@@ -27,6 +27,9 @@ export type {
   AgentCapabilities,
   AgentDescriptor,
   AgentKind,
+  EffortOption,
+  ModelOption,
+  ServiceTierOption,
 } from "../../../shared/session/agent-descriptors"
 export {
   AGENT_KINDS,
@@ -35,6 +38,7 @@ export {
   descriptorFor,
   descriptorForDirName,
   projectDirNameFor,
+  soleDescriptorWhere,
 } from "../../../shared/session/agent-descriptors"
 
 /**
@@ -42,6 +46,14 @@ export {
  * of the detection order, i.e. the agent that owns every unprefixed dirName.
  */
 export const DEFAULT_AGENT_KIND: AgentKind = descriptorForDirName(null).kind
+
+/**
+ * The agent whose project dirName is lossy, so its directory can only be
+ * discovered from the server's project list, never recomputed from a cwd.
+ * Null when every agent's encoding round-trips.
+ */
+export const DISCOVERED_DIRNAME_KIND: AgentKind | null =
+  allDescriptors().find((descriptor) => descriptor.dirName.lossy)?.kind ?? null
 
 /** What the agent owning `dirName` can do. */
 export function capabilitiesForDirName(dirName: string | null | undefined): AgentCapabilities {

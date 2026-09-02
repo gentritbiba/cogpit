@@ -8,6 +8,7 @@ import {
   type OperationSummary,
 } from "@/lib/undo-engine"
 import { agentKindForDirName } from "@/lib/agents"
+import type { NativeRewindMode } from "@/lib/agents/nativeRewind"
 import { cutLineAfterUuid, cutLineForTurnCount, formatFor } from "../../../shared/session/agents"
 import type { Turn } from "../../../shared/session/types"
 
@@ -19,9 +20,10 @@ export interface UndoConfirmState {
   branchTurnIndex?: number
   /** For partial redo: index into the archived turns array (inclusive) */
   redoUpToArchiveIndex?: number
-  copilot?: {
+  /** Set when the agent rewinds its own history instead of Cogpit cutting the transcript. */
+  nativeRewind?: {
     eventId: string
-    mode: "conversation" | "conversation-and-files"
+    mode: NativeRewindMode
     filesAvailable?: boolean
   }
 }

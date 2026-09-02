@@ -8,8 +8,7 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { sendJson, type NextFn, type UseFn } from "../http"
-import { storeFor } from "../agents"
-import { getSessionInventory } from "../lib/sessionInventory"
+import { allStores } from "../agents"
 import { summarizeSession } from "../lib/missionControlSummary"
 import type { MissionControlResponse } from "../../shared/contracts/missionControl"
 
@@ -26,24 +25,15 @@ interface Candidate {
 async function collectRecentSessionFiles(limit: number): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  // Claude names its transcripts after the session, so the listing alone is
-  // enough; the other agents need the identity read the inventory pays for.
-  for (const file of await storeFor("claude").listSessionFiles()) {
-    candidates.push({
-      sessionId: file.fileName.replace(/\.jsonl$/, ""),
-      filePath: file.filePath,
-      mtimeMs: file.mtimeMs,
-    })
-  }
-
-  for (const kind of ["codex", "copilot"] as const) {
+  for (const store of allStores()) {
     try {
-      for (const file of await getSessionInventory(kind)) {
-        if (file.isSubagent) continue
+      for (const session of await store.listTopLevelSessions()) {
         candidates.push({
-          sessionId: file.sessionId,
-          filePath: file.filePath,
-          mtimeMs: file.mtimeMs,
+          // A listing that had to open the file already knows the id; one that
+          // did not names the file after the session.
+          sessionId: session.sessionId ?? session.fileName.replace(/\.jsonl$/, ""),
+          filePath: session.filePath,
+          mtimeMs: session.mtimeMs,
         })
       }
     } catch {

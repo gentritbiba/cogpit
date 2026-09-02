@@ -5,6 +5,7 @@ import type { AgentKind } from "./agent-descriptors"
 import { parseSession, getUserMessageText } from "./parser"
 import {
   allStores,
+  defaultStore,
   storeFor,
   storeForPath,
   type SessionFile,
@@ -58,7 +59,7 @@ function truncContent(text: string): string {
  * what a caller naming its own directory has always meant.
  */
 function identifyTranscript(filePath: string, root?: string): SessionFileIdentity {
-  const store = storeForPath(filePath) ?? storeFor("claude")
+  const store = storeForPath(filePath) ?? defaultStore()
   return store.identify(filePath, root ?? store.root())
 }
 
@@ -555,7 +556,7 @@ export class SearchIndex {
   private setRoots(projectsDir?: string, copilotSessionsDir?: string): void {
     if (projectsDir === undefined) {
       this.roots = allStores().map((store) => ({ kind: store.kind, root: store.root() }))
-      this.projectsDir = storeFor("claude").root()
+      this.projectsDir = defaultStore().root()
       return
     }
     this.projectsDir = projectsDir

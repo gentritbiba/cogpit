@@ -6,7 +6,7 @@ import {
   subscribeModelOptions,
   type ModelOption,
 } from "@/lib/utils"
-import type { AgentKind } from "@/lib/agents"
+import { AGENT_KINDS, type AgentKind } from "@/lib/agents"
 
 let fetchStarted = false
 
@@ -34,10 +34,11 @@ export async function loadModelCatalog(): Promise<void> {
   try {
     const res = await authFetch("/api/models")
     if (!res.ok) return
-    const data = await res.json()
-    if (isModelOptionArray(data?.claude)) setDynamicModelOptions("claude", data.claude)
-    if (isModelOptionArray(data?.codex)) setDynamicModelOptions("codex", data.codex)
-    if (isModelOptionArray(data?.copilot)) setDynamicModelOptions("copilot", data.copilot)
+    const data = await res.json() as Record<string, unknown> | null
+    for (const kind of AGENT_KINDS) {
+      const options = data?.[kind]
+      if (isModelOptionArray(options)) setDynamicModelOptions(kind, options)
+    }
   } catch {
     // Offline / server error — static fallback lists stay in effect
   }

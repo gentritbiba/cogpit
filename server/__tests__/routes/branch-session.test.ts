@@ -37,13 +37,29 @@ vi.mock("../../sessionPaths", () => ({
 
 vi.mock("../../agents", async () => {
   const { resolve, sep } = await vi.importActual<typeof import("node:path")>("node:path")
+  const { descriptorFor, descriptorForDirName } = await vi.importActual<
+    typeof import("../../../shared/session/agent-descriptors")
+  >("../../../shared/session/agent-descriptors")
   const roots: Record<string, string> = {
     claude: "/tmp/test-projects",
     codex: "/tmp/test-codex-sessions",
     copilot: "/tmp/copilot/session-state",
   }
+  const storeFor = (kind: string) => ({
+    kind,
+    sessionsRoot: () => roots[kind],
+    // Mirrors the real stores: Claude nests by project, the rest by their own naming.
+    transcriptPath: (dirName: string, sessionId: string) => {
+      const fileName = descriptorFor(kind as "claude").sessionFile.name(sessionId)
+      return {
+        fileName,
+        filePath: [roots[kind], ...(kind === "claude" ? [dirName] : []), fileName].join("/"),
+      }
+    },
+  })
   return {
-    storeFor: (kind: string) => ({ kind, sessionsRoot: () => roots[kind] }),
+    storeFor,
+    storeForDirName: (dirName: string) => storeFor(descriptorForDirName(dirName).kind),
     storeForPath: (filePath: string) => {
       const resolved = resolve(filePath)
       const kind = Object.keys(roots).find((key) => (
@@ -59,6 +75,15 @@ vi.mock("../../agents/copilotTransport", () => ({
     forkSession: vi.fn(),
   },
 }))
+
+// The real Copilot adapter over the mocked transport, so the turn-to-event
+// mapping the fork relies on is exercised rather than restated here.
+vi.mock("../../agents/runtimes", async () => {
+  const { copilotRuntime } = await vi.importActual<
+    typeof import("../../agents/copilotRuntime")
+  >("../../agents/copilotRuntime")
+  return { runtimeForDirName: () => copilotRuntime }
+})
 
 import {
   isWithinDir,

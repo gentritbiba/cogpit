@@ -146,14 +146,24 @@ owned zone, that file is the bug, not the plan.
    stays explicit: auto-discovery would sweep tests into the published package),
    then run `bun run sync-cogpit-memory`.
 5. **`server/agents/<agent>Store.ts`** — implement `AgentStore` over the CLI's
-   sessions root, using the shared containment primitive in `./containment`.
+   sessions root, using the shared containment primitive in `./containment`,
+   with the head-read identity and full metadata readers as a sibling
+   `<agent>Metadata.ts`. An agent that records the project only inside the
+   transcript gets its project listings from `./transcriptProjects`.
    Register it in `server/agents/index.ts`.
 6. **`server/agents/<agent>Runtime.ts`** — implement `AgentRuntime` over whatever
    transport the CLI speaks, with the transport itself as a sibling module in the
-   same directory. Register it in `server/agents/runtimes.ts`.
-7. **`src/lib/agents/presentation.ts`** — icon, labels, chart colour, display
-   order.
-8. **Containment and gates** — add the CLI name and owned module patterns to
+   same directory, and the live model catalog in `<agent>Models.ts`.
+   Register it in `server/agents/runtimes.ts`.
+7. **Per-record tables in `server/agents/`** — add a row to `tailRecords.ts`
+   (status from the tail), `summaryFolds.ts` (Mission Control cards),
+   `usageScanners.ts` (cost accounting) and `recordReaders.ts` (effort and
+   prompt text). Each is a total `Record<AgentKind, …>`, so a missing row is a
+   type error.
+8. **`src/lib/agents/presentation.ts`** — icon, labels, permission-mode copy,
+   chart colour, display order. Agent-specific wire readers live beside it
+   (`quota.ts`, `goals.ts`, `nativeRewind.ts`, `modelFallback.ts`).
+9. **Containment and gates** — add the CLI name and owned module patterns to
    `scripts/check-agents.ts`, update the vocabulary budget, then run `bun run typecheck && bun run test && bun run check:architecture
    && bun run check:cogpit-memory-sync && bun run lint && bun run
    check:duplicates && bun run check:agents`.

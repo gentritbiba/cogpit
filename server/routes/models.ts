@@ -1,342 +1,39 @@
-import { query, type ModelInfo, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { UseFn } from "../http"
-import { claudeCliPath } from "../sdk-session"
-import { codexAppServer } from "../agents/codexAppServer"
-import { copilotRuntime, type CopilotModel } from "../agents/copilotTransport"
+import { AGENT_KINDS, type AgentKind, type ModelOption } from "../../shared/session/agent-descriptors"
+import { allRuntimes } from "../agents/runtimes"
 
-/** Option shape consumed by the frontend model dropdowns. */
-export interface ModelOption {
-  value: string
-  label: string
-  description?: string
-  /** Canonical wire model id this option resolves to (e.g. "" → "claude-sonnet-5"). */
-  resolvedModel?: string
-  isDefault?: boolean
-  defaultReasoningEffort?: string
-  supportedReasoningEfforts?: Array<{
-    value: string
-    label: string
-    description?: string
-  }>
-  inputModalities?: string[]
-  supportsPersonality?: boolean
-  serviceTiers?: Array<{
-    value: string
-    label: string
-    description?: string
-  }>
-  availabilityMessage?: string
-  supportsEffort?: boolean
-  supportsAdaptiveThinking?: boolean
-  supportsAutoMode?: boolean
-}
+/**
+ * One list per agent, or null where that CLI could not be asked (missing or
+ * erroring) so the frontend keeps its static fallback for it.
+ */
+export type ModelCatalog = Record<AgentKind, ModelOption[] | null>
 
-export interface ModelCatalog {
-  claude: ModelOption[] | null
-  codex: ModelOption[] | null
-  copilot: ModelOption[] | null
-}
-
-/** Shape of one entry returned by codex app-server `model/list`. */
-export interface CodexModel {
-  id: string
-  model: string
-  displayName: string
-  description?: string
-  hidden?: boolean
-  isDefault?: boolean
-  defaultReasoningEffort?: string
-  supportedReasoningEfforts?: Array<{
-    reasoningEffort: string
-    description?: string
-  }>
-  inputModalities?: string[]
-  supportsPersonality?: boolean
-  additionalSpeedTiers?: string[]
-  serviceTiers?: Array<{
-    id: string
-    name: string
-    description?: string
-  }>
-  availabilityNux?: { message?: string } | null
-}
-
-const FETCH_TIMEOUT_MS = 20_000
 const CACHE_TTL_MS = 10 * 60 * 1000
 
-/**
- * Map Claude SDK supportedModels() output to dropdown options, verbatim — the
- * same rows Claude Code's own /model picker renders. The SDK's "default"
- * pseudo-model maps to "" (no --model flag), keeping its CLI-provided
- * displayName/description, and every row carries `resolvedModel` (the
- * canonical wire id it resolves to) so the frontend never has to guess what
- * "Default" actually is.
- */
-export function mapClaudeModels(models: ModelInfo[]): ModelOption[] | null {
-  if (!Array.isArray(models) || models.length === 0) return null
-  const options: ModelOption[] = []
-  for (const m of models) {
-    if (!m?.value || !m.displayName) continue
-    const capabilities: Partial<ModelOption> = {}
-    if (typeof m.supportsEffort === "boolean") capabilities.supportsEffort = m.supportsEffort
-    if (m.supportedEffortLevels) {
-      capabilities.supportedReasoningEfforts = m.supportedEffortLevels.map((effort) => ({
-        value: effort,
-        label: effortLabel(effort),
-      }))
-    }
-    if (typeof m.supportsAdaptiveThinking === "boolean") {
-      capabilities.supportsAdaptiveThinking = m.supportsAdaptiveThinking
-    }
-    if (typeof m.supportsAutoMode === "boolean") capabilities.supportsAutoMode = m.supportsAutoMode
-    if (m.supportsFastMode) {
-      capabilities.serviceTiers = [
-        { value: "fast", label: "Fast", description: "Lower latency with increased usage" },
-      ]
-    }
-    const isDefault = m.value === "default"
-    options.push({
-      value: isDefault ? "" : m.value,
-      label: m.displayName,
-      description: m.description,
-      ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}),
-      ...(isDefault ? { isDefault: true } : {}),
-      ...capabilities,
-    })
-  }
-  // Ensure a "" Default entry always exists and comes first
-  if (!options.some((o) => o.value === "")) {
-    options.unshift({ value: "", label: "Default" })
-  } else {
-    options.sort((a, b) => (a.value === "" ? -1 : b.value === "" ? 1 : 0))
-  }
-  return options.length > 1 ? options : null
-}
-
-/**
- * Codex display names use dashes throughout ("GPT-5.6-Sol") — match our
- * existing "GPT-5.4 Mini" style by turning only the suffix dashes into spaces.
- */
-function prettifyCodexLabel(name: string): string {
-  const match = name.match(/^(GPT-[\d.]+)(.*)$/i)
-  if (!match) return name
-  return match[1] + match[2].replace(/-/g, " ")
-}
-
-function effortLabel(effort: string): string {
-  switch (effort.toLowerCase()) {
-    case "low": return "Light"
-    case "xhigh": return "Extra High"
-    case "ultra": return "Ultra"
-    default: return effort.charAt(0).toUpperCase() + effort.slice(1)
-  }
-}
-
-function mapCodexModel(model: CodexModel): ModelOption {
-  const serviceTiers = Array.isArray(model.serviceTiers)
-    ? model.serviceTiers.map((tier) => ({
-        value: tier.id,
-        label: tier.name,
-        description: tier.description,
-      }))
-    : []
-
-  // Older catalogs advertised speed tiers separately. Preserve that signal so
-  // the frontend can still offer Fast mode when it talks to an older CLI.
-  for (const tier of model.additionalSpeedTiers ?? []) {
-    if (!serviceTiers.some((option) => option.value === tier || option.label.toLowerCase() === tier.toLowerCase())) {
-      serviceTiers.push({
-        value: tier,
-        label: effortLabel(tier),
-        description: tier === "fast" ? "Higher throughput with increased usage" : undefined,
-      })
-    }
-  }
-
-  return {
-    value: model.model,
-    label: prettifyCodexLabel(model.displayName),
-    description: model.description,
-    isDefault: !!model.isDefault,
-    defaultReasoningEffort: model.defaultReasoningEffort,
-    supportedReasoningEfforts: (model.supportedReasoningEfforts ?? []).map((effort) => ({
-      value: effort.reasoningEffort,
-      label: effortLabel(effort.reasoningEffort),
-      description: effort.description,
-    })),
-    inputModalities: model.inputModalities,
-    supportsPersonality: model.supportsPersonality,
-    serviceTiers,
-    availabilityMessage: model.availabilityNux?.message,
-    supportsEffort: (model.supportedReasoningEfforts?.length ?? 0) > 0,
-  }
-}
-
-/** Map codex `model/list` output to dropdown options ("" = codex default). */
-export function mapCodexModels(models: CodexModel[]): ModelOption[] | null {
-  if (!Array.isArray(models) || models.length === 0) return null
-  const visible = models.filter((m) => m && !m.hidden && m.model && m.displayName)
-  if (visible.length === 0) return null
-  // Default model first, right after the "" Default entry
-  visible.sort((a, b) => Number(b.isDefault ?? false) - Number(a.isDefault ?? false))
-  const mapped = visible.map(mapCodexModel)
-  const providerDefault = mapped.find((model) => model.isDefault) ?? mapped[0]
-  return [
-    {
-      ...providerDefault,
-      value: "",
-      label: "Default",
-      resolvedModel: providerDefault.value,
-      description: `Use Codex's recommended model (${providerDefault.label})`,
-    },
-    ...mapped,
-  ]
-}
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-/** Map Copilot CLI `models.list` output without depending on its bundled SDK. */
-export function mapCopilotModels(models: CopilotModel[]): ModelOption[] | null {
-  if (!Array.isArray(models) || models.length === 0) return null
-  const mapped = models.flatMap((model): ModelOption[] => {
-    if (!model || typeof model.id !== "string" || !model.id) return []
-    const policy = record(model.policy)
-    if (policy?.state === "disabled") return []
-    const capabilities = record(model.capabilities)
-    const supports = record(capabilities?.supports)
-    const efforts = Array.isArray(model.supportedReasoningEfforts)
-      ? model.supportedReasoningEfforts.filter((effort): effort is string => typeof effort === "string")
-      : []
-    return [{
-      value: model.id,
-      label: typeof model.name === "string" && model.name ? model.name : model.id,
-      ...(typeof model.defaultReasoningEffort === "string"
-        ? { defaultReasoningEffort: model.defaultReasoningEffort }
-        : {}),
-      supportedReasoningEfforts: efforts.map((effort) => ({
-        value: effort,
-        label: effortLabel(effort),
-      })),
-      supportsEffort: supports?.reasoningEffort === true || efforts.length > 0,
-      inputModalities: supports?.vision === true ? ["text", "image"] : ["text"],
-    }]
-  })
-  if (mapped.length === 0) return null
-  const providerDefault = mapped.find((model) => model.value === "auto") ?? mapped[0]
-  return [{
-    ...providerDefault,
-    value: "",
-    label: "Default",
-    resolvedModel: providerDefault.value,
-    isDefault: true,
-    description: providerDefault.value === "auto"
-      ? "Let Copilot choose the best available model"
-      : `Use Copilot's default model (${providerDefault.label})`,
-  }, ...mapped]
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolvePromise(value)
-      },
-      (err) => {
-        clearTimeout(timer)
-        reject(err)
-      },
-    )
-  })
-}
-
-/**
- * Ask the Claude Code CLI (via the agent SDK) which models it currently
- * supports. Spawns a short-lived query solely for the supportedModels()
- * control request, then aborts it.
- */
-async function fetchClaudeModels(): Promise<ModelOption[] | null> {
-  const abort = new AbortController()
-  try {
-    const q = query({
-      // Never-yielding prompt: we only want the control channel.
-      // eslint-disable-next-line require-yield
-      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
-        await new Promise(() => {})
-      })(),
-      options: {
-        abortController: abort,
-        maxTurns: 1,
-        pathToClaudeCodeExecutable: claudeCliPath(),
-      },
-    })
-    const models = await withTimeout(q.supportedModels(), FETCH_TIMEOUT_MS, "claude supportedModels")
-    return mapClaudeModels(models)
-  } catch {
-    return null
-  } finally {
-    abort.abort()
-  }
-}
-
-/**
- * Ask the shared Codex app-server which models it currently offers. Reusing
- * the product's long-lived transport avoids spawning a second CLI and keeps
- * protocol initialization/capability negotiation in one place.
- */
-async function fetchCodexModels(): Promise<ModelOption[] | null> {
-  try {
-    const result = await withTimeout(
-      codexAppServer.call<{ data?: CodexModel[] }>("model/list", { includeHidden: false }),
-      FETCH_TIMEOUT_MS,
-      "codex model/list",
-    )
-    return mapCodexModels(result.data ?? [])
-  } catch {
-    return null
-  }
-}
-
-async function fetchCopilotModels(): Promise<ModelOption[] | null> {
-  try {
-    return mapCopilotModels(await withTimeout(
-      copilotRuntime.listModels(),
-      FETCH_TIMEOUT_MS,
-      "copilot models.list",
-    ))
-  } catch {
-    return null
-  }
+function emptyCatalog(): ModelCatalog {
+  return Object.fromEntries(AGENT_KINDS.map((kind) => [kind, null])) as ModelCatalog
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
 
-let lastGood: ModelCatalog = { claude: null, codex: null, copilot: null }
+let lastGood: ModelCatalog = emptyCatalog()
 let fetchedAt = 0
 let inFlight: Promise<ModelCatalog> | null = null
 
 async function getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
   const fresh = Date.now() - fetchedAt < CACHE_TTL_MS
-  if (!forceRefresh && fresh && (lastGood.claude || lastGood.codex || lastGood.copilot)) return lastGood
+  if (!forceRefresh && fresh && AGENT_KINDS.some((kind) => lastGood[kind])) return lastGood
   if (inFlight) return inFlight
 
   inFlight = (async () => {
-    const [claude, codex, copilot] = await Promise.all([
-      fetchClaudeModels(),
-      fetchCodexModels(),
-      fetchCopilotModels(),
-    ])
-    // Keep the previous good list for any side that failed this round
-    lastGood = {
-      claude: claude ?? lastGood.claude,
-      codex: codex ?? lastGood.codex,
-      copilot: copilot ?? lastGood.copilot,
-    }
+    const runtimes = allRuntimes()
+    const lists = await Promise.all(runtimes.map((runtime) => runtime.listModels()))
+    // Keep the previous good list for any agent that failed this round
+    const next = { ...lastGood }
+    runtimes.forEach((runtime, index) => {
+      next[runtime.kind] = lists[index] ?? lastGood[runtime.kind]
+    })
+    lastGood = next
     fetchedAt = Date.now()
     return lastGood
   })()
@@ -349,9 +46,9 @@ async function getModelCatalog(forceRefresh: boolean): Promise<ModelCatalog> {
 }
 
 export function registerModelRoutes(use: UseFn) {
-  // GET /api/models — live model lists from the installed provider CLIs.
-  // Either side may be null (CLI missing/erroring); the frontend falls back to
-  // its static lists for that provider.
+  // GET /api/models — live model lists from the installed agent CLIs. Any
+  // entry may be null (CLI missing/erroring); the frontend falls back to its
+  // static list for that agent.
   use("/api/models", async (req, res, next) => {
     if (req.method !== "GET") return next()
     const forceRefresh = (req.url || "").includes("refresh=1")

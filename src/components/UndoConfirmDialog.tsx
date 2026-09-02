@@ -19,7 +19,7 @@ interface UndoConfirmDialogProps {
   state: UndoConfirmState | null
   isApplying: boolean
   applyError: string | null
-  onConfirm: (restoreCopilotFiles?: boolean) => void
+  onConfirm: (restoreFiles?: boolean) => void
   onCancel: () => void
 }
 
@@ -54,9 +54,9 @@ export function UndoConfirmDialog({
 
   const renderedState = state ?? lastStateRef.current
   if (!renderedState) return null
-  const renderedStateKey = renderedState.copilot?.eventId
+  const renderedStateKey = renderedState.nativeRewind?.eventId
     ?? `${renderedState.type}:${renderedState.targetTurnIndex}:${renderedState.branchId ?? ""}`
-  const restoreCopilotFiles = fileRestoreSelection.key === renderedStateKey
+  const restoreFiles = fileRestoreSelection.key === renderedStateKey
     && fileRestoreSelection.selected
 
   return (
@@ -77,8 +77,8 @@ export function UndoConfirmDialog({
           </AlertDialogMedia>
           <AlertDialogTitle>{TITLES[renderedState.type]}</AlertDialogTitle>
           <AlertDialogDescription>
-            {renderedState.copilot
-              ? restoreCopilotFiles
+            {renderedState.nativeRewind
+              ? restoreFiles
                 ? "This removes the selected turn and everything after it, restoring captured files."
                 : "This removes the selected turn and everything after it. Files stay unchanged."
               : DESCRIPTIONS[renderedState.type]}
@@ -107,10 +107,10 @@ export function UndoConfirmDialog({
               ))}
             </div>
           )}
-          {renderedState.copilot?.filesAvailable && (
+          {renderedState.nativeRewind?.filesAvailable && (
             <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
               <Checkbox
-                checked={restoreCopilotFiles}
+                checked={restoreFiles}
                 disabled={isApplying}
                 onCheckedChange={(checked) => setFileRestoreSelection({
                   key: renderedStateKey,
@@ -133,7 +133,7 @@ export function UndoConfirmDialog({
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => onConfirm(restoreCopilotFiles)}
+            onClick={() => onConfirm(restoreFiles)}
             disabled={isApplying}
           >
             {isApplying ? (

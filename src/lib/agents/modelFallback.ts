@@ -21,7 +21,7 @@ async function readErrorMessage(
     : fallback
 }
 
-interface CodexFallbackOpts {
+interface ModelFallbackOpts {
   /** The user-selected model (empty string or undefined means no override). */
   model: string | undefined
   /** Agent kind derived from the dirName. */
@@ -35,21 +35,22 @@ interface CodexFallbackOpts {
   onModelRejected?: (model: string) => void
 }
 
-interface CodexFallbackResult {
+interface ModelFallbackResult {
   res: Response
   errorMessage: string | null
 }
 
 /**
- * Send a request with the selected model, and if the Codex backend rejects the
- * model, automatically retry once without a model override.
+ * Send a request with the selected model, and if the agent rejects the model,
+ * automatically retry once without a model override. Only Codex reports a
+ * rejected model in a recognisable way, so only it is retried.
  *
  * `sendRequest` receives an optional model string — pass `undefined` to omit.
  */
-export async function fetchWithCodexModelFallback(
+export async function fetchWithModelFallback(
   sendRequest: (model: string | undefined) => Promise<Response>,
-  { model, agentKind, errorFallback, onModelRejected }: CodexFallbackOpts,
-): Promise<CodexFallbackResult> {
+  { model, agentKind, errorFallback, onModelRejected }: ModelFallbackOpts,
+): Promise<ModelFallbackResult> {
   const fallback = (r: Response): string =>
     typeof errorFallback === "function" ? errorFallback(r) : errorFallback
 

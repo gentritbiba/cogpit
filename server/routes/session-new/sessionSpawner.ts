@@ -1,6 +1,10 @@
 import { isAbsolute } from "node:path"
 import type { ServerResponse } from "node:http"
-import { agentKindForDirName, descriptorFor } from "../../../shared/session/agent-descriptors"
+import {
+  agentKindForDirName,
+  descriptorFor,
+  descriptorForDirName,
+} from "../../../shared/session/agent-descriptors"
 import type { AgentKind } from "../../../shared/session/agent-descriptors"
 import { runtimeFor } from "../../agents/runtimes"
 import type { ImageAttachment, StartSessionRequest } from "../../agents/runtimes"
@@ -38,9 +42,9 @@ interface NewSessionBody {
 /**
  * Recover the project path a session should run in.
  *
- * Only Claude needs this: its dirName is a lossy encoding of the cwd, so the
+ * Only an agent whose dirName is a lossy encoding of the cwd needs this: the
  * real path has to be read back out of a transcript already in the directory.
- * The other agents encode the path itself and decode it exactly.
+ * The others encode the path itself and decode it exactly.
  */
 export async function resolveProjectPath(
   projectDir: string,
@@ -76,7 +80,7 @@ export async function resolveProjectPath(
   } catch {
     // projectDir might not exist yet
   }
-  return descriptorFor("claude").dirName.decode(dirName) ?? projectDir
+  return descriptorForDirName(dirName).dirName.decode(dirName) ?? projectDir
 }
 
 function isUsablePath(value: unknown): value is string {
@@ -99,7 +103,7 @@ async function resolveSpawnCwd(
   requestedCwd: string | undefined,
 ): Promise<string | RouteError> {
   const descriptor = descriptorFor(kind)
-  if (kind !== "claude") {
+  if (!descriptor.dirName.lossy) {
     const cwd = descriptor.dirName.decode(dirName)
     return isUsablePath(cwd)
       ? cwd

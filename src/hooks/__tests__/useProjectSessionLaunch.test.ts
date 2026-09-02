@@ -15,7 +15,7 @@ import { authFetch } from "@/lib/auth"
 
 const mockAuthFetch = vi.mocked(authFetch)
 const dispatch = vi.fn<(action: SessionAction) => void>()
-const onCodexModelRejected = vi.fn<(model: string) => void>()
+const onModelRejected = vi.fn<(model: string) => void>()
 
 const baseOptions = {
   permissionsConfig: DEFAULT_PERMISSIONS,
@@ -29,7 +29,7 @@ const baseOptions = {
   fastMode: false,
   ultracode: false,
   mcpConfig: null as string | null,
-  onCodexModelRejected,
+  onModelRejected,
 }
 
 describe("useProjectSessionLaunch", () => {

@@ -1,27 +1,15 @@
-import { basename, dirname, relative, sep } from "node:path"
 import type { UseFn } from "../../http"
 import {
-  dirs,
   getSessionMeta,
   getSessionStatus,
-  isWithinDir,
-  join,
   open,
   readFile,
-  readdir,
-  stat,
 } from "../../helpers"
-import { projectDirToReadableName } from "../../lib/projectNames"
-import {
-  agentKindForDirName,
-  descriptorFor,
-  projectDirNameFor,
-} from "../../../shared/session/agent-descriptors"
-import { storeFor, storeForPath } from "../../agents"
+import { projectDirNameFor } from "../../../shared/session/agent-descriptors"
+import { allStores, storeFor, storeForDirName, storeForPath } from "../../agents"
 import { findJsonlPath, resolveSessionFilePath } from "../../sessionPaths"
 import { handleActiveSessions } from "./activeSessionsRoute"
 import { projectLabel } from "./projectLabel"
-import { getSessionInventory } from "../../lib/sessionInventory"
 import { getOrLoadSessionMeta } from "../../lib/sessionMetaCache"
 import { getScannedSessionPullRequests } from "../../lib/sessionPrIndex"
 import { parseTailByteBudget, trimTailToByteBudget } from "./tailBudget"
@@ -40,19 +28,6 @@ const MIN_PAGE_LINES = 30
 const MAX_TAIL_WINDOW_BYTES = 2 * 1024 * 1024
 /** Hard cap when extending a `?before=` window to satisfy the min-line floor. */
 const MAX_BEFORE_WINDOW_BYTES = 4 * 1024 * 1024
-
-/** Bucket rows by a key, skipping rows whose key is absent. */
-function groupBy<T, K>(rows: readonly T[], keyOf: (row: T) => K | null): Map<K, T[]> {
-  const groups = new Map<K, T[]>()
-  for (const row of rows) {
-    const key = keyOf(row)
-    if (key === null) continue
-    const bucket = groups.get(key)
-    if (bucket) bucket.push(row)
-    else groups.set(key, [row])
-  }
-  return groups
-}
 
 interface TailResult {
   lines: string[]
@@ -239,45 +214,9 @@ export function registerProjectRoutes(use: UseFn) {
 
     try {
       const projects = []
-
-      // Claude keeps one directory per project, so the listing already groups.
-      for (const [dirName, files] of groupBy(
-        await storeFor("claude").listSessionFiles(),
-        (file) => file.dirName,
-      )) {
-        const newest = files.reduce((a, b) => a.mtimeMs >= b.mtimeMs ? a : b)
-        const { path: realPath, shortName } = projectDirToReadableName(dirName)
-
-        // The dirName encoding is lossy for paths containing hyphens, so the
-        // cwd the newest session recorded is the better answer when readable.
-        let cwd: string | null = null
-        try {
-          cwd = (await getSessionMeta(newest.filePath)).cwd ?? null
-        } catch { /* ignore, fall back to the derived path */ }
-
-        projects.push({
-          dirName,
-          path: cwd ?? realPath,
-          shortName,
-          sessionCount: files.length,
-          lastModified: newest.mtimeMs ? new Date(newest.mtimeMs).toISOString() : null,
-        })
-      }
-
-      // The other agents record the project only inside the transcript, so
-      // their projects are the distinct cwds across the session inventory.
-      for (const kind of ["codex", "copilot"] as const) {
-        const sessions = (await getSessionInventory(kind)).filter((file) => !file.isSubagent)
-        for (const [cwd, files] of groupBy(sessions, (file) => file.cwd)) {
-          const latestTime = Math.max(...files.map((file) => file.mtimeMs))
-          const dirName = projectDirNameFor(kind, cwd)
-          projects.push({
-            dirName,
-            path: cwd,
-            shortName: projectLabel(dirName, cwd),
-            sessionCount: files.length,
-            lastModified: latestTime ? new Date(latestTime).toISOString() : null,
-          })
+      for (const store of allStores()) {
+        for (const project of await store.listProjects()) {
+          projects.push({ ...project, shortName: projectLabel(project.dirName, project.path) })
         }
       }
 
@@ -304,55 +243,24 @@ export function registerProjectRoutes(use: UseFn) {
 
     if (parts.length === 1) {
       const dirName = decodeURIComponent(parts[0])
-      const agentKind = agentKindForDirName(dirName)
-      const agentCwd = agentKind === "claude"
-        ? null
-        : descriptorFor(agentKind).dirName.decode(dirName)
-      const projectDir = join(dirs.PROJECTS_DIR, dirName)
-
-      if (!agentCwd && !isWithinDir(dirs.PROJECTS_DIR, projectDir)) {
-        res.statusCode = 403
-        res.end(JSON.stringify({ error: "Access denied" }))
-        return
-      }
 
       try {
         const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10))
         const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "20", 10)), 200)
 
-        type FileStat = {
-          fileName: string
-          filePath: string
-          mtime: Date
-          size: number
-          sessionId?: string
+        const files = await storeForDirName(dirName).listProjectSessionFiles(dirName)
+        if (!files) {
+          res.statusCode = 403
+          res.end(JSON.stringify({ error: "Access denied" }))
+          return
         }
-
-        const providerFiles = agentCwd ? await getSessionInventory(agentKind) : null
-        const fileStats: FileStat[] = providerFiles
-          ? providerFiles
-            .flatMap((file) => file.cwd === agentCwd && !file.isSubagent
-              ? [{
-                fileName: file.fileName,
-                filePath: file.filePath,
-                mtime: new Date(file.mtimeMs),
-                size: file.size,
-                sessionId: file.sessionId,
-              }]
-              : [])
-          : await Promise.all(
-            (await readdir(projectDir))
-              .filter((f) => f.endsWith(".jsonl"))
-              .map(async (f) => {
-                const filePath = join(projectDir, f)
-                try {
-                  const fileStat = await stat(filePath)
-                  return { fileName: f, filePath, mtime: fileStat.mtime, size: fileStat.size }
-                } catch {
-                  return { fileName: f, filePath, mtime: new Date(0), size: 0 }
-                }
-              })
-          )
+        const fileStats = files.map((file) => ({
+          fileName: file.fileName,
+          filePath: file.filePath,
+          mtime: new Date(file.mtimeMs),
+          size: file.size,
+          sessionId: file.sessionId,
+        }))
 
         fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
 
@@ -412,63 +320,15 @@ export function registerProjectRoutes(use: UseFn) {
     } else if (parts.length === 3 && parts[2] === "subagents") {
       // GET /api/sessions/{dirName}/{sessionId}/subagents — list subagent files
       const dirName = decodeURIComponent(parts[0])
-      const subagentAgentKind = agentKindForDirName(dirName)
-      if (subagentAgentKind === "copilot") {
-        // Copilot sub-agents are events inside the parent transcript, not files.
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify([]))
-        return
-      }
-      if (subagentAgentKind === "codex") {
-        // For Codex sessions, find sub-agent files by checking forked_from_id
-        const parentSessionId = decodeURIComponent(parts[1])
-        try {
-          const codexFiles = await storeFor("codex").listSessionFiles()
-          const listing: Array<{ agentId: string; fileName: string; size: number; modifiedAt: number }> = []
-          for (const file of codexFiles) {
-            try {
-              const meta = await getSessionMeta(file.filePath)
-              if (!meta.isSubagent || meta.parentSessionId !== parentSessionId) continue
-              listing.push({
-                agentId: meta.sessionId,
-                fileName: file.fileName,
-                size: file.size,
-                modifiedAt: file.mtimeMs,
-              })
-            } catch { continue }
-          }
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify(listing))
-        } catch {
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify([]))
-        }
-        return
-      }
       const sessionId = decodeURIComponent(parts[1])
-      const subagentsDir = join(dirs.PROJECTS_DIR, dirName, sessionId, "subagents")
-      if (!isWithinDir(dirs.PROJECTS_DIR, subagentsDir)) {
+      const listing = await storeForDirName(dirName).listSubagentFiles(dirName, sessionId)
+      if (!listing) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
         return
       }
-      try {
-        const files = await readdir(subagentsDir)
-        const listing: Array<{ agentId: string; size: number; modifiedAt: number }> = []
-        for (const f of files) {
-          if (!f.startsWith("agent-") || !f.endsWith(".jsonl")) continue
-          const agentId = f.replace("agent-", "").replace(".jsonl", "")
-          try {
-            const s = await stat(join(subagentsDir, f))
-            listing.push({ agentId, size: s.size, modifiedAt: s.mtimeMs })
-          } catch { continue }
-        }
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify(listing))
-      } catch {
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify([]))
-      }
+      res.setHeader("Content-Type", "application/json")
+      res.end(JSON.stringify(listing))
     } else if (parts.length >= 2) {
       // Serve session file content (supports nested paths like sessionId/subagents/file.jsonl)
       const dirName = decodeURIComponent(parts[0])
@@ -481,26 +341,7 @@ export function registerProjectRoutes(use: UseFn) {
         return
       }
 
-      let filePath: string | null = null
-
-      // Codex stores every rollout in its date-based sessions tree rather than
-      // nesting subagents beneath their parent. Resolve virtual UI paths by ID
-      // before trying the literal relative path.
-      if (agentKindForDirName(dirName) === "codex") {
-        const idMatch = fileName.match(/\/subagents\/agent-([^.]+)\.jsonl$/)
-          ?? fileName.match(/^([^/]+)\.jsonl$/)
-        if (idMatch) {
-          const resolved = await findJsonlPath(idMatch[1])
-          if (resolved && storeFor("codex").ownsPath(resolved)) {
-            filePath = resolved
-          }
-        }
-      }
-
-      if (!filePath) {
-        filePath = await resolveSessionFilePath(dirName, fileName)
-      }
-
+      const filePath = await resolveSessionFilePath(dirName, fileName)
       if (!filePath) {
         res.statusCode = 403
         res.end(JSON.stringify({ error: "Access denied" }))
@@ -586,25 +427,10 @@ export function registerProjectRoutes(use: UseFn) {
     const sessionId = decodeURIComponent(parts[0])
     try {
       const filePath = await findJsonlPath(sessionId)
-      if (filePath) {
-        const store = storeForPath(filePath)
-        const root = store?.sessionsRoot()
-        if (store && root && store.kind !== "claude") {
-          // These agents address a session by the cwd it ran in, which only the
-          // transcript knows, and by the path relative to their storage root.
-          const meta = await getSessionMeta(filePath)
-          res.setHeader("Content-Type", "application/json")
-          res.end(JSON.stringify({
-            dirName: projectDirNameFor(store.kind, meta.cwd || ""),
-            fileName: relative(root, filePath).split(sep).join("/"),
-          }))
-          return
-        }
-
-        const fileName = basename(filePath) || descriptorFor("claude").sessionFile.name(sessionId)
-        const dirName = basename(dirname(filePath))
+      const address = filePath ? await storeForPath(filePath)?.sessionAddress(filePath) : null
+      if (address) {
         res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ dirName, fileName }))
+        res.end(JSON.stringify(address))
         return
       }
       res.statusCode = 404

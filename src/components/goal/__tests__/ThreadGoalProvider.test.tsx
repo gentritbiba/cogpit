@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { CodexGoalProvider } from "@/components/goal/CodexGoalProvider"
+import { ThreadGoalProvider } from "@/components/goal/ThreadGoalProvider"
 import { GoalControlsBlock } from "@/components/goal"
 import { authFetch } from "@/lib/auth"
 
@@ -10,9 +10,9 @@ const mockedFetch = vi.mocked(authFetch)
 
 function renderGoalUi(threadId = "thread-1") {
   return render(
-    <CodexGoalProvider threadId={threadId}>
+    <ThreadGoalProvider agentKind="codex" threadId={threadId}>
       <GoalControlsBlock />
-    </CodexGoalProvider>,
+    </ThreadGoalProvider>,
   )
 }
 
@@ -21,7 +21,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe("CodexGoalProvider", () => {
+describe("ThreadGoalProvider", () => {
   it("creates a long-running goal with an optional token budget", async () => {
     mockedFetch
       .mockResolvedValueOnce(new Response(JSON.stringify({ goal: null }), { status: 200 }))

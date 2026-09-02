@@ -8,7 +8,7 @@ import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
 import type { UsageCostProvider } from "../../../shared/contracts/usageCost"
-import { createUsageScanner, type UsageCostRecord } from "./transcripts"
+import { createUsageScanner, type UsageCostRecord } from "../../agents/usageScanners"
 
 export interface TranscriptFile {
   path: string

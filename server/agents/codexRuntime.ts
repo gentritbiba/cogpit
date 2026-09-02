@@ -15,6 +15,7 @@ import {
   spawn,
   unlink,
 } from "../helpers"
+import { fetchCodexModels } from "./codexModels"
 import { friendlySpawnError } from "./spawnError"
 import { cleanupTempFiles, writeTempImageFiles } from "./tempImages"
 import { resolveAgentCommand } from "../lib/binaryResolver"
@@ -790,6 +791,18 @@ export const codexRuntime: AgentRuntime = {
 
   async answerQuestion() {
     return false
+  },
+
+  listModels: fetchCodexModels,
+
+  // token_count events are appended to the rollout live, so nothing is
+  // outstanding while a turn runs.
+  async liveUsageRecords() {
+    return []
+  },
+
+  async fork() {
+    throw new AgentRuntimeError(400, "FORK_UNSUPPORTED", "Sessions branch by copying the rollout")
   },
 
   describeRuntime() {

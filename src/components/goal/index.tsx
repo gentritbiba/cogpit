@@ -3,8 +3,8 @@ import type { ReactNode } from "react"
 import { capabilitiesFor, type AgentKind } from "@/lib/agents"
 import type { ParsedSession } from "../../../shared/session/types"
 import { Button } from "@/components/ui/button"
-import { ClaudeGoalProvider } from "./ClaudeGoalProvider"
-import { CodexGoalProvider } from "./CodexGoalProvider"
+import { ThreadGoalProvider } from "./ThreadGoalProvider"
+import { TranscriptGoalProvider } from "./TranscriptGoalProvider"
 import { useGoalControls } from "./context"
 
 interface GoalProviderProps {
@@ -18,15 +18,22 @@ interface GoalProviderProps {
  *  pieces independently: a full-width row above the input, and a compact
  *  trigger that lives inline with the other composer settings. */
 export function GoalProvider({ agentKind, session, onSendCommand, children }: GoalProviderProps) {
-  if (!capabilitiesFor(agentKind).goals) return children
-  if (agentKind === "codex") {
-    return <CodexGoalProvider threadId={session.sessionId}>{children}</CodexGoalProvider>
+  const goals = capabilitiesFor(agentKind).goals
+  if (goals === "thread-api") {
+    return (
+      <ThreadGoalProvider agentKind={agentKind} threadId={session.sessionId}>
+        {children}
+      </ThreadGoalProvider>
+    )
   }
-  return (
-    <ClaudeGoalProvider session={session} onSendCommand={onSendCommand}>
-      {children}
-    </ClaudeGoalProvider>
-  )
+  if (goals === "transcript") {
+    return (
+      <TranscriptGoalProvider agentKind={agentKind} session={session} onSendCommand={onSendCommand}>
+        {children}
+      </TranscriptGoalProvider>
+    )
+  }
+  return children
 }
 
 /** The goal row. Renders nothing until a goal exists or is being edited, so an

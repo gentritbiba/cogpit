@@ -15,7 +15,7 @@ import {
   parseCopilotUsageLine,
   parseCopilotUsageMetrics,
   type UsageCostRecord,
-} from "../lib/usageCost/transcripts"
+} from "../agents/usageScanners"
 import {
   cacheSavingsUsd,
   lookupRate,

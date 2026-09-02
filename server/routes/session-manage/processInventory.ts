@@ -3,7 +3,13 @@ import type { UseFn } from "../../http"
 import { sendJson } from "../../http"
 import { activeProcesses, persistentSessions, spawn } from "../../helpers"
 import { ErrorCodes, RouteError, sendError } from "../../lib/routeError"
-import type { AgentKind } from "../../../shared/session/types"
+import {
+  allDescriptors,
+  matchesAgentProcess,
+  windowsProcessNameFilter,
+  type AgentDescriptor,
+  type AgentKind,
+} from "../../../shared/session/agent-descriptors"
 
 export interface AgentProcessInfo {
   pid: number
@@ -29,28 +35,35 @@ function createTrackedSessionMap(): Map<number, string> {
   return trackedByPid
 }
 
+/**
+ * Agents in classification order: an exact executable match is authoritative
+ * and must not be pre-empted by another agent's loose substring match.
+ */
+const PROCESS_DESCRIPTORS: readonly AgentDescriptor[] = [...allDescriptors()].sort(
+  (a, b) => Number(b.cli.process.by === "executable") - Number(a.cli.process.by === "executable"),
+)
+
+/** The agent a command line belongs to, or null for an unrelated process. */
+function classifyProcess(command: string): AgentDescriptor | null {
+  return PROCESS_DESCRIPTORS.find((descriptor) => matchesAgentProcess(descriptor, command)) ?? null
+}
+
+/**
+ * The classified agent's own argv shape first, then any other's: a launcher
+ * that wraps one CLI under another's name still carries a session id.
+ */
 function findSessionId(
+  descriptor: AgentDescriptor,
   command: string,
   pid: number,
   trackedByPid: ReadonlyMap<number, string>,
 ): string | null {
-  const resumeMatch = command.match(/--resume(?:=|\s+)([0-9a-f-]{36})/)
-  const sessionIdMatch = command.match(/--session-id(?:=|\s+)([0-9a-f-]{36})/)
-  const codexResumeMatch = command.match(/codex(?:\s+\S+)*\s+exec\s+resume\s+([0-9a-f-]{36})/)
   return trackedByPid.get(pid)
-    ?? resumeMatch?.[1]
-    ?? sessionIdMatch?.[1]
-    ?? codexResumeMatch?.[1]
+    ?? descriptor.cli.process.sessionIdFromCommand(command)
+    ?? PROCESS_DESCRIPTORS
+      .map((candidate) => candidate.cli.process.sessionIdFromCommand(command))
+      .find((sessionId) => sessionId !== null)
     ?? null
-}
-
-function isCopilotProcess(command: string): boolean {
-  const executableMatch = command.trimStart().match(
-    /^(?:"([^"]+)"(?=\s|$)|'([^']+)'(?=\s|$)|(\S+))/,
-  )
-  const executable = executableMatch?.[1] ?? executableMatch?.[2] ?? executableMatch?.[3] ?? ""
-  const fileName = executable.split(/[\\/]/).pop() ?? ""
-  return /^copilot(?:\.exe)?$/i.test(fileName)
 }
 
 function parseWindowsProcesses(
@@ -64,18 +77,16 @@ function parseWindowsProcesses(
 
     for (const item of items) {
       const command = item?.CommandLine || ""
-      const isCopilot = isCopilotProcess(command)
-      if (!command.includes("claude") && !command.includes("codex") && !isCopilot) continue
+      const descriptor = classifyProcess(command)
+      if (!descriptor) continue
 
       const pid = item.ProcessId
       processes.push({
         pid,
         memMB: Math.round((item.WorkingSetSize || 0) / 1024 / 1024),
         cpu: 0,
-        sessionId: findSessionId(command, pid, trackedByPid),
-        agentKind: isCopilot
-          ? "copilot"
-          : command.includes("codex") ? "codex" : "claude",
+        sessionId: findSessionId(descriptor, command, pid, trackedByPid),
+        agentKind: descriptor.kind,
         managed: trackedByPid.has(pid),
         tty: "??",
         startTime: "",
@@ -108,17 +119,15 @@ function parsePosixProcesses(
 
     const pid = Number.parseInt(columns[1], 10)
     const args = columns.slice(10).join(" ")
-    const isCopilot = isCopilotProcess(args)
-    if (!line.includes("claude") && !line.includes("codex") && !isCopilot) continue
+    const descriptor = classifyProcess(args)
+    if (!descriptor) continue
 
     processes.push({
       pid,
       memMB: Math.round((Number.parseInt(columns[5], 10) || 0) / 1024),
       cpu: Number.parseFloat(columns[2]) || 0,
-      sessionId: findSessionId(args, pid, trackedByPid),
-      agentKind: isCopilot
-        ? "copilot"
-        : args.includes("codex") ? "codex" : "claude",
+      sessionId: findSessionId(descriptor, args, pid, trackedByPid),
+      agentKind: descriptor.kind,
       managed: trackedByPid.has(pid),
       tty: columns[6] || "??",
       startTime: columns[8] || "",
@@ -147,11 +156,12 @@ export function registerRunningProcessesRoute(use: UseFn): void {
     if (url.pathname.split("/").filter(Boolean).length > 0) return next()
 
     const isWindows = process.platform === "win32"
+    const nameFilter = allDescriptors().map(windowsProcessNameFilter).join(" or ")
     const child: ChildProcess = isWindows
       ? spawn("powershell", [
           "-NoProfile",
           "-Command",
-          "Get-CimInstance Win32_Process -Filter \"name like '%claude%' or name like '%codex%' or name = 'copilot.exe'\" | Select-Object ProcessId, WorkingSetSize, CommandLine | ConvertTo-Json -Compress",
+          `Get-CimInstance Win32_Process -Filter "${nameFilter}" | Select-Object ProcessId, WorkingSetSize, CommandLine | ConvertTo-Json -Compress`,
         ])
       : spawn("ps", ["aux"])
     let stdout = ""

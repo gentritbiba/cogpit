@@ -4,6 +4,7 @@ import type { SessionSource } from "./useLiveSession"
 import { parseSession } from "../../shared/session/parser"
 import { authFetch } from "@/lib/auth"
 import { capabilitiesForDirName } from "@/lib/agents"
+import { applyNativeRewind, previewNativeRewind } from "@/lib/agents/nativeRewind"
 import {
   buildUndoOperations,
   buildRedoFromArchived,
@@ -38,7 +39,7 @@ export interface UseUndoRedoResult {
 
   // Confirmation dialog
   confirmState: UndoConfirmState | null
-  confirmApply: (restoreCopilotFiles?: boolean) => Promise<void>
+  confirmApply: (restoreFiles?: boolean) => Promise<void>
   confirmCancel: () => void
 
   // Loading
@@ -57,11 +58,11 @@ export function useUndoRedo(
   const [isApplying, setIsApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
-  const copilotPreviewRequestRef = useRef(0)
+  const rewindPreviewRequestRef = useRef(0)
 
   // Load undo state when session changes
   useEffect(() => {
-    copilotPreviewRequestRef.current += 1
+    rewindPreviewRequestRef.current += 1
     if (!enabled || !session) {
       setUndoState(null)
       setConfirmState(null)
@@ -175,29 +176,14 @@ export function useUndoRedo(
       const turn = session.turns[targetTurnIndex]
       if (!turn) return
       const requestedSessionId = session.sessionId
-      const previewRequest = ++copilotPreviewRequestRef.current
+      const previewRequest = ++rewindPreviewRequestRef.current
       const isCurrentRequest = () => (
-        copilotPreviewRequestRef.current === previewRequest
+        rewindPreviewRequestRef.current === previewRequest
         && sessionIdRef.current === requestedSessionId
       )
       const eventId = turn.id.includes("@") ? turn.id.slice(turn.id.lastIndexOf("@") + 1) : turn.id
       const turnCount = session.turns.length - targetTurnIndex
-      void authFetch(
-        `/api/copilot-history/${encodeURIComponent(session.sessionId)}/preview`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ eventId }),
-        },
-      ).then(async (response) => {
-        if (!isCurrentRequest()) return
-        const preview = response.ok
-          ? await response.json() as {
-              available?: boolean
-              fileCount?: number
-              files?: Array<{ path?: string }>
-            }
-          : null
+      void previewNativeRewind(session.sessionId, eventId).then((preview) => {
         if (!isCurrentRequest()) return
         const filePaths = preview?.files
           ?.map(({ path }) => path)
@@ -212,7 +198,7 @@ export function useUndoRedo(
             operationCount: fileCount,
           },
           targetTurnIndex: effectiveTarget,
-          copilot: {
+          nativeRewind: {
             eventId,
             mode: "conversation",
             filesAvailable: Boolean(preview?.available && fileCount > 0),
@@ -224,7 +210,7 @@ export function useUndoRedo(
           type: "undo",
           summary: { turnCount, fileCount: 0, filePaths: [], operationCount: 0 },
           targetTurnIndex: effectiveTarget,
-          copilot: { eventId, mode: "conversation" },
+          nativeRewind: { eventId, mode: "conversation" },
         })
       })
       return
@@ -289,7 +275,7 @@ export function useUndoRedo(
   }, [enabled, session, branches])
 
   // Confirm and apply the pending operation
-  const confirmApply = useCallback(async (restoreCopilotFiles = false) => {
+  const confirmApply = useCallback(async (restoreFiles = false) => {
     if (!enabled || !confirmState || !session || !sessionSource) {
       setConfirmState(null)
       return
@@ -299,27 +285,13 @@ export function useUndoRedo(
     setApplyError(null)
 
     try {
-      if (confirmState.copilot) {
-        const mode = restoreCopilotFiles && confirmState.copilot.filesAvailable
+      if (confirmState.nativeRewind) {
+        const mode = restoreFiles && confirmState.nativeRewind.filesAvailable
           ? "conversation-and-files"
           : "conversation"
-        const response = await authFetch(
-          `/api/copilot-history/${encodeURIComponent(session.sessionId)}/rewind`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              eventId: confirmState.copilot.eventId,
-              mode,
-            }),
-          },
-        )
-        const result = await response.json().catch(() => null) as {
-          outcome?: string
-          error?: string
-        } | null
-        if (!response.ok || result?.outcome !== "success") {
-          setApplyError(result?.error || `Copilot rewind failed${result?.outcome ? `: ${result.outcome}` : ""}`)
+        const outcome = await applyNativeRewind(session.sessionId, confirmState.nativeRewind.eventId, mode)
+        if (!outcome.ok) {
+          setApplyError(outcome.error)
           return
         }
         await onReloadSession()
@@ -352,9 +324,9 @@ export function useUndoRedo(
         await applyBranchSwitch(session, sessionSource, state, branch, freshRawText, confirmState, commitUndoTransaction)
       }
 
-      // Kill the persistent Claude process so it restarts fresh from the
-      // truncated JSONL on the next message. Without this, the running
-      // process still holds the full (pre-undo) conversation in memory.
+      // Stop the live session so it restarts fresh from the truncated
+      // transcript on the next message. Without this, the running process
+      // still holds the full (pre-undo) conversation in memory.
       try {
         await authFetch("/api/stop-session", {
           method: "POST",
@@ -376,7 +348,7 @@ export function useUndoRedo(
   }, [enabled, confirmState, session, sessionSource, undoState, branches, commitUndoTransaction, onReloadSession])
 
   const confirmCancel = useCallback(() => {
-    copilotPreviewRequestRef.current += 1
+    rewindPreviewRequestRef.current += 1
     setConfirmState(null)
     setApplyError(null)
   }, [])

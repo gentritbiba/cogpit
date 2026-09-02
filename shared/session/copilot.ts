@@ -1147,6 +1147,17 @@ export function deriveCopilotSessionStatus(rawMessages: readonly RawRecord[]): S
   return { status: "idle" }
 }
 
+// ── Branching ──────────────────────────────────────────────────────────────
+
+/**
+ * Copilot branches through its own fork RPC (`capabilities.nativeFork`), so a
+ * copied-and-cut transcript is never made and there is no header shape to
+ * invent for one.
+ */
+export function brandCopilotBranch(): never {
+  throw new Error("Copilot sessions branch through the CLI's fork API, not by copying the transcript")
+}
+
 // ── Turn boundaries ─────────────────────────────────────────────────────────
 
 /**
